@@ -6,3 +6,11 @@ description: Example service for okdp-compiler.
 type: application
 version: 1.0.0
 appVersion: "2.3"
+annotations:
+  # Catalog metadata, as in platform-charts: what the service provides and
+  # the platform services it needs. Helm annotations are strings: each value
+  # is read as YAML, a single name or a list in a block scalar.
+  okdp.io/roles: webapp
+  okdp.io/depends-on: |
+    - database-server
+    - ingress
