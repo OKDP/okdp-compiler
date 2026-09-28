@@ -1,0 +1,8 @@
+# error: field "user" is not part of the database contract
+database: shared-db
+connections:
+  shared-db:
+    contract: database
+    host: db.example.org
+    dbName: webapp
+    user: admin

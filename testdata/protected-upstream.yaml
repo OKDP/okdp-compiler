@@ -1,0 +1,6 @@
+# error: upstream.app.ingress.hosts: ingress.hosts is set by the platform
+upstream:
+  app:
+    ingress:
+      hosts:
+        - host: other.example.org

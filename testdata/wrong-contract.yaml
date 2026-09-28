@@ -1,0 +1,6 @@
+# error: connection "store" has contract "s3", "database" is expected
+database: store
+connections:
+  store:
+    contract: s3
+    url: "https://s3.example.org"

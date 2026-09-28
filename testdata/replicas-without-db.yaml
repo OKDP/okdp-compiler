@@ -1,0 +1,2 @@
+# error: replicas > 1 needs a database
+replicas: 2

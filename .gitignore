@@ -12,6 +12,7 @@ go.work.sum
 # IDEs and editors
 .idea/
 .vscode/
+.zed/
 
 # AI assistants
 CLAUDE.md

@@ -1,0 +1,5 @@
+# error: global.okdp.ingress.className is required
+global:
+  okdp:
+    ingress:
+      className: null
