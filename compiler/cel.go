@@ -1,0 +1,533 @@
+package compiler
+
+// The "values.yaml with expressions" engine: the mapping is YAML shaped like
+// the upstream values, where ${{ <CEL> }} computes a value.
+//
+//   key: ${{ expr }}              the whole scalar: the value keeps the expression's type
+//   key: text ${{ expr }} text    interpolation: the value is a string
+//   $${{                          a literal "${{"
+//   key: {$if: ${{ cond }}, ...}  the key is left out when cond is false
+//   key: {$if: ..., $value: x}    same, for a value that is not a map
+//   key: {$for: c in <expr>, $key: ..., $value: ...}   a map built from a list
+//   {$merge: ${{ map }}}          merged into the enclosing map
+//   - {$for: c in <expr>, $each: item or [items]}     list items repeated per element
+//   $let: {name: ..., ...}        with $for: bindings per element, in order
+//   - {$spread: ${{ list }}}      list items spliced in
+//   - {$if: ${{ cond }}, ...}     the item is left out when cond is false
+//
+// Top level:
+// 	let (ordered bindings)
+// 	errors (expressions returning lists of messages: any message fails the compile)
+// 	output (chart -> values),
+// 	instance (url, usage) and provides (the connections the instance publishes).
+
+import (
+	"fmt"
+	"maps"
+	"reflect"
+	"sort"
+	"strings"
+
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/ext"
+	"google.golang.org/protobuf/types/known/structpb"
+	"gopkg.in/yaml.v3"
+)
+
+// omap: an ordered YAML map
+// A let binding can reference previous ones. Must stay sequential.
+type omap struct {
+	keys []string
+	vals map[string]any
+}
+
+// fromNode: a YAML node as data, maps as omap to keep their key order.
+func fromNode(n *yaml.Node) (any, error) {
+	switch n.Kind {
+	case yaml.DocumentNode:
+		return fromNode(n.Content[0])
+	case yaml.MappingNode:
+		m := &omap{vals: map[string]any{}}
+		for i := 0; i < len(n.Content); i += 2 {
+			k := n.Content[i].Value
+			v, err := fromNode(n.Content[i+1])
+			if err != nil {
+				return nil, err
+			}
+			m.keys = append(m.keys, k)
+			m.vals[k] = v
+		}
+		return m, nil
+	case yaml.SequenceNode:
+		out := []any{}
+		for _, c := range n.Content {
+			v, err := fromNode(c)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	// A scalar: decoded as YAML types (int, bool...), then normalized.
+	case yaml.ScalarNode:
+		var v any
+		if err := n.Decode(&v); err != nil {
+			return nil, err
+		}
+		return normalize(v), nil
+	case yaml.AliasNode:
+		return fromNode(n.Alias)
+	}
+	return nil, fmt.Errorf("unsupported YAML node at line %d", n.Line)
+}
+
+// celEngine: evaluates a mapping. It caches the CEL environments and keeps
+// the compile context for okdpDcr.
+type celEngine struct {
+	envs map[string]*cel.Env
+	ctx  M
+}
+
+// env: the CEL environment for these variable names, cached.
+func (e *celEngine) env(names []string) (*cel.Env, error) {
+	// One environment per set of variable names, built once.
+	sort.Strings(names)
+	key := strings.Join(names, ",")
+	if env, ok := e.envs[key]; ok {
+		return env, nil
+	}
+	// CEL extensions, then the functions mappings may call.
+	opts := []cel.EnvOption{
+		ext.Strings(), ext.Lists(), ext.Bindings(), ext.TwoVarComprehensions(), ext.Encoders(), cel.OptionalTypes(),
+		cel.Function("str", cel.Overload("str_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(str(native(v))) }))),
+		cel.Function("first", cel.Overload("first_list", []*cel.Type{cel.ListType(cel.DynType)}, cel.DynType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				for _, x := range native(v).([]any) {
+					if truthy(x) {
+						return types.DefaultTypeAdapter.NativeToValue(x)
+					}
+				}
+				return types.String("")
+			}))),
+		cel.Function("okdpDcr", cel.Overload("okdpDcr_map", []*cel.Type{cel.DynType}, cel.DynType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				out, err := okdpDcr(e.ctx, asMap(native(v)))
+				if err != nil {
+					return types.NewErr("%s", err.Error())
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+	}
+	// Every variable is dynamic: values are plain YAML data.
+	for _, n := range names {
+		opts = append(opts, cel.Variable(n, cel.DynType))
+	}
+	env, err := cel.NewEnv(opts...)
+	if err != nil {
+		return nil, err
+	}
+	e.envs[key] = env
+	return env, nil
+}
+
+// native: a CEL value as plain Go data (maps, lists, float64, string, bool, nil).
+func native(v ref.Val) any {
+	pb, err := v.ConvertToNative(reflect.TypeFor[*structpb.Value]())
+	if err != nil {
+		return v.Value()
+	}
+	return pb.(*structpb.Value).AsInterface()
+}
+
+// eval: compiles and evaluates one CEL expression in scope.
+func (e *celEngine) eval(expr string, scope M) (any, error) {
+	names := make([]string, 0, len(scope))
+	for k := range scope {
+		names = append(names, k)
+	}
+	env, err := e.env(names)
+	if err != nil {
+		return nil, err
+	}
+	ast, iss := env.Compile(expr)
+	if iss.Err() != nil {
+		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), iss.Err())
+	}
+	prg, err := env.Program(ast)
+	if err != nil {
+		return nil, err
+	}
+	out, _, err := prg.Eval(map[string]any(scope))
+	if err != nil {
+		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
+	}
+	return native(out), nil
+}
+
+// piece: a literal text, or the source of an expression.
+type piece struct {
+	text string
+	expr bool
+}
+
+// scan: the ${{ }} expressions of a string (brace depth and quotes tracked,
+// so a CEL map literal may contain "}}").
+func scan(s string) ([]piece, error) {
+	var out []piece
+	var lit strings.Builder
+	for i := 0; i < len(s); {
+		// $${{ is a literal ${{.
+		if strings.HasPrefix(s[i:], "$${{") {
+			lit.WriteString("${{")
+			i += 4
+			continue
+		}
+		if !strings.HasPrefix(s[i:], "${{") {
+			lit.WriteByte(s[i])
+			i++
+			continue
+		}
+		if lit.Len() > 0 {
+			out = append(out, piece{text: lit.String()})
+			lit.Reset()
+		}
+		j := closing(s, i+3)
+		if j < 0 {
+			return nil, fmt.Errorf("unterminated ${{ in %q", s)
+		}
+		out = append(out, piece{text: s[i+3 : j], expr: true})
+		i = j + 2
+	}
+	if lit.Len() > 0 {
+		out = append(out, piece{text: lit.String()})
+	}
+	return out, nil
+}
+
+// closing: the index of the }} that closes an expression starting at from,
+// skipping quoted strings and nested braces, or -1.
+func closing(s string, from int) int {
+	depth := 0
+	var quote byte
+	for j := from; j < len(s); j++ {
+		c := s[j]
+		if quote != 0 {
+			switch c {
+			case '\\':
+				j++
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+		case '{':
+			depth++
+		case '}':
+			if depth == 0 && j+1 < len(s) && s[j+1] == '}' {
+				return j
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+// evalString: a scalar with its ${{ }} expressions evaluated.
+func (e *celEngine) evalString(s string, scope M) (any, error) {
+	pieces, err := scan(s)
+	if err != nil {
+		return nil, err
+	}
+	// A lone expression keeps its type; otherwise the result is text.
+	if len(pieces) == 1 && pieces[0].expr {
+		return e.eval(pieces[0].text, scope)
+	}
+	var b strings.Builder
+	for _, p := range pieces {
+		if !p.expr {
+			b.WriteString(p.text)
+			continue
+		}
+		v, err := e.eval(p.text, scope)
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString(str(v))
+	}
+	return b.String(), nil
+}
+
+// with: a copy of scope with k bound to v.
+func with(scope M, k string, v any) M {
+	out := M{}
+	maps.Copy(out, scope)
+	out[k] = v
+	return out
+}
+
+// iteration: the scope of one $for element: the loop variable, then the
+// $let bindings of the $for, evaluated in order.
+func (e *celEngine) iteration(m *omap, scope M, name string, item any) (M, error) {
+	s := with(scope, name, item)
+	if lets, ok := m.vals["$let"].(*omap); ok {
+		for _, k := range lets.keys {
+			v, _, err := e.node(lets.vals[k], s)
+			if err != nil {
+				return nil, atKey("$let "+k, err)
+			}
+			s = with(s, k, v)
+		}
+	}
+	return s, nil
+}
+
+// loop: "c in <expr>" -> variable, items.
+func (e *celEngine) loop(spec any, scope M) (string, []any, error) {
+	s := str(spec)
+	name, expr, ok := strings.Cut(s, " in ")
+	if !ok {
+		return "", nil, fmt.Errorf("$for: %q is not \"<name> in <expression>\"", s)
+	}
+	v, err := e.evalString("${{"+expr+"}}", scope)
+	if err != nil {
+		return "", nil, err
+	}
+	items, ok := v.([]any)
+	if !ok && v != nil {
+		return "", nil, fmt.Errorf("$for %q: not a list", s)
+	}
+	return strings.TrimSpace(name), items, nil
+}
+
+// nodeError: the error of an expression, at its path in the document: the
+// section, binding, map keys and list positions down to the expression
+// (output: app: env[2]: value).
+type nodeError struct {
+	path  string
+	index bool // the path starts with a list position
+	err   error
+}
+
+// Error: the path, then the error of the expression.
+func (e *nodeError) Error() string { return e.path + ": " + e.err.Error() }
+
+// Unwrap: the error of the expression.
+func (e *nodeError) Unwrap() error { return e.err }
+
+// atKey: err, under the key k (a map key, a section, "let <name>").
+func atKey(k string, err error) error { return within(k, false, err) }
+
+// atIndex: err, at the position i of a list.
+func atIndex(i int, err error) error { return within(fmt.Sprintf("[%d]", i), true, err) }
+
+// within: err, its path below seg: a list position follows the key before
+// it without a separator (env[2]), any other step after ": ".
+func within(seg string, index bool, err error) error {
+	ne, ok := err.(*nodeError)
+	switch {
+	case !ok:
+		return &nodeError{path: seg, index: index, err: err}
+	case ne.index:
+		return &nodeError{path: seg + ne.path, index: index, err: ne.err}
+	}
+	return &nodeError{path: seg + ": " + ne.path, index: index, err: ne.err}
+}
+
+// node: evaluates a template node. keep=false: the node is left out.
+func (e *celEngine) node(n any, scope M) (any, bool, error) {
+	switch t := n.(type) {
+	case string:
+		v, err := e.evalString(t, scope)
+		return v, true, err
+	case []any:
+		out := []any{}
+		for i, item := range t {
+			// Directives that produce several items: $for and $spread.
+			if m, ok := item.(*omap); ok {
+				if spec, ok := m.vals["$for"]; ok {
+					name, items, err := e.loop(spec, scope)
+					if err != nil {
+						return nil, false, atIndex(i, err)
+					}
+					for _, it := range items {
+						s, err := e.iteration(m, scope, name, it)
+						if err != nil {
+							return nil, false, atIndex(i, err)
+						}
+						v, keep, err := e.node(m.vals["$each"], s)
+						if err != nil {
+							return nil, false, atIndex(i, err)
+						}
+						// $each may give one item or a list of items.
+						if l, ok := v.([]any); ok {
+							out = append(out, l...)
+						} else if keep {
+							out = append(out, v)
+						}
+					}
+					continue
+				}
+				if spec, ok := m.vals["$spread"]; ok {
+					v, err := e.evalString(str(spec), scope)
+					if err != nil {
+						return nil, false, atIndex(i, err)
+					}
+					if l, ok := v.([]any); ok {
+						out = append(out, l...)
+					}
+					continue
+				}
+			}
+			v, keep, err := e.node(item, scope)
+			if err != nil {
+				return nil, false, atIndex(i, err)
+			}
+			if keep {
+				out = append(out, v)
+			}
+		}
+		return out, true, nil
+	case *omap:
+		// $if false: the whole node is left out.
+		if cond, ok := t.vals["$if"]; ok {
+			c, err := e.evalString(str(cond), scope)
+			if err != nil {
+				return nil, false, err
+			}
+			if !truthy(c) {
+				return nil, false, nil
+			}
+		}
+		// $for in a map: one key per element.
+		if spec, ok := t.vals["$for"]; ok {
+			name, items, err := e.loop(spec, scope)
+			if err != nil {
+				return nil, false, err
+			}
+			out := M{}
+			for _, it := range items {
+				s, err := e.iteration(t, scope, name, it)
+				if err != nil {
+					return nil, false, err
+				}
+				k, _, err := e.node(t.vals["$key"], s)
+				if err != nil {
+					return nil, false, err
+				}
+				v, _, err := e.node(t.vals["$value"], s)
+				if err != nil {
+					return nil, false, err
+				}
+				out[str(k)] = v
+			}
+			return out, true, nil
+		}
+		// $value: the node is that value, not a map.
+		if v, ok := t.vals["$value"]; ok {
+			return e.node(v, scope)
+		}
+		// A plain map: each key in order, then $merge on top.
+		out := M{}
+		for _, k := range t.keys {
+			if k == "$if" || k == "$merge" {
+				continue
+			}
+			v, keep, err := e.node(t.vals[k], scope)
+			if err != nil {
+				return nil, false, atKey(k, err)
+			}
+			if keep {
+				out[k] = v
+			}
+		}
+		if spec, ok := t.vals["$merge"]; ok {
+			v, err := e.evalString(str(spec), scope)
+			if err != nil {
+				return nil, false, err
+			}
+			out = mergeOverwrite(out, asMap(v))
+		}
+		return out, true, nil
+	}
+	return n, true, nil // number, bool, null
+}
+
+// mapped: what a mapping produces.
+type mapped struct {
+	output   M     // chart -> computed values
+	instance M     // url, usage
+	provides []any // [{contract, name?, values, secretRef?}]
+}
+
+// runCEL: runs a mapping (mapping.cel.yaml) on the context ctx.
+func runCEL(b []byte, ctx M) (*mapped, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return nil, err
+	}
+	root, err := fromNode(&doc)
+	if err != nil {
+		return nil, err
+	}
+	top, ok := root.(*omap)
+	if !ok {
+		return nil, fmt.Errorf("the mapping must be a YAML map")
+	}
+	e := &celEngine{envs: map[string]*cel.Env{}, ctx: ctx}
+	// The context, then the let bindings, in order: each sees the previous ones.
+	scope := M{}
+	maps.Copy(scope, ctx)
+	if lets, ok := top.vals["let"].(*omap); ok {
+		for _, k := range lets.keys {
+			v, _, err := e.node(lets.vals[k], scope)
+			if err != nil {
+				return nil, atKey("let "+k, err)
+			}
+			scope[k] = v
+		}
+	}
+	// All error messages are collected before failing.
+	var msgs []string
+	for i, x := range asList(top.vals["errors"]) {
+		v, _, err := e.node(x, scope)
+		if err != nil {
+			return nil, atKey("errors", atIndex(i, err))
+		}
+		for _, m := range asList(v) {
+			msgs = append(msgs, str(m))
+		}
+	}
+	if len(msgs) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
+	}
+	res := &mapped{}
+	for _, k := range []string{"output", "instance", "provides"} {
+		v, _, err := e.node(top.vals[k], scope)
+		if err != nil {
+			return nil, atKey(k, err)
+		}
+		switch k {
+		case "output":
+			res.output = asMap(v)
+		case "instance":
+			res.instance = asMap(v)
+		case "provides":
+			res.provides = asList(v)
+		}
+	}
+	return res, nil
+}
+
+// asList: v as a list, or nil.
+func asList(v any) []any {
+	if l, ok := v.([]any); ok {
+		return l
+	}
+	return nil
+}
