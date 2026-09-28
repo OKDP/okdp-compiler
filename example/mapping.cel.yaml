@@ -1,0 +1,68 @@
+# Mapping of the webapp example: the values computed for its upstream charts
+# (app, and metrics when enabled), and what the instance publishes. Inputs:
+#   release    {name, namespace}
+#   values     the parameters; every connection reference (x-okdp-connection-ref)
+#              is already resolved to its contract fields
+#   global     {okdp: ...}: platform/platform-values.yaml, as written
+#   platform   what the compiler derives from global.okdp: oidc (defaults applied,
+#              dcr.enabled), oidcClientSecret, ingressAnnotations, proxyEnv
+# ${{ ... }} is a CEL expression: alone in a scalar it keeps its type,
+# otherwise it is interpolated as text.
+let:
+  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  # The database parameter: a resolved connection, or "" when not set.
+  db: '${{ type(values.database) == map ? values.database : {} }}'
+  dbSecret: ${{ db.?secretRef.name.orValue('') }}
+
+# Each expression returns a list of messages; any message fails the compile.
+errors:
+  - '${{ values.replicas > 1 && db.size() == 0 ? ["webapp: replicas > 1 needs a database, sessions are stored there"] : [] }}'
+  - >-
+    ${{ db.size() > 0 && dbSecret == '' ? ['webapp: database connection "' + db.okdp.ref
+        + '" has no secretRef, the password cannot be read'] : [] }}
+
+output:
+  app:
+    fullnameOverride: ${{ release.name }}-app
+    replicaCount: ${{ values.replicas }}
+    ingress:
+      enabled: true
+      className: ${{ global.okdp.ingress.className }}
+      annotations: ${{ platform.ingressAnnotations }}
+      hosts:
+        - host: ${{ host }}
+          paths: [{path: /, pathType: Prefix}]
+      tls:
+        - hosts: ["${{ host }}"]
+          secretName: ${{ release.name }}-tls
+    env:
+      - name: APP_URL
+        value: https://${{ host }}
+      - $if: ${{ db.size() > 0 }}
+        name: DB_URL
+        value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
+      - $if: ${{ db.size() > 0 }}
+        name: DB_DRIVER
+        value: ${{ db.driver }}
+      - $if: ${{ db.size() > 0 }}
+        name: DB_PASSWORD
+        valueFrom: {secretKeyRef: {name: "${{ dbSecret }}", key: password}}
+  # Left out when metrics are off: the chart is not rendered.
+  metrics:
+    $if: ${{ values.metrics.enabled }}
+    target: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080/metrics
+    interval: ${{ values.metrics.interval }}
+
+instance:
+  url: https://${{ host }}
+  usage: |
+    A web application. Open https://${{ host }}
+
+# The connections this instance publishes: other instances of the project
+# reference it by its release name. The compiler checks the values against
+# the contract, and against its x-okdp-internal naming convention.
+provides:
+  - contract: http
+    values:
+      url: https://${{ host }}
+      internalUrl: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080

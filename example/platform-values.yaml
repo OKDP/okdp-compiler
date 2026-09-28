@@ -1,0 +1,9 @@
+# Platform values (platform/platform-values.yaml): the first values layer.
+global:
+  okdp:
+    ingress:
+      suffix: okdp.example.org
+      className: nginx
+    certificateIssuers:
+      selfSigned:
+        name: okdp-ca

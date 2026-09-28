@@ -1,0 +1,16 @@
+# An external database, and upstream values (env is appended).
+database: shared-db
+connections:
+  shared-db:
+    contract: database
+    engine: mysql
+    host: db.example.org
+    port: 3306
+    dbName: webapp
+    secretRef: {name: shared-db-credentials}
+upstream:
+  app:
+    env:
+      - {name: LOG_LEVEL, value: debug}
+    resources:
+      limits: {memory: 1Gi}
