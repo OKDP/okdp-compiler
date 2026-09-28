@@ -54,7 +54,7 @@ bin/okdp-compile --chart example/webapp --service example \
 | `compiler/connections.go` | connection references declared in the parameter schema (`x-okdp-connection-ref`), resolved to an external connection or an instance of the namespace and completed against their contract |
 | `compiler/cel.go` | the mapping engine: YAML shaped like the upstream values, with `${{ CEL }}` expressions and `$if`/`$for`/`$merge`/`$spread`/`$let` directives |
 | `compiler/dcr.go` | `okdpDcr`, the host function computing the oidc-dcr chart values of an OAuth client |
-| `compiler/merge.go` | final values of each upstream chart: upstream defaults < fixed values < computed values < instance `upstream:` values |
+| `compiler/merge.go` | final values of each upstream chart: upstream defaults < base values < computed values < instance `upstream:` values |
 | `compiler/descriptor.go` | the descriptor ConfigMap `<release>-okdp`, from the mapping's `instance` and `provides` sections, checked against the contracts |
 | `compiler/values.go` | YAML/JSON read as Helm values (`ParseValues`) and Helm's merge rules |
 | `compiler/compare.go` | `Compare`: a result against a `helm template` output of the wrapper chart |

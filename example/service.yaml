@@ -1,14 +1,14 @@
 # Service definition of the webapp example (the wrapper chart is webapp/).
-# Engine-neutral part: the upstream charts, their fixed values (plain YAML),
-# and what an instance may override under upstream.<chart>. The mapping
-# (mapping.cel.yaml) computes the rest.
+# Engine-neutral part: the upstream charts, their base values (OKDP's
+# defaults, plain YAML), and what an instance may override under
+# upstream.<chart>. The mapping (mapping.cel.yaml) computes the rest.
 require:
   - ingress.suffix
   - ingress.className
   - certificateIssuers.selfSigned.name
 charts:
   app:
-    fixed: vendor-values/app.yaml
+    base: vendor-values/app.yaml
     upstream: true
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
     append: [env]

@@ -21,7 +21,7 @@ var (
 	contracts = fstest.MapFS{}
 	def       = &Definition{
 		Service: Service{
-			Charts:  map[string]ChartSpec{"app": {Fixed: "vendor-values/app.yaml"}},
+			Charts:  map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml"}},
 			Require: []string{"ingress.suffix"},
 		},
 		Mapping: []byte(`

@@ -1,4 +1,4 @@
-# Fixed values of the app chart: OKDP's choices, the same for every instance.
+# Base values of the app chart: OKDP's defaults, the same for every instance.
 image:
   tag: "2.3"
 resources:

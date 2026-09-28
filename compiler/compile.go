@@ -63,7 +63,7 @@ type Service struct {
 
 // ChartSpec: one upstream chart of a service.
 type ChartSpec struct {
-	Fixed    string   `yaml:"fixed"`    // vendor-values file of the wrapper (fixed values)
+	Base     string   `yaml:"base"`     // vendor-values file of the wrapper (OKDP's default values)
 	Values   string   `yaml:"values"`   // name of the values ConfigMap to compare with
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths
 	Append   []string `yaml:"append"`   // instance upstream values: appended lists
@@ -73,7 +73,7 @@ type ChartSpec struct {
 // Result: what a compile produces.
 type Result struct {
 	// Computed: chart -> the values the mapping computed, before the merge
-	// with the upstream defaults, the fixed values and the instance values.
+	// with the upstream defaults, the base values and the instance values.
 	Computed map[string]any
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any

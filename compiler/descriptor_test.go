@@ -132,14 +132,14 @@ func TestTrunc(t *testing.T) {
 // TestLoadDefinition: both files are required, service.yaml must parse.
 func TestLoadDefinition(t *testing.T) {
 	ok := fstest.MapFS{
-		"service.yaml":     {Data: []byte("require: [a]\ncharts: {app: {fixed: f.yaml, protect: [p]}}\n")},
+		"service.yaml":     {Data: []byte("require: [a]\ncharts: {app: {base: f.yaml, protect: [p]}}\n")},
 		"mapping.cel.yaml": {Data: []byte("output: {}\n")},
 	}
 	d, err := LoadDefinition(ok)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Service{Require: []string{"a"}, Charts: map[string]ChartSpec{"app": {Fixed: "f.yaml", Protect: []string{"p"}}}}
+	want := Service{Require: []string{"a"}, Charts: map[string]ChartSpec{"app": {Base: "f.yaml", Protect: []string{"p"}}}}
 	if !reflect.DeepEqual(d.Service, want) || string(d.Mapping) != "output: {}\n" {
 		t.Errorf("got %#v", d)
 	}

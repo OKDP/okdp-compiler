@@ -1,5 +1,5 @@
 // Merge: the final values of each upstream chart, as okdp.vendor.render
-// computes them (upstream defaults < fixed values < computed values <
+// computes them (upstream defaults < base values < computed values <
 // instance upstream values, global copied down).
 package compiler
 
@@ -21,9 +21,9 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M
 	defaults := asMap(d)
 	out := asMap(deepCopy(defaults))
 	spec := svc.Charts[chart]
-	// Then OKDP's fixed values for this chart.
-	if spec.Fixed != "" {
-		f, err := readYAML(in.Chart, path.Clean(spec.Fixed))
+	// Then OKDP's default values for this chart.
+	if spec.Base != "" {
+		f, err := readYAML(in.Chart, path.Clean(spec.Base))
 		if err != nil {
 			return nil, err
 		}

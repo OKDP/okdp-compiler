@@ -123,7 +123,7 @@ func TestResolveUnknownContract(t *testing.T) {
 }
 
 // TestCompileOutputErrors: the mapping may only output charts of
-// service.yaml, and their fixed values file must exist.
+// service.yaml, and their base values file must exist.
 func TestCompileOutputErrors(t *testing.T) {
 	d := *def
 	d.Mapping = []byte("output: {db: {}}\n")
@@ -131,8 +131,8 @@ func TestCompileOutputErrors(t *testing.T) {
 		t.Errorf("unknown chart: got %v", err)
 	}
 	d = *def
-	d.Service.Charts = map[string]ChartSpec{"app": {Fixed: "vendor-values/missing.yaml"}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/missing.yaml"}}
 	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open vendor-values/missing.yaml") {
-		t.Errorf("missing fixed values: got %v", err)
+		t.Errorf("missing base values: got %v", err)
 	}
 }
