@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "replicas": {"type": "integer", "minimum": 1},
+    "database": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}},
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "interval": {"type": "string"}
+      }
+    },
+    "connections": {"type": "object"},
+    "upstream": {"type": "object"},
+    "global": {"type": "object"}
+  }
+}

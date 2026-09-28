@@ -1,0 +1,8 @@
+# Wrapper chart of the webapp example: the parameters (values.yaml,
+# values.schema.json) and the upstream charts it vendors (vendor/).
+apiVersion: v2
+name: webapp
+description: Example service for okdp-compiler.
+type: application
+version: 1.0.0
+appVersion: "2.3"
