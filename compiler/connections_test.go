@@ -32,21 +32,21 @@ const resolveSchema = `{"properties": {
 	"other": {"type": "string"}}}`
 
 // resolveCtx: the context of the in-memory chart with resolveSchema.
-func resolveCtx(values M) (M, error) {
+func resolveCtx(values M) (M, []Dependency, error) {
 	ch := maps.Clone(chart)
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
 	in.Chart, in.Contracts = ch, dbContract
-	ctx, _, err := buildContext(in, &def.Service)
+	ctx, _, deps, err := buildContext(in, &def.Service)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return asMap(ctx["values"]), nil
+	return asMap(ctx["values"]), deps, nil
 }
 
 // TestResolve: internal and external references, completed against the contract.
 func TestResolve(t *testing.T) {
-	values, err := resolveCtx(M{
+	values, deps, err := resolveCtx(M{
 		"main":     M{"db": "demo-pg"},
 		"replicas": []any{"ext", ""},
 		"other":    "demo-pg",
@@ -81,6 +81,9 @@ func TestResolve(t *testing.T) {
 	if values["other"] != "demo-pg" {
 		t.Error("a field without x-okdp-connection-ref is left as it is")
 	}
+	if want := []Dependency{{Instance: "demo-pg", Contract: "database", Field: "main.db"}}; !reflect.DeepEqual(deps, want) {
+		t.Errorf("dependencies: %#v", deps)
+	}
 }
 
 // TestResolveErrors: contract checks on references.
@@ -100,7 +103,7 @@ func TestResolveErrors(t *testing.T) {
 		"secret field":   {ext(M{"password": "p"}), `"password" is a secret field`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := resolveCtx(tc.values)
+			_, _, err := resolveCtx(tc.values)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
@@ -114,7 +117,7 @@ func TestResolveUnknownContract(t *testing.T) {
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
 	in := inputs(M{"q": "demo-mq"})
 	in.Chart = ch
-	if _, _, err := buildContext(in, &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
+	if _, _, _, err := buildContext(in, &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
 		t.Errorf("got %v", err)
 	}
 }

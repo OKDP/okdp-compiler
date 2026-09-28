@@ -79,6 +79,9 @@ type Result struct {
 	Values map[string]map[string]any
 	// Objects: OKDP's own objects, rendered whole (the descriptor ConfigMap).
 	Objects []map[string]any
+	// Dependencies: the instances the connection references point to, by
+	// parameter path. References to external connections are not listed.
+	Dependencies []Dependency
 }
 
 // Compile runs the mapping of def on one instance. It is safe for
@@ -98,7 +101,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	}
 	svc := &def.Service
 	// What the mapping sees: values, platform context, resolved connections.
-	ctx, values, err := buildContext(in, svc)
+	ctx, values, deps, err := buildContext(in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +114,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Objects: []map[string]any{desc}}
+	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Objects: []map[string]any{desc}, Dependencies: deps}
 	// Charts left out by the mapping ($if) are not rendered.
 	for chart, v := range res.output {
 		if _, ok := svc.Charts[chart]; !ok {

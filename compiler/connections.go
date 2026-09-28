@@ -15,6 +15,18 @@ type resolver struct {
 	in     Inputs
 	conns  M
 	suffix string
+	deps   *[]Dependency // when set, every internal reference is recorded
+}
+
+// Dependency: an instance of the same namespace that a connection reference
+// of the parameters points to (an internal reference: the name of an
+// instance, not of an external connection). The instance must exist and
+// provide the contract; a deployment can wait for it (Flux dependsOn, Argo
+// sync waves).
+type Dependency struct {
+	Instance string `json:"instance" yaml:"instance"` // the referenced instance (its release name)
+	Contract string `json:"contract" yaml:"contract"` // the contract it must provide
+	Field    string `json:"field" yaml:"field"`       // the parameter that references it, e.g. backends[0].database
 }
 
 // walk follows the parameter schema and replaces every string carrying an
@@ -129,6 +141,9 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 	}
 	// Where it comes from, for the mapping (e.g. error messages).
 	out["okdp"] = M{"ref": ref, "contract": contract, "source": source}
+	if source == "internal" && r.deps != nil {
+		*r.deps = append(*r.deps, Dependency{Instance: ref, Contract: contract, Field: field})
+	}
 	return out, nil
 }
 

@@ -11,7 +11,7 @@ import (
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	ctx, _, err := buildContext(inputs(M{"global": M{"okdp": okdp}}), &def.Service)
+	ctx, _, _, err := buildContext(inputs(M{"global": M{"okdp": okdp}}), &def.Service)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func TestContextErrors(t *testing.T) {
 		delete(ch, missing)
 		in := inputs()
 		in.Chart = ch
-		if _, _, err := buildContext(in, &def.Service); err == nil {
+		if _, _, _, err := buildContext(in, &def.Service); err == nil {
 			t.Errorf("without %s: must fail", missing)
 		}
 	}
@@ -94,7 +94,7 @@ func TestContextErrors(t *testing.T) {
 // TestContextValues: the parameters the mapping sees, without global and
 // connections, and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	ctx, values, err := buildContext(inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
+	ctx, values, _, err := buildContext(inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
 	if err != nil {
 		t.Fatal(err)
 	}

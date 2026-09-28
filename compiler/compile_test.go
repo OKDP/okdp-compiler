@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -90,5 +91,37 @@ func TestCompileErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestDependencies: internal references only, with their parameter path.
+func TestDependencies(t *testing.T) {
+	ch := fstest.MapFS{}
+	maps.Copy(ch, chart)
+	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+		"replicas": {"type": "integer"},
+		"backends": {"type": "array", "items": {"properties": {
+			"database": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}}}}`)}
+	in := inputs(map[string]any{
+		"backends": []any{
+			map[string]any{"database": "ext"},     // an external connection: not a dependency
+			map[string]any{"database": "demo-db"}, // an instance
+			map[string]any{"database": ""},        // not set
+		},
+		"connections": map[string]any{"ext": map[string]any{"contract": "database", "host": "db.example.org"}},
+	})
+	in.Chart = ch
+	in.Contracts = fstest.MapFS{"database.schema.json": {Data: []byte(`{
+		"x-okdp-contract": "database",
+		"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc"},
+		"properties": {"host": {"type": "string"}},
+		"required": ["host"]}`)}}
+	res, err := Compile(def, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[1].database"}}
+	if !reflect.DeepEqual(res.Dependencies, want) {
+		t.Errorf("got %#v, want %#v", res.Dependencies, want)
 	}
 }

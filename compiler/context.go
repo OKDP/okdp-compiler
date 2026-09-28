@@ -5,14 +5,16 @@ package compiler
 
 import (
 	"fmt"
+	"sort"
 )
 
-// buildContext: what a mapping sees, and the merged values.
-func buildContext(in Inputs, svc *Service) (M, M, error) {
+// Context: what a mapping sees, the merged values, and the instances the
+// connection references point to.
+func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	// 1. values layers, as Helm: chart defaults, then each -f file.
 	defaults, err := readYAML(in.Chart, "values.yaml")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	values := asMap(deepCopy(defaults))
 	for _, v := range in.Values {
@@ -23,7 +25,7 @@ func buildContext(in Inputs, svc *Service) (M, M, error) {
 	// 2. platform requirements.
 	for _, k := range svc.Require {
 		if !truthy(dig(okdpG, k)) {
-			return nil, nil, fmt.Errorf("global.okdp.%s is required. It is a platform value: set it in platform/platform-values.yaml", k)
+			return nil, nil, nil, fmt.Errorf("global.okdp.%s is required. It is a platform value: set it in platform/platform-values.yaml", k)
 		}
 	}
 	// 3. platform context.
@@ -40,7 +42,7 @@ func buildContext(in Inputs, svc *Service) (M, M, error) {
 	}
 	mode := str(oidc["clientProvisioning"])
 	if mode != "existing" && mode != "dcr" {
-		return nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
+		return nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
 	}
 	dcr := asMap(deepCopy(oidc["dcr"]))
 	dcr["enabled"] = truthy(oidc["enabled"]) && mode == "dcr"
@@ -70,13 +72,14 @@ func buildContext(in Inputs, svc *Service) (M, M, error) {
 	// 4. connection references, resolved in place (x-okdp-connection-ref).
 	schema, err := readJSON(in.Chart, "values.schema.json")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// The mapping gets a copy: the merged values stay as the user wrote them.
 	params := asMap(deepCopy(values))
-	r := resolver{in: in, conns: asMap(values["connections"]), suffix: str(dig(okdpG, "ingress.suffix"))}
+	var deps []Dependency
+	r := resolver{in: in, conns: asMap(values["connections"]), suffix: str(dig(okdpG, "ingress.suffix")), deps: &deps}
 	if err := r.walk(schema, params, ""); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// Not parameters: global is exposed apart, connections are resolved.
 	delete(params, "global")
@@ -87,5 +90,7 @@ func buildContext(in Inputs, svc *Service) (M, M, error) {
 		"global":   M{"okdp": deepCopy(okdpG)}, // platform-values.yaml, as written
 		"platform": platform,                   // derived from it by the compiler
 	}
-	return ctx, values, nil
+	// The schema walk follows map order: sort for a stable result.
+	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
+	return ctx, values, deps, nil
 }
