@@ -4,14 +4,19 @@
 # upstream.<chart>.yaml file (upstream: true; or a path, or a list of paths),
 # then its inline upstream.<chart> values. The mapping (mapping.cel.yaml)
 # computes the rest.
+
+# Platform values the service needs, under global.okdp (the compile fails
+# when one is missing).
 require:
-  - ingress.suffix
-  - ingress.className
-  - certificateIssuers.selfSigned.name
+  - ingress.suffix                     # domain of the instance's host: <release>.<suffix>
+  - ingress.className                  # ingress class of the platform
+  - certificateIssuers.selfSigned.name # issuer of the instance's TLS certificate
+# The upstream charts vendored by the wrapper chart (webapp/vendor/<chart>/),
+# by name, as the mapping outputs them.
 charts:
-  app:
-    base: vendor-values/app.yaml
-    upstream: true
-    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
-    append: [env]
-  metrics: {}
+  app:                                 # the application chart
+    base: vendor-values/app.yaml       # OKDP's default values, over the chart's own defaults
+    upstream: true                     # user values accepted: upstream.app.yaml, then inline upstream.app
+    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls] # set by the platform: user values may not change them
+    append: [env]                      # user lists appended to the computed ones instead of replacing them
+  metrics: {}                          # the metrics chart: no base values, no user values
