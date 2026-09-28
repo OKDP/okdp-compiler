@@ -11,15 +11,17 @@ import (
 // Context: what a mapping sees, the merged values, and the instances the
 // connection references point to.
 func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
-	// 1. values layers, as Helm: chart defaults, then each -f file.
-	defaults, err := readYAML(in.Chart, "values.yaml")
+	// 1. values layers, as Helm: the -f files merged in order, coalesced
+	// over the chart defaults.
+	defaults, err := readValues(in.Chart, "values.yaml")
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	values := asMap(deepCopy(defaults))
+	user := M{}
 	for _, v := range in.Values {
-		values = coalesce(values, asMap(normalize(v)))
+		user = mergeMaps(user, asMap(normalize(v)))
 	}
+	values := coalesceValues(defaults, user)
 	global := asMap(values["global"])
 	okdpG := asMap(global["okdp"])
 	// 2. platform requirements.

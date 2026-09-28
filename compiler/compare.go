@@ -1,40 +1,39 @@
 package compiler
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Compare checks a compile result against what the wrapper chart renders
 // today: the okdp.io/vendor-values ConfigMaps and the OKDP objects of a
 // `helm template` output of the wrapper (rendered with the same instance
 // values). It reports each chart and object to w, and fails on any
-// difference.
+// difference. A key that is null in the rendered values and missing from the
+// compiled ones is not a difference (a null default, which Helm drops): the
+// report counts them.
 func Compare(def *Definition, in Inputs, res *Result, rendered []byte, w io.Writer) error {
 	svc := &def.Service
 	cms := map[string]M{}
 	objects := map[string]M{} // kind/name -> object
-	// Index the rendered objects, and the values ConfigMaps by name.
-	dec := yaml.NewDecoder(bytes.NewReader(rendered))
-	for {
-		var doc any
-		if err := dec.Decode(&doc); err != nil {
-			break
-		}
-		d := asMap(normalize(doc))
+	// Index the rendered objects, and the values ConfigMaps by name, read
+	// as Helm reads YAML.
+	docs, err := readYAMLStream(rendered)
+	if err != nil {
+		return err
+	}
+	for _, doc := range docs {
+		d := asMap(doc)
 		md := asMap(d["metadata"])
 		objects[str(d["kind"])+"/"+str(md["name"])] = d
 		if d["kind"] == "ConfigMap" && asMap(md["labels"])["okdp.io/vendor-values"] != nil {
-			var v any
-			if err := yaml.Unmarshal([]byte(str(asMap(d["data"])["values.yaml"])), &v); err != nil {
+			v, err := loadValues([]byte(str(asMap(d["data"])["values.yaml"])))
+			if err != nil {
 				return err
 			}
-			cms[str(md["name"])] = asMap(normalize(v))
+			cms[str(md["name"])] = v
 		}
 	}
 	// OKDP objects: compared whole.
@@ -77,10 +76,18 @@ func Compare(def *Definition, in Inputs, res *Result, rendered []byte, w io.Writ
 			bad++
 			continue
 		}
+		want = asMap(deepCopy(want))
+		nulls := ""
+		if n := dropNulls(res.Values[chart], want); n > 0 {
+			nulls = fmt.Sprintf(" (%d null keys of %s left out, as Helm drops null defaults)", n, name)
+		}
 		d := diffPaths(res.Values[chart], want, "")
 		if len(d) == 0 {
-			fmt.Fprintf(w, "  %-14s identical to %s\n", chart, name)
+			fmt.Fprintf(w, "  %-14s identical to %s%s\n", chart, name, nulls)
 		} else {
+			if nulls != "" {
+				fmt.Fprintf(w, "  %-14s%s\n", chart, nulls)
+			}
 			bad++
 			fmt.Fprintf(w, "  %-14s DIFF vs %s:\n", chart, name)
 			for _, l := range d {
@@ -99,6 +106,27 @@ func Compare(def *Definition, in Inputs, res *Result, rendered []byte, w io.Writ
 		return fmt.Errorf("%d difference(s)", bad)
 	}
 	return nil
+}
+
+// dropNulls: the null keys of want missing from got, removed from want (at
+// any depth of maps); returns how many.
+func dropNulls(got, want M) int {
+	n := 0
+	for k, w := range want {
+		g, ok := got[k]
+		switch {
+		case w == nil && !ok:
+			delete(want, k)
+			n++
+		case ok:
+			gm, gok := g.(M)
+			wm, wok := w.(M)
+			if gok && wok {
+				n += dropNulls(gm, wm)
+			}
+		}
+	}
+	return n
 }
 
 // diffPaths: the differences between two values, one line per path.

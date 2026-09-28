@@ -1,44 +1,120 @@
-// Values: reading YAML and JSON as Helm values (string keys, every number a
-// float64), and Helm's merge rules.
+// Values: reading YAML and JSON as Helm values, and Helm's merge rules.
+//
+// Values files are read as Helm 4 reads them (loader.LoadValues): each YAML
+// document of the file decoded by sigs.k8s.io/yaml (YAML 1.1: y, yes, on...
+// are booleans; through JSON: string keys, every number a float64), the
+// documents merged in order. The layers are merged as Helm merges its -f
+// files (MergeMaps), and coalesced over the chart defaults as Helm does
+// (CoalesceValues): a null deletes a default, and is kept where there is no
+// default. Helm's own functions are not imported: helm.sh/helm/v4 pulls in
+// client-go and a newer Go and Kubernetes than the console server that
+// embeds this package, for about a hundred lines. They are reproduced from
+// helm v4.3.0 (pkg/chart/common/util/coalesce.go, pkg/chart/v2/loader), and
+// compiler/testdata/helm holds what `helm template` computes on each case.
 package compiler
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // M: a values map (YAML or JSON object).
 type M = map[string]any
 
-// readYAML: a YAML file of fsys, normalized.
-func readYAML(fsys fs.FS, name string) (any, error) {
+// readValues: a values file of fsys, read as Helm reads values files.
+func readValues(fsys fs.FS, name string) (M, error) {
 	b, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return nil, err
 	}
-	var v any
-	if err := yaml.Unmarshal(b, &v); err != nil {
+	v, err := loadValues(b)
+	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	return normalize(v), nil
+	return v, nil
 }
 
-// ParseValues: a values file as the compiler reads it (string keys, every
-// number a float64), for Inputs.Values.
+// ParseValues: a values file as Helm reads it (YAML 1.1, every document of
+// the file merged in order, string keys, every number a float64), for
+// Inputs.Values.
 func ParseValues(b []byte) (map[string]any, error) {
-	var v any
-	if err := yaml.Unmarshal(b, &v); err != nil {
+	return loadValues(b)
+}
+
+// loadValues: Helm's loader.LoadValues. The file is split into documents
+// as Kubernetes' YAMLReader does (a line starting with "---", followed by
+// nothing but a comment), each document is decoded by sigs.k8s.io/yaml into
+// a map, and the documents are merged with MergeMaps.
+func loadValues(b []byte) (M, error) {
+	docs, err := splitDocuments(b)
+	if err != nil {
+		return nil, fmt.Errorf("error reading yaml document: %w", err)
+	}
+	values := M{}
+	for _, doc := range docs {
+		current := M{}
+		if err := sigsyaml.Unmarshal(doc, &current); err != nil {
+			return nil, fmt.Errorf("cannot unmarshal yaml document: %w", err)
+		}
+		values = mergeMaps(values, current)
+	}
+	return values, nil
+}
+
+// splitDocuments: the documents of a YAML stream, as Kubernetes'
+// YAMLReader reads them (lines end with "\n", a "\r\n" is read as "\n").
+func splitDocuments(b []byte) ([][]byte, error) {
+	var docs [][]byte
+	var buf bytes.Buffer
+	text := strings.TrimSuffix(string(b), "\n")
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if rest, ok := strings.CutPrefix(line, "---"); ok {
+			if t := strings.TrimSpace(rest); t != "" && t[0] != '#' {
+				return nil, fmt.Errorf("invalid Yaml document separator: %s", t)
+			}
+			if buf.Len() > 0 {
+				docs = append(docs, bytes.Clone(buf.Bytes()))
+				buf.Reset()
+			}
+			continue
+		}
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+	}
+	if buf.Len() > 0 {
+		docs = append(docs, buf.Bytes())
+	}
+	return docs, nil
+}
+
+// readYAMLStream: the documents of a multi-document YAML stream (a `helm
+// template` output), each read as Helm reads YAML.
+func readYAMLStream(b []byte) ([]any, error) {
+	docs, err := splitDocuments(b)
+	if err != nil {
 		return nil, err
 	}
-	return asMap(normalize(v)), nil
+	var out []any
+	for _, doc := range docs {
+		var v any
+		if err := sigsyaml.Unmarshal(doc, &v); err != nil {
+			return nil, err
+		}
+		if v != nil {
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }
 
 // normalize: maps with string keys, every number a float64 (as Helm values,
-// which go through JSON).
+// which go through JSON), for values a caller built in memory.
 func normalize(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -98,16 +174,15 @@ func asMap(v any) M {
 	return M{}
 }
 
-// coalesce: Helm's merge of user values over chart defaults (null deletes).
-func coalesce(dst, src M) M {
+// mergeMaps: Helm's MergeMaps, the merge of its -f files (and sprig's
+// mergeOverwrite on values): maps merge, lists and scalars replace, a null
+// replaces too and stays null. dst is changed in place and returned; src is
+// copied.
+func mergeMaps(dst, src M) M {
 	for k, sv := range src {
-		if sv == nil {
-			delete(dst, k)
-			continue
-		}
 		if sm, ok := sv.(M); ok {
 			if dm, ok := dst[k].(M); ok {
-				dst[k] = coalesce(dm, sm)
+				dst[k] = mergeMaps(dm, sm)
 				continue
 			}
 		}
@@ -116,19 +191,81 @@ func coalesce(dst, src M) M {
 	return dst
 }
 
-// mergeOverwrite: sprig's mergeOverwrite on Helm values (maps merge, lists
-// and scalars replace, null sets null).
-func mergeOverwrite(dst, src M) M {
-	for k, sv := range src {
-		if sm, ok := sv.(M); ok {
-			if dm, ok := dst[k].(M); ok {
-				dst[k] = mergeOverwrite(dm, sm)
-				continue
+// coalesceValues: Helm's CoalesceValues for a chart without dependencies,
+// the values its templates see: user values (the merged -f files) over the
+// chart defaults. A user null deletes the default (the key is gone); a null
+// where the chart has no default stays; null defaults are dropped (Helm 4).
+// When a value and its default are not both maps, the value wins. Neither
+// argument is changed.
+func coalesceValues(defaults, user M) M {
+	v := asMap(deepCopy(user))
+	for key, val := range asMap(deepCopy(defaults)) {
+		value, ok := v[key]
+		switch {
+		case ok && value == nil:
+			delete(v, key)
+		case ok:
+			dest, isMap := value.(M)
+			src, srcMap := val.(M)
+			if isMap && srcMap {
+				cleanNil(src)
+				coalesceTables(dest, src)
+			}
+		case val == nil:
+		default:
+			if sub, isMap := val.(M); isMap {
+				cleanNil(sub)
+			}
+			v[key] = val
+		}
+	}
+	return v
+}
+
+// coalesceTables: Helm's coalesceTablesFullKey (merge false): dst (the
+// user's) wins over src (the defaults); a null in dst deletes a non-null
+// default and is kept otherwise.
+func coalesceTables(dst, src M) M {
+	nonNil := map[string]bool{}
+	for k, v := range src {
+		if v != nil {
+			nonNil[k] = true
+		}
+	}
+	for k, v := range dst {
+		if v == nil {
+			src[k] = nil
+		}
+	}
+	for k, val := range src {
+		dv, ok := dst[k]
+		switch {
+		case ok && dv == nil && nonNil[k]:
+			delete(dst, k)
+		case !ok:
+			dst[k] = val
+		default:
+			sm, srcMap := val.(M)
+			dm, dstMap := dv.(M)
+			if srcMap && dstMap {
+				coalesceTables(dm, sm)
 			}
 		}
-		dst[k] = deepCopy(sv)
 	}
 	return dst
+}
+
+// cleanNil: Helm's cleanNilValues, every null of m removed, at any depth of
+// maps (not in lists).
+func cleanNil(m M) M {
+	for k, v := range m {
+		if v == nil {
+			delete(m, k)
+		} else if sub, ok := v.(M); ok {
+			cleanNil(sub)
+		}
+	}
+	return m
 }
 
 // truthy: v as a Helm condition sees it (empty is false).
@@ -185,4 +322,25 @@ func readJSON(fsys fs.FS, name string) (M, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return asMap(v), nil
+}
+
+// chartMeta: the Chart.yaml fields the compiler uses, read as Helm reads
+// them (into strings: an unquoted appVersion: 1.10 is "1.1", as in Helm).
+type chartMeta struct {
+	Name       string `json:"name"`
+	Version    string `json:"version"`
+	AppVersion string `json:"appVersion"`
+}
+
+// readChart: Chart.yaml of the wrapper chart.
+func readChart(fsys fs.FS) (chartMeta, error) {
+	var c chartMeta
+	b, err := fs.ReadFile(fsys, "Chart.yaml")
+	if err != nil {
+		return c, err
+	}
+	if err := sigsyaml.Unmarshal(b, &c); err != nil {
+		return c, fmt.Errorf("%s: %w", "Chart.yaml", err)
+	}
+	return c, nil
 }

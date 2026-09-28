@@ -59,7 +59,7 @@ func okdpDcr(ctx M, args M) (M, error) {
 		keys = M{"client_id": ".client_id"}
 	}
 	// The mapping may override any registration field.
-	request = mergeOverwrite(request, asMap(deepCopy(args["request"])))
+	request = mergeMaps(request, asMap(deepCopy(args["request"])))
 	ca := str(args["caSecret"])
 	if ca == "" {
 		ca = "certs-bundle"

@@ -26,7 +26,9 @@ import (
 	"maps"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -41,22 +43,43 @@ import (
 type omap struct {
 	keys []string
 	vals map[string]any
+	raw  map[string]string // key -> the key as written
+}
+
+// name: key k as written, for the keys that are binding names (let and
+// $let): a binding n or y keeps its name, YAML 1.1 does not make it a
+// boolean.
+func (m *omap) name(k string) string {
+	if r, ok := m.raw[k]; ok {
+		return r
+	}
+	return k
 }
 
 // fromNode: a YAML node as data, maps as omap to keep their key order.
+// Scalars and keys are read as Helm reads values (YAML 1.1, see scalar and
+// mapKey): the mapping is YAML shaped like the upstream values, a snippet
+// copied from a values.yaml means the same in both.
 func fromNode(n *yaml.Node) (any, error) {
 	switch n.Kind {
 	case yaml.DocumentNode:
 		return fromNode(n.Content[0])
 	case yaml.MappingNode:
-		m := &omap{vals: map[string]any{}}
+		m := &omap{vals: map[string]any{}, raw: map[string]string{}}
 		for i := 0; i < len(n.Content); i += 2 {
-			k := n.Content[i].Value
+			k, err := mapKey(n.Content[i])
+			if err != nil {
+				return nil, err
+			}
 			v, err := fromNode(n.Content[i+1])
 			if err != nil {
 				return nil, err
 			}
-			m.keys = append(m.keys, k)
+			// A key given twice: the last value wins, as in Helm values.
+			if _, dup := m.vals[k]; !dup {
+				m.keys = append(m.keys, k)
+				m.raw[k] = n.Content[i].Value
+			}
 			m.vals[k] = v
 		}
 		return m, nil
@@ -70,10 +93,10 @@ func fromNode(n *yaml.Node) (any, error) {
 			out = append(out, v)
 		}
 		return out, nil
-	// A scalar: decoded as YAML types (int, bool...), then normalized.
+	// A scalar: decoded as YAML 1.1 types (int, bool...), then normalized.
 	case yaml.ScalarNode:
-		var v any
-		if err := n.Decode(&v); err != nil {
+		v, err := scalar(n)
+		if err != nil {
 			return nil, err
 		}
 		return normalize(v), nil
@@ -81,6 +104,72 @@ func fromNode(n *yaml.Node) (any, error) {
 		return fromNode(n.Alias)
 	}
 	return nil, fmt.Errorf("unsupported YAML node at line %d", n.Line)
+}
+
+// yaml11Bools: the plain scalars YAML 1.1 (Helm's sigs.k8s.io/yaml) reads
+// as booleans and YAML 1.2 (yaml.v3) as strings.
+var yaml11Bools = map[string]bool{
+	"y": true, "Y": true, "yes": true, "Yes": true, "YES": true, "on": true, "On": true, "ON": true,
+	"n": false, "N": false, "no": false, "No": false, "NO": false, "off": false, "Off": false, "OFF": false,
+}
+
+// scalar: a scalar node decoded as Helm decodes values (YAML 1.1). yaml.v3
+// resolves plain scalars as YAML 1.1 does (ints with 0777, 0x, 0b, _...,
+// floats, nulls) except booleans: a plain, untagged y, yes, on, n, no, off
+// (and their case variants) is a boolean. Timestamps stay strings, as in
+// Helm. Quoted scalars and explicit tags (!!str yes) are left as they are.
+func scalar(n *yaml.Node) (any, error) {
+	var v any
+	if err := n.Decode(&v); err != nil {
+		return nil, err
+	}
+	if _, ok := v.(time.Time); ok {
+		return n.Value, nil
+	}
+	if s, ok := v.(string); ok && n.Style == 0 && n.Tag == "!!str" {
+		if b, ok := yaml11Bools[s]; ok {
+			return b, nil
+		}
+	}
+	return v, nil
+}
+
+// mapKey: a map key as Helm reads it: decoded as a YAML 1.1 scalar, then
+// turned into a string as sigs.k8s.io/yaml does (on: is "true", 1.0: is
+// "1", 0x10: is "16"). A null or a non-scalar key is an error, as in Helm.
+func mapKey(n *yaml.Node) (string, error) {
+	if n.Kind == yaml.AliasNode {
+		return mapKey(n.Alias)
+	}
+	if n.Kind != yaml.ScalarNode {
+		return "", fmt.Errorf("line %d: a map key must be a scalar", n.Line)
+	}
+	v, err := scalar(n)
+	if err != nil {
+		return "", err
+	}
+	switch t := v.(type) {
+	case string:
+		return t, nil
+	case bool:
+		return strconv.FormatBool(t), nil
+	case int:
+		return strconv.Itoa(t), nil
+	case int64:
+		return strconv.FormatInt(t, 10), nil
+	case float64:
+		s := strconv.FormatFloat(t, 'g', -1, 32)
+		switch s {
+		case "+Inf":
+			s = ".inf"
+		case "-Inf":
+			s = "-.inf"
+		case "NaN":
+			s = ".nan"
+		}
+		return s, nil
+	}
+	return "", fmt.Errorf("line %d: unsupported map key %q", n.Line, n.Value)
 }
 
 // celEngine: evaluates a mapping. It caches the CEL environments and keeps
@@ -279,9 +368,9 @@ func (e *celEngine) iteration(m *omap, scope M, name string, item any) (M, error
 		for _, k := range lets.keys {
 			v, _, err := e.node(lets.vals[k], s)
 			if err != nil {
-				return nil, atKey("$let "+k, err)
+				return nil, atKey("$let "+lets.name(k), err)
 			}
-			s = with(s, k, v)
+			s = with(s, lets.name(k), v)
 		}
 	}
 	return s, nil
@@ -451,7 +540,7 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 			if err != nil {
 				return nil, false, err
 			}
-			out = mergeOverwrite(out, asMap(v))
+			out = mergeMaps(out, asMap(v))
 		}
 		return out, true, nil
 	}
@@ -487,9 +576,9 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 		for _, k := range lets.keys {
 			v, _, err := e.node(lets.vals[k], scope)
 			if err != nil {
-				return nil, atKey("let "+k, err)
+				return nil, atKey("let "+lets.name(k), err)
 			}
-			scope[k] = v
+			scope[lets.name(k)] = v
 		}
 	}
 	// All error messages are collected before failing.

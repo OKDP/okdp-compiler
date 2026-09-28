@@ -1,0 +1,6 @@
+# A later layer wins; a null replaces an earlier layer's value, and then
+# deletes the default under it.
+b: second
+c: null
+m: {z: null, l: null}
+gone: null

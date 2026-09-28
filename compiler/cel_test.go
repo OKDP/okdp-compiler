@@ -37,8 +37,8 @@ func TestMappingDirectives(t *testing.T) {
 		want M
 	}{
 		"lone expression keeps its type": {
-			`{n: '${{ values.items[1].n }}', b: '${{ values.on }}', l: '${{ [1, 2] }}'}`,
-			M{"n": float64(2), "b": true, "l": []any{float64(1), float64(2)}},
+			`{num: '${{ values.items[1].n }}', b: '${{ values.on }}', l: '${{ [1, 2] }}'}`,
+			M{"num": float64(2), "b": true, "l": []any{float64(1), float64(2)}},
 		},
 		"interpolation is text": {
 			`{s: 'n=${{ values.items[1].n }} on=${{ values.on }}'}`,
@@ -57,12 +57,12 @@ func TestMappingDirectives(t *testing.T) {
 			M{"s": "1.5", "f": "y", "e": ""},
 		},
 		"$if on a key": {
-			`{no: {$if: '${{ values.off }}', a: 1}, yes: {$if: '${{ values.on }}', a: 1}}`,
-			M{"yes": M{"a": float64(1)}},
+			`{dropped: {$if: '${{ values.off }}', a: 1}, kept: {$if: '${{ values.on }}', a: 1}}`,
+			M{"kept": M{"a": float64(1)}},
 		},
 		"$if with $value": {
-			`{no: {$if: '${{ values.off }}', $value: 1}, yes: {$if: '${{ values.on }}', $value: [1]}}`,
-			M{"yes": []any{float64(1)}},
+			`{dropped: {$if: '${{ values.off }}', $value: 1}, kept: {$if: '${{ values.on }}', $value: [1]}}`,
+			M{"kept": []any{float64(1)}},
 		},
 		"$if on a list item": {
 			`{l: [{$if: '${{ values.off }}', a: 1}, {b: 2}]}`,
@@ -93,8 +93,8 @@ func TestMappingDirectives(t *testing.T) {
 			M{"l": []any{float64(0), float64(1), float64(2), float64(3)}},
 		},
 		"$merge on top of the keys": {
-			`{m: {x: 1, y: 1, $merge: '${{ values.extra }}'}}`,
-			M{"m": M{"x": float64(2), "y": float64(1), "k": "v"}},
+			`{m: {x: 1, w: 1, $merge: '${{ values.extra }}'}}`,
+			M{"m": M{"x": float64(2), "w": float64(1), "k": "v"}},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -135,6 +135,38 @@ provides:
 	want := []any{M{"contract": "http", "values": M{"url": "u2"}}}
 	if !reflect.DeepEqual(res.provides, want) {
 		t.Errorf("provides: got %#v", res.provides)
+	}
+}
+
+// TestMappingYAML11: the mapping's scalars and keys are read as Helm reads
+// values (YAML 1.1), except binding names (let, $let).
+func TestMappingYAML11(t *testing.T) {
+	res, err := runCEL([]byte(`
+let:
+  n: 1.0
+output:
+  x:
+    bools: [yes, no, on, off, y, N, "yes", 'no', !!str on, true]
+    numbers: [0777, 0x1F, 1_000, 1.0, 012345678901234567890]
+    strings: [2001-12-14, "0777", 1.2.3]
+    keys: {on: a, 1.0: b, 0x10: c, "y": d, dup: 1, dup: 2}
+    lets: [{$for: c in values.items, $let: {y: '${{ c.n + n }}'}, $each: '${{ y }}'}]
+`), mapCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{
+		"bools":   []any{true, false, true, false, true, false, "yes", "no", "on", true},
+		"numbers": []any{float64(511), float64(31), float64(1000), float64(1), float64(12345678901234567890)},
+		"strings": []any{"2001-12-14", "0777", "1.2.3"},
+		"keys":    M{"true": "a", "1": "b", "16": "c", "y": "d", "dup": float64(2)},
+		"lets":    []any{float64(2), float64(3)},
+	}
+	if got := asMap(res.output["x"]); !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %#v\nwant %#v", got, want)
+	}
+	if _, err := runCEL([]byte("output: {x: {~: 1}}\n"), mapCtx()); err == nil || !strings.Contains(err.Error(), "unsupported map key") {
+		t.Errorf("a null key: got %v", err)
 	}
 }
 

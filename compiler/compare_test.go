@@ -49,6 +49,10 @@ func TestCompare(t *testing.T) {
 	app := res.Values["app"]
 	changed := asMap(deepCopy(app))
 	changed["replicaCount"] = float64(5)
+	// A null default the wrapper rendered and the compile leaves out.
+	nulls := asMap(deepCopy(app))
+	nulls["nameOverride"] = nil
+	asMap(nulls["image"])["digest"] = nil
 	for name, tc := range map[string]struct {
 		rendered []M
 		want     []string // in the report
@@ -61,6 +65,10 @@ func TestCompare(t *testing.T) {
 		"changed value": {
 			[]M{desc, valuesCM(t, "demo-app-app-values", changed)},
 			[]string{"DIFF vs demo-app-app-values", "changed .replicaCount: got 1, want 5"}, true,
+		},
+		"null defaults": {
+			[]M{desc, valuesCM(t, "demo-app-app-values", nulls)},
+			[]string{"identical to demo-app-app-values (2 null keys of demo-app-app-values left out, as Helm drops null defaults)"}, false,
 		},
 		"no values ConfigMap": {
 			[]M{desc},

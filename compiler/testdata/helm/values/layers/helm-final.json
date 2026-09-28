@@ -1,0 +1,10 @@
+{
+  "a": "first",
+  "b": "second",
+  "c": null,
+  "m": {
+    "true": 1,
+    "x": 2,
+    "z": null
+  }
+}

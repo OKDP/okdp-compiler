@@ -1,0 +1,16 @@
+# A null deletes a default; where there is no default it stays null.
+deleted: null
+deletedMap: null
+newNull: null
+nullThenMap: {a: 1}
+scalarOverMap: s
+mapOverScalar: {a: 1}
+list: [3]
+topNull: null
+tbl:
+  a: 10
+  deleted: null
+  newNull: null
+  defaultNull: null
+  nested: {deleted: null, newNull: ~, defaultNull: z}
+  newMap: {e: null, f: 5}

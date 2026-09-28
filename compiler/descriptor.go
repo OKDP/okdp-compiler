@@ -15,12 +15,11 @@ import (
 // and `provides` sections; every output is checked against its contract
 // (okdp.contract.provide).
 func descriptor(in Inputs, ctx M, instance M, provides []any) (M, error) {
-	c, err := readYAML(in.Chart, "Chart.yaml")
+	chart, err := readChart(in.Chart)
 	if err != nil {
 		return nil, err
 	}
-	chart := asMap(c)
-	name, version := str(chart["name"]), str(chart["version"])
+	name, version := chart.Name, chart.Version
 	suffix := str(dig(asMap(ctx["global"]), "okdp.ingress.suffix"))
 	// No connections: only to compute what internal references resolve to.
 	r := resolver{in: in, conns: M{}, suffix: suffix}
@@ -99,7 +98,7 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, error) {
 		"okdp.io/instance":             in.Release,
 		"okdp.io/service":              name,
 	}
-	if v := str(chart["appVersion"]); v != "" {
+	if v := chart.AppVersion; v != "" {
 		labels["app.kubernetes.io/version"] = v
 	}
 	names := make([]string, 0, len(contracts))

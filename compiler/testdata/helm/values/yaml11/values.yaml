@@ -1,0 +1,9 @@
+# YAML 1.1 scalars and keys, as Helm (sigs.k8s.io/yaml) reads them.
+bools: [yes, no, on, off, y, n, Y, N, Yes, NO, On, OFF, true, False, "yes", 'no', !!str on]
+numbers: [0777, 0x1F, 0o17, 0b101, 1_000, 1e3, 1.0, 1.50, .5, -0, +12, 12345678901234567890]
+strings: [2001-12-14, "0777", 1.2.3, 0.10.0, ~foo]
+nulls: {tilde: ~, word: null, upper: Null, empty: }
+keys: {on: a, no: b, 1.0: c, 0x10: d, 1_000: e, 2.50: f, "y": g}
+exposure:
+  nodePort:
+    enabled: no

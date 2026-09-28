@@ -1,0 +1,17 @@
+# Chart defaults: some keys are null by default.
+top: x
+deleted: x
+deletedMap: {a: 1}
+topNull: null
+emptyNull:
+nullThenMap: null
+scalarOverMap: {a: 1}
+mapOverScalar: s
+list: [1, 2]
+tbl:
+  a: 1
+  b: 2
+  defaultNull: null
+  deleted: x
+  nested: {c: 3, defaultNull: ~, deleted: y}
+  keep: {d: 4}

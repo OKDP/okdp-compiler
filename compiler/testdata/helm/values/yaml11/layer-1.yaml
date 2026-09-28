@@ -1,0 +1,8 @@
+# An instance layer, read the same way.
+exposure:
+  nodePort:
+    enabled: off
+  loadBalancer:
+    enabled: Yes
+port: 08
+mode: 0644
