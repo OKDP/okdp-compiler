@@ -9,6 +9,7 @@
 //	def, err := compiler.LoadDefinition(os.DirFS("example"))
 //	res, err := compiler.Compile(def, compiler.Inputs{
 //		Chart:     os.DirFS("charts/services/myservice"),
+//		Instance:  os.DirFS("instances/demo/myservice"),
 //		Contracts: os.DirFS("okdp-lib-chart/contracts"),
 //		Values:    []map[string]any{instanceValues},
 //		Release:   "demo-myservice",
@@ -20,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 )
@@ -49,6 +51,7 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 // Inputs: what one compile reads besides the service definition.
 type Inputs struct {
 	Chart     fs.FS            // wrapper chart: Chart.yaml, values.yaml, values.schema.json, vendor/, vendor-values/
+	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // okdp-lib-chart/contracts: <contract>.schema.json
 	Values    []map[string]any // instance values layers, in order (helm -f); see ParseValues
 	Release   string
@@ -67,7 +70,40 @@ type ChartSpec struct {
 	Values   string   `yaml:"values"`   // name of the values ConfigMap to compare with
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths
 	Append   []string `yaml:"append"`   // instance upstream values: appended lists
-	Upstream *bool    `yaml:"upstream"` // instance upstream values accepted
+	Upstream Upstream `yaml:"upstream"` // instance upstream values accepted, and their files
+}
+
+// Upstream: the user-defined values a chart accepts. true reads
+// upstream.<chart>.yaml of the instance when it exists; a path, or a list of
+// paths, reads these files instead (they must exist), merged in order. The
+// instance's inline upstream.<chart> values come after the files.
+type Upstream struct {
+	Enabled bool
+	Files   []string // nil: upstream.<chart>.yaml, if it exists
+}
+
+// UnmarshalYAML: true or false, a path or a list of paths.
+func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
+	switch {
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!null":
+		return nil
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!bool":
+		return n.Decode(&u.Enabled)
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!str" && n.Value != "":
+		u.Enabled, u.Files = true, []string{n.Value}
+		return nil
+	case n.Kind == yaml.SequenceNode:
+		files := []string{}
+		if err := n.Decode(&files); err != nil {
+			return err
+		}
+		if slices.Contains(files, "") {
+			break
+		}
+		u.Enabled, u.Files = true, files
+		return nil
+	}
+	return fmt.Errorf("line %d: upstream must be true, false, a path or a list of paths", n.Line)
 }
 
 // Result: what a compile produces.

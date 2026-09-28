@@ -1,7 +1,9 @@
 # Service definition of the webapp example (the wrapper chart is webapp/).
 # Engine-neutral part: the upstream charts, their base values (OKDP's
-# defaults, plain YAML), and what an instance may override under
-# upstream.<chart>. The mapping (mapping.cel.yaml) computes the rest.
+# defaults, plain YAML), and what an instance may override: its
+# upstream.<chart>.yaml file (upstream: true; or a path, or a list of paths),
+# then its inline upstream.<chart> values. The mapping (mapping.cel.yaml)
+# computes the rest.
 require:
   - ingress.suffix
   - ingress.className

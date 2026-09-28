@@ -1,6 +1,6 @@
 // okdp-compile --chart <wrapper chart dir> --service <dir> --contracts <dir>
 //
-//	-f values.yaml [-f ...] [--release demo-<chart>] [--namespace demo]
+//	[--instance <dir>] -f values.yaml [-f ...] [--release demo-<chart>] [--namespace demo]
 //	[--expect <helm template output>] [--out <file>] [--emit-dir <dir>]
 
 package main
@@ -34,6 +34,7 @@ func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 // options: the command-line flags.
 type options struct {
 	chart, service, contracts string
+	instance                  string
 	release, namespace        string
 	values                    multi
 	expect, out, emitDir      string
@@ -46,6 +47,7 @@ func main() {
 	flag.StringVar(&o.chart, "chart", "", "wrapper chart directory")
 	flag.StringVar(&o.service, "service", "", "service definition directory (service.yaml, mapping.cel.yaml)")
 	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
+	flag.StringVar(&o.instance, "instance", "", "instance directory (upstream values files: upstream.<chart>.yaml)")
 	flag.StringVar(&o.release, "release", "", "release name (default demo-<chart>)")
 	flag.StringVar(&o.namespace, "namespace", "demo", "namespace")
 	flag.Var(&o.values, "f", "values file (repeatable)")
@@ -81,6 +83,9 @@ func run(o options) error {
 		Contracts: os.DirFS(o.contracts),
 		Release:   o.release,
 		Namespace: o.namespace,
+	}
+	if o.instance != "" {
+		in.Instance = os.DirFS(o.instance)
 	}
 	for _, f := range o.values {
 		b, err := os.ReadFile(f)

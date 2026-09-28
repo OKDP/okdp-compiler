@@ -33,7 +33,7 @@ func TestApplyUpstream(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := computed()
-			if err := applyUpstream(got, tc.user, "c", protect, appendPaths); err != nil {
+			if err := applyUpstream(got, tc.user, source{chart: "c"}, protect, appendPaths); err != nil {
 				t.Fatal(err)
 			}
 			want := computed()
@@ -61,7 +61,7 @@ func TestApplyUpstreamErrors(t *testing.T) {
 		"append to a non-list":    {M{"env": "A"}, "upstream.c.env must be a list"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := applyUpstream(M{}, tc.user, "c", []string{"ingress.hosts", "fullnameOverride"}, []string{"env"})
+			err := applyUpstream(M{}, tc.user, source{chart: "c"}, []string{"ingress.hosts", "fullnameOverride"}, []string{"env"})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
