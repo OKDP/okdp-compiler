@@ -182,7 +182,8 @@ func readUpstream(instance fs.FS, name string, optional bool) (M, error) {
 // instance file, or the inline upstream.<chart> values.
 type source struct{ file, chart string }
 
-// at: the path p of the values of s.
+// at: the path p of the values of s (formatPath: a key in brackets joins
+// without a dot).
 func (s source) at(p string) string {
 	switch {
 	case s.file != "" && p == "":
@@ -191,6 +192,8 @@ func (s source) at(p string) string {
 		return s.file + ": " + p
 	case p == "":
 		return "upstream." + s.chart
+	case p[0] == '[':
+		return "upstream." + s.chart + p
 	}
 	return "upstream." + s.chart + "." + p
 }
@@ -204,23 +207,17 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 	if b, _ := json.Marshal(user); strings.Contains(string(b), "{{") {
 		return fmt.Errorf("%s: a key or value contains \"{{\"", src.at(""))
 	}
-	// Refuse any protected path, or a parent of it given as a non-map.
+	// Refuse any protected path, or a parent of it given as a non-map. A
+	// path may name a key containing dots, or a family of keys, in brackets
+	// (paths.go): the message names the key the value was found at, and the
+	// path that protects it.
 	for _, p := range append([]string{"global"}, protect...) {
-		parts := strings.Split(p, ".")
-		var node any = user
-		for i, part := range parts {
-			m, ok := node.(M)
-			if !ok {
-				break
-			}
-			x, ok := m[part]
-			if !ok {
-				break
-			}
-			if _, isMap := x.(M); i == len(parts)-1 || !isMap {
-				return fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(strings.Join(parts[:i+1], ".")), p)
-			}
-			node = x
+		segs, err := parsePath(p)
+		if err != nil {
+			return fmt.Errorf("protect %q: %w", p, err)
+		}
+		if at := protectedAt(user, segs); at != nil {
+			return fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(formatPath(at)), p)
 		}
 	}
 	return mergeUpstream(values, user, src, appendPaths)
@@ -231,35 +228,16 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 // succeeds; user never is.
 func mergeUpstream(values, user M, src source, appendPaths []string) error {
 	user = asMap(deepCopy(user))
-	// Listed paths are appended to the computed lists instead of replacing them.
+	// Listed paths are appended to the computed lists instead of replacing
+	// them; a path may name keys in brackets, globs included (paths.go).
+	done := map[string]bool{}
 	for _, p := range appendPaths {
-		parts := strings.Split(p, ".")
-		u, v := user, any(values)
-		found := true
-		for _, part := range parts[:len(parts)-1] {
-			um, ok := u[part].(M)
-			if !ok {
-				found = false
-				break
-			}
-			u = um
-			if vm, ok := v.(M); ok {
-				v = vm[part]
-			}
+		segs, err := parsePath(p)
+		if err != nil {
+			return fmt.Errorf("append %q: %w", p, err)
 		}
-		last := parts[len(parts)-1]
-		if add, ok := u[last]; found && ok {
-			addList, ok := add.([]any)
-			if !ok {
-				return fmt.Errorf("%s must be a list", src.at(p))
-			}
-			var base []any
-			if vm, ok := v.(M); ok {
-				if cl, ok := vm[last].([]any); ok {
-					base = cl
-				}
-			}
-			u[last] = append(append([]any{}, base...), addList...)
+		if err := appendLists(user, values, segs, nil, src, done); err != nil {
+			return err
 		}
 	}
 	// The rest replaces the computed values.

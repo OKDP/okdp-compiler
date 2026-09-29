@@ -37,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -59,6 +60,9 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	def := &Definition{}
 	if err := yaml.Unmarshal(b, &def.Service); err != nil {
 		return nil, fmt.Errorf("service.yaml: %w", err)
+	}
+	if err := def.Service.check(); err != nil {
+		return nil, err
 	}
 	if def.Mapping, err = fs.ReadFile(fsys, "mapping.cel.yaml"); err != nil {
 		return nil, err
@@ -89,8 +93,8 @@ type ChartSpec struct {
 	Chart    string   `yaml:"chart"`    // the vendored chart, vendor/<chart> (its defaults and schema, and what renders the values); default: the key
 	Base     string   `yaml:"base"`     // vendor-values file of the wrapper (OKDP's default values)
 	Values   string   `yaml:"values"`   // name of the values ConfigMap to compare with
-	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths
-	Append   []string `yaml:"append"`   // instance upstream values: appended lists
+	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
+	Append   []string `yaml:"append"`   // instance upstream values: appended lists (same paths)
 	Upstream Upstream `yaml:"upstream"` // instance upstream values accepted, and their files
 }
 
@@ -101,6 +105,32 @@ type ChartSpec struct {
 type Upstream struct {
 	Enabled bool
 	Files   []string // nil: upstream.<chart>.yaml, if it exists
+}
+
+// check: what service.yaml may not hold, refused when it is loaded
+// (LoadDefinition) and before every compile: a chart alias that is not the
+// name of a vendored chart, a protect or append path that does not follow
+// the grammar of paths.go (a malformed path would otherwise surface only
+// when an instance sets a value under it, or never, leaving a value
+// unprotected).
+func (s *Service) check() error {
+	for _, key := range slices.Sorted(maps.Keys(s.Charts)) {
+		spec := s.Charts[key]
+		if c := spec.Chart; c != "" && (c != path.Base(c) || c == "." || c == ".." || strings.TrimSpace(c) != c) {
+			return fmt.Errorf("service.yaml: charts.%s.chart %q: not the name of a vendored chart (vendor/<chart>)", key, c)
+		}
+		for _, l := range []struct {
+			name  string
+			paths []string
+		}{{"protect", spec.Protect}, {"append", spec.Append}} {
+			for i, p := range l.paths {
+				if _, err := parsePath(p); err != nil {
+					return fmt.Errorf("service.yaml: charts.%s.%s[%d] %q: %w", key, l.name, i, p, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // vendored: the vendored chart of the chart key: its chart alias, or the
@@ -181,10 +211,9 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		return nil, errors.New("Inputs.Namespace is required")
 	}
 	svc := &def.Service
-	for key, spec := range svc.Charts {
-		if c := spec.Chart; c != "" && (c != path.Base(c) || c == "." || c == ".." || strings.TrimSpace(c) != c) {
-			return nil, fmt.Errorf("service.yaml: charts.%s.chart %q: not the name of a vendored chart (vendor/<chart>)", key, c)
-		}
+	// Checked again: a Definition may be built in memory.
+	if err := svc.check(); err != nil {
+		return nil, err
 	}
 	// What the mapping sees: values, platform context, resolved connections.
 	ctx, values, ups, deps, err := buildContext(in, svc)
