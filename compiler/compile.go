@@ -18,6 +18,19 @@
 // (ChartSpec.Chart); Result.Charts maps every compiled chart to the vendored
 // chart that renders it.
 //
+// An instance may set any value of a chart whose service.yaml entry accepts
+// it (upstream): in its files (Inputs.Instance, upstream.<chart>.yaml by
+// default), then inline (upstream.<chart> of its values). The compiler reads
+// both before the mapping runs and shows them merged as values.upstream.<chart>,
+// so that a rule of the mapping's errors section covers a value whatever its
+// source; it then merges them over the computed values, refusing the protect
+// paths and appending to the append lists (merge.go). A path names a key that
+// contains dots in brackets, and a family of keys with a final glob:
+// annotations["nginx.ingress.kubernetes.io/auth-*"] (paths.go). A chart
+// rendered twice from one vendored chart may receive the upstream values of
+// the other (upstream: {from: <chart>}), with its protect and append: one set
+// of values for both renders.
+//
 // Everything is read through fs.FS and in-memory values, so a caller (the
 // control plane server, a CLI) can compile from a checkout, an embedded
 // filesystem or a git tree without touching the disk:

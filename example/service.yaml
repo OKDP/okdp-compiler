@@ -3,7 +3,8 @@
 # defaults, plain YAML), and what an instance may override: its
 # upstream.<chart>.yaml file (upstream: true; or a path, or a list of paths),
 # then its inline upstream.<chart> values. The mapping (mapping.cel.yaml)
-# computes the rest.
+# computes the rest; it sees the instance's upstream values merged, files
+# and inline, as values.upstream.<chart>.
 
 # Platform values the service needs, under global.okdp (the compile fails
 # when one is missing).
@@ -22,7 +23,10 @@ charts:
   app:                                 # the application chart
     base: vendor-values/app.yaml       # OKDP's default values, over the chart's own defaults
     upstream: true                     # user values accepted: upstream.app.yaml, then inline upstream.app
-    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls] # set by the platform: user values may not change them
+    # Set by the platform: user values may not change them. A key that
+    # contains dots is written in brackets, a family of keys with a final
+    # glob: here the certificate issuer annotation of the ingress.
+    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls, 'ingress.annotations["cert-manager.io/*"]']
     append: [env]                      # user lists appended to the computed ones instead of replacing them
   metrics: {}                          # the metrics chart: no base values, no user values
   # OKDP's own objects (the okdp-objects chart, values `objects: []`): the

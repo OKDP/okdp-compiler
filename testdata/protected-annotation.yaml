@@ -1,0 +1,9 @@
+# error: upstream.app.ingress.annotations["cert-manager.io/cluster-issuer"]: ingress.annotations["cert-manager.io/*"] is set by the platform
+# A protected key containing dots (service.yaml: a bracketed path with a
+# glob); the other annotations stay open.
+upstream:
+  app:
+    ingress:
+      annotations:
+        cert-manager.io/cluster-issuer: other-issuer
+        nginx.ingress.kubernetes.io/proxy-body-size: 16m
