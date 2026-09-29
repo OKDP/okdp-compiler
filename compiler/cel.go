@@ -210,6 +210,7 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 	}
+	opts = append(opts, hostFunctions(str(dig(e.ctx, "release.name")))...)
 	// Every variable is dynamic: values are plain YAML data.
 	for _, n := range names {
 		opts = append(opts, cel.Variable(n, cel.DynType))

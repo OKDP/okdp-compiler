@@ -170,6 +170,41 @@ output:
 	}
 }
 
+// TestMappingFunctions: the host functions in a mapping, next to a let
+// binding named fullname (the function is okdpFullname).
+func TestMappingFunctions(t *testing.T) {
+	res, err := runCEL([]byte(`
+let:
+  fullname: ${{ release.name }}-mine
+  config: {b: 1, a: [x]}
+output:
+  x:
+    name: ${{ fullname }}
+    okdp: ${{ okdpFullname('app') }}
+    checksum: ${{ sha256(toJson(config)) }}
+    json: ${{ toJson(config) }}
+    yaml: ${{ toYaml(config) }}
+    quoted: ${{ quote(values.items[0].n) }}
+`), mapCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{
+		"name":     "demo-x-mine",
+		"okdp":     "demo-x-app",
+		"checksum": sha256Hex(`{"a":["x"],"b":1}`),
+		"json":     `{"a":["x"],"b":1}`,
+		"yaml":     "a:\n- x\nb: 1",
+		"quoted":   `"1"`,
+	}
+	if got := asMap(res.output["x"]); !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %#v\nwant %#v", got, want)
+	}
+	if _, err := runCEL([]byte(`output: {x: {v: '${{ toYaml("\x01 \x7f") }}'}}`), mapCtx()); err == nil || !strings.Contains(err.Error(), "toYaml: ") {
+		t.Errorf("an encoding error: got %v", err)
+	}
+}
+
 // TestMappingErrors: invalid mappings, and where their errors point.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{

@@ -1,0 +1,23 @@
+# Inputs of the CEL functions sha256, toJson, toPrettyJson, toYaml and
+# quote, rendered by Helm's sha256sum (of toString), toJson, toPrettyJson,
+# toYaml and quote (helm.json).
+inputs:
+  string: hello
+  empty: ""
+  html: <a href="x">&amp; 'q'</a>
+  unicode: "été ✓     tab\there \x01 \x7f  "
+  multiline: "line1\nline2\n"
+  yamlish: "yes"
+  colon: "a: b"
+  number: 3
+  float: 0.5
+  million: 1000000
+  huge: 12345678901234567890
+  tiny: 0.000001
+  negative: -2.5
+  bool: true
+  nil: null
+  list: [1, two, null, {a: 1}, [x]]
+  map: {b: 1, a: [x, "y"], c: {d: <e>}, key with space: v, "on": "yes", nested: {deeper: {deepest: [1, {k: v}]}}}
+  emptyMap: {}
+  emptyList: []

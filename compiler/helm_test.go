@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/cel-go/cel"
 	"gopkg.in/yaml.v3"
 )
 
@@ -154,5 +155,56 @@ func TestHelmSchema(t *testing.T) {
 				t.Errorf("got\n%s\nwant (sorted)\n%s", strings.Join(g, "\n"), strings.Join(want, "\n"))
 			}
 		})
+	}
+}
+
+// TestHelmFunctions: sha256, toJson, toPrettyJson, toYaml, quote and
+// okdpFullname called from CEL, against Helm's sha256sum (of toString),
+// toJson, toPrettyJson, toYaml, quote and okdp.fullname on the same inputs
+// (testdata/helm/functions).
+func TestHelmFunctions(t *testing.T) {
+	dir := filepath.Join("testdata", "helm", "functions")
+	b, err := os.ReadFile(filepath.Join(dir, "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := ParseValues(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helm := asMap(helmJSON(t, filepath.Join(dir, "helm.json")))
+	e := &celEngine{envs: map[string]*cel.Env{}, ctx: M{"release": M{"name": helm["release"]}}}
+	for name, x := range asMap(in["inputs"]) {
+		want := asMap(asMap(helm["functions"])[name])
+		for _, f := range []string{"sha256", "toJson", "toPrettyJson", "toYaml", "quote"} {
+			w, ok := want[f]
+			if !ok {
+				continue // sha256sum of a null: Helm's toString gives "<nil>"
+			}
+			got, err := e.eval(f+"(x)", M{"x": x})
+			switch {
+			// Helm prints "" when the encoder fails; the compile fails.
+			case err != nil && w == "":
+			case err != nil:
+				t.Errorf("%s(%s): %v", f, name, err)
+			case got != w:
+				t.Errorf("%s(%s):\n got %q\nwant %q", f, name, got, w)
+			}
+		}
+	}
+	for suffix, w := range asMap(helm["fullname"]) {
+		got, err := e.eval("okdpFullname(s)", M{"s": suffix})
+		if err != nil || got != w {
+			t.Errorf("okdpFullname(%q): got %q (%v), want %q", suffix, got, err, w)
+		}
+	}
+	if got, err := e.eval("okdpFullname()", M{}); err != nil || got != helm["release"] {
+		t.Errorf("okdpFullname(): got %q (%v)", got, err)
+	}
+	// What Helm cannot show: a null hashes as "", quotes as nothing.
+	for expr, want := range map[string]string{"sha256(null)": sha256Hex(""), "quote(null)": "", "sha256(b'abc')": sha256Hex("abc")} {
+		if got, err := e.eval(expr, M{}); err != nil || got != want {
+			t.Errorf("%s: got %q (%v), want %q", expr, got, err, want)
+		}
 	}
 }
