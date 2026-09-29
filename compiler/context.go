@@ -1,6 +1,7 @@
 // Context: what a mapping sees. It loads the values layers, checks the
-// platform requirements, derives the platform context from global.okdp, and
-// resolves the connection references (connections.go).
+// platform requirements, derives the platform context from global.okdp,
+// resolves the connection references (connections.go), and reads the
+// instance's upstream values (merge.go).
 package compiler
 
 import (
@@ -9,14 +10,15 @@ import (
 	"sort"
 )
 
-// Context: what a mapping sees, the merged values, and the instances the
-// connection references point to.
-func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
+// Context: what a mapping sees, the merged values, the instance's upstream
+// values of each chart that accepts them (applied by finalValues), and the
+// instances the connection references point to.
+func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []Dependency, error) {
 	// 1. values layers, as Helm: the -f files merged in order, coalesced
 	// over the chart defaults.
 	defaults, err := readValues(in.Chart, "values.yaml")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	user := M{}
 	for _, v := range in.Values {
@@ -26,21 +28,21 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	// Checked against the parameter schema, as Helm checks values.schema.json.
 	v, err := schemaViolations(in.Chart, "values.schema.json", values)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	chart, err := readChart(in.Chart)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if v != "" {
-		return nil, nil, nil, schemaError("values", map[string]string{chart.Name: v})
+		return nil, nil, nil, nil, schemaError("values", map[string]string{chart.Name: v})
 	}
 	global := asMap(values["global"])
 	okdpG := asMap(global["okdp"])
 	// 2. platform requirements.
 	for _, k := range svc.Require {
 		if !truthy(dig(okdpG, k)) {
-			return nil, nil, nil, fmt.Errorf("global.okdp.%s is required. It is a platform value: set it in platform/platform-values.yaml", k)
+			return nil, nil, nil, nil, fmt.Errorf("global.okdp.%s is required. It is a platform value: set it in platform/platform-values.yaml", k)
 		}
 	}
 	// 3. platform context.
@@ -57,12 +59,12 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	}
 	mode := str(oidc["clientProvisioning"])
 	if mode != "existing" && mode != "dcr" {
-		return nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
+		return nil, nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
 	}
 	// The settings of the oidc-dcr Jobs, defaults applied (oidc.go).
 	dcr := asMap(deepCopy(oidc["dcr"]))
 	if err := dcrSettings(dcr); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	dcr["enabled"] = truthy(oidc["enabled"]) && mode == "dcr"
 	oidc["dcr"] = dcr
@@ -89,18 +91,36 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	// 4. connection references, resolved in place (x-okdp-connection-ref).
 	schema, err := readJSON(in.Chart, "values.schema.json")
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	// The mapping gets a copy: the merged values stay as the user wrote them.
 	params := asMap(deepCopy(values))
 	var deps []Dependency
 	r := resolver{in: in, conns: asMap(values["connections"]), suffix: str(dig(okdpG, "ingress.suffix")), deps: &deps}
 	if err := r.walk(schema, params, ""); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	// Not parameters: global is exposed apart, connections are resolved.
 	delete(params, "global")
 	delete(params, "connections")
+	// 5. the instance's upstream values: values.upstream.<chart> is what
+	// will be applied to the chart, its upstream.<chart>.yaml files merged
+	// with its inline values, not the inline values alone. A rule of the
+	// mapping's errors section on upstream values then covers both sources:
+	// a value it refuses cannot come back through a file. The other keys of
+	// values.upstream stay as written.
+	ups := readUpstreamValues(in, svc, values)
+	for chart, up := range ups {
+		if len(up.layers) == 0 {
+			continue
+		}
+		u, ok := params["upstream"].(M)
+		if !ok {
+			u = M{}
+			params["upstream"] = u
+		}
+		u[chart] = up.view(svc.Charts[chart].Append)
+	}
 	ctx := M{
 		"release":  M{"name": in.Release, "namespace": in.Namespace},
 		"values":   params,
@@ -112,5 +132,5 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	maps.Copy(ctx, chartContext(chart, in.Release))
 	// The schema walk follows map order: sort for a stable result.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
-	return ctx, values, deps, nil
+	return ctx, values, ups, deps, nil
 }

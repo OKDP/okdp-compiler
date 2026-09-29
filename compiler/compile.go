@@ -187,7 +187,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		}
 	}
 	// What the mapping sees: values, platform context, resolved connections.
-	ctx, values, deps, err := buildContext(in, svc)
+	ctx, values, ups, deps, err := buildContext(in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +236,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		if _, ok := svc.Charts[chart]; !ok {
 			return nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", chart)
 		}
-		f, bad, err := finalValues(in, svc, chart, asMap(v), values)
+		f, bad, err := finalValues(in, svc, chart, asMap(v), values, ups[chart])
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", chart, err)
 		}

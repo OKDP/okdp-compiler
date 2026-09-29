@@ -217,6 +217,65 @@ func TestUpstreamFiles(t *testing.T) {
 			}
 		})
 	}
+	// A file that cannot be read fails the compile of its chart only: a
+	// chart the mapping leaves out does not need it.
+	d := *def
+	d.Mapping = []byte("output:\n  app: {$if: '${{ values.replicas > 1 }}'}\n")
+	d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true, Files: []string{"missing.yaml"}}}}
+	if _, err := Compile(&d, inputs()); err != nil {
+		t.Errorf("chart left out: %v", err)
+	}
+	if _, err := Compile(&d, inputs(M{"replicas": 2})); err == nil || !strings.Contains(err.Error(), "app: upstream file missing.yaml: no instance files") {
+		t.Errorf("chart compiled: got %v", err)
+	}
+}
+
+// TestUpstreamSeenByMapping: the mapping sees the instance's upstream
+// values, files and inline, as they will be applied, so that a rule of its
+// errors section covers a value written in an upstream file too (the files
+// used to be merged after the mapping, out of its sight).
+func TestUpstreamSeenByMapping(t *testing.T) {
+	d := *def
+	d.Mapping = []byte(`
+errors:
+  - >-
+    ${{ values.?upstream.?app.?image.?tag.orValue('') == 'latest'
+        ? ['demo: upstream.app.image.tag: latest is refused'] : [] }}
+output:
+  app: {}
+`)
+	d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml", Upstream: Upstream{Enabled: true}}}
+	for name, tc := range map[string]struct {
+		file   string // upstream.app.yaml of the instance, none when empty
+		inline M      // upstream.app
+		want   string // the error, or the image tag applied
+	}{
+		"refused inline":      {"", M{"image": M{"tag": "latest"}}, "upstream.app.image.tag: latest is refused"},
+		"refused in a file":   {"image: {tag: latest}\n", nil, "upstream.app.image.tag: latest is refused"},
+		"inline over a file":  {"image: {tag: latest}\n", M{"image": M{"tag": "5.0"}}, "5.0"},
+		"a file over nothing": {"image: {tag: \"5.1\"}\n", nil, "5.1"},
+		"a file under inline": {"image: {tag: \"5.1\"}\n", M{"image": M{"tag": "latest"}}, "upstream.app.image.tag: latest is refused"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := inputs(M{"upstream": M{"app": tc.inline}})
+			if tc.file != "" {
+				in.Instance = fstest.MapFS{"upstream.app.yaml": {Data: []byte(tc.file)}}
+			}
+			res, err := Compile(&d, in)
+			if strings.Contains(tc.want, " ") {
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Errorf("got %v, want an error containing %q", err, tc.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := dig(res.Values["app"], "image.tag"); got != tc.want {
+				t.Errorf("image.tag: got %#v, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestCompileSchemas: the parameters, then the final values of each chart,

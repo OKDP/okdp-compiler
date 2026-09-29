@@ -37,7 +37,7 @@ func resolveCtx(values M) (M, []Dependency, error) {
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
 	in.Chart, in.Contracts = ch, dbContract
-	ctx, _, deps, err := buildContext(in, &def.Service)
+	ctx, _, _, deps, err := buildContext(in, &def.Service)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -117,7 +117,7 @@ func TestResolveUnknownContract(t *testing.T) {
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
 	in := inputs(M{"q": "demo-mq"})
 	in.Chart = ch
-	if _, _, _, err := buildContext(in, &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
+	if _, _, _, _, err := buildContext(in, &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
 		t.Errorf("got %v", err)
 	}
 }

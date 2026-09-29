@@ -5,13 +5,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // platformCtx: the platform context of the in-memory chart, with these
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	ctx, _, _, err := buildContext(inputs(M{"global": M{"okdp": okdp}}), &def.Service)
+	ctx, _, _, _, err := buildContext(inputs(M{"global": M{"okdp": okdp}}), &def.Service)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ func TestContextErrors(t *testing.T) {
 		delete(ch, missing)
 		in := inputs()
 		in.Chart = ch
-		if _, _, _, err := buildContext(in, &def.Service); err == nil {
+		if _, _, _, _, err := buildContext(in, &def.Service); err == nil {
 			t.Errorf("without %s: must fail", missing)
 		}
 	}
@@ -137,7 +138,7 @@ func TestContextErrors(t *testing.T) {
 // TestContextValues: the parameters the mapping sees, without global and
 // connections, and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	ctx, values, _, err := buildContext(inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
+	ctx, values, _, _, err := buildContext(inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,5 +150,48 @@ func TestContextValues(t *testing.T) {
 	}
 	if want := (M{"name": "demo-app", "namespace": "demo"}); !reflect.DeepEqual(ctx["release"], want) {
 		t.Errorf("release: %#v", ctx["release"])
+	}
+}
+
+// TestContextUpstream: values.upstream.<chart> of a chart that accepts
+// upstream values is its files then its inline values, merged as they will
+// be applied (append paths appended); the other keys stay as written, and
+// the merged values keep the inline values only.
+func TestContextUpstream(t *testing.T) {
+	svc := &Service{Charts: map[string]ChartSpec{
+		"app":   {Upstream: Upstream{Enabled: true}, Append: []string{"env"}},
+		"files": {Upstream: Upstream{Enabled: true, Files: []string{"a.yaml", "b.yaml"}}},
+		"other": {},
+	}}
+	in := inputs(M{"upstream": M{
+		"app":   M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}},
+		"other": M{"y": 2},
+	}})
+	in.Instance = fstest.MapFS{
+		"upstream.app.yaml":   {Data: []byte("env: [A]\nimage: {tag: f}\n")},
+		"upstream.other.yaml": {Data: []byte("x: 1\n")},
+		"a.yaml":              {Data: []byte("a: 1\nb: 1\n")},
+		"b.yaml":              {Data: []byte("b: 2\n")},
+	}
+	ctx, values, ups, _, err := buildContext(in, svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{
+		"app":   M{"env": []any{"A", "C"}, "image": M{"tag": "f", "pullPolicy": "Always"}},
+		"files": M{"a": float64(1), "b": float64(2)},
+		"other": M{"y": float64(2)},
+	}
+	if got := asMap(ctx["values"])["upstream"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("values.upstream:\n got %#v\nwant %#v", got, want)
+	}
+	if got := dig(values, "upstream.app"); !reflect.DeepEqual(got, M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}}) {
+		t.Errorf("merged values: the inline upstream values as written, got %#v", got)
+	}
+	if len(ups["app"].layers) != 2 || ups["app"].layers[0].src.file != "upstream.app.yaml" || ups["app"].layers[1].src.chart != "app" {
+		t.Errorf("upstream sources of app: %#v", ups["app"])
+	}
+	if _, ok := ups["other"]; ok {
+		t.Error("a chart without upstream values has no upstream sources")
 	}
 }

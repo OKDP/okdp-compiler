@@ -2,6 +2,11 @@
 // renders it with: upstream defaults < base values < computed values <
 // instance upstream values files < inline instance upstream values, global
 // copied down. The layers are merged as Helm merges its -f files.
+//
+// The instance's upstream values are read once, before the mapping runs
+// (readUpstreamValues): the mapping sees them merged (values.upstream.<chart>,
+// context.go), and they are applied with their checks after it
+// (finalValues).
 package compiler
 
 import (
@@ -27,7 +32,10 @@ import (
 //
 // The violations of the chart's schema (vendor/<chart>/values.schema.json)
 // by these values, as Helm sees them when it renders, are returned apart.
-func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M, string, error) {
+//
+// up: the chart's upstream values (readUpstreamValues), nil when it accepts
+// none.
+func finalValues(in Inputs, svc *Service, chart string, computed M, values M, up *chartUpstream) (M, string, error) {
 	spec := svc.Charts[chart]
 	vendored := spec.vendored(chart)
 	defaults, err := readValues(in.Chart, path.Join("vendor", vendored, "values.yaml"))
@@ -46,24 +54,18 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M
 		}
 	}
 	out := layered(defaults, base, computed)
-	// Last, the instance's upstream values, when the chart accepts them:
-	// its files, then its inline values.
-	if spec.Upstream.Enabled {
-		files, optional := spec.Upstream.Files, spec.Upstream.Files == nil
-		if optional {
-			files = []string{"upstream." + chart + ".yaml"}
+	// Last, the instance's upstream values, when the chart accepts them: its
+	// files, then its inline values, each checked ("{{", protect, append).
+	// The mapping has seen the same values merged; these checks are what the
+	// platform enforces whatever the mapping does with them.
+	if up != nil {
+		if up.err != nil {
+			return nil, "", up.err
 		}
-		for _, f := range files {
-			u, err := readUpstream(in.Instance, path.Clean(f), optional)
-			if err != nil {
+		for _, l := range up.layers {
+			if err := applyUpstream(out, l.values, l.src, spec.Protect, spec.Append); err != nil {
 				return nil, "", err
 			}
-			if err := applyUpstream(out, u, source{file: f}, spec.Protect, spec.Append); err != nil {
-				return nil, "", err
-			}
-		}
-		if err := applyUpstream(out, asMap(asMap(values["upstream"])[chart]), source{chart: chart}, spec.Protect, spec.Append); err != nil {
-			return nil, "", err
 		}
 	}
 	// Every chart gets the instance's global, as a subchart would.
@@ -81,6 +83,83 @@ func layered(defaults M, layers ...M) M {
 		out = mergeMaps(out, l)
 	}
 	return out
+}
+
+// chartUpstream: the instance's upstream values of one chart, in the order
+// they are applied: its files, then its inline upstream.<chart> values.
+//
+// They are read before the mapping runs, not only merged after it, so that
+// the mapping sees all of them: a rule of its errors section on an upstream
+// value (a key no protect path names, a value that depends on the instance)
+// would otherwise check the inline values only, and the same value written
+// in upstream.<chart>.yaml would bypass it.
+type chartUpstream struct {
+	layers []upstreamLayer
+	// err: a file that cannot be read (missing, not YAML). It is reported
+	// when the chart is compiled, as when the files were read after the
+	// mapping: a chart the mapping leaves out does not need them.
+	err error
+}
+
+// upstreamLayer: one source of a chart's upstream values: an instance file,
+// or the inline values.
+type upstreamLayer struct {
+	src    source
+	values M
+}
+
+// readUpstreamValues: the upstream values of each chart of service.yaml that
+// accepts them, by chart: the files its upstream entry names
+// (upstream.<chart>.yaml, when it exists, by default), then the inline
+// upstream.<chart> of the merged instance values. Empty sources are left
+// out, as applyUpstream ignores them.
+func readUpstreamValues(in Inputs, svc *Service, values M) map[string]*chartUpstream {
+	inline := asMap(values["upstream"])
+	out := map[string]*chartUpstream{}
+	for chart, spec := range svc.Charts {
+		if !spec.Upstream.Enabled {
+			continue
+		}
+		up := &chartUpstream{}
+		files, optional := spec.Upstream.Files, spec.Upstream.Files == nil
+		if optional {
+			files = []string{"upstream." + chart + ".yaml"}
+		}
+		for _, f := range files {
+			u, err := readUpstream(in.Instance, path.Clean(f), optional)
+			if err != nil {
+				if up.err == nil {
+					up.err = err
+				}
+				continue
+			}
+			if len(u) > 0 {
+				up.layers = append(up.layers, upstreamLayer{source{file: f}, u})
+			}
+		}
+		if u := asMap(inline[chart]); len(u) > 0 {
+			up.layers = append(up.layers, upstreamLayer{source{chart: chart}, u})
+		}
+		out[chart] = up
+	}
+	return out
+}
+
+// view: the chart's upstream values as the mapping sees them
+// (values.upstream.<chart>): the sources merged in order as applyUpstream
+// merges them into the chart's values, the lists of appendPaths appended,
+// so that a rule of the mapping checks what will be applied. Unchecked:
+// protect and the "{{" check apply when the chart is compiled.
+func (up *chartUpstream) view(appendPaths []string) M {
+	v := M{}
+	for _, l := range up.layers {
+		if err := mergeUpstream(v, l.values, l.src, appendPaths); err != nil {
+			// A non-list on an append path fails the chart's compile; the
+			// mapping sees it as given.
+			mergeMaps(v, l.values)
+		}
+	}
+	return v
 }
 
 // readUpstream: an upstream values file of the instance. An optional file
@@ -125,7 +204,6 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 	if b, _ := json.Marshal(user); strings.Contains(string(b), "{{") {
 		return fmt.Errorf("%s: a key or value contains \"{{\"", src.at(""))
 	}
-	user = asMap(deepCopy(user))
 	// Refuse any protected path, or a parent of it given as a non-map.
 	for _, p := range append([]string{"global"}, protect...) {
 		parts := strings.Split(p, ".")
@@ -145,6 +223,14 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 			node = x
 		}
 	}
+	return mergeUpstream(values, user, src, appendPaths)
+}
+
+// mergeUpstream: user over values, the lists at appendPaths appended to the
+// computed ones instead of replacing them. values is changed only when it
+// succeeds; user never is.
+func mergeUpstream(values, user M, src source, appendPaths []string) error {
+	user = asMap(deepCopy(user))
 	// Listed paths are appended to the computed lists instead of replacing them.
 	for _, p := range appendPaths {
 		parts := strings.Split(p, ".")
