@@ -20,3 +20,7 @@ charts:
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls] # set by the platform: user values may not change them
     append: [env]                      # user lists appended to the computed ones instead of replacing them
   metrics: {}                          # the metrics chart: no base values, no user values
+  # OKDP's own objects (the okdp-objects chart, values `objects: []`): the
+  # compiler adds the descriptor ConfigMap and the objects section of the
+  # mapping (the settings ConfigMap, the session key Secret).
+  okdp: {}

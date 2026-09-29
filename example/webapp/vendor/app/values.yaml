@@ -6,6 +6,8 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 env: []
+envFrom: []
+podAnnotations: {}
 ingress:
   enabled: false
   className: ""

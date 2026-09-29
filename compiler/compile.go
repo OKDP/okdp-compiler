@@ -1,6 +1,12 @@
 // Package compiler compiles an OKDP service instance into the values of its
 // upstream charts with a YAML + CEL mapping, plus the OKDP objects of the
-// instance (its descriptor ConfigMap).
+// instance (its descriptor ConfigMap, the credentials Secrets of the
+// connections it provides, and the objects section of the mapping).
+//
+// The values are read, merged and checked against the charts' schemas as
+// Helm does (values.go, merge.go, schema.go; testdata/helm holds what
+// `helm template` computes on the same inputs), and the mapping's host
+// functions reproduce the Helm and okdp-lib-chart functions they replace.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (the
 // control plane server, a CLI) can compile from a checkout, an embedded

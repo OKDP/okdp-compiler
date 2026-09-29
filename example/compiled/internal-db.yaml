@@ -31,11 +31,95 @@ objects:
         okdp.io/service: webapp
       name: demo-webapp-okdp
       namespace: demo
+  - apiVersion: v1
+    data:
+      APP_URL: https://demo-webapp.okdp.example.org
+      METRICS_ENABLED: "true"
+    kind: ConfigMap
+    metadata:
+      labels:
+        app.kubernetes.io/component: settings
+        app.kubernetes.io/instance: demo-webapp
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: webapp
+        app.kubernetes.io/part-of: okdp
+        app.kubernetes.io/version: "2.3"
+        helm.sh/chart: webapp-1.0.0
+        okdp.io/instance: demo-webapp
+        okdp.io/service: webapp
+      name: demo-webapp-settings
+      namespace: demo
+  - apiVersion: generators.external-secrets.io/v1alpha1
+    kind: Password
+    metadata:
+      labels:
+        app.kubernetes.io/instance: demo-webapp
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: webapp
+        app.kubernetes.io/part-of: okdp
+        app.kubernetes.io/version: "2.3"
+        helm.sh/chart: webapp-1.0.0
+        okdp.io/instance: demo-webapp
+        okdp.io/service: webapp
+      name: demo-webapp-session-session-key
+      namespace: demo
+    spec:
+      allowRepeat: true
+      digits: 6
+      length: 48
+      noUpper: false
+      symbols: 0
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      labels:
+        app.kubernetes.io/instance: demo-webapp
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: webapp
+        app.kubernetes.io/part-of: okdp
+        app.kubernetes.io/version: "2.3"
+        helm.sh/chart: webapp-1.0.0
+        okdp.io/instance: demo-webapp
+        okdp.io/service: webapp
+      name: demo-webapp-session
+      namespace: demo
+    spec:
+      dataFrom:
+        - rewrite:
+            - regexp:
+                source: ^password$
+                target: session-key
+          sourceRef:
+            generatorRef:
+              apiVersion: generators.external-secrets.io/v1alpha1
+              kind: Password
+              name: demo-webapp-session-session-key
+      refreshInterval: "0"
+      target:
+        creationPolicy: Owner
+        name: demo-webapp-session
+        template:
+          data:
+            session-key: '{{ index . "session-key" }}'
+          engineVersion: v2
+          metadata:
+            labels:
+              app.kubernetes.io/instance: demo-webapp
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/name: webapp
+              app.kubernetes.io/part-of: okdp
+              app.kubernetes.io/version: "2.3"
+              helm.sh/chart: webapp-1.0.0
+              okdp.io/instance: demo-webapp
+              okdp.io/service: webapp
 values:
   app:
     env:
-      - name: APP_URL
-        value: https://demo-webapp.okdp.example.org
+      - name: SESSION_KEY
+        valueFrom:
+          secretKeyRef:
+            key: session-key
+            name: demo-webapp-session
       - name: DB_URL
         value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
       - name: DB_DRIVER
@@ -45,6 +129,9 @@ values:
           secretKeyRef:
             key: password
             name: demo-db-database-credentials
+    envFrom:
+      - configMapRef:
+          name: demo-webapp-settings
     fullnameOverride: demo-webapp-app
     global:
       okdp:
@@ -72,6 +159,8 @@ values:
         - hosts:
             - demo-webapp.okdp.example.org
           secretName: demo-webapp-tls
+    podAnnotations:
+      checksum/settings: 6e46dbed43c2d79f3521567de1d93842084bf798b93915e2f4b9ce6c37f96230
     replicaCount: 3
     resources:
       limits:
@@ -93,3 +182,121 @@ values:
       tag: latest
     interval: 30s
     target: http://demo-webapp-app.demo.svc:8080/metrics
+  okdp:
+    global:
+      okdp:
+        certificateIssuers:
+          selfSigned:
+            name: okdp-ca
+        ingress:
+          className: nginx
+          suffix: okdp.example.org
+    objects:
+      - apiVersion: v1
+        data:
+          outputs.yaml: |
+            - contract: http
+              name: demo-webapp
+              values:
+                internalUrl: http://demo-webapp-app.demo.svc:8080
+                url: https://demo-webapp.okdp.example.org
+          service: webapp
+          url: https://demo-webapp.okdp.example.org
+          usage: |
+            A web application. Open https://demo-webapp.okdp.example.org
+          version: 1.0.0
+        kind: ConfigMap
+        metadata:
+          labels:
+            app.kubernetes.io/instance: demo-webapp
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/name: webapp
+            app.kubernetes.io/part-of: okdp
+            app.kubernetes.io/version: "2.3"
+            helm.sh/chart: webapp-1.0.0
+            okdp.io/instance: demo-webapp
+            okdp.io/provides-http: "true"
+            okdp.io/service: webapp
+          name: demo-webapp-okdp
+          namespace: demo
+      - apiVersion: v1
+        data:
+          APP_URL: https://demo-webapp.okdp.example.org
+          METRICS_ENABLED: "true"
+        kind: ConfigMap
+        metadata:
+          labels:
+            app.kubernetes.io/component: settings
+            app.kubernetes.io/instance: demo-webapp
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/name: webapp
+            app.kubernetes.io/part-of: okdp
+            app.kubernetes.io/version: "2.3"
+            helm.sh/chart: webapp-1.0.0
+            okdp.io/instance: demo-webapp
+            okdp.io/service: webapp
+          name: demo-webapp-settings
+          namespace: demo
+      - apiVersion: generators.external-secrets.io/v1alpha1
+        kind: Password
+        metadata:
+          labels:
+            app.kubernetes.io/instance: demo-webapp
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/name: webapp
+            app.kubernetes.io/part-of: okdp
+            app.kubernetes.io/version: "2.3"
+            helm.sh/chart: webapp-1.0.0
+            okdp.io/instance: demo-webapp
+            okdp.io/service: webapp
+          name: demo-webapp-session-session-key
+          namespace: demo
+        spec:
+          allowRepeat: true
+          digits: 6
+          length: 48
+          noUpper: false
+          symbols: 0
+      - apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          labels:
+            app.kubernetes.io/instance: demo-webapp
+            app.kubernetes.io/managed-by: Helm
+            app.kubernetes.io/name: webapp
+            app.kubernetes.io/part-of: okdp
+            app.kubernetes.io/version: "2.3"
+            helm.sh/chart: webapp-1.0.0
+            okdp.io/instance: demo-webapp
+            okdp.io/service: webapp
+          name: demo-webapp-session
+          namespace: demo
+        spec:
+          dataFrom:
+            - rewrite:
+                - regexp:
+                    source: ^password$
+                    target: session-key
+              sourceRef:
+                generatorRef:
+                  apiVersion: generators.external-secrets.io/v1alpha1
+                  kind: Password
+                  name: demo-webapp-session-session-key
+          refreshInterval: "0"
+          target:
+            creationPolicy: Owner
+            name: demo-webapp-session
+            template:
+              data:
+                session-key: '{{ index . "session-key" }}'
+              engineVersion: v2
+              metadata:
+                labels:
+                  app.kubernetes.io/instance: demo-webapp
+                  app.kubernetes.io/managed-by: Helm
+                  app.kubernetes.io/name: webapp
+                  app.kubernetes.io/part-of: okdp
+                  app.kubernetes.io/version: "2.3"
+                  helm.sh/chart: webapp-1.0.0
+                  okdp.io/instance: demo-webapp
+                  okdp.io/service: webapp

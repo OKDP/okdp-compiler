@@ -1,6 +1,5 @@
 # Base values of the app chart: OKDP's defaults, the same for every instance.
-image:
-  tag: "2.3"
+# The image tag is the wrapper chart's appVersion (mapping.cel.yaml).
 resources:
   requests: {cpu: 100m, memory: 128Mi}
   limits: {memory: 256Mi}
