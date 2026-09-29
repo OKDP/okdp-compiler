@@ -1,0 +1,70 @@
+# Defaults of the oidc-dcr chart (oci://quay.io/adaltas/oidc-dcr 0.5.0), its
+# comments shortened: a Job that registers an OAuth client by dynamic client
+# registration and writes it to a Secret. The compiler renders it once per
+# client of the mapping's oidcClients section, in dcr mode.
+enabled: true
+# Image of the Job (curl, jq, kubectl).
+image:
+  registry: quay.io
+  repository: adaltas/oidc-dcr-job
+  tag: "" # Default is the chart version
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+# OIDC provider registration URL.
+registrationUrl: ""
+# The registration request (OIDC Dynamic Client Registration fields).
+request: {}
+tls:
+  insecure: false # curl --insecure
+  certificate: "" # Secret holding the CA bundle the Job trusts
+# Name of the Secret written, default is the release name.
+secret: ""
+# Name of the Job, its ConfigMap and RoleBinding, prefix of the headless
+# Service, default "dcr".
+fullnameOverride: ""
+# Labels added to every object and to the pod of the Job.
+commonLabels: {}
+security:
+  serviceAccount: "" # default fullnameOverride, then the chart name
+  role: "" # default fullnameOverride, then the chart name
+# Keep the finished Job (its logs) this many seconds.
+ttlSeconds: 0
+# Retries of the Job before it is marked as failed.
+backoffLimit: 1
+# Wait for the OIDC provider before registering the client.
+waitForProvider:
+  discoveryUrl: "" # polled every 5 seconds until it answers with JSON
+  ttlSeconds: 600 # the longest wait
+# The keys of the Secret: keyMapping (".x" is the field x of the registration
+# response), plus defaultKeys when useDefault is true.
+mapping:
+  useDefault: true
+  keyMapping:
+    registration_client_uri: ".registration_client_uri"
+    registration_access_token: ".registration_access_token"
+  defaultKeys:
+    client_id: ".client_id"
+    client-id: ".client_id"
+    clientId: ".client_id"
+    ClientId: ".client_id"
+    ClientID: ".client_id"
+    clientid: ".client_id"
+    oidc_client_id: ".client_id"
+    oidc-client-id: ".client_id"
+    oidcClientId: ".client_id"
+    OIDC_CLIENT_ID: ".client_id"
+    CLIENT_ID: ".client_id"
+    CLIENTID: ".client_id"
+    Client_ID: ".client_id"
+    client_secret: ".client_secret"
+    client-secret: ".client_secret"
+    clientSecret: ".client_secret"
+    ClientSecret: ".client_secret"
+    clientsecret: ".client_secret"
+    oidc_client_secret: ".client_secret"
+    oidc-client-secret: ".client_secret"
+    oidcClientSecret: ".client_secret"
+    OIDC_CLIENT_SECRET: ".client_secret"
+    CLIENT_SECRET: ".client_secret"
+    CLIENTSECRET: ".client_secret"
+    Client_Secret: ".client_secret"

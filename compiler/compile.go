@@ -8,6 +8,16 @@
 // `helm template` computes on the same inputs), and the mapping's host
 // functions reproduce the Helm and okdp-lib-chart functions they replace.
 //
+// A mapping's oidcClients section declares the service's OAuth clients
+// (oidc.go): when the platform registers them by dynamic client
+// registration, the compiler adds one chart per client, compiled from
+// vendor/oidc-dcr (oidc-dcr for the main client, <name>-oidc-dcr for a named
+// one), which service.yaml does not list; their values come from a template
+// in the mapping language embedded in the compiler (oidc-dcr.cel.yaml). A
+// chart of service.yaml may also name the vendored chart it compiles from
+// (ChartSpec.Chart); Result.Charts maps every compiled chart to the vendored
+// chart that renders it.
+//
 // Everything is read through fs.FS and in-memory values, so a caller (the
 // control plane server, a CLI) can compile from a checkout, an embedded
 // filesystem or a git tree without touching the disk:

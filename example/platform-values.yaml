@@ -7,3 +7,8 @@ global:
     certificateIssuers:
       selfSigned:
         name: okdp-ca
+    # Single sign-on. The services' OAuth clients are provisioned by the
+    # platform (clientProvisioning: existing, the default; values/dcr.yaml
+    # registers them by DCR).
+    oidc:
+      issuerUri: https://sso.okdp.example.org/realms/okdp

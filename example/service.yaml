@@ -11,8 +11,13 @@ require:
   - ingress.suffix                     # domain of the instance's host: <release>.<suffix>
   - ingress.className                  # ingress class of the platform
   - certificateIssuers.selfSigned.name # issuer of the instance's TLS certificate
+  - oidc.issuerUri                     # identity provider the application signs users in with
 # The upstream charts vendored by the wrapper chart (webapp/vendor/<chart>/),
-# by name, as the mapping outputs them.
+# by name, as the mapping outputs them. A chart may name the vendored chart
+# it compiles from and renders with (chart: <vendored chart>), e.g. a chart
+# rendered twice. The oidc-dcr chart of the mapping's OAuth client
+# (oidcClients) is not listed: the compiler adds it in dcr mode, from
+# webapp/vendor/oidc-dcr.
 charts:
   app:                                 # the application chart
     base: vendor-values/app.yaml       # OKDP's default values, over the chart's own defaults

@@ -1,0 +1,8 @@
+# error: global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr)
+# The webapp declares an OAuth client (oidcClients): in dcr mode, the
+# platform must give the registration endpoint.
+global:
+  okdp:
+    oidc:
+      clientProvisioning: dcr
+      dcr: {authMethod: anonymous}
