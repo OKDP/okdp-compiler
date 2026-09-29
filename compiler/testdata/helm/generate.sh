@@ -90,3 +90,25 @@ data:
   out: {{ toJson (dict "functions" $out) | quote }}
 EOF
 render demo-a-rather-long-release-name-for-names "$chart" "$here/functions/helm.json"
+
+# labels/<case>/: okdp.labels and okdp.selectorLabels, without and with a
+# component, of a chart with <case>/Chart.yaml: helm.json.
+for c in "$here"/labels/*/; do
+  rm -rf "$tmp/labels"
+  newchart labels
+  cp "$c/Chart.yaml" "$chart/Chart.yaml"
+  cat > "$chart/templates/labels.yaml" <<'EOF'
+{{- $out := dict
+  "labels" (include "okdp.labels" $ | fromYaml)
+  "labelsComponent" (include "okdp.labels" (dict "ctx" $ "component" "hook") | fromYaml)
+  "selectorLabels" (include "okdp.selectorLabels" $ | fromYaml)
+  "selectorLabelsComponent" (include "okdp.selectorLabels" (dict "ctx" $ "component" "hook") | fromYaml) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: labels
+data:
+  out: {{ toJson (dict "release" .Release.Name "chart" .Chart "out" $out) | quote }}
+EOF
+  render demo-labels "$chart" "$c/helm.json"
+done

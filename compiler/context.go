@@ -5,6 +5,7 @@ package compiler
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 )
 
@@ -27,12 +28,12 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	chart, err := readChart(in.Chart)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if v != "" {
-		c, err := readChart(in.Chart)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return nil, nil, nil, schemaError("values", map[string]string{c.Name: v})
+		return nil, nil, nil, schemaError("values", map[string]string{chart.Name: v})
 	}
 	global := asMap(values["global"])
 	okdpG := asMap(global["okdp"])
@@ -104,6 +105,9 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 		"global":   M{"okdp": deepCopy(okdpG)}, // platform-values.yaml, as written
 		"platform": platform,                   // derived from it by the compiler
 	}
+	// The wrapper chart: chart (name, version, appVersion), labels and
+	// selectorLabels (okdp.labels, okdp.selectorLabels).
+	maps.Copy(ctx, chartContext(chart, in.Release))
 	// The schema walk follows map order: sort for a stable result.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
 	return ctx, values, deps, nil

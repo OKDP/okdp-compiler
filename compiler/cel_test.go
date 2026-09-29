@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -202,6 +203,43 @@ output:
 	}
 	if _, err := runCEL([]byte(`output: {x: {v: '${{ toYaml("\x01 \x7f") }}'}}`), mapCtx()); err == nil || !strings.Contains(err.Error(), "toYaml: ") {
 		t.Errorf("an encoding error: got %v", err)
+	}
+}
+
+// TestMappingChart: the chart metadata and labels in the context; let and
+// $let bindings and $for variables shadow them.
+func TestMappingChart(t *testing.T) {
+	ctx := mapCtx()
+	maps.Copy(ctx, chartContext(chartMeta{Name: "demo", Version: "1.0.0", AppVersion: "4.5"}, "demo-x"))
+	src := `
+output:
+  x:
+    tag: ${{ chart.appVersion }}
+    labels: ${{ labels }}
+    selector: ${{ okdpSelectorLabels('db') }}
+    loop: [{$for: "chart in ['a']", $let: {selectorLabels: '${{ chart }}'}, $each: '${{ selectorLabels }}'}]
+`
+	res, err := runCEL([]byte(src), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := asMap(res.output["x"])
+	if x["tag"] != "4.5" || asMap(x["labels"])["helm.sh/chart"] != "demo-1.0.0" || asMap(x["labels"])["app.kubernetes.io/version"] != "4.5" {
+		t.Errorf("chart and labels: %#v", x)
+	}
+	if want := (M{"app.kubernetes.io/name": "demo", "app.kubernetes.io/instance": "demo-x", "app.kubernetes.io/component": "db"}); !reflect.DeepEqual(x["selector"], want) {
+		t.Errorf("selector: %#v", x["selector"])
+	}
+	if want := []any{"a"}; !reflect.DeepEqual(x["loop"], want) {
+		t.Errorf("$for and $let shadow chart and selectorLabels: %#v", x["loop"])
+	}
+	// A mapping's own labels binding wins over the context's.
+	res, err = runCEL([]byte("let:\n  labels: {mine: 'yes'}\n"+src), ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (M{"mine": "yes"}); !reflect.DeepEqual(asMap(res.output["x"])["labels"], want) {
+		t.Errorf("let labels: %#v", asMap(res.output["x"])["labels"])
 	}
 }
 

@@ -87,20 +87,8 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, error) {
 		}
 		outputs = string(b)
 	}
-	// Helm and OKDP labels, plus one per provided contract.
-	helmChart := strings.TrimSuffix(trunc(strings.ReplaceAll(name+"-"+version, "+", "_"), 63), "-")
-	labels := M{
-		"helm.sh/chart":                helmChart,
-		"app.kubernetes.io/name":       name,
-		"app.kubernetes.io/instance":   in.Release,
-		"app.kubernetes.io/managed-by": "Helm",
-		"app.kubernetes.io/part-of":    "okdp",
-		"okdp.io/instance":             in.Release,
-		"okdp.io/service":              name,
-	}
-	if v := chart.AppVersion; v != "" {
-		labels["app.kubernetes.io/version"] = v
-	}
+	// The labels of OKDP's objects, plus one per provided contract.
+	labels := labels(chart, in.Release, "")
 	names := make([]string, 0, len(contracts))
 	for c := range contracts {
 		names = append(names, c)

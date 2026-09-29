@@ -208,3 +208,45 @@ func TestHelmFunctions(t *testing.T) {
 		}
 	}
 }
+
+// TestHelmLabels: the chart metadata, labels and selectorLabels of the
+// mapping context and okdpLabels / okdpSelectorLabels, against Helm's
+// .Chart, okdp.labels and okdp.selectorLabels (testdata/helm/labels).
+func TestHelmLabels(t *testing.T) {
+	cases, _ := filepath.Glob(filepath.Join("testdata", "helm", "labels", "*"))
+	if len(cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, dir := range cases {
+		t.Run(filepath.Base(dir), func(t *testing.T) {
+			chart, err := readChart(os.DirFS(dir))
+			if err != nil {
+				t.Fatal(err)
+			}
+			helm := asMap(helmJSON(t, filepath.Join(dir, "helm.json")))
+			hc := asMap(helm["chart"])
+			if want := (chartMeta{Name: str(hc["Name"]), Version: str(hc["Version"]), AppVersion: str(hc["AppVersion"])}); chart != want {
+				t.Errorf("chart: got %#v, want %#v", chart, want)
+			}
+			release := str(helm["release"])
+			ctx := chartContext(chart, release)
+			ctx["release"] = M{"name": release}
+			e := &celEngine{envs: map[string]*cel.Env{}, ctx: ctx}
+			want := asMap(helm["out"])
+			for name, expr := range map[string]string{
+				"labels":                  "labels",
+				"labelsComponent":         "okdpLabels('hook')",
+				"selectorLabels":          "selectorLabels",
+				"selectorLabelsComponent": "okdpSelectorLabels('hook')",
+			} {
+				got, err := e.eval(expr, ctx)
+				if err != nil {
+					t.Fatalf("%s: %v", expr, err)
+				}
+				if !reflect.DeepEqual(got, want[name]) {
+					t.Errorf("%s:\n got %#v\nwant %#v", expr, got, want[name])
+				}
+			}
+		})
+	}
+}
