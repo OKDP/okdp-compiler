@@ -5,10 +5,23 @@ import (
 	"strings"
 )
 
-// okdpDcr: the values of the vendored oidc-dcr chart for one OAuth client,
-// as okdp.oidc.dcrValues + okdp.vendor.oidcDcr compute them. A host function:
-// plain Go, unit-testable, shared by every service mapping (it replaces a
-// library define).
+// okdpDcr: the values of the vendored oidc-dcr chart (>= 0.5.0, camelCase
+// values) for one OAuth client, as okdp.oidc.dcrValues + okdp.vendor.oidcDcr
+// compute them. A host function: plain Go, unit-testable, shared by every
+// service mapping (it replaces a library define). The registration request
+// keeps the snake_case fields of the OIDC Dynamic Client Registration
+// standard.
+//
+// What okdp.vendor.oidcDcr changed after rendering are values of the chart:
+// the objects are named after `name` (fullnameOverride, default
+// <release>-oidc-dcr cut as okdp.fullname), carry the instance label
+// (commonLabels), the Job retries 6 times (backoffLimit), and, when the
+// platform has an issuerUri, waits for the provider's discovery document
+// (waitForProvider.discoveryUrl).
+//
+// The platform's global.okdp.oidc.dcr.image is passed as the chart's image;
+// the snake_case keys of oidc-dcr < 0.5.0 (pull_policy, pull_secrets) are
+// still accepted there and renamed.
 //
 // args: grantTypes (required), redirectUris, scope, clientName, secret,
 // public, request, caSecret, name.
@@ -70,19 +83,41 @@ func okdpDcr(ctx M, args M) (M, error) {
 	}
 	name := str(args["name"])
 	if name == "" {
-		name = release + "-oidc-dcr"
+		name = fullname(release, "oidc-dcr")
 	}
 	out := M{
-		"ttl_seconds":      float64(30),
-		"registration_url": dcr["registrationUrl"],
+		"ttlSeconds":       float64(30),
+		"registrationUrl":  dcr["registrationUrl"],
 		"request":          request,
 		"tls":              M{"insecure": false, "certificate": ca},
 		"secret":           secret,
-		"mapping":          M{"use_default": false, "key_mapping": keys},
-		"security":         M{"service_account": name, "role": name},
+		"mapping":          M{"useDefault": false, "keyMapping": keys},
+		"security":         M{"serviceAccount": name, "role": name},
+		"fullnameOverride": name,
+		"commonLabels":     M{"app.kubernetes.io/instance": release},
+		"backoffLimit":     float64(6),
+	}
+	if issuer := str(oidc["issuerUri"]); issuer != "" {
+		out["waitForProvider"] = M{"discoveryUrl": strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"}
 	}
 	if img, ok := dcr["image"].(M); ok {
-		out["image"] = deepCopy(img)
+		out["image"] = dcrImage(img)
 	}
 	return out, nil
+}
+
+// dcrImage: the platform's image of the oidc-dcr Jobs, with the snake_case
+// keys of oidc-dcr < 0.5.0 renamed; a camelCase key wins over its former
+// spelling.
+func dcrImage(img M) M {
+	out := asMap(deepCopy(img))
+	for old, key := range map[string]string{"pull_policy": "pullPolicy", "pull_secrets": "pullSecrets"} {
+		if v, ok := out[old]; ok {
+			if _, set := out[key]; !set {
+				out[key] = v
+			}
+			delete(out, old)
+		}
+	}
+	return out
 }
