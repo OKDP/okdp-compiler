@@ -297,12 +297,12 @@ func TestDcrErrors(t *testing.T) {
 }
 
 // TestDcrCompile: a mapping's oidcClients compiled with the service: in dcr
-// mode, one oidc-dcr chart per client, merged over the vendored defaults;
-// the mapping may not output these charts itself.
+// mode, one oidc-dcr chart per client, which service.yaml does not list,
+// compiled from vendor/oidc-dcr (its defaults merged); the compiler owns
+// these charts: service.yaml and the mapping's output may not list them.
 func TestDcrCompile(t *testing.T) {
 	ch := maps.Clone(chart)
 	ch["vendor/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
-	ch["vendor/console-oidc-dcr/values.yaml"] = ch["vendor/oidc-dcr/values.yaml"]
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	mapping := `
 let:
@@ -321,40 +321,35 @@ oidcClients:
     public: true
     grantTypes: [authorization_code]
 `
+	compile := func(output string, existing bool, charts map[string]ChartSpec, files fstest.MapFS, values M) (*Result, error) {
+		d := *def
+		d.Mapping = []byte(strings.Replace(mapping, "%s", output, 1))
+		d.Service.Charts = charts
+		p := asMap(deepCopy(platform))
+		if existing {
+			dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
+		}
+		in := inputs(p, values)
+		in.Chart = files
+		return Compile(&d, in)
+	}
+	app := map[string]ChartSpec{"app": {}}
 	for name, tc := range map[string]struct {
-		output   string
 		values   M
 		existing bool
-		charts   []string
-		want     string
+		charts   map[string]string // Result.Charts
 	}{
-		"dcr mode":          {"", M{"replicas": 2}, false, []string{"app", "oidc-dcr", "console-oidc-dcr"}, ""},
-		"a client left out": {"", M{"replicas": 1}, false, []string{"app", "oidc-dcr"}, ""},
-		"existing mode":     {"", M{"replicas": 2}, true, []string{"app"}, ""},
-		"in output":         {"oidc-dcr: {}", M{"replicas": 2}, true, nil, `mapping output "oidc-dcr": the chart of oidcClients[0], compiled from oidcClients: remove it from output`},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]string{"app": "app", "oidc-dcr": "oidc-dcr", "console-oidc-dcr": "oidc-dcr"}},
+		"a client left out": {M{"replicas": 1}, false, map[string]string{"app": "app", "oidc-dcr": "oidc-dcr"}},
+		"existing mode":     {M{"replicas": 2}, true, map[string]string{"app": "app"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := *def
-			d.Mapping = []byte(strings.Replace(mapping, "%s", tc.output, 1))
-			d.Service.Charts = map[string]ChartSpec{"app": {}, "oidc-dcr": {}, "console-oidc-dcr": {}}
-			p := asMap(deepCopy(platform))
-			if tc.existing {
-				dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
-			}
-			in := inputs(p, tc.values)
-			in.Chart = ch
-			res, err := Compile(&d, in)
-			if tc.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Errorf("got %v, want an error containing %q", err, tc.want)
-				}
-				return
-			}
+			res, err := compile("", tc.existing, app, ch, tc.values)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := slices.Sorted(maps.Keys(res.Values)); !slices.Equal(got, slices.Sorted(slices.Values(tc.charts))) {
-				t.Errorf("charts: got %v, want %v", got, tc.charts)
+			if !reflect.DeepEqual(res.Charts, tc.charts) || len(res.Values) != len(tc.charts) {
+				t.Errorf("charts: got %v (values of %v), want %v", res.Charts, slices.Sorted(maps.Keys(res.Values)), tc.charts)
 			}
 			wantLabels := M{"main": "demo-app-demo-dcr", "console": "demo-app-demo-console-dcr"}
 			if tc.existing {
@@ -374,15 +369,33 @@ oidcClients:
 			if c := asMap(res.Computed["oidc-dcr"]); c["ttlSeconds"] != float64(30) || dig(c, "mapping.keyMapping.registration_client_uri") != nil {
 				t.Errorf("computed: %#v", c)
 			}
+			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
+				t.Errorf("console-oidc-dcr values, from vendor/oidc-dcr: %#v", c)
+			}
 		})
 	}
-	// A client whose chart service.yaml does not declare.
-	d := *def
-	d.Mapping = []byte(strings.Replace(mapping, "%s", "", 1))
-	d.Service.Charts = map[string]ChartSpec{"app": {}, "oidc-dcr": {}}
-	in := inputs(platform, M{"replicas": 2})
-	in.Chart = ch
-	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), `oidcClients[1] (console): chart "console-oidc-dcr" is not a chart of service.yaml`) {
-		t.Errorf("got %v", err)
+	noVendor := maps.Clone(chart)
+	for name, tc := range map[string]struct {
+		output   string
+		existing bool
+		charts   map[string]ChartSpec
+		files    fstest.MapFS
+		want     string
+	}{
+		"in output":          {"oidc-dcr: {}", true, app, ch, `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output`},
+		"in service.yaml":    {"", false, map[string]ChartSpec{"app": {}, "console-oidc-dcr": {Chart: "oidc-dcr"}}, ch, "service.yaml: charts.console-oidc-dcr: the chart of oidcClients[1] (console) is added by the compiler (from vendor/oidc-dcr): remove it from service.yaml"},
+		"not vendored":       {"", false, app, noVendor, "oidcClients: vendor/oidc-dcr/values.yaml not found: the OAuth clients are registered by the chart oidc-dcr (repository oci://quay.io/adaltas, version >= 0.5.0): list it in vendor.yaml"},
+		"not vendored, also": {"", true, app, noVendor, "oidcClients: vendor/oidc-dcr/values.yaml not found"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := compile(tc.output, tc.existing, tc.charts, tc.files, M{"replicas": 2})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+	// def.Service is left as it was.
+	if _, err := compile("", false, app, ch, M{"replicas": 2}); err != nil || len(app) != 1 {
+		t.Errorf("service.yaml changed: %v %v", err, app)
 	}
 }

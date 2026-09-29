@@ -14,8 +14,10 @@ package compiler
 import (
 	_ "embed"
 	"fmt"
+	"io/fs"
 	"maps"
 	"math"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -277,4 +279,37 @@ func dcrImage(img M) M {
 		}
 	}
 	return out
+}
+
+// clientCharts: the charts of service.yaml, plus the oidc-dcr chart of each
+// client compiled in dcr mode (the chart key of the client, compiled from
+// vendor/oidc-dcr, no base values, no instance values), its values added to
+// the mapping's output. The compiler owns these charts: neither service.yaml
+// nor the mapping's output may list them, and vendor/oidc-dcr must exist
+// (checked in every mode, as soon as the mapping declares a client). svc is
+// not changed.
+func clientCharts(in Inputs, svc *Service, clients []oidcClient, values map[string]M, output M) (*Service, error) {
+	if len(clients) == 0 {
+		return svc, nil
+	}
+	for _, c := range clients {
+		if _, ok := svc.Charts[c.chart]; ok {
+			return nil, fmt.Errorf("service.yaml: charts.%s: the chart of %s is added by the compiler (from vendor/%s): remove it from service.yaml", c.chart, c.where, DcrChart)
+		}
+		if _, ok := output[c.chart]; ok {
+			return nil, fmt.Errorf("mapping output %q: the chart of %s is compiled from oidcClients: remove it from output", c.chart, c.where)
+		}
+	}
+	if _, err := fs.Stat(in.Chart, path.Join("vendor", DcrChart, "values.yaml")); err != nil {
+		return nil, fmt.Errorf("oidcClients: vendor/%s/values.yaml not found: the OAuth clients are registered by the chart %s (repository oci://quay.io/adaltas, version >= 0.5.0): list it in vendor.yaml, then run scripts/vendor-charts.sh", DcrChart, DcrChart)
+	}
+	out := &Service{Charts: maps.Clone(svc.Charts), Require: svc.Require}
+	if out.Charts == nil {
+		out.Charts = map[string]ChartSpec{}
+	}
+	for chart, v := range values {
+		out.Charts[chart] = ChartSpec{Chart: DcrChart}
+		output[chart] = v
+	}
+	return out, nil
 }
