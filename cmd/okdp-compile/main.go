@@ -52,8 +52,8 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "demo", "namespace")
 	flag.Var(&o.values, "f", "values file (repeatable)")
 	flag.StringVar(&o.expect, "expect", "", "helm template output of the wrapper chart to compare with")
-	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), objects and dependencies to this file")
-	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the objects and the dependencies")
+	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the vendored chart of each chart, objects and dependencies to this file")
+	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the vendored chart that renders each (okdp.charts.yaml), the objects and the dependencies")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -115,7 +115,7 @@ func run(o options) error {
 		var buf bytes.Buffer
 		enc := yaml.NewEncoder(&buf)
 		enc.SetIndent(2)
-		if err := enc.Encode(map[string]any{"values": res.Computed, "objects": res.Objects, "dependencies": res.Dependencies}); err != nil {
+		if err := enc.Encode(map[string]any{"values": res.Computed, "charts": res.Charts, "objects": res.Objects, "dependencies": res.Dependencies}); err != nil {
 			return err
 		}
 		if err := os.WriteFile(o.out, buf.Bytes(), 0o644); err != nil {
@@ -132,8 +132,11 @@ func run(o options) error {
 	return compiler.Compare(def, in, res, rendered, os.Stdout)
 }
 
-// emit: <dir>/<chart>.values.yaml per chart, <dir>/okdp.objects.yaml and
-// <dir>/okdp.dependencies.yaml.
+// emit: <dir>/<chart>.values.yaml per chart; <dir>/okdp.charts.yaml, the
+// index of the vendored chart that renders each (chart: vendored chart, the
+// chart itself unless service.yaml names another: `helm template
+// vendor/<vendored chart> -f <chart>.values.yaml`); <dir>/okdp.objects.yaml
+// and <dir>/okdp.dependencies.yaml.
 func emit(dir string, res *compiler.Result) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -147,8 +150,14 @@ func emit(dir string, res *compiler.Result) error {
 			return err
 		}
 	}
-	b, err := yaml.Marshal(res.Objects)
+	b, err := yaml.Marshal(res.Charts)
 	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "okdp.charts.yaml"), b, 0o644); err != nil {
+		return err
+	}
+	if b, err = yaml.Marshal(res.Objects); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "okdp.objects.yaml"), b, 0o644); err != nil {

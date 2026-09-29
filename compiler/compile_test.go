@@ -368,3 +368,49 @@ objects:
 		})
 	}
 }
+
+// TestChartAlias: a chart of service.yaml compiled from another vendored
+// chart (chart): its defaults and schema, its values keyed by the chart's
+// key; Result.Charts maps every chart to the vendored chart rendering it.
+func TestChartAlias(t *testing.T) {
+	var svc Service
+	if err := yaml.Unmarshal([]byte("charts:\n  canary: {chart: app, base: vendor-values/app.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Chart != "app" {
+		t.Fatalf("service.yaml: %v %#v", err, svc)
+	}
+	mapping := "output:\n  app: {}\n  canary: {replicaCount: '${{ values.replicas }}'}\n"
+	d := *def
+	d.Mapping = []byte(mapping)
+	d.Service.Charts = map[string]ChartSpec{"app": {}, "canary": svc.Charts["canary"]}
+	res, err := Compile(&d, inputs(M{"replicas": 2}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (map[string]string{"app": "app", "canary": "app"}); !reflect.DeepEqual(res.Charts, want) {
+		t.Errorf("charts: got %#v, want %#v", res.Charts, want)
+	}
+	canary := res.Values["canary"]
+	if canary["replicaCount"] != float64(2) || dig(canary, "image.tag") != "4.5" || canary["labels"] == nil {
+		t.Errorf("canary: vendor/app's defaults and base values, then the computed ones: %#v", canary)
+	}
+	// vendor/app's schema, reported under the chart's key.
+	ch := maps.Clone(chart)
+	ch["vendor/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}
+	in := inputs(M{"replicas": 5})
+	in.Chart = ch
+	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), "canary (vendor/app):\n- at '/replicaCount': maximum: got 5, want 3") {
+		t.Errorf("schema: got %v", err)
+	}
+	for name, tc := range map[string]struct{ chart, want string }{
+		"a path":         {"../app", `service.yaml: charts.canary.chart "../app": not the name of a vendored chart`},
+		"a subdirectory": {"app/charts/x", `service.yaml: charts.canary.chart "app/charts/x": not the name`},
+		"not vendored":   {"nope", "canary: vendor/nope/values.yaml not found: the chart nope is not vendored"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := d
+			d.Service.Charts = map[string]ChartSpec{"app": {}, "canary": {Chart: tc.chart}}
+			if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}

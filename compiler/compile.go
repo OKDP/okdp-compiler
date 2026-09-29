@@ -27,7 +27,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -70,8 +72,11 @@ type Service struct {
 	Require []string             `yaml:"require"` // global.okdp keys the service needs
 }
 
-// ChartSpec: one upstream chart of a service.
+// ChartSpec: one upstream chart of a service, by key: the key names its
+// values (the mapping's output, Result.Values, the values ConfigMap
+// compared with).
 type ChartSpec struct {
+	Chart    string   `yaml:"chart"`    // the vendored chart, vendor/<chart> (its defaults and schema, and what renders the values); default: the key
 	Base     string   `yaml:"base"`     // vendor-values file of the wrapper (OKDP's default values)
 	Values   string   `yaml:"values"`   // name of the values ConfigMap to compare with
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths
@@ -86,6 +91,15 @@ type ChartSpec struct {
 type Upstream struct {
 	Enabled bool
 	Files   []string // nil: upstream.<chart>.yaml, if it exists
+}
+
+// vendored: the vendored chart of the chart key: its chart alias, or the
+// key itself.
+func (c ChartSpec) vendored(key string) string {
+	if c.Chart != "" {
+		return c.Chart
+	}
+	return key
 }
 
 // UnmarshalYAML: true or false, a path or a list of paths.
@@ -127,6 +141,10 @@ type Result struct {
 	Computed map[string]any
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any
+	// Charts: chart -> the vendored chart that renders its values
+	// (`helm template vendor/<Charts[chart]> -f <Values[chart]>`): the chart
+	// itself, or the vendored chart its service.yaml entry names (`chart`).
+	Charts map[string]string
 	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
 	// the credentials Secrets of the provided connections, then the objects
 	// section of the mapping. With an okdp chart in service.yaml
@@ -153,6 +171,11 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		return nil, errors.New("Inputs.Namespace is required")
 	}
 	svc := &def.Service
+	for key, spec := range svc.Charts {
+		if c := spec.Chart; c != "" && (c != path.Base(c) || c == "." || c == ".." || strings.TrimSpace(c) != c) {
+			return nil, fmt.Errorf("service.yaml: charts.%s.chart %q: not the name of a vendored chart (vendor/<chart>)", key, c)
+		}
+	}
 	// What the mapping sees: values, platform context, resolved connections.
 	ctx, values, deps, err := buildContext(in, svc)
 	if err != nil {
@@ -187,7 +210,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Objects: []map[string]any{desc}, Dependencies: deps}
+	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Charts: map[string]string{}, Objects: []map[string]any{desc}, Dependencies: deps}
 	for _, o := range append(credentials, res.objects...) {
 		out.Objects = append(out.Objects, asMap(o))
 	}
@@ -217,7 +240,13 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 			return nil, fmt.Errorf("%s: %w", chart, err)
 		}
 		out.Values[chart] = f
-		violations["vendor/"+chart] = bad
+		vendored := svc.Charts[chart].vendored(chart)
+		out.Charts[chart] = vendored
+		if vendored == chart {
+			violations["vendor/"+chart] = bad
+		} else {
+			violations[chart+" (vendor/"+vendored+")"] = bad
+		}
 	}
 	if err := schemaError("compiled values", violations); err != nil {
 		return nil, err
