@@ -6,17 +6,25 @@ import (
 	"testing"
 )
 
-// dcrCtx: a context whose platform registers OAuth clients anonymously.
-func dcrCtx() M {
+// dcrCtx: a context whose platform registers OAuth clients anonymously,
+// these DCR settings over the defaults (dcrSettings, as buildContext).
+func dcrCtx(settings ...M) M {
+	dcr := M{
+		"authMethod":      "anonymous",
+		"registrationUrl": "https://idp.example.org/register",
+		"image":           M{"repository": "example/dcr"},
+	}
+	for _, s := range settings {
+		dcr = mergeMaps(dcr, s)
+	}
+	if err := dcrSettings(dcr); err != nil {
+		panic(err)
+	}
 	return M{
 		"release": M{"name": "demo-x", "namespace": "demo"},
 		"platform": M{"oidc": M{
 			"scope": "openid profile email",
-			"dcr": M{
-				"authMethod":      "anonymous",
-				"registrationUrl": "https://idp.example.org/register",
-				"image":           M{"repository": "example/dcr"},
-			},
+			"dcr":   dcr,
 		}},
 	}
 }
@@ -127,6 +135,9 @@ func TestDcrErrors(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := dcrCtx()
+			if err := dcrSettings(tc.dcr); err != nil {
+				t.Fatal(err)
+			}
 			asMap(asMap(ctx["platform"])["oidc"])["dcr"] = tc.dcr
 			_, err := okdpDcr(ctx, tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -164,24 +175,31 @@ output:
 	}
 }
 
-// TestDcrImage: the platform's image of the Jobs, its snake_case keys of
-// oidc-dcr < 0.5.0 renamed; a camelCase key wins over its former spelling.
-func TestDcrImage(t *testing.T) {
-	for name, tc := range map[string]struct{ image, want M }{
-		"camelCase":      {M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}, M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}},
-		"former keys":    {M{"tag": "1", "pull_policy": "Never", "pull_secrets": []any{"s"}}, M{"tag": "1", "pullPolicy": "Never", "pullSecrets": []any{"s"}}},
-		"camelCase wins": {M{"pull_policy": "Never", "pullPolicy": "Always"}, M{"pullPolicy": "Always"}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			ctx := dcrCtx()
-			asMap(asMap(asMap(ctx["platform"])["oidc"])["dcr"])["image"] = tc.image
-			out, err := okdpDcr(ctx, M{"grantTypes": []any{"client_credentials"}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(out["image"], tc.want) {
-				t.Errorf("got %#v, want %#v", out["image"], tc.want)
-			}
-		})
+// TestDcrPlatform: the platform's DCR settings (platform.oidc.dcr): the Job
+// TTL and retries, the CA Secret (the caSecret argument wins), the wait for
+// the provider and the image.
+func TestDcrPlatform(t *testing.T) {
+	ctx := dcrCtx(M{"ttlSeconds": float64(300), "backoffLimit": float64(2), "caSecret": "corp-ca", "waitTtlSeconds": float64(120),
+		"image": M{"registry": "mirror.example.org", "pull_policy": "Always"}})
+	asMap(asMap(ctx["platform"])["oidc"])["issuerUri"] = "https://idp.example.org/realms/data"
+	grants := M{"grantTypes": []any{"client_credentials"}}
+	out, err := okdpDcr(ctx, grants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{
+		"ttlSeconds":      float64(300),
+		"backoffLimit":    float64(2),
+		"tls":             M{"insecure": false, "certificate": "corp-ca"},
+		"waitForProvider": M{"discoveryUrl": "https://idp.example.org/realms/data/.well-known/openid-configuration", "ttlSeconds": float64(120)},
+		"image":           M{"registry": "mirror.example.org", "repository": "example/dcr", "pullPolicy": "Always"},
+	}
+	for k, v := range want {
+		if !reflect.DeepEqual(out[k], v) {
+			t.Errorf("%s: got %#v, want %#v", k, out[k], v)
+		}
+	}
+	if out, err = okdpDcr(ctx, M{"grantTypes": grants["grantTypes"], "caSecret": "ca"}); err != nil || asMap(out["tls"])["certificate"] != "ca" {
+		t.Errorf("caSecret argument: %v %#v", err, out["tls"])
 	}
 }

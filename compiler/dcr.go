@@ -15,13 +15,15 @@ import (
 // What okdp.vendor.oidcDcr changed after rendering are values of the chart:
 // the objects are named after `name` (fullnameOverride, default
 // <release>-oidc-dcr cut as okdp.fullname), carry the instance label
-// (commonLabels), the Job retries 6 times (backoffLimit), and, when the
-// platform has an issuerUri, waits for the provider's discovery document
-// (waitForProvider.discoveryUrl).
+// (commonLabels), the Job retries platform.oidc.dcr.backoffLimit times (6),
+// and, when the platform has an issuerUri, waits for the provider's
+// discovery document (waitForProvider.discoveryUrl, for up to
+// platform.oidc.dcr.waitTtlSeconds when set).
 //
-// The platform's global.okdp.oidc.dcr.image is passed as the chart's image;
-// the snake_case keys of oidc-dcr < 0.5.0 (pull_policy, pull_secrets) are
-// still accepted there and renamed.
+// The platform's settings come from platform.oidc.dcr, defaults applied
+// (dcrSettings): the Job TTL (ttlSeconds, 30), the CA Secret (caSecret,
+// certs-bundle; the caSecret argument wins), the image, passed as the
+// chart's image (its snake_case keys of oidc-dcr < 0.5.0 renamed).
 //
 // args: grantTypes (required), redirectUris, scope, clientName, secret,
 // public, request, caSecret, name.
@@ -75,7 +77,7 @@ func okdpDcr(ctx M, args M) (M, error) {
 	request = mergeMaps(request, asMap(deepCopy(args["request"])))
 	ca := str(args["caSecret"])
 	if ca == "" {
-		ca = "certs-bundle"
+		ca = str(dcr["caSecret"])
 	}
 	secret := str(args["secret"])
 	if secret == "" {
@@ -86,7 +88,7 @@ func okdpDcr(ctx M, args M) (M, error) {
 		name = fullname(release, "oidc-dcr")
 	}
 	out := M{
-		"ttlSeconds":       float64(30),
+		"ttlSeconds":       dcr["ttlSeconds"],
 		"registrationUrl":  dcr["registrationUrl"],
 		"request":          request,
 		"tls":              M{"insecure": false, "certificate": ca},
@@ -95,29 +97,17 @@ func okdpDcr(ctx M, args M) (M, error) {
 		"security":         M{"serviceAccount": name, "role": name},
 		"fullnameOverride": name,
 		"commonLabels":     M{"app.kubernetes.io/instance": release},
-		"backoffLimit":     float64(6),
+		"backoffLimit":     dcr["backoffLimit"],
 	}
 	if issuer := str(oidc["issuerUri"]); issuer != "" {
-		out["waitForProvider"] = M{"discoveryUrl": strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"}
+		wait := M{"discoveryUrl": strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"}
+		if v, ok := dcr["waitTtlSeconds"]; ok {
+			wait["ttlSeconds"] = v
+		}
+		out["waitForProvider"] = wait
 	}
 	if img, ok := dcr["image"].(M); ok {
-		out["image"] = dcrImage(img)
+		out["image"] = deepCopy(img)
 	}
 	return out, nil
-}
-
-// dcrImage: the platform's image of the oidc-dcr Jobs, with the snake_case
-// keys of oidc-dcr < 0.5.0 renamed; a camelCase key wins over its former
-// spelling.
-func dcrImage(img M) M {
-	out := asMap(deepCopy(img))
-	for old, key := range map[string]string{"pull_policy": "pullPolicy", "pull_secrets": "pullSecrets"} {
-		if v, ok := out[old]; ok {
-			if _, set := out[key]; !set {
-				out[key] = v
-			}
-			delete(out, old)
-		}
-	}
-	return out
 }

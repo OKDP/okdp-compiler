@@ -59,7 +59,11 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	if mode != "existing" && mode != "dcr" {
 		return nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
 	}
+	// The settings of the oidc-dcr Jobs, defaults applied (oidc.go).
 	dcr := asMap(deepCopy(oidc["dcr"]))
+	if err := dcrSettings(dcr); err != nil {
+		return nil, nil, nil, err
+	}
 	dcr["enabled"] = truthy(oidc["enabled"]) && mode == "dcr"
 	oidc["dcr"] = dcr
 	oidc["existing"] = truthy(oidc["enabled"]) && mode == "existing"

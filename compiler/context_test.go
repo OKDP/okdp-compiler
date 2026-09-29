@@ -30,7 +30,7 @@ func TestPlatformDefaults(t *testing.T) {
 			"scope":              "openid profile email groups",
 			"clientProvisioning": "existing",
 			"existing":           true,
-			"dcr":                M{"enabled": false},
+			"dcr":                M{"enabled": false, "caSecret": "certs-bundle", "ttlSeconds": float64(30), "backoffLimit": float64(6)},
 		},
 		"oidcClientSecret":   "creds-demo-app-oauth2",
 		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": "ca"},
@@ -71,6 +71,49 @@ func TestPlatformDisabled(t *testing.T) {
 	oidc := asMap(p["oidc"])
 	if asMap(oidc["dcr"])["enabled"] != false || oidc["existing"] != false {
 		t.Errorf("oidc: %#v", oidc)
+	}
+}
+
+// TestPlatformDcrSettings: the settings of the oidc-dcr Jobs
+// (global.okdp.oidc.dcr), defaults applied, the image's snake_case keys of
+// oidc-dcr < 0.5.0 renamed (a camelCase key wins over its former spelling).
+func TestPlatformDcrSettings(t *testing.T) {
+	defaults := M{"caSecret": "certs-bundle", "ttlSeconds": float64(30), "backoffLimit": float64(6)}
+	for name, tc := range map[string]struct{ dcr, want M }{
+		"defaults":       {M{"registrationUrl": "u"}, M{"registrationUrl": "u"}},
+		"empty":          {M{"caSecret": "", "ttlSeconds": nil, "image": nil}, M{}},
+		"set":            {M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}},
+		"camelCase":      {M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}},
+		"former keys":    {M{"image": M{"tag": "1", "pull_policy": "Never", "pull_secrets": []any{"s"}}}, M{"image": M{"tag": "1", "pullPolicy": "Never", "pullSecrets": []any{"s"}}}},
+		"camelCase wins": {M{"image": M{"pull_policy": "Never", "pullPolicy": "Always"}}, M{"image": M{"pullPolicy": "Always"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := platformCtx(t, M{"oidc": M{"clientProvisioning": "dcr", "dcr": tc.dcr}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := mergeMaps(M{"enabled": true}, defaults)
+			want = mergeMaps(want, tc.want)
+			if got := asMap(dig(p, "oidc.dcr")); !reflect.DeepEqual(got, want) {
+				t.Errorf("got  %#v\nwant %#v", got, want)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		dcr  M
+		want string
+	}{
+		"image":          {M{"image": "quay.io/x:1"}, `global.okdp.oidc.dcr.image must be a map (registry, repository, tag, pullPolicy, pullSecrets), got "quay.io/x:1"`},
+		"caSecret":       {M{"caSecret": true}, "global.okdp.oidc.dcr.caSecret must be the name of a Secret, got true"},
+		"ttlSeconds":     {M{"ttlSeconds": "30s"}, `global.okdp.oidc.dcr.ttlSeconds must be a whole number >= 0, got "30s"`},
+		"backoffLimit":   {M{"backoffLimit": float64(-1)}, "global.okdp.oidc.dcr.backoffLimit must be a whole number >= 0, got -1"},
+		"waitTtlSeconds": {M{"waitTtlSeconds": 1.5}, "global.okdp.oidc.dcr.waitTtlSeconds must be a whole number >= 0, got 1.5"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := platformCtx(t, M{"oidc": M{"dcr": tc.dcr}}); err == nil || err.Error() != tc.want {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
