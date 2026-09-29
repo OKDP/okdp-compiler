@@ -108,7 +108,8 @@ func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []D
 	// with its inline values, not the inline values alone. A rule of the
 	// mapping's errors section on upstream values then covers both sources:
 	// a value it refuses cannot come back through a file. The other keys of
-	// values.upstream stay as written.
+	// values.upstream stay as written. A chart with upstream.from has no
+	// key of its own: it receives the values of the chart it names.
 	ups := readUpstreamValues(in, svc, values)
 	for chart, up := range ups {
 		if len(up.layers) == 0 {

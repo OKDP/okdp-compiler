@@ -140,6 +140,7 @@ func TestUpstreamYAML(t *testing.T) {
 		"upstream: a.yaml":           {Enabled: true, Files: []string{"a.yaml"}},
 		"upstream: [a.yaml, b.yaml]": {Enabled: true, Files: []string{"a.yaml", "b.yaml"}},
 		"upstream: []":               {Enabled: true, Files: []string{}},
+		"upstream: {from: a}":        {From: "a"},
 	} {
 		var spec ChartSpec
 		if err := yaml.Unmarshal([]byte(in), &spec); err != nil {
@@ -148,7 +149,8 @@ func TestUpstreamYAML(t *testing.T) {
 			t.Errorf("%q: got %#v, want %#v", in, spec.Upstream, want)
 		}
 	}
-	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: {a: b}", `upstream: [a.yaml, ""]`, "upstream: [[a]]"} {
+	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: {a: b}", `upstream: [a.yaml, ""]`, "upstream: [[a]]",
+		"upstream: {}", `upstream: {from: ""}`, "upstream: {from: a, files: [b]}", "upstream: {from: [a]}", "upstream: {from: true}"} {
 		var spec ChartSpec
 		if err := yaml.Unmarshal([]byte(in), &spec); err == nil {
 			t.Errorf("%q: no error", in)
@@ -467,6 +469,86 @@ func TestChartAlias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			d := d
 			d.Service.Charts = map[string]ChartSpec{"app": {}, "canary": {Chart: tc.chart}}
+			if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestUpstreamFrom: a chart with upstream.from receives the upstream values
+// of the chart it names, files and inline, with that chart's protect and
+// append: one set of instance values for two renders of an upstream chart.
+func TestUpstreamFrom(t *testing.T) {
+	var svc Service
+	if err := yaml.Unmarshal([]byte(`
+charts:
+  app: {upstream: true, protect: [labels], append: [env]}
+  canary: {chart: app, upstream: {from: app}}
+`), &svc); err != nil {
+		t.Fatal(err)
+	}
+	d := *def
+	d.Service = svc
+	d.Mapping = []byte(`
+output:
+  app: {$if: '${{ values.replicas > 1 }}', replicaCount: '${{ values.replicas }}', env: [A]}
+  canary: {replicaCount: 1, env: [CANARY]}
+`)
+	instance := fstest.MapFS{"upstream.app.yaml": {Data: []byte("image: {tag: from-file}\nenv: [F]\n")}}
+	in := inputs(M{"replicas": 2, "upstream": M{"app": M{"env": []any{"I"}, "resources": M{"cpu": "1"}}}})
+	in.Instance = instance
+	res, err := Compile(&d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for chart, env := range map[string][]any{"app": {"A", "F", "I"}, "canary": {"CANARY", "F", "I"}} {
+		v := res.Values[chart]
+		if dig(v, "image.tag") != "from-file" || dig(v, "resources.cpu") != "1" || !reflect.DeepEqual(v["env"], env) {
+			t.Errorf("%s: the instance file and inline values of app, env appended: %#v", chart, v)
+		}
+	}
+	if res.Charts["canary"] != "app" || res.Values["canary"]["replicaCount"] != float64(1) {
+		t.Errorf("canary: its own computed values, vendor/app: %#v %#v", res.Charts, res.Values["canary"])
+	}
+	// app's protected paths refuse the value for both renders, also when
+	// the mapping leaves app out.
+	for name, tc := range map[string]struct {
+		replicas int
+		want     string
+	}{
+		"both renders": {2, "app: upstream.app.yaml: labels: labels is set by the platform"},
+		"canary alone": {1, "canary: upstream.app.yaml: labels: labels is set by the platform"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := inputs(M{"replicas": tc.replicas})
+			in.Instance = fstest.MapFS{"upstream.app.yaml": {Data: []byte("labels: {x: y}\n")}}
+			if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+	// The mapping sees app's values once, under upstream.app.
+	in = inputs(M{"replicas": 1})
+	in.Instance = instance
+	d.Mapping = []byte("errors: ['${{ has(values.upstream.canary) || values.upstream.app.image.tag != \"from-file\" ? [\"wrong view\"] : [] }}']\noutput: {canary: {}}\n")
+	if _, err := Compile(&d, in); err != nil {
+		t.Error(err)
+	}
+	// What service.yaml may not hold.
+	for name, tc := range map[string]struct {
+		charts map[string]ChartSpec
+		want   string
+	}{
+		"itself":        {map[string]ChartSpec{"a": {Upstream: Upstream{From: "a"}}}, "charts.a.upstream.from: the chart itself"},
+		"unknown":       {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}}}, `charts.a.upstream.from "b": not a chart of service.yaml`},
+		"no own values": {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}}, "b": {}}, `charts.a.upstream.from "b": that chart accepts no upstream values of its own`},
+		"a chain":       {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}}, "b": {Upstream: Upstream{From: "c"}}, "c": {Upstream: Upstream{Enabled: true}}}, `charts.a.upstream.from "b": that chart accepts no upstream values of its own`},
+		"its own rules": {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}, Protect: []string{"x"}}, "b": {Upstream: Upstream{Enabled: true}}}, "charts.a: protect and append come with upstream.from, from charts.b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := *def
+			d.Service.Charts = tc.charts
 			if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}

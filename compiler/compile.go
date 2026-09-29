@@ -102,9 +102,30 @@ type ChartSpec struct {
 // upstream.<chart>.yaml of the instance when it exists; a path, or a list of
 // paths, reads these files instead (they must exist), merged in order. The
 // instance's inline upstream.<chart> values come after the files.
+//
+// {from: <chart>} gives the chart the upstream values of another chart of
+// service.yaml, with that chart's protect and append: for two renders of
+// one upstream chart (an alias, ChartSpec.Chart) that an instance sets with
+// one set of values (polaris-admin's bootstrap and principals Jobs). The
+// mapping used to merge them into the second render by hand, which could
+// not see the instance files, so the files had to be refused.
 type Upstream struct {
 	Enabled bool
 	Files   []string // nil: upstream.<chart>.yaml, if it exists
+	From    string   // the chart whose upstream values this one receives (Enabled is false)
+}
+
+// upstreamOf: the chart whose instance upstream values the chart key
+// receives: itself when it accepts them, the chart its upstream.from names,
+// or "" when it receives none.
+func (s *Service) upstreamOf(key string) string {
+	switch spec := s.Charts[key]; {
+	case spec.Upstream.From != "":
+		return spec.Upstream.From
+	case spec.Upstream.Enabled:
+		return key
+	}
+	return ""
 }
 
 // check: what service.yaml may not hold, refused when it is loaded
@@ -112,12 +133,28 @@ type Upstream struct {
 // name of a vendored chart, a protect or append path that does not follow
 // the grammar of paths.go (a malformed path would otherwise surface only
 // when an instance sets a value under it, or never, leaving a value
-// unprotected).
+// unprotected), an upstream.from that does not name a chart accepting
+// upstream values of its own.
 func (s *Service) check() error {
 	for _, key := range slices.Sorted(maps.Keys(s.Charts)) {
 		spec := s.Charts[key]
 		if c := spec.Chart; c != "" && (c != path.Base(c) || c == "." || c == ".." || strings.TrimSpace(c) != c) {
 			return fmt.Errorf("service.yaml: charts.%s.chart %q: not the name of a vendored chart (vendor/<chart>)", key, c)
+		}
+		if from := spec.Upstream.From; from != "" {
+			target, ok := s.Charts[from]
+			switch {
+			case from == key:
+				return fmt.Errorf("service.yaml: charts.%s.upstream.from: the chart itself (upstream: true accepts its own values)", key)
+			case !ok:
+				return fmt.Errorf("service.yaml: charts.%s.upstream.from %q: not a chart of service.yaml", key, from)
+			case !target.Upstream.Enabled:
+				return fmt.Errorf("service.yaml: charts.%s.upstream.from %q: that chart accepts no upstream values of its own (upstream: true, or files)", key, from)
+			// One set of values, one set of rules: what the instance may set
+			// is decided once, on the chart that owns the values.
+			case len(spec.Protect) > 0 || len(spec.Append) > 0:
+				return fmt.Errorf("service.yaml: charts.%s: protect and append come with upstream.from, from charts.%s: list them there", key, from)
+			}
 		}
 		for _, l := range []struct {
 			name  string
@@ -142,9 +179,16 @@ func (c ChartSpec) vendored(key string) string {
 	return key
 }
 
-// UnmarshalYAML: true or false, a path or a list of paths.
+// UnmarshalYAML: true or false, a path or a list of paths, or {from:
+// <chart>}.
 func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	switch {
+	case n.Kind == yaml.MappingNode:
+		if len(n.Content) != 2 || n.Content[0].Value != "from" || n.Content[1].Kind != yaml.ScalarNode || n.Content[1].Tag != "!!str" || n.Content[1].Value == "" {
+			break
+		}
+		u.From = n.Content[1].Value
+		return nil
 	case n.Kind == yaml.ScalarNode && n.Tag == "!!null":
 		return nil
 	case n.Kind == yaml.ScalarNode && n.Tag == "!!bool":
@@ -163,7 +207,7 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 		u.Enabled, u.Files = true, files
 		return nil
 	}
-	return fmt.Errorf("line %d: upstream must be true, false, a path or a list of paths", n.Line)
+	return fmt.Errorf("line %d: upstream must be true, false, a path, a list of paths or {from: <chart>}", n.Line)
 }
 
 // ObjectsChart: the chart of service.yaml that renders OKDP's own objects
@@ -259,13 +303,16 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		res.output[ObjectsChart] = okdp
 	}
 	// Charts left out by the mapping ($if) are not rendered. Every chart's
-	// schema violations are reported together.
+	// schema violations are reported together. In key order: the first
+	// error is the same from one compile to the next, also when a refused
+	// upstream value reaches two charts (upstream.from).
 	violations := map[string]string{}
-	for chart, v := range res.output {
+	for _, chart := range slices.Sorted(maps.Keys(res.output)) {
+		v := res.output[chart]
 		if _, ok := svc.Charts[chart]; !ok {
 			return nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", chart)
 		}
-		f, bad, err := finalValues(in, svc, chart, asMap(v), values, ups[chart])
+		f, bad, err := finalValues(in, svc, chart, asMap(v), values, ups)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", chart, err)
 		}

@@ -33,9 +33,9 @@ import (
 // The violations of the chart's schema (vendor/<chart>/values.schema.json)
 // by these values, as Helm sees them when it renders, are returned apart.
 //
-// up: the chart's upstream values (readUpstreamValues), nil when it accepts
-// none.
-func finalValues(in Inputs, svc *Service, chart string, computed M, values M, up *chartUpstream) (M, string, error) {
+// ups: the instance's upstream values, by the chart that accepts them
+// (readUpstreamValues).
+func finalValues(in Inputs, svc *Service, chart string, computed M, values M, ups map[string]*chartUpstream) (M, string, error) {
 	spec := svc.Charts[chart]
 	vendored := spec.vendored(chart)
 	defaults, err := readValues(in.Chart, path.Join("vendor", vendored, "values.yaml"))
@@ -57,13 +57,18 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M, up
 	// Last, the instance's upstream values, when the chart accepts them: its
 	// files, then its inline values, each checked ("{{", protect, append).
 	// The mapping has seen the same values merged; these checks are what the
-	// platform enforces whatever the mapping does with them.
-	if up != nil {
+	// platform enforces whatever the mapping does with them. A chart with
+	// upstream.from receives the values of the chart it names, with that
+	// chart's protect and append: one set of values for two renders of an
+	// upstream chart, refused or appended the same way in both.
+	owner := svc.upstreamOf(chart)
+	if up := ups[owner]; up != nil {
 		if up.err != nil {
 			return nil, "", up.err
 		}
+		rules := svc.Charts[owner]
 		for _, l := range up.layers {
-			if err := applyUpstream(out, l.values, l.src, spec.Protect, spec.Append); err != nil {
+			if err := applyUpstream(out, l.values, l.src, rules.Protect, rules.Append); err != nil {
 				return nil, "", err
 			}
 		}
