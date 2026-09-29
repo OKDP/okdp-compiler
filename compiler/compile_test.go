@@ -1,8 +1,10 @@
 package compiler
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -267,5 +269,102 @@ func TestCompileSchemas(t *testing.T) {
 	}
 	if v, ok := res.Values["app"]["labels"]; !ok || v != nil {
 		t.Errorf("labels: got %#v, want null (Helm deletes the default)", v)
+	}
+}
+
+// TestObjects: the objects section (directives included) after the
+// descriptor, and the okdp chart: the mapping's own objects, then
+// Result.Objects; compiled even when the mapping leaves it out.
+func TestObjects(t *testing.T) {
+	ch := maps.Clone(chart)
+	ch["vendor/okdp/values.yaml"] = &fstest.MapFile{Data: []byte("objects: []\n")}
+	mapping := `
+output:
+  app: {}
+  %s
+objects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: '${{ okdpFullname("extra") }}', labels: '${{ labels }}'}
+  - $if: ${{ values.replicas > 1 }}
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: ha}
+  - $spread: "${{ okdpGeneratedSecret({'name': release.name + '-internal', 'keys': [{'key': 'token'}]}) }}"
+`
+	names := func(objects []any) []string {
+		var out []string
+		for _, o := range objects {
+			out = append(out, str(asMap(o)["kind"])+"/"+str(dig(asMap(o), "metadata.name")))
+		}
+		return out
+	}
+	all := []string{"ConfigMap/demo-app-okdp", "ConfigMap/demo-app-extra", "Password/demo-app-internal-token", "ExternalSecret/demo-app-internal"}
+	for name, tc := range map[string]struct {
+		okdp     string // the okdp entry of output
+		declared bool   // service.yaml declares the okdp chart
+		want     []string
+	}{
+		"no okdp chart":              {"", false, nil},
+		"okdp chart left out":        {"", true, all},
+		"okdp chart left out by $if": {"okdp: {$if: '${{ false }}', objects: [{kind: Secret, metadata: {name: s}}]}", true, all},
+		"objects of the mapping first": {
+			"okdp: {objects: [{apiVersion: v1, kind: Secret, metadata: {name: s}}]}", true,
+			append([]string{"Secret/s"}, all...),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := *def
+			d.Mapping = []byte(fmt.Sprintf(mapping, tc.okdp))
+			d.Service.Charts = map[string]ChartSpec{"app": {}}
+			if tc.declared {
+				d.Service.Charts["okdp"] = ChartSpec{}
+			}
+			in := inputs()
+			in.Chart = ch
+			res, err := Compile(&d, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var objects []any
+			for _, o := range res.Objects {
+				objects = append(objects, o)
+			}
+			if got := names(objects); !slices.Equal(got, all) {
+				t.Errorf("Result.Objects: got %v, want %v", got, all)
+			}
+			if lbl := asMap(dig(res.Objects[1], "metadata.labels")); lbl["helm.sh/chart"] != "demo-1.2.3" {
+				t.Errorf("labels: %#v", lbl)
+			}
+			okdp, ok := res.Values["okdp"]
+			if !tc.declared {
+				if ok {
+					t.Errorf("an okdp chart that service.yaml does not declare: %#v", okdp)
+				}
+				return
+			}
+			if got := names(asList(okdp["objects"])); !slices.Equal(got, tc.want) {
+				t.Errorf("okdp chart objects: got %v, want %v", got, tc.want)
+			}
+			if got := names(asList(asMap(res.Computed["okdp"])["objects"])); !slices.Equal(got, tc.want) {
+				t.Errorf("computed okdp objects: got %v, want %v", got, tc.want)
+			}
+		})
+	}
+	for name, tc := range map[string]struct{ mapping, want string }{
+		"not a list":      {"objects: {a: 1}\n", "objects: must be a list of objects"},
+		"not an object":   {"objects: [{metadata: {name: x}}]\n", "objects[0]: not an object with a kind and a metadata.name"},
+		"okdp not a list": {"output: {okdp: {objects: {a: 1}}}\n", "mapping output okdp.objects: must be a list of objects"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := *def
+			d.Mapping = []byte(tc.mapping)
+			d.Service.Charts = map[string]ChartSpec{"okdp": {}}
+			in := inputs()
+			in.Chart = ch
+			if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
 	}
 }

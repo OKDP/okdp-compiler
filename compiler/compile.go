@@ -106,6 +106,14 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	return fmt.Errorf("line %d: upstream must be true, false, a path or a list of paths", n.Line)
 }
 
+// ObjectsChart: the chart of service.yaml that renders OKDP's own objects
+// (okdp-objects, values `objects: []`). When a service declares it, the
+// compiler appends Result.Objects to the objects the mapping computes for
+// it (output.okdp.objects), and compiles it even when the mapping leaves it
+// out: the descriptor ConfigMap, the credentials Secrets and the objects
+// section reach the cluster with the upstream charts.
+const ObjectsChart = "okdp"
+
 // Result: what a compile produces.
 type Result struct {
 	// Computed: chart -> the values the mapping computed, before the merge
@@ -113,7 +121,10 @@ type Result struct {
 	Computed map[string]any
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any
-	// Objects: OKDP's own objects, rendered whole (the descriptor ConfigMap).
+	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
+	// the credentials Secrets of the provided connections, then the objects
+	// section of the mapping. With an okdp chart in service.yaml
+	// (ObjectsChart), they are also in its values.
 	Objects []map[string]any
 	// Dependencies: the instances the connection references point to, by
 	// parameter path. References to external connections are not listed.
@@ -145,12 +156,30 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The descriptor ConfigMap, checked against the contracts.
-	desc, err := descriptor(in, ctx, res.instance, res.provides)
+	// The descriptor ConfigMap, checked against the contracts, and the
+	// credentials Secrets of the outputs; then the mapping's objects.
+	desc, credentials, err := descriptor(in, ctx, res.instance, res.provides)
 	if err != nil {
 		return nil, err
 	}
 	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Objects: []map[string]any{desc}, Dependencies: deps}
+	for _, o := range append(credentials, res.objects...) {
+		out.Objects = append(out.Objects, asMap(o))
+	}
+	// The okdp chart (okdp-objects) renders them: appended to the objects the
+	// mapping computed for it, and rendered even when the mapping left it out.
+	if _, ok := svc.Charts[ObjectsChart]; ok {
+		okdp := asMap(res.output[ObjectsChart])
+		objects, isList := okdp["objects"].([]any)
+		if okdp["objects"] != nil && !isList {
+			return nil, fmt.Errorf("mapping output %s.objects: must be a list of objects", ObjectsChart)
+		}
+		for _, o := range out.Objects {
+			objects = append(objects, deepCopy(o))
+		}
+		okdp["objects"] = objects
+		res.output[ObjectsChart] = okdp
+	}
 	// Charts left out by the mapping ($if) are not rendered. Every chart's
 	// schema violations are reported together.
 	violations := map[string]string{}

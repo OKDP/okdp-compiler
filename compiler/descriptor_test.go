@@ -104,6 +104,7 @@ func TestDescriptorErrors(t *testing.T) {
 		"unknown field":    {"  - {contract: http, values: {url: u, path: /}}\n", `field "path" is not part of the http contract`},
 		"secret field":     {"  - {contract: http, values: {url: u, token: t}}\n", `"token" is a secret field`},
 		"required field":   {"  - {contract: http, name: other, values: {}}\n", `field "url" is required by the http contract`},
+		"empty secret":     {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: u}}\n", `two http outputs are named "demo-app"`},
 		"internal mismatch": {
 			"  - {contract: http, values: {url: https://elsewhere}}\n",
@@ -116,6 +117,24 @@ func TestDescriptorErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestDescriptorSecret: an output with a secret gets a secretRef, and its
+// credentials Secret follows the descriptor.
+func TestDescriptorSecret(t *testing.T) {
+	res, err := provideCompile("  - {contract: http, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(str(asMap(res.Objects[0]["data"])["outputs.yaml"]), "secretRef:\n    name: other-http-credentials\n") {
+		t.Errorf("outputs.yaml: %s", asMap(res.Objects[0]["data"])["outputs.yaml"])
+	}
+	if len(res.Objects) != 2 || res.Objects[1]["kind"] != "Secret" || dig(res.Objects[1], "metadata.name") != "other-http-credentials" {
+		t.Fatalf("objects: %#v", res.Objects)
+	}
+	if l := asMap(asMap(res.Objects[1]["metadata"])["labels"]); l["okdp.io/credentials-http"] != "true" {
+		t.Errorf("labels: %#v", l)
 	}
 }
 

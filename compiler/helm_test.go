@@ -16,6 +16,9 @@ import (
 // Tests against what Helm computes: the fixtures of testdata/helm are
 // written by `helm template` (testdata/helm/generate.sh, Helm 4).
 
+// helmdata: testdata/helm, at the repository root.
+var helmdata = filepath.Join("..", "testdata", "helm")
+
 // helmJSON: a JSON file written by generate.sh.
 func helmJSON(t *testing.T, path string) any {
 	t.Helper()
@@ -36,7 +39,7 @@ func helmJSON(t *testing.T, path string) any {
 // layers (final.yaml, rewritten by -update), which Helm renders the same
 // (helm-final.json).
 func TestHelmValues(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join("testdata", "helm", "values", "*"))
+	cases, _ := filepath.Glob(filepath.Join(helmdata, "values", "*"))
 	if len(cases) == 0 {
 		t.Fatal("no cases")
 	}
@@ -102,7 +105,7 @@ func TestHelmValues(t *testing.T) {
 // values.schema.json by the coalesced values, as Helm reports them
 // (helm.txt; Helm's order varies, the lines are compared sorted).
 func TestHelmSchema(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join("testdata", "helm", "schema", "*"))
+	cases, _ := filepath.Glob(filepath.Join(helmdata, "schema", "*"))
 	if len(cases) == 0 {
 		t.Fatal("no cases")
 	}
@@ -163,7 +166,7 @@ func TestHelmSchema(t *testing.T) {
 // toJson, toPrettyJson, toYaml, quote and okdp.fullname on the same inputs
 // (testdata/helm/functions).
 func TestHelmFunctions(t *testing.T) {
-	dir := filepath.Join("testdata", "helm", "functions")
+	dir := filepath.Join(helmdata, "functions")
 	b, err := os.ReadFile(filepath.Join(dir, "values.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +216,7 @@ func TestHelmFunctions(t *testing.T) {
 // mapping context and okdpLabels / okdpSelectorLabels, against Helm's
 // .Chart, okdp.labels and okdp.selectorLabels (testdata/helm/labels).
 func TestHelmLabels(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join("testdata", "helm", "labels", "*"))
+	cases, _ := filepath.Glob(filepath.Join(helmdata, "labels", "*"))
 	if len(cases) == 0 {
 		t.Fatal("no cases")
 	}
@@ -249,4 +252,19 @@ func TestHelmLabels(t *testing.T) {
 			}
 		})
 	}
+}
+
+// byKey: objects by kind/namespace/name (helm template sorts them by kind).
+func byKey(t *testing.T, objects []any) map[string]any {
+	t.Helper()
+	out := map[string]any{}
+	for _, o := range objects {
+		m := asMap(o)
+		k := str(m["kind"]) + "/" + str(dig(m, "metadata.namespace")) + "/" + str(dig(m, "metadata.name"))
+		if _, dup := out[k]; dup {
+			t.Errorf("two objects %s", k)
+		}
+		out[k] = m
+	}
+	return out
 }

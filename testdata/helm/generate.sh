@@ -4,7 +4,7 @@
 # (its templates are what the compiler reproduces). Run from anywhere:
 #
 #   go test ./compiler -run TestHelmValues -update   # values/<case>/final.yaml
-#   OKDP_LIB_CHART=../okdp-lib-chart compiler/testdata/helm/generate.sh
+#   OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh
 #
 # values/<case>/: a chart whose values.yaml is <case>/values.yaml, rendered
 #   with -f <case>/layer-*.yaml in order: .Values as JSON in helm.json; and
@@ -12,7 +12,8 @@
 #   layers): helm-final.json.
 # schema/<case>/: a chart with <case>/values.schema.json and values.yaml,
 #   rendered with -f <case>/layer-*.yaml: what helm reports in helm.txt
-#   ("ok" when the values are valid).
+#   ("ok" when the values are valid; Helm's order varies, a report with the
+#   same lines is not rewritten).
 # functions/: Helm's sha256sum, toJson, toPrettyJson, toYaml and quote of
 #   each input of functions/values.yaml, and okdp.fullname of each suffix:
 #   helm.json.
@@ -69,7 +70,11 @@ for c in "$here"/schema/*/; do
   if helm template t "$chart" "${layers[@]}" > /dev/null 2> "$tmp/err"; then
     echo ok > "$c/helm.txt"
   else
-    grep -v '^level=' "$tmp/err" > "$c/helm.txt"
+    grep -v '^level=' "$tmp/err" > "$tmp/report"
+    # Kept when only the order changes.
+    if ! cmp -s <(sort "$tmp/report") <(sort "$c/helm.txt" 2> /dev/null); then
+      mv "$tmp/report" "$c/helm.txt"
+    fi
   fi
 done
 
@@ -112,3 +117,32 @@ data:
 EOF
   render demo-labels "$chart" "$c/helm.json"
 done
+
+# The chart of the secrets cases (the tests build the same).
+svc='apiVersion: v2\nname: svc\nversion: 1.2.3\nappVersion: "4.5"\n'
+
+# secrets/generated/<case>.yaml: okdp.generatedSecret with the arguments
+# under args, rendered in <case>.helm.yaml (or the first line of the error
+# in <case>.helm.txt).
+newchart secrets
+printf "$svc" > "$chart/Chart.yaml"
+printf '{{ include "okdp.generatedSecret" (merge (dict "ctx" $) .Values.args) }}\n' > "$chart/templates/secret.yaml"
+for f in "$here"/secrets/generated/*.yaml; do
+  [[ $f == *.helm.yaml ]] && continue
+  rm -f "${f%.yaml}.helm.yaml" "${f%.yaml}.helm.txt"
+  if helm template demo-secrets "$chart" --namespace demo -f "$f" > "$tmp/out" 2> "$tmp/err"; then
+    mv "$tmp/out" "${f%.yaml}.helm.yaml"
+  else
+    grep -v -m1 '^level=' "$tmp/err" > "${f%.yaml}.helm.txt"
+  fi
+done
+
+# secrets/descriptor/: okdp.descriptor of a chart with outputs.tpl (outputs
+# with a secret), in helm.yaml.
+newchart svc
+d=$here/secrets/descriptor
+printf "$svc" > "$chart/Chart.yaml"
+sed -i '/define "okdp.instance.\(url\|usage\|outputs\)"/d' "$chart/templates/_descriptor.tpl"
+cp "$d/outputs.tpl" "$chart/templates/_outputs.tpl"
+printf '{{ include "okdp.descriptor" . }}\n' > "$chart/templates/descriptor.yaml"
+helm template demo-secrets "$chart" --namespace demo > "$d/helm.yaml"

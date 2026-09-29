@@ -10,7 +10,7 @@
 // client-go and a newer Go and Kubernetes than the console server that
 // embeds this package, for about a hundred lines. They are reproduced from
 // helm v4.3.0 (pkg/chart/common/util/coalesce.go, pkg/chart/v2/loader), and
-// compiler/testdata/helm holds what `helm template` computes on each case.
+// testdata/helm holds what `helm template` computes on each case.
 package compiler
 
 import (

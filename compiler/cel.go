@@ -19,7 +19,8 @@ package compiler
 // 	let (ordered bindings)
 // 	errors (expressions returning lists of messages: any message fails the compile)
 // 	output (chart -> values),
-// 	instance (url, usage) and provides (the connections the instance publishes).
+// 	instance (url, usage) and provides (the connections the instance publishes),
+// 	objects (OKDP's own objects, whole manifests).
 
 import (
 	"fmt"
@@ -200,6 +201,14 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 					}
 				}
 				return types.String("")
+			}))),
+		cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				out, err := generatedSecret(e.ctx, asMap(native(v)))
+				if err != nil {
+					return types.NewErr("%s", err.Error())
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 		cel.Function("okdpDcr", cel.Overload("okdpDcr_map", []*cel.Type{cel.DynType}, cel.DynType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
@@ -555,7 +564,8 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 type mapped struct {
 	output   M     // chart -> computed values
 	instance M     // url, usage
-	provides []any // [{contract, name?, values, secretRef?}]
+	provides []any // [{contract, name?, values, secretRef?, secret?}]
+	objects  []any // OKDP's own objects, whole manifests
 }
 
 // runCEL: runs a mapping (mapping.cel.yaml) on the context ctx.
@@ -600,7 +610,7 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
 	}
 	res := &mapped{}
-	for _, k := range []string{"output", "instance", "provides"} {
+	for _, k := range []string{"output", "instance", "provides", "objects"} {
 		v, _, err := e.node(top.vals[k], scope)
 		if err != nil {
 			return nil, atKey(k, err)
@@ -612,6 +622,18 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 			res.instance = asMap(v)
 		case "provides":
 			res.provides = asList(v)
+		case "objects":
+			if v != nil && asList(v) == nil {
+				return nil, fmt.Errorf("objects: must be a list of objects")
+			}
+			res.objects = asList(v)
+		}
+	}
+	// Every object is a whole manifest: a kind and a name at least.
+	for i, o := range res.objects {
+		m, ok := o.(M)
+		if !ok || str(m["kind"]) == "" || str(dig(m, "metadata.name")) == "" {
+			return nil, fmt.Errorf("objects[%d]: not an object with a kind and a metadata.name: %s", i, short(o))
 		}
 	}
 	return res, nil
