@@ -1,0 +1,5 @@
+# No $schema: draft 2020-12 for Helm 4 (format not asserted, $ref siblings
+# applied).
+ip: 300.1.1.1
+name: long
+replicas: 2.0

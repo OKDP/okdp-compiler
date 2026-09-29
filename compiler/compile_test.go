@@ -216,3 +216,56 @@ func TestUpstreamFiles(t *testing.T) {
 		})
 	}
 }
+
+// TestCompileSchemas: the parameters, then the final values of each chart,
+// against their schemas; every violation is reported with its path.
+func TestCompileSchemas(t *testing.T) {
+	schema := `{"$schema": "http://json-schema.org/draft-07/schema#",
+		"properties": {"replicaCount": {"type": "integer", "maximum": 3}, "image": {"properties": {"tag": {"type": "string", "pattern": "^[0-9.]+$"}}}}}`
+	for name, tc := range map[string]struct {
+		files  fstest.MapFS
+		values M
+		want   string
+	}{
+		"parameters": {
+			nil, M{"replicas": 1.5},
+			"values don't meet the specifications of the schema(s) in the following chart(s):\ndemo:\n- at '/replicas': got number, want integer",
+		},
+		"final values": {
+			fstest.MapFS{"vendor/app/values.schema.json": {Data: []byte(schema)}},
+			M{"replicas": float64(5), "upstream": M{"app": M{"image": M{"tag": "latest"}}}},
+			"compiled values don't meet the specifications of the schema(s) in the following chart(s):\nvendor/app:\n- at '/image/tag': 'latest' does not match pattern '^[0-9.]+$'\n- at '/replicaCount': maximum: got 5, want 3",
+		},
+		"a $ref to a URL": {
+			fstest.MapFS{"vendor/app/values.schema.json": {Data: []byte(`{"$ref": "https://example.org/x.json"}`)}},
+			M{}, "the schema may only reference itself",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ch := maps.Clone(chart)
+			maps.Copy(ch, tc.files)
+			d := *def
+			d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml", Upstream: Upstream{Enabled: true}}}
+			in := inputs(tc.values)
+			in.Chart = ch
+			_, err := Compile(&d, in)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+	// A null that deletes a default is checked as Helm checks it: gone.
+	ch := maps.Clone(chart)
+	ch["vendor/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}
+	in := inputs(M{"upstream": M{"app": M{"labels": nil}}})
+	in.Chart = ch
+	d := *def
+	d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true}}}
+	res, err := Compile(&d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := res.Values["app"]["labels"]; !ok || v != nil {
+		t.Errorf("labels: got %#v, want null (Helm deletes the default)", v)
+	}
+}

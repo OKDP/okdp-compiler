@@ -151,16 +151,22 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Objects: []map[string]any{desc}, Dependencies: deps}
-	// Charts left out by the mapping ($if) are not rendered.
+	// Charts left out by the mapping ($if) are not rendered. Every chart's
+	// schema violations are reported together.
+	violations := map[string]string{}
 	for chart, v := range res.output {
 		if _, ok := svc.Charts[chart]; !ok {
 			return nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", chart)
 		}
-		f, err := finalValues(in, svc, chart, asMap(v), values)
+		f, bad, err := finalValues(in, svc, chart, asMap(v), values)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", chart, err)
 		}
 		out.Values[chart] = f
+		violations["vendor/"+chart] = bad
+	}
+	if err := schemaError("compiled values", violations); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

@@ -22,6 +22,18 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 		user = mergeMaps(user, asMap(normalize(v)))
 	}
 	values := coalesceValues(defaults, user)
+	// Checked against the parameter schema, as Helm checks values.schema.json.
+	v, err := schemaViolations(in.Chart, "values.schema.json", values)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if v != "" {
+		c, err := readChart(in.Chart)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return nil, nil, nil, schemaError("values", map[string]string{c.Name: v})
+	}
 	global := asMap(values["global"])
 	okdpG := asMap(global["okdp"])
 	// 2. platform requirements.

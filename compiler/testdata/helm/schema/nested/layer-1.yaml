@@ -1,0 +1,2 @@
+auth: {password: x}
+items: [{port: 80}, {port: 70000}, {port: "80"}]

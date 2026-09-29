@@ -1,0 +1,5 @@
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+schema:
+- at '/kept': got null, want string
+- at '/nested/t': got null, want string
+

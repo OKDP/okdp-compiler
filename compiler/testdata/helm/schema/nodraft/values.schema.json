@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "realm": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "mode": {"type": "string", "enum": ["a", "b"]},
+    "replicas": {"type": "integer", "minimum": 1},
+    "ratio": {"type": "integer"},
+    "ip": {"type": "string", "format": "ipv4"},
+    "name": {"$ref": "#/definitions/name", "maxLength": 2},
+    "closed": {"type": "object", "additionalProperties": false, "properties": {"a": {"type": "boolean"}}},
+    "client": {"type": "object", "required": ["redirect_uris"]}
+  },
+  "definitions": {"name": {"type": "string"}}
+}

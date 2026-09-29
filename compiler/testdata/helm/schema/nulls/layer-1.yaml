@@ -1,0 +1,5 @@
+# Checked after the coalescing: a null that deletes a default is no
+# violation; a null where there is no default is.
+deleted: null
+kept: null
+nested: {s: null, t: null}

@@ -1,0 +1,9 @@
+# Every kind of violation, with the draft-07 rules: format asserted, $ref
+# siblings ignored.
+realm: "x; rm -rf /"
+mode: c
+replicas: 0
+ratio: 1.5
+ip: 300.1.1.1
+name: long
+closed: {a: yes, b: 1}

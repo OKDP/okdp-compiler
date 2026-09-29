@@ -9,6 +9,9 @@
 #   with -f <case>/layer-*.yaml in order: .Values as JSON in helm.json; and
 #   rendered with -f <case>/final.yaml (the compiler's final values for these
 #   layers): helm-final.json.
+# schema/<case>/: a chart with <case>/values.schema.json and values.yaml,
+#   rendered with -f <case>/layer-*.yaml: what helm reports in helm.txt
+#   ("ok" when the values are valid).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -45,5 +48,20 @@ for c in "$here"/values/*/; do
   render "$chart" "$c/helm.json" "${layers[@]}"
   if [[ -f $c/final.yaml ]]; then
     render "$chart" "$c/helm-final.json" -f "$c/final.yaml"
+  fi
+done
+
+chart=$tmp/schema
+mkdir -p "$chart/templates"
+printf 'apiVersion: v2\nname: schema\nversion: 1.0.0\n' > "$chart/Chart.yaml"
+printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n' > "$chart/templates/x.yaml"
+for c in "$here"/schema/*/; do
+  cp "$c/values.yaml" "$c/values.schema.json" "$chart/"
+  layers=()
+  for l in "$c"/layer-*.yaml; do layers+=(-f "$l"); done
+  if helm template t "$chart" "${layers[@]}" > /dev/null 2> "$tmp/err"; then
+    echo ok > "$c/helm.txt"
+  else
+    grep -v '^level=' "$tmp/err" > "$c/helm.txt"
   fi
 done

@@ -1,0 +1,9 @@
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+schema:
+- at '/auth': 'oneOf' failed, none matched
+  - at '/auth': got object, want string
+  - at '/auth': missing property 'user'
+- at '/items': validation failed
+  - at '/items/1/port': maximum: got 70,000, want 65,535
+  - at '/items/2/port': got string, want integer
+

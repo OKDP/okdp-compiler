@@ -23,10 +23,13 @@ import (
 // 4: a null that deletes a default stays null (Helm deletes the key when it
 // renders), a null where there is no default stays (Helm keeps it), and the
 // null defaults are left out (Helm 4 drops them, Helm 3 copies them back).
-func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M, error) {
+//
+// The violations of the chart's schema (vendor/<chart>/values.schema.json)
+// by these values, as Helm sees them when it renders, are returned apart.
+func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M, string, error) {
 	defaults, err := readValues(in.Chart, path.Join("vendor", chart, "values.yaml"))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	spec := svc.Charts[chart]
 	// Upstream chart defaults first, then OKDP's default values for this
@@ -34,7 +37,7 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M
 	base := M{}
 	if spec.Base != "" {
 		if base, err = readValues(in.Chart, path.Clean(spec.Base)); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	out := layered(defaults, base, computed)
@@ -48,19 +51,20 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M) (M
 		for _, f := range files {
 			u, err := readUpstream(in.Instance, path.Clean(f), optional)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
 			if err := applyUpstream(out, u, source{file: f}, spec.Protect, spec.Append); err != nil {
-				return nil, err
+				return nil, "", err
 			}
 		}
 		if err := applyUpstream(out, asMap(asMap(values["upstream"])[chart]), source{chart: chart}, spec.Protect, spec.Append); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
 	// Every chart gets the instance's global, as a subchart would.
 	out["global"] = layered(asMap(defaults["global"]), asMap(values["global"]), asMap(computed["global"]))
-	return out, nil
+	v, err := schemaViolations(in.Chart, path.Join("vendor", chart, "values.schema.json"), coalesceValues(defaults, out))
+	return out, v, err
 }
 
 // layered: values layers merged as Helm merges -f files, over chart

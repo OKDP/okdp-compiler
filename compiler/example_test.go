@@ -82,7 +82,8 @@ func TestExample(t *testing.T) {
 }
 
 // TestExampleErrors: every testdata/<case>.yaml, applied over the platform
-// values, must fail with the message of its first line (# error: ...).
+// values, must fail with the message of its first line (# error: ..., \n
+// for a line break).
 func TestExampleErrors(t *testing.T) {
 	def, err := LoadDefinition(os.DirFS(example))
 	if err != nil {
@@ -103,6 +104,7 @@ func TestExampleErrors(t *testing.T) {
 			if !ok {
 				t.Fatalf("first line must be \"# error: <message>\", got %q", first)
 			}
+			want = strings.ReplaceAll(want, `\n`, "\n")
 			_, err = Compile(def, exampleInputs(t, f))
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("got %v, want an error containing %q", err, want)

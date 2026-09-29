@@ -1,0 +1,10 @@
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+schema:
+- at '/client': missing property 'redirect_uris'
+- at '/replicas': minimum: got 0, want 1
+- at '/closed': additional properties 'b' not allowed
+- at '/ip': '300.1.1.1' is not valid ipv4: decimal must be between 0 and 255
+- at '/mode': value must be one of 'a', 'b'
+- at '/ratio': got number, want integer
+- at '/realm': 'x; rm -rf /' does not match pattern '^[A-Za-z0-9_.-]+$'
+

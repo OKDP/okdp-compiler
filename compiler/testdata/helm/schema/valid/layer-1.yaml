@@ -1,0 +1,7 @@
+realm: my.realm
+replicas: 3
+ratio: 2.0
+ip: 10.0.0.1
+name: ab
+closed: {a: true}
+client: {redirect_uris: []}

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -90,6 +92,66 @@ func TestHelmValues(t *testing.T) {
 			// values give what the templates see.
 			if got := coalesceValues(defaults, final); !reflect.DeepEqual(any(got), want) {
 				t.Errorf("final values coalesced:\n got %#v\nwant %#v", got, want)
+			}
+		})
+	}
+}
+
+// TestHelmSchema: for each testdata/helm/schema/<case>, the violations of
+// values.schema.json by the coalesced values, as Helm reports them
+// (helm.txt; Helm's order varies, the lines are compared sorted).
+func TestHelmSchema(t *testing.T) {
+	cases, _ := filepath.Glob(filepath.Join("testdata", "helm", "schema", "*"))
+	if len(cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, dir := range cases {
+		t.Run(filepath.Base(dir), func(t *testing.T) {
+			fsys := os.DirFS(dir)
+			defaults, err := readValues(fsys, "values.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			files, _ := filepath.Glob(filepath.Join(dir, "layer-*.yaml"))
+			user := M{}
+			for _, f := range files {
+				b, err := os.ReadFile(f)
+				if err != nil {
+					t.Fatal(err)
+				}
+				l, err := ParseValues(b)
+				if err != nil {
+					t.Fatalf("%s: %v", f, err)
+				}
+				user = mergeMaps(user, l)
+			}
+			v, err := schemaViolations(fsys, "values.schema.json", coalesceValues(defaults, user))
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := os.ReadFile(filepath.Join(dir, "helm.txt"))
+			if err != nil {
+				t.Fatalf("%v (run testdata/helm/generate.sh)", err)
+			}
+			helm := strings.TrimSpace(string(b))
+			if helm == "ok" {
+				if v != "" {
+					t.Errorf("Helm accepts the values, got:\n%s", v)
+				}
+				return
+			}
+			// Helm: "Error: <message>", "<chart>:", then the violations.
+			lines := strings.Split(helm, "\n")
+			got := schemaError("values", map[string]string{"schema": v})
+			if got == nil {
+				t.Fatalf("no violation, Helm reports:\n%s", helm)
+			}
+			if want := strings.TrimPrefix(lines[0], "Error: ") + "\n" + lines[1]; !strings.HasPrefix(got.Error(), want) {
+				t.Errorf("got %q, want it to start with %q", got.Error(), want)
+			}
+			want := slices.Sorted(slices.Values(lines[2:]))
+			if g := slices.Sorted(slices.Values(strings.Split(v, "\n"))); !slices.Equal(g, want) {
+				t.Errorf("got\n%s\nwant (sorted)\n%s", strings.Join(g, "\n"), strings.Join(want, "\n"))
 			}
 		})
 	}

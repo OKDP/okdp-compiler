@@ -1,0 +1,5 @@
+Error: values don't meet the specifications of the schema(s) in the following chart(s):
+schema:
+- at '/name': maxLength: got 4, want 2
+- at '/client': missing property 'redirect_uris'
+
