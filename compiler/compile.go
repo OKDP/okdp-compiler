@@ -162,6 +162,25 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The OAuth clients (oidcClients, oidc.go): checked in every mode; in dcr
+	// mode, the oidc-dcr chart of each, computed as the mapping's output.
+	clients, dcrValues, err := oidcClients(ctx, res.clients)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range clients {
+		if _, ok := res.output[c.chart]; ok {
+			return nil, fmt.Errorf("mapping output %q: the chart of %s, compiled from oidcClients: remove it from output", c.chart, c.where)
+		}
+		v, ok := dcrValues[c.chart]
+		if !ok {
+			continue
+		}
+		if _, ok := svc.Charts[c.chart]; !ok {
+			return nil, fmt.Errorf("%s: chart %q is not a chart of service.yaml", c.where, c.chart)
+		}
+		res.output[c.chart] = v
+	}
 	// The descriptor ConfigMap, checked against the contracts, and the
 	// credentials Secrets of the outputs; then the mapping's objects.
 	desc, credentials, err := descriptor(in, ctx, res.instance, res.provides)

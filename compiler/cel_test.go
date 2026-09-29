@@ -246,24 +246,25 @@ output:
 // TestMappingErrors: invalid mappings, and where their errors point.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
-		"errors are collected":  {"errors:\n  - '${{ [\"one\"] }}'\n  - '${{ [] }}'\n  - '${{ [\"two\"] }}'\n", "one\ntwo"},
-		"errors position":       {"errors:\n  - '${{ [] }}'\n  - '${{ nope }}'\n", "errors[1]: ${{ nope }}:"},
-		"not a map":             {"- a\n", "must be a YAML map"},
-		"invalid YAML":          {"output: [\n", "yaml"},
-		"unterminated":          {"output: {x: {v: '${{ 1 + '}}\n", "unterminated ${{"},
-		"syntax error":          {"output: {x: {v: '${{ 1 + }}'}}\n", "${{ 1 + }}"},
-		"unknown variable":      {"output: {x: {v: '${{ nope }}'}}\n", "undeclared reference"},
-		"key path in the error": {"output: {x: {a: {b: '${{ nope }}'}}}\n", "output: x: a: b:"},
-		"list positions":        {"output: {x: {l: [a, {b: [1, '${{ nope }}']}]}}\n", "output: x: l[1]: b[1]: ${{ nope }}:"},
-		"list in a list":        {"output: {x: {l: [[1, '${{ nope }}']]}}\n", "output: x: l[0][1]: ${{ nope }}:"},
-		"$for position":         {"output: {x: {l: [0, {$for: c in values.items, $each: '${{ nope }}'}]}}\n", "output: x: l[1]: ${{ nope }}:"},
-		"$spread position":      {"output: {x: {l: [0, {$spread: '${{ nope }}'}]}}\n", "output: x: l[1]: ${{ nope }}:"},
-		"let name":              {"let: {a: '${{ nope }}'}\n", "let a:"},
-		"let list position":     {"let: {a: [1, '${{ nope }}']}\n", "let a[1]: ${{ nope }}:"},
-		"$let name":             {"output: {x: {l: [{$for: c in values.items, $let: {d: '${{ nope }}'}, $each: 1}]}}\n", "output: x: l[0]: $let d: ${{ nope }}:"},
-		"$for syntax":           {"output: {x: {m: {$for: c values.items, $key: a, $value: 1}}}\n", `is not "<name> in <expression>"`},
-		"$for not a list":       {"output: {x: {m: {$for: c in values.extra, $key: a, $value: 1}}}\n", "not a list"},
-		"function error":        {"output: {x: {v: '${{ okdpDcr({}) }}'}}\n", "authMethod"},
+		"errors are collected":   {"errors:\n  - '${{ [\"one\"] }}'\n  - '${{ [] }}'\n  - '${{ [\"two\"] }}'\n", "one\ntwo"},
+		"errors position":        {"errors:\n  - '${{ [] }}'\n  - '${{ nope }}'\n", "errors[1]: ${{ nope }}:"},
+		"not a map":              {"- a\n", "must be a YAML map"},
+		"invalid YAML":           {"output: [\n", "yaml"},
+		"unterminated":           {"output: {x: {v: '${{ 1 + '}}\n", "unterminated ${{"},
+		"syntax error":           {"output: {x: {v: '${{ 1 + }}'}}\n", "${{ 1 + }}"},
+		"unknown variable":       {"output: {x: {v: '${{ nope }}'}}\n", "undeclared reference"},
+		"key path in the error":  {"output: {x: {a: {b: '${{ nope }}'}}}\n", "output: x: a: b:"},
+		"list positions":         {"output: {x: {l: [a, {b: [1, '${{ nope }}']}]}}\n", "output: x: l[1]: b[1]: ${{ nope }}:"},
+		"list in a list":         {"output: {x: {l: [[1, '${{ nope }}']]}}\n", "output: x: l[0][1]: ${{ nope }}:"},
+		"$for position":          {"output: {x: {l: [0, {$for: c in values.items, $each: '${{ nope }}'}]}}\n", "output: x: l[1]: ${{ nope }}:"},
+		"$spread position":       {"output: {x: {l: [0, {$spread: '${{ nope }}'}]}}\n", "output: x: l[1]: ${{ nope }}:"},
+		"let name":               {"let: {a: '${{ nope }}'}\n", "let a:"},
+		"let list position":      {"let: {a: [1, '${{ nope }}']}\n", "let a[1]: ${{ nope }}:"},
+		"$let name":              {"output: {x: {l: [{$for: c in values.items, $let: {d: '${{ nope }}'}, $each: 1}]}}\n", "output: x: l[0]: $let d: ${{ nope }}:"},
+		"$for syntax":            {"output: {x: {m: {$for: c values.items, $key: a, $value: 1}}}\n", `is not "<name> in <expression>"`},
+		"$for not a list":        {"output: {x: {m: {$for: c in values.extra, $key: a, $value: 1}}}\n", "not a list"},
+		"function error":         {"output: {x: {v: '${{ okdpGeneratedSecret({}) }}'}}\n", "name is required"},
+		"oidcClients not a list": {"oidcClients: {a: 1}\n", "oidcClients: must be a list of OAuth clients"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := runCEL([]byte(tc.src), mapCtx())
@@ -271,6 +272,14 @@ func TestMappingErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestTemplateErrors: an error of a template's values names its path.
+func TestTemplateErrors(t *testing.T) {
+	_, err := evalTemplate([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx())
+	if want := "values: a[1]: ${{ nope }}:"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("got %v, want an error containing %q", err, want)
 	}
 }
 

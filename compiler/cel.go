@@ -20,7 +20,11 @@ package compiler
 // 	errors (expressions returning lists of messages: any message fails the compile)
 // 	output (chart -> values),
 // 	instance (url, usage) and provides (the connections the instance publishes),
-// 	objects (OKDP's own objects, whole manifests).
+// 	objects (OKDP's own objects, whole manifests),
+// 	oidcClients (the OAuth clients of the service, oidc.go).
+//
+// The compiler's own templates (oidc-dcr.cel.yaml) are written in the same
+// language: let, errors, then the values they compute (evalTemplate).
 
 import (
 	"fmt"
@@ -174,7 +178,7 @@ func mapKey(n *yaml.Node) (string, error) {
 }
 
 // celEngine: evaluates a mapping. It caches the CEL environments and keeps
-// the compile context for okdpDcr.
+// the compile context for the host functions that need it.
 type celEngine struct {
 	envs map[string]*cel.Env
 	ctx  M
@@ -210,19 +214,12 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 				}
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
-		cel.Function("okdpDcr", cel.Overload("okdpDcr_map", []*cel.Type{cel.DynType}, cel.DynType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				out, err := okdpDcr(e.ctx, asMap(native(v)))
-				if err != nil {
-					return types.NewErr("%s", err.Error())
-				}
-				return types.DefaultTypeAdapter.NativeToValue(out)
-			}))),
 	}
 	release := str(dig(e.ctx, "release.name"))
 	chart := chartMeta{Name: str(dig(e.ctx, "chart.name")), Version: str(dig(e.ctx, "chart.version")), AppVersion: str(dig(e.ctx, "chart.appVersion"))}
 	opts = append(opts, hostFunctions(release)...)
 	opts = append(opts, labelFunctions(chart, release)...)
+	opts = append(opts, oidcFunctions(e.ctx)...)
 	// Every variable is dynamic: values are plain YAML data.
 	for _, n := range names {
 		opts = append(opts, cel.Variable(n, cel.DynType))
@@ -566,10 +563,12 @@ type mapped struct {
 	instance M     // url, usage
 	provides []any // [{contract, name?, values, secretRef?, secret?}]
 	objects  []any // OKDP's own objects, whole manifests
+	clients  []any // the OAuth clients (oidcClients), checked by oidc.go
 }
 
-// runCEL: runs a mapping (mapping.cel.yaml) on the context ctx.
-func runCEL(b []byte, ctx M) (*mapped, error) {
+// parseDoc: a YAML + CEL document (a mapping, a template), its maps
+// ordered.
+func parseDoc(b []byte) (*omap, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, err
@@ -582,8 +581,13 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 	if !ok {
 		return nil, fmt.Errorf("the mapping must be a YAML map")
 	}
-	e := &celEngine{envs: map[string]*cel.Env{}, ctx: ctx}
-	// The context, then the let bindings, in order: each sees the previous ones.
+	return top, nil
+}
+
+// bind: the scope of a document's sections: the context, then its let
+// bindings, in order (each sees the previous ones); then its errors
+// section, every message collected before failing.
+func (e *celEngine) bind(top *omap, ctx M) (M, error) {
 	scope := M{}
 	maps.Copy(scope, ctx)
 	if lets, ok := top.vals["let"].(*omap); ok {
@@ -595,7 +599,6 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 			scope[lets.name(k)] = v
 		}
 	}
-	// All error messages are collected before failing.
 	var msgs []string
 	for i, x := range asList(top.vals["errors"]) {
 		v, _, err := e.node(x, scope)
@@ -609,8 +612,41 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 	if len(msgs) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
 	}
+	return scope, nil
+}
+
+// evalTemplate: a template of the compiler (YAML + CEL, embedded) on the
+// context ctx: its let bindings and errors, then its values section.
+func evalTemplate(b []byte, ctx M) (M, error) {
+	top, err := parseDoc(b)
+	if err != nil {
+		return nil, err
+	}
+	e := &celEngine{envs: map[string]*cel.Env{}, ctx: ctx}
+	scope, err := e.bind(top, ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, _, err := e.node(top.vals["values"], scope)
+	if err != nil {
+		return nil, atKey("values", err)
+	}
+	return asMap(v), nil
+}
+
+// runCEL: runs a mapping (mapping.cel.yaml) on the context ctx.
+func runCEL(b []byte, ctx M) (*mapped, error) {
+	top, err := parseDoc(b)
+	if err != nil {
+		return nil, err
+	}
+	e := &celEngine{envs: map[string]*cel.Env{}, ctx: ctx}
+	scope, err := e.bind(top, ctx)
+	if err != nil {
+		return nil, err
+	}
 	res := &mapped{}
-	for _, k := range []string{"output", "instance", "provides", "objects"} {
+	for _, k := range []string{"output", "instance", "provides", "objects", "oidcClients"} {
 		v, _, err := e.node(top.vals[k], scope)
 		if err != nil {
 			return nil, atKey(k, err)
@@ -627,6 +663,11 @@ func runCEL(b []byte, ctx M) (*mapped, error) {
 				return nil, fmt.Errorf("objects: must be a list of objects")
 			}
 			res.objects = asList(v)
+		case "oidcClients":
+			if v != nil && asList(v) == nil {
+				return nil, fmt.Errorf("oidcClients: must be a list of OAuth clients")
+			}
+			res.clients = asList(v)
 		}
 	}
 	// Every object is a whole manifest: a kind and a name at least.

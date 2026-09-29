@@ -67,11 +67,9 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	dcr["enabled"] = truthy(oidc["enabled"]) && mode == "dcr"
 	oidc["dcr"] = dcr
 	oidc["existing"] = truthy(oidc["enabled"]) && mode == "existing"
-	// The Secret that holds the OAuth client: provisioned, or registered by DCR.
-	clientSecret := fmt.Sprintf("creds-%s-oauth2", in.Release)
-	if dcr["enabled"] == true {
-		clientSecret = fmt.Sprintf("%s-%s-dcr", in.Release, in.Namespace)
-	}
+	// The Secret that holds the service's main OAuth client: provisioned, or
+	// registered by DCR (oidc.go; oidcClientSecret(name) for the others).
+	mainSecret := clientSecret(in.Release, in.Namespace, dcr["enabled"] == true, "")
 	// Proxy settings, as environment variables.
 	proxy := asMap(okdpG["proxy"])
 	proxyEnv := M{}
@@ -84,7 +82,7 @@ func buildContext(in Inputs, svc *Service) (M, M, []Dependency, error) {
 	// okdp.oidc.clientSecret, okdp.ingressAnnotations and okdp.proxy.env).
 	platform := M{
 		"oidc":               oidc,
-		"oidcClientSecret":   clientSecret,
+		"oidcClientSecret":   mainSecret,
 		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": str(dig(okdpG, "certificateIssuers.selfSigned.name"))},
 		"proxyEnv":           proxyEnv,
 	}
