@@ -216,9 +216,8 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 			}))),
 	}
 	release := str(dig(e.ctx, "release.name"))
-	chart := chartMeta{Name: str(dig(e.ctx, "chart.name")), Version: str(dig(e.ctx, "chart.version")), AppVersion: str(dig(e.ctx, "chart.appVersion"))}
 	opts = append(opts, hostFunctions(release)...)
-	opts = append(opts, labelFunctions(chart, release)...)
+	opts = append(opts, labelFunctions(ctxService(e.ctx), release)...)
 	opts = append(opts, oidcFunctions(e.ctx)...)
 	// Every variable is dynamic: values are plain YAML data.
 	for _, n := range names {

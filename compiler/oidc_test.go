@@ -300,7 +300,7 @@ func TestDcrErrors(t *testing.T) {
 // compiled from vendor/oidc-dcr (its defaults merged); the compiler owns
 // these charts: service.yaml and the mapping's output may not list them.
 func TestDcrCompile(t *testing.T) {
-	ch := maps.Clone(chart)
+	ch := maps.Clone(pkg)
 	ch["vendor/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	mapping := `
@@ -321,16 +321,14 @@ oidcClients:
     grantTypes: [authorization_code]
 `
 	compile := func(output string, existing bool, charts map[string]ChartSpec, files fstest.MapFS, values M) (*Result, error) {
-		d := *def
+		d := withFiles(files)
 		d.Mapping = []byte(strings.Replace(mapping, "%s", output, 1))
 		d.Service.Charts = charts
 		p := asMap(deepCopy(platform))
 		if existing {
 			dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
 		}
-		in := inputs(p, values)
-		in.Chart = files
-		return Compile(&d, in)
+		return Compile(d, inputs(p, values))
 	}
 	app := map[string]ChartSpec{"app": {}}
 	for name, tc := range map[string]struct {
@@ -373,7 +371,7 @@ oidcClients:
 			}
 		})
 	}
-	noVendor := maps.Clone(chart)
+	noVendor := maps.Clone(pkg)
 	for name, tc := range map[string]struct {
 		output   string
 		existing bool

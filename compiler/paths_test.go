@@ -177,7 +177,7 @@ func TestServicePaths(t *testing.T) {
 		"charts:\n  app:\n    chart: ../x\n":                `service.yaml: charts.app.chart "../x": not the name of a vendored chart`,
 		"charts:\n  app:\n    protect: ['a[\"b.c*\"].d']\n": "",
 	} {
-		_, err := LoadDefinition(fstest.MapFS{"service.yaml": {Data: []byte(yml)}, "mapping.cel.yaml": {Data: mapping}})
+		_, err := LoadDefinition(fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\n" + yml)}, "mapping.cel.yaml": {Data: mapping}})
 		if want == "" {
 			if err != nil {
 				t.Errorf("%s: %v", yml, err)

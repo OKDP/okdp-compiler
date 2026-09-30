@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/google/cel-go/cel"
 	"gopkg.in/yaml.v3"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // Tests against what Helm computes: the fixtures of testdata/helm are
@@ -212,46 +215,90 @@ func TestHelmFunctions(t *testing.T) {
 	}
 }
 
-// TestHelmLabels: the chart metadata, labels and selectorLabels of the
-// mapping context and okdpLabels / okdpSelectorLabels, against Helm's
-// .Chart, okdp.labels and okdp.selectorLabels (testdata/helm/labels).
-func TestHelmLabels(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join(helmdata, "labels", "*"))
-	if len(cases) == 0 {
-		t.Fatal("no cases")
+// readYAMLStream: the documents of a multi-document YAML stream (a `helm
+// template` output), each read as Helm reads YAML.
+func readYAMLStream(b []byte) ([]any, error) {
+	docs, err := splitDocuments(b)
+	if err != nil {
+		return nil, err
 	}
-	for _, dir := range cases {
-		t.Run(filepath.Base(dir), func(t *testing.T) {
-			chart, err := readChart(os.DirFS(dir))
-			if err != nil {
-				t.Fatal(err)
-			}
-			helm := asMap(helmJSON(t, filepath.Join(dir, "helm.json")))
-			hc := asMap(helm["chart"])
-			if want := (chartMeta{Name: str(hc["Name"]), Version: str(hc["Version"]), AppVersion: str(hc["AppVersion"])}); chart != want {
-				t.Errorf("chart: got %#v, want %#v", chart, want)
-			}
-			release := str(helm["release"])
-			ctx := chartContext(chart, release)
-			ctx["release"] = M{"name": release}
-			e := &celEngine{envs: map[string]*cel.Env{}, ctx: ctx}
-			want := asMap(helm["out"])
-			for name, expr := range map[string]string{
-				"labels":                  "labels",
-				"labelsComponent":         "okdpLabels('hook')",
-				"selectorLabels":          "selectorLabels",
-				"selectorLabelsComponent": "okdpSelectorLabels('hook')",
-			} {
-				got, err := e.eval(expr, ctx)
-				if err != nil {
-					t.Fatalf("%s: %v", expr, err)
-				}
-				if !reflect.DeepEqual(got, want[name]) {
-					t.Errorf("%s:\n got %#v\nwant %#v", expr, got, want[name])
-				}
-			}
-		})
+	var out []any
+	for _, doc := range docs {
+		var v any
+		if err := sigsyaml.Unmarshal(doc, &v); err != nil {
+			return nil, err
+		}
+		if v != nil {
+			out = append(out, v)
+		}
 	}
+	return out, nil
+}
+
+// diffPaths: the differences between two values, one line per path.
+func diffPaths(a, b any, path string) []string {
+	am, aok := a.(M)
+	bm, bok := b.(M)
+	if aok && bok {
+		var out []string
+		keys := map[string]bool{}
+		for k := range am {
+			keys[k] = true
+		}
+		for k := range bm {
+			keys[k] = true
+		}
+		for _, k := range slices.Sorted(maps.Keys(keys)) {
+			x, inA := am[k]
+			y, inB := bm[k]
+			p := path + "." + k
+			switch {
+			case !inA:
+				out = append(out, fmt.Sprintf("missing %s (want %v)", p, short(y)))
+			case !inB:
+				out = append(out, fmt.Sprintf("extra   %s = %v", p, short(x)))
+			default:
+				out = append(out, diffPaths(x, y, p)...)
+			}
+		}
+		return out
+	}
+	// Lists of the same length: item by item. Otherwise compared whole.
+	al, aok := a.([]any)
+	bl, bok := b.([]any)
+	if aok && bok && len(al) == len(bl) {
+		var out []string
+		for i := range al {
+			out = append(out, diffPaths(al[i], bl[i], fmt.Sprintf("%s[%d]", path, i))...)
+		}
+		return out
+	}
+	if fmt.Sprintf("%#v", a) != fmt.Sprintf("%#v", b) {
+		return []string{fmt.Sprintf("changed %s: got %v, want %v", path, short(a), short(b))}
+	}
+	return nil
+}
+
+// withoutChartLabel: Helm's objects without their helm.sh/chart labels (of
+// the objects, and of the Secret an ExternalSecret writes), which the
+// compiler does not set: OKDP's objects belong to no chart of the service.
+func withoutChartLabel(objects []any) []any {
+	var drop func(v any)
+	drop = func(v any) {
+		switch t := v.(type) {
+		case M:
+			delete(t, "helm.sh/chart")
+			for _, x := range t {
+				drop(x)
+			}
+		case []any:
+			for _, x := range t {
+				drop(x)
+			}
+		}
+	}
+	drop(objects)
+	return objects
 }
 
 // byKey: objects by kind/namespace/name (helm template sorts them by kind).

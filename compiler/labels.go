@@ -1,21 +1,31 @@
-// Labels: the labels of the objects OKDP renders itself, as okdp.labels and
-// okdp.selectorLabels of okdp-lib-chart compute them from the wrapper chart
-// (Chart.yaml) and the release.
+// Labels: the labels of the objects OKDP renders itself, from the package
+// (service.yaml's name and appVersion) and the release.
 package compiler
 
 import (
-	"strings"
-
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 )
 
-// selectorLabels: okdp.selectorLabels, the stable subset of the labels, for
-// selectors; with app.kubernetes.io/component when component is not empty.
-func selectorLabels(chart chartMeta, release, component string) M {
+// serviceMeta: what the mapping and OKDP's objects see of the package:
+// service.yaml's name, version and appVersion.
+type serviceMeta struct {
+	Name       string
+	Version    string
+	AppVersion string
+}
+
+// ctxService: the package of a mapping context.
+func ctxService(ctx M) serviceMeta {
+	return serviceMeta{Name: str(dig(ctx, "service.name")), Version: str(dig(ctx, "service.version")), AppVersion: str(dig(ctx, "service.appVersion"))}
+}
+
+// selectorLabels: the stable subset of the labels, for selectors; with
+// app.kubernetes.io/component when component is not empty.
+func selectorLabels(svc serviceMeta, release, component string) M {
 	out := M{
-		"app.kubernetes.io/name":     chart.Name,
+		"app.kubernetes.io/name":     svc.Name,
 		"app.kubernetes.io/instance": release,
 	}
 	if component != "" {
@@ -24,40 +34,40 @@ func selectorLabels(chart chartMeta, release, component string) M {
 	return out
 }
 
-// labels: okdp.labels, the labels of every object OKDP renders itself:
-// helm.sh/chart, the selector labels (and component), the application
-// version when Chart.yaml has one, Helm as manager, part of okdp, and the
-// instance and service OKDP finds the objects by.
-func labels(chart chartMeta, release, component string) M {
-	out := selectorLabels(chart, release, component)
-	out["helm.sh/chart"] = strings.TrimSuffix(trunc(strings.ReplaceAll(chart.Name+"-"+chart.Version, "+", "_"), 63), "-")
-	if chart.AppVersion != "" {
-		out["app.kubernetes.io/version"] = chart.AppVersion
+// labels: the labels of every object OKDP renders itself: the selector
+// labels (and component), the application version when service.yaml has
+// one, Helm as manager (the objects chart renders them), part of okdp, and
+// the instance and service OKDP finds the objects by. No helm.sh/chart: the
+// objects belong to no chart of the service.
+func labels(svc serviceMeta, release, component string) M {
+	out := selectorLabels(svc, release, component)
+	if svc.AppVersion != "" {
+		out["app.kubernetes.io/version"] = svc.AppVersion
 	}
 	out["app.kubernetes.io/managed-by"] = "Helm"
 	out["app.kubernetes.io/part-of"] = "okdp"
 	out["okdp.io/instance"] = release
-	out["okdp.io/service"] = chart.Name
+	out["okdp.io/service"] = svc.Name
 	return out
 }
 
-// chartContext: what the mapping sees of the wrapper chart: chart (name,
+// serviceContext: what the mapping sees of the package: service (name,
 // version, appVersion), labels and selectorLabels (without component).
-func chartContext(chart chartMeta, release string) M {
+func serviceContext(svc serviceMeta, release string) M {
 	return M{
-		"chart":          M{"name": chart.Name, "version": chart.Version, "appVersion": chart.AppVersion},
-		"labels":         labels(chart, release, ""),
-		"selectorLabels": selectorLabels(chart, release, ""),
+		"service":        M{"name": svc.Name, "version": svc.Version, "appVersion": svc.AppVersion},
+		"labels":         labels(svc, release, ""),
+		"selectorLabels": selectorLabels(svc, release, ""),
 	}
 }
 
 // labelFunctions: okdpLabels(component) and okdpSelectorLabels(component),
 // the labels with app.kubernetes.io/component.
-func labelFunctions(chart chartMeta, release string) []cel.EnvOption {
-	fn := func(name string, f func(chartMeta, string, string) M) cel.EnvOption {
+func labelFunctions(svc serviceMeta, release string) []cel.EnvOption {
+	fn := func(name string, f func(serviceMeta, string, string) M) cel.EnvOption {
 		return cel.Function(name, cel.Overload(name+"_dyn", []*cel.Type{cel.DynType}, cel.DynType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				return types.DefaultTypeAdapter.NativeToValue(f(chart, release, text(v)))
+				return types.DefaultTypeAdapter.NativeToValue(f(svc, release, text(v)))
 			})))
 	}
 	return []cel.EnvOption{fn("okdpLabels", labels), fn("okdpSelectorLabels", selectorLabels)}

@@ -1,11 +1,19 @@
-# Service definition of the webapp example (the wrapper chart is webapp/).
-# Engine-neutral part: the upstream charts, their base values (OKDP's
-# defaults, plain YAML), and what an instance may override: its
-# upstream.<chart>.yaml file (upstream: true; or a path, or a list of paths),
-# then its inline upstream.<chart> values. The mapping (mapping.cel.yaml)
-# computes the rest; it sees the instance's upstream values merged, files
-# and inline, as values.upstream.<chart>.
+# The webapp example package: its name and versions, its catalog metadata,
+# the upstream charts, their base values (OKDP's defaults, plain YAML), and
+# what an instance may override: its upstream.<chart>.yaml file (upstream:
+# true; or a path, or a list of paths), then its inline upstream.<chart>
+# values. The mapping (mapping.cel.yaml) computes the rest; it sees the
+# instance's upstream values merged, files and inline, as
+# values.upstream.<chart>. The parameters an instance sets are values.yaml
+# and values.schema.json, beside this file.
 
+name: webapp
+version: 1.0.0
+appVersion: "2.3"                      # quoted: a version, not a number
+# Catalog metadata: what the service provides, and the platform services it
+# needs.
+roles: [webapp]
+dependsOn: [database-server, ingress]
 # Platform values the service needs, under global.okdp (the compile fails
 # when one is missing).
 require:
@@ -13,7 +21,7 @@ require:
   - ingress.className                  # ingress class of the platform
   - certificateIssuers.selfSigned.name # issuer of the instance's TLS certificate
   - oidc.issuerUri                     # identity provider the application signs users in with
-# The upstream charts vendored by the wrapper chart (webapp/vendor/<chart>/),
+# The upstream charts vendored in the package (webapp/vendor/<chart>/),
 # by name, as the mapping outputs them. A chart may name the vendored chart
 # it compiles from and renders with (chart: <vendored chart>), e.g. a chart
 # rendered twice. The oidc-dcr chart of the mapping's OAuth client
@@ -21,7 +29,7 @@ require:
 # webapp/vendor/oidc-dcr.
 charts:
   app:                                 # the application chart
-    base: vendor-values/app.yaml       # OKDP's default values, over the chart's own defaults
+    base: base/app.yaml                # OKDP's default values, over the chart's own defaults
     upstream: true                     # user values accepted: upstream.app.yaml, then inline upstream.app
     # Set by the platform: user values may not change them. A key that
     # contains dots is written in brackets, a family of keys with a final

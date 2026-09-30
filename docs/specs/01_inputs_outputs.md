@@ -1091,27 +1091,3 @@ values:
     global: {okdp: ...}
     objects: [...]                         # the four objects above
 ```
-
-## Compare
-
-`compiler.Compare(def, in, res, rendered, w)` checks a result against a
-`helm template` output of the wrapper chart rendered with the same values
-(the wrapper rendering its values with okdp-lib-chart). It reads `rendered`
-as Helm reads YAML, then:
-
-- every object of `Result.Objects` must be rendered, with the same `kind`
-  and `metadata.name`, and be equal, compared whole;
-- every chart of `Result.Values` must have its values ConfigMap, looked up
-  by chart key (the vendored chart plays no part): labelled
-  `okdp.io/vendor-values`, named `charts.<key>.values` (`{release}`
-  replaced by the release), else `<release>-<key>-values`; an
-  [OAuth client chart](#oauth-client-charts) has no `service.yaml` entry:
-  `<release>-oidc-dcr-values`, `<release>-<name>-oidc-dcr-values`. Its
-  `data.values.yaml` must equal the final values, path by path. A key
-  `null` in the rendered values and missing from the compiled ones is not a
-  difference (a `null` default, which Helm drops): it is counted;
-- every rendered values ConfigMap must belong to a compiled chart.
-
-The other rendered objects are not compared. It writes one line per object
-and per chart to `w`, and fails with `<n> difference(s)`. The command
-line: [`--expect`](../01_usage.md#--expect).

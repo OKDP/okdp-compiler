@@ -206,32 +206,41 @@ output:
 	}
 }
 
-// TestMappingChart: the chart metadata and labels in the context; let and
-// $let bindings and $for variables shadow them.
-func TestMappingChart(t *testing.T) {
+// TestMappingService: the package metadata and labels in the context; let
+// and $let bindings and $for variables shadow them.
+func TestMappingService(t *testing.T) {
 	ctx := mapCtx()
-	maps.Copy(ctx, chartContext(chartMeta{Name: "demo", Version: "1.0.0", AppVersion: "4.5"}, "demo-x"))
+	maps.Copy(ctx, serviceContext(serviceMeta{Name: "demo", Version: "1.0.0", AppVersion: "4.5"}, "demo-x"))
 	src := `
 output:
   x:
-    tag: ${{ chart.appVersion }}
+    tag: ${{ service.appVersion }}
     labels: ${{ labels }}
     selector: ${{ okdpSelectorLabels('db') }}
-    loop: [{$for: "chart in ['a']", $let: {selectorLabels: '${{ chart }}'}, $each: '${{ selectorLabels }}'}]
+    loop: [{$for: "service in ['a']", $let: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
 `
 	res, err := runCEL([]byte(src), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	x := asMap(res.output["x"])
-	if x["tag"] != "4.5" || asMap(x["labels"])["helm.sh/chart"] != "demo-1.0.0" || asMap(x["labels"])["app.kubernetes.io/version"] != "4.5" {
-		t.Errorf("chart and labels: %#v", x)
+	wantLabels := M{
+		"app.kubernetes.io/name":       "demo",
+		"app.kubernetes.io/instance":   "demo-x",
+		"app.kubernetes.io/version":    "4.5",
+		"app.kubernetes.io/managed-by": "Helm",
+		"app.kubernetes.io/part-of":    "okdp",
+		"okdp.io/instance":             "demo-x",
+		"okdp.io/service":              "demo",
+	}
+	if x["tag"] != "4.5" || !reflect.DeepEqual(x["labels"], wantLabels) {
+		t.Errorf("service and labels: %#v", x)
 	}
 	if want := (M{"app.kubernetes.io/name": "demo", "app.kubernetes.io/instance": "demo-x", "app.kubernetes.io/component": "db"}); !reflect.DeepEqual(x["selector"], want) {
 		t.Errorf("selector: %#v", x["selector"])
 	}
 	if want := []any{"a"}; !reflect.DeepEqual(x["loop"], want) {
-		t.Errorf("$for and $let shadow chart and selectorLabels: %#v", x["loop"])
+		t.Errorf("$for and $let shadow service and selectorLabels: %#v", x["loop"])
 	}
 	// A mapping's own labels binding wins over the context's.
 	res, err = runCEL([]byte("let:\n  labels: {mine: 'yes'}\n"+src), ctx)

@@ -33,12 +33,12 @@ import (
 // The violations of the chart's schema (vendor/<chart>/values.schema.json)
 // by these values, as Helm sees them when it renders, are returned apart.
 //
-// ups: the instance's upstream values, by the chart that accepts them
-// (readUpstreamValues).
-func finalValues(in Inputs, svc *Service, chart string, computed M, values M, ups map[string]*chartUpstream) (M, string, error) {
+// files: the package. ups: the instance's upstream values, by the chart that
+// accepts them (readUpstreamValues).
+func finalValues(files fs.FS, svc *Service, chart string, computed M, values M, ups map[string]*chartUpstream) (M, string, error) {
 	spec := svc.Charts[chart]
 	vendored := spec.vendored(chart)
-	defaults, err := readValues(in.Chart, path.Join("vendor", vendored, "values.yaml"))
+	defaults, err := readValues(files, path.Join("vendor", vendored, "values.yaml"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, "", fmt.Errorf("vendor/%s/values.yaml not found: the chart %s is not vendored (vendor.yaml, then scripts/vendor-charts.sh)", vendored, vendored)
 	}
@@ -49,7 +49,7 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M, up
 	// chart, then what the mapping computed.
 	base := M{}
 	if spec.Base != "" {
-		if base, err = readValues(in.Chart, path.Clean(spec.Base)); err != nil {
+		if base, err = readValues(files, path.Clean(spec.Base)); err != nil {
 			return nil, "", err
 		}
 	}
@@ -75,7 +75,7 @@ func finalValues(in Inputs, svc *Service, chart string, computed M, values M, up
 	}
 	// Every chart gets the instance's global, as a subchart would.
 	out["global"] = layered(asMap(defaults["global"]), asMap(values["global"]), asMap(computed["global"]))
-	v, err := schemaViolations(in.Chart, path.Join("vendor", vendored, "values.schema.json"), coalesceValues(defaults, out))
+	v, err := schemaViolations(files, path.Join("vendor", vendored, "values.schema.json"), coalesceValues(defaults, out))
 	return out, v, err
 }
 

@@ -288,7 +288,7 @@ func dcrImage(img M) M {
 // nor the mapping's output may list them, and vendor/oidc-dcr must exist
 // (checked in every mode, as soon as the mapping declares a client). svc is
 // not changed.
-func clientCharts(in Inputs, svc *Service, clients []oidcClient, values map[string]M, output M) (*Service, error) {
+func clientCharts(files fs.FS, svc *Service, clients []oidcClient, values map[string]M, output M) (*Service, error) {
 	if len(clients) == 0 {
 		return svc, nil
 	}
@@ -300,7 +300,7 @@ func clientCharts(in Inputs, svc *Service, clients []oidcClient, values map[stri
 			return nil, fmt.Errorf("mapping output %q: the chart of %s is compiled from oidcClients: remove it from output", c.chart, c.where)
 		}
 	}
-	if _, err := fs.Stat(in.Chart, path.Join("vendor", DcrChart, "values.yaml")); err != nil {
+	if _, err := fs.Stat(files, path.Join("vendor", DcrChart, "values.yaml")); err != nil {
 		return nil, fmt.Errorf("oidcClients: vendor/%s/values.yaml not found: the OAuth clients are registered by the chart %s (repository oci://quay.io/adaltas, version >= 0.5.0): list it in vendor.yaml, then run scripts/vendor-charts.sh", DcrChart, DcrChart)
 	}
 	out := &Service{Charts: maps.Clone(svc.Charts), Require: svc.Require}

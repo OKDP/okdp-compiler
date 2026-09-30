@@ -19,7 +19,6 @@ const example = "../example"
 func exampleInputs(t *testing.T, files ...string) Inputs {
 	t.Helper()
 	in := Inputs{
-		Chart:     os.DirFS(filepath.Join(example, "webapp")),
 		Contracts: os.DirFS(filepath.Join(example, "contracts")),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -42,7 +41,7 @@ func exampleInputs(t *testing.T, files ...string) Inputs {
 // final values, the vendored chart of each, objects and dependencies with
 // example/compiled/<case>.yaml.
 func TestExample(t *testing.T) {
-	def, err := LoadDefinition(os.DirFS(example))
+	def, err := LoadDefinition(os.DirFS(filepath.Join(example, "webapp")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +85,7 @@ func TestExample(t *testing.T) {
 // values, must fail with the message of its first line (# error: ..., \n
 // for a line break).
 func TestExampleErrors(t *testing.T) {
-	def, err := LoadDefinition(os.DirFS(example))
+	def, err := LoadDefinition(os.DirFS(filepath.Join(example, "webapp")))
 	if err != nil {
 		t.Fatal(err)
 	}

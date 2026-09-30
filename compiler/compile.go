@@ -35,9 +35,8 @@
 // control plane server, a CLI) can compile from a checkout, an embedded
 // filesystem or a git tree without touching the disk:
 //
-//	def, err := compiler.LoadDefinition(os.DirFS("example"))
+//	def, err := compiler.LoadDefinition(os.DirFS("packages/myservice"))
 //	res, err := compiler.Compile(def, compiler.Inputs{
-//		Chart:     os.DirFS("charts/services/myservice"),
 //		Instance:  os.DirFS("instances/demo/myservice"),
 //		Contracts: os.DirFS("okdp-lib-chart/contracts"),
 //		Values:    []map[string]any{instanceValues},
@@ -58,19 +57,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Definition: a service definition, service.yaml and its mapping.
+// Definition: a package, as LoadDefinition reads it: service.yaml, its
+// mapping, and the package's other files.
 type Definition struct {
 	Service Service
 	Mapping []byte // mapping.cel.yaml
+	Files   fs.FS  // the package: values.yaml, values.schema.json, the base files
 }
 
-// LoadDefinition reads service.yaml and mapping.cel.yaml at the root of fsys.
+// LoadDefinition reads the package at the root of fsys: service.yaml and
+// mapping.cel.yaml; each compile reads its other files.
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	b, err := fs.ReadFile(fsys, "service.yaml")
 	if err != nil {
 		return nil, err
 	}
-	def := &Definition{}
+	def := &Definition{Files: fsys}
 	if err := yaml.Unmarshal(b, &def.Service); err != nil {
 		return nil, fmt.Errorf("service.yaml: %w", err)
 	}
@@ -83,9 +85,8 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return def, nil
 }
 
-// Inputs: what one compile reads besides the service definition.
+// Inputs: what one compile reads besides the package.
 type Inputs struct {
-	Chart     fs.FS            // wrapper chart: Chart.yaml, values.yaml, values.schema.json, vendor/, vendor-values/
 	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // okdp-lib-chart/contracts: <contract>.schema.json
 	Values    []map[string]any // instance values layers, in order (helm -f); see ParseValues
@@ -93,19 +94,27 @@ type Inputs struct {
 	Namespace string
 }
 
-// Service: service.yaml, the engine-neutral part of a service definition.
+// Service: service.yaml, the engine-neutral part of a package.
 type Service struct {
-	Charts  map[string]ChartSpec `yaml:"charts"`
-	Require []string             `yaml:"require"` // global.okdp keys the service needs
+	Name       string               `yaml:"name"`       // the service: labels, descriptor, parameter schema errors
+	Version    string               `yaml:"version"`    // the package's version: descriptor
+	AppVersion string               `yaml:"appVersion"` // the application's version: label app.kubernetes.io/version
+	Roles      []string             `yaml:"roles"`      // catalog: what the service provides (not read by the compiler)
+	DependsOn  []string             `yaml:"dependsOn"`  // catalog: the platform services it needs (not read by the compiler)
+	Charts     map[string]ChartSpec `yaml:"charts"`
+	Require    []string             `yaml:"require"` // global.okdp keys the service needs
+}
+
+// meta: what the mapping and OKDP's objects see of the package.
+func (s *Service) meta() serviceMeta {
+	return serviceMeta{Name: s.Name, Version: s.Version, AppVersion: s.AppVersion}
 }
 
 // ChartSpec: one upstream chart of a service, by key: the key names its
-// values (the mapping's output, Result.Values, the values ConfigMap
-// compared with).
+// values (the mapping's output, Result.Values).
 type ChartSpec struct {
 	Chart    string   `yaml:"chart"`    // the vendored chart, vendor/<chart> (its defaults and schema, and what renders the values); default: the key
-	Base     string   `yaml:"base"`     // vendor-values file of the wrapper (OKDP's default values)
-	Values   string   `yaml:"values"`   // name of the values ConfigMap to compare with
+	Base     string   `yaml:"base"`     // a values file of the package, base/<key>.yaml by convention (OKDP's default values)
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
 	Append   []string `yaml:"append"`   // instance upstream values: appended lists (same paths)
 	Upstream Upstream `yaml:"upstream"` // instance upstream values accepted, and their files
@@ -142,13 +151,19 @@ func (s *Service) upstreamOf(key string) string {
 }
 
 // check: what service.yaml may not hold, refused when it is loaded
-// (LoadDefinition) and before every compile: a chart alias that is not the
-// name of a vendored chart, a protect or append path that does not follow
-// the grammar of paths.go (a malformed path would otherwise surface only
-// when an instance sets a value under it, or never, leaving a value
-// unprotected), an upstream.from that does not name a chart accepting
-// upstream values of its own.
+// (LoadDefinition) and before every compile: no name or version, a chart
+// alias that is not the name of a vendored chart, a protect or append path
+// that does not follow the grammar of paths.go (a malformed path would
+// otherwise surface only when an instance sets a value under it, or never,
+// leaving a value unprotected), an upstream.from that does not name a chart
+// accepting upstream values of its own.
 func (s *Service) check() error {
+	switch {
+	case s.Name == "":
+		return errors.New("service.yaml: name is required")
+	case s.Version == "":
+		return errors.New("service.yaml: version is required")
+	}
 	for _, key := range slices.Sorted(maps.Keys(s.Charts)) {
 		spec := s.Charts[key]
 		if c := spec.Chart; c != "" && (c != path.Base(c) || c == "." || c == ".." || strings.TrimSpace(c) != c) {
@@ -258,8 +273,8 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	switch {
 	case def == nil:
 		return nil, errors.New("no service definition")
-	case in.Chart == nil:
-		return nil, errors.New("Inputs.Chart is required")
+	case def.Files == nil:
+		return nil, errors.New("Definition.Files is required")
 	case in.Contracts == nil:
 		return nil, errors.New("Inputs.Contracts is required")
 	case in.Release == "":
@@ -273,7 +288,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	// What the mapping sees: values, platform context, resolved connections.
-	ctx, values, ups, deps, err := buildContext(in, svc)
+	ctx, values, ups, deps, err := buildContext(def.Files, in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +303,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if svc, err = clientCharts(in, svc, clients, dcrValues, res.output); err != nil {
+	if svc, err = clientCharts(def.Files, svc, clients, dcrValues, res.output); err != nil {
 		return nil, err
 	}
 	// The descriptor ConfigMap, checked against the contracts, and the
@@ -325,7 +340,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		if _, ok := svc.Charts[chart]; !ok {
 			return nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", chart)
 		}
-		f, bad, err := finalValues(in, svc, chart, asMap(v), values, ups)
+		f, bad, err := finalValues(def.Files, svc, chart, asMap(v), values, ups)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", chart, err)
 		}

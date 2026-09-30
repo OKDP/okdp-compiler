@@ -8,8 +8,8 @@
 #   platform   what the compiler derives from global.okdp: oidc (defaults applied,
 #              dcr.enabled and the settings of the oidc-dcr Jobs), oidcClientSecret,
 #              ingressAnnotations, proxyEnv
-#   chart      {name, version, appVersion} of the wrapper chart (Chart.yaml)
-#   labels, selectorLabels   okdp.labels and okdp.selectorLabels
+#   service    {name, version, appVersion} of the package (service.yaml)
+#   labels, selectorLabels   the labels of OKDP's own objects
 # ${{ ... }} is a CEL expression: alone in a scalar it keeps its type,
 # otherwise it is interpolated as text. Besides CEL's own, the functions
 # sha256, toJson, toPrettyJson, toYaml, quote (as Helm's), okdpFullname,
@@ -39,9 +39,9 @@ output:
   app:
     fullnameOverride: ${{ release.name }}-app
     replicaCount: ${{ values.replicas }}
-    # The application version, from Chart.yaml: never written in a mapping.
+    # The application version, from service.yaml: never written in a mapping.
     image:
-      tag: ${{ chart.appVersion }}
+      tag: ${{ service.appVersion }}
     # A settings change restarts the pods.
     podAnnotations:
       checksum/settings: ${{ sha256(toJson(settings)) }}

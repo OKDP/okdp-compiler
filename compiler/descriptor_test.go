@@ -48,7 +48,7 @@ func TestDescriptor(t *testing.T) {
 	}
 	labels := asMap(md["labels"])
 	for k, v := range map[string]any{
-		"helm.sh/chart":             "demo-1.2.3",
+		"helm.sh/chart":             nil,
 		"app.kubernetes.io/version": "4.5",
 		"okdp.io/instance":          "demo-app",
 		"okdp.io/service":           "demo",
@@ -148,28 +148,49 @@ func TestTrunc(t *testing.T) {
 	}
 }
 
-// TestLoadDefinition: both files are required, service.yaml must parse.
+// TestLoadDefinition: both files are required, service.yaml must parse and
+// name the service and its version; the package's other files are read by
+// each compile.
 func TestLoadDefinition(t *testing.T) {
 	ok := fstest.MapFS{
-		"service.yaml":     {Data: []byte("require: [a]\ncharts: {app: {base: f.yaml, protect: [p]}}\n")},
+		"service.yaml": {Data: []byte(`name: demo
+version: 1.0.0
+appVersion: 1.10
+roles: [web]
+dependsOn: [ingress]
+require: [a]
+charts: {app: {base: f.yaml, protect: [p]}}
+`)},
 		"mapping.cel.yaml": {Data: []byte("output: {}\n")},
 	}
 	d, err := LoadDefinition(ok)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Service{Require: []string{"a"}, Charts: map[string]ChartSpec{"app": {Base: "f.yaml", Protect: []string{"p"}}}}
-	if !reflect.DeepEqual(d.Service, want) || string(d.Mapping) != "output: {}\n" {
+	want := Service{
+		Name: "demo", Version: "1.0.0", AppVersion: "1.10", Roles: []string{"web"}, DependsOn: []string{"ingress"},
+		Require: []string{"a"}, Charts: map[string]ChartSpec{"app": {Base: "f.yaml", Protect: []string{"p"}}},
+	}
+	if !reflect.DeepEqual(d.Service, want) || string(d.Mapping) != "output: {}\n" || d.Files == nil {
 		t.Errorf("got %#v", d)
 	}
-	for name, fsys := range map[string]fstest.MapFS{
-		"no service.yaml":   {"mapping.cel.yaml": ok["mapping.cel.yaml"]},
-		"no mapping":        {"service.yaml": ok["service.yaml"]},
-		"bad service.yaml":  {"service.yaml": {Data: []byte("charts: [")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]},
-		"wrong field types": {"service.yaml": {Data: []byte("charts: [a]\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]},
+	for name, tc := range map[string]struct {
+		fsys fstest.MapFS
+		want string
+	}{
+		"no service.yaml":   {fstest.MapFS{"mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml"},
+		"no mapping":        {fstest.MapFS{"service.yaml": ok["service.yaml"]}, "mapping.cel.yaml"},
+		"bad service.yaml":  {fstest.MapFS{"service.yaml": {Data: []byte("charts: [")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: "},
+		"wrong field types": {fstest.MapFS{"service.yaml": {Data: []byte("charts: [a]\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: "},
+		"no name":           {fstest.MapFS{"service.yaml": {Data: []byte("version: 1.0.0\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: name is required"},
+		"no version":        {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: version is required"},
 	} {
-		if _, err := LoadDefinition(fsys); err == nil {
-			t.Errorf("%s: must fail", name)
+		if _, err := LoadDefinition(tc.fsys); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)
 		}
+	}
+	// A definition built in memory needs its package files.
+	if _, err := Compile(&Definition{Service: want}, inputs()); err == nil || !strings.Contains(err.Error(), "Definition.Files is required") {
+		t.Errorf("no files: got %v", err)
 	}
 }

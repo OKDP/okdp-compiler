@@ -34,8 +34,7 @@ res, err := compiler.Compile(def, compiler.Inputs{
 
 `Compile` keeps no state between calls and is safe for concurrent use. Any
 `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree, `fstest.MapFS` (see
-`compiler/compile_test.go`). `compiler.Compare` checks a result against a
-`helm template` output of the wrapper chart.
+`compiler/compile_test.go`).
 
 What Helm does, the compiler does the same way, checked against `helm
 template` (`testdata/helm`): every values file is read as Helm

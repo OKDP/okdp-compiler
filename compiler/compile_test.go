@@ -12,22 +12,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A minimal wrapper chart and service, in memory: what a caller without a
-// checkout (the control plane server) passes.
+// A minimal package, in memory: what a caller without a checkout (the
+// control plane server) passes.
 var (
-	chart = fstest.MapFS{
-		"Chart.yaml":             {Data: []byte("name: demo\nversion: 1.2.3\nappVersion: \"4.5\"\n")},
+	pkg = fstest.MapFS{
 		"values.yaml":            {Data: []byte("replicas: 1\nglobal:\n  okdp:\n    ingress:\n      suffix: example.org\n")},
 		"values.schema.json":     {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
 		"vendor/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
-		"vendor-values/app.yaml": {Data: []byte("image: {tag: \"4.5\"}\n")},
+		"base/app.yaml":          {Data: []byte("image: {tag: \"4.5\"}\n")},
 	}
 	contracts = fstest.MapFS{}
 	def       = &Definition{
 		Service: Service{
-			Charts:  map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml"}},
-			Require: []string{"ingress.suffix"},
+			Name:       "demo",
+			Version:    "1.2.3",
+			AppVersion: "4.5",
+			Charts:     map[string]ChartSpec{"app": {Base: "base/app.yaml"}},
+			Require:    []string{"ingress.suffix"},
 		},
+		Files: pkg,
 		Mapping: []byte(`
 let:
   host: ${{ release.name + "." + global.okdp.ingress.suffix }}
@@ -45,9 +48,16 @@ instance:
 	}
 )
 
-// inputs: the in-memory chart and contracts, with these values layers.
+// inputs: the in-memory contracts, with these values layers.
 func inputs(values ...map[string]any) Inputs {
-	return Inputs{Chart: chart, Contracts: contracts, Values: values, Release: "demo-app", Namespace: "demo"}
+	return Inputs{Contracts: contracts, Values: values, Release: "demo-app", Namespace: "demo"}
+}
+
+// withFiles: def with these package files.
+func withFiles(files fstest.MapFS) *Definition {
+	d := *def
+	d.Files = files
+	return &d
 }
 
 // TestCompile: final values and descriptor of a compile from memory.
@@ -87,7 +97,7 @@ func TestCompileErrors(t *testing.T) {
 	}{
 		"mapping error":   {inputs(map[string]any{"replicas": 11}), "at most 10 replicas"},
 		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"ingress": nil}}}), "global.okdp.ingress.suffix is required"},
-		"missing release": {Inputs{Chart: chart, Contracts: contracts, Namespace: "demo"}, "Release is required"},
+		"missing release": {Inputs{Contracts: contracts, Namespace: "demo"}, "Release is required"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Compile(def, tc.in)
@@ -100,8 +110,7 @@ func TestCompileErrors(t *testing.T) {
 
 // TestDependencies: internal references only, with their parameter path.
 func TestDependencies(t *testing.T) {
-	ch := fstest.MapFS{}
-	maps.Copy(ch, chart)
+	ch := maps.Clone(pkg)
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
 		"replicas": {"type": "integer"},
 		"backends": {"type": "array", "items": {"properties": {
@@ -114,13 +123,12 @@ func TestDependencies(t *testing.T) {
 		},
 		"connections": map[string]any{"ext": map[string]any{"contract": "database", "host": "db.example.org"}},
 	})
-	in.Chart = ch
 	in.Contracts = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 		"x-okdp-contract": "database",
 		"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc"},
 		"properties": {"host": {"type": "string"}},
 		"required": ["host"]}`)}}
-	res, err := Compile(def, in)
+	res, err := Compile(withFiles(ch), in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +190,7 @@ func TestUpstreamFiles(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
+			d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/app.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
 			in := inputs(inline)
 			if tc.instance != nil {
 				in.Instance = tc.instance
@@ -246,7 +254,7 @@ errors:
 output:
   app: {}
 `)
-	d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml", Upstream: Upstream{Enabled: true}}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/app.yaml", Upstream: Upstream{Enabled: true}}}
 	for name, tc := range map[string]struct {
 		file   string // upstream.app.yaml of the instance, none when empty
 		inline M      // upstream.app
@@ -305,26 +313,22 @@ func TestCompileSchemas(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			ch := maps.Clone(chart)
+			ch := maps.Clone(pkg)
 			maps.Copy(ch, tc.files)
-			d := *def
-			d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/app.yaml", Upstream: Upstream{Enabled: true}}}
-			in := inputs(tc.values)
-			in.Chart = ch
-			_, err := Compile(&d, in)
+			d := withFiles(ch)
+			d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/app.yaml", Upstream: Upstream{Enabled: true}}}
+			_, err := Compile(d, inputs(tc.values))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
 	// A null that deletes a default is checked as Helm checks it: gone.
-	ch := maps.Clone(chart)
+	ch := maps.Clone(pkg)
 	ch["vendor/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}
-	in := inputs(M{"upstream": M{"app": M{"labels": nil}}})
-	in.Chart = ch
-	d := *def
+	d := withFiles(ch)
 	d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true}}}
-	res, err := Compile(&d, in)
+	res, err := Compile(d, inputs(M{"upstream": M{"app": M{"labels": nil}}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +341,7 @@ func TestCompileSchemas(t *testing.T) {
 // descriptor, and the okdp chart: the mapping's own objects, then
 // Result.Objects; compiled even when the mapping leaves it out.
 func TestObjects(t *testing.T) {
-	ch := maps.Clone(chart)
+	ch := maps.Clone(pkg)
 	ch["vendor/okdp/values.yaml"] = &fstest.MapFile{Data: []byte("objects: []\n")}
 	mapping := `
 output:
@@ -375,15 +379,13 @@ objects:
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := *def
+			d := withFiles(ch)
 			d.Mapping = []byte(fmt.Sprintf(mapping, tc.okdp))
 			d.Service.Charts = map[string]ChartSpec{"app": {}}
 			if tc.declared {
 				d.Service.Charts["okdp"] = ChartSpec{}
 			}
-			in := inputs()
-			in.Chart = ch
-			res, err := Compile(&d, in)
+			res, err := Compile(d, inputs())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -394,7 +396,7 @@ objects:
 			if got := names(objects); !slices.Equal(got, all) {
 				t.Errorf("Result.Objects: got %v, want %v", got, all)
 			}
-			if lbl := asMap(dig(res.Objects[1], "metadata.labels")); lbl["helm.sh/chart"] != "demo-1.2.3" {
+			if lbl := asMap(dig(res.Objects[1], "metadata.labels")); lbl["okdp.io/service"] != "demo" || lbl["app.kubernetes.io/version"] != "4.5" || lbl["helm.sh/chart"] != nil {
 				t.Errorf("labels: %#v", lbl)
 			}
 			okdp, ok := res.Values["okdp"]
@@ -418,12 +420,10 @@ objects:
 		"okdp not a list": {"output: {okdp: {objects: {a: 1}}}\n", "mapping output okdp.objects: must be a list of objects"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := *def
+			d := withFiles(ch)
 			d.Mapping = []byte(tc.mapping)
 			d.Service.Charts = map[string]ChartSpec{"okdp": {}}
-			in := inputs()
-			in.Chart = ch
-			if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := Compile(d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
@@ -435,7 +435,7 @@ objects:
 // key; Result.Charts maps every chart to the vendored chart rendering it.
 func TestChartAlias(t *testing.T) {
 	var svc Service
-	if err := yaml.Unmarshal([]byte("charts:\n  canary: {chart: app, base: vendor-values/app.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Chart != "app" {
+	if err := yaml.Unmarshal([]byte("charts:\n  canary: {chart: app, base: base/app.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Chart != "app" {
 		t.Fatalf("service.yaml: %v %#v", err, svc)
 	}
 	mapping := "output:\n  app: {}\n  canary: {replicaCount: '${{ values.replicas }}'}\n"
@@ -454,11 +454,11 @@ func TestChartAlias(t *testing.T) {
 		t.Errorf("canary: vendor/app's defaults and base values, then the computed ones: %#v", canary)
 	}
 	// vendor/app's schema, reported under the chart's key.
-	ch := maps.Clone(chart)
+	ch := maps.Clone(pkg)
 	ch["vendor/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}
-	in := inputs(M{"replicas": 5})
-	in.Chart = ch
-	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), "canary (vendor/app):\n- at '/replicaCount': maximum: got 5, want 3") {
+	ds := d
+	ds.Files = ch
+	if _, err := Compile(&ds, inputs(M{"replicas": 5})); err == nil || !strings.Contains(err.Error(), "canary (vendor/app):\n- at '/replicaCount': maximum: got 5, want 3") {
 		t.Errorf("schema: got %v", err)
 	}
 	for name, tc := range map[string]struct{ chart, want string }{
@@ -482,6 +482,8 @@ func TestChartAlias(t *testing.T) {
 func TestUpstreamFrom(t *testing.T) {
 	var svc Service
 	if err := yaml.Unmarshal([]byte(`
+name: demo
+version: 1.2.3
 charts:
   app: {upstream: true, protect: [labels], append: [env]}
   canary: {chart: app, upstream: {from: app}}

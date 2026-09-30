@@ -25,7 +25,6 @@ objects:
         app.kubernetes.io/name: webapp
         app.kubernetes.io/part-of: okdp
         app.kubernetes.io/version: "2.3"
-        helm.sh/chart: webapp-1.0.0
         okdp.io/instance: demo-webapp
         okdp.io/provides-http: "true"
         okdp.io/service: webapp
@@ -44,7 +43,6 @@ objects:
         app.kubernetes.io/name: webapp
         app.kubernetes.io/part-of: okdp
         app.kubernetes.io/version: "2.3"
-        helm.sh/chart: webapp-1.0.0
         okdp.io/instance: demo-webapp
         okdp.io/service: webapp
       name: demo-webapp-settings
@@ -58,7 +56,6 @@ objects:
         app.kubernetes.io/name: webapp
         app.kubernetes.io/part-of: okdp
         app.kubernetes.io/version: "2.3"
-        helm.sh/chart: webapp-1.0.0
         okdp.io/instance: demo-webapp
         okdp.io/service: webapp
       name: demo-webapp-session-session-key
@@ -78,7 +75,6 @@ objects:
         app.kubernetes.io/name: webapp
         app.kubernetes.io/part-of: okdp
         app.kubernetes.io/version: "2.3"
-        helm.sh/chart: webapp-1.0.0
         okdp.io/instance: demo-webapp
         okdp.io/service: webapp
       name: demo-webapp-session
@@ -109,7 +105,6 @@ objects:
               app.kubernetes.io/name: webapp
               app.kubernetes.io/part-of: okdp
               app.kubernetes.io/version: "2.3"
-              helm.sh/chart: webapp-1.0.0
               okdp.io/instance: demo-webapp
               okdp.io/service: webapp
 values:
@@ -217,7 +212,6 @@ values:
             app.kubernetes.io/name: webapp
             app.kubernetes.io/part-of: okdp
             app.kubernetes.io/version: "2.3"
-            helm.sh/chart: webapp-1.0.0
             okdp.io/instance: demo-webapp
             okdp.io/provides-http: "true"
             okdp.io/service: webapp
@@ -236,7 +230,6 @@ values:
             app.kubernetes.io/name: webapp
             app.kubernetes.io/part-of: okdp
             app.kubernetes.io/version: "2.3"
-            helm.sh/chart: webapp-1.0.0
             okdp.io/instance: demo-webapp
             okdp.io/service: webapp
           name: demo-webapp-settings
@@ -250,7 +243,6 @@ values:
             app.kubernetes.io/name: webapp
             app.kubernetes.io/part-of: okdp
             app.kubernetes.io/version: "2.3"
-            helm.sh/chart: webapp-1.0.0
             okdp.io/instance: demo-webapp
             okdp.io/service: webapp
           name: demo-webapp-session-session-key
@@ -270,7 +262,6 @@ values:
             app.kubernetes.io/name: webapp
             app.kubernetes.io/part-of: okdp
             app.kubernetes.io/version: "2.3"
-            helm.sh/chart: webapp-1.0.0
             okdp.io/instance: demo-webapp
             okdp.io/service: webapp
           name: demo-webapp-session
@@ -301,6 +292,5 @@ values:
                   app.kubernetes.io/name: webapp
                   app.kubernetes.io/part-of: okdp
                   app.kubernetes.io/version: "2.3"
-                  helm.sh/chart: webapp-1.0.0
                   okdp.io/instance: demo-webapp
                   okdp.io/service: webapp

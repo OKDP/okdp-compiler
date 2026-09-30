@@ -6,17 +6,18 @@ package compiler
 
 import (
 	"fmt"
+	"io/fs"
 	"maps"
 	"sort"
 )
 
 // Context: what a mapping sees, the merged values, the instance's upstream
 // values of each chart that accepts them (applied by finalValues), and the
-// instances the connection references point to.
-func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []Dependency, error) {
+// instances the connection references point to. files: the package.
+func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []Dependency, error) {
 	// 1. values layers, as Helm: the -f files merged in order, coalesced
-	// over the chart defaults.
-	defaults, err := readValues(in.Chart, "values.yaml")
+	// over the package's defaults.
+	defaults, err := readValues(files, "values.yaml")
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -26,16 +27,12 @@ func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []D
 	}
 	values := coalesceValues(defaults, user)
 	// Checked against the parameter schema, as Helm checks values.schema.json.
-	v, err := schemaViolations(in.Chart, "values.schema.json", values)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	chart, err := readChart(in.Chart)
+	v, err := schemaViolations(files, "values.schema.json", values)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	if v != "" {
-		return nil, nil, nil, nil, schemaError("values", map[string]string{chart.Name: v})
+		return nil, nil, nil, nil, schemaError("values", map[string]string{svc.Name: v})
 	}
 	global := asMap(values["global"])
 	okdpG := asMap(global["okdp"])
@@ -88,7 +85,7 @@ func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []D
 		"proxyEnv":           proxyEnv,
 	}
 	// 4. connection references, resolved in place (x-okdp-connection-ref).
-	schema, err := readJSON(in.Chart, "values.schema.json")
+	schema, err := readJSON(files, "values.schema.json")
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -127,9 +124,9 @@ func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []D
 		"global":   M{"okdp": deepCopy(okdpG)}, // platform-values.yaml, as written
 		"platform": platform,                   // derived from it by the compiler
 	}
-	// The wrapper chart: chart (name, version, appVersion), labels and
-	// selectorLabels (okdp.labels, okdp.selectorLabels).
-	maps.Copy(ctx, chartContext(chart, in.Release))
+	// The package: service (name, version, appVersion), labels and
+	// selectorLabels.
+	maps.Copy(ctx, serviceContext(svc.meta(), in.Release))
 	// The schema walk follows map order: sort for a stable result.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
 	return ctx, values, ups, deps, nil

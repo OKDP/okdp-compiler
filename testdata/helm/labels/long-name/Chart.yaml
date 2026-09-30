@@ -1,4 +1,0 @@
-apiVersion: v2
-name: a-chart-name-long-enough-for-the-chart-label-to-be-cut-at-63
-version: 1.2.3+meta
-appVersion: 1.10

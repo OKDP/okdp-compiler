@@ -39,7 +39,6 @@ mapping (`upstream: yes` is the path `yes`). Unknown fields are ignored.
 | `upstream` | `true`, `false`, a path or a list of paths | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
 | `protect` | list of dotted paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
 | `append` | list of dotted paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
-| `values` | string | `<release>-<name>-values` | Used by `compiler.Compare` only: name of the chart's values ConfigMap (label `okdp.io/vendor-values`) in the `helm template` output of the wrapper chart. `{release}` is replaced by the release name. |
 
 How the chart defaults, `base`, the computed values and the instance
 upstream values combine: [merge precedence](01_inputs_outputs.md#merge-precedence).
@@ -66,8 +65,7 @@ name: a chart rendered more than once, with other values, is vendored once
 [merge precedence](01_inputs_outputs.md#merge-precedence)). Everything else
 stays keyed by the name: `output.<name>` of the mapping, `Result.Values` and
 `Result.Computed`, the instance's `upstream.<name>.yaml` and inline
-`upstream.<name>` values, the values ConfigMap `compiler.Compare` looks for
-(`values`, default `<release>-<name>-values`). `Result.Charts` maps each
+`upstream.<name>` values. `Result.Charts` maps each
 compiled chart to its vendored chart: [chart index](01_inputs_outputs.md#chart-index).
 
 The value is the name of a directory of `vendor/`: `""` is the default; a
@@ -120,7 +118,6 @@ charts:
   admin:
     base: vendor-values/admin.yaml
     upstream: []                       # inline upstream.admin only
-    values: "{release}-admin-bootstrap-values"  # compiler.Compare only
   admin-users:                         # output.admin-users, a second render of vendor/admin/
     chart: admin
     base: vendor-values/admin-users.yaml

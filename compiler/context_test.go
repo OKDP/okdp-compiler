@@ -12,7 +12,7 @@ import (
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	ctx, _, _, _, err := buildContext(inputs(M{"global": M{"okdp": okdp}}), &def.Service)
+	ctx, _, _, _, err := buildContext(pkg, inputs(M{"global": M{"okdp": okdp}}), &def.Service)
 	if err != nil {
 		return nil, err
 	}
@@ -118,18 +118,16 @@ func TestPlatformDcrSettings(t *testing.T) {
 	}
 }
 
-// TestContextErrors: an unknown provisioning mode, unreadable chart files.
+// TestContextErrors: an unknown provisioning mode, unreadable package files.
 func TestContextErrors(t *testing.T) {
 	if _, err := platformCtx(t, M{"oidc": M{"clientProvisioning": "manual"}}); err == nil ||
 		!strings.Contains(err.Error(), `clientProvisioning "manual" is not one of existing, dcr`) {
 		t.Errorf("got %v", err)
 	}
 	for _, missing := range []string{"values.yaml", "values.schema.json"} {
-		ch := maps.Clone(chart)
+		ch := maps.Clone(pkg)
 		delete(ch, missing)
-		in := inputs()
-		in.Chart = ch
-		if _, _, _, _, err := buildContext(in, &def.Service); err == nil {
+		if _, _, _, _, err := buildContext(ch, inputs(), &def.Service); err == nil {
 			t.Errorf("without %s: must fail", missing)
 		}
 	}
@@ -138,7 +136,7 @@ func TestContextErrors(t *testing.T) {
 // TestContextValues: the parameters the mapping sees, without global and
 // connections, and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	ctx, values, _, _, err := buildContext(inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
+	ctx, values, _, _, err := buildContext(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +171,7 @@ func TestContextUpstream(t *testing.T) {
 		"a.yaml":              {Data: []byte("a: 1\nb: 1\n")},
 		"b.yaml":              {Data: []byte("b: 2\n")},
 	}
-	ctx, values, ups, _, err := buildContext(in, svc)
+	ctx, values, ups, _, err := buildContext(pkg, in, svc)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"testing/fstest"
 )
 
 // TestNormalize: string keys, and every number a float64.
@@ -115,20 +114,6 @@ func TestParseValuesErrors(t *testing.T) {
 		if _, err := ParseValues([]byte(in)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: got %v, want an error containing %q", in, err, want)
 		}
-	}
-}
-
-// TestReadChart: Chart.yaml fields as Helm reads them, numbers as strings.
-func TestReadChart(t *testing.T) {
-	c, err := readChart(fstest.MapFS{"Chart.yaml": {Data: []byte("name: x\nversion: 1.0.0\nappVersion: 1.10\n")}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := (chartMeta{Name: "x", Version: "1.0.0", AppVersion: "1.1"}); c != want {
-		t.Errorf("got %#v, want %#v", c, want)
-	}
-	if _, err := readChart(fstest.MapFS{"Chart.yaml": {Data: []byte("name: [\n")}}); err == nil {
-		t.Error("invalid Chart.yaml must fail")
 	}
 }
 

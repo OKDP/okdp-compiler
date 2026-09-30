@@ -93,26 +93,6 @@ func splitDocuments(b []byte) ([][]byte, error) {
 	return docs, nil
 }
 
-// readYAMLStream: the documents of a multi-document YAML stream (a `helm
-// template` output), each read as Helm reads YAML.
-func readYAMLStream(b []byte) ([]any, error) {
-	docs, err := splitDocuments(b)
-	if err != nil {
-		return nil, err
-	}
-	var out []any
-	for _, doc := range docs {
-		var v any
-		if err := sigsyaml.Unmarshal(doc, &v); err != nil {
-			return nil, err
-		}
-		if v != nil {
-			out = append(out, v)
-		}
-	}
-	return out, nil
-}
-
 // normalize: maps with string keys, every number a float64 (as Helm values,
 // which go through JSON), for values a caller built in memory.
 func normalize(v any) any {
@@ -324,23 +304,11 @@ func readJSON(fsys fs.FS, name string) (M, error) {
 	return asMap(v), nil
 }
 
-// chartMeta: the Chart.yaml fields the compiler uses, read as Helm reads
-// them (into strings: an unquoted appVersion: 1.10 is "1.1", as in Helm).
-type chartMeta struct {
-	Name       string `json:"name"`
-	Version    string `json:"version"`
-	AppVersion string `json:"appVersion"`
-}
-
-// readChart: Chart.yaml of the wrapper chart.
-func readChart(fsys fs.FS) (chartMeta, error) {
-	var c chartMeta
-	b, err := fs.ReadFile(fsys, "Chart.yaml")
-	if err != nil {
-		return c, err
+// short: a value for a message, cut at 160 characters.
+func short(v any) string {
+	s := fmt.Sprintf("%#v", v)
+	if len(s) > 160 {
+		s = s[:160] + "..."
 	}
-	if err := sigsyaml.Unmarshal(b, &c); err != nil {
-		return c, fmt.Errorf("%s: %w", "Chart.yaml", err)
-	}
-	return c, nil
+	return s
 }

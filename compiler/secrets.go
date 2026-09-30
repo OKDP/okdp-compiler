@@ -35,7 +35,7 @@ func generatedSecret(ctx M, args M) ([]any, error) {
 	api := str(orDefault(args["apiVersion"], "external-secrets.io/v1"))
 	extra := asMap(args["labels"])
 	annotations := asMap(args["annotations"])
-	okdpLabels := labels(ctxChart(ctx), str(rel["name"]), "")
+	okdpLabels := labels(ctxService(ctx), str(rel["name"]), "")
 	meta := func(name string, labels M) M {
 		m := M{"name": name, "namespace": ns, "labels": labels}
 		if len(annotations) > 0 {
@@ -140,10 +140,10 @@ func credentialsSecret(ctx M, contract, output, name string, secret M) ([]any, e
 		})
 	}
 	if !truthy(secret["stringData"]) {
-		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", ctxChart(ctx).Name, output)
+		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", ctxService(ctx).Name, output)
 	}
 	rel := asMap(ctx["release"])
-	l := labels(ctxChart(ctx), str(rel["name"]), "")
+	l := labels(ctxService(ctx), str(rel["name"]), "")
 	l[label] = "true"
 	return []any{M{
 		"apiVersion": "v1",
@@ -152,11 +152,6 @@ func credentialsSecret(ctx M, contract, output, name string, secret M) ([]any, e
 		"type":       "Opaque",
 		"stringData": deepCopy(secret["stringData"]),
 	}}, nil
-}
-
-// ctxChart: the wrapper chart of a mapping context.
-func ctxChart(ctx M) chartMeta {
-	return chartMeta{Name: str(dig(ctx, "chart.name")), Version: str(dig(ctx, "chart.version")), AppVersion: str(dig(ctx, "chart.appVersion"))}
 }
 
 // orDefault: sprig's default: v, or d when v is empty (null, "", 0, false,

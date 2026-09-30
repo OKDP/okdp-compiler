@@ -44,7 +44,7 @@ where the module can be fetched at that path.
 ```text
 okdp-compile --chart <dir> --service <dir> [--contracts <dir>] [--instance <dir>]
              [-f <values.yaml>]... [--release <name>] [--namespace <name>]
-             [--out <file>] [--emit-dir <dir>] [--expect <file>]
+             [--out <file>] [--emit-dir <dir>]
 okdp-compile --version
 ```
 
@@ -59,13 +59,11 @@ okdp-compile --version
 | `--namespace` | `demo` | namespace |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file |
 | `--emit-dir` | none | write the final values of each chart, the chart index, the objects and the dependencies to a directory, one file each |
-| `--expect` | none | compare the result with a `helm template` output of the wrapper chart |
 | `--version` | | print the version and exit |
 
-Flags take one or two dashes. Without `--out`, `--emit-dir` or `--expect`,
-the command only compiles: exit status 0 means the instance compiles.
-When several are given, `--emit-dir` is written first, then `--out`, then
-the comparison runs.
+Flags take one or two dashes. Without `--out` or `--emit-dir`, the command
+only compiles: exit status 0 means the instance compiles. When both are
+given, `--emit-dir` is written first, then `--out`.
 
 ### `--out`
 
@@ -157,34 +155,11 @@ off in `example/values/dcr.yaml`, so there is no `metrics.values.yaml`; in
 `oidc-dcr.values.yaml`. Files of a previous run are not removed: emit into
 an empty directory.
 
-### `--expect`
-
-Compares the result with a `helm template` output of the wrapper chart,
-rendered with the same values files, release and namespace (see
-[compare](specs/01_inputs_outputs.md#compare)). The report goes to
-stdout; any difference fails the command with `error: <n> difference(s)`.
-The example wrapper chart has no templates: the report below was produced
-against a stream assembled from the emitted files, with one value changed.
-
-```console
-$ bin/okdp-compile --chart example/webapp --service example \
-    -f example/platform-values.yaml -f example/values/internal-db.yaml --expect rendered.yaml
-  objects        identical to ConfigMap/demo-webapp-okdp
-  objects        identical to ConfigMap/demo-webapp-settings
-  objects        identical to Password/demo-webapp-session-session-key
-  objects        identical to ExternalSecret/demo-webapp-session
-  app            DIFF vs demo-webapp-app-values:
-      changed .replicaCount: got 3, want 2
-  metrics        identical to demo-webapp-metrics-values
-  okdp           identical to demo-webapp-okdp-values
-error: 1 difference(s)
-```
-
 ### Exit status and errors
 
 | Status | When |
 |---|---|
-| 0 | compiled (and identical, with `--expect`); `--version`, `--help` |
+| 0 | compiled; `--version`, `--help` |
 | 1 | any error: `error: <message>` on stderr |
 | 2 | unknown flag, or a flag without its argument: the message and the usage on stderr |
 
@@ -396,9 +371,6 @@ what both write ([outputs](specs/01_inputs_outputs.md#outputs)).
 - `compiler.DcrChart` (`oidc-dcr`) is the vendored chart of the
   [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts):
   `Result.Charts` maps each to it.
-- `compiler.Compare(def, in, res, rendered, w)` compares `res` with a
-  `helm template` output of the wrapper chart, writes the report to `w`
-  and returns `<n> difference(s)` on any difference.
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
   the inputs are not changed.
@@ -502,7 +474,6 @@ name in `Chart.yaml`. Every error exits with status 1.
 | `<key>: upstream file <file>: no instance files (Inputs.Instance)` | `service.yaml` names upstream files, and no instance directory is given | pass `--instance` / `Inputs.Instance` |
 | `global.okdp.oidc.clientProvisioning "manual" is not one of existing, dcr` | wrong platform value | `existing` or `dcr` |
 | `$ref <url>: the schema may only reference itself (the compile reads no file or URL)` | a `values.schema.json` references a file or a URL | inline the referenced schema |
-| `<n> difference(s)` | `--expect`: the result differs from the wrapper's render | read the report on stdout |
 
 ### Mapping
 

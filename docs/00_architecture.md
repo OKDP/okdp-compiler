@@ -194,7 +194,6 @@ Files of `compiler/`, by stage, and what each one relies on:
 | `merge.go` | stage 9, `protect` and `append`; `vendor/<alias>` for an aliased chart | `values.go`, `schema.go` |
 | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
 | `values.go` | the data model; Helm's reading (`ParseValues`), merging and coalescing of values | every stage |
-| `compare.go` | `Compare` | outside the pipeline: a `Result` against a render, by chart key |
 
 Layers: `values.go` and `schema.go` reproduce Helm and know nothing of
 OKDP; `functions.go`, `labels.go` and `secrets.go` reproduce Helm, sprig
@@ -210,8 +209,7 @@ engine for the mappings and the oidc-dcr template.
 `cmd/okdp-compile/main.go` is a thin caller: `os.DirFS`, `ParseValues`,
 `LoadDefinition`, `Compile`, then output files, the chart index
 (`Result.Charts`) included: `okdp.charts.yaml` with
-[`--emit-dir`](01_usage.md#--emit-dir), `charts` with [`--out`](01_usage.md#--out);
-then `Compare`.
+[`--emit-dir`](01_usage.md#--emit-dir), `charts` with [`--out`](01_usage.md#--out).
 
 ## Design decisions
 
@@ -466,14 +464,6 @@ checks (wrong contract, unknown field, secret field), the example's
 upstream path, a missing platform value, a parameter schema violation, and
 the OAuth client in `dcr` mode without a registration URL
 (`dcr-without-registration-url.yaml`).
-
-### Compare
-
-`Compare` checks a `Result` against a `helm template` output of the wrapper
-chart rendered by okdp-lib-chart with the same instance values
-([Compare](specs/01_inputs_outputs.md#compare)). It verifies that a
-service moved from okdp-lib-chart rendering to a service definition computes
-the same thing. The CLI exposes it as `--expect` ([Usage](01_usage.md#--expect)).
 
 ## Limitations
 

@@ -18,11 +18,8 @@ import (
 // or {stringData}), named after its secretRef (default
 // <name>-<contract>-credentials).
 func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) {
-	chart, err := readChart(in.Chart)
-	if err != nil {
-		return nil, nil, err
-	}
-	name, version := chart.Name, chart.Version
+	svc := ctxService(ctx)
+	name, version := svc.Name, svc.Version
 	suffix := str(dig(asMap(ctx["global"]), "okdp.ingress.suffix"))
 	// No connections: only to compute what internal references resolve to.
 	r := resolver{in: in, conns: M{}, suffix: suffix}
@@ -103,7 +100,7 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 		outputs = string(b)
 	}
 	// The labels of OKDP's objects, plus one per provided contract.
-	labels := labels(chart, in.Release, "")
+	labels := labels(svc, in.Release, "")
 	names := make([]string, 0, len(contracts))
 	for c := range contracts {
 		names = append(names, c)

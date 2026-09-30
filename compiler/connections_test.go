@@ -31,13 +31,13 @@ const resolveSchema = `{"properties": {
 	"replicas": {"type": "array", "items": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}},
 	"other": {"type": "string"}}}`
 
-// resolveCtx: the context of the in-memory chart with resolveSchema.
+// resolveCtx: the context of the in-memory package with resolveSchema.
 func resolveCtx(values M) (M, []Dependency, error) {
-	ch := maps.Clone(chart)
+	ch := maps.Clone(pkg)
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
-	in.Chart, in.Contracts = ch, dbContract
-	ctx, _, _, deps, err := buildContext(in, &def.Service)
+	in.Contracts = dbContract
+	ctx, _, _, deps, err := buildContext(ch, in, &def.Service)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -113,11 +113,9 @@ func TestResolveErrors(t *testing.T) {
 
 // TestResolveUnknownContract: a schema that references a missing contract.
 func TestResolveUnknownContract(t *testing.T) {
-	ch := maps.Clone(chart)
+	ch := maps.Clone(pkg)
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
-	in := inputs(M{"q": "demo-mq"})
-	in.Chart = ch
-	if _, _, _, _, err := buildContext(in, &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
+	if _, _, _, _, err := buildContext(ch, inputs(M{"q": "demo-mq"}), &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
 		t.Errorf("got %v", err)
 	}
 }
@@ -131,8 +129,8 @@ func TestCompileOutputErrors(t *testing.T) {
 		t.Errorf("unknown chart: got %v", err)
 	}
 	d = *def
-	d.Service.Charts = map[string]ChartSpec{"app": {Base: "vendor-values/missing.yaml"}}
-	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open vendor-values/missing.yaml") {
+	d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/missing.yaml"}}
+	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open base/missing.yaml") {
 		t.Errorf("missing base values: got %v", err)
 	}
 }
