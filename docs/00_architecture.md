@@ -8,12 +8,9 @@ specified in [service definition](specs/02_service_definition.md) and
 
 An OKDP service is a set of upstream Helm charts deployed together as one
 instance, configured from a few parameters, the platform's and projects
-settings and the connections to other instances. okdp-lib-chart did this inside
-one `helm template` of a wrapper chart: its templates computed the upstream
-values, rendered the vendored upstream templates from the wrapper's own
-templates, and rewrote part of the output. okdp-compiler moves the computation
-to a compile step: it computes, in Go, the values each upstream chart is then
-rendered with, unchanged, by Helm.
+settings and the connections to other instances. okdp-compiler is the compile
+step: it computes, in Go, the values each upstream chart is then rendered with,
+unchanged, by Helm.
 
 One compile is one instance. It reads the service definition
 (`LoadDefinition`) and, in `Inputs`, the wrapper chart, the contracts, the
@@ -220,9 +217,9 @@ then `Compare`.
 
 ### Helm fidelity
 
-What Helm computed when okdp-lib-chart rendered the wrapper chart, the
-compiler computes the same way, and the fixtures check it against the helm
-binary ([Testing](#testing)). A values difference is silent: read as YAML
+What Helm computes from the same values files, the compiler computes the
+same way, and the fixtures check it against the helm binary
+([Testing](#testing)). A values difference is silent: read as YAML
 1.2, an upstream default `enabled: no` is the string `"no"`, which a
 template's `if` takes as true.
 
@@ -241,7 +238,7 @@ template's `if` takes as true.
   v6), on the coalesced values the templates see, reported in Helm's words,
   sorted by path since Helm's order varies between runs
   ([Schema check](specs/01_inputs_outputs.md#schema-check)).
-- Functions: a host function that replaces a Helm, sprig or okdp-lib-chart
+- Functions: a host function that reproduces a Helm, sprig or okdp-lib-chart
   function is that function's Go code. Where Helm prints `""` for a value it
   cannot encode, the compile fails instead.
 - Reproduced, not imported: the helm module pulls in client-go and requires
@@ -318,8 +315,7 @@ express, or what more than one reader needs:
 
 ### Values for unmodified upstream charts
 
-okdp-lib-chart rendered the vendored upstream templates from the wrapper's
-templates and rewrote part of the result. The compiler stops at values:
+The compiler stops at values:
 
 - each upstream chart stays a standard chart, vendored as published and
   rendered by Helm itself: hooks, `.Files`, `.Capabilities`, subcharts and

@@ -6,7 +6,7 @@
 // The values are read, merged and checked against the charts' schemas as
 // Helm does (values.go, merge.go, schema.go; testdata/helm holds what
 // `helm template` computes on the same inputs), and the mapping's host
-// functions reproduce the Helm and okdp-lib-chart functions they replace.
+// functions reproduce Helm and okdp-lib-chart functions.
 //
 // A mapping's oidcClients section declares the service's OAuth clients
 // (oidc.go): when the platform registers them by dynamic client

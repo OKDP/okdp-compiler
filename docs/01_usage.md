@@ -424,20 +424,6 @@ done
 The emitted files can be committed and checked with `git diff --exit-code`,
 as `go test ./compiler` does with `example/compiled/`.
 
-While a wrapper chart still renders its upstream charts with Helm templates
-(okdp-lib-chart's `okdp.vendor.render`, which writes the
-`okdp.io/vendor-values` ConfigMaps), compare the mapping with it on every
-`ci/*-values.yaml`, with the same layers, release and namespace on both sides
-(not run here: the example wrapper has no templates):
-
-```bash
-for f in "$chart"/ci/*-values.yaml; do
-  helm template "$release" "$chart" --namespace demo -f platform-values.yaml -f "$f" > rendered.yaml
-  okdp-compile --chart "$chart" --service "$service" --release "$release" --namespace demo \
-    -f platform-values.yaml -f "$f" --expect rendered.yaml || exit 1
-done
-```
-
 ### GitOps
 
 The compiler writes values and objects, not HelmRelease or Application
@@ -544,6 +530,6 @@ the compile. Where the cause or the fix is not in the message:
 | `oidcClients[0]: unknown key(s) redirectUri (allowed: name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret)` | a typo, or a registration field written as a client key | use a client key; a registration field goes under `request` |
 | `global.okdp.oidc.dcr.authMethod "" is not supported: OKDP registers its OAuth clients anonymously` | `dcr` mode, at least one client, and `authMethod` unset (`""`, as when the platform sets no `dcr` settings) or not `anonymous` | `authMethod: anonymous` in the platform values |
 | `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/dcr-without-registration-url.yaml`) | set it in the platform values |
-| `service.yaml: charts.oidc-dcr: the chart of oidcClients[0] is added by the compiler (from vendor/oidc-dcr): remove it from service.yaml` | `service.yaml` lists the chart key of a client, often in a port of a chart that rendered oidc-dcr itself | remove it: the compiler adds the client charts; rename the chart key or the client when it is another chart |
+| `service.yaml: charts.oidc-dcr: the chart of oidcClients[0] is added by the compiler (from vendor/oidc-dcr): remove it from service.yaml` | `service.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; rename the chart key or the client when it is another chart |
 | `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output` | `output` computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
 | `oidcClients: vendor/oidc-dcr/values.yaml not found: the OAuth clients are registered by the chart oidc-dcr (repository oci://quay.io/adaltas, version >= 0.5.0): list it in vendor.yaml, then run scripts/vendor-charts.sh` | the mapping declares a client and the wrapper chart does not vendor oidc-dcr, in `existing` mode too | vendor it once, under `vendor/oidc-dcr/` ([wrapper chart](specs/01_inputs_outputs.md#wrapper-chart)) |

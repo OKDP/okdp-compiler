@@ -203,7 +203,8 @@ func (s source) at(p string) string {
 	return "upstream." + s.chart + "." + p
 }
 
-// applyUpstream: okdp.vendor.upstream (instance values over the computed ones).
+// applyUpstream: one source of instance upstream values over the computed
+// ones, after the {{ and protect checks.
 func applyUpstream(values, user M, src source, protect, appendPaths []string) error {
 	if len(user) == 0 {
 		return nil

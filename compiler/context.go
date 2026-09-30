@@ -80,8 +80,7 @@ func buildContext(in Inputs, svc *Service) (M, M, map[string]*chartUpstream, []D
 			proxyEnv[env] = proxy[k]
 		}
 	}
-	// What the compiler derives from global.okdp (the former okdp.oidc,
-	// okdp.oidc.clientSecret, okdp.ingressAnnotations and okdp.proxy.env).
+	// What the compiler derives from global.okdp.
 	platform := M{
 		"oidc":               oidc,
 		"oidcClientSecret":   mainSecret,

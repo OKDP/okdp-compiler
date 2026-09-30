@@ -217,8 +217,8 @@ list, with the one item schema). `$ref`, `allOf`, `anyOf`, `oneOf`,
 
 The path names the parameter in errors and [dependencies](#dependencies). A
 reference that is `""` (not set), or not a string, is left as it is. The
-ports of platform-charts declare them in lists of objects, e.g. the catalogs
-of trino:
+packages of platform-charts declare them in lists of objects, e.g. the
+catalogs of trino:
 
 ```json
 "hiveCatalogs": {"type": "array", "items": {"type": "object", "properties": {
@@ -1113,5 +1113,5 @@ as Helm reads YAML, then:
 - every rendered values ConfigMap must belong to a compiled chart.
 
 The other rendered objects are not compared. It writes one line per object
-and per chart to `w`, and fails with `<n> difference(s)`. Usage in CI:
-[01_usage.md](../01_usage.md#ci).
+and per chart to `w`, and fails with `<n> difference(s)`. The command
+line: [`--expect`](../01_usage.md#--expect).

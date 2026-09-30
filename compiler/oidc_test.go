@@ -84,8 +84,7 @@ func TestDcrDefaults(t *testing.T) {
 // TestDcrNames: the main client's chart and objects are named after the
 // release (cut as okdp.fullname), a named client's after the release and
 // its name, and so are its Secret and client name; the wait for the
-// provider uses its discovery URL (one trailing slash of issuerUri dropped,
-// as okdp.vendor.oidcDcr did).
+// provider uses its discovery URL (one trailing slash of issuerUri dropped).
 func TestDcrNames(t *testing.T) {
 	ctx := dcrCtx()
 	setIssuer(ctx, "https://idp.example.org/realms/data/")

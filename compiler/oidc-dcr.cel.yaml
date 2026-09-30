@@ -6,9 +6,7 @@
 #
 # Embedded in the compiler and evaluated once per client (oidc.go) by the
 # mapping engine: ${{ CEL }} expressions, the same directives and
-# functions. Formerly okdp-lib-chart's okdp.oidc.dcrValues, plus what
-# okdp.vendor.oidcDcr changed after rendering (names, labels, retries, the
-# wait for the provider), now values of the chart.
+# functions.
 #
 # Inputs, besides the mapping's context (release, platform, global, values,
 # chart, labels, selectorLabels):

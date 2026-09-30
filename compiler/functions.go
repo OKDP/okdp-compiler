@@ -1,6 +1,6 @@
 // Functions: the host functions a mapping calls besides CEL's own, each
 // deterministic and hermetic, and each the Go code of the Helm template
-// function it replaces (testdata/helm/functions holds what `helm template`
+// function it reproduces (testdata/helm/functions holds what `helm template`
 // prints for the same inputs).
 package compiler
 

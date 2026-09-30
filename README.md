@@ -37,7 +37,7 @@ res, err := compiler.Compile(def, compiler.Inputs{
 `compiler/compile_test.go`). `compiler.Compare` checks a result against a
 `helm template` output of the wrapper chart.
 
-What Helm did, the compiler does the same way, checked against `helm
+What Helm does, the compiler does the same way, checked against `helm
 template` (`testdata/helm`): every values file is read as Helm
 reads it (YAML 1.1), the layers are merged and coalesced as Helm does, the
 parameters and the final values are checked against the charts'

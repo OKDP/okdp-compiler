@@ -3,7 +3,7 @@
 How to package an upstream application for OKDP: a wrapper chart and its
 service definition, compiled by `okdp-compile`. The steps follow the `webapp`
 example of this repository (`example/`); the recipes and pitfalls come from
-the services ported to this format in `OKDP/platform-charts` and
+the services packaged in `OKDP/platform-charts` and
 `OKDP/sandbox-dependencies`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md) and
 [inputs and outputs](specs/01_inputs_outputs.md), the command line
@@ -25,7 +25,7 @@ renders each chart from the vendored chart the
 [chart index](specs/01_inputs_outputs.md#chart-index) names
 (`vendor/<chart>/`), as a standard chart.
 
-The ports lay a package out as follows (`charts/<category>/<name>/` in
+A package is laid out as follows (`charts/<category>/<name>/` in
 platform-charts, `packages/<category>/<name>/` in sandbox-dependencies):
 
 ```
@@ -44,8 +44,8 @@ platform-charts, `packages/<category>/<name>/` in sandbox-dependencies):
 └── README.md               parameters, platform values read, charts, known gaps
 ```
 
-`--chart` and `--service` are separate flags: the ports keep `service.yaml`
-and `mapping.cel.yaml` in the chart directory (`--chart X --service X`), the
+`--chart` and `--service` are separate flags: a package keeps `service.yaml`
+and `mapping.cel.yaml` in its chart directory (`--chart X --service X`), the
 example one level up (`--chart example/webapp --service example`).
 
 ## Step by step
@@ -320,8 +320,8 @@ provides:                  # the connections the instance publishes
 
 Besides CEL's own, [host functions](specs/02_service_definition.md#host-functions)
 (`str`, `sha256`, `toJson`, `okdpFullname`, `okdpLabels`,
-`okdpGeneratedSecret`, `oidcClientSecret`...) reproduce the Helm and
-okdp-lib-chart helpers the former templates used.
+`okdpGeneratedSecret`, `oidcClientSecret`...) reproduce Helm's functions
+and give OKDP's names, labels and Secrets.
 
 ### 6. Consume and provide connections
 
@@ -420,11 +420,6 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
   the platform`). Add one per `errors` entry, per protected path that
   matters, per schema rule.
-- Porting a chart built on okdp-lib-chart: render the former chart with
-  `helm template` on the same instance values and pass the output to
-  `--expect`: each compiled chart is compared with the values ConfigMap it
-  rendered, each OKDP object with its counterpart
-  ([compare](specs/01_inputs_outputs.md#compare)).
 
 [Troubleshooting](01_usage.md#troubleshooting) explains the error messages.
 
@@ -759,8 +754,7 @@ errors:
 - **The clients' chart keys are the compiler's.** `oidc-dcr` and
   `<name>-oidc-dcr` name the charts of the declared clients: a
   `service.yaml` chart or an `output` entry of the same key fails the
-  compile, in every mode. Porting a chart that rendered oidc-dcr itself,
-  delete those entries and the second vendored copy.
+  compile, in every mode.
 - **A client's `secret` is not followed.** It renames the Secret the Job
   writes, in `dcr` mode only; `oidcClientSecret(name)` still returns the
   mode's name, and in `existing` mode the platform's Secret keeps its own.
