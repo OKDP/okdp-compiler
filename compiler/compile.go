@@ -156,8 +156,8 @@ func (s *Service) upstreamOf(key string) string {
 }
 
 // check: what service.yaml may not hold, refused when it is loaded
-// (LoadDefinition) and before every compile: no name or version, a chart
-// without its source, a protect or append path that does not follow the grammar of paths.go (a malformed path would
+// (LoadDefinition) and before every compile: no name or version, the chart
+// of OKDP's own objects (the compiler adds it), a chart without its source, a protect or append path that does not follow the grammar of paths.go (a malformed path would
 // otherwise surface only when an instance sets a value under it, or never,
 // leaving a value unprotected), an upstream.from that does not name a chart
 // accepting upstream values of its own.
@@ -167,6 +167,9 @@ func (s *Service) check() error {
 		return errors.New("service.yaml: name is required")
 	case s.Version == "":
 		return errors.New("service.yaml: version is required")
+	}
+	if _, ok := s.Charts[ObjectsChart]; ok {
+		return fmt.Errorf("service.yaml: charts.%s: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml", ObjectsChart)
 	}
 	for _, key := range slices.Sorted(maps.Keys(s.Charts)) {
 		spec := s.Charts[key]
@@ -233,12 +236,12 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	return fmt.Errorf("line %d: upstream must be true, false, a path, a list of paths or {from: <chart>}", n.Line)
 }
 
-// ObjectsChart: the chart of service.yaml that renders OKDP's own objects
-// (okdp-objects, values `objects: []`). When a service declares it, the
-// compiler appends Result.Objects to the objects the mapping computes for
-// it (output.okdp.objects), and compiles it even when the mapping leaves it
-// out: the descriptor ConfigMap, the credentials Secrets and the objects
-// section reach the cluster with the upstream charts.
+// ObjectsChart: the chart key of OKDP's own objects. The compiler adds it to
+// every compile, rendered by the platform's objects chart
+// (global.okdp.charts.objects: okdp-objects, values `objects: []`), its
+// objects Result.Objects: the descriptor ConfigMap, the credentials Secrets
+// and the objects section reach the cluster with the upstream charts.
+// Neither service.yaml nor the mapping's output may list it.
 const ObjectsChart = "okdp"
 
 // Result: what a compile produces.
@@ -250,12 +253,13 @@ type Result struct {
 	Values map[string]map[string]any
 	// Charts: chart -> the upstream chart that renders its values (`helm
 	// template <Charts[chart]> -f <Values[chart]>`): its service.yaml
-	// source, or the oidc-dcr chart for an OAuth client.
+	// source, the platform's oidc-dcr chart for an OAuth client, the
+	// platform's objects chart for okdp.
 	Charts map[string]ChartRef
 	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
 	// the credentials Secrets of the provided connections, then the objects
-	// section of the mapping. With an okdp chart in service.yaml
-	// (ObjectsChart), they are also in its values.
+	// section of the mapping; also the values of the okdp chart
+	// (ObjectsChart).
 	Objects []map[string]any
 	// Dependencies: the instances the connection references point to, by
 	// parameter path. References to external connections are not listed.
@@ -289,6 +293,11 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The charts the platform renders the compiler's own charts with.
+	objectsSource, dcrSource, err := platformCharts(asMap(dig(values, "global.okdp")))
+	if err != nil {
+		return nil, err
+	}
 	res, err := runCEL(def.Mapping, ctx)
 	if err != nil {
 		return nil, err
@@ -300,7 +309,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if svc, err = clientCharts(svc, clients, dcrValues, res.output); err != nil {
+	if svc, err = clientCharts(svc, clients, dcrValues, res.output, dcrSource); err != nil {
 		return nil, err
 	}
 	// The descriptor ConfigMap, checked against the contracts, and the
@@ -313,19 +322,9 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	for _, o := range append(credentials, res.objects...) {
 		out.Objects = append(out.Objects, asMap(o))
 	}
-	// The okdp chart (okdp-objects) renders them: appended to the objects the
-	// mapping computed for it, and rendered even when the mapping left it out.
-	if _, ok := svc.Charts[ObjectsChart]; ok {
-		okdp := asMap(res.output[ObjectsChart])
-		objects, isList := okdp["objects"].([]any)
-		if okdp["objects"] != nil && !isList {
-			return nil, fmt.Errorf("mapping output %s.objects: must be a list of objects", ObjectsChart)
-		}
-		for _, o := range out.Objects {
-			objects = append(objects, deepCopy(o))
-		}
-		okdp["objects"] = objects
-		res.output[ObjectsChart] = okdp
+	// The okdp chart renders them.
+	if svc, err = objectsChart(svc, out.Objects, res.output, objectsSource); err != nil {
+		return nil, err
 	}
 	// Charts left out by the mapping ($if) are not rendered. Every chart's
 	// schema violations are reported together. In key order: the first
@@ -351,4 +350,26 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// objectsChart: the charts of svc plus the okdp chart (ObjectsChart),
+// rendered by the platform's objects chart, its values the objects (no base
+// values, no instance values), added to the mapping's output, which may not
+// list it. svc is not changed.
+func objectsChart(svc *Service, objects []map[string]any, output M, src ChartRef) (*Service, error) {
+	if _, ok := output[ObjectsChart]; ok {
+		return nil, fmt.Errorf("mapping output %q: the chart of OKDP's own objects is compiled from the objects section: remove it from output", ObjectsChart)
+	}
+	list := make([]any, 0, len(objects))
+	for _, o := range objects {
+		list = append(list, deepCopy(o))
+	}
+	output[ObjectsChart] = M{"objects": list}
+	out := *svc
+	out.Charts = maps.Clone(svc.Charts)
+	if out.Charts == nil {
+		out.Charts = map[string]ChartSpec{}
+	}
+	out.Charts[ObjectsChart] = ChartSpec{Source: src}
+	return &out, nil
 }

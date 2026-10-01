@@ -25,8 +25,11 @@ require:
 # source, the published chart that renders its values: the compiler reads
 # its defaults and schema from the chart cache (example/charts/), a deployer
 # renders it from its repository. Two keys may name the same source, e.g. a
-# chart rendered twice. The oidc-dcr chart of the mapping's OAuth client
-# (oidcClients) is not listed: the compiler adds it in dcr mode.
+# chart rendered twice. The compiler adds two charts of its own, not listed:
+# okdp, OKDP's own objects (the descriptor ConfigMap and the objects section
+# of the mapping: the settings ConfigMap, the session key Secret), and in
+# dcr mode the oidc-dcr chart of the mapping's OAuth client (oidcClients);
+# the platform values name the charts that render them.
 charts:
   app:                                 # the application chart (fictional)
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
@@ -39,8 +42,3 @@ charts:
     append: [env]                      # user lists appended to the computed ones instead of replacing them
   metrics:                             # the metrics chart (fictional): no base values, no user values
     source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
-  # OKDP's own objects (the okdp-objects chart, values `objects: []`): the
-  # compiler adds the descriptor ConfigMap and the objects section of the
-  # mapping (the settings ConfigMap, the session key Secret).
-  okdp:
-    source: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}

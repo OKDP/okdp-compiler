@@ -1,8 +1,9 @@
-// Charts: the upstream charts of a package, by reference (ChartRef), and the
-// chart cache a compile reads their defaults and schemas from
-// (Inputs.Charts): each chart as `helm pull -d <cache>` writes it,
-// <chart>-<version>.tgz, or unpacked, <chart>-<version>/. The compiler reads
-// nothing else of a chart: a deployer renders it from its repository.
+// Charts: the upstream charts of a package, by reference (ChartRef), the
+// platform's charts (global.okdp.charts: objects, oidcDcr), and the chart
+// cache a compile reads their defaults and schemas from (Inputs.Charts):
+// each chart as `helm pull -d <cache>` writes it, <chart>-<version>.tgz, or
+// unpacked, <chart>-<version>/. The compiler reads nothing else of a chart:
+// a deployer renders it from its repository.
 package compiler
 
 import (
@@ -57,6 +58,50 @@ func (r ChartRef) pull() string {
 		return fmt.Sprintf("helm pull %s/%s --version %s", strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version)
 	}
 	return fmt.Sprintf("helm pull %s --repo %s --version %s", r.Chart, r.Repository, r.Version)
+}
+
+// platformCharts: the charts the platform renders the compiler's own charts
+// with (global.okdp.charts of okdp): objects, the chart of OKDP's own objects
+// (okdp-objects, required), and oidcDcr, the chart of the OAuth clients in
+// dcr mode (DcrSource by default).
+func platformCharts(okdp M) (objects, dcr ChartRef, err error) {
+	charts, ok := okdp["charts"].(M)
+	if !ok && okdp["charts"] != nil {
+		return objects, dcr, fmt.Errorf("global.okdp.charts must be a map (objects, oidcDcr), got %s", short(okdp["charts"]))
+	}
+	if charts["objects"] == nil {
+		return objects, dcr, errors.New("global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml")
+	}
+	if objects, err = platformChart(charts["objects"], "global.okdp.charts.objects"); err != nil {
+		return objects, dcr, err
+	}
+	dcr = DcrSource
+	if charts["oidcDcr"] != nil {
+		dcr, err = platformChart(charts["oidcDcr"], "global.okdp.charts.oidcDcr")
+	}
+	return objects, dcr, err
+}
+
+// platformChart: a chart of global.okdp.charts, a map of strings, checked.
+func platformChart(v any, where string) (ChartRef, error) {
+	var r ChartRef
+	m, ok := v.(M)
+	if !ok {
+		return r, fmt.Errorf("%s must be a map (repository, chart, version), got %s", where, short(v))
+	}
+	for _, f := range []struct {
+		key string
+		to  *string
+	}{{"repository", &r.Repository}, {"chart", &r.Chart}, {"version", &r.Version}} {
+		if x, set := m[f.key]; set {
+			s, ok := x.(string)
+			if !ok {
+				return r, fmt.Errorf("%s.%s must be a string, got %s", where, f.key, short(x))
+			}
+			*f.to = s
+		}
+	}
+	return r, r.check(where)
 }
 
 // upstreamChart: what the compiler reads of an upstream chart: its defaults

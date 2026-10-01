@@ -97,7 +97,8 @@ oidcClients:
     grantTypes: [authorization_code, refresh_token]
 
 # OKDP's own objects, whole manifests, rendered by the okdp chart after the
-# descriptor ConfigMap (service.yaml declares it).
+# descriptor ConfigMap (the compiler adds it, with the platform's objects
+# chart).
 objects:
   - apiVersion: v1
     kind: ConfigMap

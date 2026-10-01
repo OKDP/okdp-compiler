@@ -339,9 +339,9 @@ oidcClients:
 		existing bool
 		charts   map[string]ChartRef // Result.Charts
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]ChartRef{"app": appSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
-		"a client left out": {M{"replicas": 1}, false, map[string]ChartRef{"app": appSource, "oidc-dcr": DcrSource}},
-		"existing mode":     {M{"replicas": 2}, true, map[string]ChartRef{"app": appSource}},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]ChartRef{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
+		"a client left out": {M{"replicas": 1}, false, map[string]ChartRef{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource}},
+		"existing mode":     {M{"replicas": 2}, true, map[string]ChartRef{"app": appSource, "okdp": objectsSource}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, err := compile("", tc.existing, app, ch, tc.values)
@@ -369,7 +369,7 @@ oidcClients:
 			if c := asMap(res.Computed["oidc-dcr"]); c["ttlSeconds"] != float64(30) || dig(c, "mapping.keyMapping.registration_client_uri") != nil {
 				t.Errorf("computed: %#v", c)
 			}
-			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
+			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 4 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
 				t.Errorf("console-oidc-dcr values, over oidc-dcr's defaults: %#v", c)
 			}
 		})
@@ -391,6 +391,14 @@ oidcClients:
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	// The platform may name another oidc-dcr chart, a mirror.
+	mirror := ChartRef{Repository: "oci://mirror.example.org/adaltas", Chart: "oidc-dcr", Version: "0.5.1"}
+	mirrored := maps.Clone(charts)
+	mirrored["oidc-dcr-0.5.1/values.yaml"] = ch["oidc-dcr-0.5.0/values.yaml"]
+	res, err := compile("", false, app, mirrored, M{"replicas": 1, "global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": mirror.Repository, "chart": mirror.Chart, "version": mirror.Version}}}}})
+	if err != nil || res.Charts["oidc-dcr"] != mirror {
+		t.Errorf("global.okdp.charts.oidcDcr: %v %#v", err, res)
 	}
 	// In existing mode, the chart cache needs no oidc-dcr chart.
 	if _, err := compile("", true, app, charts, M{"replicas": 2}); err != nil {

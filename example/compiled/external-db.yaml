@@ -153,6 +153,11 @@ values:
         certificateIssuers:
           selfSigned:
             name: okdp-ca
+        charts:
+          objects:
+            chart: okdp-objects
+            repository: oci://registry.example.org/okdp
+            version: 1.0.0
         ingress:
           className: nginx
           suffix: okdp.example.org
@@ -191,6 +196,11 @@ values:
         certificateIssuers:
           selfSigned:
             name: okdp-ca
+        charts:
+          objects:
+            chart: okdp-objects
+            repository: oci://registry.example.org/okdp
+            version: 1.0.0
         ingress:
           className: nginx
           suffix: okdp.example.org

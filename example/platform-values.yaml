@@ -7,6 +7,11 @@ global:
     certificateIssuers:
       selfSigned:
         name: okdp-ca
+    # The charts the compiler renders its own charts with: objects, OKDP's
+    # own objects (the okdp-objects chart, required); oidcDcr, the OAuth
+    # clients in dcr mode (default: oci://quay.io/adaltas, oidc-dcr 0.5.0).
+    charts:
+      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
     # Single sign-on. The services' OAuth clients are provisioned by the
     # platform (clientProvisioning: existing, the default; values/dcr.yaml
     # registers them by DCR).

@@ -32,7 +32,8 @@ import (
 const DcrChart = "oidc-dcr"
 
 // DcrSource: the chart that registers an OAuth client by dynamic client
-// registration, the version whose values the embedded template writes.
+// registration, the version whose values the embedded template writes: the
+// default of global.okdp.charts.oidcDcr.
 var DcrSource = ChartRef{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.5.0"}
 
 // dcrTemplate: the oidc-dcr values of one client (the mapping language).
@@ -283,11 +284,12 @@ func dcrImage(img M) M {
 }
 
 // clientCharts: the charts of service.yaml, plus the chart of each client
-// compiled in dcr mode (the chart key of the client, rendered by DcrSource,
-// no base values, no instance values), its values added to the mapping's
-// output. The compiler owns these charts: neither service.yaml nor the
-// mapping's output may list them, in any mode. svc is not changed.
-func clientCharts(svc *Service, clients []oidcClient, values map[string]M, output M) (*Service, error) {
+// compiled in dcr mode (the chart key of the client, rendered by the
+// platform's oidc-dcr chart src, no base values, no instance values), its
+// values added to the mapping's output. The compiler owns these charts:
+// neither service.yaml nor the mapping's output may list them, in any mode.
+// svc is not changed.
+func clientCharts(svc *Service, clients []oidcClient, values map[string]M, output M, src ChartRef) (*Service, error) {
 	if len(clients) == 0 {
 		return svc, nil
 	}
@@ -299,13 +301,14 @@ func clientCharts(svc *Service, clients []oidcClient, values map[string]M, outpu
 			return nil, fmt.Errorf("mapping output %q: the chart of %s is compiled from oidcClients: remove it from output", c.chart, c.where)
 		}
 	}
-	out := &Service{Charts: maps.Clone(svc.Charts), Require: svc.Require}
+	out := *svc
+	out.Charts = maps.Clone(svc.Charts)
 	if out.Charts == nil {
 		out.Charts = map[string]ChartSpec{}
 	}
 	for chart, v := range values {
-		out.Charts[chart] = ChartSpec{Source: DcrSource}
+		out.Charts[chart] = ChartSpec{Source: src}
 		output[chart] = v
 	}
-	return out, nil
+	return &out, nil
 }
