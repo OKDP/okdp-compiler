@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -63,11 +64,22 @@ func (r ChartRef) pull() string {
 // platformCharts: the charts the platform renders the compiler's own charts
 // with (global.okdp.charts of okdp): objects, the chart of OKDP's own objects
 // (okdp-objects, required), and oidcDcr, the chart of the OAuth clients in
-// dcr mode (DcrSource by default).
+// dcr mode (DcrSource by default). Another key is refused: a misspelled
+// oidcDcr would otherwise leave the default in place.
 func platformCharts(okdp M) (objects, dcr ChartRef, err error) {
 	charts, ok := okdp["charts"].(M)
 	if !ok && okdp["charts"] != nil {
 		return objects, dcr, fmt.Errorf("global.okdp.charts must be a map (objects, oidcDcr), got %s", short(okdp["charts"]))
+	}
+	var unknown []string
+	for k := range charts {
+		if k != "objects" && k != "oidcDcr" {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) > 0 {
+		slices.Sort(unknown)
+		return objects, dcr, fmt.Errorf("global.okdp.charts: unknown key(s) %s (allowed: objects, oidcDcr)", strings.Join(unknown, ", "))
 	}
 	if charts["objects"] == nil {
 		return objects, dcr, errors.New("global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml")

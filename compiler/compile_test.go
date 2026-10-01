@@ -432,6 +432,7 @@ objects:
 		"not a string": {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": 1}}}}}, "global.okdp.charts.objects.version must be a string, got 1"},
 		"a range":      {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}, `global.okdp.charts.objects.version "1.x": a pinned chart version`},
 		"oidcDcr":      {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": "quay.io"}}}}}, `global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository`},
+		"unknown key":  {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"oidcDCR": M{}, "dcr": M{}}}}}, "global.okdp.charts: unknown key(s) dcr, oidcDCR (allowed: objects, oidcDcr)"},
 		"not in cache": {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "2.0.0"}}}}}, "okdp: chart okdp-objects-2.0.0 is not in the chart cache"},
 	} {
 		t.Run(name, func(t *testing.T) {

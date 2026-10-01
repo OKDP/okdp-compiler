@@ -157,10 +157,11 @@ func (s *Service) upstreamOf(key string) string {
 
 // check: what service.yaml may not hold, refused when it is loaded
 // (LoadDefinition) and before every compile: no name or version, the chart
-// of OKDP's own objects (the compiler adds it), a chart without its source, a protect or append path that does not follow the grammar of paths.go (a malformed path would
-// otherwise surface only when an instance sets a value under it, or never,
-// leaving a value unprotected), an upstream.from that does not name a chart
-// accepting upstream values of its own.
+// of OKDP's own objects (the compiler adds it), a chart without its source,
+// a protect or append path that does not follow the grammar of paths.go (a
+// malformed path would otherwise surface only when an instance sets a value
+// under it, or never, leaving a value unprotected), an upstream.from that
+// does not name a chart accepting upstream values of its own.
 func (s *Service) check() error {
 	switch {
 	case s.Name == "":
