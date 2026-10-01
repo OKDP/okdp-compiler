@@ -1,20 +1,23 @@
 # Service definition
 
 Normative reference of a service definition: the two files at the root of
-a directory that `compiler.LoadDefinition(fsys)` reads.
+a package that `compiler.LoadDefinition(fsys)` reads.
 
 | File | Content |
 |---|---|
-| [`service.yaml`](#serviceyaml) | the engine-neutral part: the upstream charts, their base values, what an instance may override, the platform values the service needs |
+| [`service.yaml`](#serviceyaml) | the engine-neutral part: the service's name and versions, the upstream charts and their sources, their base values, what an instance may override, the platform values the service needs |
 | [`mapping.cel.yaml`](#mappingcelyaml) | the mapping: YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives; it computes the values of each chart, OKDP's own objects and what the instance publishes, and declares the service's OAuth clients |
 
 Both files are required: a missing one fails `LoadDefinition` with the read
 error (`open service.yaml: ...`), and a `service.yaml` that does not decode
 fails with `service.yaml: <error>`. `LoadDefinition` only reads
 `mapping.cel.yaml`: each `Compile` parses and evaluates it, so its errors
-are compile errors ([Errors](#errors)).
+are compile errors ([Errors](#errors)). It keeps the package
+(`Definition.Files`): each compile reads its other files, `values.yaml`,
+`values.schema.json` and the base files
+([package files](01_inputs_outputs.md#package-files)).
 
-The other inputs of a compile (wrapper chart, contracts, platform and
+The other inputs of a compile (the chart cache, contracts, platform and
 instance values) and its outputs are specified in
 [01_inputs_outputs.md](01_inputs_outputs.md).
 
@@ -27,51 +30,76 @@ mapping (`upstream: yes` is the path `yes`). Unknown fields are ignored.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
+| `name` | string | required | The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations, `okdp-compile`'s default release `demo-<name>`. |
+| `version` | string | required | The package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`. |
+| `appVersion` | string | `""` | The application's version: `service.appVersion`, label `app.kubernetes.io/version` (left out when empty). |
+| `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
+| `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `require` | list of strings | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty: [requirements](01_inputs_outputs.md#requirements). |
-| `charts` | map: name → [chart](#chart) | `{}` | The upstream charts of the service, by name: chart `<name>` is `output.<name>` of the mapping, compiled from `vendor/<name>/` of the wrapper chart, or from the vendored chart it names ([aliases](#aliases)). The charts of the OAuth clients are not listed: the compiler adds them ([oidcClients](#oidcclients)). |
+| `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key: chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
+
+The versions are strings, as written: `appVersion: 1.10` is `"1.10"`.
+Without `name` or `version`, loading fails: `service.yaml: name is required`,
+`service.yaml: version is required`.
 
 ### Chart
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `chart` | string | the name | The vendored chart the chart compiles from and renders with: `vendor/<chart>/` of the wrapper chart ([aliases](#aliases)). |
-| `base` | string | none | Path, in the wrapper chart, of OKDP's default values for this chart (by convention `vendor-values/<name>.yaml`). Read as a Helm values file; a missing file fails the compile (`<name>: open <path>: ...`). |
-| `upstream` | `true`, `false`, a path or a list of paths | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
-| `protect` | list of dotted paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
-| `append` | list of dotted paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
+| `source` | `{repository, chart, version}` | required | The upstream chart that renders the key's values: [sources](#sources). |
+| `base` | string | none | Path, in the package, of OKDP's default values for this chart (by convention `base/<key>.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
+| `upstream` | `true`, `false`, a path, a list of paths or `{from: <key>}` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
+| `protect` | list of paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
+| `append` | list of paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
 
 How the chart defaults, `base`, the computed values and the instance
 upstream values combine: [merge precedence](01_inputs_outputs.md#merge-precedence).
-A chart is rendered only when the mapping outputs it (`okdp` excepted:
-[the okdp chart](#the-okdp-chart)); its vendored chart must then be under
-`vendor/` ([wrapper chart](01_inputs_outputs.md#wrapper-chart)).
+A chart is rendered only when the mapping outputs it; its source must then
+be in the chart cache ([chart cache](01_inputs_outputs.md#chart-cache)).
 
-### Aliases
+### Sources
 
 ```yaml
 charts:
-  polaris-admin: {base: vendor-values/polaris-admin-bootstrap.yaml}
+  polaris-admin:
+    source: &admin {repository: https://charts.example.org, chart: polaris-admin, version: 1.0.0}
+    base: base/polaris-admin-bootstrap.yaml
+    upstream: true
+    protect: [fullnameOverride, phase, realms]
   polaris-admin-principals:            # the values of a second render
-    chart: polaris-admin               # vendor/polaris-admin: defaults, schema, render
-    base: vendor-values/polaris-admin-principals.yaml
+    source: *admin                     # the same chart
+    base: base/polaris-admin-principals.yaml
+    upstream: {from: polaris-admin}    # the instance values of polaris-admin, with its protect
 ```
 
-`chart` names the vendored chart a chart compiles from, by default its
-name: a chart rendered more than once, with other values, is vendored once
-(`vendor.yaml` lists it once) and declared under one name per render. From
-`vendor/<chart>/` come the chart's defaults (`values.yaml`), its schema
-(`values.schema.json`) and its render
-([wrapper chart](01_inputs_outputs.md#wrapper-chart),
-[merge precedence](01_inputs_outputs.md#merge-precedence)). Everything else
-stays keyed by the name: `output.<name>` of the mapping, `Result.Values` and
-`Result.Computed`, the instance's `upstream.<name>.yaml` and inline
-`upstream.<name>` values. `Result.Charts` maps each
-compiled chart to its vendored chart: [chart index](01_inputs_outputs.md#chart-index).
+`source` names the upstream chart that renders the key's values, as its
+repository publishes it: `repository`, a chart repository (`https://`) or an
+OCI registry path (`oci://`); `chart`, the chart's name in it; `version`, a
+pinned version. A deployer renders the chart from there. The compiler reads
+only its `values.yaml` and `values.schema.json`, from the chart cache
+(`<chart>-<version>.tgz` or `<chart>-<version>/`:
+[chart cache](01_inputs_outputs.md#chart-cache)): the first layer of the
+final values, and their schema
+([merge precedence](01_inputs_outputs.md#merge-precedence)).
+`Result.Charts` maps each compiled key to its source:
+[chart index](01_inputs_outputs.md#chart-index).
 
-The value is the name of a directory of `vendor/`: `""` is the default; a
-value that holds a `/`, is `.` or `..`, or has leading or trailing spaces
-fails with
-`service.yaml: charts.<name>.chart "<chart>": not the name of a vendored chart (vendor/<chart>)`.
+Two keys of the same source are two renders of one upstream chart, each
+with its own values (polaris-admin's bootstrap and principals phases).
+Everything else stays keyed by the key: `output.<key>` of the mapping,
+`Result.Values` and `Result.Computed`, the instance's `upstream.<key>.yaml`
+and inline `upstream.<key>` values. `upstream: {from: <key>}` gives the
+second render the instance values of the first ([upstream](#upstream)).
+
+A source is checked when `service.yaml` is loaded, and by `Compile` for a
+definition built in memory:
+
+| Source | Error |
+|---|---|
+| absent, or all three fields empty | `service.yaml: charts.<key>.source is required: the upstream chart (repository, chart, version)` |
+| `repository` not starting with `https://`, `http://` or `oci://` | `service.yaml: charts.<key>.source.repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
+| `chart` empty, holding a `/`, `.` or `..`, or with leading or trailing spaces | `service.yaml: charts.<key>.source.chart "<chart>": the name of a chart of the repository` |
+| `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `service.yaml: charts.<key>.source.version "<version>": a pinned chart version (1.2.3), not a range` |
 
 ### upstream
 
@@ -82,47 +110,77 @@ fails with
 | a path | that file of `Inputs.Instance`, which must exist, then the inline values |
 | a list of paths | these files in order, each of which must exist, then the inline values |
 | `[]` | the inline values only |
+| `{from: <key>}` | those of the chart `<key>`, as its own entry reads them, with its `protect` and `append` |
 
-A value of another form (`""`, a number, a map, or a list holding `""`)
-fails with `service.yaml: line <n>: upstream must be true, false, a path or a list of paths`.
+A value of another form (`""`, a number, a map other than `{from: <key>}`,
+or a list holding `""`) fails with
+`service.yaml: line <n>: upstream must be true, false, a path, a list of paths or {from: <chart>}`.
 How the instance values are written, and the errors of a missing file:
 [upstream values](01_inputs_outputs.md#upstream-values).
 
+`{from: <key>}` is for two renders of one upstream chart that an instance
+sets with one set of values ([sources](#sources)): refused or appended the
+same way in both, also when the mapping leaves `<key>` out. The mapping sees
+them once, as `values.upstream.<key>`. `<key>` must accept upstream values of
+its own, and the chart lists no `protect` or `append` of its own:
+
+| Case | Error |
+|---|---|
+| `<key>` is the chart itself | `service.yaml: charts.<chart>.upstream.from: the chart itself (upstream: true accepts its own values)` |
+| `<key>` is not a chart of `service.yaml` | `service.yaml: charts.<chart>.upstream.from "<key>": not a chart of service.yaml` |
+| `<key>` accepts no upstream values of its own (none, or `from`) | `service.yaml: charts.<chart>.upstream.from "<key>": that chart accepts no upstream values of its own (upstream: true, or files)` |
+| the chart has `protect` or `append` | `service.yaml: charts.<chart>: protect and append come with upstream.from, from charts.<key>: list them there` |
+
 ### protect and append
 
-Dotted paths (`ingress.hosts`): a key holding a dot cannot be named.
-`global` is always protected. Both apply to each instance upstream file,
-then to the inline values: [protect](01_inputs_outputs.md#protect),
+Paths of keys separated by dots (`ingress.hosts`). A key containing dots is
+written in brackets, as one literal key (`config["spark.ui.filters"]`); a
+bracketed key ending with `*` names every key starting with the text before
+it (`ingress.annotations["cert-manager.io/*"]`; `["*"]` names every key);
+`\"`, `\\` and `\*` write a quote, a backslash and a star in brackets. A
+malformed path fails when `service.yaml` is loaded:
+`service.yaml: charts.<key>.protect[<i>] "<path>": <reason>` (`append[<i>]`
+alike). `global` is always protected. Both apply to each instance upstream
+file, then to the inline values: [protect](01_inputs_outputs.md#protect),
 [append](01_inputs_outputs.md#append).
 
 ### The okdp chart
 
-The chart named `okdp` (`compiler.ObjectsChart`, the okdp-objects chart)
-renders OKDP's own objects. When `charts` declares it, the compiler appends
-`Result.Objects` to its `output.okdp.objects` and compiles it even when the
-mapping leaves it out: [the okdp chart](01_inputs_outputs.md#the-okdp-chart).
-Otherwise it is a chart like the others.
+`okdp` (`compiler.ObjectsChart`) is the compiler's: it adds the chart to
+every compile, rendered by the platform's objects chart
+(`global.okdp.charts.objects`), its values `Result.Objects`:
+[the okdp chart](01_inputs_outputs.md#the-okdp-chart). `charts` may not
+declare it (`service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml`,
+when the file is loaded), nor `output` compute it ([output](#output)).
 
 ### Example
 
 ```yaml
+name: webapp
+version: 2.3.0-1.0.0                   # <upstream>-<okdp semver>
+appVersion: "2.3"
+roles: [webapp]                        # catalog metadata
+dependsOn: [database-server, ingress]
 require:                               # global.okdp.<path>, each non-empty
   - ingress.suffix
   - certificateIssuers.selfSigned.name
 charts:
-  app:                                 # vendor/app/ of the wrapper, output.app of the mapping
-    base: vendor-values/app.yaml       # OKDP's defaults, over vendor/app/values.yaml
+  app:                                 # output.app of the mapping
+    source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
+    base: base/app.yaml                # OKDP's defaults, over the chart's values.yaml
     upstream: true                     # upstream.app.yaml when it exists, then inline upstream.app
-    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
+    protect: [fullnameOverride, ingress.enabled, ingress.hosts, 'ingress.annotations["cert-manager.io/*"]']
     append: [env]                      # instance lists appended to the computed ones
   admin:
-    base: vendor-values/admin.yaml
+    source: &admin {repository: oci://registry.example.org/charts, chart: admin, version: 0.3.1}
+    base: base/admin.yaml
     upstream: []                       # inline upstream.admin only
-  admin-users:                         # output.admin-users, a second render of vendor/admin/
-    chart: admin
-    base: vendor-values/admin-users.yaml
-  metrics: {}                          # no base values, no instance values
-  okdp: {}                             # OKDP's own objects (compiler.ObjectsChart)
+  admin-users:                         # output.admin-users, a second render of the admin chart
+    source: *admin
+    base: base/admin-users.yaml
+    upstream: {from: admin}            # the instance values of admin
+  metrics:                             # no base values, no instance values
+    source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
 ```
 
 ## mapping.cel.yaml
@@ -155,7 +213,7 @@ output:
     fullnameOverride: ${{ release.name }}-app
     replicaCount: ${{ values.replicas }}          # a number: the expression is the whole scalar
     image:
-      tag: ${{ chart.appVersion }}
+      tag: ${{ service.appVersion }}
     ingress:
       annotations: ${{ platform.ingressAnnotations }}
       hosts:
@@ -196,8 +254,8 @@ oidcClients:
 4. The objects are checked (kind and name); then the OAuth clients, whose
    charts are added in `dcr` mode ([oidcClients](#oidcclients)); then the
    compile builds the descriptor from `instance` and `provides`, checked
-   against the contracts, and the final values of each chart in `output`
-   and of each client chart.
+   against the contracts, and the final values of each chart in `output`,
+   of each client chart and of the `okdp` chart.
 
 A section does not see the others: there is no `output` or `instance`
 variable. A value used by several sections is a `let` binding.
@@ -233,10 +291,11 @@ A map: chart name → the values the mapping computes for that chart.
 
 - Every key must be a chart of `service.yaml`:
   `mapping output "<key>": not a chart of service.yaml`. A key may not be
-  the chart of a declared OAuth client ([oidcClients](#oidcclients)).
-- A chart the mapping leaves out (absent, or dropped by `$if`) is not
-  rendered: no `Result.Values` entry. The `okdp` chart is the exception
+  the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
+  `okdp`: `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output`
   ([the okdp chart](#the-okdp-chart)).
+- A chart the mapping leaves out (absent, or dropped by `$if`) is not
+  rendered: no `Result.Values` entry.
 - The values are the computed layer of the chart's final values:
   [merge precedence](01_inputs_outputs.md#merge-precedence).
 
@@ -315,7 +374,7 @@ The Secret is named after `secretRef.name` when given, else
 and the output has a `secretRef` only when the mapping gives one. A
 `secret` with neither a non-empty `generate` nor a non-empty `stringData`
 fails with `<service>: output "<name>": secret needs stringData or generate`
-(`<service>`: the wrapper chart's name). The rendered objects and their
+(`<service>`: the `name` of `service.yaml`). The rendered objects and their
 labels: [credentials Secrets](01_inputs_outputs.md#credentials-secrets).
 
 ### oidcClients
@@ -342,7 +401,7 @@ own by OIDC Dynamic Client Registration, per
 
 | Mode | The compiler |
 |---|---|
-| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, compiled from `vendor/oidc-dcr`: `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
+| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, rendered by the platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 by default: [platform charts](01_inputs_outputs.md#platform-charts)): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
 | otherwise (`existing`, or `platform.oidc.enabled` false) | adds no chart: the platform provides each client's Secret |
 
 | Key | Type | Default | Meaning |
@@ -366,9 +425,9 @@ Every mode checks the clients, after the mapping: each client is a map of
 these keys only, each of its type, `name` of the form above, `grantTypes`
 given; one client at most has no name, and names are unique. As soon as the
 mapping declares a client, its chart key belongs to the compiler:
-`service.yaml` may not list it, nor `output` compute it; and
-`vendor/oidc-dcr/values.yaml` must exist
-([wrapper chart](01_inputs_outputs.md#wrapper-chart)). The first failing
+`service.yaml` may not list it, nor `output` compute it. Only `dcr` mode
+reads the oidc-dcr chart, from the chart cache
+([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
 check stops the compile ([compile errors](#compile-errors)).
 
 The mapping reads the name of a client's Secret with
@@ -627,12 +686,12 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace` |
-| `values` | The parameters: the wrapper chart's `values.yaml` and the instance values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` when not set ([connections](01_inputs_outputs.md#connections)). Without `global` and `connections`; `upstream` stays. |
+| `values` | The parameters: the package's `values.yaml` and the instance values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` when not set ([connections](01_inputs_outputs.md#connections)). Without `global` and `connections`. `upstream.<key>` of a chart that accepts upstream values is its files then its inline values, merged as they will be applied (the `append` lists appended); the other keys of `upstream` stay as written. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
-| `chart` | `{name, version, appVersion}` of the wrapper's `Chart.yaml`, strings read as Helm reads them ([Chart.yaml](01_inputs_outputs.md#chartyaml)). |
-| `labels` | `okdp.labels`, below, without component. |
-| `selectorLabels` | `okdp.selectorLabels`, below, without component. |
+| `service` | `{name, version, appVersion}` of `service.yaml`, as written ([service](#service)). |
+| `labels` | the labels of OKDP's objects, below, without component. |
+| `selectorLabels` | their selector labels, below, without component. |
 | `let` bindings | [let](#let), in order |
 | `$for` variables, `$let` bindings | inside their [`$for`](#for) |
 
@@ -654,23 +713,24 @@ time: `undeclared reference to '<name>'`.
 
 `labels` and `selectorLabels` (and the functions
 [`okdpLabels`, `okdpSelectorLabels`](#okdplabels-and-okdpselectorlabels)),
-as okdp-lib-chart's `okdp.labels` and `okdp.selectorLabels` compute them:
+the labels of every object OKDP renders itself:
 
 | Label | Value | `selectorLabels` |
 |---|---|---|
-| `app.kubernetes.io/name` | `chart.name` | yes |
+| `app.kubernetes.io/name` | `service.name` | yes |
 | `app.kubernetes.io/instance` | `release.name` | yes |
 | `app.kubernetes.io/component` | the component, when not empty (functions only) | yes |
-| `helm.sh/chart` | `<chart.name>-<chart.version>`, `+` as `_`, cut to 63 characters, no trailing `-` | no |
-| `app.kubernetes.io/version` | `chart.appVersion`, when not empty | no |
-| `app.kubernetes.io/managed-by` | `Helm` | no |
+| `app.kubernetes.io/version` | `service.appVersion`, when not empty | no |
+| `app.kubernetes.io/managed-by` | `Helm` (the okdp chart renders them) | no |
 | `app.kubernetes.io/part-of` | `okdp` | no |
 | `okdp.io/instance` | `release.name` | no |
-| `okdp.io/service` | `chart.name` | no |
+| `okdp.io/service` | `service.name` | no |
+
+No `helm.sh/chart`: the objects belong to no chart of the service.
 
 Bindings shadow context variables of the same name in expressions. The host
 functions do not see bindings: `okdpFullname`, `okdpLabels`,
-`okdpSelectorLabels` and `okdpGeneratedSecret` read `release` and `chart`
+`okdpSelectorLabels` and `okdpGeneratedSecret` read `release` and `service`
 of the compile context, `oidcClientSecret` its `release` and
 `platform.oidc.dcr.enabled`.
 
@@ -707,7 +767,7 @@ The math, sets and regex extensions are not enabled.
 | `toYaml(x)` | string | `toYaml` |
 | `quote(x)` | string | `quote` |
 | `okdpFullname()`, `okdpFullname(suffix)` | string | `okdp.fullname` |
-| `okdpLabels(component)` | map | `okdp.labels` |
+| `okdpLabels(component)` | map | `okdp.labels`, without `helm.sh/chart` |
 | `okdpSelectorLabels(component)` | map | `okdp.selectorLabels` |
 | `okdpGeneratedSecret(args)` | list of objects | `okdp.generatedSecret` |
 | `oidcClientSecret(name)` | string | `okdp.oidc.clientSecret` (the main client) |
@@ -770,7 +830,7 @@ uses it too.
 | `name` | required | name of the Secret, and of the ExternalSecret writing it |
 | `keys` | `[]` | the generated keys, below |
 | `stringData` | `{}` | static keys, as text (`str`; null is `<nil>`); a value containing `{{` is written as a template string literal |
-| `labels` | `{}` | extra labels of the ExternalSecret and of the Secret, over `okdp.labels` |
+| `labels` | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](#context) |
 | `annotations` | `{}` | annotations of every object |
 | `type` | none | type of the Secret |
 | `namespace` | `release.namespace` | namespace of every object |
@@ -794,7 +854,7 @@ key, in order, then the `ExternalSecret`. A Password is named
 `<name>-<key>`, the key lower-cased with `_` and `.` as `-`; a name longer
 than 63 characters is cut to 54, without a trailing `-`, and suffixed with
 `-` and 8 hex characters of the key's SHA-256. Passwords carry
-`okdp.labels`. The Secret's data are the `stringData` keys, then each
+[`labels`](#context). The Secret's data are the `stringData` keys, then each
 generated key; a generated key replaces a `stringData` key of the same name.
 
 Errors: `okdp.generatedSecret: name is required`,
@@ -893,7 +953,7 @@ Other errors of the mapping:
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
 | `objects: must be a list of objects`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
-| `mapping output okdp.objects: must be a list of objects` | [the okdp chart](01_inputs_outputs.md#the-okdp-chart) |
+| `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
 | `oidcClients: must be a list of OAuth clients` | [`oidcClients`](#oidcclients) is not a list |
 | `<client>: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got <value>`, `<client>: unknown key(s) <keys> (allowed: name, grantTypes, ...)` | a client that is not a map, or has another key |
@@ -901,7 +961,7 @@ Other errors of the mapping:
 | `<client>: grantTypes is required: a list of OAuth grant types (authorization_code, refresh_token, client_credentials...)` | `grantTypes` absent, empty, or holding an item that is not a non-empty string |
 | `<client>: redirectUris must be a list of URLs, got <value>`, `<client>: <key> must be a string, got <value>`, `<client>: public must be true or false, got <value>`, `<client>: request must be a map of registration fields, got <value>` | a key of another type (`<key>`: `scope`, `clientName`, `secret`, `caSecret`) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
-| `service.yaml: charts.<chart>: the chart of <client> is added by the compiler (from vendor/oidc-dcr): remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
+| `service.yaml: charts.<chart>: the chart of <client> is added by the compiler: remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
 | `<client>: oidc-dcr values: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
 `<client>`, `<other>`: `oidcClients[<i>]`, the client's position in the

@@ -42,7 +42,7 @@ where the module can be fetched at that path.
 ## Command line
 
 ```text
-okdp-compile --chart <dir> --service <dir> [--contracts <dir>] [--instance <dir>]
+okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>] [--instance <dir>]
              [-f <values.yaml>]... [--release <name>] [--namespace <name>]
              [--out <file>] [--emit-dir <dir>]
 okdp-compile --version
@@ -50,12 +50,12 @@ okdp-compile --version
 
 | Flag | Default | |
 |---|---|---|
-| `--chart` | required | wrapper chart directory: `Chart.yaml`, `values.yaml`, `values.schema.json`, `vendor/`, `vendor-values/` ([wrapper chart](specs/01_inputs_outputs.md#wrapper-chart)) |
-| `--service` | required | service definition directory: `service.yaml` and `mapping.cel.yaml` at its root |
+| `--package` | required | package directory: `service.yaml`, `mapping.cel.yaml`, `values.yaml`, `values.schema.json` at its root, and the base files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart as `helm pull -d <dir>` writes it, `<chart>-<version>.tgz`, or unpacked, `<chart>-<version>/` ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
 | `--instance` | none | instance directory: the upstream values files `service.yaml` names (`upstream.<key>.yaml`, by chart key; [instance values](specs/01_inputs_outputs.md#instance-values)) |
 | `-f` | none | a values file; repeatable, merged in order as `helm -f` files. The platform values come first ([platform values](specs/01_inputs_outputs.md#platform-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
-| `--release` | `demo-<base name of --chart>` | release name; give it explicitly when `--chart` is `.` (the default would be `demo-.`) |
+| `--release` | `demo-<name>` | release name; `<name>` is the `name` of `service.yaml` |
 | `--namespace` | `demo` | namespace |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file |
 | `--emit-dir` | none | write the final values of each chart, the chart index, the objects and the dependencies to a directory, one file each |
@@ -69,7 +69,8 @@ given, `--emit-dir` is written first, then `--out`.
 
 One YAML document, keys sorted: `charts` (`Result.Charts`, the
 [chart index](specs/01_inputs_outputs.md#chart-index): chart key ->
-the vendored chart that renders it), `dependencies` (`Result.Dependencies`),
+the upstream chart that renders it, `repository`, `chart`, `version`),
+`dependencies` (`Result.Dependencies`),
 `objects` (`Result.Objects`) and `values` (`Result.Computed`: chart key ->
 what the mapping computed, before the merge with the chart defaults, the
 base values and the instance's upstream values; in `dcr` mode, also the
@@ -77,13 +78,22 @@ values of the [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-char
 The final values are written by `--emit-dir`, not by `--out`.
 
 ```console
-$ export OKDP_CONTRACTS=example/contracts
-$ bin/okdp-compile --chart example/webapp --service example \
+$ export OKDP_CONTRACTS=example/contracts OKDP_CHARTS=example/charts
+$ bin/okdp-compile --package example/webapp \
     -f example/platform-values.yaml -f example/values/internal-db.yaml --out /dev/stdout
 charts:
-  app: app
-  metrics: metrics
-  okdp: okdp
+  app:
+    repository: https://charts.example.org
+    chart: app
+    version: 1.8.0
+  metrics:
+    repository: oci://registry.example.org/charts
+    chart: metrics
+    version: 0.4.2
+  okdp:
+    repository: oci://registry.example.org/okdp
+    chart: okdp-objects
+    version: 1.0.0
 dependencies:
   - instance: demo-db
     contract: database
@@ -107,7 +117,7 @@ values:
 The computed values of a chart hold only what the mapping sets:
 
 ```console
-$ bin/okdp-compile --chart example/webapp --service example \
+$ bin/okdp-compile --package example/webapp \
     -f example/platform-values.yaml -f example/values/internal-db.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
@@ -124,17 +134,17 @@ The directory is created if needed, and its files are overwritten:
 
 | File | Content |
 |---|---|
-| `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
-| `okdp.charts.yaml` | `Result.Charts`, the [chart index](specs/01_inputs_outputs.md#chart-index): `<key>: <vendored chart>`, one entry per values file; `{}` when there is no chart |
+| `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
+| `okdp.charts.yaml` | `Result.Charts`, the [chart index](specs/01_inputs_outputs.md#chart-index): `<key>: {repository, chart, version}`, one entry per values file |
 | `okdp.objects.yaml` | `Result.Objects`: a YAML list of whole manifests |
 | `okdp.dependencies.yaml` | `Result.Dependencies`: a YAML list, `[]` when there is none |
 
 With `example/values/dcr.yaml` (the platform registers the OAuth clients by
 DCR), the webapp's client adds the chart `oidc-dcr`, which `service.yaml`
-does not list:
+does not list, any more than `okdp`:
 
 ```console
-$ bin/okdp-compile --chart example/webapp --service example \
+$ bin/okdp-compile --package example/webapp \
     -f example/platform-values.yaml -f example/values/dcr.yaml --emit-dir dcr
 $ ls dcr
 app.values.yaml
@@ -144,9 +154,18 @@ okdp.dependencies.yaml
 okdp.objects.yaml
 okdp.values.yaml
 $ cat dcr/okdp.charts.yaml
-app: app
-oidc-dcr: oidc-dcr
-okdp: okdp
+app:
+    repository: https://charts.example.org
+    chart: app
+    version: 1.8.0
+oidc-dcr:
+    repository: oci://quay.io/adaltas
+    chart: oidc-dcr
+    version: 0.5.0
+okdp:
+    repository: oci://registry.example.org/okdp
+    chart: okdp-objects
+    version: 1.0.0
 ```
 
 A chart the mapping leaves out has no file and no index entry: metrics are
@@ -167,7 +186,7 @@ A message is a whole report and may span several lines: every schema
 violation, every message of the mapping's `errors` section.
 
 ```console
-$ bin/okdp-compile --chart example/webapp --service example \
+$ bin/okdp-compile --package example/webapp \
     -f example/platform-values.yaml -f testdata/schema-violation.yaml
 error: values don't meet the specifications of the schema(s) in the following chart(s):
 webapp:
@@ -178,50 +197,59 @@ webapp:
 ### Rendering with Helm
 
 Render each key of the index with its `<key>.values.yaml` alone, with the
-vendored chart the index names for it, `index[key]`, and the release and
-namespace of the compile:
+upstream chart the index names for it, `index[key]`, from its repository,
+and the release and namespace of the compile:
 
 ```bash
-helm template <release> <wrapper chart>/vendor/<index[key]> --namespace <namespace> -f <dir>/<key>.values.yaml
+helm template <release> <chart> --repo <repository> --version <version> --namespace <namespace> -f <dir>/<key>.values.yaml
+helm template <release> oci://<repository>/<chart> --version <version> --namespace <namespace> -f <dir>/<key>.values.yaml
 ```
 
-`index[key]` is the key's entry in `okdp.charts.yaml`: the key itself, its
-[alias](specs/02_service_definition.md#aliases), or `oidc-dcr` for an
-OAuth client chart, so one vendored chart may render several keys, each with
-its own values file. Do not add the base
-values (`vendor-values/`), the instance files or the values files of the
+The second form is for an `oci://` repository. A chart the chart cache holds
+as an archive renders from it too: `helm template <release>
+<cache>/<chart>-<version>.tgz ...`. `index[key]` is the key's `source` in
+`service.yaml` ([sources](specs/02_service_definition.md#sources)), the
+platform's oidc-dcr chart for an OAuth client chart, the platform's objects
+chart for `okdp` ([platform charts](specs/01_inputs_outputs.md#platform-charts)):
+one upstream chart may render several keys, each with its own values file.
+Do not add the base values, the instance files or the values files of the
 compile: the final values already merge the chart's own defaults, the base
 values, the computed values and the instance's upstream values
-([merge precedence](specs/01_inputs_outputs.md#merge-precedence)),
-and give what Helm gives with them. A chart the index does not list is not
-rendered.
+([merge precedence](specs/01_inputs_outputs.md#merge-precedence)), and give
+what Helm gives with them. A chart the index does not list is not rendered.
 
-The example's `vendor/<chart>/` hold only the charts' `values.yaml`, enough to
-compile but not to render. With the charts unpacked there (here in a copy of
-the wrapper, `webapp/`, with the okdp-objects chart under `vendor/okdp/` and
-oidc-dcr 0.5.0 under `vendor/oidc-dcr/`), from the `dcr` directory above:
+The example's chart cache, `example/charts/`, holds only the charts'
+`values.yaml`, enough to compile but not to render, and its `app`, `metrics`
+and `okdp-objects` charts are fictional. Every key of the index, from the
+`dcr` directory above:
 
 ```bash
-yq 'to_entries[] | .key + " " + .value' dcr/okdp.charts.yaml |
-while read -r key chart; do
-  helm template demo-webapp "webapp/vendor/$chart" --namespace demo -f "dcr/$key.values.yaml"
+yq 'to_entries[] | .key + " " + .value.repository + " " + .value.chart + " " + .value.version' dcr/okdp.charts.yaml |
+while read -r key repository chart version; do
+  case $repository in
+    oci://*) set -- "${repository%/}/$chart" ;;
+    *) set -- "$chart" --repo "$repository" ;;
+  esac
+  helm template demo-webapp "$@" --version "$version" --namespace demo -f "dcr/$key.values.yaml"
 done > manifests.yaml
 ```
 
+The oidc-dcr chart is published:
+
 ```console
-$ helm template demo-webapp webapp/vendor/oidc-dcr --namespace demo -f dcr/oidc-dcr.values.yaml | yq -N '.kind + " " + .metadata.name'
+$ helm template demo-webapp oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --namespace demo -f dcr/oidc-dcr.values.yaml | yq -N '.kind + " " + .metadata.name'
 ServiceAccount demo-webapp-oidc-dcr
 ConfigMap demo-webapp-oidc-dcr
 Role demo-webapp-oidc-dcr
 RoleBinding demo-webapp-oidc-dcr
 Service demo-webapp-oidc-dcr-headless
 Job demo-webapp-oidc-dcr
-$ helm template demo-webapp webapp/vendor/okdp --namespace demo -f dcr/okdp.values.yaml | yq -N '.kind + " " + .metadata.name'
-ConfigMap demo-webapp-okdp
-ConfigMap demo-webapp-settings
-ExternalSecret demo-webapp-session
-Password demo-webapp-session-session-key
 ```
+
+The okdp chart writes each object of its values as a manifest: the
+descriptor ConfigMap `demo-webapp-okdp`, the ConfigMap
+`demo-webapp-settings`, the ExternalSecret `demo-webapp-session` and the
+Password `demo-webapp-session-session-key` (`dcr/okdp.objects.yaml`).
 
 ## Go library
 
@@ -249,12 +277,12 @@ import (
 )
 
 func main() {
-	def, err := compiler.LoadDefinition(os.DirFS("example")) // service.yaml, mapping.cel.yaml
+	def, err := compiler.LoadDefinition(os.DirFS("example/webapp")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Chart:     os.DirFS("example/webapp"),
+		Charts:    os.DirFS("example/charts"), // the chart cache
 		Contracts: os.DirFS("example/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -277,9 +305,10 @@ func main() {
 	}
 	fmt.Println("charts:", len(res.Values), "objects:", len(res.Objects))
 	fmt.Println("replicaCount:", res.Values["app"]["replicaCount"])
-	// Each chart key is rendered by the vendored chart res.Charts[key].
+	// Each chart key is rendered by the upstream chart res.Charts[key].
 	for _, key := range slices.Sorted(maps.Keys(res.Charts)) {
-		fmt.Printf("%s: vendor/%s\n", key, res.Charts[key])
+		c := res.Charts[key]
+		fmt.Printf("%s: %s %s %s\n", key, c.Repository, c.Chart, c.Version)
 	}
 	for _, d := range res.Dependencies {
 		fmt.Printf("dependency: %s -> %s (%s)\n", d.Field, d.Instance, d.Contract)
@@ -290,10 +319,10 @@ func main() {
 ```text
 charts: 4 objects: 4
 replicaCount: 3
-app: vendor/app
-metrics: vendor/metrics
-oidc-dcr: vendor/oidc-dcr
-okdp: vendor/okdp
+app: https://charts.example.org app 1.8.0
+metrics: oci://registry.example.org/charts metrics 0.4.2
+oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
+okdp: oci://registry.example.org/okdp okdp-objects 1.0.0
 dependency: database -> demo-db (database)
 ```
 
@@ -314,23 +343,32 @@ import (
 
 func main() {
 	def, err := compiler.LoadDefinition(fstest.MapFS{
-		"service.yaml":     {Data: []byte("charts:\n  app: {base: vendor-values/app.yaml}\n")},
-		"mapping.cel.yaml": {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
+		"service.yaml": {Data: []byte(`name: demo
+version: 1.2.3
+appVersion: "4.5"
+charts:
+  app:
+    source: {repository: https://charts.example.org, chart: app, version: 1.0.0}
+    base: base/app.yaml
+`)},
+		"mapping.cel.yaml":   {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
+		"values.yaml":        {Data: []byte("replicas: 1\n")},
+		"values.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
+		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	chart := fstest.MapFS{
-		"Chart.yaml":             {Data: []byte("name: demo\nversion: 1.2.3\nappVersion: \"4.5\"\n")},
-		"values.yaml":            {Data: []byte("replicas: 1\n")},
-		"values.schema.json":     {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
-		"vendor/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
-		"vendor-values/app.yaml": {Data: []byte("image: {tag: \"4.5\"}\n")},
-	}
+	platform := map[string]any{"global": map[string]any{"okdp": map[string]any{"charts": map[string]any{
+		"objects": map[string]any{"repository": "oci://registry.example.org/okdp", "chart": "okdp-objects", "version": "1.0.0"},
+	}}}}
 	res, err := compiler.Compile(def, compiler.Inputs{
-		Chart:     chart,
+		Charts: fstest.MapFS{ // the defaults of each upstream chart
+			"app-1.0.0/values.yaml":          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
+			"okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
+		},
 		Contracts: fstest.MapFS{}, // no connection, no provides: no contract read
-		Values:    []map[string]any{{"replicas": 3}},
+		Values:    []map[string]any{platform, {"replicas": 3}},
 		Release:   "demo-app",
 		Namespace: "demo",
 	})
@@ -344,7 +382,13 @@ func main() {
 ```
 
 ```text
-global: {}
+global:
+    okdp:
+        charts:
+            objects:
+                chart: okdp-objects
+                repository: oci://registry.example.org/okdp
+                version: 1.0.0
 image:
     tag: "4.5"
 replicaCount: 3
@@ -352,14 +396,17 @@ replicaCount: 3
 
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
-`LoadDefinition(fsys)` reads `service.yaml` and `mapping.cel.yaml` at the
-root of `fsys`; a `Definition{Service, Mapping}` can also be built in Go.
+`LoadDefinition(fsys)` reads the package at the root of `fsys`:
+`service.yaml` and `mapping.cel.yaml`, then keeps `fsys` (`Definition.Files`)
+for the files each compile reads, `values.yaml`, `values.schema.json` and the
+base files. A `Definition{Service, Mapping, Files}` can also be built in Go.
 
-`Inputs` takes what the flags give: `Chart` (`--chart`), `Instance`
+`Inputs` takes what the flags give: `Charts` (`--charts`), `Instance`
 (`--instance`, `nil` when there is none), `Contracts` (`--contracts`; it may
 be empty when nothing references a contract), `Values` (the `-f` files,
-parsed, in order), `Release` and `Namespace`; all but `Instance` and
-`Values` are required ([inputs and outputs](specs/01_inputs_outputs.md)).
+parsed, in order; the platform values first), `Release` and `Namespace`;
+all but `Instance` and `Values` are required
+([inputs and outputs](specs/01_inputs_outputs.md)).
 `Result.Values` is what `--emit-dir` writes, `Result.Computed` what `--out`
 writes under `values`, `Charts` (the index), `Objects` and `Dependencies`
 what both write ([outputs](specs/01_inputs_outputs.md#outputs)).
@@ -368,9 +415,16 @@ what both write ([outputs](specs/01_inputs_outputs.md#outputs)).
 
 - `compiler.ParseValues(b)` reads one values file as Helm does (YAML 1.1,
   every document of the file merged in order), for `Inputs.Values`.
-- `compiler.DcrChart` (`oidc-dcr`) is the vendored chart of the
-  [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts):
-  `Result.Charts` maps each to it.
+- `compiler.ChartRef` is an upstream chart, `{Repository, Chart, Version}`:
+  a `source` of `service.yaml`, an entry of `Result.Charts`.
+- `compiler.ObjectsChart` (`okdp`) is the chart key of
+  [OKDP's own objects](specs/01_inputs_outputs.md#the-okdp-chart),
+  `compiler.DcrChart` (`oidc-dcr`) the chart key of a service's main
+  [OAuth client](specs/01_inputs_outputs.md#oauth-client-charts), and the
+  suffix of the others; `compiler.DcrSource` is the oidc-dcr chart they
+  are rendered by unless the platform names another
+  ([platform charts](specs/01_inputs_outputs.md#platform-charts)): the
+  chart a chart cache needs for a `dcr` platform.
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
   the inputs are not changed.
@@ -388,7 +442,7 @@ Compile every values file of a package; any error fails the job:
 ```bash
 for f in example/values/*.yaml; do
   name=$(basename "$f" .yaml)
-  bin/okdp-compile --chart example/webapp --service example \
+  bin/okdp-compile --package example/webapp --charts example/charts \
     -f example/platform-values.yaml -f "$f" --emit-dir "ci-out/$name" || exit 1
 done
 ```
@@ -401,23 +455,27 @@ as `go test ./compiler` does with `example/compiled/`.
 The compiler writes values and objects, not HelmRelease or Application
 objects. A deployment renders each key of the index under the instance's
 release name and namespace, as in [rendering with Helm](#rendering-with-helm):
-the vendored chart comes from `okdp.charts.yaml`, not from the key.
+one Flux HelmRelease, or one Argo CD Application source, per key, whose
+chart is the key's entry in `okdp.charts.yaml` (the repository, the chart's
+name in it, the version) and whose values are `<key>.values.yaml`. The
+chart comes from the index, not from the key, and from its own repository:
+OKDP publishes no chart of the service.
 
 **OAuth clients.** In `dcr` mode the index lists one chart per OAuth client
-(`oidc-dcr`, `<name>-oidc-dcr`, rendered with `vendor/oidc-dcr`;
+(`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr chart;
 [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)):
 deploy them with the others. Their Job, a Helm pre-install/pre-upgrade hook
 (an Argo CD `PreSync` hook), writes the client's Secret; the pods that read
 it do not start before it exists.
 
-**OKDP's own objects.** When the service declares the `okdp` chart,
-`Result.Objects` are in its values
-([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)):
-deploying `vendor/okdp` with `okdp.values.yaml`, like the other charts,
-brings the descriptor ConfigMap, the credentials Secrets and the mapping's
-objects to the cluster. Without it, they are only in `Result.Objects`
-(`okdp.objects.yaml`, a YAML list): `yq '.[] | split_doc'
-out/okdp.objects.yaml` turns the list into a multi-document stream to apply.
+**OKDP's own objects.** `Result.Objects` are the values of the `okdp` chart,
+which every compile adds
+([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)): deploying the
+platform's objects chart (`global.okdp.charts.objects`) with
+`okdp.values.yaml`, like the other charts, brings the descriptor ConfigMap,
+the credentials Secrets and the mapping's objects to the cluster. They are
+also in `okdp.objects.yaml`, a YAML list: `yq '.[] | split_doc'
+out/okdp.objects.yaml` turns it into a multi-document stream.
 
 **Dependencies.** `Result.Dependencies` lists the instances of the
 namespace the connection references point to, one item per parameter
@@ -443,25 +501,29 @@ it.
 ## Troubleshooting
 
 `<field>` is the parameter path (`database`, `backends[1].database`),
-`<key>` a chart key (of `service.yaml`, or an OAuth client chart), `<chart>`
-a vendored chart (`vendor/<chart>`: the key, or its alias), `<wrapper>` the
-name in `Chart.yaml`. Every error exits with status 1.
+`<key>` a chart key (of `service.yaml`, `okdp`, or an OAuth client chart),
+`<chart>-<version>` the upstream chart that renders it, `<service>` the
+`name` of `service.yaml`. Every error exits with status 1.
 
 ### Inputs and instance values
 
 | Message | Cause | Fix |
 |---|---|---|
-| `--chart is required`, `--service is required`, `--contracts (or $OKDP_CONTRACTS) is required` | a required flag is missing | give it |
-| `open service.yaml: no such file or directory`, `open values.yaml: ...` | `--service` or `--chart` is not the right directory | point `--service` at `service.yaml` and `mapping.cel.yaml`, `--chart` at the wrapper chart root |
-| `open values.schema.json: no such file or directory` | the wrapper chart has no parameter schema; it is always read (connection references are declared there) | add `values.schema.json` ([wrapper chart](specs/01_inputs_outputs.md#wrapper-chart)) |
-| `metrics: vendor/metrics/values.yaml not found: the chart metrics is not vendored (vendor.yaml, then scripts/vendor-charts.sh)` | a chart the mapping outputs has no vendored `values.yaml` (a chart left out by `$if` is not read) | vendor the chart under `vendor/<chart>/` |
-| `metrics: vendor/prometheus-exporter/values.yaml not found: the chart prometheus-exporter is not vendored (vendor.yaml, then scripts/vendor-charts.sh)` | the key `metrics` has the alias `chart: prometheus-exporter`, and no `vendor/prometheus-exporter/` | vendor the chart, or fix the alias ([aliases](specs/02_service_definition.md#aliases)) |
-| `service.yaml: charts.metrics.chart "../metrics": not the name of a vendored chart (vendor/<chart>)` | an alias that is a path, `.`, `..`, or has leading or trailing spaces | the name of a directory of `vendor/` |
+| `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required` | a required flag is missing | give it |
+| `open service.yaml: no such file or directory`, `open values.yaml: ...` | `--package` is not the package's directory | point it at the directory of `service.yaml` |
+| `open values.schema.json: no such file or directory` | the package has no parameter schema; it is always read (connection references are declared there) | add `values.schema.json` ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |
+| `service.yaml: charts.metrics.source is required: the upstream chart (repository, chart, version)` | a chart without its `source` | name the published chart that renders it ([sources](specs/02_service_definition.md#sources)) |
+| `service.yaml: charts.metrics.source.version "^0.4": a pinned chart version (1.2.3), not a range` | a version range, or a field of `source` that is not a repository URL (`https://`, `oci://`), a chart name or a version | pin the version the chart cache holds |
+| `service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml` | `service.yaml` lists `okdp` | remove it; the platform names its chart ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+| `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>` | a chart the compile renders (a chart left out by `$if` is not read) is neither `<chart>-<version>/` nor `<chart>-<version>.tgz` of the chart cache; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version>` | run the command with `-d` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
+| `global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml` | the platform values name no objects chart | pass the platform values as the first `-f`; set it ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+| `global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart that is not a repository URL, a chart name and a pinned version; also `global.okdp.charts.oidcDcr` | fix the platform values |
 | `database: unknown contract "database"` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
 | `global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml` | `require` in `service.yaml` lists it, and no layer sets it (or a later one sets it to `null`) | pass the platform values as the first `-f`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
-| `values don't meet the specifications of the schema(s) in the following chart(s):` then `<wrapper>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the wrapper's `values.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
-| `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `vendor/<key>:`, or `<key> (vendor/<chart>):` for a key with an alias (`metrics (vendor/exporter):`) | the final values violate `vendor/<chart>/values.schema.json` | fix the instance's upstream values; if they are not involved, the base values or the mapping |
+| `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `values.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
+| `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, the base values or the mapping |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field` | a secret field written in the connection | put it in a Secret named by `secretRef` |
@@ -501,6 +563,6 @@ the compile. Where the cause or the fix is not in the message:
 | `oidcClients[0]: unknown key(s) redirectUri (allowed: name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret)` | a typo, or a registration field written as a client key | use a client key; a registration field goes under `request` |
 | `global.okdp.oidc.dcr.authMethod "" is not supported: OKDP registers its OAuth clients anonymously` | `dcr` mode, at least one client, and `authMethod` unset (`""`, as when the platform sets no `dcr` settings) or not `anonymous` | `authMethod: anonymous` in the platform values |
 | `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/dcr-without-registration-url.yaml`) | set it in the platform values |
-| `service.yaml: charts.oidc-dcr: the chart of oidcClients[0] is added by the compiler (from vendor/oidc-dcr): remove it from service.yaml` | `service.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; rename the chart key or the client when it is another chart |
+| `service.yaml: charts.oidc-dcr: the chart of oidcClients[0] is added by the compiler: remove it from service.yaml` | `service.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; rename the chart key or the client when it is another chart |
 | `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output` | `output` computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
-| `oidcClients: vendor/oidc-dcr/values.yaml not found: the OAuth clients are registered by the chart oidc-dcr (repository oci://quay.io/adaltas, version >= 0.5.0): list it in vendor.yaml, then run scripts/vendor-charts.sh` | the mapping declares a client and the wrapper chart does not vendor oidc-dcr, in `existing` mode too | vendor it once, under `vendor/oidc-dcr/` ([wrapper chart](specs/01_inputs_outputs.md#wrapper-chart)) |
+| `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>` | `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |

@@ -10,24 +10,28 @@ An OKDP service is a set of upstream Helm charts deployed together as one
 instance, configured from a few parameters, the platform's and projects
 settings and the connections to other instances. okdp-compiler is the compile
 step: it computes, in Go, the values each upstream chart is then rendered with,
-unchanged, by Helm.
+unchanged, by Helm, from the chart's own repository. A service is a package,
+a directory in git, not a chart: OKDP publishes no chart of the service.
 
-One compile is one instance. It reads the service definition
-(`LoadDefinition`) and, in `Inputs`, the wrapper chart, the contracts, the
-values layers (the platform values, then the instance's), the instance's
-upstream values files, and the release and namespace, shared by all the
-instance's charts ([Inputs and outputs](specs/01_inputs_outputs.md)).
+One compile is one instance. It reads the package (`LoadDefinition`:
+`service.yaml`, `mapping.cel.yaml`, the parameters and the base values) and,
+in `Inputs`, the chart cache (the upstream charts' defaults and schemas),
+the contracts, the values layers (the platform values, then the
+instance's), the instance's upstream values files, and the release and
+namespace, shared by all the instance's charts
+([Inputs and outputs](specs/01_inputs_outputs.md)).
 It returns, in `Result`: `Values`, the final values each upstream chart is
-rendered with by `helm template`; `Charts`, the vendored chart that renders
-each ([Chart index](specs/01_inputs_outputs.md#chart-index));
+rendered with by `helm template`; `Charts`, the upstream chart that renders
+each, by repository, name and version
+([Chart index](specs/01_inputs_outputs.md#chart-index));
 `Objects`, OKDP's own objects for the cluster, rendered by the `okdp` chart
-when the service declares it; `Dependencies`, for the deployer (Flux
+the compiler adds; `Dependencies`, for the deployer (Flux
 `dependsOn`, Argo CD sync waves); `Computed`, the mapping's output before
 the merges, for inspection
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
-Callers: the control plane server embeds the package and compiles from a git
-tree; `okdp-compile` (`cmd/okdp-compile`) runs the same code from directories,
+Callers: the control plane server embeds the Go package and compiles from a
+/usr/bin/git tree; `okdp-compile` (`cmd/okdp-compile`) runs the same code from directories,
 in CI or scripts. The library depends on neither Helm nor the Kubernetes client 
 libraries: cel-go for expressions, `santhosh-tekuri/jsonschema/v6` for schemas, 
 `sigs.k8s.io/yaml` for values, `gopkg.in/yaml.v3` for the mapping, the oidc-dcr
@@ -38,57 +42,66 @@ template and `service.yaml`.
 ```mermaid
 flowchart TD
   def["service definition<br/>service.yaml, mapping.cel.yaml"]
-  chart["wrapper chart<br/>Chart.yaml, values.yaml, values.schema.json"]
+  pkg["package files<br/>values.yaml, values.schema.json, base/"]
   layers["values layers<br/>global.okdp, instance values"]
   contracts["contracts<br/>contract schemas"]
-  vendor["vendor/chart/, vendor-values/"]
+  cache["chart cache<br/>chart-version: values.yaml, values.schema.json"]
   files["instance files<br/>upstream.chart.yaml"]
   tmpl["oidc-dcr.cel.yaml<br/>embedded template"]
 
   layers --> s1["1: parameters<br/>merged, coalesced, schema-checked"]
-  chart --> s1
+  pkg --> s1
   s1 --> s2["2: platform requirements"]
   def -. require .-> s2
   s2 --> s3["3: platform context<br/>OIDC, oidc-dcr settings"]
   s3 --> s4["4: connections resolved"]
   contracts --> s4
   s4 --> deps["Result.Dependencies"]
-  s4 --> s5["5: mapping<br/>let, errors, output, instance, provides, objects, oidcClients"]
+  s4 --> pc["platform charts<br/>global.okdp.charts"]
+  pc --> s5["5: mapping<br/>let, errors, output, instance, provides, objects, oidcClients"]
   def --> s5
   s5 -- oidcClients --> s6["6: OAuth clients<br/>checked; dcr mode: one chart per client"]
   tmpl --> s6
-  vendor -. "vendor/oidc-dcr" .-> s6
+  pc -. oidcDcr .-> s6
   s5 -- "instance, provides" --> s7["7: descriptor ConfigMap<br/>credentials Secrets"]
   contracts --> s7
-  s7 --> s8["8: Result.Objects"]
+  s7 --> s8["8: Result.Objects<br/>the okdp chart"]
   s5 -- objects --> s8
+  pc -. objects .-> s8
   s8 -- "okdp chart" --> s9
   s5 -- output --> s9["9: final values<br/>merges, protect, append"]
   s6 -- "client charts" --> s9
-  def -. "charts, aliases" .-> s9
-  vendor --> s9
+  def -. "charts, sources" .-> s9
+  pkg -. base .-> s9
+  cache -- defaults --> s9
   files --> s9
   s9 --> s10["10: upstream schemas"]
+  cache -- schemas --> s10
   s10 --> vals["Result.Values, Result.Charts"]
 ```
 
 `LoadDefinition` (`compiler/compile.go`) decodes `service.yaml` into
-`Service` and keeps `mapping.cel.yaml` as bytes: the mapping is parsed by
-each compile, so a YAML error in it surfaces at `Compile`.
+`Service`, checks it (`Service.check`), keeps `mapping.cel.yaml` as bytes
+and the package's filesystem as `Definition.Files`: the mapping is parsed by
+each compile, so a YAML error in it surfaces at `Compile`, and the other
+files of the package are read by each compile.
 
-`Compile` checks its required inputs (`Chart`, `Contracts`, `Release`,
-`Namespace`) and the chart aliases of `service.yaml` (each
-`charts.<key>.chart` the name of a vendored chart, not a path:
-[Aliases](specs/02_service_definition.md#aliases)), then runs:
+`Compile` checks its required inputs (`Definition.Files`, `Charts`,
+`Contracts`, `Release`, `Namespace`) and `service.yaml` again, for a
+`Definition` built in memory: a `name` and a `version`, no chart `okdp`,
+each chart's `source` a repository URL, a chart name and a pinned version
+(`ChartRef.check`, `compiler/charts.go`;
+[Sources](specs/02_service_definition.md#sources)), the `upstream.from`
+entries and the `protect` and `append` paths. Then it runs:
 
-1. **Parameters** (`buildContext`, `compiler/context.go`). The wrapper's
+1. **Parameters** (`buildContext`, `compiler/context.go`). The package's
    `values.yaml` is read as Helm reads it. Each layer of `Inputs.Values` is
    normalized (string keys, `float64` numbers) and merged in order by
    `mergeMaps`, Helm's merge of `-f` files; the result is coalesced over the
    defaults by `coalesceValues`. The coalesced values are checked against
    `values.schema.json` (`schemaViolations`, which skips a missing schema;
-   stage 4 does not); every violation is reported at once, under the chart
-   name of `Chart.yaml`. Nothing below runs on invalid parameters.
+   stage 4 does not); every violation is reported at once, under the
+   `name` of `service.yaml`. Nothing below runs on invalid parameters.
 2. **Platform requirements**. Each `require` entry of `service.yaml` is a
    dotted path under `global.okdp` that must be set and not empty.
 3. **Platform context**. `platform` is derived from `global.okdp`: OIDC with
@@ -111,8 +124,13 @@ each compile, so a YAML error in it surfaces at `Compile`.
    Internal references are recorded as `Dependency`, sorted by parameter
    path. `global` and `connections` are then removed from the parameters,
    and the context is assembled: `release`, `values`, `global`, `platform`,
-   `chart`, `labels`, `selectorLabels`
+   `service`, `labels`, `selectorLabels`
    ([Context](specs/02_service_definition.md#context)).
+   `Compile` then reads the platform's charts, `global.okdp.charts`
+   (`platformCharts`, `compiler/charts.go`): `objects`, required, the chart
+   of the `okdp` chart, and `oidcDcr`, the chart of the OAuth clients,
+   `DcrSource` (oidc-dcr 0.5.0) by default; each checked as a source is
+   ([Platform charts](specs/01_inputs_outputs.md#platform-charts)).
 5. **Mapping** (`runCEL`, `compiler/cel.go`). The mapping is parsed into
    ordered maps (`parseDoc`). The `let` bindings are evaluated in order,
    each seeing the previous ones; then every `errors` expression, all
@@ -128,11 +146,11 @@ each compile, so a YAML error in it surfaces at `Compile`.
    `compiler/oidc-dcr.cel.yaml` is evaluated once per client
    (`evalTemplate`) on the context plus `client` and `names`: the values of
    the client's chart. Then, in any mode with a client, `clientCharts`
-   checks the reserved chart keys and `vendor/oidc-dcr`; in `dcr` mode it
-   adds each client chart to a copy of the charts of `service.yaml`
-   (`ChartSpec{Chart: "oidc-dcr"}`: no base values, no instance upstream
-   values), and its values to the mapping's output, which `Result.Computed`
-   shows ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
+   checks the reserved chart keys; in `dcr` mode it adds each client chart
+   to a copy of the charts of `service.yaml` (`ChartSpec{Source: <oidcDcr>}`:
+   no base values, no instance upstream values), and its values to the
+   mapping's output, which `Result.Computed` shows
+   ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
 7. **Descriptor and credentials Secrets** (`descriptor`,
    `compiler/descriptor.go`). Each `provides` entry is checked and completed
    against its contract; published under the release name, it is compared
@@ -142,31 +160,35 @@ each compile, so a YAML error in it surfaces at `Compile`.
    (`credentialsSecret`, `compiler/secrets.go`)
    ([Descriptor ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap),
    [Credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
-8. **Objects** (`Compile`). `Result.Objects` is the descriptor, the
-   credentials Secrets, then the mapping's `objects`. When `service.yaml`
-   declares the `okdp` chart (`ObjectsChart`), copies of them are appended to
-   `output.okdp.objects`, and the chart is compiled even when the mapping
-   leaves it out ([The okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
+8. **Objects** (`Compile`, `objectsChart`). `Result.Objects` is the
+   descriptor, the credentials Secrets, then the mapping's `objects`.
+   `objectsChart` adds the `okdp` chart (`ObjectsChart`) to the copy of the
+   charts, rendered by the platform's objects chart, and copies of the
+   objects to the mapping's output as its values, `{objects: [...]}`; the
+   mapping's own `output` may not list `okdp`
+   ([The okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
 9. **Final values** (`finalValues`, `compiler/merge.go`), for each chart of
-   `output`, which must be a chart of `service.yaml` or a client chart; a
-   chart the mapping leaves out (`$if`) is not compiled. The vendored chart
-   is the key's alias, or the key itself (`ChartSpec.vendored`):
-   `vendor/<vendored>/values.yaml` (required, a missing one reported as a
-   chart not vendored; its nulls removed), the `base` file and the computed
-   values are merged as `-f` files (`layered`). When the chart accepts
-   upstream values, the instance's files, then its inline `upstream.<key>`
-   values, go through `applyUpstream` one source at a time: the `{{` check,
-   `protect`, `append`, then the merge. Last, `global` is set.
-   `Result.Charts` records the vendored chart of each compiled key. The
-   layers and the rules:
+   `output`, which must be a chart of `service.yaml`, a client chart or
+   `okdp`; a chart the mapping leaves out (`$if`) is not compiled. The
+   upstream chart is the key's `source`: the chart cache
+   (`chartCache.get`, `compiler/charts.go`) reads it once per compile,
+   from `<chart>-<version>/`, else from `<chart>-<version>.tgz` (its own
+   `values.yaml` and `values.schema.json`, not its subcharts'); a chart it
+   does not hold fails with the `helm pull` command that fetches it. The
+   chart's `values.yaml` (its nulls removed), the `base` file and the
+   computed values are merged as `-f` files (`layered`). When the chart
+   accepts upstream values, the instance's files, then its inline
+   `upstream.<key>` values, go through `applyUpstream` one source at a
+   time: the `{{` check, `protect`, `append`, then the merge. Last,
+   `global` is set. `Result.Charts` records the source of each compiled
+   key. The layers and the rules:
    [Merge precedence](specs/01_inputs_outputs.md#merge-precedence),
    [Upstream values](specs/01_inputs_outputs.md#upstream-values).
-10. **Upstream schemas** (`schemaViolations`, `compiler/schema.go`). The
-    final values, coalesced over the chart defaults as Helm will coalesce
-    them, are checked against `vendor/<vendored>/values.schema.json` when it
-    exists. The violations of every chart are reported together, under the
-    key, followed by its vendored chart when they differ (`canary
-    (vendor/app)`).
+10. **Upstream schemas** (`checkSchema`, `compiler/schema.go`). The final
+    values, coalesced over the chart defaults as Helm will coalesce them,
+    are checked against the chart's `values.schema.json` when it has one.
+    The violations of every chart are reported together, under the key and
+    its upstream chart (`app (app-1.8.0)`).
 
 Errors: a compile stops at its first error, except where the whole list
 helps the author: the `errors` messages, the parameter schema violations,
@@ -181,24 +203,26 @@ Files of `compiler/`, by stage, and what each one relies on:
 
 | File | Owns | Relations |
 |---|---|---|
-| `compile.go` | public types, `LoadDefinition`, `Compile`: the order of the stages, the chart alias check, the `okdp` chart rule, `Result.Charts` | calls `buildContext`, `runCEL`, `oidcClients`, `clientCharts`, `descriptor`, `finalValues`, `schemaError` |
+| `compile.go` | public types, `LoadDefinition`, `Compile`: the order of the stages, the checks of `service.yaml`, the `okdp` chart (`objectsChart`), `Result.Charts` | calls `buildContext`, `platformCharts`, `runCEL`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `finalValues`, `schemaError` |
+| `charts.go` | `ChartRef` and its check, the platform's charts (`platformCharts`), the chart cache (`chartCache`: `<chart>-<version>/` or `.tgz`, `readArchive`) | used by `compile.go` and `merge.go`; `values.go` reads the defaults |
 | `context.go` | stages 1 to 4: parameters, requirements, platform context, the context | `values.go`, `schema.go`, `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret |
 | `connections.go` | connection references, `complete`, `Dependency` | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
 | `cel.go` | stage 5: the mapping read as ordered YAML 1.1 data, directives, sections, CEL environments; `evalTemplate`, the same engine for the compiler's own templates | registers `str`, `first` and the functions of `functions.go`, `labels.go`, `secrets.go`, `oidc.go`; keeps the context for the functions that need it |
 | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`, `okdpFullname` | `fullname` also names the client charts' objects (`oidc.go`) |
-| `labels.go` | `okdp.labels`, `okdp.selectorLabels` | the context (`chart`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
+| `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | `secrets.go` | `okdpGeneratedSecret`, credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go` |
-| `oidc.go` | stage 6: the `oidcClients` checks, the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts (`clientCharts`); the oidc-dcr settings (`dcrSettings`, stage 3) | evaluates `oidc-dcr.cel.yaml` with `evalTemplate` (`cel.go`); `fullname` (`functions.go`); used by `context.go` and `compile.go` |
+| `oidc.go` | stage 6: the `oidcClients` checks, the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts (`clientCharts`), `DcrSource`; the oidc-dcr settings (`dcrSettings`, stage 3) | evaluates `oidc-dcr.cel.yaml` with `evalTemplate` (`cel.go`); `fullname` (`functions.go`); used by `context.go` and `compile.go` |
 | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | `descriptor.go` | stage 7 | `connections.go`, `secrets.go`, `labels.go` |
-| `merge.go` | stage 9, `protect` and `append`; `vendor/<alias>` for an aliased chart | `values.go`, `schema.go` |
+| `merge.go` | stage 9, `protect` and `append` | the chart cache (`charts.go`), `values.go`, `schema.go` |
 | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
 | `values.go` | the data model; Helm's reading (`ParseValues`), merging and coalescing of values | every stage |
 
 Layers: `values.go` and `schema.go` reproduce Helm and know nothing of
-OKDP; `functions.go`, `labels.go` and `secrets.go` reproduce Helm, sprig
-and okdp-lib-chart functions; `connections.go`, `context.go`,
-`descriptor.go`, `oidc.go` and `merge.go` implement OKDP's rules,
+OKDP; `functions.go` and `secrets.go` reproduce Helm, sprig and
+okdp-lib-chart functions; `charts.go` reads the chart cache;
+`connections.go`, `context.go`, `descriptor.go`, `labels.go`, `oidc.go` and
+`merge.go` implement OKDP's rules,
 `oidc-dcr.cel.yaml` the values of the oidc-dcr chart; `compile.go` orders
 them. Each rule is computed in one place and reused: the labels of the
 context, of `okdpLabels` and of the descriptor; one generated Secret for the
@@ -221,10 +245,9 @@ same way, and the fixtures check it against the helm binary
 1.2, an upstream default `enabled: no` is the string `"no"`, which a
 template's `if` takes as true.
 
-- Reading: values files as Helm 4's loader reads them (`loadValues`,
-  `sigs.k8s.io/yaml`, YAML 1.1), `Chart.yaml` into strings
-  ([Values files](specs/01_inputs_outputs.md#values-files),
-  [Chart.yaml](specs/01_inputs_outputs.md#chartyaml)).
+- Reading: values files, the upstream charts' `values.yaml` included, as
+  Helm 4's loader reads them (`loadValues`, `sigs.k8s.io/yaml`, YAML 1.1)
+  ([Values files](specs/01_inputs_outputs.md#values-files)).
 - Merging: `mergeMaps` is Helm's `MergeMaps`, `coalesceValues` Helm 4's
   `CoalesceValues`
   ([Layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
@@ -288,7 +311,8 @@ language embedded in the compiler (`//go:embed`), not by Go code:
   (`$if`) or a registration field the client's `request` overrides
   (`$merge`) needs no Go of its own.
 - Embedded, not in the package: the template is versioned with the Go code
-  that checks the clients and computes the names it reads. Every service
+  that checks the clients and computes the names it reads, and so is
+  `DcrSource`, the oidc-dcr version it writes values for. Every service
   registers its clients the same way: a package declares its clients (the
   client keys), not the chart's values. No file is read for it, so the
   compile stays hermetic
@@ -307,27 +331,33 @@ express, or what more than one reader needs:
   mapping that reads the Secret and the Job that writes it agree (a client
   that sets its own `secret` names it in the mapping too). The template
   receives them as `names`;
-- the charts (`clientCharts`): the reserved keys, `vendor/oidc-dcr`
-  present, the chart entries added to a copy of the charts of
-  `service.yaml`.
+- the charts (`clientCharts`): the reserved keys, the chart entries added
+  to a copy of the charts of `service.yaml`, rendered by the platform's
+  oidc-dcr chart.
 
 ### Values for unmodified upstream charts
 
 The compiler stops at values:
 
-- each upstream chart stays a standard chart, vendored as published and
-  rendered by Helm itself: hooks, `.Files`, `.Capabilities`, subcharts and
-  the chart's schema behave as upstream intends;
+- each upstream chart stays a standard chart, rendered as published, from
+  its own repository, by Helm itself: hooks, `.Files`, `.Capabilities`,
+  subcharts and the chart's schema behave as upstream intends. OKDP keeps
+  no copy of it and publishes no chart of the service: the compiler reads
+  only the chart's `values.yaml` and `values.schema.json`, from the chart
+  cache ([Chart cache](specs/01_inputs_outputs.md#chart-cache));
 - the result is data: checked against the upstream schema at compile time,
   diffed in a pull request, compared with a previous render;
 - no Helm template code runs in the compiler, and none can come in through
   instance values (`{{` is refused).
 
-The cost: what an upstream chart has no value for cannot be changed
-([Limitations](#limitations)). OKDP's own objects take the same path: they
-are the `objects` values of the `okdp` chart (okdp-objects), which writes
-each item as a manifest. So do the OAuth clients: each is a chart compiled
-from the vendored oidc-dcr chart, whose Job registers it.
+The cost: what an upstream chart has no value for cannot be changed, and
+neither can the chart itself ([Limitations](#limitations)). OKDP's own
+objects take the same path: they are the `objects` values of the `okdp`
+chart, rendered by the platform's objects chart (okdp-objects), which
+writes each item as a manifest. So do the OAuth clients: each is a chart
+rendered by the platform's oidc-dcr chart, whose Job registers it. Both are
+charts of the platform, the same for every service, named in the platform
+values ([Platform charts](specs/01_inputs_outputs.md#platform-charts)).
 
 ### Stateless, hermetic, concurrent
 
@@ -335,8 +365,11 @@ from the vendored oidc-dcr chart, whose Job registers it.
   the oidc-dcr template once per client, and builds its own CEL engines.
   The package-level variables are read-only: tables, a regular expression,
   the embedded template. A `Definition` can be shared between goroutines,
-  and is not changed: the client charts are added to a copy of its charts.
-  Caching across compiles, if any, is the caller's.
+  and is not changed: the client charts and the `okdp` chart are added to a
+  copy of its charts. Each compile reads an upstream chart from the chart
+  cache once, however many keys it renders. Caching across compiles, if
+  any, is the caller's: a chart cache keyed by pinned versions never goes
+  stale.
 - No clock, random number, environment variable, network, or file outside
   the given filesystems: the same inputs give the same result. GitOps tools
   render on every sync (Argo CD with `helm template`), and a value that
@@ -349,28 +382,30 @@ from the vendored oidc-dcr chart, whose Job registers it.
 
 ### Everything through fs.FS
 
-The compiler opens no path itself: the wrapper chart, the instance files
-and the contracts are `fs.FS`, the values layers are in-memory maps, the
-oidc-dcr template is in the binary.
+The compiler opens no path itself: the package, the chart cache, the
+instance files and the contracts are `fs.FS`, the values layers are
+in-memory maps, the oidc-dcr template is in the binary.
 
 - The control plane server compiles from a git tree or an `embed.FS`, tests
   from `fstest.MapFS`, the CLI from `os.DirFS`; the contracts from any of
   them, an `embed.FS` of the contract schemas included.
 - The paths written in `service.yaml` (`base`, `upstream`) are cleaned and
   opened inside their filesystem, and an `fs.FS` path cannot contain `..`:
-  a definition cannot read outside the chart or the instance files. A chart
-  alias (`charts.<key>.chart`) must be a plain name, so `vendor/<chart>`
-  stays under `vendor/`. The CLI uses `os.DirFS`, which still follows
-  symbolic links.
+  a package cannot read outside itself or the instance files. A chart
+  cache entry, `<chart>-<version>`, is named by a checked source or
+  platform chart (a chart name without `/`, `.` or `..`, a pinned
+  version), so it stays at the cache's root. The CLI uses `os.DirFS`, which
+  still follows symbolic links.
 - A schema `$ref` to a file or a URL fails the compile instead of being
   fetched (`schemaLoader`); a `urn:` reference accepts anything, as in Helm.
 
 ### Security boundaries
 
-The service definition, the wrapper chart with its vendored charts, and the
-contracts are reviewed with the package. The values layers and the instance
-files are input, from a console user or a GitOps pull request. The compiler
-enforces:
+The package, with the upstream charts its sources pin, is reviewed in its
+repository; the contracts and the platform's charts with the platform. The
+values layers and the instance files are input, from a console user or a
+GitOps pull request. The chart cache is the caller's, filled from the pinned
+references. The compiler enforces:
 
 | Boundary | Where | Reason |
 |---|---|---|
@@ -381,7 +416,8 @@ enforces:
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
 | No templates in upstream values | `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets |
 | Upstream schemas | stage 10 | an upstream chart's rules fail the compile, not the deployment |
-| Declared charts only | `Compile`, `clientCharts` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart with one of its own: the key of a declared client's chart is the compiler's |
+| Pinned charts | `ChartRef.check` | a source and a platform chart name one version, not a range: the chart the compile checks the values against is the chart the deployer renders |
+| Declared charts only | `Compile`, `clientCharts`, `objectsChart` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart or the `okdp` chart with one of its own: their keys are the compiler's, and their charts the platform's |
 | OAuth client charts | `clientCharts` | no base values, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
 
 Not decided by the compiler: the values layers are not told apart, so a
@@ -409,9 +445,8 @@ compares:
 | `values/<case>/` | `.Values` with the `layer-*.yaml` files (`helm.json`), and with the compiler's `final.yaml` (`helm-final.json`) | `TestHelmValues`: coalescing as Helm, and final values that Helm renders back to the same `.Values` |
 | `schema/<case>/` | Helm's error report, or `ok` (`helm.txt`) | `TestHelmSchema` |
 | `functions/` | `sha256sum`, `toJson`, `toPrettyJson`, `toYaml`, `quote`, `okdp.fullname` | `TestHelmFunctions` |
-| `labels/<case>/` | `.Chart`, `okdp.labels`, `okdp.selectorLabels` | `TestHelmLabels` |
-| `secrets/generated/` | the objects of `okdp.generatedSecret`, or its error | `TestHelmGeneratedSecret` |
-| `secrets/descriptor/` | `okdp.descriptor` of outputs with a `secret` | `TestHelmDescriptorSecrets` |
+| `secrets/generated/` | the objects of `okdp.generatedSecret`, or its error | `TestHelmGeneratedSecret`, without the `helm.sh/chart` labels the compiler does not set (`withoutChartLabel`) |
+| `secrets/descriptor/` | `okdp.descriptor` of outputs with a `secret` | `TestHelmDescriptorSecrets`, the same |
 
 To regenerate: `go test ./compiler -run TestHelmValues -update` (writes each
 `final.yaml`), then `OKDP_LIB_CHART=../okdp-lib-chart
@@ -423,11 +458,14 @@ all.
 ### Unit tests
 
 Most source files have their `_test.go`, in memory (`fstest.MapFS`, as the
-control plane server passes its inputs); the host functions, labels,
-schemas and generated Secrets are tested against Helm, in `helm_test.go`.
-`compile_test.go` runs the whole pipeline on a minimal chart: schemas,
-upstream files, `protect` and `append`, objects and the `okdp` chart,
-dependencies, chart aliases (`TestChartAlias`). `oidc_test.go` covers the
+control plane server passes its inputs); the host functions, schemas and
+generated Secrets are tested against Helm, in `helm_test.go`.
+`compile_test.go` runs the whole pipeline on a minimal package and chart
+cache: schemas, upstream files, `protect` and `append`, objects and the
+`okdp` chart with the platform's charts (`TestObjects`), dependencies, one
+upstream chart for two keys (`TestSharedSource`). `charts_test.go` covers
+the source checks (`TestChartRefCheck`) and the chart cache, unpacked or
+an archive with subcharts (`TestChartCache`). `oidc_test.go` covers the
 OAuth clients: the values the oidc-dcr template computes (the defaults
 compared whole; the names, client keys, platform settings), the modes and
 `oidcClientSecret`, the errors of the section and of the platform, and the
@@ -439,13 +477,14 @@ chart index included.
 
 ### Example
 
-`example/` is a complete service, `webapp`: `service.yaml` and
-`mapping.cel.yaml` (the service definition, an OAuth client included),
-`webapp/` (its wrapper chart, with the vendored charts' `values.yaml` only,
-the okdp and oidc-dcr charts included), `contracts/`,
-`platform-values.yaml`, `values/` (the instances; `dcr.yaml` sets the
-platform to `dcr` mode, so its compile adds the `oidc-dcr` chart) and
-`compiled/` (their compiled output). `TestExample` (`example_test.go`)
+`example/` is a complete service, `webapp`: `webapp/` (the package:
+`service.yaml`, `mapping.cel.yaml` with an OAuth client, `values.yaml`,
+`values.schema.json`, `base/app.yaml`), `charts/` (the chart cache: the
+`values.yaml` of each upstream chart only, `<chart>-<version>/`, the
+platform's okdp-objects and oidc-dcr charts included), `contracts/`,
+`platform-values.yaml` (the objects chart among them), `values/` (the
+instances; `dcr.yaml` sets the platform to `dcr` mode, so its compile adds
+the `oidc-dcr` chart) and `compiled/` (their compiled output). `TestExample` (`example_test.go`)
 compiles each `example/values/<case>.yaml` over
 `example/platform-values.yaml`, and compares the final values, the chart
 index (`charts`), the objects and the dependencies byte for byte with
@@ -467,21 +506,25 @@ the OAuth client in `dcr` mode without a registration URL
 
 ## Limitations
 
-- **The mapping does not see the instance's upstream files.** They are read
-  at stage 9, after the mapping; the mapping sees only the inline
-  `values.upstream`. `protect`, `append` and the `{{` check cover both, but
-  an `errors` rule on upstream values covers the inline ones only. A
-  service that needs such a rule accepts inline values only (`upstream:
-  []`).
-- **`protect` and `append` paths are dotted map keys**: no list index, no
-  key containing a dot (annotation names, Spark properties), no pattern.
+- **`protect` and `append` paths name map keys**: no list index; a family
+  of keys is a prefix only, a bracketed key ending with `*`
+  ([Paths](specs/02_service_definition.md#protect-and-append)).
 - **Upstream templates cannot be changed.** Nothing patches or rewrites a
   rendered chart: what a chart has no value for (a label on one object, a
   hard-coded Secret reference, a Job field) stays as upstream wrote it.
-- **Subcharts of a vendored chart** are left to Helm: the final values and
+- **Upstream charts are rendered as published.** A package does not
+  modify a chart: a bundled subchart is disabled by its values, not
+  removed; a chart cannot be cut down to a part of it (only its CRDs); the
+  CRDs of `crds/` are upgraded by the deployer's settings, not turned into
+  templates.
+- **Subcharts of an upstream chart** are left to Helm: the final values and
   the schema check use the chart's own `values.yaml` and
   `values.schema.json`; the defaults and schemas of its subcharts apply only
   when Helm renders it.
+- **One chart cache name per chart and version.** `<chart>-<version>`
+  does not hold the repository: two sources of the same chart name and
+  version from two repositories share one cache entry, and the compile reads
+  whichever the cache holds.
 - **Schema references** resolve within the schema only (and `urn:`):
   [Everything through fs.FS](#everything-through-fsfs).
 - **Connection references** are found through `properties` and `items` of
@@ -504,8 +547,9 @@ the OAuth client in `dcr` mode without a registration URL
 - **A client chart's values are the template's.** A package sets the client
   keys, the platform the Job settings; a client chart takes no base values
   and no instance upstream values. The template writes the values of
-  oidc-dcr >= 0.5.0 (camelCase); the version of `vendor/oidc-dcr` is not
-  checked (its `values.schema.json` is applied, when it has one).
+  oidc-dcr >= 0.5.0 (camelCase); the version the platform names
+  (`global.okdp.charts.oidcDcr`) is not checked against it (its
+  `values.schema.json` is applied, when it has one).
 
 ## Extension points
 
@@ -535,5 +579,8 @@ the OAuth client in `dcr` mode without a registration URL
   change ([Contracts](specs/01_inputs_outputs.md#contracts)).
 - **OKDP objects.** What the mapping writes in `objects` reaches the cluster
   through the `okdp` chart: a new kind of object needs no compiler change.
+- **Chart sources.** Where a chart comes from is data: a new upstream chart
+  or version is a `source` of `service.yaml` and an entry of the chart
+  cache, a new platform chart version a platform value.
 - **Callers.** Anything that provides `fs.FS` inputs and values maps; the
   CLI is one such caller.

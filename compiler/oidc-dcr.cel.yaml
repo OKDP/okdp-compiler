@@ -1,4 +1,4 @@
-# The values of the vendored oidc-dcr chart (oci://quay.io/adaltas/oidc-dcr,
+# The values of the oidc-dcr chart (oci://quay.io/adaltas/oidc-dcr,
 # >= 0.5.0, camelCase values) for one OAuth client of a mapping's
 # oidcClients section, in dcr mode (global.okdp.oidc.clientProvisioning:
 # dcr): the chart's Job, a pre-install/pre-upgrade hook, registers the client
@@ -9,7 +9,7 @@
 # functions.
 #
 # Inputs, besides the mapping's context (release, platform, global, values,
-# chart, labels, selectorLabels):
+# service, labels, selectorLabels):
 #   client  the client as the mapping wrote it, checked by the compiler:
 #           grantTypes, and the optional redirectUris, scope, clientName,
 #           public, request, secret, caSecret (null keys left out); name is
