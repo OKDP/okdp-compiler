@@ -21,14 +21,15 @@ require:
   - ingress.className                  # ingress class of the platform
   - certificateIssuers.selfSigned.name # issuer of the instance's TLS certificate
   - oidc.issuerUri                     # identity provider the application signs users in with
-# The upstream charts vendored in the package (webapp/vendor/<chart>/),
-# by name, as the mapping outputs them. A chart may name the vendored chart
-# it compiles from and renders with (chart: <vendored chart>), e.g. a chart
-# rendered twice. The oidc-dcr chart of the mapping's OAuth client
-# (oidcClients) is not listed: the compiler adds it in dcr mode, from
-# webapp/vendor/oidc-dcr.
+# The upstream charts, by key, as the mapping outputs them. Each names its
+# source, the published chart that renders its values: the compiler reads
+# its defaults and schema from the chart cache (example/charts/), a deployer
+# renders it from its repository. Two keys may name the same source, e.g. a
+# chart rendered twice. The oidc-dcr chart of the mapping's OAuth client
+# (oidcClients) is not listed: the compiler adds it in dcr mode.
 charts:
-  app:                                 # the application chart
+  app:                                 # the application chart (fictional)
+    source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
     base: base/app.yaml                # OKDP's default values, over the chart's own defaults
     upstream: true                     # user values accepted: upstream.app.yaml, then inline upstream.app
     # Set by the platform: user values may not change them. A key that
@@ -36,8 +37,10 @@ charts:
     # glob: here the certificate issuer annotation of the ingress.
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls, 'ingress.annotations["cert-manager.io/*"]']
     append: [env]                      # user lists appended to the computed ones instead of replacing them
-  metrics: {}                          # the metrics chart: no base values, no user values
+  metrics:                             # the metrics chart (fictional): no base values, no user values
+    source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
   # OKDP's own objects (the okdp-objects chart, values `objects: []`): the
   # compiler adds the descriptor ConfigMap and the objects section of the
   # mapping (the settings ConfigMap, the session key Secret).
-  okdp: {}
+  okdp:
+    source: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}

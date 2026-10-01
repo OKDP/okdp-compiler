@@ -297,11 +297,12 @@ func TestDcrErrors(t *testing.T) {
 
 // TestDcrCompile: a mapping's oidcClients compiled with the service: in dcr
 // mode, one oidc-dcr chart per client, which service.yaml does not list,
-// compiled from vendor/oidc-dcr (its defaults merged); the compiler owns
-// these charts: service.yaml and the mapping's output may not list them.
+// rendered by DcrSource (its defaults merged, from the chart cache); the
+// compiler owns these charts: service.yaml and the mapping's output may not
+// list them.
 func TestDcrCompile(t *testing.T) {
-	ch := maps.Clone(pkg)
-	ch["vendor/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
+	ch := maps.Clone(charts)
+	ch["oidc-dcr-0.5.0/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	mapping := `
 let:
@@ -320,25 +321,27 @@ oidcClients:
     public: true
     grantTypes: [authorization_code]
 `
-	compile := func(output string, existing bool, charts map[string]ChartSpec, files fstest.MapFS, values M) (*Result, error) {
-		d := withFiles(files)
+	compile := func(output string, existing bool, specs map[string]ChartSpec, cache fstest.MapFS, values M) (*Result, error) {
+		d := *def
 		d.Mapping = []byte(strings.Replace(mapping, "%s", output, 1))
-		d.Service.Charts = charts
+		d.Service.Charts = specs
 		p := asMap(deepCopy(platform))
 		if existing {
 			dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
 		}
-		return Compile(d, inputs(p, values))
+		in := inputs(p, values)
+		in.Charts = cache
+		return Compile(&d, in)
 	}
-	app := map[string]ChartSpec{"app": {}}
+	app := map[string]ChartSpec{"app": {Source: appSource}}
 	for name, tc := range map[string]struct {
 		values   M
 		existing bool
-		charts   map[string]string // Result.Charts
+		charts   map[string]ChartRef // Result.Charts
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]string{"app": "app", "oidc-dcr": "oidc-dcr", "console-oidc-dcr": "oidc-dcr"}},
-		"a client left out": {M{"replicas": 1}, false, map[string]string{"app": "app", "oidc-dcr": "oidc-dcr"}},
-		"existing mode":     {M{"replicas": 2}, true, map[string]string{"app": "app"}},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]ChartRef{"app": appSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
+		"a client left out": {M{"replicas": 1}, false, map[string]ChartRef{"app": appSource, "oidc-dcr": DcrSource}},
+		"existing mode":     {M{"replicas": 2}, true, map[string]ChartRef{"app": appSource}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, err := compile("", tc.existing, app, ch, tc.values)
@@ -362,16 +365,15 @@ oidcClients:
 			if dcr["ttlSeconds"] != float64(30) || dig(dcr, "request.redirect_uris") == nil || dig(dcr, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri" {
 				t.Errorf("oidc-dcr values: %#v", dcr)
 			}
-			// What the template computed, before the vendored defaults.
+			// What the template computed, before the chart's defaults.
 			if c := asMap(res.Computed["oidc-dcr"]); c["ttlSeconds"] != float64(30) || dig(c, "mapping.keyMapping.registration_client_uri") != nil {
 				t.Errorf("computed: %#v", c)
 			}
 			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
-				t.Errorf("console-oidc-dcr values, from vendor/oidc-dcr: %#v", c)
+				t.Errorf("console-oidc-dcr values, over oidc-dcr's defaults: %#v", c)
 			}
 		})
 	}
-	noVendor := maps.Clone(pkg)
 	for name, tc := range map[string]struct {
 		output   string
 		existing bool
@@ -379,10 +381,9 @@ oidcClients:
 		files    fstest.MapFS
 		want     string
 	}{
-		"in output":          {"oidc-dcr: {}", true, app, ch, `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output`},
-		"in service.yaml":    {"", false, map[string]ChartSpec{"app": {}, "console-oidc-dcr": {Chart: "oidc-dcr"}}, ch, "service.yaml: charts.console-oidc-dcr: the chart of oidcClients[1] (console) is added by the compiler (from vendor/oidc-dcr): remove it from service.yaml"},
-		"not vendored":       {"", false, app, noVendor, "oidcClients: vendor/oidc-dcr/values.yaml not found: the OAuth clients are registered by the chart oidc-dcr (repository oci://quay.io/adaltas, version >= 0.5.0): list it in vendor.yaml"},
-		"not vendored, also": {"", true, app, noVendor, "oidcClients: vendor/oidc-dcr/values.yaml not found"},
+		"in output":        {"oidc-dcr: {}", true, app, ch, `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output`},
+		"in service.yaml":  {"", false, map[string]ChartSpec{"app": {Source: appSource}, "console-oidc-dcr": {Source: DcrSource}}, ch, "service.yaml: charts.console-oidc-dcr: the chart of oidcClients[1] (console) is added by the compiler: remove it from service.yaml"},
+		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := compile(tc.output, tc.existing, tc.charts, tc.files, M{"replicas": 2})
@@ -390,6 +391,10 @@ oidcClients:
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	// In existing mode, the chart cache needs no oidc-dcr chart.
+	if _, err := compile("", true, app, charts, M{"replicas": 2}); err != nil {
+		t.Errorf("existing mode without oidc-dcr: %v", err)
 	}
 	// def.Service is left as it was.
 	if _, err := compile("", false, app, ch, M{"replicas": 2}); err != nil || len(app) != 1 {

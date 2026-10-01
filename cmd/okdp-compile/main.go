@@ -1,4 +1,4 @@
-// okdp-compile --package <dir> --contracts <dir>
+// okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
 //	[--instance <dir>] -f values.yaml [-f ...] [--release demo-<service>] [--namespace demo]
 //	[--out <file>] [--emit-dir <dir>]
@@ -33,7 +33,8 @@ func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 
 // options: the command-line flags.
 type options struct {
-	pkg, contracts     string
+	pkg, charts        string
+	contracts          string
 	instance           string
 	release, namespace string
 	values             multi
@@ -45,13 +46,14 @@ func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.StringVar(&o.pkg, "package", "", "package directory (service.yaml, mapping.cel.yaml, values.yaml, values.schema.json)")
+	flag.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts, <chart>-<version>.tgz (helm pull -d) or <chart>-<version>/ (default $OKDP_CHARTS)")
 	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
 	flag.StringVar(&o.instance, "instance", "", "instance directory (upstream values files: upstream.<chart>.yaml)")
 	flag.StringVar(&o.release, "release", "", "release name (default demo-<service name>)")
 	flag.StringVar(&o.namespace, "namespace", "demo", "namespace")
 	flag.Var(&o.values, "f", "values file (repeatable)")
-	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the vendored chart of each chart, objects and dependencies to this file")
-	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the vendored chart that renders each (okdp.charts.yaml), the objects and the dependencies")
+	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the upstream chart of each chart, objects and dependencies to this file")
+	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the upstream chart that renders each (okdp.charts.yaml), the objects and the dependencies")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -68,6 +70,8 @@ func run(o options) error {
 	switch {
 	case o.pkg == "":
 		return errors.New("--package is required")
+	case o.charts == "":
+		return errors.New("--charts (or $OKDP_CHARTS) is required")
 	case o.contracts == "":
 		return errors.New("--contracts (or $OKDP_CONTRACTS) is required")
 	}
@@ -79,6 +83,7 @@ func run(o options) error {
 		o.release = "demo-" + def.Service.Name
 	}
 	in := compiler.Inputs{
+		Charts:    os.DirFS(o.charts),
 		Contracts: os.DirFS(o.contracts),
 		Release:   o.release,
 		Namespace: o.namespace,
@@ -121,10 +126,10 @@ func run(o options) error {
 }
 
 // emit: <dir>/<chart>.values.yaml per chart; <dir>/okdp.charts.yaml, the
-// index of the vendored chart that renders each (chart: vendored chart, the
-// chart itself unless service.yaml names another: `helm template
-// vendor/<vendored chart> -f <chart>.values.yaml`); <dir>/okdp.objects.yaml
-// and <dir>/okdp.dependencies.yaml.
+// index of the upstream chart that renders each (chart: {repository, chart,
+// version}: `helm template <chart> --repo <repository> --version <version>
+// -f <chart>.values.yaml`); <dir>/okdp.objects.yaml and
+// <dir>/okdp.dependencies.yaml.
 func emit(dir string, res *compiler.Result) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

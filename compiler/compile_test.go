@@ -16,18 +16,24 @@ import (
 // control plane server) passes.
 var (
 	pkg = fstest.MapFS{
-		"values.yaml":            {Data: []byte("replicas: 1\nglobal:\n  okdp:\n    ingress:\n      suffix: example.org\n")},
-		"values.schema.json":     {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
-		"vendor/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
-		"base/app.yaml":          {Data: []byte("image: {tag: \"4.5\"}\n")},
+		"values.yaml":        {Data: []byte("replicas: 1\nglobal:\n  okdp:\n    ingress:\n      suffix: example.org\n")},
+		"values.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
+		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
 	}
-	contracts = fstest.MapFS{}
-	def       = &Definition{
+	// The chart cache: the upstream charts' defaults.
+	charts = fstest.MapFS{
+		"app-1.0.0/values.yaml":          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
+		"okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
+	}
+	appSource     = ChartRef{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
+	objectsSource = ChartRef{Repository: "oci://registry.example.org/okdp", Chart: "okdp-objects", Version: "1.0.0"}
+	contracts     = fstest.MapFS{}
+	def           = &Definition{
 		Service: Service{
 			Name:       "demo",
 			Version:    "1.2.3",
 			AppVersion: "4.5",
-			Charts:     map[string]ChartSpec{"app": {Base: "base/app.yaml"}},
+			Charts:     map[string]ChartSpec{"app": {Source: appSource, Base: "base/app.yaml"}},
 			Require:    []string{"ingress.suffix"},
 		},
 		Files: pkg,
@@ -48,9 +54,18 @@ instance:
 	}
 )
 
-// inputs: the in-memory contracts, with these values layers.
+// inputs: the in-memory chart cache and contracts, with these values
+// layers.
 func inputs(values ...map[string]any) Inputs {
-	return Inputs{Contracts: contracts, Values: values, Release: "demo-app", Namespace: "demo"}
+	return Inputs{Charts: charts, Contracts: contracts, Values: values, Release: "demo-app", Namespace: "demo"}
+}
+
+// withCharts: inputs with these files added to the chart cache.
+func withCharts(in Inputs, files fstest.MapFS) Inputs {
+	cs := maps.Clone(charts)
+	maps.Copy(cs, files)
+	in.Charts = cs
+	return in
 }
 
 // withFiles: def with these package files.
@@ -97,7 +112,8 @@ func TestCompileErrors(t *testing.T) {
 	}{
 		"mapping error":   {inputs(map[string]any{"replicas": 11}), "at most 10 replicas"},
 		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"ingress": nil}}}), "global.okdp.ingress.suffix is required"},
-		"missing release": {Inputs{Contracts: contracts, Namespace: "demo"}, "Release is required"},
+		"missing release": {Inputs{Charts: charts, Contracts: contracts, Namespace: "demo"}, "Release is required"},
+		"no chart cache":  {Inputs{Contracts: contracts, Release: "demo-app", Namespace: "demo"}, "Inputs.Charts is required"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Compile(def, tc.in)
@@ -190,7 +206,7 @@ func TestUpstreamFiles(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/app.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
+			d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Base: "base/app.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
 			in := inputs(inline)
 			if tc.instance != nil {
 				in.Instance = tc.instance
@@ -217,7 +233,7 @@ func TestUpstreamFiles(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true, Files: tc.files}, Protect: []string{"labels"}}}
+			d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Upstream: Upstream{Enabled: true, Files: tc.files}, Protect: []string{"labels"}}}
 			in := inputs()
 			if tc.instance != nil {
 				in.Instance = tc.instance
@@ -231,7 +247,7 @@ func TestUpstreamFiles(t *testing.T) {
 	// chart the mapping leaves out does not need it.
 	d := *def
 	d.Mapping = []byte("output:\n  app: {$if: '${{ values.replicas > 1 }}'}\n")
-	d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true, Files: []string{"missing.yaml"}}}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Upstream: Upstream{Enabled: true, Files: []string{"missing.yaml"}}}}
 	if _, err := Compile(&d, inputs()); err != nil {
 		t.Errorf("chart left out: %v", err)
 	}
@@ -254,7 +270,7 @@ errors:
 output:
   app: {}
 `)
-	d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/app.yaml", Upstream: Upstream{Enabled: true}}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Base: "base/app.yaml", Upstream: Upstream{Enabled: true}}}
 	for name, tc := range map[string]struct {
 		file   string // upstream.app.yaml of the instance, none when empty
 		inline M      // upstream.app
@@ -303,32 +319,29 @@ func TestCompileSchemas(t *testing.T) {
 			"values don't meet the specifications of the schema(s) in the following chart(s):\ndemo:\n- at '/replicas': got number, want integer",
 		},
 		"final values": {
-			fstest.MapFS{"vendor/app/values.schema.json": {Data: []byte(schema)}},
+			fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(schema)}},
 			M{"replicas": float64(5), "upstream": M{"app": M{"image": M{"tag": "latest"}}}},
-			"compiled values don't meet the specifications of the schema(s) in the following chart(s):\nvendor/app:\n- at '/image/tag': 'latest' does not match pattern '^[0-9.]+$'\n- at '/replicaCount': maximum: got 5, want 3",
+			"compiled values don't meet the specifications of the schema(s) in the following chart(s):\napp (app-1.0.0):\n- at '/image/tag': 'latest' does not match pattern '^[0-9.]+$'\n- at '/replicaCount': maximum: got 5, want 3",
 		},
 		"a $ref to a URL": {
-			fstest.MapFS{"vendor/app/values.schema.json": {Data: []byte(`{"$ref": "https://example.org/x.json"}`)}},
+			fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"$ref": "https://example.org/x.json"}`)}},
 			M{}, "the schema may only reference itself",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			ch := maps.Clone(pkg)
-			maps.Copy(ch, tc.files)
-			d := withFiles(ch)
-			d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/app.yaml", Upstream: Upstream{Enabled: true}}}
-			_, err := Compile(d, inputs(tc.values))
+			d := *def
+			d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Base: "base/app.yaml", Upstream: Upstream{Enabled: true}}}
+			_, err := Compile(&d, withCharts(inputs(tc.values), tc.files))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
 	// A null that deletes a default is checked as Helm checks it: gone.
-	ch := maps.Clone(pkg)
-	ch["vendor/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}
-	d := withFiles(ch)
-	d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true}}}
-	res, err := Compile(d, inputs(M{"upstream": M{"app": M{"labels": nil}}}))
+	d := *def
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Upstream: Upstream{Enabled: true}}}
+	in := withCharts(inputs(M{"upstream": M{"app": M{"labels": nil}}}), fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}})
+	res, err := Compile(&d, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,8 +354,6 @@ func TestCompileSchemas(t *testing.T) {
 // descriptor, and the okdp chart: the mapping's own objects, then
 // Result.Objects; compiled even when the mapping leaves it out.
 func TestObjects(t *testing.T) {
-	ch := maps.Clone(pkg)
-	ch["vendor/okdp/values.yaml"] = &fstest.MapFile{Data: []byte("objects: []\n")}
 	mapping := `
 output:
   app: {}
@@ -379,13 +390,13 @@ objects:
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := withFiles(ch)
+			d := *def
 			d.Mapping = []byte(fmt.Sprintf(mapping, tc.okdp))
-			d.Service.Charts = map[string]ChartSpec{"app": {}}
+			d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource}}
 			if tc.declared {
-				d.Service.Charts["okdp"] = ChartSpec{}
+				d.Service.Charts["okdp"] = ChartSpec{Source: objectsSource}
 			}
-			res, err := Compile(d, inputs())
+			res, err := Compile(&d, inputs())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -420,59 +431,43 @@ objects:
 		"okdp not a list": {"output: {okdp: {objects: {a: 1}}}\n", "mapping output okdp.objects: must be a list of objects"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := withFiles(ch)
+			d := *def
 			d.Mapping = []byte(tc.mapping)
-			d.Service.Charts = map[string]ChartSpec{"okdp": {}}
-			if _, err := Compile(d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			d.Service.Charts = map[string]ChartSpec{"okdp": {Source: objectsSource}}
+			if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
 }
 
-// TestChartAlias: a chart of service.yaml compiled from another vendored
-// chart (chart): its defaults and schema, its values keyed by the chart's
-// key; Result.Charts maps every chart to the vendored chart rendering it.
-func TestChartAlias(t *testing.T) {
+// TestSharedSource: two charts of service.yaml rendered by one upstream
+// chart: its defaults and schema, read once from the chart cache, each with
+// its own values; Result.Charts maps every chart to its source.
+func TestSharedSource(t *testing.T) {
 	var svc Service
-	if err := yaml.Unmarshal([]byte("charts:\n  canary: {chart: app, base: base/app.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Chart != "app" {
+	if err := yaml.Unmarshal([]byte("charts:\n  canary: {source: {repository: https://charts.example.org, chart: app, version: 1.0.0}, base: base/app.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Source != appSource {
 		t.Fatalf("service.yaml: %v %#v", err, svc)
 	}
 	mapping := "output:\n  app: {}\n  canary: {replicaCount: '${{ values.replicas }}'}\n"
 	d := *def
 	d.Mapping = []byte(mapping)
-	d.Service.Charts = map[string]ChartSpec{"app": {}, "canary": svc.Charts["canary"]}
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource}, "canary": svc.Charts["canary"]}
 	res, err := Compile(&d, inputs(M{"replicas": 2}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (map[string]string{"app": "app", "canary": "app"}); !reflect.DeepEqual(res.Charts, want) {
+	if want := (map[string]ChartRef{"app": appSource, "canary": appSource}); !reflect.DeepEqual(res.Charts, want) {
 		t.Errorf("charts: got %#v, want %#v", res.Charts, want)
 	}
 	canary := res.Values["canary"]
 	if canary["replicaCount"] != float64(2) || dig(canary, "image.tag") != "4.5" || canary["labels"] == nil {
-		t.Errorf("canary: vendor/app's defaults and base values, then the computed ones: %#v", canary)
+		t.Errorf("canary: app's defaults and its base values, then the computed ones: %#v", canary)
 	}
-	// vendor/app's schema, reported under the chart's key.
-	ch := maps.Clone(pkg)
-	ch["vendor/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}
-	ds := d
-	ds.Files = ch
-	if _, err := Compile(&ds, inputs(M{"replicas": 5})); err == nil || !strings.Contains(err.Error(), "canary (vendor/app):\n- at '/replicaCount': maximum: got 5, want 3") {
+	// app's schema, reported under each chart's key.
+	in := withCharts(inputs(M{"replicas": 5}), fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}})
+	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), "canary (app-1.0.0):\n- at '/replicaCount': maximum: got 5, want 3") {
 		t.Errorf("schema: got %v", err)
-	}
-	for name, tc := range map[string]struct{ chart, want string }{
-		"a path":         {"../app", `service.yaml: charts.canary.chart "../app": not the name of a vendored chart`},
-		"a subdirectory": {"app/charts/x", `service.yaml: charts.canary.chart "app/charts/x": not the name`},
-		"not vendored":   {"nope", "canary: vendor/nope/values.yaml not found: the chart nope is not vendored"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := d
-			d.Service.Charts = map[string]ChartSpec{"app": {}, "canary": {Chart: tc.chart}}
-			if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error containing %q", err, tc.want)
-			}
-		})
 	}
 }
 
@@ -485,8 +480,12 @@ func TestUpstreamFrom(t *testing.T) {
 name: demo
 version: 1.2.3
 charts:
-  app: {upstream: true, protect: [labels], append: [env]}
-  canary: {chart: app, upstream: {from: app}}
+  app:
+    source: &app {repository: https://charts.example.org, chart: app, version: 1.0.0}
+    upstream: true
+    protect: [labels]
+    append: [env]
+  canary: {source: *app, upstream: {from: app}}
 `), &svc); err != nil {
 		t.Fatal(err)
 	}
@@ -510,8 +509,8 @@ output:
 			t.Errorf("%s: the instance file and inline values of app, env appended: %#v", chart, v)
 		}
 	}
-	if res.Charts["canary"] != "app" || res.Values["canary"]["replicaCount"] != float64(1) {
-		t.Errorf("canary: its own computed values, vendor/app: %#v %#v", res.Charts, res.Values["canary"])
+	if res.Charts["canary"] != appSource || res.Values["canary"]["replicaCount"] != float64(1) {
+		t.Errorf("canary: its own computed values, rendered by app: %#v %#v", res.Charts, res.Values["canary"])
 	}
 	// app's protected paths refuse the value for both renders, also when
 	// the mapping leaves app out.
@@ -542,11 +541,11 @@ output:
 		charts map[string]ChartSpec
 		want   string
 	}{
-		"itself":        {map[string]ChartSpec{"a": {Upstream: Upstream{From: "a"}}}, "charts.a.upstream.from: the chart itself"},
-		"unknown":       {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}}}, `charts.a.upstream.from "b": not a chart of service.yaml`},
-		"no own values": {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}}, "b": {}}, `charts.a.upstream.from "b": that chart accepts no upstream values of its own`},
-		"a chain":       {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}}, "b": {Upstream: Upstream{From: "c"}}, "c": {Upstream: Upstream{Enabled: true}}}, `charts.a.upstream.from "b": that chart accepts no upstream values of its own`},
-		"its own rules": {map[string]ChartSpec{"a": {Upstream: Upstream{From: "b"}, Protect: []string{"x"}}, "b": {Upstream: Upstream{Enabled: true}}}, "charts.a: protect and append come with upstream.from, from charts.b"},
+		"itself":        {map[string]ChartSpec{"a": {Source: appSource, Upstream: Upstream{From: "a"}}}, "charts.a.upstream.from: the chart itself"},
+		"unknown":       {map[string]ChartSpec{"a": {Source: appSource, Upstream: Upstream{From: "b"}}}, `charts.a.upstream.from "b": not a chart of service.yaml`},
+		"no own values": {map[string]ChartSpec{"a": {Source: appSource, Upstream: Upstream{From: "b"}}, "b": {Source: appSource}}, `charts.a.upstream.from "b": that chart accepts no upstream values of its own`},
+		"a chain":       {map[string]ChartSpec{"a": {Source: appSource, Upstream: Upstream{From: "b"}}, "b": {Source: appSource, Upstream: Upstream{From: "c"}}, "c": {Source: appSource, Upstream: Upstream{Enabled: true}}}, `charts.a.upstream.from "b": that chart accepts no upstream values of its own`},
+		"its own rules": {map[string]ChartSpec{"a": {Source: appSource, Upstream: Upstream{From: "b"}, Protect: []string{"x"}}, "b": {Source: appSource, Upstream: Upstream{Enabled: true}}}, "charts.a: protect and append come with upstream.from, from charts.b"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def

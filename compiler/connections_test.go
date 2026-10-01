@@ -129,7 +129,7 @@ func TestCompileOutputErrors(t *testing.T) {
 		t.Errorf("unknown chart: got %v", err)
 	}
 	d = *def
-	d.Service.Charts = map[string]ChartSpec{"app": {Base: "base/missing.yaml"}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Base: "base/missing.yaml"}}
 	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open base/missing.yaml") {
 		t.Errorf("missing base values: got %v", err)
 	}

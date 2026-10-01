@@ -87,8 +87,8 @@ output:
 
 # The OAuth clients of the service, here one: the application's, for the
 # sign-in. In dcr mode (global.okdp.oidc.clientProvisioning: dcr), the
-# compiler adds a chart oidc-dcr (from vendor/oidc-dcr, not listed in
-# service.yaml) whose Job registers the client and writes its Secret; the
+# compiler adds a chart oidc-dcr (rendered by the oidc-dcr chart, not listed
+# in service.yaml) whose Job registers the client and writes its Secret; the
 # platform's settings (global.okdp.oidc.dcr) apply. In existing mode the
 # platform provides it: nothing is compiled. Another client would be named
 # (name: console: chart console-oidc-dcr, Secret oidcClientSecret('console')).

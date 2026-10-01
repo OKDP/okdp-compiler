@@ -171,11 +171,11 @@ func TestUpstreamBrackets(t *testing.T) {
 // a bracketed path protects an upstream file's values too.
 func TestServicePaths(t *testing.T) {
 	mapping := []byte("output:\n  app: {}\n")
+	const app = "charts:\n  app:\n    source: {repository: https://x, chart: app, version: 1.0.0}\n"
 	for yml, want := range map[string]string{
-		"charts:\n  app:\n    protect: [a.b, 'a[\"b']\n":    `service.yaml: charts.app.protect[1] "a[\"b": a bracketed key ends with "]`,
-		"charts:\n  app:\n    append: ['env.*']\n":          `service.yaml: charts.app.append[0] "env.*": a * outside brackets`,
-		"charts:\n  app:\n    chart: ../x\n":                `service.yaml: charts.app.chart "../x": not the name of a vendored chart`,
-		"charts:\n  app:\n    protect: ['a[\"b.c*\"].d']\n": "",
+		app + "    protect: [a.b, 'a[\"b']\n":    `service.yaml: charts.app.protect[1] "a[\"b": a bracketed key ends with "]`,
+		app + "    append: ['env.*']\n":          `service.yaml: charts.app.append[0] "env.*": a * outside brackets`,
+		app + "    protect: ['a[\"b.c*\"].d']\n": "",
 	} {
 		_, err := LoadDefinition(fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\n" + yml)}, "mapping.cel.yaml": {Data: mapping}})
 		if want == "" {
@@ -188,11 +188,11 @@ func TestServicePaths(t *testing.T) {
 	}
 	d := *def
 	d.Mapping = mapping
-	d.Service.Charts = map[string]ChartSpec{"app": {Protect: []string{"labels.*"}}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Protect: []string{"labels.*"}}}
 	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), `charts.app.protect[0] "labels.*"`) {
 		t.Errorf("in memory: got %v", err)
 	}
-	d.Service.Charts = map[string]ChartSpec{"app": {Upstream: Upstream{Enabled: true}, Protect: []string{`labels["okdp.io/*"]`}}}
+	d.Service.Charts = map[string]ChartSpec{"app": {Source: appSource, Upstream: Upstream{Enabled: true}, Protect: []string{`labels["okdp.io/*"]`}}}
 	in := inputs()
 	in.Instance = fstest.MapFS{"upstream.app.yaml": {Data: []byte("labels: {okdp.io/instance: other}\n")}}
 	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), `app: upstream.app.yaml: labels["okdp.io/instance"]: labels["okdp.io/*"] is set by the platform and cannot be changed`) {

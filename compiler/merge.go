@@ -19,32 +19,29 @@ import (
 )
 
 // finalValues: what the upstream chart is rendered with (`helm template
-// vendor/<chart> -f <final values>`, vendor/<alias> for a chart that names
-// its vendored chart in service.yaml). The base values, the computed values
-// and the instance's upstream values are merged as Helm merges -f files
-// (MergeMaps: maps merge, lists and scalars replace, a null replaces and
-// stays), over the chart's own defaults without their nulls. Rendered by
-// Helm, these values give exactly what `helm template vendor/<chart> -f base
-// -f computed -f <upstream files> -f <inline upstream>` gives, with Helm 3 or
-// 4: a null that deletes a default stays null (Helm deletes the key when it
-// renders), a null where there is no default stays (Helm keeps it), and the
-// null defaults are left out (Helm 4 drops them, Helm 3 copies them back).
+// <source> -f <final values>`). The base values, the computed values and the
+// instance's upstream values are merged as Helm merges -f files (MergeMaps:
+// maps merge, lists and scalars replace, a null replaces and stays), over
+// the chart's own defaults without their nulls. Rendered by Helm, these
+// values give exactly what `helm template <source> -f base -f computed -f
+// <upstream files> -f <inline upstream>` gives, with Helm 3 or 4: a null
+// that deletes a default stays null (Helm deletes the key when it renders),
+// a null where there is no default stays (Helm keeps it), and the null
+// defaults are left out (Helm 4 drops them, Helm 3 copies them back).
 //
-// The violations of the chart's schema (vendor/<chart>/values.schema.json)
-// by these values, as Helm sees them when it renders, are returned apart.
+// The violations of the chart's schema (its values.schema.json) by these
+// values, as Helm sees them when it renders, are returned apart.
 //
-// files: the package. ups: the instance's upstream values, by the chart that
-// accepts them (readUpstreamValues).
-func finalValues(files fs.FS, svc *Service, chart string, computed M, values M, ups map[string]*chartUpstream) (M, string, error) {
+// charts: the chart cache, the chart's defaults and schema. files: the
+// package. ups: the instance's upstream values, by the chart that accepts
+// them (readUpstreamValues).
+func finalValues(charts *chartCache, files fs.FS, svc *Service, chart string, computed M, values M, ups map[string]*chartUpstream) (M, string, error) {
 	spec := svc.Charts[chart]
-	vendored := spec.vendored(chart)
-	defaults, err := readValues(files, path.Join("vendor", vendored, "values.yaml"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, "", fmt.Errorf("vendor/%s/values.yaml not found: the chart %s is not vendored (vendor.yaml, then scripts/vendor-charts.sh)", vendored, vendored)
-	}
+	upstream, err := charts.get(spec.Source)
 	if err != nil {
 		return nil, "", err
 	}
+	defaults := upstream.defaults
 	// Upstream chart defaults first, then OKDP's default values for this
 	// chart, then what the mapping computed.
 	base := M{}
@@ -75,7 +72,7 @@ func finalValues(files fs.FS, svc *Service, chart string, computed M, values M, 
 	}
 	// Every chart gets the instance's global, as a subchart would.
 	out["global"] = layered(asMap(defaults["global"]), asMap(values["global"]), asMap(computed["global"]))
-	v, err := schemaViolations(files, path.Join("vendor", vendored, "values.schema.json"), coalesceValues(defaults, out))
+	v, err := checkSchema(spec.Source.id()+"/values.schema.json", upstream.schema, coalesceValues(defaults, out))
 	return out, v, err
 }
 

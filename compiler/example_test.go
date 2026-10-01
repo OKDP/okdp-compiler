@@ -19,6 +19,7 @@ const example = "../example"
 func exampleInputs(t *testing.T, files ...string) Inputs {
 	t.Helper()
 	in := Inputs{
+		Charts:    os.DirFS(filepath.Join(example, "charts")),
 		Contracts: os.DirFS(filepath.Join(example, "contracts")),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -38,7 +39,7 @@ func exampleInputs(t *testing.T, files ...string) Inputs {
 }
 
 // TestExample compiles every example/values/<case>.yaml and compares the
-// final values, the vendored chart of each, objects and dependencies with
+// final values, the upstream chart of each, objects and dependencies with
 // example/compiled/<case>.yaml.
 func TestExample(t *testing.T) {
 	def, err := LoadDefinition(os.DirFS(filepath.Join(example, "webapp")))

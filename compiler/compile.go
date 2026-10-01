@@ -8,15 +8,19 @@
 // `helm template` computes on the same inputs), and the mapping's host
 // functions reproduce Helm and okdp-lib-chart functions.
 //
+// Each chart of service.yaml names the upstream chart that renders its values
+// (ChartSpec.Source: repository, chart, version), and Result.Charts maps
+// every compiled chart to it: a deployer renders the upstream chart from its
+// repository. The compiler reads only its defaults and schema, from the chart
+// cache (Inputs.Charts, charts.go); one upstream chart may render several
+// charts of service.yaml, each with its own values.
+//
 // A mapping's oidcClients section declares the service's OAuth clients
 // (oidc.go): when the platform registers them by dynamic client
-// registration, the compiler adds one chart per client, compiled from
-// vendor/oidc-dcr (oidc-dcr for the main client, <name>-oidc-dcr for a named
+// registration, the compiler adds one chart per client, rendered by the
+// oidc-dcr chart (oidc-dcr for the main client, <name>-oidc-dcr for a named
 // one), which service.yaml does not list; their values come from a template
-// in the mapping language embedded in the compiler (oidc-dcr.cel.yaml). A
-// chart of service.yaml may also name the vendored chart it compiles from
-// (ChartSpec.Chart); Result.Charts maps every compiled chart to the vendored
-// chart that renders it.
+// in the mapping language embedded in the compiler (oidc-dcr.cel.yaml).
 //
 // An instance may set any value of a chart whose service.yaml entry accepts
 // it (upstream): in its files (Inputs.Instance, upstream.<chart>.yaml by
@@ -27,9 +31,9 @@
 // paths and appending to the append lists (merge.go). A path names a key that
 // contains dots in brackets, and a family of keys with a final glob:
 // annotations["nginx.ingress.kubernetes.io/auth-*"] (paths.go). A chart
-// rendered twice from one vendored chart may receive the upstream values of
-// the other (upstream: {from: <chart>}), with its protect and append: one set
-// of values for both renders.
+// rendered by the same upstream chart as another may receive the upstream
+// values of the other (upstream: {from: <chart>}), with its protect and
+// append: one set of values for both renders.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (the
 // control plane server, a CLI) can compile from a checkout, an embedded
@@ -37,6 +41,7 @@
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("packages/myservice"))
 //	res, err := compiler.Compile(def, compiler.Inputs{
+//		Charts:    os.DirFS("charts"),
 //		Instance:  os.DirFS("instances/demo/myservice"),
 //		Contracts: os.DirFS("okdp-lib-chart/contracts"),
 //		Values:    []map[string]any{instanceValues},
@@ -50,9 +55,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"path"
 	"slices"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -87,6 +90,7 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 
 // Inputs: what one compile reads besides the package.
 type Inputs struct {
+	Charts    fs.FS            // chart cache: the upstream charts, <chart>-<version>.tgz (helm pull) or <chart>-<version>/
 	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // okdp-lib-chart/contracts: <contract>.schema.json
 	Values    []map[string]any // instance values layers, in order (helm -f); see ParseValues
@@ -111,9 +115,10 @@ func (s *Service) meta() serviceMeta {
 }
 
 // ChartSpec: one upstream chart of a service, by key: the key names its
-// values (the mapping's output, Result.Values).
+// values (the mapping's output, Result.Values), the upstream chart renders
+// them.
 type ChartSpec struct {
-	Chart    string   `yaml:"chart"`    // the vendored chart, vendor/<chart> (its defaults and schema, and what renders the values); default: the key
+	Source   ChartRef `yaml:"source"`   // the upstream chart: its defaults and schema (Inputs.Charts), and what renders the values
 	Base     string   `yaml:"base"`     // a values file of the package, base/<key>.yaml by convention (OKDP's default values)
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
 	Append   []string `yaml:"append"`   // instance upstream values: appended lists (same paths)
@@ -127,8 +132,8 @@ type ChartSpec struct {
 //
 // {from: <chart>} gives the chart the upstream values of another chart of
 // service.yaml, with that chart's protect and append: for two renders of
-// one upstream chart (an alias, ChartSpec.Chart) that an instance sets with
-// one set of values (polaris-admin's bootstrap and principals Jobs). The
+// one upstream chart (two keys of the same source) that an instance sets
+// with one set of values (polaris-admin's bootstrap and principals Jobs). The
 // mapping used to merge them into the second render by hand, which could
 // not see the instance files, so the files had to be refused.
 type Upstream struct {
@@ -152,8 +157,7 @@ func (s *Service) upstreamOf(key string) string {
 
 // check: what service.yaml may not hold, refused when it is loaded
 // (LoadDefinition) and before every compile: no name or version, a chart
-// alias that is not the name of a vendored chart, a protect or append path
-// that does not follow the grammar of paths.go (a malformed path would
+// without its source, a protect or append path that does not follow the grammar of paths.go (a malformed path would
 // otherwise surface only when an instance sets a value under it, or never,
 // leaving a value unprotected), an upstream.from that does not name a chart
 // accepting upstream values of its own.
@@ -166,8 +170,8 @@ func (s *Service) check() error {
 	}
 	for _, key := range slices.Sorted(maps.Keys(s.Charts)) {
 		spec := s.Charts[key]
-		if c := spec.Chart; c != "" && (c != path.Base(c) || c == "." || c == ".." || strings.TrimSpace(c) != c) {
-			return fmt.Errorf("service.yaml: charts.%s.chart %q: not the name of a vendored chart (vendor/<chart>)", key, c)
+		if err := spec.Source.check("service.yaml: charts." + key + ".source"); err != nil {
+			return err
 		}
 		if from := spec.Upstream.From; from != "" {
 			target, ok := s.Charts[from]
@@ -196,15 +200,6 @@ func (s *Service) check() error {
 		}
 	}
 	return nil
-}
-
-// vendored: the vendored chart of the chart key: its chart alias, or the
-// key itself.
-func (c ChartSpec) vendored(key string) string {
-	if c.Chart != "" {
-		return c.Chart
-	}
-	return key
 }
 
 // UnmarshalYAML: true or false, a path or a list of paths, or {from:
@@ -253,10 +248,10 @@ type Result struct {
 	Computed map[string]any
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any
-	// Charts: chart -> the vendored chart that renders its values
-	// (`helm template vendor/<Charts[chart]> -f <Values[chart]>`): the chart
-	// itself, or the vendored chart its service.yaml entry names (`chart`).
-	Charts map[string]string
+	// Charts: chart -> the upstream chart that renders its values (`helm
+	// template <Charts[chart]> -f <Values[chart]>`): its service.yaml
+	// source, or the oidc-dcr chart for an OAuth client.
+	Charts map[string]ChartRef
 	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
 	// the credentials Secrets of the provided connections, then the objects
 	// section of the mapping. With an okdp chart in service.yaml
@@ -275,6 +270,8 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 		return nil, errors.New("no service definition")
 	case def.Files == nil:
 		return nil, errors.New("Definition.Files is required")
+	case in.Charts == nil:
+		return nil, errors.New("Inputs.Charts is required")
 	case in.Contracts == nil:
 		return nil, errors.New("Inputs.Contracts is required")
 	case in.Release == "":
@@ -303,7 +300,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if svc, err = clientCharts(def.Files, svc, clients, dcrValues, res.output); err != nil {
+	if svc, err = clientCharts(svc, clients, dcrValues, res.output); err != nil {
 		return nil, err
 	}
 	// The descriptor ConfigMap, checked against the contracts, and the
@@ -312,7 +309,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Charts: map[string]string{}, Objects: []map[string]any{desc}, Dependencies: deps}
+	out := &Result{Computed: res.output, Values: map[string]map[string]any{}, Charts: map[string]ChartRef{}, Objects: []map[string]any{desc}, Dependencies: deps}
 	for _, o := range append(credentials, res.objects...) {
 		out.Objects = append(out.Objects, asMap(o))
 	}
@@ -335,23 +332,20 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	// error is the same from one compile to the next, also when a refused
 	// upstream value reaches two charts (upstream.from).
 	violations := map[string]string{}
+	charts := &chartCache{fsys: in.Charts, charts: map[ChartRef]*upstreamChart{}}
 	for _, chart := range slices.Sorted(maps.Keys(res.output)) {
 		v := res.output[chart]
 		if _, ok := svc.Charts[chart]; !ok {
 			return nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", chart)
 		}
-		f, bad, err := finalValues(def.Files, svc, chart, asMap(v), values, ups)
+		f, bad, err := finalValues(charts, def.Files, svc, chart, asMap(v), values, ups)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", chart, err)
 		}
 		out.Values[chart] = f
-		vendored := svc.Charts[chart].vendored(chart)
-		out.Charts[chart] = vendored
-		if vendored == chart {
-			violations["vendor/"+chart] = bad
-		} else {
-			violations[chart+" (vendor/"+vendored+")"] = bad
-		}
+		src := svc.Charts[chart].Source
+		out.Charts[chart] = src
+		violations[chart+" ("+src.id()+")"] = bad
 	}
 	if err := schemaError("compiled values", violations); err != nil {
 		return nil, err

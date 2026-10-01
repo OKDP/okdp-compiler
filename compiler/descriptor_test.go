@@ -159,7 +159,7 @@ appVersion: 1.10
 roles: [web]
 dependsOn: [ingress]
 require: [a]
-charts: {app: {base: f.yaml, protect: [p]}}
+charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base: f.yaml, protect: [p]}}
 `)},
 		"mapping.cel.yaml": {Data: []byte("output: {}\n")},
 	}
@@ -169,7 +169,7 @@ charts: {app: {base: f.yaml, protect: [p]}}
 	}
 	want := Service{
 		Name: "demo", Version: "1.0.0", AppVersion: "1.10", Roles: []string{"web"}, DependsOn: []string{"ingress"},
-		Require: []string{"a"}, Charts: map[string]ChartSpec{"app": {Base: "f.yaml", Protect: []string{"p"}}},
+		Require: []string{"a"}, Charts: map[string]ChartSpec{"app": {Source: ChartRef{Repository: "https://x", Chart: "app", Version: "1.0.0"}, Base: "f.yaml", Protect: []string{"p"}}},
 	}
 	if !reflect.DeepEqual(d.Service, want) || string(d.Mapping) != "output: {}\n" || d.Files == nil {
 		t.Errorf("got %#v", d)

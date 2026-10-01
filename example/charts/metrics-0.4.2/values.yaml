@@ -1,4 +1,4 @@
-# Defaults of the (fictional) upstream metrics chart.
+# Defaults of the (fictional) upstream metrics chart, 0.4.2.
 target: ""
 interval: 1m
 image:

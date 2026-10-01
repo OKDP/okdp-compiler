@@ -13,8 +13,21 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// schemaViolations: the values against the JSON schema file name of fsys
-// (none when the chart has no schema), one line per violation with its
+// schemaViolations: the values against the JSON schema file name of fsys,
+// none when there is no such file (checkSchema).
+func schemaViolations(fsys fs.FS, name string, values M) (string, error) {
+	b, err := fs.ReadFile(fsys, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return checkSchema(name, b, values)
+}
+
+// checkSchema: the values against the JSON schema b, read from name (none
+// when b is nil: the chart has no schema), one line per violation with its
 // path, as Helm prints them:
 //
 //   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
@@ -26,13 +39,9 @@ import (
 // for drafts before 2019-09 only. Unlike Helm, nothing is fetched: a $ref to
 // a file or a URL fails the compile (a urn: $ref accepts anything, as in
 // Helm). The violations are sorted by path: Helm's order varies between runs.
-func schemaViolations(fsys fs.FS, name string, values M) (_ string, err error) {
-	b, err := fs.ReadFile(fsys, name)
-	if errors.Is(err, fs.ErrNotExist) {
+func checkSchema(name string, b []byte, values M) (_ string, err error) {
+	if b == nil {
 		return "", nil
-	}
-	if err != nil {
-		return "", err
 	}
 	// A panic of the validator is an error, as in Helm.
 	defer func() {
