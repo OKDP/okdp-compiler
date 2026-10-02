@@ -12,7 +12,8 @@ import (
 )
 
 // dbContract: a database contract with defaults, a derived field, a
-// conditional default, a secret field, and a required boolean.
+// conditional default, a secret field (required: it is in the Secret, never
+// set), and a required boolean.
 var dbContract = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "database",
 	"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc", "url": "https://${ref}.${suffix}"},
@@ -25,7 +26,7 @@ var dbContract = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 		"tls": {"type": "boolean", "default": false},
 		"password": {"type": "string", "x-okdp-secret": true}
 	},
-	"required": ["host", "tls"]}`)}}
+	"required": ["host", "tls", "password"]}`)}}
 
 // resolveSchema: parameters with references in a nested object, and in a
 // list of references.

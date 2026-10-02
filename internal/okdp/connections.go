@@ -187,9 +187,13 @@ func complete(schema, out M, where string) error {
 			}
 		}
 	}
-	// false is a value: only missing or empty fails.
+	// false is a value: only missing or empty fails. A secret field is never
+	// set: it is in the credentials Secret.
 	required, _ := schema["required"].([]any)
 	for _, k := range required {
+		if value.Truthy(value.AsMap(props[value.Str(k)])["x-okdp-secret"]) {
+			continue
+		}
 		if !value.Truthy(out[value.Str(k)]) && out[value.Str(k)] != false {
 			return fmt.Errorf("%s: field %q is required by the %s contract", where, k, contract)
 		}
