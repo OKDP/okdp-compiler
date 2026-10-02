@@ -145,10 +145,11 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `internal/compile/cel.go`). The mapping is parsed into ordered maps
    (`parseDoc`), with OKDP's host functions (`functions`) beside the
    language's. The `let` bindings are evaluated in order, each seeing the
-   previous ones; then every `errors` expression, all messages collected,
-   any message failing the compile (`bind`); then the sections
-   (`Doc.Section`): `output`, `instance`, `provides`, `objects` and
-   `oidcClients`, in that order. Each `objects` item must be a whole
+   previous ones; then every `errors` item, a rule (`$if`, `message`) or an
+   expression returning messages, all messages collected, any message
+   failing the compile (`bind`); then the sections (`Doc.Section`):
+   `output`, `instance`, `provides`, `objects` and `oidcClients`, in that
+   order. Each `objects` item must be a whole
    manifest, with a `kind` and a `metadata.name`; `oidcClients` must be a
    list.
 6. **OAuth clients** (`oidcClients`, `clientCharts`, `internal/okdp/oidc.go`).

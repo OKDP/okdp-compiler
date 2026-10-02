@@ -263,8 +263,9 @@ let:                       # names and hosts computed once, in order
   db: '${{ type(values.database) == map ? values.database : {} }}'
   sessionSecret: ${{ okdpFullname('session') }}
 
-errors:                    # each expression returns a list of messages
-  - '${{ values.replicas > 1 && db.size() == 0 ? ["webapp: replicas > 1 needs a database, sessions are stored there"] : [] }}'
+errors:                    # a rule's message fails the compile when $if holds
+  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
+    message: "webapp: replicas > 1 needs a database, sessions are stored there"
 
 output:                    # chart -> the values computed for it
   app:
@@ -306,8 +307,11 @@ provides:                  # the connections the instance publishes
   compiler adds the okdp chart to every compile, so the descriptor always
   reaches the cluster
   ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
-- `errors` fails the compile with every message at once. Prefix each with
-  the service and the parameter, and say what to set.
+- `errors` fails the compile with every message at once. A rule is a
+  condition, `$if`, and a `message`; `$for` checks every element of a list.
+  An expression returning a list of messages remains for messages computed
+  together. Prefix each message with the service and the parameter, and say
+  what to set.
 - `oidcClients` declares the service's OAuth clients; the mapping reads each
   from its Secret, `platform.oidcClientSecret` for the main client
   ([recipe](#oauth-clients)).
@@ -673,10 +677,10 @@ env:                                            # a list (superset)
 
 ```yaml
 errors:
-  - >-
-    ${{ platform.oidc.enabled && platform.oidc.?issuerUri.orValue('') == ''
-        ? ['global.okdp.oidc.issuerUri is required. It is a platform value: set it in platform/platform-values.yaml']
-        : [] }}
+  - $if: ${{ platform.oidc.enabled && platform.oidc.?issuerUri.orValue('') == '' }}
+    message: >-
+      global.okdp.oidc.issuerUri is required. It is a platform value: set it
+      in platform/platform-values.yaml
 ```
 
 Read an optional platform value with `.?` and `orValue`

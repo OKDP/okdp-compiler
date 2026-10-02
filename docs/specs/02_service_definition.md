@@ -193,7 +193,7 @@ structure ([Directives](#directives)). Its top-level keys are the
 | Key | Type | Content |
 |---|---|---|
 | [`let`](#let) | map | named values, evaluated in order |
-| [`errors`](#the-errors-section) | list | expressions returning lists of messages: any message fails the compile |
+| [`errors`](#the-errors-section) | list | rules (`$if`, `message`) and expressions returning lists of messages: any message fails the compile |
 | [`output`](#output) | map | chart → computed values |
 | [`objects`](#objects) | list | OKDP's own objects, whole manifests |
 | [`instance`](#instance) | map | `url` and `usage` of the instance |
@@ -207,7 +207,8 @@ let:
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
 errors:
-  - '${{ values.replicas > 1 && db.size() == 0 ? ["webapp: replicas > 1 needs a database"] : [] }}'
+  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
+    message: "webapp: replicas > 1 needs a database"
 output:
   app:
     fullnameOverride: ${{ release.name }}-app
@@ -888,28 +889,45 @@ available in every expression, `let` and `errors` included.
 
 ```yaml
 errors:
-  - '${{ values.replicas > 1 && db.size() == 0 ? ["webapp: replicas > 1 needs a database"] : [] }}'
+  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
+    message: "webapp: replicas > 1 needs a database"
+  - $for: p in ['s3SecretRef', 'trinoOidcSecretRef']
+    $each:
+      $if: ${{ first([values[p]]) == '' }}
+      message: "okdp-examples: ${{ p }} is required"
   - >-
-    ${{ ['s3SecretRef', 'trinoOidcSecretRef'].filter(p, first([values[p]]) == '')
-        .map(p, 'okdp-examples: ' + p + ' is required') }}
+    ${{ realms.filter(r, r.admin == null)
+        .map(r, 'okdp-examples: realm "' + r.name + '" has no catalog_admin') }}
 ```
 
-`errors` is a list, evaluated after `let`, before the other sections. Each
-item is a node evaluated like any other, usually a lone expression; its
-value is a list of messages, each converted with `str`. A value that is not
-a list adds no message: `${{ c ? "message" : "" }}` never fails, write
-`${{ c ? ["message"] : [] }}`. Every item is evaluated; when there is any
-message, the compile fails with the messages joined by newlines, without
-prefix:
+`errors` is a list, evaluated after `let`, before the other sections, as
+any list ([directives](#directives)): `$if` leaves an item out, `$for` and
+`$spread` give several. Each value it gives is:
+
+- a rule, `{message: <text>}`: its message. A rule is written with its
+  condition, `$if`: the message is evaluated only when the condition holds,
+  and may read what exists only then (`db.okdp.ref` of a database
+  connection);
+- a list: its messages, each converted with `str`. An expression returning
+  the messages of a check, `[]` when it passes, for messages computed
+  together (`filter` and `map`).
+
+Anything else fails the compile: `errors[<i>]: a rule is {$if: <condition>,
+message: <text>}, or an expression returning a list of messages, got
+<value>`, as does a message that is not text (`message must be text, got
+<value>`) or is empty (`an empty message`). Every item is evaluated; when
+there is any message, the compile fails with the messages joined by
+newlines, without prefix:
 
 ```text
 webapp: replicas > 1 needs a database
 okdp-examples: s3SecretRef is required
+okdp-examples: realm "data" has no catalog_admin
 ```
 
 An `errors` that is not a list is ignored. An item whose evaluation fails
-stops the compile with that error, prefixed with its position
-(`errors[1]: `).
+stops the compile with that error, prefixed with the position of the item
+as written (`errors[1]: `, `errors[1]: message: `).
 
 ### Compile errors
 

@@ -19,7 +19,8 @@
 // Top level, before any section:
 //
 //	let (ordered bindings)
-//	errors (expressions returning lists of messages: any message fails the compile)
+//	errors (rules: {$if: <condition>, message: <text>}, or expressions
+//	returning lists of messages: any message fails the compile)
 //
 // A template (EvalTemplate) has one section, values.
 package compile
@@ -431,6 +432,53 @@ func within(seg string, index bool, err error) error {
 	return &nodeError{path: seg + ": " + ne.path, index: index, err: ne.err}
 }
 
+// items: the values the i-th item of a list gives: none ($if false), one,
+// or several ($for, $spread); its errors at its position.
+func (e *celEngine) items(i int, item any, scope M) ([]any, error) {
+	// Directives that produce several items: $for and $spread.
+	if m, ok := item.(*omap); ok {
+		if spec, ok := m.vals["$for"]; ok {
+			name, items, err := e.loop(spec, scope)
+			if err != nil {
+				return nil, atIndex(i, err)
+			}
+			var out []any
+			for _, it := range items {
+				s, err := e.iteration(m, scope, name, it)
+				if err != nil {
+					return nil, atIndex(i, err)
+				}
+				v, keep, err := e.node(m.vals["$each"], s)
+				if err != nil {
+					return nil, atIndex(i, err)
+				}
+				// $each may give one item or a list of items.
+				if l, ok := v.([]any); ok {
+					out = append(out, l...)
+				} else if keep {
+					out = append(out, v)
+				}
+			}
+			return out, nil
+		}
+		if spec, ok := m.vals["$spread"]; ok {
+			v, err := e.evalString(value.Str(spec), scope)
+			if err != nil {
+				return nil, atIndex(i, err)
+			}
+			return value.AsList(v), nil
+		}
+	}
+	v, keep, err := e.node(item, scope)
+	if err != nil {
+		return nil, atIndex(i, err)
+	}
+	if !keep {
+		return nil, nil
+	}
+	return []any{v}, nil
+}
+
 // node: evaluates a template node. keep=false: the node is left out.
 func (e *celEngine) node(n any, scope M) (any, bool, error) {
 	switch t := n.(type) {
@@ -440,49 +488,11 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 	case []any:
 		out := []any{}
 		for i, item := range t {
-			// Directives that produce several items: $for and $spread.
-			if m, ok := item.(*omap); ok {
-				if spec, ok := m.vals["$for"]; ok {
-					name, items, err := e.loop(spec, scope)
-					if err != nil {
-						return nil, false, atIndex(i, err)
-					}
-					for _, it := range items {
-						s, err := e.iteration(m, scope, name, it)
-						if err != nil {
-							return nil, false, atIndex(i, err)
-						}
-						v, keep, err := e.node(m.vals["$each"], s)
-						if err != nil {
-							return nil, false, atIndex(i, err)
-						}
-						// $each may give one item or a list of items.
-						if l, ok := v.([]any); ok {
-							out = append(out, l...)
-						} else if keep {
-							out = append(out, v)
-						}
-					}
-					continue
-				}
-				if spec, ok := m.vals["$spread"]; ok {
-					v, err := e.evalString(value.Str(spec), scope)
-					if err != nil {
-						return nil, false, atIndex(i, err)
-					}
-					if l, ok := v.([]any); ok {
-						out = append(out, l...)
-					}
-					continue
-				}
-			}
-			v, keep, err := e.node(item, scope)
+			vs, err := e.items(i, item, scope)
 			if err != nil {
-				return nil, false, atIndex(i, err)
+				return nil, false, err
 			}
-			if keep {
-				out = append(out, v)
-			}
+			out = append(out, vs...)
 		}
 		return out, true, nil
 	case *omap:
@@ -573,7 +583,7 @@ func parseDoc(b []byte) (*omap, error) {
 
 // bind: the scope of a document's sections: the context, then its let
 // bindings, in order (each sees the previous ones); then its errors
-// section, every message collected before failing.
+// section, every message collected before failing (messages).
 func (e *celEngine) bind(top *omap, ctx M) (M, error) {
 	scope := M{}
 	maps.Copy(scope, ctx)
@@ -588,18 +598,51 @@ func (e *celEngine) bind(top *omap, ctx M) (M, error) {
 	}
 	var msgs []string
 	for i, x := range value.AsList(top.vals["errors"]) {
-		v, _, err := e.node(x, scope)
+		vs, err := e.items(i, x, scope)
 		if err != nil {
-			return nil, atKey("errors", atIndex(i, err))
+			return nil, atKey("errors", err)
 		}
-		for _, m := range value.AsList(v) {
-			msgs = append(msgs, value.Str(m))
+		for _, v := range vs {
+			m, err := messages(v)
+			if err != nil {
+				return nil, atKey("errors", atIndex(i, err))
+			}
+			msgs = append(msgs, m...)
 		}
 	}
 	if len(msgs) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
 	}
 	return scope, nil
+}
+
+// messages: what an evaluated item of an errors section reports: a rule,
+// {message: <text>} (left out by its $if when it holds no error), gives its
+// message; a list gives its messages (an expression returning the messages
+// of a check, none when it passes).
+func messages(v any) ([]string, error) {
+	switch t := v.(type) {
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, m := range t {
+			out = append(out, value.Str(m))
+		}
+		return out, nil
+	case M:
+		msg, ok := t["message"]
+		if !ok || len(t) != 1 {
+			break
+		}
+		s, ok := msg.(string)
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("message must be text, got %s", value.Short(msg))
+		case s == "":
+			return nil, fmt.Errorf("an empty message")
+		}
+		return []string{s}, nil
+	}
+	return nil, fmt.Errorf("a rule is {$if: <condition>, message: <text>}, or an expression returning a list of messages, got %s", value.Short(v))
 }
 
 // Doc: a document (a mapping, a template) bound to its context: its let

@@ -7,12 +7,12 @@ let:
   db: '${{ type(values.database) == map ? values.database : {} }}'
   dbSecret: ${{ db.?secretRef.name.orValue('') }}
 
-# Each rule returns a list of messages; any message fails the compile.
+# A rule fails the compile with its message when its condition holds.
 errors:
-  - '${{ values.replicas > 1 && db.size() == 0 ? ["webapp: replicas > 1 needs a database, sessions are stored there"] : [] }}'
-  - >-
-    ${{ db.size() > 0 && dbSecret == '' ? ['webapp: database connection "' + db.okdp.ref
-        + '" has no secretRef, the password cannot be read'] : [] }}
+  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
+    message: "webapp: replicas > 1 needs a database, sessions are stored there"
+  - $if: ${{ db.size() > 0 && dbSecret == '' }}
+    message: 'webapp: database connection "${{ db.okdp.ref }}" has no secretRef, the password cannot be read'
 
 output:
   app:

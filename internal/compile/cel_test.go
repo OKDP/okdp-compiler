@@ -171,6 +171,39 @@ output:
 	}
 }
 
+// TestErrorRules: rules ($if and message), per element ($for), beside an
+// expression returning messages; the message of a rule that holds no error
+// is not evaluated; what an item may not be.
+func TestErrorRules(t *testing.T) {
+	_, err := runOutput(`
+errors:
+  - $if: ${{ values.on }}
+    message: on is set
+  - $if: ${{ values.off }}
+    message: '${{ nope }}, not evaluated'
+  - $for: c in values.items
+    $each:
+      $if: ${{ c.n > 1.0 }}
+      message: item ${{ c.name }} is too large
+  - '${{ ["a list", "of messages"] }}'
+`)
+	if want := "on is set\nitem b is too large\na list\nof messages"; err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+	for name, tc := range map[string]struct{ src, want string }{
+		"not a rule":     {"errors:\n  - {$if: '${{ true }}', msg: x}\n", "errors[0]: a rule is {$if: <condition>, message: <text>}, or an expression returning a list of messages"},
+		"a string":       {"errors:\n  - '${{ \"x\" }}'\n", "errors[0]: a rule is {$if"},
+		"not text":       {"errors:\n  - {message: '${{ 1 }}'}\n", "errors[0]: message must be text, got 1"},
+		"empty":          {"errors:\n  - {message: ''}\n", "errors[0]: an empty message"},
+		"message error":  {"errors:\n  - '${{ [] }}'\n  - {$if: '${{ true }}', message: '${{ nope }}'}\n", "errors[1]: message: ${{ nope }}:"},
+		"$each position": {"errors:\n  - '${{ [] }}'\n  - {$for: c in values.items, $each: {message: '${{ nope }}'}}\n", "errors[1]: message: ${{ nope }}:"},
+	} {
+		if _, err := runOutput(tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)
+		}
+	}
+}
+
 // TestEmptyDocument: an empty or comment-only document has no section.
 func TestEmptyDocument(t *testing.T) {
 	for _, src := range []string{"", "# only a comment\n"} {
