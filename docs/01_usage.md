@@ -351,14 +351,14 @@ charts:
 
 ```text
 global:
-    okdp:
-        charts:
-            objects:
-                chart: okdp-objects
-                repository: oci://registry.example.org/okdp
-                version: 1.0.0
+  okdp:
+    charts:
+      objects:
+        chart: okdp-objects
+        repository: oci://registry.example.org/okdp
+        version: 1.0.0
 image:
-    tag: "4.5"
+  tag: "4.5"
 replicaCount: 3
 ```
 
