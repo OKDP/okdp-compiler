@@ -1,0 +1,14 @@
+# The platform values (global.okdp), the same for every instance.
+global:
+  okdp:
+    ingress:
+      suffix: okdp.example.org
+      className: nginx
+    certificateIssuers:
+      selfSigned:
+        name: okdp-ca
+    # The chart OKDP's own objects are rendered with.
+    charts:
+      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
+    oidc:
+      issuerUri: https://sso.okdp.example.org/realms/okdp

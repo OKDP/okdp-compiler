@@ -1,6 +1,5 @@
-# error: values don't meet the specifications of the schema(s) in the following chart(s):\nwebapp:\n- at '/metrics/enabled': got string, want boolean\n- at '/replicas': minimum: got 0, want 1
-# The parameter schema (webapp/values.schema.json), checked before the
-# mapping runs: every violation, with its path.
+# error: values don't meet the specifications of the schema(s) in the following chart(s):\nwebapp:\n- at '/database': got number, want string\n- at '/replicas': minimum: got 0, want 1
+# The parameter schema (example/input/package/values.schema.json), checked
+# before the mapping runs: every violation, with its path.
 replicas: 0
-metrics:
-  enabled: "true"
+database: 1

@@ -148,9 +148,9 @@ file, then to the inline values: [protect](01_inputs_outputs.md#protect),
 
 `okdp` (`compiler.ObjectsChart`) is the compiler's: it adds the chart to
 every compile, rendered by the platform's objects chart
-(`global.okdp.charts.objects`), its values `Result.Objects`:
-[the okdp chart](01_inputs_outputs.md#the-okdp-chart). `charts` may not
-declare it (`service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml`,
+(`global.okdp.charts.objects`), its values `Result.Objects`: [the okdp
+chart](01_inputs_outputs.md#the-okdp-chart). `charts` may not declare it
+(`service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml`,
 when the file is loaded), nor `output` compute it ([output](#output)).
 
 ### Example

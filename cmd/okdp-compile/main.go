@@ -1,12 +1,11 @@
 // okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
 //	[--instance <dir>] -f values.yaml [-f ...] [--release demo-<service>] [--namespace demo]
-//	[--out <file>] [--emit-dir <dir>]
+//	[--out <file>] [--emit-dir <dir>] [--indent 2]
 
 package main
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,9 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
-	"github.com/okdp/okdp-compiler/compiler"
+	compiler "github.com/okdp/okdp-compiler"
 )
 
 // version: set at build time (-ldflags "-X main.version=...").
@@ -39,6 +36,7 @@ type options struct {
 	release, namespace string
 	values             multi
 	out, emitDir       string
+	indent             int
 }
 
 // main: parses the flags and runs the compile.
@@ -53,7 +51,8 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "demo", "namespace")
 	flag.Var(&o.values, "f", "values file (repeatable)")
 	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the upstream chart of each chart, objects and dependencies to this file")
-	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the upstream chart that renders each (okdp.charts.yaml), the objects and the dependencies")
+	flag.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files --out and --emit-dir write, 2 to 9 spaces")
+	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the upstream chart that renders each (okdp.charts.yaml) and the dependencies (okdp.dependencies.yaml)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -74,6 +73,8 @@ func run(o options) error {
 		return errors.New("--charts (or $OKDP_CHARTS) is required")
 	case o.contracts == "":
 		return errors.New("--contracts (or $OKDP_CONTRACTS) is required")
+	case o.indent < 2 || o.indent > 9:
+		return fmt.Errorf("--indent %d: 2 to 9 spaces", o.indent)
 	}
 	def, err := compiler.LoadDefinition(os.DirFS(o.pkg))
 	if err != nil {
@@ -107,57 +108,36 @@ func run(o options) error {
 		return err
 	}
 	if o.emitDir != "" {
-		if err := emit(o.emitDir, res); err != nil {
+		if err := emit(o.emitDir, res, o.indent); err != nil {
 			return err
 		}
 	}
 	if o.out != "" {
-		var buf bytes.Buffer
-		enc := yaml.NewEncoder(&buf)
-		enc.SetIndent(2)
-		if err := enc.Encode(map[string]any{"values": res.Computed, "charts": res.Charts, "objects": res.Objects, "dependencies": res.Dependencies}); err != nil {
+		b, err := compiler.Document(res, o.indent)
+		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(o.out, buf.Bytes(), 0o644); err != nil {
+		if err := os.WriteFile(o.out, b, 0o644); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// emit: <dir>/<chart>.values.yaml per chart; <dir>/okdp.charts.yaml, the
-// index of the upstream chart that renders each (chart: {repository, chart,
-// version}: `helm template <chart> --repo <repository> --version <version>
-// -f <chart>.values.yaml`); <dir>/okdp.objects.yaml and
-// <dir>/okdp.dependencies.yaml.
-func emit(dir string, res *compiler.Result) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	for chart, v := range res.Values {
-		b, err := yaml.Marshal(v)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(dir, chart+".values.yaml"), b, 0o644); err != nil {
-			return err
-		}
-	}
-	b, err := yaml.Marshal(res.Charts)
+// emit: the files of the compile (compiler.Files) in dir, indented by indent
+// spaces.
+func emit(dir string, res *compiler.Result, indent int) error {
+	files, err := compiler.Files(res, indent)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "okdp.charts.yaml"), b, 0o644); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if b, err = yaml.Marshal(res.Objects); err != nil {
-		return err
+	for name, b := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			return err
+		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "okdp.objects.yaml"), b, 0o644); err != nil {
-		return err
-	}
-	if b, err = yaml.Marshal(res.Dependencies); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "okdp.dependencies.yaml"), b, 0o644)
+	return nil
 }

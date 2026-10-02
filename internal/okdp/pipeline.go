@@ -1,0 +1,156 @@
+// Package okdp compiles an OKDP service instance into the values of its
+// upstream charts with a YAML + CEL mapping (package compile), plus the OKDP
+// objects of the instance (its descriptor ConfigMap, the credentials Secrets
+// of the connections it provides, and the objects section of the mapping).
+// It holds OKDP's rules: the platform context derived from global.okdp, the
+// connections and their contracts, the descriptor, the OAuth clients, the
+// okdp chart; and the order of the stages (Compile).
+//
+// The values are read, merged and checked against the charts' schemas as
+// Helm does (package chart; testdata/helm holds what `helm template`
+// computes on the same inputs), and the mapping's host functions reproduce
+// Helm and okdp-lib-chart functions.
+//
+// Each chart of service.yaml names the upstream chart that renders its values
+// (chart.Spec.Source: repository, chart, version), and Result.Charts maps
+// every compiled chart to it: a deployer renders the upstream chart from its
+// repository. The compiler reads only its defaults and schema, from the chart
+// cache (Inputs.Charts); one upstream chart may render several charts of
+// service.yaml, each with its own values.
+//
+// A mapping's oidcClients section declares the service's OAuth clients
+// (oidc.go): when the platform registers them by dynamic client
+// registration, the compiler adds one chart per client, rendered by the
+// oidc-dcr chart (oidc-dcr for the main client, <name>-oidc-dcr for a named
+// one), which service.yaml does not list; their values come from a template
+// in the mapping language embedded in the compiler (oidc-dcr.cel.yaml).
+//
+// An instance may set any value of a chart whose service.yaml entry accepts
+// it (upstream): in its files (Inputs.Instance, upstream.<chart>.yaml by
+// default), then inline (upstream.<chart> of its values). The compiler reads
+// both before the mapping runs and shows them merged as values.upstream.<chart>,
+// so that a rule of the mapping's errors section covers a value whatever its
+// source; it then merges them over the computed values, refusing the protect
+// paths and appending to the append lists (chart.FinalValues). A path names
+// a key that contains dots in brackets, and a family of keys with a final
+// glob: annotations["nginx.ingress.kubernetes.io/auth-*"]. A chart rendered
+// by the same upstream chart as another may receive the upstream values of
+// the other (upstream: {from: <chart>}), with its protect and append: one
+// set of values for both renders.
+//
+// Everything is read through fs.FS and in-memory values, so a caller (the
+// control plane server, a CLI) can compile from a checkout, an embedded
+// filesystem or a git tree without touching the disk, through the public
+// package at the module's root (compiler).
+package okdp
+
+import (
+	"errors"
+	"io/fs"
+
+	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/internal/value"
+)
+
+// M: a values map (value.M).
+type M = value.M
+
+// Inputs: what one compile reads besides the package.
+type Inputs struct {
+	Charts    fs.FS            // chart cache: the upstream charts, <chart>-<version>.tgz (helm pull) or <chart>-<version>/
+	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
+	Contracts fs.FS            // the contract schemas: <contract>.schema.json
+	Values    []map[string]any // instance values layers, in order (helm -f); see chart.ParseValues
+	Release   string
+	Namespace string
+}
+
+// Result: what a compile produces.
+type Result struct {
+	// Computed: chart -> the values the mapping computed, before the merge
+	// with the upstream defaults, the base values and the instance values.
+	Computed map[string]any
+	// Values: chart -> the final values the upstream chart receives.
+	Values map[string]map[string]any
+	// Charts: chart -> the upstream chart that renders its values (`helm
+	// template <Charts[chart]> -f <Values[chart]>`): its service.yaml
+	// source, the platform's oidc-dcr chart for an OAuth client, the
+	// platform's objects chart for okdp.
+	Charts map[string]chart.Ref
+	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
+	// the credentials Secrets of the provided connections, then the objects
+	// section of the mapping; also the values of the okdp chart
+	// (ObjectsChart).
+	Objects []map[string]any
+	// Dependencies: the instances the connection references point to, by
+	// parameter path. References to external connections are not listed.
+	Dependencies []Dependency
+}
+
+// Compile runs the mapping of def on one instance. It is safe for
+// concurrent use: it keeps no state between calls.
+func Compile(def *Definition, in Inputs) (*Result, error) {
+	switch {
+	case def == nil:
+		return nil, errors.New("no service definition")
+	case def.Files == nil:
+		return nil, errors.New("Definition.Files is required")
+	case in.Charts == nil:
+		return nil, errors.New("Inputs.Charts is required")
+	case in.Contracts == nil:
+		return nil, errors.New("Inputs.Contracts is required")
+	case in.Release == "":
+		return nil, errors.New("Inputs.Release is required")
+	case in.Namespace == "":
+		return nil, errors.New("Inputs.Namespace is required")
+	}
+	svc := &def.Service
+	// Checked again: a Definition may be built in memory.
+	if err := svc.Check(); err != nil {
+		return nil, err
+	}
+	// What the mapping sees: values, platform context, resolved connections.
+	ctx, values, ups, deps, err := buildContext(def.Files, in, svc)
+	if err != nil {
+		return nil, err
+	}
+	// The charts the platform renders the compiler's own charts with.
+	objectsSource, dcrSource, err := platformCharts(value.AsMap(value.Dig(values, "global.okdp")))
+	if err != nil {
+		return nil, err
+	}
+	res, err := runMapping(def.Mapping, ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The OAuth clients (oidcClients, oidc.go): checked in every mode; in dcr
+	// mode, the oidc-dcr chart of each, added to the charts of service.yaml
+	// and to the mapping's output.
+	clients, dcrValues, err := oidcClients(ctx, res.clients)
+	if err != nil {
+		return nil, err
+	}
+	if svc, err = clientCharts(svc, clients, dcrValues, res.output, dcrSource); err != nil {
+		return nil, err
+	}
+	// The descriptor ConfigMap, checked against the contracts, and the
+	// credentials Secrets of the outputs; then the mapping's objects.
+	desc, credentials, err := descriptor(in, ctx, res.instance, res.provides)
+	if err != nil {
+		return nil, err
+	}
+	out := &Result{Computed: res.output, Objects: []map[string]any{desc}, Dependencies: deps}
+	for _, o := range append(credentials, res.objects...) {
+		out.Objects = append(out.Objects, value.AsMap(o))
+	}
+	// The okdp chart renders them.
+	if svc, err = objectsChart(svc, out.Objects, res.output, objectsSource); err != nil {
+		return nil, err
+	}
+	// The final values of each chart of the output; charts left out by the
+	// mapping ($if) are not rendered.
+	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, svc.Charts, res.output, values, ups); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

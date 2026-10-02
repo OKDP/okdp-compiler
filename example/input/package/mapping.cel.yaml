@@ -1,0 +1,62 @@
+# The values of the app chart, from the instance's parameters (values), the
+# platform values (global.okdp, and platform, derived from them) and the
+# release. ${{ ... }} is a CEL expression.
+let:
+  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  # The database parameter: the resolved connection, or {} when not set.
+  db: '${{ type(values.database) == map ? values.database : {} }}'
+  dbSecret: ${{ db.?secretRef.name.orValue('') }}
+
+# Each rule returns a list of messages; any message fails the compile.
+errors:
+  - '${{ values.replicas > 1 && db.size() == 0 ? ["webapp: replicas > 1 needs a database, sessions are stored there"] : [] }}'
+  - >-
+    ${{ db.size() > 0 && dbSecret == '' ? ['webapp: database connection "' + db.okdp.ref
+        + '" has no secretRef, the password cannot be read'] : [] }}
+
+output:
+  app:
+    fullnameOverride: ${{ release.name }}-app
+    replicaCount: ${{ values.replicas }}
+    image:
+      tag: ${{ service.appVersion }}
+    ingress:
+      enabled: true
+      className: ${{ global.okdp.ingress.className }}
+      annotations: ${{ platform.ingressAnnotations }}
+      hosts:
+        - host: ${{ host }}
+          paths: [{path: /, pathType: Prefix}]
+      tls:
+        - hosts: ["${{ host }}"]
+          secretName: ${{ release.name }}-tls
+    env:
+      - name: OIDC_ISSUER
+        value: ${{ global.okdp.oidc.issuerUri }}
+      - name: OIDC_CLIENT_ID
+        valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_id}}
+      - name: OIDC_CLIENT_SECRET
+        valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_secret}}
+      - $if: ${{ db.size() > 0 }}
+        name: DB_URL
+        value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
+      - $if: ${{ db.size() > 0 }}
+        name: DB_PASSWORD
+        valueFrom: {secretKeyRef: {name: "${{ dbSecret }}", key: password}}
+
+# The service's OAuth client: provisioned by the platform (the default), or
+# registered by an oidc-dcr chart the compiler adds (clientProvisioning: dcr).
+oidcClients:
+  - redirectUris: ['https://${{ host }}/oauth2/callback']
+    grantTypes: [authorization_code, refresh_token]
+
+instance:
+  url: https://${{ host }}
+  usage: A web application. Open https://${{ host }}
+
+# What other instances can reference this one as.
+provides:
+  - contract: http
+    values:
+      url: https://${{ host }}
+      internalUrl: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080

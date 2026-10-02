@@ -121,9 +121,9 @@ subcharts (`<chart>/charts/<sub>/values.yaml`). A chart without
 [schema check](#schema-check-of-the-final-values). Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
 it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
-objects chart in every compile. `example/charts/` holds the example's
-charts unpacked, their `values.yaml` only: enough to compile, not to
-render.
+objects chart in every compile. `example/input/charts/` holds the
+example's charts unpacked, their `values.yaml` only: enough to compile, not
+to render.
 
 A chart the cache does not hold fails with the command that downloads it,
 prefixed with the chart key; a file that does not read fails with its path:
@@ -197,7 +197,7 @@ Three top-level keys are not parameters of the service:
 
 They are checked with the parameters: a schema with `additionalProperties:
 false` declares them, `{"type": "object"}` at least
-(`example/webapp/values.schema.json`).
+(`example/input/package/values.schema.json`).
 
 ## Connections
 
@@ -281,7 +281,7 @@ Both are then [completed](#completion) against the contract.
 
 The parameter, replaced by a map: the contract fields, `secretRef` when
 there is one, and `okdp`, where the connection comes from. With
-`example/contracts/database.schema.json`:
+`example/input/contracts/database.schema.json`:
 
 ```yaml
 # database: demo-db (internal)
@@ -365,7 +365,7 @@ Not read: `type`, `enum`, `pattern`, `minimum`, `maximum`,
 schema (`port: "abc"`, `engine: oracle` pass), and an external connection is
 accepted for any contract, `x-okdp-external` or not.
 
-`example/contracts/database.schema.json`, trimmed:
+`example/input/contracts/database.schema.json`, trimmed:
 
 ```json
 {
@@ -422,7 +422,7 @@ fails.
 ## Platform values
 
 `global.okdp`: the settings of the platform (ingress, certificate issuers,
-OIDC, proxy...), given as a values layer: `example/platform-values.yaml`,
+OIDC, proxy...), given as a values layer: `example/input/platform.yaml`,
 `platform/platform-values.yaml` in a platform repository. The compiler gives
 the layers no role: `global.okdp` is read from the
 [parameters](#parameters), every layer merged over `values.yaml`. A later
@@ -513,7 +513,7 @@ no other cache entry.
 OAuth clients of a service in `dcr` mode
 ([OAuth client charts](#oauth-client-charts)). The mapping sees them as
 `platform.oidc.dcr`, defaults applied, `enabled` set by the compiler
-([Context](02_service_definition.md#context)). `example/values/dcr.yaml`:
+([Context](02_service_definition.md#context)). For example:
 
 ```yaml
 global:
@@ -579,7 +579,7 @@ order); the binary's `-f` files, in the order given. The platform values
 come first:
 
 ```bash
-bin/okdp-compile ... -f example/platform-values.yaml -f example/values/internal-db.yaml
+bin/okdp-compile ... -f example/input/platform.yaml -f example/input/instance.yaml
 ```
 
 Merge, nulls and schema: [Parameters](#parameters).
@@ -604,7 +604,7 @@ and the [okdp chart](#the-okdp-chart) included: they read no file either),
 or for a name that is not a chart, are ignored without error.
 
 ```yaml
-# example/values/external-db.yaml
+# an instance's values
 upstream:
   app:
     env:
@@ -654,10 +654,10 @@ defaults, base values, computed values, previous sources) instead of
 replacing it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
-With the example (`append: [env]`), the computed `SESSION_KEY` and `DB_*`
-items come first and `LOG_LEVEL` follows; when `upstream.app.yaml` and the
-inline values both set `env`, the items of the file come before the inline
-ones.
+With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
+come first and `LOG_LEVEL` follows (`example/output/app.values.yaml`); when
+`upstream.app.yaml` and the inline values both set `env`, the items of the
+file come before the inline ones.
 
 ### Upstream errors
 
@@ -777,9 +777,9 @@ with the chart key (`app: app-1.8.0/values.schema.json: ...`).
 the mapping leaves out (`$if`) is in none, and is not to be rendered; the
 okdp chart is in all three, and in `dcr` mode the chart of each OAuth
 client. Numbers are float64, as in Helm values.
-`example/compiled/<case>.yaml` holds `Values`, `Charts`, `Objects` and
-`Dependencies` of each example instance ([Example](#example)). The files
-the binary writes from them: [command line](../01_usage.md#command-line).
+The files the binary writes from them:
+[command line](../01_usage.md#command-line); `example/output/` holds those
+of the example ([Example](#example)).
 
 ### Chart index
 
@@ -804,22 +804,21 @@ The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
 ([equivalence with Helm](#equivalence-with-helm)).
 
-`example/compiled/dcr.yaml`:
+The example's in `dcr` mode (`okdp.charts.yaml`):
 
 ```yaml
-charts:
-  app:
-    repository: https://charts.example.org
-    chart: app
-    version: 1.8.0
-  oidc-dcr:
-    repository: oci://quay.io/adaltas
-    chart: oidc-dcr
-    version: 0.5.0
-  okdp:
-    repository: oci://registry.example.org/okdp
-    chart: okdp-objects
-    version: 1.0.0
+app:
+  repository: https://charts.example.org
+  chart: app
+  version: 1.8.0
+oidc-dcr:
+  repository: oci://quay.io/adaltas
+  chart: oidc-dcr
+  version: 0.5.0
+okdp:
+  repository: oci://registry.example.org/okdp
+  chart: okdp-objects
+  version: 1.0.0
 ```
 
 Everything else is keyed by the key
@@ -857,7 +856,7 @@ A client chart has no `service.yaml` entry, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no base values
 and no instance upstream values ([merge precedence](#merge-precedence)).
 
-The computed values are not Go code: `compiler/oidc-dcr.cel.yaml`, a
+The computed values are not Go code: `internal/okdp/oidc-dcr.cel.yaml`, a
 template in the mapping language embedded in the compiler, computes them
 for each client from the client (its keys, checked, `null` keys left out),
 its names (the chart key, the objects' name, the Secret) and the mapping's
@@ -877,45 +876,45 @@ The client keys, their types and defaults:
 [oidcClients](02_service_definition.md#oidcclients). Maps merge over the
 chart's defaults: its default `mapping.keyMapping` entries stay, so the
 Secret also holds `registration_client_uri` and `registration_access_token`
-of the registration response (oidc-dcr 0.5.0). `example/compiled/dcr.yaml`,
-trimmed (`example/values/dcr.yaml` over `example/platform-values.yaml`):
+of the registration response (oidc-dcr 0.5.0). The example's final values
+in `dcr` mode, with the platform's settings above and oidc-dcr 0.5.0 in the
+chart cache, trimmed:
 
 ```yaml
-values:
-  app:
-    env:
-      - name: OIDC_CLIENT_ID
-        valueFrom: {secretKeyRef: {key: client_id, name: demo-webapp-demo-dcr}}   # platform.oidcClientSecret
-      ...
-  oidc-dcr:
-    backoffLimit: 6                        # default of the settings
-    commonLabels: {app.kubernetes.io/instance: demo-webapp}
-    enabled: true                          # upstream default
-    fullnameOverride: demo-webapp-oidc-dcr
-    global: {okdp: ...}
-    image: {pullPolicy: IfNotPresent, pullSecrets: [], registry: quay.io, repository: adaltas/oidc-dcr-job, tag: ""}   # upstream default
-    mapping:
-      defaultKeys: {...}                   # upstream default, unused
-      keyMapping:
-        client_id: .client_id
-        client_secret: .client_secret
-        registration_access_token: .registration_access_token   # upstream default
-        registration_client_uri: .registration_client_uri       # upstream default
-      useDefault: false
-    registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
-    request:
-      application_type: web
-      client_name: demo-webapp-demo
-      grant_types: [authorization_code, refresh_token]
-      redirect_uris: [https://demo-webapp.okdp.example.org/oauth2/callback]
-      scope: profile email groups          # platform.oidc.scope, without openid
-    secret: demo-webapp-demo-dcr
-    security: {role: demo-webapp-oidc-dcr, serviceAccount: demo-webapp-oidc-dcr}
-    tls: {certificate: certs-bundle, insecure: false}
-    ttlSeconds: 300                        # global.okdp.oidc.dcr.ttlSeconds
-    waitForProvider:
-      discoveryUrl: https://sso.okdp.example.org/realms/okdp/.well-known/openid-configuration
-      ttlSeconds: 600                      # upstream default
+# app.values.yaml
+env:
+  - name: OIDC_CLIENT_ID
+    valueFrom: {secretKeyRef: {key: client_id, name: demo-webapp-demo-dcr}}   # platform.oidcClientSecret
+  ...
+# oidc-dcr.values.yaml
+backoffLimit: 6                        # default of the settings
+commonLabels: {app.kubernetes.io/instance: demo-webapp}
+enabled: true                          # upstream default
+fullnameOverride: demo-webapp-oidc-dcr
+global: {okdp: ...}
+image: {pullPolicy: IfNotPresent, pullSecrets: [], registry: quay.io, repository: adaltas/oidc-dcr-job, tag: ""}   # upstream default
+mapping:
+  defaultKeys: {...}                   # upstream default, unused
+  keyMapping:
+    client_id: .client_id
+    client_secret: .client_secret
+    registration_access_token: .registration_access_token   # upstream default
+    registration_client_uri: .registration_client_uri       # upstream default
+  useDefault: false
+registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
+request:
+  application_type: web
+  client_name: demo-webapp-demo
+  grant_types: [authorization_code, refresh_token]
+  redirect_uris: [https://demo-webapp.okdp.example.org/oauth2/callback]
+  scope: profile email groups          # platform.oidc.scope, without openid
+secret: demo-webapp-demo-dcr
+security: {role: demo-webapp-oidc-dcr, serviceAccount: demo-webapp-oidc-dcr}
+tls: {certificate: certs-bundle, insecure: false}
+ttlSeconds: 300                        # global.okdp.oidc.dcr.ttlSeconds
+waitForProvider:
+  discoveryUrl: https://sso.okdp.example.org/realms/okdp/.well-known/openid-configuration
+  ttlSeconds: 600                      # upstream default
 ```
 
 ### Descriptor ConfigMap
@@ -1087,45 +1086,64 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 
 ### Example
 
-`example/compiled/internal-db.yaml`, trimmed: release `demo-webapp`,
-namespace `demo`, `example/values/internal-db.yaml` (`replicas: 3`,
-`database: demo-db`, `metrics.enabled: true`) over
-`example/platform-values.yaml` (`existing` mode: no OAuth client chart;
-`example/compiled/dcr.yaml` has one, [OAuth client charts](#oauth-client-charts)).
+`example/output/`, what `--emit-dir` writes for the example: release
+`demo-webapp`, namespace `demo`, `example/input/instance.yaml`
+(`replicas: 2`, `database: demo-db`, an `env` entry in `upstream.app`) over
+`example/input/platform.yaml` (`existing` mode: no OAuth client chart,
+[OAuth client charts](#oauth-client-charts)).
+
+`app.values.yaml`, annotated:
 
 ```yaml
-charts:
-  app:
-    repository: https://charts.example.org
-    chart: app
-    version: 1.8.0
-  metrics:
-    repository: oci://registry.example.org/charts
-    chart: metrics
-    version: 0.4.2
+env:
+  - name: OIDC_ISSUER                     # computed
+    value: https://sso.okdp.example.org/realms/okdp
+  - name: OIDC_CLIENT_ID                  # platform.oidcClientSecret, existing mode
+    valueFrom:
+      secretKeyRef:
+        key: client_id
+        name: creds-demo-webapp-oauth2
+  - name: OIDC_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        key: client_secret
+        name: creds-demo-webapp-oauth2
+  - name: DB_URL                          # the database connection, resolved
+    value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        key: password
+        name: demo-db-database-credentials
+  - name: LOG_LEVEL                       # upstream.app, appended
+    value: debug
+fullnameOverride: demo-webapp-app         # computed
+global:                                   # the parameters' global
   okdp:
-    repository: oci://registry.example.org/okdp
-    chart: okdp-objects
-    version: 1.0.0
-dependencies:
-  - instance: demo-db
-    contract: database
-    field: database
+    # ... the platform values
+image:
+  repository: example/webapp              # upstream default
+  tag: "2.3"                              # computed: service.appVersion
+ingress:
+  # ... computed
+replicaCount: 2                           # computed: values.replicas
+resources:                                # base values
+  limits:
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+`okdp.values.yaml`: the values of the [okdp chart](#the-okdp-chart), the
+descriptor ConfigMap under `objects`:
+
+```yaml
+global:
+  okdp:
+    # ... the platform values
 objects:
   - apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: demo-webapp-okdp
-      namespace: demo
-      labels:
-        app.kubernetes.io/instance: demo-webapp
-        app.kubernetes.io/managed-by: Helm
-        app.kubernetes.io/name: webapp
-        app.kubernetes.io/part-of: okdp
-        app.kubernetes.io/version: "2.3"
-        okdp.io/instance: demo-webapp
-        okdp.io/provides-http: "true"
-        okdp.io/service: webapp
     data:
       outputs.yaml: |
         - contract: http
@@ -1138,49 +1156,32 @@ objects:
       usage: |
         A web application. Open https://demo-webapp.okdp.example.org
       version: 1.0.0
-  - {apiVersion: v1, kind: ConfigMap, metadata: {name: demo-webapp-settings, ...}, ...}   # objects section
-  - {apiVersion: generators.external-secrets.io/v1alpha1, kind: Password,
-     metadata: {name: demo-webapp-session-session-key, ...}, ...}                        # okdpGeneratedSecret
-  - {apiVersion: external-secrets.io/v1, kind: ExternalSecret, metadata: {name: demo-webapp-session, ...}, ...}
-values:
-  app:
-    env:                                   # computed
-      - name: SESSION_KEY
-        valueFrom: {secretKeyRef: {key: session-key, name: demo-webapp-session}}
-      - name: OIDC_ISSUER
-        value: https://sso.okdp.example.org/realms/okdp
-      - name: OIDC_CLIENT_ID               # platform.oidcClientSecret, existing mode
-        valueFrom: {secretKeyRef: {key: client_id, name: creds-demo-webapp-oauth2}}
-      - name: OIDC_CLIENT_SECRET
-        valueFrom: {secretKeyRef: {key: client_secret, name: creds-demo-webapp-oauth2}}
-      - name: DB_URL
-        value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
-      - name: DB_DRIVER
-        value: org.postgresql.Driver
-      - name: DB_PASSWORD
-        valueFrom: {secretKeyRef: {key: password, name: demo-db-database-credentials}}
-    fullnameOverride: demo-webapp-app      # computed
-    global:                                # the parameters' global
-      okdp:
-        certificateIssuers: {selfSigned: {name: okdp-ca}}
-        charts: {objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}}
-        ingress: {className: nginx, suffix: okdp.example.org}
-        oidc: {issuerUri: https://sso.okdp.example.org/realms/okdp}
-    image:
-      pullPolicy: IfNotPresent             # upstream default
-      repository: example/webapp           # upstream default
-      tag: "2.3"                           # computed: service.appVersion
-    replicaCount: 3                        # computed: values.replicas
-    resources:                             # base values
-      limits: {memory: 256Mi}
-      requests: {cpu: 100m, memory: 128Mi}
-    ...
-  metrics:
-    global: {okdp: ...}
-    image: {repository: example/scraper, tag: latest}
-    interval: 30s
-    target: http://demo-webapp-app.demo.svc:8080/metrics
-  okdp:
-    global: {okdp: ...}
-    objects: [...]                         # the four objects above
+    kind: ConfigMap
+    metadata:
+      labels:
+        app.kubernetes.io/instance: demo-webapp
+        # ...
+        okdp.io/provides-http: "true"
+        okdp.io/service: webapp
+      name: demo-webapp-okdp
+      namespace: demo
+```
+
+`okdp.charts.yaml` and `okdp.dependencies.yaml`:
+
+```yaml
+app:
+  repository: https://charts.example.org
+  chart: app
+  version: 1.8.0
+okdp:
+  repository: oci://registry.example.org/okdp
+  chart: okdp-objects
+  version: 1.0.0
+```
+
+```yaml
+- instance: demo-db
+  contract: database
+  field: database
 ```

@@ -1,0 +1,4 @@
+# OKDP's defaults for the app chart, the same for every instance.
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {memory: 256Mi}

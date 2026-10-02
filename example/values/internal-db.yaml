@@ -1,5 +1,0 @@
-# A database instance of the same project (demo-db): a dependency.
-replicas: 3
-database: demo-db
-metrics:
-  enabled: true

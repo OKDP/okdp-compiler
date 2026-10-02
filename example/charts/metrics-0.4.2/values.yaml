@@ -1,6 +1,0 @@
-# Defaults of the (fictional) upstream metrics chart, 0.4.2.
-target: ""
-interval: 1m
-image:
-  repository: example/scraper
-  tag: latest

@@ -44,7 +44,7 @@ where the module can be fetched at that path.
 ```text
 okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>] [--instance <dir>]
              [-f <values.yaml>]... [--release <name>] [--namespace <name>]
-             [--out <file>] [--emit-dir <dir>]
+             [--out <file>] [--emit-dir <dir>] [--indent <n>]
 okdp-compile --version
 ```
 
@@ -58,7 +58,8 @@ okdp-compile --version
 | `--release` | `demo-<name>` | release name; `<name>` is the `name` of `service.yaml` |
 | `--namespace` | `demo` | namespace |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file |
-| `--emit-dir` | none | write the final values of each chart, the chart index, the objects and the dependencies to a directory, one file each |
+| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`), the chart index and the dependencies to a directory, one file each |
+| `--indent` | `2` | the indentation of the YAML files `--out` and `--emit-dir` write, 2 to 9 spaces |
 | `--version` | | print the version and exit |
 
 Flags take one or two dashes. Without `--out` or `--emit-dir`, the command
@@ -78,18 +79,14 @@ values of the [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-char
 The final values are written by `--emit-dir`, not by `--out`.
 
 ```console
-$ export OKDP_CONTRACTS=example/contracts OKDP_CHARTS=example/charts
-$ bin/okdp-compile --package example/webapp \
-    -f example/platform-values.yaml -f example/values/internal-db.yaml --out /dev/stdout
+$ export OKDP_CONTRACTS=example/input/contracts OKDP_CHARTS=example/input/charts
+$ bin/okdp-compile --package example/input/package \
+    -f example/input/platform.yaml -f example/input/instance.yaml --out /dev/stdout
 charts:
   app:
     repository: https://charts.example.org
     chart: app
     version: 1.8.0
-  metrics:
-    repository: oci://registry.example.org/charts
-    chart: metrics
-    version: 0.4.2
   okdp:
     repository: oci://registry.example.org/okdp
     chart: okdp-objects
@@ -100,30 +97,25 @@ dependencies:
     field: database
 objects:
   - apiVersion: v1
-    # ... ConfigMap demo-webapp-okdp (the descriptor), ConfigMap demo-webapp-settings,
-    # Password demo-webapp-session-session-key, ExternalSecret demo-webapp-session
+    # ... ConfigMap demo-webapp-okdp, the descriptor
 values:
   app:
     # ...
-    replicaCount: 3
-  metrics:
-    interval: 30s
-    target: http://demo-webapp-app.demo.svc:8080/metrics
+    replicaCount: 2
   okdp:
     objects:
-      # ... the four objects above
+      # ... the descriptor
 ```
 
 The computed values of a chart hold only what the mapping sets:
 
 ```console
-$ bin/okdp-compile --package example/webapp \
-    -f example/platform-values.yaml -f example/values/internal-db.yaml \
+$ bin/okdp-compile --package example/input/package \
+    -f example/input/platform.yaml -f example/input/instance.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
 tag: "2.3"
 $ yq '.image' out/app.values.yaml
-pullPolicy: IfNotPresent
 repository: example/webapp
 tag: "2.3"
 ```
@@ -134,45 +126,36 @@ The directory is created if needed, and its files are overwritten:
 
 | File | Content |
 |---|---|
-| `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
+| `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart) (OKDP's own objects, `Result.Objects`, under `objects`), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
 | `okdp.charts.yaml` | `Result.Charts`, the [chart index](specs/01_inputs_outputs.md#chart-index): `<key>: {repository, chart, version}`, one entry per values file |
-| `okdp.objects.yaml` | `Result.Objects`: a YAML list of whole manifests |
 | `okdp.dependencies.yaml` | `Result.Dependencies`: a YAML list, `[]` when there is none |
 
-With `example/values/dcr.yaml` (the platform registers the OAuth clients by
-DCR), the webapp's client adds the chart `oidc-dcr`, which `service.yaml`
-does not list, any more than `okdp`:
+The example's are `example/output/`:
 
 ```console
-$ bin/okdp-compile --package example/webapp \
-    -f example/platform-values.yaml -f example/values/dcr.yaml --emit-dir dcr
-$ ls dcr
+$ bin/okdp-compile --package example/input/package \
+    -f example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
+$ ls out
 app.values.yaml
-oidc-dcr.values.yaml
 okdp.charts.yaml
 okdp.dependencies.yaml
-okdp.objects.yaml
 okdp.values.yaml
-$ cat dcr/okdp.charts.yaml
+$ cat out/okdp.charts.yaml
 app:
-    repository: https://charts.example.org
-    chart: app
-    version: 1.8.0
-oidc-dcr:
-    repository: oci://quay.io/adaltas
-    chart: oidc-dcr
-    version: 0.5.0
+  repository: https://charts.example.org
+  chart: app
+  version: 1.8.0
 okdp:
-    repository: oci://registry.example.org/okdp
-    chart: okdp-objects
-    version: 1.0.0
+  repository: oci://registry.example.org/okdp
+  chart: okdp-objects
+  version: 1.0.0
 ```
 
-A chart the mapping leaves out has no file and no index entry: metrics are
-off in `example/values/dcr.yaml`, so there is no `metrics.values.yaml`; in
-`existing` mode (`example/values/internal-db.yaml`) there is no
-`oidc-dcr.values.yaml`. Files of a previous run are not removed: emit into
-an empty directory.
+In `dcr` mode (`global.okdp.oidc.clientProvisioning: dcr`), the webapp's
+OAuth client adds the chart `oidc-dcr`, which `service.yaml` does not list,
+any more than `okdp`: `oidc-dcr.values.yaml`, and its entry in the index.
+A chart the mapping leaves out (`$if`) has no file and no index entry.
+Files of a previous run are not removed: emit into an empty directory.
 
 ### Exit status and errors
 
@@ -186,11 +169,11 @@ A message is a whole report and may span several lines: every schema
 violation, every message of the mapping's `errors` section.
 
 ```console
-$ bin/okdp-compile --package example/webapp \
-    -f example/platform-values.yaml -f testdata/schema-violation.yaml
+$ bin/okdp-compile --package example/input/package \
+    -f example/input/platform.yaml -f testdata/schema-violation.yaml
 error: values don't meet the specifications of the schema(s) in the following chart(s):
 webapp:
-- at '/metrics/enabled': got string, want boolean
+- at '/database': got number, want string
 - at '/replicas': minimum: got 0, want 1
 ```
 
@@ -218,38 +201,25 @@ values, the computed values and the instance's upstream values
 ([merge precedence](specs/01_inputs_outputs.md#merge-precedence)), and give
 what Helm gives with them. A chart the index does not list is not rendered.
 
-The example's chart cache, `example/charts/`, holds only the charts'
-`values.yaml`, enough to compile but not to render, and its `app`, `metrics`
-and `okdp-objects` charts are fictional. Every key of the index, from the
-`dcr` directory above:
+The example's chart cache, `example/input/charts/`, holds only the charts'
+`values.yaml`, enough to compile but not to render, and its `app` and
+`okdp-objects` charts are fictional. Every key of the index, from the `out`
+directory above:
 
 ```bash
-yq 'to_entries[] | .key + " " + .value.repository + " " + .value.chart + " " + .value.version' dcr/okdp.charts.yaml |
+yq 'to_entries[] | .key + " " + .value.repository + " " + .value.chart + " " + .value.version' out/okdp.charts.yaml |
 while read -r key repository chart version; do
   case $repository in
     oci://*) set -- "${repository%/}/$chart" ;;
     *) set -- "$chart" --repo "$repository" ;;
   esac
-  helm template demo-webapp "$@" --version "$version" --namespace demo -f "dcr/$key.values.yaml"
+  helm template demo-webapp "$@" --version "$version" --namespace demo -f "out/$key.values.yaml"
 done > manifests.yaml
 ```
 
-The oidc-dcr chart is published:
-
-```console
-$ helm template demo-webapp oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --namespace demo -f dcr/oidc-dcr.values.yaml | yq -N '.kind + " " + .metadata.name'
-ServiceAccount demo-webapp-oidc-dcr
-ConfigMap demo-webapp-oidc-dcr
-Role demo-webapp-oidc-dcr
-RoleBinding demo-webapp-oidc-dcr
-Service demo-webapp-oidc-dcr-headless
-Job demo-webapp-oidc-dcr
-```
-
-The okdp chart writes each object of its values as a manifest: the
-descriptor ConfigMap `demo-webapp-okdp`, the ConfigMap
-`demo-webapp-settings`, the ExternalSecret `demo-webapp-session` and the
-Password `demo-webapp-session-session-key` (`dcr/okdp.objects.yaml`).
+The okdp chart writes each object of its values (`objects` of
+`out/okdp.values.yaml`) as a manifest: here the descriptor ConfigMap
+`demo-webapp-okdp`.
 
 ## Go library
 
@@ -273,22 +243,22 @@ import (
 	"os"
 	"slices"
 
-	"github.com/okdp/okdp-compiler/compiler"
+	compiler "github.com/okdp/okdp-compiler"
 )
 
 func main() {
-	def, err := compiler.LoadDefinition(os.DirFS("example/webapp")) // the package
+	def, err := compiler.LoadDefinition(os.DirFS("example/input/package")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("example/charts"), // the chart cache
-		Contracts: os.DirFS("example/contracts"),
+		Charts:    os.DirFS("example/input/charts"), // the chart cache
+		Contracts: os.DirFS("example/input/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
 	// The values layers, in order, as helm -f files.
-	for _, f := range []string{"example/platform-values.yaml", "example/values/internal-db.yaml", "example/values/dcr.yaml"} {
+	for _, f := range []string{"example/input/platform.yaml", "example/input/instance.yaml"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			log.Fatal(err)
@@ -317,11 +287,9 @@ func main() {
 ```
 
 ```text
-charts: 4 objects: 4
-replicaCount: 3
+charts: 2 objects: 1
+replicaCount: 2
 app: https://charts.example.org app 1.8.0
-metrics: oci://registry.example.org/charts metrics 0.4.2
-oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
 okdp: oci://registry.example.org/okdp okdp-objects 1.0.0
 dependency: database -> demo-db (database)
 ```
@@ -338,7 +306,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/okdp/okdp-compiler/compiler"
+	compiler "github.com/okdp/okdp-compiler"
 )
 
 func main() {
@@ -396,22 +364,24 @@ replicaCount: 3
 
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
-`LoadDefinition(fsys)` reads the package at the root of `fsys`:
+`compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`:
 `service.yaml` and `mapping.cel.yaml`, then keeps `fsys` (`Definition.Files`)
 for the files each compile reads, `values.yaml`, `values.schema.json` and the
 base files. A `Definition{Service, Mapping, Files}` can also be built in Go.
 
-`Inputs` takes what the flags give: `Charts` (`--charts`), `Instance`
-(`--instance`, `nil` when there is none), `Contracts` (`--contracts`; it may
-be empty when nothing references a contract), `Values` (the `-f` files,
-parsed, in order; the platform values first), `Release` and `Namespace`;
-all but `Instance` and `Values` are required
-([inputs and outputs](specs/01_inputs_outputs.md)).
-`Result.Values` is what `--emit-dir` writes, `Result.Computed` what `--out`
-writes under `values`, `Charts` (the index), `Objects` and `Dependencies`
-what both write ([outputs](specs/01_inputs_outputs.md#outputs)).
-`Result.Values` renders as in [rendering with Helm](#rendering-with-helm),
-`Result.Charts` being the index.
+`compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
+`Instance` (`--instance`, `nil` when there is none), `Contracts`
+(`--contracts`; it may be empty when nothing references a contract),
+`Values` (the `-f` files, parsed, in order; the platform values first),
+`Release` and `Namespace`; all but `Instance` and `Values` are required
+([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
+`--emit-dir` writes, `Result.Computed` what `--out` writes under `values`,
+`Charts` (the index), `Objects` and `Dependencies` what both write
+([outputs](specs/01_inputs_outputs.md#outputs)):
+`compiler.Files(res, indent)` gives the files of `--emit-dir` (name ->
+content), `compiler.Document(res, indent)` the file of `--out`, for a caller
+to write where it keeps them. `Result.Values` renders as in [rendering with
+Helm](#rendering-with-helm), `Result.Charts` being the index.
 
 - `compiler.ParseValues(b)` reads one values file as Helm does (YAML 1.1,
   every document of the file merged in order), for `Inputs.Values`.
@@ -437,18 +407,20 @@ what both write ([outputs](specs/01_inputs_outputs.md#outputs)).
 
 ### CI
 
-Compile every values file of a package; any error fails the job:
+Compile every instance of a package; any error fails the job:
 
 ```bash
-for f in example/values/*.yaml; do
+for f in instances/*.yaml; do
   name=$(basename "$f" .yaml)
-  bin/okdp-compile --package example/webapp --charts example/charts \
-    -f example/platform-values.yaml -f "$f" --emit-dir "ci-out/$name" || exit 1
+  bin/okdp-compile --package package --charts charts \
+    -f platform.yaml -f "$f" --emit-dir "compiled/$name" || exit 1
 done
+/usr/bin/git diff --exit-code compiled/
 ```
 
-The emitted files can be committed and checked with `git diff --exit-code`,
-as `go test ./compiler` does with `example/compiled/`.
+The emitted files can be committed and checked with
+`/usr/bin/git diff --exit-code`, as `go test ./internal/fsio` checks
+`example/output/`.
 
 ### GitOps
 
@@ -474,8 +446,8 @@ which every compile adds
 platform's objects chart (`global.okdp.charts.objects`) with
 `okdp.values.yaml`, like the other charts, brings the descriptor ConfigMap,
 the credentials Secrets and the mapping's objects to the cluster. They are
-also in `okdp.objects.yaml`, a YAML list: `yq '.[] | split_doc'
-out/okdp.objects.yaml` turns it into a multi-document stream.
+its `objects`, a YAML list: `yq '.objects[] | split_doc'
+out/okdp.values.yaml` turns them into a multi-document stream.
 
 **Dependencies.** `Result.Dependencies` lists the instances of the
 namespace the connection references point to, one item per parameter

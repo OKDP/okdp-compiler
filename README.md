@@ -7,14 +7,15 @@ repositories, with the values the compiler writes.
 
 Two ways to use it:
 
-- **as a Go library** (`github.com/okdp/okdp-compiler/compiler`): no binary to call,
+- **as a Go library** (`github.com/okdp/okdp-compiler`, package `compiler`):
+  no binary to call,
   everything is read through `fs.FS` and in-memory values;
 - **as a binary** (`okdp-compile`), for CI and/or scripts.
 
 ## Library
 
 ```go
-import "github.com/okdp/okdp-compiler/compiler"
+import compiler "github.com/okdp/okdp-compiler"
 
 def, err := compiler.LoadDefinition(packageFS) // service.yaml, mapping.cel.yaml, values.yaml, values.schema.json, base/
 res, err := compiler.Compile(def, compiler.Inputs{
@@ -26,7 +27,7 @@ res, err := compiler.Compile(def, compiler.Inputs{
 	Namespace: "demo",
 })
 // res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
-// res.Charts:   chart -> the upstream chart that renders them (ChartRef: repository, chart, version):
+// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
 //               its service.yaml source, the platform's objects chart for okdp,
 //               the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 // res.Computed: chart -> what the mapping computed, before the merges
@@ -37,7 +38,7 @@ res, err := compiler.Compile(def, compiler.Inputs{
 
 `Compile` keeps no state between calls and is safe for concurrent use. Any
 `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree, `fstest.MapFS` (see
-`compiler/compile_test.go`).
+`internal/okdp/pipeline_test.go`).
 
 What Helm does, the compiler does the same way, checked against `helm
 template` (`testdata/helm`): every values file is read as Helm
@@ -81,28 +82,32 @@ Expressions see `release`, `values`, `global.okdp`, `platform`, `service`,
 The OAuth clients are provisioned by the platform
 (`global.okdp.oidc.clientProvisioning: existing`, the default) or registered
 by each service (`dcr`): in `dcr` mode, OIDC enabled, the compiler adds one
-chart per client, rendered by the oidc-dcr chart (`global.okdp.charts.oidcDcr`,
-oidc-dcr 0.5.0 by default), its values computed by an embedded template in
-the mapping language, [`compiler/oidc-dcr.cel.yaml`](compiler/oidc-dcr.cel.yaml)
-([oidcClients](docs/specs/02_service_definition.md#oidcclients),
-[their charts](docs/specs/01_inputs_outputs.md#oauth-client-charts),
-[their platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).
+chart per client, rendered by the oidc-dcr chart
+(`global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 by default), its values
+computed by an embedded template in the mapping language,
+[`internal/okdp/oidc-dcr.cel.yaml`](internal/okdp/oidc-dcr.cel.yaml)
+([oidcClients](docs/specs/02_service_definition.md#oidcclients), [their
+charts](docs/specs/01_inputs_outputs.md#oauth-client-charts), [their
+platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).
 
 ## Binary
 
 ```bash
 make build    # bin/okdp-compile
-export OKDP_CONTRACTS=example/contracts   # or --contracts
-export OKDP_CHARTS=example/charts         # or --charts
-bin/okdp-compile --package example/webapp \
-  -f example/platform-values.yaml -f example/values/internal-db.yaml --out /dev/stdout
-bin/okdp-compile --package example/webapp \
-  -f example/platform-values.yaml -f example/values/internal-db.yaml -f testdata/protected-upstream.yaml
+export OKDP_CONTRACTS=example/input/contracts   # or --contracts
+export OKDP_CHARTS=example/input/charts         # or --charts
+bin/okdp-compile --package example/input/package \
+  -f example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
+# out/ is now example/output/, byte for byte
+bin/okdp-compile --package example/input/package \
+  -f example/input/platform.yaml -f example/input/instance.yaml -f testdata/protected-upstream.yaml
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
 
 `--emit-dir <dir>` writes the final values of each chart,
-`<dir>/<chart>.values.yaml`, and their index, `<dir>/okdp.charts.yaml`:
+`<dir>/<chart>.values.yaml` (OKDP's own objects in `okdp.values.yaml`),
+their index, `<dir>/okdp.charts.yaml`, and the dependencies,
+`<dir>/okdp.dependencies.yaml`:
 render each with `helm template <release> <chart> --repo <repository>
 --version <version> -f <dir>/<chart>.values.yaml`, the chart named by the
 index ([rendering with Helm](docs/01_usage.md#rendering-with-helm)). `--out
@@ -113,9 +118,15 @@ dependencies ([command line](docs/01_usage.md#command-line)).
 
 | Path | Description |
 |---|---|
-| `compiler/` | the library; what each file owns: [source map](docs/00_architecture.md#source-map) |
-| `cmd/okdp-compile/main.go` | binary entrypoint; `--emit-dir` writes the values files and their index |
-| `example/` | a complete example: the package `webapp/`, a chart cache `charts/`, the platform and instance values, and the compiled output, checked by `go test` ([example](docs/00_architecture.md#example)) |
+| `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `Files`... |
+| `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
+| `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, the `charts` section of `service.yaml`, the final values |
+| `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients, the `okdp` chart) and `Compile` |
+| `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`--out`, `--emit-dir`) |
+| `internal/value/` | the values every package shares, and their helpers |
+| `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
+| `example/input/` | an example compile's inputs: the package (`package/`), the chart cache (`charts/`), the contracts, the platform values and the instance's ([example](docs/00_architecture.md#example)) |
+| `example/output/` | what `okdp-compile --emit-dir` writes for it, checked by `go test` |
 | `testdata/` | instance values that must fail on the example, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
 | `docs/` | the documentation |

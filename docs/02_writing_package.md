@@ -2,7 +2,8 @@
 
 How to package an upstream application for OKDP: a directory of parameters,
 base values and a service definition, compiled by `okdp-compile`. The steps
-follow the `webapp` example of this repository (`example/webapp/`); the
+follow a `webapp` service, of which the example of this repository is a
+smaller version (`example/input/package/`); the
 recipes and pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md) and
@@ -38,7 +39,7 @@ the package is published as a chart.
 
 `--package` names the package directory, `--charts` the chart cache the
 compiler reads the upstream charts' defaults and schemas from
-(`okdp-compile --package example/webapp --charts example/charts`).
+(`okdp-compile --package example/input/package --charts example/input/charts`).
 
 ## Step by step
 
@@ -219,7 +220,7 @@ charts:
 - `upstream` lets an instance set any value of the chart, from its files
   and its inline `upstream.<key>` values
   ([upstream](specs/02_service_definition.md#upstream)). Leave it out
-  for a chart an instance has no reason to set (the example's `metrics`).
+  for a chart an instance has no reason to set (the webapp's `metrics`).
 - `protect` refuses instance values on a path, under it, or a non-map on the
   way to it ([protect](specs/01_inputs_outputs.md#protect)).
   Protect what the platform relies on:
@@ -251,7 +252,7 @@ The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [expressions](specs/02_service_definition.md#expressions) and
 [directives](specs/02_service_definition.md#directives) (`$if`, `$for`,
 `$merge`, `$spread`, `$let`). Its [sections](specs/02_service_definition.md#sections),
-as the example writes them (the
+as the webapp writes them (the
 [evaluation order](specs/02_service_definition.md#evaluation-order)
 puts `objects` and `oidcClients` last):
 
@@ -299,7 +300,7 @@ provides:                  # the connections the instance publishes
   [context](specs/02_service_definition.md#context) variable of the
   same name (`labels`).
 - `output` holds only what is computed. A `$if` on a chart leaves it out:
-  it is neither compiled nor rendered (the example's `metrics`, trino's
+  it is neither compiled nor rendered (the webapp's `metrics`, trino's
   `opa-kube-mgmt` and `opal`). `okdp` is not a key of `output`: the
   compiler adds the okdp chart to every compile, so the descriptor always
   reaches the cluster
@@ -350,7 +351,7 @@ instance of the namespace: host `demo-db-db.demo.svc`, Secret
 sync waves). The mapping reads both the same way, credentials through a
 `secretKeyRef` on `secretRef.name`; it fails with a clear message when it
 needs the Secret and the connection has none (the second `errors` entry of
-`example/webapp/mapping.cel.yaml`). `s3` and `database-server` have no internal
+`example/input/package/mapping.cel.yaml`). `s3` and `database-server` have no internal
 convention: they are always external (cnpg-postgresql publishes one
 `database-server` connection per database, which consumers declare as
 connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
@@ -388,8 +389,7 @@ Each `ci/<case>-values.yaml` is a whole instance: its `global.okdp` block
 parameters. Write one case per mode: OIDC `existing`, `dcr` and off,
 internal and external connections, proxy set, each optional chart on,
 upstream values with appended lists. The `dcr` case gives the platform's `oidc.dcr.registrationUrl` and
-`authMethod: anonymous` (polaris's `ci/dcr-values.yaml`, the example's
-`values/dcr.yaml`).
+`authMethod: anonymous` (polaris's `ci/dcr-values.yaml`).
 
 ```bash
 export OKDP_CONTRACTS=~/okdp/contracts     # the contract schemas

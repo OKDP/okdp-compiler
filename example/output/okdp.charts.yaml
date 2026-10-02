@@ -1,0 +1,8 @@
+app:
+  repository: https://charts.example.org
+  chart: app
+  version: 1.8.0
+okdp:
+  repository: oci://registry.example.org/okdp
+  chart: okdp-objects
+  version: 1.0.0

@@ -3,7 +3,7 @@
 # binary on the PATH (Helm 4) and the okdp-lib-chart checkout $OKDP_LIB_CHART
 # (its templates are what the compiler reproduces). Run from anywhere:
 #
-#   go test ./compiler -run TestHelmValues -update   # values/<case>/final.yaml
+#   go test ./internal/chart -run TestHelmValues -update   # values/<case>/final.yaml
 #   OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh
 #
 # values/<case>/: a chart whose values.yaml is <case>/values.yaml, rendered
