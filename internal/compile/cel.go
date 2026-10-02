@@ -551,11 +551,14 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 }
 
 // parseDoc: a YAML + CEL document (a mapping, a template), its maps
-// ordered.
+// ordered. An empty document (no node, comments at most) has no section.
 func parseDoc(b []byte) (*omap, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, err
+	}
+	if doc.Kind == 0 {
+		return &omap{vals: map[string]any{}, raw: map[string]string{}}, nil
 	}
 	root, err := fromNode(&doc)
 	if err != nil {

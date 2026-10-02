@@ -171,6 +171,15 @@ output:
 	}
 }
 
+// TestEmptyDocument: an empty or comment-only document has no section.
+func TestEmptyDocument(t *testing.T) {
+	for _, src := range []string{"", "# only a comment\n"} {
+		if out, err := runOutput(src); err != nil || len(out) != 0 {
+			t.Errorf("%q: got %v %#v, want no section", src, err, out)
+		}
+	}
+}
+
 // TestMappingErrors: invalid mappings, and where their errors point.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
