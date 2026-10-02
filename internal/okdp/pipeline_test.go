@@ -14,8 +14,8 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// A minimal package, in memory: what a caller without a checkout (the
-// control plane server) passes.
+// A minimal package, in memory: what a caller without a checkout (a
+// server compiling from git) passes.
 var (
 	pkg = fstest.MapFS{
 		"values.yaml": {Data: []byte(`replicas: 1

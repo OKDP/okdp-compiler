@@ -17,7 +17,7 @@ Two ways to use it:
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-def, err := compiler.LoadDefinition(packageFS) // service.yaml, mapping.cel.yaml, values.yaml, values.schema.json, base/
+def, err := compiler.LoadDefinition(packageFS) // service.yaml, mapping.cel.yaml; each compile reads values.yaml, values.schema.json, base/
 res, err := compiler.Compile(def, compiler.Inputs{
 	Charts:    chartsFS,    // chart cache: each upstream chart, <chart>-<version>.tgz (helm pull) or <chart>-<version>/
 	Instance:  instanceFS,  // optional: the instance's upstream values files (upstream.<chart>.yaml)
@@ -110,8 +110,8 @@ bin/okdp-compile --package example/input/package \
 their index, `<dir>/okdp.charts.yaml`, and the dependencies,
 `<dir>/okdp.dependencies.yaml`:
 render each with `helm template <release> <chart> --repo <repository>
---version <version> -f <dir>/<chart>.values.yaml`, the chart named by the
-index ([rendering with Helm](docs/01_usage.md#rendering-with-helm)).
+--version <version> -f <dir>/<chart>.values.yaml` (`<repository>/<chart>`
+for an `oci://` repository), the chart named by the index ([rendering with Helm](docs/01_usage.md#rendering-with-helm)).
 `--umbrella <dir>` writes the instance as one chart, for one Helm release
 per instance: `<dir>/Chart.yaml`, an umbrella over the upstream charts of
 the index, and `<dir>/instance.values.yaml`, the final values of each chart

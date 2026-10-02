@@ -1,5 +1,5 @@
 // Output: what a compile is written as, file name -> content; the caller
-// writes them (the CLI to a directory, the control plane server to git).
+// writes them (the CLI to a directory, a server to git).
 package fsio
 
 import (

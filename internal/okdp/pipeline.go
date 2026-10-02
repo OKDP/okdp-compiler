@@ -38,8 +38,8 @@
 // the other (upstream: {from: <chart>}), with its protect and append: one
 // set of values for both renders.
 //
-// Everything is read through fs.FS and in-memory values, so a caller (the
-// control plane server, a CLI) can compile from a checkout, an embedded
+// Everything is read through fs.FS and in-memory values, so a caller (a
+// server, a CLI) can compile from a checkout, an embedded
 // filesystem or a git tree without touching the disk, through the public
 // package at the module's root (compiler).
 package okdp

@@ -41,10 +41,11 @@ and Services.
 OKDP does not modify an upstream chart
 ([values for unmodified upstream charts](00_architecture.md#values-for-unmodified-upstream-charts)):
 what an upstream chart cannot produce needs a vehicle. The okdp-objects
-chart makes these objects one more Helm release beside the upstream ones:
-the same release name and namespace, the same deployer (an Argo CD source
-per key of the index, or a subchart of the instance's umbrella), pruned
-when they change or the instance is removed ([GitOps](01_usage.md#gitops)).
+chart makes these objects one more chart beside the upstream ones, rendered
+the same way: under the same release name and namespace, by the same
+deployer (an Argo CD source per key of the index, or a subchart of the
+instance's umbrella, in its release), pruned when they change or the
+instance is removed ([GitOps](01_usage.md#gitops)).
 
 ### Removing the chart
 
@@ -63,10 +64,10 @@ Argo CD with a directory source.
   cache: `global.okdp.charts.objects` and the cache's `okdp-objects-<version>/`
   go, which fits packages that need nothing pushed to a registry; the output
   is simpler.
-- Cons: a second kind of source per instance. The deployer, and the control
-  plane server, which generates one HelmRelease per chart key, need a
-  second path. No Helm hooks. The objects must be ordered against the charts
-  that read them (a Secret before its pods) with `dependsOn` or sync waves.
+- Cons: a second kind of source per instance: the deployer, and whatever
+  generates its objects, need a second path. No Helm hooks. The objects
+  must be ordered against the charts that read them (a Secret before its
+  pods) with `dependsOn` or sync waves.
   Their `app.kubernetes.io/managed-by: Helm` label no longer holds.
 
 **An upstream chart's `extraObjects` or `extraDeploy` value.**
@@ -78,7 +79,7 @@ Argo CD with a directory source.
   an arbitrary chart. It does not generalize.
 
 Conclusion: if the chart is the burden, plain manifests are the
-alternative, and the cost moves to the deployer and the control plane.
+alternative, and the cost moves to the deployer.
 
 ## The descriptor ConfigMap
 
@@ -97,33 +98,31 @@ convention of its contract (`x-okdp-internal`,
 [contracts](specs/01_inputs_outputs.md#contracts)), and the check that a
 provider publishes what its consumers compute runs at compile time.
 
-The control plane server reads it from the cluster
-(`DescriptorRepository`):
+The tools around the cluster read it, by its labels:
 
-- `List` and `Watch` feed the list of instances (URL, usage, version) and
-  its live updates;
-- `ConnectionService.ListInternal` and `ListSelectable` feed the internal
-  connections a deployment form offers: what the deployed instances
-  provide.
+- the console lists the deployed instances of a namespace (URL, usage,
+  version) and follows their changes;
+- a deployment form offers the internal connections of the namespace: what
+  its deployed instances provide (`outputs.yaml`,
+  `okdp.io/provides-<contract>`).
 
 ### Removing the descriptor
 
 Possible: everything it holds is known at compile time.
 
-- Pros: one ConfigMap less per instance; the control plane no longer lists
-  and watches ConfigMaps in the project namespaces; the compile-time checks
-  are unchanged.
+- Pros: one ConfigMap less per instance; its readers no longer list and
+  watch ConfigMaps in the namespaces; the compile-time checks are
+  unchanged.
 - Cons:
   - the cluster no longer says what is actually deployed: the descriptor
     appears once the sync has applied it, the compile is what git holds.
     The console's deployed view and its live updates would come from the
     GitOps engine's status;
-  - the control plane would need the compile result of each instance: kept
+  - a reader would need the compile result of each instance: kept
     somewhere, or recompiled to list, pulling the charts;
-  - instances deployed without the control plane (the CLI and plain GitOps)
-    are no longer discoverable by any tool in the cluster;
-  - it is a contract shared with other readers ("shared no-kubocd contract"
-    in the control plane server): they break too.
+  - instances deployed by other means (the CLI and plain GitOps) are no
+    longer discoverable by any tool in the cluster;
+  - it is a contract with its readers: every one of them changes.
 
 Removing the descriptor alone does not remove the okdp-objects chart: the
 credentials Secrets and the `objects` section still need it, or a vehicle

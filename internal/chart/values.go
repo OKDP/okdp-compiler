@@ -15,8 +15,8 @@
 // files (MergeMaps), and coalesced over the chart defaults as Helm does
 // (CoalesceValues): a null deletes a default, and is kept where there is no
 // default. Helm's own functions are not imported: helm.sh/helm/v4 pulls in
-// client-go and a newer Go and Kubernetes than the console server that
-// embeds this package, for about a hundred lines. They are reproduced from
+// client-go and a newer Go and Kubernetes than the programs that embed
+// this package, for about a hundred lines. They are reproduced from
 // helm v4.3.0 (pkg/chart/common/util/coalesce.go, pkg/chart/v2/loader), and
 // testdata/helm holds what `helm template` computes on each case.
 package chart

@@ -80,8 +80,8 @@ cache](#chart-cache)), the base files, the
 
 - Documents: the file is split on the lines starting with `---`, as
   Kubernetes' YAMLReader splits it; only a comment may follow the `---`
-  (otherwise `invalid Yaml document separator: <text>`); empty documents are
-  skipped.
+  (otherwise `<file>: error reading yaml document: invalid Yaml document
+  separator: <text>`); empty documents are skipped.
 - Decoding: each document by `sigs.k8s.io/yaml`, YAML 1.1. A plain `y`,
   `yes`, `on`, `n`, `no`, `off` (and their capitalized forms) is a boolean,
   as a key too (`on:` is the key `"true"`); keys are strings; every number is
@@ -172,8 +172,9 @@ as Helm 4 checks the values of a chart:
 - the draft: the schema's `$schema`, draft 2020-12 without one; `format` is
   asserted for drafts before 2019-09 only;
 - `$ref`: within the schema only. A `urn:` reference accepts anything (as in
-  Helm); a file or a URL fails the compile: `$ref <url>: the schema may only
-  reference itself (the compile reads no file or URL)`.
+  Helm); a file or a URL fails the compile: `values.schema.json: failing
+  loading "<url>": $ref <url>: the schema may only reference itself (the
+  compile reads no file or URL)`.
 
 Every violation is reported with its path, sorted by path, under the name of
 the service, `name` of `service.yaml` (`testdata/schema-violation.yaml`):
@@ -193,7 +194,7 @@ Three top-level keys are not parameters of the service:
 |---|---|---|
 | `global` | the platform values, `global.okdp` ([Platform values](#platform-values)) | removed: given as `global` and `platform` |
 | `connections` | the external connections, by name ([Connections](#connections)) | removed: the references are resolved in place |
-| `upstream` | the inline upstream values, by chart key ([Upstream values](#upstream-values)) | kept, as written |
+| `upstream` | the inline upstream values, by chart key ([Upstream values](#upstream-values)) | for a chart that accepts upstream values and has some: its files, then its inline values, merged as they will be applied (`append` lists appended); the other keys as written |
 
 They are checked with the parameters: a schema with `additionalProperties:
 false` declares them, `{"type": "object"}` at least

@@ -104,7 +104,8 @@ dependsOn:                # the platform services it needs
 ```
 
 `name` and `version` are required. The upstream half of `version` stays
-SemVer (`480.0.0-1.0.0` for Trino 480): the console compares versions;
+SemVer (`480.0.0-1.0.0` for Trino 480): the console compares versions,
+and the umbrella chart (`--umbrella`) takes it as its version;
 release-please owns the OKDP half. `service.yaml` is read as YAML 1.2, the
 versions as written: `appVersion: 1.10` is `"1.10"`. The mapping sees them
 as `service` (`service.appVersion`); the labels of OKDP's objects take
@@ -313,8 +314,8 @@ provides:                  # the connections the instance publishes
 - `objects` are whole manifests (a `kind` and a `metadata.name` at least) the
   okdp chart renders after the descriptor: generated Secrets, hooks, custom
   resources, a workload the upstream charts lack. A component without an
-  upstream chart (the control plane server and UI, cnpg-postgresql) declares
-  no chart and writes everything here.
+  upstream chart (cnpg-postgresql) declares no chart and writes everything
+  here.
 - `instance.url` is what the console opens (none without a UI); `usage` is
   shown with the instance.
 
@@ -597,7 +598,7 @@ objects:
 
 `toJson` sorts the keys: the checksum changes with the content only. Hash
 the text the pod reads when there is one (seaweedfs `checksum/iam`, keycloak
-`checksum/realm`, the control plane server `checksum/config`).
+`checksum/realm`).
 
 ### Conditional items, maps from lists
 

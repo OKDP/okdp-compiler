@@ -366,8 +366,6 @@ import (
 	"os"
 	"testing/fstest"
 
-	"gopkg.in/yaml.v3"
-
 	compiler "github.com/okdp/okdp-compiler"
 )
 
@@ -405,9 +403,11 @@ charts:
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := yaml.NewEncoder(os.Stdout).Encode(res.Values["app"]); err != nil {
+	files, err := compiler.Files(res, compiler.DefaultIndent)
+	if err != nil {
 		log.Fatal(err)
 	}
+	os.Stdout.Write(files["app.values.yaml"])
 }
 ```
 
@@ -469,19 +469,21 @@ Helm](#rendering-with-helm), `Result.Charts` being the index.
 
 ### CI
 
-Compile every instance of a package; any error fails the job:
+Compile every instance of a package, each under its release name and
+namespace; any error fails the job:
 
 ```bash
 for f in instances/*.yaml; do
-  name=$(basename "$f" .yaml)
-  bin/okdp-compile --package package --charts charts \
-    -f platform.yaml -f "$f" --emit-dir "compiled/$name" || exit 1
+  name=$(basename "$f" .yaml)   # the instance's release name
+  bin/okdp-compile --package package --charts charts --contracts contracts \
+    -f platform.yaml -f "$f" --release "$name" --namespace demo \
+    --emit-dir "compiled/$name" || exit 1
 done
-/usr/bin/git diff --exit-code compiled/
+git diff --exit-code compiled/
 ```
 
 The emitted files can be committed and checked with
-`/usr/bin/git diff --exit-code`, as `go test ./internal/fsio` checks
+`git diff --exit-code`, as `go test ./internal/fsio` checks
 `example/output/`.
 
 ### GitOps
@@ -596,15 +598,16 @@ it.
 | Message | Cause | Fix |
 |---|---|---|
 | `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required` | a required flag is missing | give it |
-| `open service.yaml: no such file or directory`, `open values.yaml: ...` | `--package` is not the package's directory | point it at the directory of `service.yaml` |
-| `open values.schema.json: no such file or directory` | the package has no parameter schema; it is always read (connection references are declared there) | add `values.schema.json` ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `open service.yaml: no such file or directory`, `open mapping.cel.yaml: ...` | `--package` is not the package's directory, or the package has no mapping | point it at the directory of `service.yaml` |
+| `open values.yaml: no such file or directory`, `open values.schema.json: ...` | the package has no parameter defaults, or no parameter schema; both are always read (connection references are declared in the schema) | add them ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |
-| `service.yaml: charts.metrics.source is required: the upstream chart (repository, chart, version)` | a chart without its `source` | name the published chart that renders it ([sources](specs/02_service_definition.md#sources)) |
-| `service.yaml: charts.metrics.source.version "^0.4": a pinned chart version (1.2.3), not a range` | a version range, or a field of `source` that is not a repository URL (`https://`, `oci://`), a chart name or a version | pin the version the chart cache holds |
+| `service.yaml: charts.app.source is required: the upstream chart (repository, chart, version)` | a chart without its `source` | name the published chart that renders it ([sources](specs/02_service_definition.md#sources)) |
+| `service.yaml: charts.app.source.repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `service.yaml: charts.app.source.chart "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `http://`, `oci://`), a chart that is not a chart's name | fix the source ([sources](specs/02_service_definition.md#sources)) |
+| `service.yaml: charts.app.source.version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version the chart cache holds |
 | `service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml` | `service.yaml` lists `okdp` | remove it; the platform names its chart ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>` | a chart the compile renders (a chart left out by `$if` is not read) is neither `<chart>-<version>/` nor `<chart>-<version>.tgz` of the chart cache; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version>` | run the command with `-d` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
 | `global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml` | the platform values name no objects chart | pass the platform values as the first `-f`; set it ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
-| `global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart that is not a repository URL, a chart name and a pinned version; also `global.okdp.charts.oidcDcr` | fix the platform values |
+| `global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart checked as a source is (its repository, chart and version, the same messages); also `global.okdp.charts.oidcDcr`, and `... must be a map (repository, chart, version)`, `... must be a string` for its form | fix the platform values |
 | `database: unknown contract "database"` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
 | `global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml` | `require` in `service.yaml` lists it, and no layer sets it (or a later one sets it to `null`) | pass the platform values as the first `-f`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
@@ -619,6 +622,8 @@ it.
 | `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `service.yaml` protects (`protect`, and always `global`); a file name replaces `upstream.<key>` for an instance file | remove the value; set it through the parameters when the package offers one |
 | `app: upstream.app: a key or value contains "{{"` | template code in the instance's upstream values | remove it |
 | `app: upstream.app.env must be a list` | a path of `append` given as a non-list | give a list |
+| `service.yaml: version "1.0": the version of the umbrella chart, SemVer (1.2.3)` | `--umbrella` with a package version Helm does not accept as a chart's | a SemVer `version` in `service.yaml` |
+| `chart "my.app": an umbrella dependency alias is letters, digits, - and _` | `--umbrella` with a chart key Helm does not accept as an alias (a key that is not its chart's name is aliased) | rename the key in `service.yaml` and the mapping |
 | `<key>: upstream file <file>: no instance files (Inputs.Instance)` | `service.yaml` names upstream files, and no instance directory is given | pass `--instance` / `Inputs.Instance` |
 | `global.okdp.oidc.clientProvisioning "manual" is not one of existing, dcr` | wrong platform value | `existing` or `dcr` |
 | `$ref <url>: the schema may only reference itself (the compile reads no file or URL)` | a `values.schema.json` references a file or a URL | inline the referenced schema |

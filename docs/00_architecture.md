@@ -14,10 +14,10 @@ unchanged, by Helm, from the chart's own repository. A service is a package,
 a directory in git, not a chart: OKDP publishes no chart of the service.
 
 One compile is one instance. It reads the package (`fsio.LoadDefinition`:
-`service.yaml`, `mapping.cel.yaml`, the parameters and the base values) and,
-in `Inputs`, the chart cache (the upstream charts' defaults and schemas),
-the contracts, the values layers (the platform values, then the
-instance's), the instance's upstream values files, and the release and
+`service.yaml` and `mapping.cel.yaml`; then each compile, the parameters and
+the base values) and, in `Inputs`, the chart cache (the upstream charts' 
+defaults and schemas), the contracts, the values layers (the platform values,
+then the instance's), the instance's upstream values files, and the release and
 namespace, shared by all the instance's charts
 ([Inputs and outputs](specs/01_inputs_outputs.md)).
 It returns, in `Result`: `Values`, the final values each upstream chart is
@@ -30,9 +30,10 @@ the compiler adds; `Dependencies`, for the deployer (Flux
 the merges, for inspection
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
-Callers: the control plane server embeds the Go package at the module's root
-(`compiler`) and compiles from a git tree; `okdp-compile`
-(`cmd/okdp-compile`) runs the same code from directories, in CI or scripts.
+Callers: a Go program embeds the package at the module's root
+(`compiler`) and compiles from a git tree, an embedded filesystem or memory;
+`okdp-compile` (`cmd/okdp-compile`) runs the same code from directories, in
+CI or scripts.
 The library depends on neither Helm nor the Kubernetes client libraries:
 cel-go for expressions, `santhosh-tekuri/jsonschema/v6` for schemas,
 `sigs.k8s.io/yaml` for values, `gopkg.in/yaml.v3` for the mapping, the
@@ -75,6 +76,7 @@ flowchart TD
   def -. "charts, sources" .-> s9
   pkg -. base .-> s9
   cache -- defaults --> s9
+  files -. "values.upstream" .-> s4
   files --> s9
   s9 --> s10["10: upstream schemas"]
   cache -- schemas --> s10
@@ -126,8 +128,12 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    against its contract (`complete`)
    ([Connections](specs/01_inputs_outputs.md#connections)). Internal
    references are recorded as `Dependency`, sorted by parameter path.
-   `global` and `connections` are then removed from the parameters, and the
-   context is assembled: `release`, `values`, `global`, `platform`,
+   `global` and `connections` are then removed from the parameters. The
+   instance's upstream values are read (`chart.ReadUpstream`): its files,
+   then its inline `upstream.<key>` values, shown merged to the mapping as
+   `values.upstream.<key>` (`Upstreams.Show`), so that an `errors` rule
+   covers a value whatever its source; they are checked and applied at stage
+   9. The context is assembled: `release`, `values`, `global`, `platform`,
    `service`, `labels`, `selectorLabels`
    ([Context](specs/02_service_definition.md#context)). `Compile` then reads
    the platform's charts, `global.okdp.charts` (`platformCharts`,
@@ -148,8 +154,8 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 6. **OAuth clients** (`oidcClients`, `clientCharts`, `internal/okdp/oidc.go`).
    The clients are checked in every mode
    ([oidcClients](specs/02_service_definition.md#oidcclients)). In
-   `dcr` mode, with at least one client, the platform's registration
-   settings are checked, and the embedded template
+   `dcr` mode, OIDC enabled, with at least one client, the platform's
+   registration settings are checked, and the embedded template
    `internal/okdp/oidc-dcr.cel.yaml` is evaluated once per client
    (`compile.EvalTemplate`) on the context plus `client` and `names`: the
    values of the client's chart. Then, in any mode with a client, `clientCharts`
@@ -208,9 +214,10 @@ value: ...`), the `let` or `$let` binding, the OAuth client (`oidcClients[1]
 ## Source map
 
 The module's root is the public package, `compiler`: it gives callers the
-types they name, as aliases, and wraps the functions of five packages under
-`internal/`, each importing only those below it: `cmd/okdp-compile` ->
-`compiler` -> `fsio` -> `okdp` -> `compile` and `chart` -> `value`.
+types they name, as aliases, and wraps the functions of `fsio`, `chart` and
+`okdp`. Under `internal/`, five packages each import only those below them:
+`cmd/okdp-compile` -> `compiler` -> `fsio` -> `okdp` -> `compile` and `chart`
+-> `value`.
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -259,10 +266,11 @@ provider check; one OAuth client Secret name (`clientSecret`) for
 engine for the mappings and the oidc-dcr template.
 `cmd/okdp-compile/main.go` is a thin caller of the public package:
 `os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
-`compiler.Compile`, then the files of `compiler.Document` and
-`compiler.Files`, the chart index (`Result.Charts`) included:
-`okdp.charts.yaml` with [`--emit-dir`](01_usage.md#--emit-dir), `charts`
-with [`--out`](01_usage.md#--out).
+`compiler.Compile`, then the files of `compiler.Files`, `compiler.Umbrella`
+and `compiler.Document`, the chart index (`Result.Charts`) included:
+`okdp.charts.yaml` with [`--emit-dir`](01_usage.md#--emit-dir), the
+dependencies of `Chart.yaml` with [`--umbrella`](01_usage.md#--umbrella),
+`charts` with [`--out`](01_usage.md#--out).
 
 ## Design decisions
 
@@ -292,8 +300,8 @@ template's `if` takes as true.
   function is that function's Go code. Where Helm prints `""` for a value it
   cannot encode, the compile fails instead.
 - Reproduced, not imported: the helm module pulls in client-go and requires
-  newer Go and Kubernetes versions than the control plane server that embeds
-  this package. `coalesceValues`, `coalesceTables`, `cleanNil`, `value.Merge`
+  newer Go and Kubernetes versions than the programs that embed this
+  package. `coalesceValues`, `coalesceTables`, `cleanNil`, `value.Merge`
   and `loadValues` follow helm v4.3.0; the fixtures guard the copy.
 
 ### One data model
@@ -387,7 +395,8 @@ chart, rendered by the platform's objects chart (okdp-objects), which
 writes each item as a manifest. So do the OAuth clients: each is a chart
 rendered by the platform's oidc-dcr chart, whose Job registers it. Both are
 charts of the platform, the same for every service, named in the platform
-values ([Platform charts](specs/01_inputs_outputs.md#platform-charts)).
+values, oidc-dcr with a default (`DcrSource`)
+([Platform charts](specs/01_inputs_outputs.md#platform-charts)).
 
 ### Stateless, hermetic, concurrent
 
@@ -416,7 +425,7 @@ The compiler opens no path itself: the package, the chart cache, the
 instance files and the contracts are `fs.FS`, the values layers are
 in-memory maps, the oidc-dcr template is in the binary.
 
-- The control plane server compiles from a git tree or an `embed.FS`, tests
+- A server compiles from a git tree or an `embed.FS`, tests
   from `fstest.MapFS`, the CLI from `os.DirFS`; the contracts from any of
   them, an `embed.FS` of the contract schemas included.
 - The paths written in `service.yaml` (`base`, `upstream`) are cleaned and
@@ -441,7 +450,7 @@ references. The compiler enforces:
 |---|---|---|
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
 | Credentials never inlined | `resolve` | an external connection carries contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and descriptors are not secret |
-| Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; a provided output is a valid instance of its contract, without secret fields |
+| Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; a provided output holds only fields of its contract, its required ones, and no secret field (values are not checked against the contract's types) |
 | Provider and consumers agree | `descriptor` | an output under the release name equals what internal references resolve to |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
 | No templates in upstream values | `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets |
@@ -489,8 +498,8 @@ output, labels and all.
 
 ### Unit tests
 
-Most source files have their `_test.go`, in memory (`fstest.MapFS`, as the
-control plane server passes its inputs); the host functions, schemas and
+Most source files have their `_test.go`, in memory (`fstest.MapFS`, as a
+server passes its inputs); the host functions, schemas and
 generated Secrets are tested against Helm, in `helm_test.go`.
 `internal/compile/cel_test.go` covers the language: directives, YAML 1.1,
 error paths. `internal/chart/spec_test.go` covers the source checks
@@ -585,9 +594,9 @@ the OAuth client in `dcr` mode without a registration URL
   ([Expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
   a mistake in a branch passes until an instance takes it. Test cases need
   to cover each branch.
-- **OAuth clients are registered anonymously only.** In `dcr` mode, a
-  mapping that declares a client needs `global.okdp.oidc.dcr.authMethod:
-  anonymous`
+- **OAuth clients are registered anonymously only.** In `dcr` mode, OIDC
+  enabled, a mapping that declares a client needs
+  `global.okdp.oidc.dcr.authMethod: anonymous`
   ([OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings)).
 - **A client chart's values are the template's.** A package sets the client
   keys, the platform the Job settings; a client chart takes no base values
@@ -630,4 +639,4 @@ the OAuth client in `dcr` mode without a registration URL
   cache, a new platform chart version a platform value.
 - **Callers.** Anything that provides `fs.FS` inputs and values maps; the
   CLI is one such caller. A caller writes the result where it keeps it,
-  from `compiler.Files` or `compiler.Document`.
+  from `compiler.Files`, `compiler.Umbrella` or `compiler.Document`.
