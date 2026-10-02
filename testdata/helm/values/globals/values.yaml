@@ -1,0 +1,6 @@
+# Chart defaults with globals: the instance's merge over them, in the chart
+# and, through an umbrella, in each of its subcharts.
+global:
+  image: {registry: docker.io, pullPolicy: IfNotPresent}
+  labels: {team: default}
+own: default

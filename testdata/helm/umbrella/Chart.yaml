@@ -1,0 +1,27 @@
+apiVersion: v2
+name: umbrella
+version: 1.0.0
+dependencies:
+  - name: documents
+    repository: file://../documents
+    version: 1.0.0
+  - name: globals
+    repository: file://../globals
+    version: 1.0.0
+  - name: globals
+    alias: globals-alias
+    repository: file://../globals
+    version: 1.0.0
+  - name: layers
+    repository: file://../layers
+    version: 1.0.0
+  - name: nulls
+    repository: file://../nulls
+    version: 1.0.0
+  - name: nulls
+    alias: nulls-alias
+    repository: file://../nulls
+    version: 1.0.0
+  - name: yaml11
+    repository: file://../yaml11
+    version: 1.0.0

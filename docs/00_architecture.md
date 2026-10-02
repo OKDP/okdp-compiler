@@ -217,7 +217,7 @@ neither knows OKDP.
 
 | Package | File | Owns | Relations |
 |---|---|---|---|
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `Files`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `Files`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
 | `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`; `Native`, a CEL value as data | registers `str`, `first`, the functions of `functions.go`, then the caller's |
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
@@ -242,6 +242,7 @@ neither knows OKDP.
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
 | `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, checked, and `mapping.cel.yaml` | `okdp.Service.Check` |
 | | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content) | `okdp.Result` |
+| | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go` and
@@ -476,9 +477,11 @@ library's templates, and stores its output or its error; the
 | `functions/` | `sha256sum`, `toJson`, `toPrettyJson`, `toYaml`, `quote`, `okdp.fullname` | `compile`: `TestHelmFunctions`; `okdp`: `TestHelmFullname` |
 | `secrets/generated/` | the objects of `okdp.generatedSecret`, or its error | `okdp`: `TestHelmGeneratedSecret`, without the `helm.sh/chart` labels the compiler does not set (`withoutChartLabel`) |
 | `secrets/descriptor/` | `okdp.descriptor` of outputs with a `secret` | `okdp`: `TestHelmDescriptorSecrets`, the same |
+| `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`) | `fsio`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart |
 
 To regenerate: `go test ./internal/chart -run TestHelmValues -update`
-(writes each `final.yaml`), then
+(writes each `final.yaml`), `go test ./internal/fsio -run TestHelmUmbrella
+-update` (writes the umbrella), then
 `OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh` (it also needs
 python3 with PyYAML). A behaviour copied from Helm or okdp-lib-chart gets a
 case here, and only what no other case covers: a fixture is Helm's whole
@@ -507,7 +510,8 @@ client charts in a whole compile (`TestDcrCompile`); `context_test.go` the
 oidc-dcr settings and their defaults. The template has no Helm fixture: its
 expected values are in `oidc_test.go`. `internal/fsio/load_test.go` checks
 the loading of a package, `internal/fsio/output_test.go` the files
-`--emit-dir` writes, the chart index included.
+`--emit-dir` writes, the chart index included, `internal/fsio/umbrella_test.go`
+the umbrella's chart and values.
 
 ### Example
 
@@ -517,10 +521,12 @@ and an OAuth client, `values.yaml`, `values.schema.json`, `base/app.yaml`),
 `charts/` (the chart cache: the `values.yaml` of each chart only, the
 platform's okdp-objects included), `contracts/`, `platform.yaml` (the
 platform values) and `instance.yaml` (the instance's values).
-`example/output/` is what the compile writes, as `okdp-compile --emit-dir`.
-`TestExample` (`internal/fsio/example_test.go`) compiles `instance.yaml`
-over `platform.yaml`, under the CLI's default release and namespace, and
-compares the files of `fsio.Files` with `example/output/` byte for byte.
+`example/output/` is what the compile writes: `files/` as `okdp-compile
+--emit-dir`, `umbrella/` as `--umbrella`. `TestExample`
+(`internal/fsio/example_test.go`) compiles `instance.yaml` over
+`platform.yaml`, under the CLI's default release and namespace, and
+compares the files of `fsio.Files` and `fsio.Umbrella` with them byte for
+byte.
 After a change, `go test ./internal/fsio -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures); the diff is the change's effect, reviewed as such.
@@ -538,6 +544,12 @@ the OAuth client in `dcr` mode without a registration URL
 (`dcr-without-registration-url.yaml`).
 
 ## Limitations
+
+- **Through the umbrella, an upstream chart renders as a subchart**: an
+  aliased key is its `.Chart.Name`, and Helm adds an empty `global` and
+  keeps the null defaults nested in its maps
+  ([Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart)).
+  `--emit-dir` renders each chart alone.
 
 - **`protect` and `append` paths name map keys**: no list index; a family
   of keys is a prefix only, a bracketed key ending with `*`

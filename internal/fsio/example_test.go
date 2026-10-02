@@ -13,10 +13,11 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-var update = flag.Bool("update", false, "rewrite example/output/ from the current compiler")
+var update = flag.Bool("update", false, "rewrite example/output/ and testdata/helm/umbrella/ from the current compiler")
 
 // The example: what a compile reads (example/input) and writes
-// (example/output, as `okdp-compile --emit-dir`).
+// (example/output: files/ as `okdp-compile --emit-dir`, umbrella/ as
+// `--umbrella`).
 var (
 	input  = filepath.Join("..", "..", "example", "input")
 	output = filepath.Join("..", "..", "example", "output")
@@ -25,7 +26,7 @@ var (
 // exampleCompile: the example package compiled with its chart cache and
 // contracts, the platform values, then the given values files, under the
 // CLI's default release and namespace.
-func exampleCompile(t *testing.T, files ...string) (*okdp.Result, error) {
+func exampleCompile(t *testing.T, files ...string) (*okdp.Definition, *okdp.Result, error) {
 	t.Helper()
 	def, err := LoadDefinition(os.DirFS(filepath.Join(input, "package")))
 	if err != nil {
@@ -48,13 +49,15 @@ func exampleCompile(t *testing.T, files ...string) (*okdp.Result, error) {
 		}
 		in.Values = append(in.Values, v)
 	}
-	return okdp.Compile(def, in)
+	res, err := okdp.Compile(def, in)
+	return def, res, err
 }
 
 // TestExample compiles the example instance (example/input/instance.yaml)
-// and compares its files with example/output/, byte for byte.
+// and compares what it writes with example/output/, byte for byte: files/,
+// what --emit-dir writes, and umbrella/, what --umbrella writes.
 func TestExample(t *testing.T) {
-	res, err := exampleCompile(t, filepath.Join(input, "instance.yaml"))
+	def, res, err := exampleCompile(t, filepath.Join(input, "instance.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,21 +65,34 @@ func TestExample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	umbrella, err := Umbrella(def, res, DefaultIndent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkDir(t, "files", files)
+	checkDir(t, "umbrella", umbrella)
+}
+
+// checkDir: example/output/<dir> holds these files, and only them, byte for
+// byte; -update rewrites it.
+func checkDir(t *testing.T, dir string, files map[string][]byte) {
+	t.Helper()
+	path := filepath.Join(output, dir)
 	if *update {
-		if err := os.RemoveAll(output); err != nil {
+		if err := os.RemoveAll(path); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.MkdirAll(output, 0o755); err != nil {
+		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		for name, b := range files {
-			if err := os.WriteFile(filepath.Join(output, name), b, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(path, name), b, 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
 		return
 	}
-	entries, err := os.ReadDir(output)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		t.Fatalf("%v (run go test ./internal/fsio -update)", err)
 	}
@@ -86,16 +102,16 @@ func TestExample(t *testing.T) {
 	}
 	for name := range files {
 		if !slices.Contains(names, name) {
-			t.Errorf("%s: missing from example/output, run go test ./internal/fsio -update and review the diff", name)
+			t.Errorf("example/output/%s/%s: missing, run go test ./internal/fsio -update and review the diff", dir, name)
 		}
 	}
 	for _, name := range names {
-		b, err := os.ReadFile(filepath.Join(output, name))
+		b, err := os.ReadFile(filepath.Join(path, name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if want, ok := files[name]; !ok || !bytes.Equal(b, want) {
-			t.Errorf("example/output/%s differs from the compile, run go test ./internal/fsio -update and review the diff", name)
+			t.Errorf("example/output/%s/%s differs from the compile, run go test ./internal/fsio -update and review the diff", dir, name)
 		}
 	}
 }
@@ -120,7 +136,7 @@ func TestExampleErrors(t *testing.T) {
 				t.Fatalf("first line must be \"# error: <message>\", got %q", first)
 			}
 			want = strings.ReplaceAll(want, `\n`, "\n")
-			if _, err := exampleCompile(t, f); err == nil || !strings.Contains(err.Error(), want) {
+			if _, _, err := exampleCompile(t, f); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("got %v, want an error containing %q", err, want)
 			}
 		})

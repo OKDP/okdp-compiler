@@ -655,9 +655,10 @@ replacing it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
-come first and `LOG_LEVEL` follows (`example/output/app.values.yaml`); when
-`upstream.app.yaml` and the inline values both set `env`, the items of the
-file come before the inline ones.
+come first and `LOG_LEVEL` follows
+(`example/output/files/app.values.yaml`); when `upstream.app.yaml` and the
+inline values both set `env`, the items of the file come before the inline
+ones.
 
 ### Upstream errors
 
@@ -778,8 +779,9 @@ the mapping leaves out (`$if`) is in none, and is not to be rendered; the
 okdp chart is in all three, and in `dcr` mode the chart of each OAuth
 client. Numbers are float64, as in Helm values.
 The files the binary writes from them:
-[command line](../01_usage.md#command-line); `example/output/` holds those
-of the example ([Example](#example)).
+[command line](../01_usage.md#command-line), and the
+[umbrella chart](#umbrella-chart); `example/output/` holds those of the
+example ([Example](#example)).
 
 ### Chart index
 
@@ -1084,9 +1086,46 @@ The compiler is not given the other instances: it does not check that the
 instance exists, nor that it provides the contract. A deployer orders the
 releases with the list ([GitOps](../01_usage.md#gitops)).
 
+### Umbrella chart
+
+`compiler.Umbrella(def, res, indent)` (`okdp-compile --umbrella`): the
+instance as one chart, for one Helm release per instance, under the release
+name the values were compiled for. Two files:
+
+- `Chart.yaml`: `apiVersion: v2`; `name`, `version` and `appVersion` of
+  `service.yaml` (`version` must be SemVer); `dependencies`, one per key of
+  `Values`, sorted by key: the [chart index](#chart-index) entry of the key
+  (`name`, `repository`, `version`), and `alias: <key>` when the key is not
+  the chart's name (a key Helm accepts as an alias: letters, digits, `-`,
+  `_`);
+- `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
+  final values under the key, each with its own `global`; none at the top.
+
+The chart has no `values.yaml`. Its values are user values (`helm -f`,
+Argo CD `valueFiles`, Flux `valuesFrom`): as the chart's own values they
+would be defaults, and Helm drops the nulls of defaults
+([Layers and nulls](#layers-and-nulls)).
+
+Helm gives each subchart the final values of its key, as the chart alone
+receives them ([Equivalence with Helm](#equivalence-with-helm)), and adds
+what it adds to every subchart:
+
+| Difference | The chart alone | As a subchart |
+|---|---|---|
+| `.Chart.Name` of an aliased key | the chart's name | the key: names derived from it change, unless the values set them (`fullnameOverride`, `nameOverride`) |
+| `.Values.global` | absent when nothing sets it | an empty map |
+| a null default nested in a map of the chart's `values.yaml`, the values leaving it unset | dropped | kept, null |
+
+A template reads an absent key and a null the same way (`{{ .Values.x }}`,
+`if`, `default`), but for `hasKey`, `toYaml`, and `range` over the map.
+Each key's own `global` reaches its subchart, and the subcharts of that
+chart, as when the chart is alone: there is no `global` at the top for Helm
+to merge over it. `testdata/helm/umbrella` checks it with Helm 4.3: the
+umbrella over the charts of the values fixtures, one chart under two keys.
+
 ### Example
 
-`example/output/`, what `--emit-dir` writes for the example: release
+`example/output/files/`, what `--emit-dir` writes for the example: release
 `demo-webapp`, namespace `demo`, `example/input/instance.yaml`
 (`replicas: 2`, `database: demo-db`, an `env` entry in `upstream.app`) over
 `example/input/platform.yaml` (`existing` mode: no OAuth client chart,
@@ -1184,4 +1223,22 @@ okdp:
 - instance: demo-db
   contract: database
   field: database
+```
+
+`example/output/umbrella/`, what `--umbrella` writes: `instance.values.yaml`,
+the same values under their keys (`app:`, `okdp:`), and `Chart.yaml`:
+
+```yaml
+apiVersion: v2
+name: webapp
+version: 1.0.0
+appVersion: "2.3"
+dependencies:
+  - name: app
+    repository: https://charts.example.org
+    version: 1.8.0
+  - name: okdp-objects
+    alias: okdp
+    repository: oci://registry.example.org/okdp
+    version: 1.0.0
 ```

@@ -44,7 +44,7 @@ where the module can be fetched at that path.
 ```text
 okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>] [--instance <dir>]
              [-f <values.yaml>]... [--release <name>] [--namespace <name>]
-             [--out <file>] [--emit-dir <dir>] [--indent <n>]
+             [--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent <n>]
 okdp-compile --version
 ```
 
@@ -59,12 +59,14 @@ okdp-compile --version
 | `--namespace` | `demo` | namespace |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file |
 | `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`), the chart index and the dependencies to a directory, one file each |
-| `--indent` | `2` | the indentation of the YAML files `--out` and `--emit-dir` write, 2 to 9 spaces |
+| `--umbrella` | none | write the instance as one chart to a directory: `Chart.yaml`, an umbrella over the upstream charts, and `instance.values.yaml`, its values |
+| `--indent` | `2` | the indentation of the YAML files `--out`, `--emit-dir` and `--umbrella` write, 2 to 9 spaces |
 | `--version` | | print the version and exit |
 
-Flags take one or two dashes. Without `--out` or `--emit-dir`, the command
-only compiles: exit status 0 means the instance compiles. When both are
-given, `--emit-dir` is written first, then `--out`.
+Flags take one or two dashes. Without `--out`, `--emit-dir` or
+`--umbrella`, the command only compiles: exit status 0 means the instance
+compiles. When several are given, `--emit-dir` is written first, then
+`--umbrella`, then `--out`.
 
 ### `--out`
 
@@ -130,7 +132,7 @@ The directory is created if needed, and its files are overwritten:
 | `okdp.charts.yaml` | `Result.Charts`, the [chart index](specs/01_inputs_outputs.md#chart-index): `<key>: {repository, chart, version}`, one entry per values file |
 | `okdp.dependencies.yaml` | `Result.Dependencies`: a YAML list, `[]` when there is none |
 
-The example's are `example/output/`:
+The example's, `out/` here, are `example/output/files/`:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
@@ -156,6 +158,66 @@ OAuth client adds the chart `oidc-dcr`, which `service.yaml` does not list,
 any more than `okdp`: `oidc-dcr.values.yaml`, and its entry in the index.
 A chart the mapping leaves out (`$if`) has no file and no index entry.
 Files of a previous run are not removed: emit into an empty directory.
+
+### `--umbrella`
+
+The instance as one chart, for one Helm release per instance
+([GitOps](#gitops)). The directory is created if needed, and its files are
+overwritten:
+
+| File | Content |
+|---|---|
+| `Chart.yaml` | an umbrella chart, named and versioned after `service.yaml` (`name`, `version`, `appVersion`), with one dependency per key of the index: its upstream chart (repository, name, version), aliased to the key when the key is not the chart's name |
+| `instance.values.yaml` | `Result.Values`: the final values of each key, under the key |
+
+The chart has no `values.yaml`: its values are given to Helm as user
+values, with `-f`. As the chart's `values.yaml` they would be its defaults,
+and Helm drops the nulls of defaults, where a null of the final values
+deletes an upstream default
+([layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
+
+The example's are `example/output/umbrella/`:
+
+```console
+$ bin/okdp-compile --package example/input/package \
+    -f example/input/platform.yaml -f example/input/instance.yaml --umbrella umbrella
+$ cat umbrella/Chart.yaml
+apiVersion: v2
+name: webapp
+version: 1.0.0
+appVersion: "2.3"
+dependencies:
+  - name: app
+    repository: https://charts.example.org
+    version: 1.8.0
+  - name: okdp-objects
+    alias: okdp
+    repository: oci://registry.example.org/okdp
+    version: 1.0.0
+```
+
+Rendered, under the release and namespace of the compile (the example's
+charts are fictional: its umbrella compiles, it does not render):
+
+```bash
+helm dependency build <dir>
+helm template <release> <dir> --namespace <namespace> -f <dir>/instance.values.yaml
+```
+
+Each upstream chart renders as a subchart, with the final values of its
+key, as it renders alone ([rendering with Helm](#rendering-with-helm)), but
+for what Helm does to every subchart (checked with Helm 4.3,
+[umbrella chart](specs/01_inputs_outputs.md#umbrella-chart)):
+
+- an aliased subchart is named after its alias: its `.Chart.Name` is the
+  key, not the chart's name. A name the chart derives from `.Chart.Name`
+  changes, unless the values set it (`fullnameOverride`, `nameOverride`).
+  The key `okdp` (chart `okdp-objects`) is aliased: the objects chart writes
+  its objects as they are;
+- every subchart has a `global` map, empty when nothing sets one;
+- a null default nested in a map of the chart's `values.yaml`, which the
+  values leave unset, stays null, where the chart alone drops it. A template
+  reads both the same, except `hasKey`, `toYaml`, and `range` over the map.
 
 ### Exit status and errors
 
@@ -425,13 +487,65 @@ The emitted files can be committed and checked with
 ### GitOps
 
 The compiler writes values and objects, not HelmRelease or Application
-objects. A deployment renders each key of the index under the instance's
-release name and namespace, as in [rendering with Helm](#rendering-with-helm):
-one Flux HelmRelease, or one Argo CD Application source, per key, whose
-chart is the key's entry in `okdp.charts.yaml` (the repository, the chart's
-name in it, the version) and whose values are `<key>.values.yaml`. The
-chart comes from the index, not from the key, and from its own repository:
-OKDP publishes no chart of the service.
+objects. The values of every key are compiled for the instance's release
+name and namespace: a deployment renders them under these, in one of two
+ways. OKDP publishes no chart of the service in either: the upstream charts
+come from their own repositories.
+
+- **One release per instance**, the umbrella (`--umbrella`): one Flux
+  HelmRelease, or one Argo CD Application. Helm keeps one release of a name
+  per namespace, and Flux deploys Helm releases: with Flux, deploy the
+  umbrella.
+- **One source per key** (`--emit-dir`), as in
+  [rendering with Helm](#rendering-with-helm): one Argo CD Application
+  source per key, whose chart is the key's entry in `okdp.charts.yaml` (the
+  repository, the chart's name in it, the version) and whose values are
+  `<key>.values.yaml`. Argo CD renders each source with `helm template` and
+  creates no Helm release: the sources share the release name. Two Flux
+  HelmReleases cannot.
+
+**The umbrella.** Its directory is committed with the instance's compiled
+files. Flux builds the chart from the deployments repository, and takes the
+values from a ConfigMap of `instance.values.yaml` (a kustomize
+`configMapGenerator`):
+
+```yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: demo-webapp
+  namespace: demo
+spec:
+  releaseName: demo-webapp
+  chart:
+    spec:
+      chart: ./compiled/demo-webapp
+      sourceRef: {kind: GitRepository, name: deployments, namespace: flux-system}
+      reconcileStrategy: Revision
+  valuesFrom:
+    - kind: ConfigMap
+      name: demo-webapp-values
+      valuesKey: instance.values.yaml
+```
+
+`reconcileStrategy: Revision` rebuilds the chart at every revision of the
+repository: its version, the package's, does not change when the platform
+changes the version of a dependency. `chart.spec.valuesFiles` would make the
+values the chart's defaults, and drop their nulls. Argo CD takes the values
+file with `-f`:
+
+```yaml
+spec:
+  source:
+    repoURL: https://git.example.org/deployments.git
+    path: compiled/demo-webapp
+    helm:
+      releaseName: demo-webapp
+      valueFiles: [instance.values.yaml]
+```
+
+Both fetch the dependencies from their repositories: a private repository
+needs its credentials there.
 
 **OAuth clients.** In `dcr` mode the index lists one chart per OAuth client
 (`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr chart;

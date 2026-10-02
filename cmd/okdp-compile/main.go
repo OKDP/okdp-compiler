@@ -1,7 +1,7 @@
 // okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
 //	[--instance <dir>] -f values.yaml [-f ...] [--release demo-<service>] [--namespace demo]
-//	[--out <file>] [--emit-dir <dir>] [--indent 2]
+//	[--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent 2]
 
 package main
 
@@ -36,6 +36,7 @@ type options struct {
 	release, namespace string
 	values             multi
 	out, emitDir       string
+	umbrella           string
 	indent             int
 }
 
@@ -51,8 +52,9 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "demo", "namespace")
 	flag.Var(&o.values, "f", "values file (repeatable)")
 	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the upstream chart of each chart, objects and dependencies to this file")
-	flag.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files --out and --emit-dir write, 2 to 9 spaces")
+	flag.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files --out, --emit-dir and --umbrella write, 2 to 9 spaces")
 	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the upstream chart that renders each (okdp.charts.yaml) and the dependencies (okdp.dependencies.yaml)")
+	flag.StringVar(&o.umbrella, "umbrella", "", "write the instance as one chart to <dir>: Chart.yaml, an umbrella over the upstream charts, and "+compiler.UmbrellaValues+", its values (helm -f)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
@@ -108,7 +110,20 @@ func run(o options) error {
 		return err
 	}
 	if o.emitDir != "" {
-		if err := emit(o.emitDir, res, o.indent); err != nil {
+		files, err := compiler.Files(res, o.indent)
+		if err != nil {
+			return err
+		}
+		if err := write(o.emitDir, files); err != nil {
+			return err
+		}
+	}
+	if o.umbrella != "" {
+		files, err := compiler.Umbrella(def, res, o.indent)
+		if err != nil {
+			return err
+		}
+		if err := write(o.umbrella, files); err != nil {
 			return err
 		}
 	}
@@ -124,13 +139,8 @@ func run(o options) error {
 	return nil
 }
 
-// emit: the files of the compile (compiler.Files) in dir, indented by indent
-// spaces.
-func emit(dir string, res *compiler.Result, indent int) error {
-	files, err := compiler.Files(res, indent)
-	if err != nil {
-		return err
-	}
+// write: files (name -> content) in dir, created if needed.
+func write(dir string, files map[string][]byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

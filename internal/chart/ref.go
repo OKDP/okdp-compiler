@@ -21,6 +21,11 @@ type Ref struct {
 // chartVersion: a pinned chart version, SemVer as Helm requires it.
 var chartVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
+// IsVersion: v is a pinned chart version, SemVer as Helm requires it.
+func IsVersion(v string) bool {
+	return chartVersion.MatchString(v)
+}
+
 // Check: a repository URL, the name of a chart, a pinned version. where
 // names the reference in the errors.
 func (r Ref) Check(where string) error {

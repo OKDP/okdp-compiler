@@ -92,6 +92,19 @@ func Files(res *Result, indent int) (map[string][]byte, error) {
 	return fsio.Files(res, indent)
 }
 
+// UmbrellaValues: the file of Umbrella holding the instance's values, given
+// to Helm as user values (helm -f, Argo CD valueFiles, Flux valuesFrom).
+const UmbrellaValues = fsio.UmbrellaValues
+
+// Umbrella: what `okdp-compile --umbrella` writes, file name -> content: the
+// instance as one chart, Chart.yaml, an umbrella over the upstream charts of
+// its keys (aliased to the key when it is not the chart's name), and
+// UmbrellaValues, the final values of each key under the key; indented by
+// indent spaces (2 to 9).
+func Umbrella(def *Definition, res *Result, indent int) (map[string][]byte, error) {
+	return fsio.Umbrella(def, res, indent)
+}
+
 // Document: what `okdp-compile --out` writes: the chart index, the
 // dependencies, the objects and the computed values, in one YAML
 // document, indented by indent spaces (2 to 9).

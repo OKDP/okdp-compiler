@@ -1,0 +1,193 @@
+{
+  "documents": {
+    "b": [
+      2
+    ],
+    "c": 1,
+    "global": {},
+    "m": {
+      "true": 2,
+      "x": 1,
+      "z": 3
+    }
+  },
+  "globals": {
+    "global": {
+      "image": {
+        "pullPolicy": "IfNotPresent",
+        "registry": "mirror.example.org"
+      },
+      "labels": {
+        "team": "default"
+      },
+      "okdp": {
+        "ingress": {
+          "suffix": "example.org"
+        }
+      }
+    },
+    "own": "instance"
+  },
+  "globals-alias": {
+    "global": {
+      "image": {
+        "pullPolicy": "IfNotPresent",
+        "registry": "mirror.example.org"
+      },
+      "labels": {
+        "team": "default"
+      },
+      "okdp": {
+        "ingress": {
+          "suffix": "example.org"
+        }
+      }
+    },
+    "own": "instance"
+  },
+  "layers": {
+    "a": "first",
+    "b": "second",
+    "c": null,
+    "global": {},
+    "m": {
+      "true": 1,
+      "x": 2,
+      "z": null
+    }
+  },
+  "nulls": {
+    "global": {},
+    "list": [
+      3
+    ],
+    "mapOverScalar": {
+      "a": 1
+    },
+    "newNull": null,
+    "nullThenMap": {
+      "a": 1
+    },
+    "scalarOverMap": "s",
+    "tbl": {
+      "a": 10,
+      "b": 2,
+      "defaultNull": null,
+      "keep": {
+        "d": 4
+      },
+      "nested": {
+        "c": 3,
+        "defaultNull": "z",
+        "newNull": null
+      },
+      "newMap": {
+        "e": null,
+        "f": 5
+      },
+      "newNull": null
+    },
+    "top": "x"
+  },
+  "nulls-alias": {
+    "global": {},
+    "list": [
+      3
+    ],
+    "mapOverScalar": {
+      "a": 1
+    },
+    "newNull": null,
+    "nullThenMap": {
+      "a": 1
+    },
+    "scalarOverMap": "s",
+    "tbl": {
+      "a": 10,
+      "b": 2,
+      "defaultNull": null,
+      "keep": {
+        "d": 4
+      },
+      "nested": {
+        "c": 3,
+        "defaultNull": "z",
+        "newNull": null
+      },
+      "newMap": {
+        "e": null,
+        "f": 5
+      },
+      "newNull": null
+    },
+    "top": "x"
+  },
+  "yaml11": {
+    "bools": [
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false,
+      "yes",
+      "no",
+      "on"
+    ],
+    "exposure": {
+      "loadBalancer": {
+        "enabled": true
+      },
+      "nodePort": {
+        "enabled": false
+      }
+    },
+    "global": {},
+    "keys": {
+      "1": "c",
+      "1000": "e",
+      "16": "d",
+      "2.5": "f",
+      "false": "b",
+      "true": "a",
+      "y": "g"
+    },
+    "mode": 420,
+    "nulls": {
+      "empty": null,
+      "tilde": null,
+      "upper": null,
+      "word": null
+    },
+    "numbers": [
+      511,
+      31,
+      15,
+      5,
+      1000,
+      1000,
+      1,
+      1.5,
+      0.5,
+      0,
+      12,
+      12345678901234567000
+    ],
+    "port": 8,
+    "strings": [
+      "2001-12-14",
+      "0777",
+      "1.2.3",
+      "0.10.0",
+      "~foo"
+    ]
+  }
+}

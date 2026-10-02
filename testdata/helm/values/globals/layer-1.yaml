@@ -1,0 +1,4 @@
+global:
+  image: {registry: mirror.example.org}
+  okdp: {ingress: {suffix: example.org}}
+own: instance

@@ -42,9 +42,9 @@ OKDP does not modify an upstream chart
 ([values for unmodified upstream charts](00_architecture.md#values-for-unmodified-upstream-charts)):
 what an upstream chart cannot produce needs a vehicle. The okdp-objects
 chart makes these objects one more Helm release beside the upstream ones:
-the same release name and namespace, the same deployer (a Flux HelmRelease,
-an Argo CD source, per key of the index), pruned when they change or the
-instance is removed ([GitOps](01_usage.md#gitops)).
+the same release name and namespace, the same deployer (an Argo CD source
+per key of the index, or a subchart of the instance's umbrella), pruned
+when they change or the instance is removed ([GitOps](01_usage.md#gitops)).
 
 ### Removing the chart
 
