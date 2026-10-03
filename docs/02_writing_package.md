@@ -793,10 +793,15 @@ as `values.upstream.<key>`.
   values, and an instance's list replaces the mapping's unless the path is in
   `append`. Keep each list wholly in the base values or in the mapping.
 - **Names longer than 63 characters.** `${{ release.name }}-something`
-  overflows with long project and instance names: use
-  `okdpFullname('something')`, cut as `okdp.fullname`. A name a contract's
-  convention promises (`<release>-app`, `<release>-hive-metastore`) is kept
-  as the convention writes it.
+  overflows with long project and instance names: a release has up to 53
+  characters (Helm's limit, checked by the compiler), which leaves 10 for
+  `-<suffix>`. Use `okdpFullname('something')`, cut to 63 characters. A
+  name a contract's convention promises (`<release>-app`,
+  `<release>-hive-metastore`) is kept as the convention writes it.
+- **One object, one name.** Two objects of one kind and name in one
+  namespace (the descriptor `<release>-okdp` and the credentials Secrets
+  included) fail the compile; so do two OAuth client names whose objects'
+  names are the same once cut to 63 characters.
 - **No credential in values.** Connections and values carry `secretRef`
   names, never passwords: values end up in Git and in readable objects. A
   secret field in a connection or in `provides` fails the compile.

@@ -85,20 +85,20 @@ func TestDcrDefaults(t *testing.T) {
 }
 
 // TestDcrNames: the main client's chart and objects are named after the
-// release (cut as okdp.fullname), a named client's after the release and
-// its name, and so are its Secret and client name; the wait for the
+// release, a named client's after the release and its name (cut as
+// okdpFullname), and so are its Secret and client name; the wait for the
 // provider uses its discovery URL (one trailing slash of issuerUri dropped).
 func TestDcrNames(t *testing.T) {
 	ctx := dcrCtx()
 	setIssuer(ctx, "https://idp.example.org/realms/data/")
-	long := "demo-" + strings.Repeat("x", 50)
+	long := "demo-" + strings.Repeat("x", 48) // the longest release, 53 characters
 	for name, tc := range map[string]struct {
 		release, client                    string
 		chart, fullname, secret, clientNam string
 	}{
 		"main":           {"demo-x", "", "oidc-dcr", "demo-x-oidc-dcr", "demo-x-demo-dcr", "demo-x-demo"},
 		"named":          {"demo-x", "console", "console-oidc-dcr", "demo-x-console-oidc-dcr", "demo-x-demo-console-dcr", "demo-x-demo-console"},
-		"a long release": {long, "", "oidc-dcr", long + "-oidc-dc", long + "-demo-dcr", long + "-demo"},
+		"a long release": {long, "consoles", "consoles-oidc-dcr", long + "-consoles", long + "-demo-consoles-dcr", long + "-demo-consoles"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			value.AsMap(ctx["release"])["name"] = tc.release
@@ -132,6 +132,12 @@ func TestDcrNames(t *testing.T) {
 	}
 	if len(values) != 2 || values["oidc-dcr"]["secret"] != "demo-x-demo-dcr" || values["console-oidc-dcr"]["secret"] != "demo-x-demo-console-dcr" {
 		t.Errorf("two clients: %#v", values)
+	}
+	// Two names cut to one objects' name.
+	value.AsMap(ctx["release"])["name"] = long
+	want := `oidcClients[1] (console-api): oidcClients[0] (console-app) has the same objects' name, "` + long + `-console-a", once cut to 63 characters`
+	if _, err := dcrValues(ctx, M{"name": "console-app", "grantTypes": []any{"client_credentials"}}, M{"name": "console-api", "grantTypes": []any{"client_credentials"}}); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("one objects' name: got %v, want an error containing %q", err, want)
 	}
 }
 
@@ -275,7 +281,9 @@ func TestDcrErrors(t *testing.T) {
 		"unknown key":       {nil, []any{M{"grantTypes": grants, "redirectUri": "x", "ttl": 1}}, "oidcClients[0]: unknown key(s) redirectUri, ttl (allowed: name"},
 		"name":              {nil, []any{M{"grantTypes": grants, "name": "Console"}}, `oidcClients[0]: name "Console" must be lowercase letters, digits and "-"`},
 		"name type":         {nil, []any{M{"grantTypes": grants, "name": true}}, "oidcClients[0]: name true must be"},
+		"name length":       {nil, []any{M{"grantTypes": grants, "name": strings.Repeat("a", 55)}}, `", 54 characters at most (it names the chart <name>-oidc-dcr`},
 		"same name":         {nil, []any{M{"grantTypes": grants, "name": "a"}, M{"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
+		"same secret":       {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": "b", "secret": "demo-x-demo-dcr"}}, `oidcClients[1] (b): oidcClients[0] writes the same Secret, "demo-x-demo-dcr": give each client its own secret`},
 		"two main clients":  {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
 		"redirect uris":     {nil, []any{M{"grantTypes": grants, "redirectUris": "https://x/cb"}}, `oidcClients[0]: redirectUris must be a list of URLs, got "https://x/cb"`},
 		"scope":             {nil, []any{M{"grantTypes": grants, "scope": []any{"a"}}}, "oidcClients[0]: scope must be a string"},

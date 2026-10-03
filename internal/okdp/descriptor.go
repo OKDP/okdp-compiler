@@ -14,25 +14,27 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// descriptor: the descriptor ConfigMap <release>-okdp of an instance, as
-// okdp.descriptor renders it today: service, version, url, usage, and the
-// connections the instance provides (outputs.yaml), which the console lists
-// and other instances reference by name. Built from the mapping's `instance`
-// and `provides` sections; every output is checked, its shape (checkOutput),
-// then against its contract (okdp.contract.provide), in the order of
-// provides, its fields in key order: the first error is reported, every
-// violation of the contract's types at once (checkContract). Then, as
-// okdp.descriptor renders them, the credentials Secret of every output given
-// a `secret` ({generate, stringData} or {stringData}), named after its
-// secretRef (default <name>-<contract>-credentials).
-func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) {
+// descriptor: the descriptor ConfigMap <release>-okdp (cut as
+// okdp.fullname) of an instance, as okdp.descriptor renders it today:
+// service, version, url, usage, and the connections the instance provides
+// (outputs.yaml), which the console lists and other instances reference by
+// name. Built from the mapping's `instance` and `provides` sections; every
+// output is checked, its shape (checkOutput), then against its contract
+// (okdp.contract.provide), in the order of provides, its fields in key
+// order: the first error is reported, every violation of the contract's
+// types at once (checkContract). Then, as okdp.descriptor renders them, the
+// credentials Secret of every output given a `secret` ({generate,
+// stringData} or {stringData}), named after its secretRef (default
+// <name>-<contract>-credentials). A secretRef that is set (not empty) names
+// a Secret: its name is required.
+func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []ownObject, error) {
 	svc := ctxService(ctx)
 	name, version := svc.Name, svc.Version
 	suffix := value.Str(value.Dig(value.AsMap(ctx["global"]), "okdp.ingress.suffix"))
 	// No connections: only to compute what internal references resolve to.
 	r := resolver{in: in, conns: M{}, suffix: suffix}
 	published := []any{}
-	var credentials []any
+	var credentials []ownObject
 	contracts := map[string]bool{}
 	seen := map[string]bool{}
 	for i, x := range provides {
@@ -95,6 +97,9 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 		entry := M{"name": out, "contract": contract, "values": values}
 		secret := value.AsMap(p["secret"])
 		if ref := value.AsMap(p["secretRef"]); len(ref) > 0 {
+			if s, ok := ref["name"].(string); !ok || s == "" {
+				return nil, nil, fmt.Errorf("%s: secretRef.name must be the name of a Secret, got %s", where, value.Short(ref["name"]))
+			}
 			entry["secretRef"] = M{"name": ref["name"]}
 		} else if value.Truthy(secret) {
 			entry["secretRef"] = M{"name": out + "-" + contract + "-credentials"}
@@ -107,7 +112,9 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 			if err != nil {
 				return nil, nil, err
 			}
-			credentials = append(credentials, objs...)
+			for _, o := range objs {
+				credentials = append(credentials, ownObject{"the credentials Secret of " + where, value.AsMap(o)})
+			}
 		}
 	}
 	outputs := "[]\n"
@@ -132,7 +139,7 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
 		"metadata": M{
-			"name":      trunc(in.Release+"-okdp", 63),
+			"name":      fullname(in.Release, "okdp"),
 			"namespace": in.Namespace,
 			"labels":    labels,
 		},

@@ -20,8 +20,18 @@ and of what it produces. The flags that pass these inputs to the binary are in
 A missing required input fails before anything is read, in this order:
 `no service definition` for a nil `*Definition`, `Definition.Files is
 required`, `Inputs.Charts is required`, `Inputs.Contracts is required`,
-`Inputs.Release is required`, `Inputs.Namespace is required`. Paths in an
-`fs.FS` are relative to its root.
+`Inputs.Release is required`, `Inputs.Namespace is required`. Then the
+names: the release is a release name Helm accepts, from which OKDP derives
+object names (`<release>-okdp`, Secrets), and the namespace a namespace
+name, both DNS-1123 labels (lowercase letters, digits and `-`, a letter or
+a digit at each end):
+
+| Case | Error |
+|---|---|
+| a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
+| a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
+
+Paths in an `fs.FS` are relative to its root.
 
 ## Package files
 
@@ -943,7 +953,7 @@ with the chart key (`app: charts.example.org/app-1.8.0/values.schema.json: ...`)
 | `Values` | `map[string]map[string]any` | chart key -> its final values ([Merge precedence](#merge-precedence)) |
 | `Computed` | `map[string]any` | chart key -> the values computed for it, before any merge: the mapping's `output.<key>`; for an [OAuth client chart](#oauth-client-charts), the values of the oidc-dcr template; for the [okdp chart](#the-okdp-chart), `objects`: a copy of `Objects` |
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
-| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section) |
+| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); no two of them one object of the cluster |
 | `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
 
 `Values`, `Computed` and `Charts` have one entry per compiled chart: a chart
@@ -1028,10 +1038,13 @@ the clients are checked all the same.
 
 The objects' name, `<release>-<chart key>` cut to 63 characters without a
 trailing `-` (as `okdpFullname`), is set as `fullnameOverride`,
-`security.serviceAccount` and `security.role`. In `dcr` mode a client's
-`secret` replaces the Secret name, which
+`security.serviceAccount` and `security.role`; a client name has at most
+54 characters, its chart key a DNS-1123 label, and two clients whose
+objects' names are the same once cut are refused, in every mode. In `dcr`
+mode a client's `secret` replaces the Secret name, which
 [`oidcClientSecret`](02_service_definition.md#oidcclientsecret) does not
-follow.
+follow, and two clients may not write one Secret
+([compile errors](02_service_definition.md#compile-errors)).
 
 A client chart has no `service.yaml` entry, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no base values
@@ -1106,7 +1119,7 @@ instances reference by name. Built from the mapping's `instance` and
 
 | Field | Value |
 |---|---|
-| `metadata.name` | `<release>-okdp`, cut to 63 characters |
+| `metadata.name` | `<release>-okdp`, as `okdpFullname('okdp')` (never cut: the release has at most 53 characters) |
 | `metadata.namespace` | `Inputs.Namespace` |
 | `metadata.labels` | the labels, plus `okdp.io/provides-<contract>: "true"` per contract provided |
 | `data.service` | `name` of `service.yaml` |
@@ -1124,7 +1137,7 @@ from `name` and `appVersion` of `service.yaml`.
 |---|---|
 | `contract` | `contract` of the item |
 | `name` | `name` of the item; `<release>` by default |
-| `secretRef` | `{name}` of `secretRef`; else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
+| `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
 | `values` | `values` of the item, [completed](#completion) against the contract |
 
 Every item is checked for its shape, then against its contract, in the
@@ -1147,6 +1160,7 @@ item's position.
 | required field not set | `<out>: field "<key>" is required by the <contract> contract` |
 | a value the contract's schema refuses | `<out>: field "<field>" violates the <contract> contract: <violation>`, one line each; `<out>: the fields violate the <contract> contract: <violation>` for a keyword on the whole `values` |
 | internal convention | `<out>: <field> is "<value>" but internal references to "<name>" resolve it to "<expected>"` |
+| a `secretRef` without a `name`, or whose `name` is not a non-empty string | `<out>: secretRef.name must be the name of a Secret, got <value>` |
 | same contract and name twice | `two <contract> outputs are named "<name>"` |
 
 Internal convention: an output named `<release>` (the default), of a contract
@@ -1159,7 +1173,8 @@ references this one by name gets the values it publishes.
 The Secret of a `provides` item with a `secret`: named after the item's
 `secretRef` (`<name>-<contract>-credentials` by default), labelled
 `okdp.io/credentials-<contract>: "true"`. They follow the descriptor in
-`Objects`, in `provides` order.
+`Objects`, in `provides` order; two items naming one Secret fail the
+compile ([objects section](#objects-section)).
 
 | `secret` | Objects |
 |---|---|
@@ -1230,6 +1245,22 @@ The mapping's `objects`, after the credentials Secrets, in order, as
 computed: the compiler adds no namespace, label or name. Each is a whole
 manifest, with a `kind` and a `metadata.name`
 ([objects](02_service_definition.md#objects)).
+
+No two items of `Objects`, the descriptor and the credentials Secrets
+included, may be one object of the cluster, which the second would replace
+when they are applied: the same API group (of `apiVersion`, whatever its
+version), `kind`, namespace (`Inputs.Namespace` for an object without one)
+and name. The first such pair fails the compile:
+
+```text
+<object>: <other> is the same object, <kind> "<name>" in namespace "<namespace>": give each object its own name
+```
+
+`<object>`, `<other>`: `the descriptor`, `the credentials Secret of
+provides "<name>" (<contract>)` (any object of it: a `Password` generator,
+the `ExternalSecret`, the `Secret`), or `objects[<i>]`, the position in the
+evaluated list; `<kind>` is followed by `.<group>` for a kind of an API
+group (`ExternalSecret.external-secrets.io`).
 
 ### The okdp chart
 

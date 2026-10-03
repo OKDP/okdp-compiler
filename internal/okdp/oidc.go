@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -48,15 +47,18 @@ var dcrTemplate []byte
 // clientKeys: the keys of a client of oidcClients.
 var clientKeys = []string{"name", "grantTypes", "redirectUris", "scope", "clientName", "public", "request", "secret", "caSecret"}
 
-// clientName: a client's name, part of its chart, object and Secret names.
-var clientName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+// clientNameMax: the longest name of a client, part of its chart, object
+// and Secret names: its chart key <name>-oidc-dcr is a DNS-1123 label (63
+// characters at most), as a chart key of service.yaml.
+const clientNameMax = 63 - len("-"+DcrChart)
 
 // oidcClient: a client of the oidcClients section, checked.
 type oidcClient struct {
-	where string // oidcClients[<i>], and (<name>) when named, for the errors
-	name  string // "" for the service's main client
-	spec  M      // as written, null keys left out, name set
-	chart string // oidc-dcr, or <name>-oidc-dcr
+	where    string // oidcClients[<i>], and (<name>) when named, for the errors
+	name     string // "" for the service's main client
+	spec     M      // as written, null keys left out, name set
+	chart    string // oidc-dcr, or <name>-oidc-dcr
+	fullname string // its objects' name, <release>-<chart> cut as okdpFullname
 }
 
 // clientChart: the chart of a client: oidc-dcr for the main client,
@@ -122,8 +124,8 @@ func checkClient(i int, v any) (oidcClient, error) {
 	}
 	if n, set := c.spec["name"]; set {
 		s, ok := n.(string)
-		if !ok || (s != "" && !clientName.MatchString(s)) {
-			return c, fmt.Errorf("%s: name %s must be lowercase letters, digits and \"-\" (it names the chart %s, its objects and its Secret)", c.where, value.Short(n), clientChart("<name>"))
+		if !ok || (s != "" && (len(s) > clientNameMax || !dnsLabel.MatchString(s))) {
+			return c, fmt.Errorf("%s: name %s must be lowercase letters, digits and \"-\", %d characters at most (it names the chart %s, its objects and its Secret)", c.where, value.Short(n), clientNameMax, clientChart("<name>"))
 		}
 		c.name = s
 	}
@@ -168,13 +170,15 @@ func checkClient(i int, v any) (oidcClient, error) {
 }
 
 // oidcClients: the clients of the mapping's oidcClients section, checked in
-// every mode (one main client at most, unique names), and, in dcr mode, the
-// values of the oidc-dcr chart of each: chart -> values, from dcrTemplate.
-// The platform must then register anonymously, at its registrationUrl. The
-// template is evaluated within budget (nil: none).
+// every mode (one main client at most, unique names, unique objects' names
+// once cut), and, in dcr mode, the values of the oidc-dcr chart of each:
+// chart -> values, from dcrTemplate. The platform must then register
+// anonymously, at its registrationUrl, and no two clients write one Secret.
+// The template is evaluated within budget (nil: none).
 func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, map[string]M, error) {
+	release, ns := value.Str(value.Dig(ctx, "release.name")), value.Str(value.Dig(ctx, "release.namespace"))
 	var clients []oidcClient
-	seen := map[string]string{}
+	seen, objects := map[string]string{}, map[string]string{}
 	for i, v := range section {
 		c, err := checkClient(i, v)
 		if err != nil {
@@ -186,6 +190,12 @@ func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, ma
 			return nil, nil, fmt.Errorf("%s: %s has the same name: client names must be unique", c.where, other)
 		}
 		seen[c.name] = c.where
+		// Two names may give one objects' name once cut to 63 characters.
+		c.fullname = fullname(release, c.chart)
+		if other, dup := objects[c.fullname]; dup {
+			return nil, nil, fmt.Errorf("%s: %s has the same objects' name, %q, once cut to 63 characters: shorten the client names", c.where, other, c.fullname)
+		}
+		objects[c.fullname] = c.where
 		clients = append(clients, c)
 	}
 	oidc := value.AsMap(value.Dig(ctx, "platform.oidc"))
@@ -200,13 +210,18 @@ func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, ma
 	if u, ok := dcr["registrationUrl"].(string); !ok || u == "" {
 		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at")
 	}
-	release, ns := value.Str(value.Dig(ctx, "release.name")), value.Str(value.Dig(ctx, "release.namespace"))
 	values := map[string]M{}
+	secrets := map[string]string{}
 	for _, c := range clients {
-		names := M{"chart": c.chart, "fullname": fullname(release, c.chart), "secret": clientSecret(release, ns, true, c.name)}
+		secret := clientSecret(release, ns, true, c.name)
 		if s := value.Str(c.spec["secret"]); s != "" {
-			names["secret"] = s
+			secret = s
 		}
+		if other, dup := secrets[secret]; dup {
+			return nil, nil, fmt.Errorf("%s: %s writes the same Secret, %q: give each client its own secret", c.where, other, secret)
+		}
+		secrets[secret] = c.where
+		names := M{"chart": c.chart, "fullname": c.fullname, "secret": secret}
 		in := maps.Clone(ctx)
 		in["client"] = c.spec
 		in["names"] = names

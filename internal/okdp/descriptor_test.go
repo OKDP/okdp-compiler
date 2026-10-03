@@ -122,6 +122,12 @@ func TestDescriptorErrors(t *testing.T) {
 		"values not a map":    {"  - {contract: http, values: [url]}\n", `provides[0]: values: must be a map of contract fields, got []interface {}{"url"}`},
 		"secretRef not a map": {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", `provides[0]: secretRef: must be a map (name), got "creds"`},
 		"secret not a map":    {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", `provides[0]: secret: must be a map (generate, stringData), got []interface {}{"token"}`},
+		"secretRef no name":   {"  - {contract: http, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", `provides "other" (http): secretRef.name must be the name of a Secret, got <nil>`},
+		"secretRef name":      {"  - {contract: http, name: other, values: {url: u}, secretRef: {name: 1}}\n", `provides "other" (http): secretRef.name must be the name of a Secret, got 1`},
+		"one Secret": {
+			"  - {contract: http, name: a, values: {url: u}, secretRef: {name: s}, secret: {stringData: {token: t}}}\n  - {contract: http, name: b, values: {url: u}, secretRef: {name: s}, secret: {stringData: {token: t}}}\n",
+			`the credentials Secret of provides "b" (http): the credentials Secret of provides "a" (http) is the same object, Secret "s" in namespace "demo"`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := provideCompile(tc.provides)

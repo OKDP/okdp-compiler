@@ -429,7 +429,12 @@ A value that is not a list fails with
 `objects: must be a list of objects, got <value>`; absent or null, there
 are none. They follow the descriptor and the
 credentials Secrets in `Result.Objects` and in the `okdp` chart:
-[outputs](01_inputs_outputs.md#outputs).
+[outputs](01_inputs_outputs.md#outputs). No two of these may be one object
+of the cluster (the same API group, `kind`, namespace and name, an object
+without a namespace in the release's): `objects[<i>]: the descriptor is the
+same object, ConfigMap "<release>-okdp" in namespace "<namespace>": give
+each object its own name`
+([objects section](01_inputs_outputs.md#objects-section)).
 
 ### instance
 
@@ -466,7 +471,7 @@ A list of outputs, the connections the instance publishes. Each item:
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
 | `name` | string | the release name | The output's name, the one other instances reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
 | `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; under the release name, the values the contract's `x-okdp-internal` convention gives): [contracts](01_inputs_outputs.md#contracts). |
-| `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept. |
+| `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string, else `provides "<name>" (<contract>): secretRef.name must be the name of a Secret, got <value>`. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
 
 Other keys are ignored. A value that is not a list fails with
@@ -501,8 +506,9 @@ The Secret is named after `secretRef.name` when given, else
 and the output has a `secretRef` only when the mapping gives one. A
 `secret` with neither a non-empty `generate` nor a non-empty `stringData`
 fails with `<service>: output "<name>": secret needs stringData or generate`
-(`<service>`: the `name` of `service.yaml`). The rendered objects and their
-labels: [credentials Secrets](01_inputs_outputs.md#credentials-secrets).
+(`<service>`: the `name` of `service.yaml`); two outputs whose Secrets have
+one name fail as [`objects`](#objects) of one name do. The rendered objects
+and their labels: [credentials Secrets](01_inputs_outputs.md#credentials-secrets).
 
 ### oidcClients
 
@@ -533,7 +539,7 @@ registers its own by OIDC Dynamic Client Registration, per
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `name` | string | `""` | `""`: the service's main client, one at most. Else the client's name, unique: lowercase letters, digits and `-`, starting and ending with a letter or a digit. It names the client's chart, its objects and its Secret. |
+| `name` | string | `""` | `""`: the service's main client, one at most. Else the client's name, unique: lowercase letters, digits and `-`, starting and ending with a letter or a digit, 54 characters at most (its chart key `<name>-oidc-dcr` is a DNS-1123 label). It names the client's chart, its objects and its Secret. |
 | `grantTypes` | list of strings | required | The OAuth grant types the client registers (`authorization_code`, `refresh_token`, `client_credentials`...), a non-empty list of non-empty strings. |
 | `redirectUris` | list of strings | `[]` | Its redirect URIs, each non-empty. |
 | `scope` | string | `platform.oidc.scope` | The scope it requests, space separated. |
@@ -550,7 +556,10 @@ keys; how they become the values of the client's chart:
 
 Every mode checks the clients, after the mapping: each client is a map of
 these keys only, each of its type, `name` of the form above, `grantTypes`
-given; one client at most has no name, and names are unique. As soon as the
+given; one client at most has no name, names are unique, and so are the
+names of their objects, `<release>-<chart key>` cut to 63 characters
+([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)). In
+`dcr` mode, no two clients write one Secret. As soon as the
 mapping declares a client, its chart key belongs to the compiler:
 `service.yaml` may not list it, nor `output` compute it. Only `dcr` mode
 reads the oidc-dcr chart, from the chart cache
@@ -884,7 +893,7 @@ The variables of every expression:
 
 | Variable | Value |
 |---|---|
-| `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace` |
+| `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
 | `values` | The parameters: the package's `values.yaml`, the platform's and the instance's values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection, nor in its upstream files (a file with `{{` is left out). Without `global` and `connections`. `upstream.<key>` of a chart that accepts upstream values is its files then its inline values, merged as they will be applied (the `append` lists appended); the other keys of `upstream` stay as written. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
@@ -1181,17 +1190,20 @@ Other errors of the mapping:
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
 | `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |
 | `objects: must be a list of objects, got <value>`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
+| `<object>: <other> is the same object, <kind> "<name>" in namespace "<namespace>": give each object its own name` | two of OKDP's own objects, the descriptor, the credentials Secrets and [`objects`](#objects), of one API group, kind, namespace and name ([objects section](01_inputs_outputs.md#objects-section)) |
 | `output: <key>: must be a map of the chart's values, got <value>` | a chart of [`output`](#output) whose values are a scalar or a list |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
 | `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
 | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>`, `provides[<i>]: <key>: must be a map ..., got <value>` | a [`provides`](#provides) item, or its `values`, `secretRef` or `secret`, of another shape |
-| `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
+| `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `provides "<name>" (<contract>): secretRef.name must be the name of a Secret, got <value>` | [`provides`](#provides) |
 | `oidcClients: must be a list of OAuth clients, got <value>` | [`oidcClients`](#oidcclients) is not a list |
 | `<client>: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got <value>`, `<client>: unknown key(s) <keys> (allowed: name, grantTypes, ...)` | a client that is not a map, or has another key |
-| `<client>: name <value> must be lowercase letters, digits and "-" (it names the chart <name>-oidc-dcr, its objects and its Secret)` | a `name` that is not a string of that form |
+| `<client>: name <value> must be lowercase letters, digits and "-", 54 characters at most (it names the chart <name>-oidc-dcr, its objects and its Secret)` | a `name` that is not a string of that form |
 | `<client>: grantTypes is required: a list of OAuth grant types (authorization_code, refresh_token, client_credentials...)` | `grantTypes` absent, empty, or holding an item that is not a non-empty string |
 | `<client>: redirectUris must be a list of URLs, got <value>`, `<client>: <key> must be a string, got <value>`, `<client>: public must be true or false, got <value>`, `<client>: request must be a map of registration fields, got <value>` | a key of another type (`<key>`: `scope`, `clientName`, `secret`, `caSecret`) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
+| `<client>: <other> has the same objects' name, "<fullname>", once cut to 63 characters: shorten the client names` | two names that differ only past the 63 characters of `<release>-<name>-oidc-dcr` ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) |
+| `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](#oidcclientsecret)'s |
 | `service.yaml: charts.<chart>: the chart of <client> is added by the compiler: remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
 | `<client>: oidc-dcr values: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 

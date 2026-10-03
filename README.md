@@ -131,7 +131,8 @@ computed values, the index, the objects and the dependencies
 before any is written, and each directory holds only what its flag writes
 there: the files of a previous compile no longer written are removed, a
 directory holding any other file is refused. `--release` and
-`--namespace` are required: the values are compiled for them.
+`--namespace` are required, names Kubernetes and Helm accept (a release of
+53 characters at most): the values are compiled for them.
 
 ## Layout
 

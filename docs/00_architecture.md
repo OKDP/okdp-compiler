@@ -96,7 +96,10 @@ compile, so a YAML error in it surfaces at `Compile`, and the other files
 of the package are read by each compile.
 
 `okdp.Compile` (`internal/okdp/pipeline.go`) checks its required inputs
-(`Definition.Files`, `Charts`, `Contracts`, `Release`, `Namespace`) and
+(`Definition.Files`, `Charts`, `Contracts`, `Release`, `Namespace`), the
+release, a name Helm accepts (`isRelease`, `internal/okdp/names.go`: a
+DNS-1123 label of 53 characters at most), and the namespace, a DNS-1123
+label (`dnsLabel`), then
 `service.yaml` again, for a `Definition` built in memory: a `name` and a
 `version`, each `require` entry a key, its condition one expression, no
 chart `okdp`, each chart key a DNS label (it names files and the
@@ -188,10 +191,12 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `objects` item must be a whole manifest, with a `kind` and a
    `metadata.name`.
 6. **OAuth clients** (`oidcClients`, `clientCharts`, `internal/okdp/oidc.go`).
-   The clients are checked in every mode
+   The clients are checked in every mode, their names and their objects'
+   names (`fullname`) unique
    ([oidcClients](specs/02_service_definition.md#oidcclients)). In
    `dcr` mode, OIDC enabled, with at least one client, the platform's
-   registration settings are checked, and the embedded template
+   registration settings are checked, no two clients write one Secret, and
+   the embedded template
    `internal/okdp/oidc-dcr.cel.yaml` is evaluated once per client
    (`compile.EvalTemplate`) on the context plus `client` and `names`: the
    values of the client's chart. Then, in any mode with a client, `clientCharts`
@@ -207,14 +212,17 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    against its schema (`checkContract`); published
    under the release name, it is compared with what the `resolver`
    computes for an internal reference to this instance
-   (`x-okdp-internal`): provider and consumers compute the same names. An
+   (`x-okdp-internal`): provider and consumers compute the same names. A
+   `secretRef` names a Secret, its `name` required. An
    entry with a `secret` gets its credentials Secret
    (`credentialsSecret`, `internal/okdp/secrets.go`) ([Descriptor
    ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap), [Credentials
    Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
 8. **Objects** (`Compile`, `objectsChart`, `internal/okdp/objects.go`).
    `Result.Objects` is the descriptor, the credentials Secrets, then the
-   mapping's `objects`.
+   mapping's `objects`, no two of them one object of the cluster: the same
+   API group, kind, namespace and name (`uniqueObjects`;
+   [objects section](specs/01_inputs_outputs.md#objects-section)).
    `objectsChart` adds the `okdp` chart (`ObjectsChart`) to the copy of the
    charts, rendered by the platform's objects chart, and copies of the
    objects to the mapping's output as its values, `{objects: [...]}`; the
@@ -288,7 +296,7 @@ neither knows OKDP.
 | | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's, no `{{` in the instance's (`valuesLayers`) | `readJSON` (`connections.go`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context; then the requirements under a condition (`requireWhen`) | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream`; `compile.Condition` and `functions` (`mapping.go`) for the conditions |
 | | `connections.go` | connection references, `complete`, `Dependency`, `readJSON`; the contracts (`readContract`) and the check of values against them (`checkContract`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
-| | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference |
+| | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference; `pipeline.go`, for the release and namespace; `oidc.go`, for a client's name |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `secrets.go` | `okdpGeneratedSecret`, credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go` |
@@ -438,7 +446,8 @@ express, or what more than one reader needs:
 - the mode (no chart in `existing` mode) and the platform's settings: their
   defaults and types (`dcrSettings`), and what `dcr` mode requires of them;
 - the names: the chart key, the objects' full name (cut to 63 characters,
-  as `okdpFullname`), the Secret. The Secret name is also what
+  as `okdpFullname`; two clients cut to one name are refused), the Secret.
+  The Secret name is also what
   `oidcClientSecret` and `platform.oidcClientSecret` return, so the
   mapping that reads the Secret and the Job that writes it agree (a client
   that sets its own `secret` names it in the mapping too). The template

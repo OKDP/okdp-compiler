@@ -68,8 +68,8 @@ okdp-compile --version
 | `--instance` | none | instance directory: the upstream values files `service.yaml` names (`upstream.<key>.yaml`, by chart key; [instance values](specs/01_inputs_outputs.md#instance-values)) |
 | `--platform` | none | a platform values file: `global`, `global.okdp` among them ([platform values](specs/01_inputs_outputs.md#platform-values)); repeatable, merged in order as `helm -f` files, before the `-f` files |
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--platform` files. It sets no `global` but the keys the parameter schema declares under it ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
-| `--release` | required | release name: the Helm release the values are compiled for, which renders them |
-| `--namespace` | required | namespace: the release's |
+| `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
+| `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file, out of the directories below |
 | `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`), the chart index and the dependencies to a directory, one file each; it holds only these files |
 | `--umbrella` | none | write the instance as one chart to a directory: `Chart.yaml`, an umbrella over the upstream charts, and `instance.values.yaml`, its values; a directory other than `--emit-dir`'s, holding only these files |
@@ -672,6 +672,7 @@ with status 2.
 | Message | Cause | Fix |
 |---|---|---|
 | `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
+| `Inputs.Release "Demo_App": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`, `Inputs.Namespace "<name>": a namespace name, ...` | `--release` or `--namespace` is not a name Kubernetes and Helm accept | give one of that form ([inputs](specs/01_inputs_outputs.md)) |
 | `--instance: stat instances/demo: no such file or directory`, `--charts charts.tgz: not a directory` | a directory flag (`--package`, `--charts`, `--contracts`, `--instance`) names no directory | fix the path |
 | `unexpected argument "instance.yaml": every input is a flag (-f before each values file)` | an argument that is not a flag, here a second values file after one `-f`; exit status 2, nothing compiled | one `-f` per values file |
 | `refusing to write in out: notes.txt is not an output of okdp-compile` | the `--emit-dir` or `--umbrella` directory holds a file the flag does not write (`Chart.lock` and `charts/` of `helm dependency build` included); nothing is written | another directory, or remove the file |

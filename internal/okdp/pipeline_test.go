@@ -176,6 +176,10 @@ func TestCompileErrors(t *testing.T) {
 		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"ingress": nil}}}), "global.okdp.ingress.suffix is required"},
 		"missing release": {Inputs{Charts: charts, Contracts: contracts, Namespace: "demo"}, "Release is required"},
 		"no chart cache":  {Inputs{Contracts: contracts, Release: "demo-app", Namespace: "demo"}, "Inputs.Charts is required"},
+		"release":         {Inputs{Charts: charts, Contracts: contracts, Release: "demo_app", Namespace: "demo"}, `Inputs.Release "demo_app": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`},
+		"long release":    {Inputs{Charts: charts, Contracts: contracts, Release: strings.Repeat("a", 54), Namespace: "demo"}, `Inputs.Release "aaaa`},
+		"namespace":       {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
+		"long namespace":  {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Compile(def, tc.in)
@@ -183,6 +187,12 @@ func TestCompileErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	// The longest release and namespace.
+	in := inputs()
+	in.Release, in.Namespace = strings.Repeat("a", 53), strings.Repeat("a", 63)
+	if _, err := Compile(def, in); err != nil {
+		t.Errorf("53-character release, 63-character namespace: %v", err)
 	}
 	// A definition built in memory needs its package files.
 	if _, err := Compile(&Definition{Service: def.Service}, inputs()); err == nil || !strings.Contains(err.Error(), "Definition.Files is required") {
@@ -466,6 +476,12 @@ objects:
 	if res, err = Compile(&d, inputs()); err != nil || !slices.Equal(slices.Sorted(maps.Keys(res.Values)), []string{"okdp"}) {
 		t.Errorf("no output: %v %v", err, res)
 	}
+	// The descriptor's name in another namespace, or for a kind of another
+	// API group: other objects.
+	d.Mapping = []byte("objects:\n  - {apiVersion: v1, kind: ConfigMap, metadata: {name: demo-app-okdp, namespace: other}}\n  - {apiVersion: example.org/v1, kind: ConfigMap, metadata: {name: demo-app-okdp}}\n")
+	if res, err = Compile(&d, inputs()); err != nil || len(res.Objects) != 3 {
+		t.Errorf("other objects: %v %v", err, res)
+	}
 	for name, tc := range map[string]struct {
 		mapping string
 		charts  chart.Specs
@@ -474,6 +490,8 @@ objects:
 	}{
 		"not a list":      {"objects: {a: 1}\n", nil, nil, "objects: must be a list of objects"},
 		"not an object":   {"objects: [{metadata: {name: x}}]\n", nil, nil, "objects[0]: not an object with a kind and a metadata.name"},
+		"the descriptor":  {"objects: [{apiVersion: v1, kind: ConfigMap, metadata: {name: demo-app-okdp}}]\n", nil, nil, `objects[0]: the descriptor is the same object, ConfigMap "demo-app-okdp" in namespace "demo": give each object its own name`},
+		"another version": {"objects:\n  - {apiVersion: external-secrets.io/v1beta1, kind: ExternalSecret, metadata: {name: x, namespace: demo}}\n  - {apiVersion: external-secrets.io/v1, kind: ExternalSecret, metadata: {name: x}}\n", nil, nil, `objects[1]: objects[0] is the same object, ExternalSecret.external-secrets.io "x" in namespace "demo"`},
 		"in output":       {"output: {okdp: {}}\n", nil, nil, `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output`},
 		"in service.yaml": {"{}\n", chart.Specs{"okdp": {Source: objectsSource}}, nil, "service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml"},
 		"no objects chart": {

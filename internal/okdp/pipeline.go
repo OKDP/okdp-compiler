@@ -47,6 +47,7 @@ package okdp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
@@ -64,8 +65,8 @@ type Inputs struct {
 	Contracts fs.FS            // the contract schemas: <contract>.schema.json
 	Platform  []map[string]any // platform values layers, in order (helm -f): global, global.okdp among them; see chart.ParseValues
 	Values    []map[string]any // instance values layers, in order, after Platform: no global but the keys the parameter schema declares (valuesLayers)
-	Release   string
-	Namespace string
+	Release   string           // the Helm release: a DNS-1123 label of 53 characters at most
+	Namespace string           // the release's namespace: a DNS-1123 label
 }
 
 // Result: what a compile produces.
@@ -144,6 +145,10 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 		return nil, errors.New("Inputs.Release is required")
 	case in.Namespace == "":
 		return nil, errors.New("Inputs.Namespace is required")
+	case !isRelease(in.Release):
+		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, releaseMax)
+	case len(in.Namespace) > 63 || !dnsLabel.MatchString(in.Namespace):
+		return nil, fmt.Errorf("Inputs.Namespace %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Namespace)
 	}
 	svc := &def.Service
 	// Checked again: a Definition may be built in memory.
@@ -180,14 +185,22 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 		return nil, err
 	}
 	// The descriptor ConfigMap, checked against the contracts, and the
-	// credentials Secrets of the outputs; then the mapping's objects.
+	// credentials Secrets of the outputs; then the mapping's objects, no
+	// two of them one object of the cluster.
 	desc, credentials, err := descriptor(in, mctx, res.instance, res.provides)
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Computed: res.output, Objects: []map[string]any{desc}, Dependencies: deps}
-	for _, o := range append(credentials, res.objects...) {
-		out.Objects = append(out.Objects, value.AsMap(o))
+	own := append([]ownObject{{"the descriptor", desc}}, credentials...)
+	for i, o := range res.objects {
+		own = append(own, ownObject{fmt.Sprintf("objects[%d]", i), value.AsMap(o)})
+	}
+	if err := uniqueObjects(own, in.Namespace); err != nil {
+		return nil, err
+	}
+	out := &Result{Computed: res.output, Dependencies: deps}
+	for _, o := range own {
+		out.Objects = append(out.Objects, o.object)
 	}
 	// The okdp chart renders them, unless the caller deploys them otherwise.
 	if !set.withoutObjects {

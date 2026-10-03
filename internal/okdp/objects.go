@@ -1,6 +1,7 @@
 // Objects: the okdp chart, the chart of OKDP's own objects the compiler
 // adds to every compile, and the platform's charts (global.okdp.charts) the
-// compiler's own charts are rendered with.
+// compiler's own charts are rendered with; no two of OKDP's own objects are
+// one object of the cluster.
 package okdp
 
 import (
@@ -100,4 +101,40 @@ func objectsChart(svc *Service, objects []map[string]any, output M, src chart.Re
 	}
 	out.Charts[ObjectsChart] = chart.Spec{Source: src}
 	return &out, nil
+}
+
+// ownObject: one of OKDP's own objects, and what gives it, for the errors:
+// the descriptor, the credentials Secret of provides "<name>" (<contract>),
+// objects[<i>].
+type ownObject struct {
+	from   string
+	object M
+}
+
+// uniqueObjects: the first two objects that are one object of the cluster,
+// refused: the same API group (of apiVersion, whatever its version), kind,
+// namespace (namespace, the release's, for an object without one) and
+// name. Applied, the second would replace the first.
+func uniqueObjects(objects []ownObject, namespace string) error {
+	seen := map[[4]string]string{}
+	for _, o := range objects {
+		group, _, grouped := strings.Cut(value.Str(o.object["apiVersion"]), "/")
+		if !grouped {
+			group = ""
+		}
+		md := value.AsMap(o.object["metadata"])
+		kind, ns, name := value.Str(o.object["kind"]), value.Str(md["namespace"]), value.Str(md["name"])
+		if ns == "" {
+			ns = namespace
+		}
+		id := [4]string{group, kind, ns, name}
+		if other, dup := seen[id]; dup {
+			if group != "" {
+				kind += "." + group
+			}
+			return fmt.Errorf("%s: %s is the same object, %s %q in namespace %q: give each object its own name", o.from, other, kind, name, ns)
+		}
+		seen[id] = o.from
+	}
+	return nil
 }
