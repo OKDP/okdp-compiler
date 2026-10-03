@@ -540,8 +540,8 @@ compiler adds itself, each a source as in `service.yaml`
 
 | Key | Default | Renders |
 |---|---|---|
-| `objects` | none: required | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document) |
-| `oidcDcr` | `{repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.5.0}` (`compiler.DcrSource`) | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes |
+| `objects` | none: required, unless the compile leaves the okdp chart out (`compiler.WithoutObjectsChart`) | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document) |
+| `oidcDcr` | `{repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.5.0}` (`compiler.DcrSource()`) | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes |
 
 Every compile checks them, after the [requirements](#requirements), the
 types of the [settings the compiler reads](#fields-the-compiler-reads),
@@ -865,7 +865,7 @@ type ChartRef struct {
 | Compiled chart | `Result.Charts[<key>]` |
 |---|---|
 | a chart of `service.yaml` | `charts.<key>.source` ([sources](02_service_definition.md#sources)) |
-| the chart of an OAuth client | `global.okdp.charts.oidcDcr`, `compiler.DcrSource` by default ([Platform charts](#platform-charts)) |
+| the chart of an OAuth client | `global.okdp.charts.oidcDcr`, `compiler.DcrSource()` by default ([Platform charts](#platform-charts)) |
 | the okdp chart | `global.okdp.charts.objects` |
 
 The final values of a key are rendered by its upstream chart, from its
@@ -1118,7 +1118,7 @@ manifest, with a `kind` and a `metadata.name`
 ### The okdp chart
 
 `compiler.ObjectsChart` (`"okdp"`): the chart of OKDP's own objects, which
-the compiler adds to every compile, rendered by the platform's objects
+the compiler adds to every compile (unless `compiler.WithoutObjectsChart`), rendered by the platform's objects
 chart (`global.okdp.charts.objects`: [Platform charts](#platform-charts)),
 an okdp-objects chart (values `objects: []`; its template prints each item
 of `objects` as one YAML document):
@@ -1139,7 +1139,9 @@ mapping output "okdp": the chart of OKDP's own objects is compiled from the obje
 
 The descriptor, the credentials Secrets and the objects section then reach
 the cluster with the upstream charts. `Objects` holds them too, for a
-caller that deploys them otherwise.
+caller that deploys them otherwise: `compiler.CompileContext` with
+`compiler.WithoutObjectsChart()` then leaves the okdp chart out of `Charts`
+and `Values`.
 
 ### Dependencies
 

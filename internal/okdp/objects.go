@@ -24,10 +24,11 @@ const ObjectsChart = "okdp"
 
 // platformCharts: the charts the platform renders the compiler's own charts
 // with (global.okdp.charts of okdp): objects, the chart of OKDP's own objects
-// (okdp-objects, required), and oidcDcr, the chart of the OAuth clients in
-// dcr mode (DcrSource by default). Another key is refused: a misspelled
-// oidcDcr would otherwise leave the default in place.
-func platformCharts(okdp M) (objects, dcr chart.Ref, err error) {
+// (okdp-objects, required unless the compile renders no okdp chart,
+// WithoutObjectsChart), and oidcDcr, the chart of the OAuth clients in dcr
+// mode (DcrSource by default). Another key is refused: a misspelled oidcDcr
+// would otherwise leave the default in place.
+func platformCharts(okdp M, needObjects bool) (objects, dcr chart.Ref, err error) {
 	charts, ok := okdp["charts"].(M)
 	if !ok && okdp["charts"] != nil {
 		return objects, dcr, fmt.Errorf("global.okdp.charts must be a map (objects, oidcDcr), got %s", value.Short(okdp["charts"]))
@@ -42,11 +43,13 @@ func platformCharts(okdp M) (objects, dcr chart.Ref, err error) {
 		slices.Sort(unknown)
 		return objects, dcr, fmt.Errorf("global.okdp.charts: unknown key(s) %s (allowed: objects, oidcDcr)", strings.Join(unknown, ", "))
 	}
-	if charts["objects"] == nil {
+	if charts["objects"] == nil && needObjects {
 		return objects, dcr, errors.New("global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml")
 	}
-	if objects, err = platformChart(charts["objects"], "global.okdp.charts.objects"); err != nil {
-		return objects, dcr, err
+	if charts["objects"] != nil {
+		if objects, err = platformChart(charts["objects"], "global.okdp.charts.objects"); err != nil {
+			return objects, dcr, err
+		}
 	}
 	dcr = DcrSource
 	if charts["oidcDcr"] != nil {

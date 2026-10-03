@@ -170,8 +170,9 @@ func checkClient(i int, v any) (oidcClient, error) {
 // oidcClients: the clients of the mapping's oidcClients section, checked in
 // every mode (one main client at most, unique names), and, in dcr mode, the
 // values of the oidc-dcr chart of each: chart -> values, from dcrTemplate.
-// The platform must then register anonymously, at its registrationUrl.
-func oidcClients(ctx M, section []any) ([]oidcClient, map[string]M, error) {
+// The platform must then register anonymously, at its registrationUrl. The
+// template is evaluated within budget (nil: none).
+func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, map[string]M, error) {
 	var clients []oidcClient
 	seen := map[string]string{}
 	for i, v := range section {
@@ -209,7 +210,7 @@ func oidcClients(ctx M, section []any) ([]oidcClient, map[string]M, error) {
 		in := maps.Clone(ctx)
 		in["client"] = c.spec
 		in["names"] = names
-		v, err := compile.EvalTemplate(dcrTemplate, in, functions(in)...)
+		v, err := compile.EvalTemplate(dcrTemplate, in, budget, functions(in)...)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %s values: %w", c.where, DcrChart, err)
 		}

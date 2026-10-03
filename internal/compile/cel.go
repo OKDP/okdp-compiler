@@ -28,6 +28,7 @@ package compile
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
+	"github.com/google/cel-go/interpreter"
 	"gopkg.in/yaml.v3"
 
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -295,9 +297,33 @@ func mapKey(n *yaml.Node) (string, error) {
 // celEngine: evaluates a document. It caches the CEL environments, built
 // with the caller's host functions.
 type celEngine struct {
-	envs  map[string]*cel.Env
-	funcs []cel.EnvOption
+	envs   map[string]*cel.Env
+	funcs  []cel.EnvOption
+	budget *Budget // nil: no cancellation, no cost limit
 }
+
+// Budget: what the evaluations of one compile may use, shared by its
+// documents (the mapping, the templates): its context, which cancels them,
+// and a total CEL cost, when limited. Not safe for concurrent use: one per
+// compile.
+type Budget struct {
+	ctx   context.Context
+	limit uint64 // 0: no limit
+	used  uint64 // counted under a limit only
+}
+
+// NewBudget: the budget of a compile: cancelled with ctx (nil: never), its
+// expressions' total CEL cost at most limit (0: no limit).
+func NewBudget(ctx context.Context, limit uint64) *Budget {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &Budget{ctx: ctx, limit: limit}
+}
+
+// interruptEvery: how many iterations of a comprehension run between two
+// checks of the context.
+const interruptEvery = 100
 
 // env: the CEL environment for these variable names, cached.
 func (e *celEngine) env(names []string) (*cel.Env, error) {
@@ -450,11 +476,7 @@ func (e *celEngine) eval(expr string, scope M) (any, error) {
 	if iss.Err() != nil {
 		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), iss.Err())
 	}
-	prg, err := env.Program(ast)
-	if err != nil {
-		return nil, err
-	}
-	out, _, err := prg.Eval(map[string]any(scope))
+	out, err := e.run(env, ast, scope)
 	if err != nil {
 		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
 	}
@@ -464,6 +486,55 @@ func (e *celEngine) eval(expr string, scope M) (any, error) {
 		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
 	}
 	return v, nil
+}
+
+// run: a compiled expression evaluated in scope, within the budget: the
+// context checked before and during the evaluation, its cost counted
+// against the limit.
+func (e *celEngine) run(env *cel.Env, ast *cel.Ast, scope M) (ref.Val, error) {
+	b := e.budget
+	if b == nil {
+		prg, err := env.Program(ast)
+		if err != nil {
+			return nil, err
+		}
+		out, _, err := prg.Eval(map[string]any(scope))
+		return out, err
+	}
+	if err := b.ctx.Err(); err != nil {
+		return nil, err
+	}
+	opts := []cel.ProgramOption{cel.InterruptCheckFrequency(interruptEvery)}
+	if b.limit > 0 {
+		if b.used >= b.limit {
+			return nil, b.exceeded()
+		}
+		opts = append(opts, cel.CostLimit(b.limit-b.used))
+	}
+	prg, err := env.Program(ast, opts...)
+	if err != nil {
+		return nil, err
+	}
+	out, details, err := prg.ContextEval(b.ctx, map[string]any(scope))
+	if details != nil && details.ActualCost() != nil {
+		b.used += *details.ActualCost()
+	}
+	var cancelled interpreter.EvalCancelledError
+	switch {
+	case err == nil:
+		return out, nil
+	case errors.As(err, &cancelled) && cancelled.Cause == interpreter.CostLimitExceeded:
+		return nil, b.exceeded()
+	case b.ctx.Err() != nil:
+		// Interrupted (CEL's "operation interrupted"): the context's error.
+		return nil, b.ctx.Err()
+	}
+	return nil, err
+}
+
+// exceeded: the error of a compile past its cost limit.
+func (b *Budget) exceeded() error {
+	return fmt.Errorf("the expressions of the compile exceed its CEL cost limit (%d)", b.limit)
 }
 
 // piece: a literal text, or the source of an expression.
@@ -876,11 +947,11 @@ type Doc struct {
 }
 
 // Load: the document b on the context ctx, with the host functions funcs
-// besides the language's own (str, first, and those of functions.go): its
-// maps read in order as YAML 1.1, its top level, let and errors checked
-// (checkTop), its let bindings evaluated in order, then its errors section,
-// every message collected before failing.
-func Load(b []byte, ctx M, funcs ...cel.EnvOption) (*Doc, error) {
+// besides the language's own (str, first, and those of functions.go),
+// within budget (nil: none): its maps read in order as YAML 1.1, its top
+// level, let and errors checked (checkTop), its let bindings evaluated in
+// order, then its errors section, every message collected before failing.
+func Load(b []byte, ctx M, budget *Budget, funcs ...cel.EnvOption) (*Doc, error) {
 	top, err := parseDoc(b)
 	if err != nil {
 		return nil, err
@@ -888,7 +959,7 @@ func Load(b []byte, ctx M, funcs ...cel.EnvOption) (*Doc, error) {
 	if err := checkTop(top); err != nil {
 		return nil, err
 	}
-	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs}
+	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs, budget: budget}
 	scope, err := e.bind(top, ctx)
 	if err != nil {
 		return nil, err
@@ -911,9 +982,10 @@ func (d *Doc) Section(k string) (any, error) {
 }
 
 // EvalTemplate: a template (YAML + CEL) on the context ctx, with the host
-// functions funcs: its let bindings and errors, then its values section.
-func EvalTemplate(b []byte, ctx M, funcs ...cel.EnvOption) (M, error) {
-	d, err := Load(b, ctx, funcs...)
+// functions funcs, within budget (nil: none): its let bindings and errors,
+// then its values section.
+func EvalTemplate(b []byte, ctx M, budget *Budget, funcs ...cel.EnvOption) (M, error) {
+	d, err := Load(b, ctx, budget, funcs...)
 	if err != nil {
 		return nil, err
 	}

@@ -34,12 +34,12 @@ type mapped struct {
 	clients  []any // the OAuth clients (oidcClients), checked by oidc.go
 }
 
-// runMapping: runs a mapping (mapping.cel.yaml) on the context ctx, its
-// sections in order, each of its shape: null (absent, $if) is empty, a value
-// of another shape is refused. A null chart of output is left out, as by
-// $if.
-func runMapping(b []byte, ctx M) (*mapped, error) {
-	d, err := compile.Load(b, ctx, functions(ctx)...)
+// runMapping: runs a mapping (mapping.cel.yaml) on the context ctx, within
+// budget (nil: none), its sections in order, each of its shape: null
+// (absent, $if) is empty, a value of another shape is refused. A null chart
+// of output is left out, as by $if.
+func runMapping(budget *compile.Budget, b []byte, ctx M) (*mapped, error) {
+	d, err := compile.Load(b, ctx, budget, functions(ctx)...)
 	if err != nil {
 		return nil, err
 	}

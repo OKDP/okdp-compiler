@@ -1,6 +1,8 @@
 package okdp
 
 import (
+	"context"
+	"errors"
 	"maps"
 	"reflect"
 	"slices"
@@ -127,6 +129,44 @@ func TestCompile(t *testing.T) {
 }
 
 // TestCompileErrors: mapping errors, platform values and missing inputs.
+// TestCompileContext: a compile cancelled, bounded by a cost limit, and
+// without the okdp chart.
+func TestCompileContext(t *testing.T) {
+	v := M{"replicas": float64(3)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := CompileContext(ctx, def, inputs(v)); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: got %v, want context.Canceled", err)
+	}
+	if _, err := CompileContext(context.Background(), def, inputs(v), WithCostLimit(2)); err == nil || !strings.Contains(err.Error(), "exceed its CEL cost limit (2)") {
+		t.Errorf("past the cost limit: got %v", err)
+	}
+	if _, err := CompileContext(context.Background(), def, inputs(v), WithCostLimit(1000)); err != nil {
+		t.Errorf("within the cost limit: %v", err)
+	}
+	// Without the okdp chart, global.okdp.charts.objects is not required.
+	files := maps.Clone(pkg)
+	files["values.yaml"] = &fstest.MapFile{Data: []byte("replicas: 1\nglobal: {okdp: {ingress: {suffix: example.org}}}\n")}
+	bare := *def
+	bare.Files = files
+	if _, err := Compile(&bare, inputs(v)); err == nil || !strings.Contains(err.Error(), "global.okdp.charts.objects is required") {
+		t.Errorf("with the okdp chart: got %v, want global.okdp.charts.objects required", err)
+	}
+	res, err := CompileContext(context.Background(), &bare, inputs(v), WithoutObjectsChart())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := slices.Sorted(maps.Keys(res.Charts)); !slices.Equal(got, []string{"app"}) {
+		t.Errorf("charts: got %v, want app only", got)
+	}
+	if _, ok := res.Values[ObjectsChart]; ok {
+		t.Errorf("values of %s written", ObjectsChart)
+	}
+	if len(res.Objects) != 1 || res.Objects[0]["kind"] != "ConfigMap" {
+		t.Errorf("objects: got %v, want the descriptor", res.Objects)
+	}
+}
+
 func TestCompileErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
 		in   Inputs

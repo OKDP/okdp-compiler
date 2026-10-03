@@ -43,7 +43,7 @@ func dcrValues(ctx M, clients ...M) (map[string]M, error) {
 	for _, c := range clients {
 		section = append(section, value.Copy(c))
 	}
-	_, values, err := oidcClients(ctx, section)
+	_, values, err := oidcClients(nil, ctx, section)
 	return values, err
 }
 
@@ -220,17 +220,17 @@ func TestDcrPlatform(t *testing.T) {
 func TestDcrModes(t *testing.T) {
 	ctx := dcrCtx()
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = false
-	clients, values, err := oidcClients(ctx, []any{M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}}})
+	clients, values, err := oidcClients(nil, ctx, []any{M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}}})
 	if err != nil || values != nil || len(clients) != 2 || clients[1].chart != "console-oidc-dcr" {
 		t.Errorf("existing mode: %v %#v %#v", err, values, clients)
 	}
-	if _, _, err := oidcClients(ctx, []any{M{"name": "console"}}); err == nil || !strings.Contains(err.Error(), "grantTypes is required") {
+	if _, _, err := oidcClients(nil, ctx, []any{M{"name": "console"}}); err == nil || !strings.Contains(err.Error(), "grantTypes is required") {
 		t.Errorf("existing mode, checked: %v", err)
 	}
 	// No client: nothing to check on the platform.
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = true
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["authMethod"] = "bearer"
-	if _, values, err := oidcClients(ctx, nil); err != nil || values != nil {
+	if _, values, err := oidcClients(nil, ctx, nil); err != nil || values != nil {
 		t.Errorf("no client: %v %#v", err, values)
 	}
 	for _, tc := range []struct {
@@ -247,7 +247,7 @@ func TestDcrModes(t *testing.T) {
 		}
 		ctx := dcrCtx()
 		value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = tc.dcr
-		res, err := runMapping([]byte("output:\n  x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n"), ctx)
+		res, err := runMapping(nil, []byte("output:\n  x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n"), ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +286,7 @@ func TestDcrErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := dcrCtx()
 			maps.Copy(value.AsMap(value.Dig(ctx, "platform.oidc.dcr")), tc.dcr)
-			_, _, err := oidcClients(ctx, tc.clients)
+			_, _, err := oidcClients(nil, ctx, tc.clients)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}

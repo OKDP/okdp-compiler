@@ -483,13 +483,29 @@ Helm](#rendering-with-helm), `Result.Charts` being the index.
   [OKDP's own objects](specs/01_inputs_outputs.md#the-okdp-chart),
   `compiler.DcrChart` (`oidc-dcr`) the chart key of a service's main
   [OAuth client](specs/01_inputs_outputs.md#oauth-client-charts), and the
-  suffix of the others; `compiler.DcrSource` is the oidc-dcr chart they
+  suffix of the others; `compiler.DcrSource()` is the oidc-dcr chart they
   are rendered by unless the platform names another
   ([platform charts](specs/01_inputs_outputs.md#platform-charts)): the
   chart a chart cache needs for a `dcr` platform.
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
   the inputs are not changed.
+- `compiler.CompileContext(ctx, def, in, opts...)` is `Compile` cancelled
+  with `ctx`: between the stages, and inside an expression at the next
+  check of a comprehension (every 100 iterations); it then returns
+  `ctx.Err()`. Its options:
+  - `compiler.WithCostLimit(n)` bounds the total CEL cost (cel-go's runtime
+    cost: about one unit per operation, list element and character
+    compared) of the compile's expressions, the mapping's and the OAuth
+    client templates': past it, the compile fails with `the expressions of
+    the compile exceed its CEL cost limit (n)`. A server compiling packages
+    it does not review sets one, as an instance's values can make an
+    expression iterate over them. The example costs under 100.
+  - `compiler.WithoutObjectsChart()` leaves the
+    [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart) out of
+    `Result.Charts` and `Result.Values`, for a caller that deploys
+    `Result.Objects` otherwise; `global.okdp.charts.objects` is then not
+    required.
 - Errors are messages for the user, returned as they are; the package
   defines no error types. A message carries its context: the file, the
   parameter path, the chart key, the mapping section (see

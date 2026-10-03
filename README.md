@@ -151,14 +151,4 @@ directory holding any other file is refused. `--release` and
 
 ## Documentation
 
-[docs/README.md](docs/README.md) indexes the documentation:
-
-- [Usage](docs/01_usage.md): install, the command line, the Go library, CI and
-  GitOps, troubleshooting;
-- [Writing a package](docs/02_writing_package.md): a package, its upstream
-  charts and its service definition, step by step;
-- [Service definition](docs/specs/02_service_definition.md) and
-  [Inputs and outputs](docs/specs/01_inputs_outputs.md): the
-  reference;
-- [Architecture](docs/00_architecture.md): the compile pipeline, the design
-  decisions, the tests.
+[docs/README.md](docs/README.md) indexes the documentation

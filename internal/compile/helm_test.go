@@ -53,7 +53,7 @@ tagged: {!!merge <<: *c}
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := Load([]byte("output:\n  x:\n    "+strings.ReplaceAll(src, "\n", "\n    ")), M{})
+	d, err := Load([]byte("output:\n  x:\n    "+strings.ReplaceAll(src, "\n", "\n    ")), M{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

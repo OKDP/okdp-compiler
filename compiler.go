@@ -22,6 +22,7 @@
 package compiler
 
 import (
+	"context"
 	"io/fs"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
@@ -49,6 +50,9 @@ type (
 	// Dependency: an instance of the namespace a connection reference points
 	// to.
 	Dependency = okdp.Dependency
+	// Option: a setting of CompileContext (WithCostLimit,
+	// WithoutObjectsChart).
+	Option = okdp.Option
 )
 
 // The chart keys the compiler adds: OKDP's own objects, and the main OAuth
@@ -63,8 +67,12 @@ const (
 const DefaultIndent = fsio.DefaultIndent
 
 // DcrSource: the chart that registers an OAuth client in dcr mode, unless
-// the platform names another (global.okdp.charts.oidcDcr).
-var DcrSource = okdp.DcrSource
+// the platform names another (global.okdp.charts.oidcDcr). The platform
+// names it, not the caller: this is the default the compiler writes values
+// for.
+func DcrSource() ChartRef {
+	return okdp.DcrSource
+}
 
 // LoadDefinition reads the package at the root of fsys: service.yaml,
 // checked, and mapping.cel.yaml; each compile reads its other files.
@@ -79,10 +87,34 @@ func ParseValues(b []byte) (map[string]any, error) {
 	return chart.ParseValues(b)
 }
 
-// Compile runs the mapping of def on one instance. It is safe for
-// concurrent use: it keeps no state between calls.
+// Compile runs the mapping of def on one instance: CompileContext without a
+// context or options. It is safe for concurrent use: it keeps no state
+// between calls.
 func Compile(def *Definition, in Inputs) (*Result, error) {
 	return okdp.Compile(def, in)
+}
+
+// CompileContext runs the mapping of def on one instance, cancelled with ctx
+// (between stages, and within the evaluation of an expression), with the
+// options opts. It is safe for concurrent use: it keeps no state between
+// calls.
+func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Option) (*Result, error) {
+	return okdp.CompileContext(ctx, def, in, opts...)
+}
+
+// WithCostLimit: the total CEL cost the expressions of one compile may use,
+// the mapping's and the OAuth client templates' (0, the default: no limit).
+// Past the limit, the compile fails: a server bounds what a package's
+// expressions compute over the values an instance gives.
+func WithCostLimit(limit uint64) Option {
+	return okdp.WithCostLimit(limit)
+}
+
+// WithoutObjectsChart: no okdp chart (ObjectsChart) in the result, for a
+// caller that deploys OKDP's own objects (Result.Objects) otherwise;
+// global.okdp.charts.objects is then not required.
+func WithoutObjectsChart() Option {
+	return okdp.WithoutObjectsChart()
 }
 
 // Files: what `okdp-compile --emit-dir` writes, file name -> content: the

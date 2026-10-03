@@ -45,10 +45,12 @@
 package okdp
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -88,10 +90,47 @@ type Result struct {
 	Dependencies []Dependency
 }
 
-// Compile runs the mapping of def on one instance. It is safe for
-// concurrent use: it keeps no state between calls.
+// Option: a setting of CompileContext.
+type Option func(*settings)
+
+// settings: what the options of a compile set.
+type settings struct {
+	costLimit      uint64 // 0: no limit
+	withoutObjects bool
+}
+
+// WithCostLimit: the total CEL cost the expressions of one compile may use,
+// the mapping's and the OAuth client templates' (0, the default: no limit).
+// Past the limit, the compile fails.
+func WithCostLimit(limit uint64) Option {
+	return func(s *settings) { s.costLimit = limit }
+}
+
+// WithoutObjectsChart: no okdp chart (ObjectsChart) in the result, for a
+// caller that deploys OKDP's own objects (Result.Objects) otherwise;
+// global.okdp.charts.objects is then not required.
+func WithoutObjectsChart() Option {
+	return func(s *settings) { s.withoutObjects = true }
+}
+
+// Compile runs the mapping of def on one instance: CompileContext without a
+// context or options.
 func Compile(def *Definition, in Inputs) (*Result, error) {
+	return CompileContext(context.Background(), def, in)
+}
+
+// CompileContext runs the mapping of def on one instance, cancelled with ctx
+// (between stages, and within the evaluation of an expression), with the
+// options opts. It is safe for concurrent use: it keeps no state between
+// calls.
+func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Option) (*Result, error) {
+	var set settings
+	for _, o := range opts {
+		o(&set)
+	}
 	switch {
+	case ctx == nil:
+		return nil, errors.New("no context")
 	case def == nil:
 		return nil, errors.New("no service definition")
 	case def.Files == nil:
@@ -110,24 +149,25 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	if err := svc.Check(); err != nil {
 		return nil, err
 	}
+	budget := compile.NewBudget(ctx, set.costLimit)
 	// What the mapping sees: values, platform context, resolved connections.
-	ctx, values, ups, deps, err := buildContext(def.Files, in, svc)
+	mctx, values, ups, deps, err := buildContext(def.Files, in, svc)
 	if err != nil {
 		return nil, err
 	}
 	// The charts the platform renders the compiler's own charts with.
-	objectsSource, dcrSource, err := platformCharts(value.AsMap(value.Dig(values, "global.okdp")))
+	objectsSource, dcrSource, err := platformCharts(value.AsMap(value.Dig(values, "global.okdp")), !set.withoutObjects)
 	if err != nil {
 		return nil, err
 	}
-	res, err := runMapping(def.Mapping, ctx)
+	res, err := runMapping(budget, def.Mapping, mctx)
 	if err != nil {
 		return nil, err
 	}
 	// The OAuth clients (oidcClients, oidc.go): checked in every mode; in dcr
 	// mode, the oidc-dcr chart of each, added to the charts of service.yaml
 	// and to the mapping's output.
-	clients, dcrValues, err := oidcClients(ctx, res.clients)
+	clients, dcrValues, err := oidcClients(budget, mctx, res.clients)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +176,7 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	}
 	// The descriptor ConfigMap, checked against the contracts, and the
 	// credentials Secrets of the outputs; then the mapping's objects.
-	desc, credentials, err := descriptor(in, ctx, res.instance, res.provides)
+	desc, credentials, err := descriptor(in, mctx, res.instance, res.provides)
 	if err != nil {
 		return nil, err
 	}
@@ -144,8 +184,13 @@ func Compile(def *Definition, in Inputs) (*Result, error) {
 	for _, o := range append(credentials, res.objects...) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}
-	// The okdp chart renders them.
-	if svc, err = objectsChart(svc, out.Objects, res.output, objectsSource); err != nil {
+	// The okdp chart renders them, unless the caller deploys them otherwise.
+	if !set.withoutObjects {
+		if svc, err = objectsChart(svc, out.Objects, res.output, objectsSource); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	// The final values of each chart of the output; charts left out by the

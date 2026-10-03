@@ -1,7 +1,10 @@
 package compile
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,7 +27,7 @@ func mapCtx() M {
 
 // runOutput: loads a document on mapCtx and returns its output section.
 func runOutput(src string) (M, error) {
-	d, err := Load([]byte(src), mapCtx())
+	d, err := Load([]byte(src), mapCtx(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +400,7 @@ let:
 
 // TestTemplateErrors: an error of a template's values names its path.
 func TestTemplateErrors(t *testing.T) {
-	_, err := EvalTemplate([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx())
+	_, err := EvalTemplate([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx(), nil)
 	if want := "values: a[1]: ${{ nope }}:"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("got %v, want an error containing %q", err, want)
 	}
@@ -427,4 +430,53 @@ func TestScan(t *testing.T) {
 	if _, err := scan("${{ a }"); err == nil {
 		t.Error("an unterminated expression must fail")
 	}
+}
+
+// TestBudget: the CEL cost of a compile, shared by its evaluations, and its
+// cancellation, before and during an evaluation.
+func TestBudget(t *testing.T) {
+	one := "let:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n"
+	two := one + "  b: ${{ values.items.map(i, i.n * 2.0) }}\n"
+	// The cost of one binding, measured under a limit it cannot reach.
+	b := NewBudget(context.Background(), math.MaxUint64)
+	if _, err := Load([]byte(one), mapCtx(), b); err != nil {
+		t.Fatal(err)
+	}
+	cost := b.used
+	if cost == 0 {
+		t.Fatal("no cost counted")
+	}
+	// Enough for one binding, not for two.
+	_, err := Load([]byte(two), mapCtx(), NewBudget(context.Background(), cost))
+	if want := fmt.Sprintf("let b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", cost); err == nil || err.Error() != want {
+		t.Errorf("past the limit: got %v, want %q", err, want)
+	}
+	if _, err := Load([]byte(two), mapCtx(), NewBudget(context.Background(), 2*cost)); err != nil {
+		t.Errorf("within the limit: %v", err)
+	}
+	// Cancelled before an evaluation: the context's error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Load([]byte(one), mapCtx(), NewBudget(ctx, 0)); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: got %v, want context.Canceled", err)
+	}
+	// Cancelled during one: a comprehension stops at its next check.
+	items := make([]any, 2*interruptEvery)
+	for i := range items {
+		items[i] = float64(i)
+	}
+	_, err = Load([]byte("let:\n  a: ${{ values.items.map(i, i * 2.0) }}\n"), M{"values": M{"items": items}}, NewBudget(doneCtx{context.Background()}, 0))
+	if err == nil || !strings.Contains(err.Error(), "operation interrupted") {
+		t.Errorf("interrupted: got %v", err)
+	}
+}
+
+// doneCtx: a context done though its Err is nil, so that the check before
+// an evaluation passes and the evaluation sees it.
+type doneCtx struct{ context.Context }
+
+func (doneCtx) Done() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
 }

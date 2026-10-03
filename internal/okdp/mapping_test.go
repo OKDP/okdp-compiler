@@ -21,7 +21,7 @@ func mapCtx() M {
 
 // TestMappingSections: let in order, instance and provides.
 func TestMappingSections(t *testing.T) {
-	res, err := runMapping([]byte(`
+	res, err := runMapping(nil, []byte(`
 let:
   a: 1.0
   b: ${{ a + 1.0 }}
@@ -51,7 +51,7 @@ provides:
 // TestMappingFunctions: OKDP's host functions beside the language's, next
 // to a let binding named fullname (the function is okdpFullname).
 func TestMappingFunctions(t *testing.T) {
-	res, err := runMapping([]byte(`
+	res, err := runMapping(nil, []byte(`
 let:
   fullname: ${{ release.name }}-mine
 output:
@@ -82,7 +82,7 @@ output:
     selector: ${{ okdpSelectorLabels('db') }}
     loop: [{$for: "service in ['a']", $let: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
 `
-	res, err := runMapping([]byte(src), ctx)
+	res, err := runMapping(nil, []byte(src), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ output:
 		t.Errorf("$for and $let shadow service and selectorLabels: %#v", x["loop"])
 	}
 	// A mapping's own labels binding wins over the context's.
-	res, err = runMapping([]byte("let:\n  labels: {mine: 'yes'}\n"+src), ctx)
+	res, err = runMapping(nil, []byte("let:\n  labels: {mine: 'yes'}\n"+src), ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ output:
 // TestMappingNulls: a null section is empty; a null chart of output is left
 // out, as by $if.
 func TestMappingNulls(t *testing.T) {
-	res, err := runMapping([]byte("output: {x: '${{ null }}', web: ~, z: {}}\ninstance: ~\nprovides: '${{ null }}'\n"), mapCtx())
+	res, err := runMapping(nil, []byte("output: {x: '${{ null }}', web: ~, z: {}}\ninstance: ~\nprovides: '${{ null }}'\n"), mapCtx())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestMappingErrors(t *testing.T) {
 		"oidcClients not a list": {"oidcClients: {a: 1}\n", "oidcClients: must be a list of OAuth clients"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := runMapping([]byte(tc.src), mapCtx())
+			_, err := runMapping(nil, []byte(tc.src), mapCtx())
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
