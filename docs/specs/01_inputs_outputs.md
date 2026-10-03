@@ -804,7 +804,9 @@ renders, `global` and the [appended](#append) lists aside. `<source>`:
 `oci://<repository>/<chart> --version <version>`, or its archive in the
 chart cache.
 `testdata/helm/values` holds what Helm computes on each case
-(`TestHelmValues`).
+(`TestHelmValues`). Helm 3 reads the first document of a values file only:
+with it, a chart whose `values.yaml` has several documents renders
+differently ([Umbrella chart](#umbrella-chart)).
 
 ### Schema check of the final values
 
@@ -1195,8 +1197,23 @@ A template reads an absent key and a null the same way (`{{ .Values.x }}`,
 `if`, `default`), but for `hasKey`, `toYaml`, and `range` over the map.
 Each key's own `global` reaches its subchart, and the subcharts of that
 chart, as when the chart is alone: there is no `global` at the top for Helm
-to merge over it. `testdata/helm/umbrella` checks it with Helm 4.3: the
-umbrella over the charts of the values fixtures, one chart under two keys.
+to merge over it. `testdata/helm/umbrella` checks it, the umbrella over
+the charts of the values fixtures with one chart under two keys, with Helm
+4.3.0 and the versions the deployers embed
+([GitOps](../01_usage.md#gitops)): Helm 4.3.0, 4.2.4, 4.2.1 and 4.2.0
+render one output (`helm.json`), Helm 3.19.4 and 3.19.2 another
+(`helm3.json`). With each, a null of the final values deletes the upstream
+default. Helm 3 differs from Helm 4 on these values:
+
+| Values | Helm 4 | Helm 3.19 |
+|---|---|---|
+| a key of the first document of a `values.yaml` that a later document deletes ([Values files](#values-files)) | deleted | the first document's value: Helm 3 reads the first document only |
+| a key below the top level, null in the chart's `values.yaml`, that the values set to null | kept, null | deleted |
+| a null default nested in a map of the chart's `values.yaml`, the values leaving it unset | kept, null | dropped |
+
+An upstream chart whose `values.yaml` has several documents needs Helm 4.
+The other two are a null against an absent key, which a template reads the
+same but for `hasKey`, `toYaml` and `range`.
 
 ### Example
 

@@ -240,7 +240,8 @@ first.
 
 Each upstream chart renders as a subchart, with the final values of its
 key, as it renders alone ([rendering with Helm](#rendering-with-helm)), but
-for what Helm does to every subchart (checked with Helm 4.3,
+for what Helm does to every subchart (checked with Helm 4.3.0 and the
+versions the deployers embed, [GitOps](#gitops),
 [umbrella chart](specs/01_inputs_outputs.md#umbrella-chart)):
 
 - an aliased subchart is named after its alias: its `.Chart.Name` is the
@@ -252,6 +253,12 @@ for what Helm does to every subchart (checked with Helm 4.3,
 - a null default nested in a map of the chart's `values.yaml`, which the
   values leave unset, stays null, where the chart alone drops it. A template
   reads both the same, except `hasKey`, `toYaml`, and `range` over the map.
+
+With Helm 3.19, that null default is dropped, a key below the top level
+that the chart's `values.yaml` and the values both set to null is deleted,
+not kept null, and only the first document of a `values.yaml` is read: an
+upstream chart whose `values.yaml` has several documents needs Helm 4. A
+null of the final values deletes the upstream default with every version.
 
 ### Exit status and errors
 
@@ -606,7 +613,11 @@ spec:
 ```
 
 Both fetch the dependencies from their repositories: a private repository
-needs its credentials there.
+needs its credentials there. Each renders with the Helm it embeds (latest
+patch releases, October 2026): Flux 2.9 Helm 4.2.4 (helm-controller 1.6), Flux 2.8 Helm 4.2.0
+(helm-controller 1.5), Flux 2.7 Helm 3.19.2 (helm-controller 1.4); Argo CD
+3.5 Helm 4.2.1, Argo CD 3.4 and 3.3 Helm 3.19.4. The umbrella is checked
+with each ([`--umbrella`](#--umbrella)).
 
 **OAuth clients.** In `dcr` mode the index lists one chart per OAuth client
 (`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr chart;

@@ -5,7 +5,7 @@
 #
 #   go test ./internal/chart -run TestHelmValues -update   # values/<case>/final.yaml
 #   go test ./internal/fsio -run TestHelmUmbrella -update  # umbrella/Chart.yaml, instance.values.yaml
-#   OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh
+#   UMBRELLA_HELMS="<helm> ..." testdata/helm/generate.sh
 #
 # values/<case>/: a chart whose values.yaml is <case>/values.yaml, rendered
 #   with -f <case>/layer-*.yaml in order: .Values as JSON in helm.json; and
@@ -14,7 +14,10 @@
 # umbrella/: the umbrella the compiler writes over the values cases
 #   (Chart.yaml, instance.values.yaml), each case's chart a dependency named
 #   after the case, rendered with -f instance.values.yaml: the .Values of
-#   each subchart, by its .Chart.Name (the key), in helm.json.
+#   each subchart, by its .Chart.Name (the key), in helm.json. Rendered too
+#   by each helm binary of $UMBRELLA_HELMS (paths, separated by spaces; the
+#   deployers' Helm versions): helm<major>.json, none when it is helm.json;
+#   the binaries of one major version must render the same.
 # schema/<case>/: a chart with <case>/values.schema.json and values.yaml,
 #   rendered with -f <case>/layer-*.yaml: what helm reports in helm.txt
 #   ("ok" when the values are valid; Helm's order varies, a report with the
@@ -77,17 +80,48 @@ for c in "$here"/values/*/; do
   printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Chart.Name }}\ndata:\n  out: {{ toJson .Values | quote }}\n' > "$tmp/$name/templates/values.yaml"
 done
 cp "$here/umbrella/Chart.yaml" "$u/"
-helm dependency build "$u" > /dev/null
-if ! helm template t "$u" --namespace demo -f "$here/umbrella/instance.values.yaml" > "$tmp/render.yaml" 2> "$tmp/render.err"; then
-  echo "umbrella: helm template failed:" >&2
-  cat "$tmp/render.err" >&2
-  exit 1
-fi
-python3 -c '
+
+# umbrella <helm> <out>: the umbrella built and rendered by the binary
+# <helm>: the .Values of each subchart, by its .Chart.Name, in <out>.
+umbrella() {
+  local helm=$1 out=$2
+  "$helm" dependency build "$u" > /dev/null
+  if ! "$helm" template t "$u" --namespace demo -f "$here/umbrella/instance.values.yaml" > "$tmp/render.yaml" 2> "$tmp/render.err"; then
+    echo "umbrella ($helm): helm template failed:" >&2
+    cat "$tmp/render.err" >&2
+    exit 1
+  fi
+  python3 -c '
 import json, sys, yaml
 out = {d["metadata"]["name"]: json.loads(d["data"]["out"]) for d in yaml.safe_load_all(open(sys.argv[1])) if d}
 json.dump(out, open(sys.argv[2], "w"), indent=2, sort_keys=True)
-open(sys.argv[2], "a").write("\n")' "$tmp/render.yaml" "$here/umbrella/helm.json"
+open(sys.argv[2], "a").write("\n")' "$tmp/render.yaml" "$out"
+}
+umbrella helm "$here/umbrella/helm.json"
+declare -A first # major -> the first version rendered
+read -ra helms <<< "${UMBRELLA_HELMS:-}"
+for h in "${helms[@]}"; do
+  v=$("$h" version --template '{{.Version}}' 2> /dev/null)
+  major=${v#v}
+  major=${major%%.*}
+  umbrella "$h" "$tmp/umbrella-$v.json"
+  out=helm$major.json
+  if [[ -n ${first[$major]:-} ]]; then
+    if ! cmp -s "$tmp/umbrella-$v.json" "$tmp/umbrella-${first[$major]}.json"; then
+      echo "umbrella: Helm $v renders differently from Helm ${first[$major]}" >&2
+      exit 1
+    fi
+  else
+    first[$major]=$v
+    if cmp -s "$tmp/umbrella-$v.json" "$here/umbrella/helm.json"; then
+      rm -f "$here/umbrella/$out"
+    else
+      cp "$tmp/umbrella-$v.json" "$here/umbrella/$out"
+    fi
+  fi
+  [[ -f $here/umbrella/$out ]] || out=helm.json
+  echo "umbrella: Helm $v renders $out"
+done
 
 newchart schema
 printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n' > "$chart/templates/x.yaml"

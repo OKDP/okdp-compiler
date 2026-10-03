@@ -541,7 +541,7 @@ library's templates, and stores its output or its error; the
 | `functions/` | `sha256sum`, `toJson`, `toPrettyJson`, `toYaml`, `quote`, `okdp.fullname` | `compile`: `TestHelmFunctions`; `okdp`: `TestHelmFullname` |
 | `secrets/generated/` | the objects of `okdp.generatedSecret`, or its error | `okdp`: `TestHelmGeneratedSecret`, without the `helm.sh/chart` labels the compiler does not set (`withoutChartLabel`) |
 | `secrets/descriptor/` | `okdp.descriptor` of outputs with a `secret` | `okdp`: `TestHelmDescriptorSecrets`, the same |
-| `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`) | `fsio`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart |
+| `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`); with each other Helm major version, where it differs (`helm3.json`) | `fsio`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart, and each known difference of a version (`umbrellaRenders`) |
 
 To regenerate: `go test ./internal/chart -run TestHelmValues -update`
 (writes each `final.yaml`), `go test ./internal/fsio -run TestHelmUmbrella
@@ -550,6 +550,28 @@ To regenerate: `go test ./internal/chart -run TestHelmValues -update`
 python3 with PyYAML). A behaviour copied from Helm or okdp-lib-chart gets a
 case here, and only what no other case covers: a fixture is Helm's whole
 output, labels and all.
+
+The umbrella is also rendered with the Helm versions the deployers embed
+([GitOps](01_usage.md#gitops)): `UMBRELLA_HELMS`, helm binaries separated
+by spaces, downloaded from `https://get.helm.sh`, checked against their
+`.sha256sum` and kept out of the repository:
+
+```bash
+h=$(mktemp -d)
+for v in 4.2.4 4.2.1 4.2.0 3.19.4 3.19.2; do
+  (cd "$h" && curl -fsSL --remote-name-all https://get.helm.sh/helm-v$v-linux-amd64.tar.gz{,.sha256sum} &&
+    sha256sum -c helm-v$v-linux-amd64.tar.gz.sha256sum && mkdir v$v && tar -C v$v -xzf helm-v$v-linux-amd64.tar.gz)
+done
+UMBRELLA_HELMS="$(echo "$h"/v*/linux-amd64/helm)" OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh
+```
+
+Each binary renders `umbrella/helm<major>.json`, removed when it renders
+`helm.json`; two versions of one major version that render differently
+fail. A new render, a new version or a new difference goes in
+`umbrellaRenders` (`internal/fsio/helm_test.go`) and in the
+[Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart) spec. Without
+`UMBRELLA_HELMS`, `helm3.json` is left as it is: regenerate it whenever
+the umbrella changes.
 
 ### Unit tests
 
@@ -623,7 +645,9 @@ a registration URL (`dcr-without-registration-url.yaml`).
   aliased key is its `.Chart.Name`, and Helm adds an empty `global` and
   keeps the null defaults nested in its maps
   ([Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart)).
-  `--emit-dir` renders each chart alone.
+  `--emit-dir` renders each chart alone. Helm 3 deletes a nested key that
+  the chart's defaults and the values both set to null, and reads the first
+  document of a `values.yaml` only.
 
 - **`protect` and `append` paths name map keys**: no list index; a family
   of keys is a prefix only, a bracketed key ending with `*`
