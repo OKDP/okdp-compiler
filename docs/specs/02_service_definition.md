@@ -390,7 +390,9 @@ provides[<i>]: secret: must be a map (generate, stringData), got <value>
 ```
 
 The contract checks then report
-`provides "<name>" (<contract>): <message>`.
+`provides "<name>" (<contract>): <message>`. The items are checked in
+order, their fields in alphabetical order, and the first error is
+reported ([descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap)).
 
 #### secret
 

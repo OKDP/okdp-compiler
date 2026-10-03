@@ -128,11 +128,13 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 4. **Connections** (`resolver`, `internal/okdp/connections.go`).
    `values.schema.json` is read again as JSON (so it must exist) and walked
    (`walk`) together with a deep copy of the parameters, through
-   `properties` and `items`. Each reference is resolved (`resolve`) to an
-   external connection or an instance of the namespace, and completed
-   against its contract (`complete`)
-   ([Connections](specs/01_inputs_outputs.md#connections)). Internal
-   references are recorded as `Dependency`, sorted by parameter path.
+   `properties` (keys sorted) and `items`. Each reference is resolved
+   (`resolve`) to an external connection or an instance of the namespace,
+   and completed against its contract (`complete`)
+   ([Connections](specs/01_inputs_outputs.md#connections)). The
+   references that do not resolve are reported together, one line each,
+   sorted by parameter path (`resolveAll`). Internal references are
+   recorded as `Dependency`, sorted by parameter path.
    `global` and `connections` are then removed from the parameters. The
    instance's upstream values are read (`chart.ReadUpstream`): its files,
    then its inline `upstream.<key>` values, shown merged to the mapping as
@@ -218,7 +220,10 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 
 Errors: a compile stops at its first error, except where the whole list
 helps the author: the `errors` messages, the parameter schema violations,
-the violations of all compiled charts. A message says where: the chart, the
+the connection references that do not resolve, the violations of all
+compiled charts. The first error is the same from one compile to the next:
+a check over the keys of a map visits them sorted, a list in its order
+(`provides`, first error by position). A message says where: the chart, the
 parameter path, the upstream file, the mapping path (`output: app: env[2]:
 value: ...`), the `let` or `$let` binding, the OAuth client (`oidcClients[1]
 (console)`).
@@ -427,8 +432,9 @@ values, oidc-dcr with a default (`DcrSource`)
   changes per render never converges. Random credentials are therefore
   generated in the cluster by External Secrets `Password` generators
   (`okdpGeneratedSecret`), never at compile time.
-- Where an order shows, it is sorted: dependencies by parameter path, schema
-  violations by path and by chart. `example/output` relies on
+- Where an order shows, it is sorted: dependencies and connection errors
+  by parameter path, schema violations by path and by chart, the keys a
+  check visits before its first error. `example/output` relies on
   byte-identical results.
 
 ### Everything through fs.FS

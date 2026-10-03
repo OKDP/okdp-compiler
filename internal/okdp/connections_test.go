@@ -115,6 +115,29 @@ func TestResolveErrors(t *testing.T) {
 	}
 }
 
+// TestResolveReport: every reference that does not resolve is reported at
+// once, one line each, sorted by parameter path, the fields of a connection
+// checked in key order: the same report from one compile to the next (the
+// walk used to follow map order and stop at the first error).
+func TestResolveReport(t *testing.T) {
+	values := M{
+		"main":     M{"db": "bad"},
+		"replicas": []any{"demo-pg", "s3", "", "bad"},
+		"connections": M{
+			"bad": M{"contract": "database", "host": "h", "tls": true, "zone": "a", "port": 1},
+			"s3":  M{"contract": "s3"},
+		},
+	}
+	want := `main.db: connection "bad": field "port" is not part of the database contract
+replicas[1]: connection "s3" has contract "s3", "database" is expected
+replicas[3]: connection "bad": field "port" is not part of the database contract`
+	for range 20 {
+		if _, _, err := resolveCtx(values); err == nil || err.Error() != want {
+			t.Fatalf("got %v\nwant %s", err, want)
+		}
+	}
+}
+
 // TestResolveUnknownContract: a schema that references a missing contract.
 func TestResolveUnknownContract(t *testing.T) {
 	ch := maps.Clone(pkg)

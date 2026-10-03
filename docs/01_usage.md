@@ -618,6 +618,7 @@ it.
 | `database: connection "shared-db": "password" is a secret field` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing | set it |
 | `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | the name is not in `connections`, and the contract cannot resolve an instance | add the connection under `connections` |
+| several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, sorted by parameter path, with its first error (the fields of a connection in alphabetical order) | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
 | `webapp: database connection "shared-db" has no secretRef, the password cannot be read` | not a compiler check: a message of the example mapping's `errors` section | add `secretRef: {name: ...}` to the connection |
 | `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `service.yaml` protects (`protect`, and always `global`); a file name replaces `upstream.<key>` for an instance file | remove the value; set it through the parameters when the package offers one |
 | `app: upstream.app: a key or value contains "{{"` | template code in the instance's upstream values | remove it |

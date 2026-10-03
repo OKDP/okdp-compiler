@@ -128,6 +128,19 @@ func TestDescriptorErrors(t *testing.T) {
 	}
 }
 
+// TestDescriptorReport: the first error of the outputs, in the order of
+// provides, the fields of each in key order: the same from one compile to
+// the next.
+func TestDescriptorReport(t *testing.T) {
+	provides := "  - {contract: http, name: a, values: {url: u}}\n  - {contract: http, name: b, values: {url: u, zone: z, path: /}}\n  - {contract: ftp}\n"
+	want := `provides "b" (http): field "path" is not part of the http contract`
+	for range 20 {
+		if _, err := provideCompile(provides); err == nil || err.Error() != want {
+			t.Fatalf("got %v, want %q", err, want)
+		}
+	}
+}
+
 // TestDescriptorSecret: an output with a secret gets a secretRef, and its
 // credentials Secret follows the descriptor.
 func TestDescriptorSecret(t *testing.T) {

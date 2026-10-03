@@ -80,7 +80,8 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": value.Str(value.Dig(okdpG, "certificateIssuers.selfSigned.name"))},
 		"proxyEnv":           proxyEnv,
 	}
-	// 4. connection references, resolved in place (x-okdp-connection-ref).
+	// 4. connection references, resolved in place (x-okdp-connection-ref);
+	// every reference that does not resolve is reported.
 	schema, err := readJSON(files, "values.schema.json")
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -89,7 +90,7 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	params := value.AsMap(value.Copy(values))
 	var deps []Dependency
 	r := resolver{in: in, conns: value.AsMap(values["connections"]), suffix: value.Str(value.Dig(okdpG, "ingress.suffix")), deps: &deps}
-	if err := r.walk(schema, params, ""); err != nil {
+	if err := r.resolveAll(schema, params); err != nil {
 		return nil, nil, nil, nil, err
 	}
 	// Not parameters: global is exposed apart, connections are resolved.
@@ -109,7 +110,7 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	// The package: service (name, version, appVersion), labels and
 	// selectorLabels.
 	maps.Copy(ctx, serviceContext(svc.meta(), in.Release))
-	// The schema walk follows map order: sort for a stable result.
+	// By parameter path, in string order, as the errors of the references.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
 	return ctx, values, ups, deps, nil
 }

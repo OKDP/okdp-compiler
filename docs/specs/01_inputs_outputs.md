@@ -314,6 +314,20 @@ Secret `secretRef.name`. How the mapping uses `values`:
 
 `<path>`: the parameter path; `<name>`: the reference.
 
+Every reference that does not resolve is reported, at once, one line each,
+sorted by parameter path (string order, as the
+[dependencies](#dependencies)), as the violations of the parameter schema
+are. A reference gives one error, the first in this order: its contract
+(unknown; another one, for an external connection; no internal naming
+convention, for an internal one), the fields of an external connection in
+alphabetical order, the `required` fields in the contract's order. The
+same parameters give the same report from one compile to the next:
+
+```
+main.db: connection "shared-db": field "user" is not part of the database contract
+replicas[1]: connection "store" has contract "s3", "database" is expected
+```
+
 | Case | Error | `testdata/` |
 |---|---|---|
 | no `<contract>.schema.json` | `<path>: unknown contract "<contract>"` | |
@@ -968,8 +982,13 @@ from `name` and `appVersion` of `service.yaml`.
 | `secretRef` | `{name}` of `secretRef`; else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
 | `values` | `values` of the item, [completed](#completion) against the contract |
 
-Every item is checked for its shape, then against its contract. `<out>`:
-`provides "<name>" (<contract>)`; `<i>`: the item's position.
+Every item is checked for its shape, then against its contract, in the
+order of `provides`, the fields of its `values` and of the contract's
+`x-okdp-internal` convention in alphabetical order. The first error is
+reported, as for an expression of the mapping: `provides` is the package's
+to fix, not the instance's, and the error is the same from one compile to
+the next. `<out>`: `provides "<name>" (<contract>)`; `<i>`: the item's
+position.
 
 | Case | Error |
 |---|---|

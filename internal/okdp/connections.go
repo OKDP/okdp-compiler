@@ -5,8 +5,11 @@ package okdp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -33,14 +36,48 @@ type Dependency struct {
 	Field    string `json:"field" yaml:"field"`       // the parameter that references it, e.g. backends[0].database
 }
 
+// resolveAll: every connection reference of the parameters params, declared
+// in the parameter schema, resolved in place (walk). The references that do
+// not resolve are reported together, one error each, one per line, sorted
+// by parameter path (string order, as Result.Dependencies), as the
+// violations of the parameter schema are.
+func (r resolver) resolveAll(schema, params M) error {
+	failed := map[string]error{}
+	r.walk(schema, params, "", failed)
+	errs := make([]error, 0, len(failed))
+	for _, p := range slices.Sorted(maps.Keys(failed)) {
+		errs = append(errs, failed[p])
+	}
+	return errors.Join(errs...)
+}
+
 // walk follows the parameter schema and replaces every string carrying an
-// x-okdp-connection-ref with the resolved connection (okdp.connection).
-func (r resolver) walk(schema M, v any, path string) error {
+// x-okdp-connection-ref with the resolved connection (okdp.connection), in
+// path order (keys sorted, items in order); the error of a reference that
+// does not resolve is recorded in failed, by parameter path.
+func (r resolver) walk(schema M, v any, path string, failed map[string]error) {
+	// visit: x, at p, of the schema s; set replaces it with its connection.
+	visit := func(s M, x any, p string, set func(M)) {
+		ref, ok := s["x-okdp-connection-ref"].(M)
+		if !ok {
+			r.walk(s, x, p, failed)
+			return
+		}
+		// A reference: replaced by the connection. Empty means not set.
+		if name, ok := x.(string); ok && name != "" {
+			c, err := r.resolve(name, value.Str(ref["contract"]), p)
+			if err != nil {
+				failed[p] = err
+				return
+			}
+			set(c)
+		}
+	}
 	switch t := v.(type) {
 	case M:
 		// Only the keys the schema declares: the others are left as they are.
 		props := value.AsMap(schema["properties"])
-		for k, ps := range props {
+		for _, k := range slices.Sorted(maps.Keys(props)) {
 			x, present := t[k]
 			if !present {
 				continue
@@ -49,47 +86,21 @@ func (r resolver) walk(schema M, v any, path string) error {
 			if path != "" {
 				p = path + "." + k
 			}
-			psm := value.AsMap(ps)
-			// A reference: replaced by the connection. Empty means not set.
-			if ref, ok := psm["x-okdp-connection-ref"].(M); ok {
-				if s, ok := x.(string); ok && s != "" {
-					c, err := r.resolve(s, value.Str(ref["contract"]), p)
-					if err != nil {
-						return err
-					}
-					t[k] = c
-				}
-				continue
-			}
-			if err := r.walk(psm, x, p); err != nil {
-				return err
-			}
+			visit(value.AsMap(props[k]), x, p, func(c M) { t[k] = c })
 		}
 	case []any:
 		// A list: the same, with the item schema.
 		items := value.AsMap(schema["items"])
 		for i, x := range t {
-			p := fmt.Sprintf("%s[%d]", path, i)
-			if ref, ok := items["x-okdp-connection-ref"].(M); ok {
-				if s, ok := x.(string); ok && s != "" {
-					c, err := r.resolve(s, value.Str(ref["contract"]), p)
-					if err != nil {
-						return err
-					}
-					t[i] = c
-				}
-				continue
-			}
-			if err := r.walk(items, x, p); err != nil {
-				return err
-			}
+			visit(items, x, fmt.Sprintf("%s[%d]", path, i), func(c M) { t[i] = c })
 		}
 	}
-	return nil
 }
 
 // resolve: a reference to its contract fields. An entry of connections is
-// external; any other name is an instance of the namespace (internal).
+// external; any other name is an instance of the namespace (internal). The
+// first error is reported: the contract, then the fields of an external
+// connection in alphabetical order, then the required fields.
 func (r resolver) resolve(ref, contract, field string) (M, error) {
 	schema, err := readJSON(r.in.Contracts, contract+".schema.json")
 	if err != nil {
@@ -103,7 +114,8 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 		if value.Str(c["contract"]) != contract {
 			return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(c["contract"]), contract)
 		}
-		for k, x := range c {
+		for _, k := range slices.Sorted(maps.Keys(c)) {
+			x := c[k]
 			switch k {
 			case "contract", "description":
 			// Credentials are only referenced, never inlined.

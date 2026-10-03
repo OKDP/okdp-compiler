@@ -2,6 +2,8 @@ package okdp
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -15,7 +17,8 @@ import (
 // connections the instance provides (outputs.yaml), which the console lists
 // and other instances reference by name. Built from the mapping's `instance`
 // and `provides` sections; every output is checked, its shape (checkOutput),
-// then against its contract (okdp.contract.provide). Then, as
+// then against its contract (okdp.contract.provide), in the order of
+// provides, its fields in key order: the first error is reported. Then, as
 // okdp.descriptor renders them, the credentials Secret of every output given
 // a `secret` ({generate, stringData} or {stringData}), named after its
 // secretRef (default <name>-<contract>-credentials).
@@ -49,10 +52,12 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: unknown contract", where)
 		}
-		// Only contract fields, and no secret: those go to the credentials Secret.
+		// Only contract fields, and no secret: those go to the credentials
+		// Secret. In key order, as every check of an output: the first error
+		// is the same from one compile to the next.
 		props := value.AsMap(schema["properties"])
 		values := value.AsMap(value.Copy(p["values"]))
-		for k := range values {
+		for _, k := range slices.Sorted(maps.Keys(values)) {
 			ps, ok := props[k]
 			if !ok {
 				return nil, nil, fmt.Errorf("%s: field %q is not part of the %s contract", where, k, contract)
@@ -71,7 +76,7 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 			if err != nil {
 				return nil, nil, err
 			}
-			for k := range conv {
+			for _, k := range slices.Sorted(maps.Keys(conv)) {
 				if value.Str(values[k]) != value.Str(expected[k]) {
 					return nil, nil, fmt.Errorf("%s: %s is %q but internal references to %q resolve it to %q",
 						where, k, value.Str(values[k]), out, value.Str(expected[k]))
