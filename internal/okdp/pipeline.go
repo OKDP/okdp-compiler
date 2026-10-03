@@ -59,7 +59,7 @@ type M = value.M
 
 // Inputs: what one compile reads besides the package.
 type Inputs struct {
-	Charts    fs.FS            // chart cache: the upstream charts, <chart>-<version>.tgz (helm pull) or <chart>-<version>/
+	Charts    fs.FS            // chart cache: the upstream charts, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/, <repository> the URL without its scheme
 	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // the contract schemas: <contract>.schema.json
 	Platform  []map[string]any // platform values layers, in order (helm -f): global, global.okdp among them; see chart.ParseValues

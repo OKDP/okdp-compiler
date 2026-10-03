@@ -47,7 +47,7 @@ flowchart TD
   pkg["package files<br/>values.yaml, values.schema.json, base/"]
   layers["values layers<br/>platform's: global; instance's"]
   contracts["contracts<br/>contract schemas"]
-  cache["chart cache<br/>chart-version: values.yaml, values.schema.json"]
+  cache["chart cache<br/>repository/chart-version: values.yaml, values.schema.json"]
   files["instance files<br/>upstream.chart.yaml"]
   tmpl["oidc-dcr.cel.yaml<br/>embedded template"]
 
@@ -202,10 +202,13 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    chart or `okdp`, its values a map; a chart the mapping leaves out (`$if`,
    null) is not compiled.
    The upstream chart is the key's `source`: the chart cache
-   (`chartCache.get`, `internal/chart/cache.go`) reads it once per compile,
-   from `<chart>-<version>/`, else from `<chart>-<version>.tgz` (its own
-   `values.yaml` and `values.schema.json`, not its subcharts'); a chart it
-   does not hold fails with the `helm pull` command that fetches it. The
+   (`chartCache.get`, `internal/chart/cache.go`) reads it once per compile
+   (its own `values.yaml` and `values.schema.json`, not its subcharts'),
+   from `<repository>/<chart>-<version>/` or `.tgz` (`Ref.cacheDir`), else
+   from `<chart>-<version>/` or `.tgz` at the root, unless the compiled keys
+   name that chart and version from two repositories (`newChartCache`); a
+   chart it does not hold fails with the `mkdir -p` and `helm pull`
+   commands that fetch it into its repository's directory. The
    chart's `values.yaml` (its nulls removed), the `base` file and the
    computed values are merged as `-f` files (`layered`). When the chart
    accepts upstream values, the instance's files, then its inline
@@ -251,8 +254,8 @@ neither knows OKDP.
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
-| | `ref.go` | `Ref`, an upstream chart, and its check | the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`) |
-| | `cache.go` | the chart cache (`chartCache`: `<chart>-<version>/` or `.tgz`, `readArchive`) | `merge.go` |
+| | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`) | the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`) |
+| | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`, else at the root; `readArchive`) | `merge.go` |
 | | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
 | | `paths.go` | the grammar of the `protect` and `append` paths | `spec.go`, `merge.go` |
 | | `parameters.go` | stage 1: `Parameters` | `values.go`, `schema.go` |
@@ -479,10 +482,11 @@ in-memory maps, the oidc-dcr template is in the binary.
 - The paths written in `service.yaml` (`base`, `upstream`) are cleaned and
   opened inside their filesystem, and an `fs.FS` path cannot contain `..`:
   a package cannot read outside itself or the instance files. A chart
-  cache entry, `<chart>-<version>`, is named by a checked source or
-  platform chart (a chart name without `/`, `.` or `..`, a pinned
-  version), so it stays at the cache's root. The CLI uses `os.DirFS`, which
-  still follows symbolic links.
+  cache entry, `<repository>/<chart>-<version>` or `<chart>-<version>`, is
+  named by a checked source or platform chart (a repository whose host and
+  path are an `fs.ValidPath` without `\`, a chart name without `/`, `.` or
+  `..`, a pinned version), so it stays inside the cache. The CLI uses
+  `os.DirFS`, which still follows symbolic links.
 - A schema `$ref` to a file or a URL fails the compile instead of being
   fetched (`schemaLoader`); a `urn:` reference accepts anything, as in Helm.
 
@@ -583,7 +587,10 @@ aliases and merge keys, the values of expressions, error paths and the
 mistakes the checks refuse. `internal/chart/spec_test.go` covers the
 source checks
 (`TestRefCheck`) and the `charts` section, `internal/chart/cache_test.go`
-the chart cache, unpacked or an archive with subcharts (`TestChartCache`),
+the chart cache, unpacked or an archive with subcharts, in its
+repository's directory or at the root, one chart name and version of two
+repositories (`TestChartCache`, `TestFinalValuesRepositories`), and the
+repository's directory (`TestRefCacheDir`),
 `internal/chart/merge_test.go` and `internal/chart/paths_test.go` the
 upstream values, `protect` and `append`. `internal/okdp/pipeline_test.go`
 runs the whole pipeline on a minimal package and chart cache: schemas,
@@ -611,8 +618,9 @@ fails.
 `example/input/` is what one compile of a service, `webapp`, reads:
 `package/` (`service.yaml`, `mapping.cel.yaml` with a database connection
 and an OAuth client, `values.yaml`, `values.schema.json`, `base/app.yaml`),
-`charts/` (the chart cache: the `values.yaml` of each chart only, the
-platform's okdp-objects included), `contracts/`, `platform.yaml` (the
+`charts/` (the chart cache: the `values.yaml` of each chart only, in its
+repository's directory, the platform's okdp-objects included),
+`contracts/`, `platform.yaml` (the
 platform values) and `instance.yaml` (the instance's values).
 `example/output/` is what the compile writes: `files/` as `okdp-compile
 --emit-dir`, `umbrella/` as `--umbrella`. `TestExample`
@@ -664,10 +672,11 @@ a registration URL (`dcr-without-registration-url.yaml`).
   the schema check use the chart's own `values.yaml` and
   `values.schema.json`; the defaults and schemas of its subcharts apply only
   when Helm renders it.
-- **One chart cache name per chart and version.** `<chart>-<version>`
-  does not hold the repository: two sources of the same chart name and
-  version from two repositories share one cache entry, and the compile reads
-  whichever the cache holds.
+- **One chart cache directory per repository URL without its scheme.**
+  `oci://x/charts` and `https://x/charts` share `x/charts/`, and
+  `<chart>-<version>` at the root holds no repository: it serves a compile
+  only when the compiled keys name that chart and version from one
+  repository ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 - **Schema references** resolve within the schema only (and `urn:`):
   [Everything through fs.FS](#everything-through-fsfs).
 - **Connection references** are found through `properties` and `items` of

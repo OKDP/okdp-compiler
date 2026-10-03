@@ -51,7 +51,8 @@ with its source: the chart repository (`https://`) or OCI registry path
 (`oci://`), the chart's name in it, and a pinned version. The package holds
 no copy of it: a deployer renders the chart from its repository, and the
 compiler reads its `values.yaml` and `values.schema.json` from the chart
-cache, filled with `helm pull`
+cache, filled with `helm pull`, each chart in its repository's directory,
+the URL without its scheme
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ```yaml
@@ -62,14 +63,15 @@ charts:
 ```
 
 ```bash
-helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_CHARTS"
+mkdir -p "$OKDP_CHARTS/airflow.apache.org"   # helm pull does not create it
+helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_CHARTS/airflow.apache.org"
 ```
 
 - The key names the chart's values everywhere (`output`, the instance's
   `upstream.<key>`, the emitted `<key>.values.yaml`); it need not be the
   chart's name.
-- A compile that needs a chart the cache lacks fails with the `helm pull`
-  command that fetches it.
+- A compile that needs a chart the cache lacks fails with the `mkdir -p`
+  and `helm pull` commands that fetch it.
 - A chart rendered twice is two keys of one source
   ([recipe](#render-a-chart-twice)).
 - The chart is rendered as published. A bundled subchart the package does
@@ -426,7 +428,8 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
 - Render each chart with the source the index `<emit-dir>/okdp.charts.yaml`
   names for its key: `helm template <release> <chart> --repo <repository>
   --version <version>`, `oci://<repository>/<chart>` for a registry, or the
-  `<chart>-<version>.tgz` `helm pull` wrote in the chart cache. The clients'
+  `<chart>-<version>.tgz` `helm pull` wrote in the chart cache, in its
+  repository's directory. The clients'
   charts render with the platform's oidc-dcr chart, `polaris-admin-principals`
   with the source of `polaris-admin`
   ([rendering with Helm](01_usage.md#rendering-with-helm));

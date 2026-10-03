@@ -19,7 +19,7 @@ import compiler "github.com/okdp/okdp-compiler"
 
 def, err := compiler.LoadDefinition(packageFS) // service.yaml, mapping.cel.yaml; each compile reads values.yaml, values.schema.json, base/
 res, err := compiler.Compile(def, compiler.Inputs{
-	Charts:    chartsFS,    // chart cache: each upstream chart, <chart>-<version>.tgz (helm pull) or <chart>-<version>/
+	Charts:    chartsFS,    // chart cache: each upstream chart, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/
 	Instance:  instanceFS,  // optional: the instance's upstream values files (upstream.<chart>.yaml)
 	Contracts: contractsFS, // e.g. contracts.FS of github.com/okdp/okdp-lib-chart/contracts
 	Platform:  []map[string]any{platformValues}, // the platform's layers, in order (helm -f); compiler.ParseValues reads one
@@ -55,7 +55,8 @@ that renders its values: `{repository, chart, version}`, pinned. Two keys
 may name one source, for a chart rendered more than once
 ([sources](docs/specs/02_service_definition.md#sources)). The compiler reads
 only the chart's `values.yaml` and `values.schema.json`, from a chart cache
-the caller fills with `helm pull`
+the caller fills with `helm pull`, each chart in its repository's
+directory, the URL without its scheme (`quay.io/adaltas/oidc-dcr-0.5.0.tgz`)
 ([chart cache](docs/specs/01_inputs_outputs.md#chart-cache)). `res.Charts`
 maps every compiled key to the upstream chart that renders it
 ([chart index](docs/specs/01_inputs_outputs.md#chart-index)).

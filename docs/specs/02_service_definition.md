@@ -78,7 +78,8 @@ repository publishes it: `repository`, a chart repository (`https://`) or an
 OCI registry path (`oci://`); `chart`, the chart's name in it; `version`, a
 pinned version. A deployer renders the chart from there. The compiler reads
 only its `values.yaml` and `values.schema.json`, from the chart cache
-(`<chart>-<version>.tgz` or `<chart>-<version>/`:
+(`<repository>/<chart>-<version>.tgz` or unpacked, `<repository>` the URL
+without its scheme:
 [chart cache](01_inputs_outputs.md#chart-cache)): the first layer of the
 final values, and their schema
 ([merge precedence](01_inputs_outputs.md#merge-precedence)).
@@ -98,7 +99,7 @@ definition built in memory:
 | Source | Error |
 |---|---|
 | absent, or all three fields empty | `service.yaml: charts.<key>.source is required: the upstream chart (repository, chart, version)` |
-| `repository` not starting with `https://`, `http://` or `oci://` | `service.yaml: charts.<key>.source.repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
+| `repository` not starting with `https://`, `http://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `service.yaml: charts.<key>.source.repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
 | `chart` empty, holding a `/`, `.` or `..`, or with leading or trailing spaces | `service.yaml: charts.<key>.source.chart "<chart>": the name of a chart of the repository` |
 | `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `service.yaml: charts.<key>.source.version "<version>": a pinned chart version (1.2.3), not a range` |
 

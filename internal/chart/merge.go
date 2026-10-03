@@ -29,14 +29,22 @@ import (
 // upstream value reaches two keys (upstream.from). The schema violations of
 // every key are reported together.
 //
-// cache: the chart cache, the upstream charts' defaults and schemas. pkg:
+// cache: the chart cache, the upstream charts' defaults and schemas: the
+// sources of the keys of output, together (newChartCache). pkg:
 // the package (its base files). values: the instance's merged values (their
 // global). ups: the instance's upstream values (ReadUpstream).
 func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M, ups Upstreams) (map[string]map[string]any, map[string]Ref, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
-	charts := &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
-	for _, key := range slices.Sorted(maps.Keys(output)) {
+	keys := slices.Sorted(maps.Keys(output))
+	var sources []Ref
+	for _, key := range keys {
+		if spec, ok := specs[key]; ok {
+			sources = append(sources, spec.Source)
+		}
+	}
+	charts := newChartCache(cache, sources)
+	for _, key := range keys {
 		if _, ok := specs[key]; !ok {
 			return nil, nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", key)
 		}
@@ -112,7 +120,7 @@ func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, compute
 	}
 	// Every chart gets the instance's global, as a subchart would.
 	out["global"] = layered(value.AsMap(defaults["global"]), value.AsMap(values["global"]), value.AsMap(computed["global"]))
-	v, err := checkSchema(spec.Source.id()+"/values.schema.json", upstream.schema, coalesceValues(defaults, out))
+	v, err := checkSchema(upstream.entry+"/values.schema.json", upstream.schema, coalesceValues(defaults, out))
 	return out, v, err
 }
 

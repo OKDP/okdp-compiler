@@ -103,18 +103,34 @@ the contracts) are strict JSON: no comments.
 ## Chart cache
 
 `Inputs.Charts`: the upstream charts the compiled charts are rendered by,
-as `helm pull -d <cache>` writes them, or unpacked. The binary reads a
-directory: `--charts`, `$OKDP_CHARTS` by default
-([command line](../01_usage.md#command-line)).
+each in its repository's directory, as `helm pull -d <cache>/<repository>`
+writes them (`helm pull` does not create the directory: `mkdir -p` it
+first), or unpacked. The binary reads a directory: `--charts`,
+`$OKDP_CHARTS` by default ([command line](../01_usage.md#command-line)).
 
 ```
 <cache>/
-  <chart>-<version>.tgz               a chart archive (helm pull -d <cache>)
-  <chart>-<version>/                  or the chart unpacked
+  <repository>/<chart>-<version>.tgz  a chart archive (helm pull -d <cache>/<repository>)
+  <repository>/<chart>-<version>/     or the chart unpacked
+  <chart>-<version>.tgz               the same, without the repository (helm pull -d <cache>)
+  <chart>-<version>/
 ```
 
-A chart is found by the `chart` and `version` of its source: the directory
-first, else the archive; the repository plays no part. Of a chart, the
+`<repository>` is the source's `repository` without its scheme (`oci://`,
+`https://`, `http://`) and a trailing `/`: its host, port and path.
+`oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.5.0
+`quay.io/adaltas/oidc-dcr-0.5.0.tgz`; `http://localhost:8080/charts` is
+`localhost:8080/charts/`. A repository whose host and path are no
+directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
+refused with its source ([sources](02_service_definition.md#sources)). Two
+repositories that differ only by their scheme share a directory.
+
+A chart is found by its source: `<repository>/<chart>-<version>`, the
+directory first, else the archive; else `<chart>-<version>` at the root, a
+cache filled without the repository. When one compile uses one chart name
+and version from two repositories (a fork, a generic name such as `app`),
+a chart of them not in its repository's directory fails even when the root
+holds it: the root entry could be the other repository's. Of a chart, the
 compiler reads `values.yaml` and `values.schema.json` only: at the root of
 the directory, or in the archive's top-level directory, not those of its
 subcharts (`<chart>/charts/<sub>/values.yaml`). A chart without
@@ -124,16 +140,20 @@ per compile, whatever the number of keys it renders, and only when a chart
 it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
 objects chart in every compile. `example/input/charts/` holds the
 example's charts unpacked, their `values.yaml` only: enough to compile, not
-to render.
+to render (`charts.example.org/app-1.8.0/`,
+`registry.example.org/okdp/okdp-objects-1.0.0/`).
 
-A chart the cache does not hold fails with the command that downloads it,
-prefixed with the chart key; a file that does not read fails with its path:
+A chart the cache does not hold fails with the commands that download it
+into its repository's directory, prefixed with the chart key; a chart name
+and version of two repositories at the root only, with those of each; a
+file that does not read, with its path:
 
 ```
-app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>
-oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>
-app: app-1.8.0/values.yaml: cannot unmarshal yaml document: ...
-app: app-1.8.0.tgz: gzip: invalid header
+app: chart app-1.8.0 is not in the chart cache: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org
+oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: mkdir -p <chart cache>/quay.io/adaltas && helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>/quay.io/adaltas
+app: chart app-1.8.0 comes from 2 repositories, and the chart cache holds it only as app-1.8.0, which cannot tell them apart: pull each into its repository's directory: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org; mkdir -p <chart cache>/fork.example.org && helm pull app --repo https://fork.example.org --version 1.8.0 -d <chart cache>/fork.example.org
+app: charts.example.org/app-1.8.0/values.yaml: cannot unmarshal yaml document: ...
+app: charts.example.org/app-1.8.0.tgz: gzip: invalid header
 ```
 
 ## Parameters
@@ -565,8 +585,9 @@ global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository (
 
 The [chart cache](#chart-cache) holds each when its chart is compiled: the
 objects chart in every compile, the oidc-dcr chart in `dcr` mode with a
-client. Another repository with the same chart and version (a mirror) needs
-no other cache entry.
+client. Another repository with the same chart and version (a mirror) has
+its own directory there; the root entry `<chart>-<version>` serves both,
+unless one compile uses the two.
 
 ### OAuth client settings
 
@@ -828,7 +849,7 @@ canary (app-1.8.0):
 ```
 
 A schema that does not compile fails with its path in the cache, prefixed
-with the chart key (`app: app-1.8.0/values.schema.json: ...`).
+with the chart key (`app: charts.example.org/app-1.8.0/values.schema.json: ...`).
 
 ## Outputs
 

@@ -24,12 +24,14 @@ func TestRefCheck(t *testing.T) {
 		"{repository: https://x, chart: app, version: 1.0.0}":            "",
 		"{repository: oci://x/charts, chart: app, version: v2.1.0-rc.1}": "",
 		"": "charts.app.source is required: the upstream chart (repository, chart, version)",
-		"{repository: x.org, chart: app, version: 1.0.0}":     `charts.app.source.repository "x.org": the URL of a chart repository`,
-		"{repository: https://x, chart: ../app, version: 1}":  `charts.app.source.chart "../app": the name of a chart`,
-		"{repository: https://x, chart: a/b, version: 1.0.0}": `charts.app.source.chart "a/b": the name of a chart`,
-		"{repository: https://x, version: 1.0.0}":             `charts.app.source.chart "": the name of a chart`,
-		"{repository: https://x, chart: app, version: ^1.0}":  `charts.app.source.version "^1.0": a pinned chart version (1.2.3), not a range`,
-		"{repository: https://x, chart: app}":                 `charts.app.source.version "": a pinned chart version`,
+		"{repository: x.org, chart: app, version: 1.0.0}":          `charts.app.source.repository "x.org": the URL of a chart repository`,
+		"{repository: https://x/../y, chart: app, version: 1.0.0}": `charts.app.source.repository "https://x/../y": the URL of a chart repository`,
+		"{repository: 'oci://', chart: app, version: 1.0.0}":       `charts.app.source.repository "oci://": the URL of a chart repository`,
+		"{repository: https://x, chart: ../app, version: 1}":       `charts.app.source.chart "../app": the name of a chart`,
+		"{repository: https://x, chart: a/b, version: 1.0.0}":      `charts.app.source.chart "a/b": the name of a chart`,
+		"{repository: https://x, version: 1.0.0}":                  `charts.app.source.chart "": the name of a chart`,
+		"{repository: https://x, chart: app, version: ^1.0}":       `charts.app.source.version "^1.0": a pinned chart version (1.2.3), not a range`,
+		"{repository: https://x, chart: app}":                      `charts.app.source.version "": a pinned chart version`,
 	} {
 		yml := "app: {source: " + source + "}\n"
 		if source == "" {

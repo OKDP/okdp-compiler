@@ -4,6 +4,7 @@ package chart
 
 import (
 	"fmt"
+	"io/fs"
 	"path"
 	"regexp"
 	"strings"
@@ -11,7 +12,8 @@ import (
 
 // Ref: an upstream chart as its repository publishes it: what renders
 // the values of a chart key (a Flux HelmRelease, an Argo CD source), and
-// what the chart cache holds its defaults and schema under.
+// what the chart cache holds its defaults and schema under
+// (<repository>/<chart>-<version>, cacheDir).
 type Ref struct {
 	Repository string `yaml:"repository" json:"repository"` // https://... or oci://...
 	Chart      string `yaml:"chart" json:"chart"`           // the chart's name in the repository
@@ -26,13 +28,14 @@ func IsVersion(v string) bool {
 	return chartVersion.MatchString(v)
 }
 
-// Check: a repository URL, the name of a chart, a pinned version. where
-// names the reference in the errors.
+// Check: a repository URL that names a directory of the chart cache
+// (cacheDir), the name of a chart, a pinned version. where names the
+// reference in the errors.
 func (r Ref) Check(where string) error {
 	switch {
 	case r == Ref{}:
 		return fmt.Errorf("%s is required: the upstream chart (repository, chart, version)", where)
-	case !strings.HasPrefix(r.Repository, "https://") && !strings.HasPrefix(r.Repository, "http://") && !strings.HasPrefix(r.Repository, "oci://"):
+	case r.cacheDir() == "":
 		return fmt.Errorf("%s.repository %q: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
 	case r.Chart == "" || r.Chart != path.Base(r.Chart) || r.Chart == "." || r.Chart == ".." || strings.TrimSpace(r.Chart) != r.Chart:
 		return fmt.Errorf("%s.chart %q: the name of a chart of the repository", where, r.Chart)
@@ -48,10 +51,32 @@ func (r Ref) id() string {
 	return r.Chart + "-" + r.Version
 }
 
-// pull: the helm command that downloads the chart.
-func (r Ref) pull() string {
-	if strings.HasPrefix(r.Repository, "oci://") {
-		return fmt.Sprintf("helm pull %s/%s --version %s", strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version)
+// cacheDir: the directory of the chart cache that holds the charts of the
+// repository: its URL without the scheme and a trailing /, host, port and
+// path kept (quay.io/adaltas for oci://quay.io/adaltas). "" for a
+// repository that is not https://, http:// or oci://, or whose rest is not
+// a path inside the chart cache (fs.ValidPath, without \): an empty host, an
+// empty, . or .. segment. Check refuses such a repository.
+func (r Ref) cacheDir() string {
+	for _, scheme := range []string{"oci://", "https://", "http://"} {
+		if rest, ok := strings.CutPrefix(r.Repository, scheme); ok {
+			dir := strings.TrimSuffix(rest, "/")
+			if dir == "." || !fs.ValidPath(dir) || strings.Contains(dir, `\`) {
+				return ""
+			}
+			return dir
+		}
 	}
-	return fmt.Sprintf("helm pull %s --repo %s --version %s", r.Chart, r.Repository, r.Version)
+	return ""
+}
+
+// pull: the commands that download the chart into its repository's
+// directory of the chart cache, created first: helm pull -d does not create
+// it.
+func (r Ref) pull() string {
+	to := path.Join("<chart cache>", r.cacheDir())
+	if strings.HasPrefix(r.Repository, "oci://") {
+		return fmt.Sprintf("mkdir -p %s && helm pull %s/%s --version %s -d %s", to, strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version, to)
+	}
+	return fmt.Sprintf("mkdir -p %s && helm pull %s --repo %s --version %s -d %s", to, r.Chart, r.Repository, r.Version, to)
 }

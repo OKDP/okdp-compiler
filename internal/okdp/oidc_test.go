@@ -386,7 +386,7 @@ oidcClients:
 	}{
 		"in output":        {"oidc-dcr: {}", true, app, ch, `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output`},
 		"in service.yaml":  {"", false, chart.Specs{"app": {Source: appSource}, "console-oidc-dcr": {Source: DcrSource}}, ch, "service.yaml: charts.console-oidc-dcr: the chart of oidcClients[1] (console) is added by the compiler: remove it from service.yaml"},
-		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>"},
+		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: mkdir -p <chart cache>/quay.io/adaltas && helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>/quay.io/adaltas"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := compile(tc.output, tc.existing, tc.charts, tc.files, M{"replicas": 2})

@@ -73,7 +73,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	f.SetOutput(stderr)
 	f.BoolVar(&o.version, "version", false, "print the version and exit")
 	f.StringVar(&o.pkg, "package", "", "package directory (service.yaml, mapping.cel.yaml, values.yaml, values.schema.json)")
-	f.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts, <chart>-<version>.tgz (helm pull -d) or <chart>-<version>/ (default $OKDP_CHARTS)")
+	f.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts, <repository>/<chart>-<version>.tgz (helm pull -d <dir>/<repository>) or <repository>/<chart>-<version>/, <repository> the URL without its scheme (default $OKDP_CHARTS)")
 	f.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
 	f.StringVar(&o.instance, "instance", "", "instance directory (upstream values files: upstream.<chart>.yaml)")
 	f.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")

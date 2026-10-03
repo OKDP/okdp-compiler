@@ -63,7 +63,7 @@ okdp-compile --version
 | Flag | Default | |
 |---|---|---|
 | `--package` | required | package directory: `service.yaml`, `mapping.cel.yaml`, `values.yaml`, `values.schema.json` at its root, and the base files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
-| `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart as `helm pull -d <dir>` writes it, `<chart>-<version>.tgz`, or unpacked, `<chart>-<version>/` ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
+| `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart in its repository's directory, the URL without its scheme, as `helm pull -d <dir>/<repository>` writes it, `<repository>/<chart>-<version>.tgz`, or unpacked, `<repository>/<chart>-<version>/` (`quay.io/adaltas/oidc-dcr-0.5.0.tgz`); else `<chart>-<version>` at its root ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
 | `--instance` | none | instance directory: the upstream values files `service.yaml` names (`upstream.<key>.yaml`, by chart key; [instance values](specs/01_inputs_outputs.md#instance-values)) |
 | `--platform` | none | a platform values file: `global`, `global.okdp` among them ([platform values](specs/01_inputs_outputs.md#platform-values)); repeatable, merged in order as `helm -f` files, before the `-f` files |
@@ -294,7 +294,7 @@ helm template <release> oci://<repository>/<chart> --version <version> --namespa
 
 The second form is for an `oci://` repository. A chart the chart cache holds
 as an archive renders from it too: `helm template <release>
-<cache>/<chart>-<version>.tgz ...`. `index[key]` is the key's `source` in
+<cache>/<repository>/<chart>-<version>.tgz ...`. `index[key]` is the key's `source` in
 `service.yaml` ([sources](specs/02_service_definition.md#sources)), the
 platform's oidc-dcr chart for an OAuth client chart, the platform's objects
 chart for `okdp` ([platform charts](specs/01_inputs_outputs.md#platform-charts)):
@@ -437,8 +437,8 @@ charts:
 	}}}}
 	res, err := compiler.Compile(def, compiler.Inputs{
 		Charts: fstest.MapFS{ // the defaults of each upstream chart
-			"app-1.0.0/values.yaml":          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
-			"okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
+			"charts.example.org/app-1.0.0/values.yaml":                 {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
+			"registry.example.org/okdp/okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
 		},
 		Contracts: fstest.MapFS{}, // no connection, no provides: no contract read
 		Platform:  []map[string]any{platform},
@@ -678,10 +678,11 @@ with status 2.
 | `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |
 | `service.yaml: line 19: upstream off: write true or false (service.yaml is read as YAML 1.2, where off is not a boolean; quote a path of that name)` | a chart's `upstream` written as a YAML 1.1 boolean (`no`, `off`, `yes`, `on`...), a string in `service.yaml` | `true` or `false`; quote a file of that name ([upstream](specs/02_service_definition.md#upstream)) |
 | `service.yaml: charts.app.source is required: the upstream chart (repository, chart, version)` | a chart without its `source` | name the published chart that renders it ([sources](specs/02_service_definition.md#sources)) |
-| `service.yaml: charts.app.source.repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `service.yaml: charts.app.source.chart "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `http://`, `oci://`), a chart that is not a chart's name | fix the source ([sources](specs/02_service_definition.md#sources)) |
+| `service.yaml: charts.app.source.repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `service.yaml: charts.app.source.chart "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `http://`, `oci://`) or whose host and path are no directory of the chart cache (`https://`, `https://x/../y`), a chart that is not a chart's name | fix the source ([sources](specs/02_service_definition.md#sources)) |
 | `service.yaml: charts.app.source.version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version the chart cache holds |
 | `service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml` | `service.yaml` lists `okdp` | remove it; the platform names its chart ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
-| `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>` | a chart the compile renders (a chart left out by `$if` is not read) is neither `<chart>-<version>/` nor `<chart>-<version>.tgz` of the chart cache; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version>` | run the command with `-d` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
+| `app: chart app-1.8.0 is not in the chart cache: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org` | a chart the compile renders (a chart left out by `$if` is not read) is neither in its repository's directory (`charts.example.org/app-1.8.0/` or `.tgz`) nor at the root of the chart cache (`app-1.8.0/` or `.tgz`); for an `oci://` repository the commands are `mkdir -p <chart cache>/<repository> && helm pull oci://<repository>/<chart> --version <version> -d <chart cache>/<repository>` | run the commands, `<chart cache>` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
+| `app: chart app-1.8.0 comes from 2 repositories, and the chart cache holds it only as app-1.8.0, which cannot tell them apart: pull each into its repository's directory: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org; mkdir -p <chart cache>/fork.example.org && helm pull app --repo https://fork.example.org --version 1.8.0 -d <chart cache>/fork.example.org` | the compile renders one chart name and version from two repositories (a fork, a generic name), and the chart cache holds it at its root only, not in this key's repository's directory | run the commands ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
 | `global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml` | the platform values name no objects chart | pass the platform values with `--platform`; set it ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart checked as a source is (its repository, chart and version, the same messages); also `global.okdp.charts.oidcDcr`, and `... must be a map (repository, chart, version)`, `... must be a string` for its form | fix the platform values |
 | `database: unknown contract "database"` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
@@ -737,4 +738,4 @@ the compile. Where the cause or the fix is not in the message:
 | `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/platform/dcr-without-registration-url.yaml`) | set it in the platform values |
 | `service.yaml: charts.oidc-dcr: the chart of oidcClients[0] is added by the compiler: remove it from service.yaml` | `service.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; rename the chart key or the client when it is another chart |
 | `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output` | `output` computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
-| `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>` | `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+| `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: mkdir -p <chart cache>/quay.io/adaltas && helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>/quay.io/adaltas` | `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
