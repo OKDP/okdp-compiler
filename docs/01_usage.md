@@ -44,7 +44,7 @@ where the module can be fetched at that path.
 ```text
 okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>] [--instance <dir>]
              [--platform <platform.yaml>]... [-f <values.yaml>]...
-             [--release <name>] [--namespace <name>]
+             --release <name> --namespace <name>
              [--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent <n>]
 okdp-compile --version
 ```
@@ -57,18 +57,21 @@ okdp-compile --version
 | `--instance` | none | instance directory: the upstream values files `service.yaml` names (`upstream.<key>.yaml`, by chart key; [instance values](specs/01_inputs_outputs.md#instance-values)) |
 | `--platform` | none | a platform values file: `global`, `global.okdp` among them ([platform values](specs/01_inputs_outputs.md#platform-values)); repeatable, merged in order as `helm -f` files, before the `-f` files |
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--platform` files. It sets no `global` but the keys the parameter schema declares under it ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
-| `--release` | `demo-<name>` | release name; `<name>` is the `name` of `service.yaml` |
-| `--namespace` | `demo` | namespace |
-| `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file |
-| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`), the chart index and the dependencies to a directory, one file each |
-| `--umbrella` | none | write the instance as one chart to a directory: `Chart.yaml`, an umbrella over the upstream charts, and `instance.values.yaml`, its values |
+| `--release` | required | release name: the Helm release the values are compiled for, which renders them |
+| `--namespace` | required | namespace: the release's |
+| `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file, out of the directories below |
+| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`), the chart index and the dependencies to a directory, one file each; it holds only these files |
+| `--umbrella` | none | write the instance as one chart to a directory: `Chart.yaml`, an umbrella over the upstream charts, and `instance.values.yaml`, its values; a directory other than `--emit-dir`'s, holding only these files |
 | `--indent` | `2` | the indentation of the YAML files `--out`, `--emit-dir` and `--umbrella` write, 2 to 9 spaces |
 | `--version` | | print the version and exit |
 
-Flags take one or two dashes. Without `--out`, `--emit-dir` or
-`--umbrella`, the command only compiles: exit status 0 means the instance
-compiles. When several are given, `--emit-dir` is written first, then
-`--umbrella`, then `--out`.
+Flags take one or two dashes, and every input is a flag: an argument that
+is not one is refused, where it would end the flags and those after it be
+ignored (a values file without its `-f`). The directories of `--package`,
+`--charts`, `--contracts` and `--instance` must exist. Without `--out`,
+`--emit-dir` or `--umbrella`, the command only compiles: exit status 0
+means the instance compiles. Every output is built before any is written:
+a compile or an output that fails writes nothing.
 
 ### `--out`
 
@@ -85,6 +88,7 @@ The final values are written by `--emit-dir`, not by `--out`.
 ```console
 $ export OKDP_CONTRACTS=example/input/contracts OKDP_CHARTS=example/input/charts
 $ bin/okdp-compile --package example/input/package \
+    --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml --out /dev/stdout
 charts:
   app:
@@ -115,6 +119,7 @@ The computed values of a chart hold only what the mapping sets:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
+    --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
@@ -126,7 +131,7 @@ tag: "2.3"
 
 ### `--emit-dir`
 
-The directory is created if needed, and its files are overwritten:
+The directory is created if needed, and holds these files only:
 
 | File | Content |
 |---|---|
@@ -138,6 +143,7 @@ The example's, `out/` here, are `example/output/files/`:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
+    --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
 $ ls out
 app.values.yaml
@@ -159,13 +165,23 @@ In `dcr` mode (`global.okdp.oidc.clientProvisioning: dcr`), the webapp's
 OAuth client adds the chart `oidc-dcr`, which `service.yaml` does not list,
 any more than `okdp`: `oidc-dcr.values.yaml`, and its entry in the index.
 A chart the mapping leaves out (`$if`) has no file and no index entry.
-Files of a previous run are not removed: emit into an empty directory.
+
+Before anything is written, the files of the directory are checked: those
+of a previous compile are overwritten, and removed when this one does not
+write them (a chart no longer compiled); any other file or directory, or a
+file of these names that is not a regular file (a symbolic link), fails the
+compile, so that a directory given by mistake loses nothing:
+
+```
+refusing to write in out: notes.txt is not an output of okdp-compile
+```
 
 ### `--umbrella`
 
 The instance as one chart, for one Helm release per instance
-([GitOps](#gitops)). The directory is created if needed, and its files are
-overwritten:
+([GitOps](#gitops)). The directory is created if needed, and holds these
+files only, checked as `--emit-dir`'s are; it cannot be the directory of
+`--emit-dir`:
 
 | File | Content |
 |---|---|
@@ -182,6 +198,7 @@ The example's are `example/output/umbrella/`:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
+    --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
 apiVersion: v2
@@ -206,6 +223,10 @@ helm dependency build <dir>
 helm template <release> <dir> --namespace <namespace> -f <dir>/instance.values.yaml
 ```
 
+`helm dependency build` adds `Chart.lock` and `charts/` to the directory,
+which the next compile into it refuses: build a copy, or remove them
+first.
+
 Each upstream chart renders as a subchart, with the final values of its
 key, as it renders alone ([rendering with Helm](#rendering-with-helm)), but
 for what Helm does to every subchart (checked with Helm 4.3,
@@ -227,13 +248,14 @@ for what Helm does to every subchart (checked with Helm 4.3,
 |---|---|
 | 0 | compiled; `--version`, `--help` |
 | 1 | any error: `error: <message>` on stderr |
-| 2 | unknown flag, or a flag without its argument: the message and the usage on stderr |
+| 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
 A message is a whole report and may span several lines: every schema
 violation, every message of the mapping's `errors` section.
 
 ```console
 $ bin/okdp-compile --package example/input/package \
+    --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f testdata/schema-violation.yaml
 error: values don't meet the specifications of the schema(s) in the following chart(s):
 webapp:
@@ -487,12 +509,14 @@ for f in instances/*.yaml; do
     --platform platform.yaml -f "$f" --release "$name" --namespace demo \
     --emit-dir "compiled/$name" || exit 1
 done
-git diff --exit-code compiled/
+test -z "$(git status --porcelain compiled/)" || { git status --short compiled/; exit 1; }
 ```
 
-The emitted files can be committed and checked with
-`git diff --exit-code`, as `go test ./internal/fsio` checks
-`example/output/`.
+The emitted files can be committed and checked against the commit, as
+`go test ./internal/fsio` checks `example/output/`: `git status
+--porcelain` lists the changed, removed and new files, where
+`git diff --exit-code` misses a new, untracked file (a chart now
+compiled).
 
 ### GitOps
 
@@ -599,13 +623,18 @@ it.
 `<field>` is the parameter path (`database`, `backends[1].database`),
 `<key>` a chart key (of `service.yaml`, `okdp`, or an OAuth client chart),
 `<chart>-<version>` the upstream chart that renders it, `<service>` the
-`name` of `service.yaml`. Every error exits with status 1.
+`name` of `service.yaml`. Every error exits with status 1, a usage error
+with status 2.
 
 ### Inputs and instance values
 
 | Message | Cause | Fix |
 |---|---|---|
-| `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required` | a required flag is missing | give it |
+| `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
+| `--instance: stat instances/demo: no such file or directory`, `--charts charts.tgz: not a directory` | a directory flag (`--package`, `--charts`, `--contracts`, `--instance`) names no directory | fix the path |
+| `unexpected argument "instance.yaml": every input is a flag (-f before each values file)` | an argument that is not a flag, here a second values file after one `-f`; exit status 2, nothing compiled | one `-f` per values file |
+| `refusing to write in out: notes.txt is not an output of okdp-compile` | the `--emit-dir` or `--umbrella` directory holds a file the flag does not write (`Chart.lock` and `charts/` of `helm dependency build` included); nothing is written | another directory, or remove the file |
+| `--emit-dir and --umbrella name the same directory, out: give each its own` | both flags name one directory | give each its own |
 | `open service.yaml: no such file or directory`, `open mapping.cel.yaml: ...` | `--package` is not the package's directory, or the package has no mapping | point it at the directory of `service.yaml` |
 | `open values.yaml: no such file or directory`, `open values.schema.json: ...` | the package has no parameter defaults, or no parameter schema; both are always read (connection references are declared in the schema) | add them ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |

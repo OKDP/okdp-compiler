@@ -291,7 +291,13 @@ engine for the mappings and the oidc-dcr template.
 and `compiler.Document`, the chart index (`Result.Charts`) included:
 `okdp.charts.yaml` with [`--emit-dir`](01_usage.md#--emit-dir), the
 dependencies of `Chart.yaml` with [`--umbrella`](01_usage.md#--umbrella),
-`charts` with [`--out`](01_usage.md#--out).
+`charts` with [`--out`](01_usage.md#--out). Its own rules are the disk's:
+every input is a flag (an argument that is not one would end Go's flag
+parsing, and is refused), the directory flags name directories, every
+output is built before any is written, and an output directory holds only
+the files its flag writes there: those of a previous compile are removed,
+a directory holding any other is refused
+([command line](01_usage.md#command-line)).
 
 ## Design decisions
 
@@ -546,7 +552,10 @@ oidc-dcr settings and their defaults. The template has no Helm fixture: its
 expected values are in `oidc_test.go`. `internal/fsio/load_test.go` checks
 the loading of a package, `internal/fsio/output_test.go` the files
 `--emit-dir` writes, the chart index included, `internal/fsio/umbrella_test.go`
-the umbrella's chart and values.
+the umbrella's chart and values. `cmd/okdp-compile/main_test.go` runs the
+command line on the example: the refused arguments and options, the stale
+files removed, nothing written when a compile, an output or a directory
+fails.
 
 ### Example
 
@@ -559,10 +568,9 @@ platform values) and `instance.yaml` (the instance's values).
 `example/output/` is what the compile writes: `files/` as `okdp-compile
 --emit-dir`, `umbrella/` as `--umbrella`. `TestExample`
 (`internal/fsio/example_test.go`) compiles `instance.yaml`, an instance
-layer, over `platform.yaml`, a platform layer, under the CLI's default
-release and namespace, and
-compares the files of `fsio.Files` and `fsio.Umbrella` with them byte for
-byte.
+layer, over `platform.yaml`, a platform layer, under the release
+`demo-webapp` and the namespace `demo`, and compares the files of
+`fsio.Files` and `fsio.Umbrella` with them byte for byte.
 After a change, `go test ./internal/fsio -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures); the diff is the change's effect, reviewed as such.

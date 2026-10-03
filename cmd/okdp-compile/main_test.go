@@ -1,0 +1,169 @@
+package main
+
+import (
+	"bytes"
+	"io/fs"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// The example: what a compile reads (example/input) and writes
+// (example/output).
+var (
+	input  = filepath.Join("..", "..", "example", "input")
+	output = filepath.Join("..", "..", "example", "output")
+)
+
+// example: the options that compile the example instance into dir: files/
+// (--emit-dir), umbrella/ (--umbrella) and out.yaml (--out).
+func example(dir string) options {
+	return options{
+		pkg:       filepath.Join(input, "package"),
+		charts:    filepath.Join(input, "charts"),
+		contracts: filepath.Join(input, "contracts"),
+		platform:  multi{filepath.Join(input, "platform.yaml")},
+		values:    multi{filepath.Join(input, "instance.yaml")},
+		release:   "demo-webapp",
+		namespace: "demo",
+		indent:    2,
+		emitDir:   filepath.Join(dir, "files"),
+		umbrella:  filepath.Join(dir, "umbrella"),
+		out:       filepath.Join(dir, "out.yaml"),
+	}
+}
+
+// tree: the files under dir, path -> content.
+func tree(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, e fs.DirEntry, err error) error {
+		if err != nil || e.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(dir, path)
+		files[rel] = string(b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// TestParse: an argument that is not a flag is refused, where it would end
+// the flags and leave those after it unread.
+func TestParse(t *testing.T) {
+	for args, want := range map[string]string{
+		"-f a.yaml -f b.yaml --emit-dir out": "",
+		"-f a.yaml b.yaml --emit-dir out":    `unexpected argument "b.yaml": every input is a flag`,
+		"--emit-dir":                         "flag needs an argument: -emit-dir",
+	} {
+		var stderr bytes.Buffer
+		o, err := parse(strings.Fields(args), &stderr)
+		switch {
+		case want == "" && (err != nil || o.emitDir != "out" || !slices.Equal(o.values, multi{"a.yaml", "b.yaml"})):
+			t.Errorf("%s: %v %#v", args, err, o)
+		case want != "" && (err == nil || !strings.Contains(stderr.String(), want) || !strings.Contains(stderr.String(), "Usage of okdp-compile")):
+			t.Errorf("%s: got %v, want %q and the usage on stderr, got %q", args, err, want, stderr.String())
+		}
+	}
+}
+
+// TestRun: the example compiled into directories holding the files of a
+// previous compile: they hold what example/output holds, a file no longer
+// written removed.
+func TestRun(t *testing.T) {
+	dir := t.TempDir()
+	o := example(dir)
+	if err := os.MkdirAll(o.emitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml"} {
+		if err := os.WriteFile(filepath.Join(o.emitDir, name), []byte("stale: true\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := run(o); err != nil {
+		t.Fatal(err)
+	}
+	want := tree(t, output)
+	got := tree(t, dir)
+	if _, ok := got["out.yaml"]; !ok {
+		t.Error("--out: out.yaml not written")
+	}
+	delete(got, "out.yaml")
+	if !maps.Equal(got, want) {
+		t.Errorf("got %v, want example/output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	}
+}
+
+// TestRunErrors: what run refuses, before it writes anything.
+func TestRunErrors(t *testing.T) {
+	// A package whose version an umbrella chart cannot take: it compiles,
+	// its umbrella fails.
+	pkg := t.TempDir()
+	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(input, "package"))); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := os.ReadFile(filepath.Join(pkg, "service.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc = bytes.Replace(svc, []byte("version: 1.0.0"), []byte(`version: "1.0"`), 1)
+	if err := os.WriteFile(filepath.Join(pkg, "service.yaml"), svc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	instance := filepath.Join(input, "instances")
+	notDir := filepath.Join(input, "platform.yaml")
+	protected := filepath.Join("..", "..", "testdata", "protected-upstream.yaml")
+	for name, tc := range map[string]struct {
+		set   func(o *options)
+		files []string // created first under the output directory; a directory when ending with /
+		want  string
+	}{
+		"no release":     {func(o *options) { o.release = "" }, nil, "--release is required"},
+		"no namespace":   {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
+		"no instance":    {func(o *options) { o.instance = instance }, nil, "--instance: stat " + instance + ": no such file or directory"},
+		"not a dir":      {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
+		"same directory": {func(o *options) { o.umbrella = o.emitDir + "/" }, nil, "--emit-dir and --umbrella name the same directory"},
+		"a compile":      {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
+		"an umbrella":    {func(o *options) { o.pkg = pkg }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
+		"another file":   {nil, []string{"umbrella/notes.txt"}, "umbrella: notes.txt is not an output of okdp-compile"},
+		"a directory":    {nil, []string{"files/app.values.yaml/"}, "files: app.values.yaml is not an output of okdp-compile"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			o := example(dir)
+			if tc.set != nil {
+				tc.set(&o)
+			}
+			for _, f := range tc.files {
+				p := filepath.Join(dir, f)
+				if strings.HasSuffix(f, "/") {
+					if err := os.MkdirAll(p, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := tree(t, dir)
+			if err := run(o); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+			if after := tree(t, dir); !maps.Equal(after, before) {
+				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
+			}
+		})
+	}
+}

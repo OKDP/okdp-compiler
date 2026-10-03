@@ -98,10 +98,12 @@ make build    # bin/okdp-compile
 export OKDP_CONTRACTS=example/input/contracts   # or --contracts
 export OKDP_CHARTS=example/input/charts         # or --charts
 bin/okdp-compile --package example/input/package \
+  --release demo-webapp --namespace demo \
   --platform example/input/platform.yaml -f example/input/instance.yaml \
   --emit-dir out/files --umbrella out/umbrella
 # out/ is now example/output/, byte for byte
 bin/okdp-compile --package example/input/package \
+  --release demo-webapp --namespace demo \
   --platform example/input/platform.yaml -f example/input/instance.yaml -f testdata/protected-upstream.yaml
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
@@ -124,7 +126,11 @@ the index, and `<dir>/instance.values.yaml`, the final values of each chart
 under its key, given to Helm with `-f`
 ([`--umbrella`](docs/01_usage.md#--umbrella)). `--out <file>` writes the
 computed values, the index, the objects and the dependencies
-([command line](docs/01_usage.md#command-line)).
+([command line](docs/01_usage.md#command-line)). Every output is built
+before any is written, and each directory holds only what its flag writes
+there: the files of a previous compile no longer written are removed, a
+directory holding any other file is refused. `--release` and
+`--namespace` are required: the values are compiled for them.
 
 ## Layout
 

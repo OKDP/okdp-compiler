@@ -30,7 +30,7 @@ mapping (`upstream: yes` is the path `yes`). Unknown fields are ignored.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `name` | string | required | The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations, `okdp-compile`'s default release `demo-<name>`. |
+| `name` | string | required | The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations. |
 | `version` | string | required | The package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`. |
 | `appVersion` | string | `""` | The application's version: `service.appVersion`, label `app.kubernetes.io/version` (left out when empty). |
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
