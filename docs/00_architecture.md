@@ -357,6 +357,9 @@ sees a copy of the parameters while the merges use them as written.
   the compile.
 - `service.yaml` is not a values file: yaml.v3 decodes it into Go types as
   YAML 1.2 ([service.yaml](specs/02_service_definition.md#serviceyaml)).
+  Where the two readings differ on a field, the field is checked:
+  `Upstream.UnmarshalYAML` refuses a plain `no` or `off`, a boolean in YAML
+  1.1, a path in YAML 1.2.
 
 ### The oidc-dcr template
 

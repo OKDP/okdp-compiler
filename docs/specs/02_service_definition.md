@@ -24,7 +24,8 @@ instance values) and its outputs are specified in
 ## service.yaml
 
 Decoded by `gopkg.in/yaml.v3`: YAML 1.2, unlike values files and the
-mapping (`upstream: yes` is the path `yes`). Unknown fields are ignored.
+mapping (`appVersion: 1.10` is `"1.10"`; a plain `upstream: no` is a
+string, refused: [upstream](#upstream)). Unknown fields are ignored.
 
 ### Service
 
@@ -115,6 +116,14 @@ definition built in memory:
 A value of another form (`""`, a number, a map other than `{from: <key>}`,
 or a list holding `""`) fails with
 `service.yaml: line <n>: upstream must be true, false, a path, a list of paths or {from: <chart>}`.
+A boolean of YAML 1.1 written plain (`y`, `yes`, `n`, `no`, `on`, `off`,
+capitalized or upper case) is a string in YAML 1.2: it is refused, rather
+than taken as a file every compile would require; quoted (`"off"`) or
+tagged (`!!str off`), it is a path:
+
+```
+service.yaml: line 7: upstream off: write true or false (service.yaml is read as YAML 1.2, where off is not a boolean; quote a path of that name)
+```
 How the instance values are written, and the errors of a missing file:
 [upstream values](01_inputs_outputs.md#upstream-values).
 

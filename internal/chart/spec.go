@@ -96,10 +96,18 @@ func (s Specs) Check() error {
 	return nil
 }
 
+// yaml11Bools: the plain scalars YAML 1.1 reads as booleans and YAML 1.2
+// as strings, true and false aside.
+var yaml11Bools = []string{"y", "Y", "yes", "Yes", "YES", "n", "N", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"}
+
 // UnmarshalYAML: true or false, a path or a list of paths, or {from:
-// <chart>}.
+// <chart>}. service.yaml is YAML 1.2, where a plain no or off is a string:
+// refused rather than taken as the name of a file every compile would then
+// require; quoted, it is one.
 func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	switch {
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!str" && n.Style == 0 && slices.Contains(yaml11Bools, n.Value):
+		return fmt.Errorf("line %d: upstream %s: write true or false (service.yaml is read as YAML 1.2, where %s is not a boolean; quote a path of that name)", n.Line, n.Value, n.Value)
 	case n.Kind == yaml.MappingNode:
 		if len(n.Content) != 2 || n.Content[0].Value != "from" || n.Content[1].Kind != yaml.ScalarNode || n.Content[1].Tag != "!!str" || n.Content[1].Value == "" {
 			break

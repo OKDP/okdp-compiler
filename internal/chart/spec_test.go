@@ -57,6 +57,7 @@ func TestUpstreamYAML(t *testing.T) {
 		"upstream: [a.yaml, b.yaml]": {Enabled: true, Files: []string{"a.yaml", "b.yaml"}},
 		"upstream: []":               {Enabled: true, Files: []string{}},
 		"upstream: {from: a}":        {From: "a"},
+		`upstream: "off"`:            {Enabled: true, Files: []string{"off"}},
 	} {
 		var spec Spec
 		if err := yaml.Unmarshal([]byte(in), &spec); err != nil {
@@ -70,6 +71,15 @@ func TestUpstreamYAML(t *testing.T) {
 		var spec Spec
 		if err := yaml.Unmarshal([]byte(in), &spec); err == nil {
 			t.Errorf("%q: no error", in)
+		}
+	}
+	// A YAML 1.1 boolean, a string in service.yaml (YAML 1.2): refused, not
+	// taken as a file name.
+	for _, in := range []string{"upstream: off", "upstream: no", "upstream: Yes", "upstream: ON", "upstream: y"} {
+		var spec Spec
+		err := yaml.Unmarshal([]byte(in), &spec)
+		if want := "line 1: upstream " + strings.TrimPrefix(in, "upstream: ") + ": write true or false"; err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: got %v, want an error containing %q", in, err, want)
 		}
 	}
 }

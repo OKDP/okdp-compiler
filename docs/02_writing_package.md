@@ -753,8 +753,9 @@ as `values.upstream.<key>`.
 - **YAML 1.1.** The mapping, the base values and the upstream charts'
   defaults are read as Helm reads values: plain `no`, `off`, `y` are booleans, `0440` is
   the octal 288. Quote a string that looks like one (`"no"`). `service.yaml`
-  alone is read as YAML 1.2: `upstream: yes` names a file called `yes`
-  ([YAML reading](specs/02_service_definition.md#yaml-reading)).
+  alone is read as YAML 1.2: `upstream: no` is refused, write `false`
+  ([YAML reading](specs/02_service_definition.md#yaml-reading),
+  [upstream](specs/02_service_definition.md#upstream)).
 - **Untested branches are not compiled.** An expression in a branch no case
   takes is never evaluated, typos included
   ([expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
