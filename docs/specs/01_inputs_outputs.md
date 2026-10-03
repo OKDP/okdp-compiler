@@ -11,7 +11,8 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Package files | `Definition.Files` (`fs.FS`) | yes | [Package files](#package-files) |
 | Chart cache | `Inputs.Charts` (`fs.FS`) | yes | [Chart cache](#chart-cache) |
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
-| Values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Platform values](#platform-values), [Instance values](#instance-values) |
+| Platform values layers | `Inputs.Platform` (`[]map[string]any`) | no | [Parameters](#parameters), [Platform values](#platform-values) |
+| Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values) |
 | Instance files | `Inputs.Instance` (`fs.FS`) | no | [Upstream values](#upstream-values) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
@@ -76,7 +77,7 @@ Every values file is read as Helm 4 reads one (`loader.LoadValues`):
 `values.yaml`, the upstream charts' `values.yaml` ([chart
 cache](#chart-cache)), the base files, the
 [instance's upstream files](#upstream-values), and the values layers read by
-`compiler.ParseValues` (the binary's `-f` files).
+`compiler.ParseValues` (the binary's `--platform` and `-f` files).
 
 - Documents: the file is split on the lines starting with `---`, as
   Kubernetes' YAMLReader splits it; only a comment may follow the `---`
@@ -92,9 +93,9 @@ cache](#chart-cache)), the base files, the
   ([Layers and nulls](#layers-and-nulls)).
 
 `testdata/helm/values/documents` and `yaml11` hold what Helm reads
-from such files. Values built in memory and given in `Inputs.Values` are
-normalized the same way: `map[any]any` keys printed as strings, `int`,
-`int64`, `uint64` and `float32` as float64.
+from such files. Values built in memory and given in `Inputs.Platform` or
+`Inputs.Values` are normalized the same way: `map[any]any` keys printed as
+strings, `int`, `int64`, `uint64` and `float32` as float64.
 
 JSON files (`values.schema.json` of the package and of the upstream charts,
 the contracts) are strict JSON: no comments.
@@ -137,9 +138,11 @@ app: app-1.8.0.tgz: gzip: invalid header
 
 ## Parameters
 
-The parameters of an instance: the values layers (`Inputs.Values`) merged
-and coalesced over the package's `values.yaml`, as Helm computes `.Values`
-of a chart from its defaults and `-f` files.
+The parameters of an instance: the values layers, the platform's
+(`Inputs.Platform`) then the instance's (`Inputs.Values`), merged and
+coalesced over the package's `values.yaml`, as Helm computes `.Values` of a
+chart from its defaults and `-f` files. `global` is the platform's
+([Platform values](#platform-values)).
 
 ### Layers and nulls
 
@@ -192,7 +195,7 @@ Three top-level keys are not parameters of the service:
 
 | Key | Content | In the mapping's `values` |
 |---|---|---|
-| `global` | the platform values, `global.okdp` ([Platform values](#platform-values)) | removed: given as `global` and `platform` |
+| `global` | the platform values, `global.okdp`: set by the platform's layers, by an instance's only for the keys the schema declares ([Platform values](#platform-values)) | removed: given as `global` and `platform` |
 | `connections` | the external connections, by name ([Connections](#connections)) | removed: the references are resolved in place |
 | `upstream` | the inline upstream values, by chart key ([Upstream values](#upstream-values)) | for a chart that accepts upstream values and has some: its files, then its inline values, merged as they will be applied (`append` lists appended); the other keys as written |
 
@@ -437,13 +440,14 @@ fails.
 ## Platform values
 
 `global.okdp`: the settings of the platform (ingress, certificate issuers,
-OIDC, proxy...), given as a values layer: `example/input/platform.yaml`,
-`platform/platform-values.yaml` in a platform repository. The compiler gives
-the layers no role: `global.okdp` is read from the
-[parameters](#parameters), every layer merged over `values.yaml`. A later
-layer may change or delete a platform value (`null`), as
-`testdata/missing-platform-value.yaml` does; keeping the platform values
-authoritative is the caller's job.
+OIDC, proxy, the platform's charts...), given as the platform's values
+layers, `Inputs.Platform` (the binary's `--platform` files):
+`example/input/platform.yaml`, `platform/platform-values.yaml` in a
+platform repository. They are merged in order after the package's
+`values.yaml` and before the instance's layers, `Inputs.Values`
+([parameters](#parameters)); a later platform layer may change or delete
+(`null`) a value of the previous ones, as
+`testdata/platform/missing-platform-value.yaml` does.
 
 ```yaml
 global:
@@ -455,12 +459,37 @@ global:
     oidc: {issuerUri: https://sso.okdp.example.org/realms/okdp}
 ```
 
+`global` is the platform's: it comes from the package's `values.yaml` and
+the platform's layers, `global.okdp` decides the instance's host, where its
+OAuth clients register and the charts its objects and clients are rendered
+with, and every chart receives `global` ([merge
+precedence](#merge-precedence)). An instance layer that sets `global` fails
+before the parameter schema is checked, naming the layer by its position in
+`Inputs.Values`, from 1 (the binary's `-f` files, in order), and the first
+key of `global` it may not set, in key order; `global` set to a non-map,
+`null` included, fails as a whole (`testdata/instance-sets-global.yaml`):
+
+```
+values layer 1: global.okdp is set by the platform (--platform, Inputs.Platform)
+values layer 2: global is set by the platform (--platform, Inputs.Platform)
+```
+
+The exception: a key the parameter schema declares under `global`
+(`properties.global.properties.<key>`), `okdp` excepted, which an instance
+layer may set, over the platform's value. A package opens a global value of
+its charts to instances this way:
+
+```json
+"global": {"type": "object", "properties": {"imageRegistry": {"type": "string"}}}
+```
+
 ### Requirements
 
 `require` of `service.yaml`: dotted paths under `global.okdp`. Each must be
 set and not empty (missing, `null`, `false`, `""`, `0`, an empty list or map
 fails), checked after the [parameter schema](#schema-check), before the
-connections and the mapping (`testdata/missing-platform-value.yaml`):
+connections and the mapping
+(`testdata/platform/missing-platform-value.yaml`):
 
 ```
 global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml
@@ -594,7 +623,7 @@ In `dcr` mode ([OAuth client charts](#oauth-client-charts)), when the
 mapping declares at least one OAuth client (after `$if`, once the clients
 are checked), `authMethod` must be `anonymous` (unset, it is reported as
 `""`), then `registrationUrl` a non-empty string
-(`testdata/dcr-without-registration-url.yaml`):
+(`testdata/platform/dcr-without-registration-url.yaml`):
 
 ```
 global.okdp.oidc.dcr.authMethod "bearer" is not supported: OKDP registers its OAuth clients anonymously
@@ -608,15 +637,17 @@ for the upstream charts.
 
 ### Layers
 
-`Inputs.Values`: the layers in order, the last one winning (Helm's `-f`
-order); the binary's `-f` files, in the order given. The platform values
-come first:
+`Inputs.Values`: the instance's layers in order, the last one winning
+(Helm's `-f` order), after the platform's; the binary's `-f` files, in the
+order given, after its `--platform` files:
 
 ```bash
-bin/okdp-compile ... -f example/input/platform.yaml -f example/input/instance.yaml
+bin/okdp-compile ... --platform example/input/platform.yaml -f example/input/instance.yaml
 ```
 
-Merge, nulls and schema: [Parameters](#parameters).
+An instance layer sets no `global` but the keys the parameter schema
+declares under it ([Platform values](#platform-values)). Merge, nulls and
+schema: [Parameters](#parameters).
 
 ### Upstream values
 
@@ -729,9 +760,10 @@ the compiler computes for them: [OAuth client charts](#oauth-client-charts),
 [the okdp chart](#the-okdp-chart)) only.
 
 Then `global` is replaced by: the `global` of layer 1, under the `global` of
-the parameters, under the `global` of layer 3. The `global` of the base
-values is not kept; layers 4 and 5 may not set it (protected). Every chart
-thus gets the platform values.
+the parameters (the platform's, [Platform values](#platform-values)), under
+the `global` of layer 3. The `global` of the base values is not kept; layers
+4 and 5 may not set it (protected). Every chart thus gets the platform
+values.
 
 Layers 2 to 5 are merged as Helm merges `-f` files: maps merge key by key,
 lists and scalars replace (except at [append](#append) paths), a `null`

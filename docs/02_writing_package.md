@@ -33,7 +33,8 @@ the package is published as a chart.
 ├── values.yaml             the parameters, with their defaults
 ├── values.schema.json      their schema: types, rules, x-ui-* hints, x-okdp-connection-ref
 ├── base/<key>.yaml         base values of each chart: plain YAML
-├── ci/<case>-values.yaml   test instances, each with its global.okdp block
+├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --platform
+├── ci/<case>-values.yaml   test instances, without global
 └── README.md               parameters, platform values read, charts, known gaps
 ```
 
@@ -128,7 +129,7 @@ metrics:
   enabled: false
   interval: 30s
 global:
-  okdp: {}                # platform values: the first values layer, never set per instance
+  okdp: {}                # platform values: the platform's layers (--platform), never an instance's
 connections: {}           # external connections, one values layer per connection file
 upstream: {}              # values of the upstream charts, by chart
 ```
@@ -174,6 +175,11 @@ upstream: {}              # values of the upstream charts, by chart
   on a parameter belongs here, not in the mapping's `errors`. Declare
   `$schema`. With `additionalProperties: false`, declare `global`,
   `connections` and `upstream` too.
+- `global` is the platform's: an instance that sets it fails. A key the
+  schema declares under it (`"global": {"properties": {"imageRegistry":
+  ...}}`), never `okdp`, is one an instance may set, and every chart
+  receives it
+  ([platform values](specs/01_inputs_outputs.md#platform-values)).
 - A string pasted into a configuration file, a script or a template refuses
   `{{`, `}}` and line breaks (the `not` pattern above, as in trino, airflow,
   superset and polaris).
@@ -390,17 +396,23 @@ it (cnpg-postgresql). Neither: consumers bring their own identity
 
 ### 7. Compile, render and check
 
-Each `ci/<case>-values.yaml` is a whole instance: its `global.okdp` block
-(the platform values, `charts.objects` included), then connections and
-parameters. Write one case per mode: OIDC `existing`, `dcr` and off,
-internal and external connections, proxy set, each optional chart on,
-upstream values with appended lists. The `dcr` case gives the platform's `oidc.dcr.registrationUrl` and
-`authMethod: anonymous` (polaris's `ci/dcr-values.yaml`).
+Each `ci/<case>-values.yaml` is an instance: its connections and
+parameters, without `global`, which an instance file may not set. The
+platform values (`global.okdp`, `charts.objects` included) are given apart,
+with `--platform`: `ci/platform.yaml` for every case, then, for a case that
+needs others, its own `ci/<case>-platform.yaml`. Write one case per mode:
+OIDC `existing`, `dcr` and off, internal and external connections, proxy
+set, each optional chart on, upstream values with appended lists. The `dcr`
+case's platform file gives `oidc.clientProvisioning: dcr`,
+`oidc.dcr.registrationUrl` and `authMethod: anonymous` (polaris's
+`ci/dcr-platform.yaml`).
 
 ```bash
 export OKDP_CONTRACTS=~/okdp/contracts     # the contract schemas
 export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache, filled with helm pull
 okdp-compile --package charts/services/polaris \
+  --platform charts/services/polaris/ci/platform.yaml \
+  --platform charts/services/polaris/ci/dcr-platform.yaml \
   -f charts/services/polaris/ci/dcr-values.yaml \
   --release demo-polaris --namespace demo --emit-dir /tmp/demo-polaris
 yq '.polaris' /tmp/demo-polaris/okdp.charts.yaml   # {repository, chart, version}
@@ -426,8 +438,9 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
 - A case whose first line is `# error: <message>` must fail with that message
   (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
-  the platform`). Add one per `errors` entry, per protected path that
-  matters, per schema rule.
+  the platform`; `testdata/platform/` holds the platform files that must
+  fail). Add one per `errors` entry, per protected path that matters, per
+  schema rule.
 
 [Troubleshooting](01_usage.md#troubleshooting) explains the error messages.
 

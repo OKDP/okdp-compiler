@@ -9,7 +9,8 @@
 //		Charts:    os.DirFS("charts"),
 //		Instance:  os.DirFS("instances/demo/myservice"),
 //		Contracts: os.DirFS("contracts"),
-//		Values:    []map[string]any{platformValues, instanceValues},
+//		Platform:  []map[string]any{platformValues},
+//		Values:    []map[string]any{instanceValues},
 //		Release:   "demo-myservice",
 //		Namespace: "demo",
 //	})
@@ -73,7 +74,7 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 
 // ParseValues: a values file as Helm reads it (YAML 1.1, every document of
 // the file merged in order, string keys, every number a float64), for
-// Inputs.Values.
+// Inputs.Platform and Inputs.Values.
 func ParseValues(b []byte) (map[string]any, error) {
 	return chart.ParseValues(b)
 }

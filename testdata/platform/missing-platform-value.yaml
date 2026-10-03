@@ -1,4 +1,5 @@
 # error: global.okdp.ingress.className is required
+# A platform layer deletes a value service.yaml requires (require).
 global:
   okdp:
     ingress:

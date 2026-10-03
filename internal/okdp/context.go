@@ -1,7 +1,7 @@
-// Context: what a mapping sees. It loads the values layers
-// (chart.Parameters), checks the platform requirements, derives the platform
-// context from global.okdp (its settings checked against their types),
-// resolves the connection references
+// Context: what a mapping sees. It loads the values layers, the platform's
+// then the instance's (valuesLayers, chart.Parameters), checks the platform
+// requirements, derives the platform context from global.okdp (its settings
+// checked against their types), resolves the connection references
 // (connections.go), and reads the instance's upstream values
 // (chart.ReadUpstream).
 package okdp
@@ -21,9 +21,15 @@ import (
 // values of each chart that accepts them (applied by chart.FinalValues), and
 // the instances the connection references point to. files: the package.
 func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, []Dependency, error) {
-	// 1. values layers, as Helm: the -f files merged in order, coalesced
-	// over the package's defaults, checked against the parameter schema.
-	values, err := chart.Parameters(files, svc.Name, in.Values)
+	// 1. values layers, as Helm: the platform's then the instance's (global
+	// is the platform's: valuesLayers), merged in order as -f files,
+	// coalesced over the package's defaults, checked against the parameter
+	// schema.
+	layers, err := valuesLayers(files, in)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	values, err := chart.Parameters(files, svc.Name, layers)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

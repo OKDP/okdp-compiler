@@ -1,6 +1,7 @@
 // okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
-//	[--instance <dir>] -f values.yaml [-f ...] [--release demo-<service>] [--namespace demo]
+//	[--instance <dir>] --platform platform.yaml [--platform ...] -f values.yaml [-f ...]
+//	[--release demo-<service>] [--namespace demo]
 //	[--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent 2]
 
 package main
@@ -19,7 +20,7 @@ import (
 // version: set at build time (-ldflags "-X main.version=...").
 var version = "dev"
 
-// multi: a repeatable string flag (-f).
+// multi: a repeatable string flag (--platform, -f).
 type multi []string
 
 // String: the values, comma separated (flag.Value).
@@ -34,7 +35,7 @@ type options struct {
 	contracts          string
 	instance           string
 	release, namespace string
-	values             multi
+	platform, values   multi
 	out, emitDir       string
 	umbrella           string
 	indent             int
@@ -50,7 +51,8 @@ func main() {
 	flag.StringVar(&o.instance, "instance", "", "instance directory (upstream values files: upstream.<chart>.yaml)")
 	flag.StringVar(&o.release, "release", "", "release name (default demo-<service name>)")
 	flag.StringVar(&o.namespace, "namespace", "demo", "namespace")
-	flag.Var(&o.values, "f", "values file (repeatable)")
+	flag.Var(&o.platform, "platform", "platform values file (global, global.okdp among them), repeatable, before the -f files")
+	flag.Var(&o.values, "f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares")
 	flag.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the upstream chart of each chart, objects and dependencies to this file")
 	flag.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files --out, --emit-dir and --umbrella write, 2 to 9 spaces")
 	flag.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml, the upstream chart that renders each (okdp.charts.yaml) and the dependencies (okdp.dependencies.yaml)")
@@ -94,16 +96,11 @@ func run(o options) error {
 	if o.instance != "" {
 		in.Instance = os.DirFS(o.instance)
 	}
-	for _, f := range o.values {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-		v, err := compiler.ParseValues(b)
-		if err != nil {
-			return fmt.Errorf("%s: %w", f, err)
-		}
-		in.Values = append(in.Values, v)
+	if in.Platform, err = readValues(o.platform); err != nil {
+		return err
+	}
+	if in.Values, err = readValues(o.values); err != nil {
+		return err
 	}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
@@ -137,6 +134,23 @@ func run(o options) error {
 		}
 	}
 	return nil
+}
+
+// readValues: values files, as values layers.
+func readValues(files []string) ([]map[string]any, error) {
+	var layers []map[string]any
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		v, err := compiler.ParseValues(b)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		layers = append(layers, v)
+	}
+	return layers, nil
 }
 
 // write: files (name -> content) in dir, created if needed.

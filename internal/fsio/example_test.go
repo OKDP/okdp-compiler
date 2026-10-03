@@ -24,9 +24,9 @@ var (
 )
 
 // exampleCompile: the example package compiled with its chart cache and
-// contracts, the platform values, then the given values files, under the
-// CLI's default release and namespace.
-func exampleCompile(t *testing.T, files ...string) (*okdp.Definition, *okdp.Result, error) {
+// contracts, the platform values (platform.yaml, then these platform files)
+// and these instance files, under the example's release and namespace.
+func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition, *okdp.Result, error) {
 	t.Helper()
 	def, err := LoadDefinition(os.DirFS(filepath.Join(input, "package")))
 	if err != nil {
@@ -35,10 +35,20 @@ func exampleCompile(t *testing.T, files ...string) (*okdp.Definition, *okdp.Resu
 	in := okdp.Inputs{
 		Charts:    os.DirFS(filepath.Join(input, "charts")),
 		Contracts: os.DirFS(filepath.Join(input, "contracts")),
+		Platform:  readLayers(t, append([]string{filepath.Join(input, "platform.yaml")}, platform...)),
+		Values:    readLayers(t, instance),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
-	for _, f := range append([]string{filepath.Join(input, "platform.yaml")}, files...) {
+	res, err := okdp.Compile(def, in)
+	return def, res, err
+}
+
+// readLayers: values files, as values layers.
+func readLayers(t *testing.T, files []string) []map[string]any {
+	t.Helper()
+	var layers []map[string]any
+	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
@@ -47,17 +57,16 @@ func exampleCompile(t *testing.T, files ...string) (*okdp.Definition, *okdp.Resu
 		if err != nil {
 			t.Fatalf("%s: %v", f, err)
 		}
-		in.Values = append(in.Values, v)
+		layers = append(layers, v)
 	}
-	res, err := okdp.Compile(def, in)
-	return def, res, err
+	return layers
 }
 
 // TestExample compiles the example instance (example/input/instance.yaml)
 // and compares what it writes with example/output/, byte for byte: files/,
 // what --emit-dir writes, and umbrella/, what --umbrella writes.
 func TestExample(t *testing.T) {
-	def, res, err := exampleCompile(t, filepath.Join(input, "instance.yaml"))
+	def, res, err := exampleCompile(t, nil, []string{filepath.Join(input, "instance.yaml")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,16 +125,20 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 	}
 }
 
-// TestExampleErrors: every testdata/<case>.yaml, applied over the platform
-// values, must fail with the message of its first line (# error: ..., \n
-// for a line break).
+// TestExampleErrors: every testdata/<case>.yaml, an instance file over the
+// platform values, and every testdata/platform/<case>.yaml, a platform file
+// after platform.yaml, must fail with the message of its first line
+// (# error: ..., \n for a line break).
 func TestExampleErrors(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join("..", "..", "testdata", "*.yaml"))
-	if len(cases) == 0 {
+	testdata := filepath.Join("..", "..", "testdata")
+	instance, _ := filepath.Glob(filepath.Join(testdata, "*.yaml"))
+	platform, _ := filepath.Glob(filepath.Join(testdata, "platform", "*.yaml"))
+	if len(instance) == 0 || len(platform) == 0 {
 		t.Fatal("no testdata")
 	}
-	for _, f := range cases {
-		t.Run(strings.TrimSuffix(filepath.Base(f), ".yaml"), func(t *testing.T) {
+	for _, f := range append(instance, platform...) {
+		name, _ := filepath.Rel(testdata, f)
+		t.Run(strings.TrimSuffix(name, ".yaml"), func(t *testing.T) {
 			b, err := os.ReadFile(f)
 			if err != nil {
 				t.Fatal(err)
@@ -136,7 +149,11 @@ func TestExampleErrors(t *testing.T) {
 				t.Fatalf("first line must be \"# error: <message>\", got %q", first)
 			}
 			want = strings.ReplaceAll(want, `\n`, "\n")
-			if _, _, err := exampleCompile(t, f); err == nil || !strings.Contains(err.Error(), want) {
+			files := [2][]string{nil, {f}} // platform, instance
+			if slices.Contains(platform, f) {
+				files[0], files[1] = files[1], files[0]
+			}
+			if _, _, err := exampleCompile(t, files[0], files[1]); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("got %v, want an error containing %q", err, want)
 			}
 		})

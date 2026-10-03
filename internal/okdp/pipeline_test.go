@@ -64,9 +64,19 @@ instance:
 )
 
 // inputs: the in-memory chart cache and contracts, with these values
-// layers.
-func inputs(values ...map[string]any) Inputs {
-	return Inputs{Charts: charts, Contracts: contracts, Values: values, Release: "demo-app", Namespace: "demo"}
+// layers: the global of each, a platform layer (Inputs.Platform), the rest,
+// an instance layer (Inputs.Values).
+func inputs(layers ...map[string]any) Inputs {
+	in := Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "demo"}
+	for _, l := range layers {
+		if g, ok := l["global"]; ok {
+			in.Platform = append(in.Platform, map[string]any{"global": g})
+			l = maps.Clone(l)
+			delete(l, "global")
+		}
+		in.Values = append(in.Values, l)
+	}
+	return in
 }
 
 // withCharts: inputs with these files added to the chart cache.

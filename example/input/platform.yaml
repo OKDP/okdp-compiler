@@ -1,4 +1,5 @@
-# The platform values (global.okdp), the same for every instance.
+# The platform values (global.okdp), the same for every instance: a
+# platform layer (--platform), which an instance's layers cannot change.
 global:
   okdp:
     ingress:

@@ -16,9 +16,9 @@ a directory in git, not a chart: OKDP publishes no chart of the service.
 One compile is one instance. It reads the package (`fsio.LoadDefinition`:
 `service.yaml` and `mapping.cel.yaml`; then each compile, the parameters and
 the base values) and, in `Inputs`, the chart cache (the upstream charts' 
-defaults and schemas), the contracts, the values layers (the platform values,
-then the instance's), the instance's upstream values files, and the release and
-namespace, shared by all the instance's charts
+defaults and schemas), the contracts, the values layers (the platform's,
+`Platform`, then the instance's, `Values`), the instance's upstream values
+files, and the release and namespace, shared by all the instance's charts
 ([Inputs and outputs](specs/01_inputs_outputs.md)).
 It returns, in `Result`: `Values`, the final values each upstream chart is
 rendered with by `helm template`; `Charts`, the upstream chart that renders
@@ -45,7 +45,7 @@ oidc-dcr template and `service.yaml`.
 flowchart TD
   def["service definition<br/>service.yaml, mapping.cel.yaml"]
   pkg["package files<br/>values.yaml, values.schema.json, base/"]
-  layers["values layers<br/>global.okdp, instance values"]
+  layers["values layers<br/>platform's: global; instance's"]
   contracts["contracts<br/>contract schemas"]
   cache["chart cache<br/>chart-version: values.yaml, values.schema.json"]
   files["instance files<br/>upstream.chart.yaml"]
@@ -100,8 +100,11 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 `internal/chart/spec.go`). Then it runs:
 
 1. **Parameters** (`chart.Parameters`, `internal/chart/parameters.go`, called by
-   `buildContext`, `internal/okdp/context.go`). The package's
-   `values.yaml` is read as Helm reads it. Each layer of `Inputs.Values` is
+   `buildContext`, `internal/okdp/context.go`). `global` is the platform's
+   (`valuesLayers`, `internal/okdp/layers.go`): an instance layer that sets
+   it fails, but for the keys `values.schema.json` declares under it,
+   `okdp` excepted. The package's `values.yaml` is read as Helm reads it.
+   Each layer, those of `Inputs.Platform` then those of `Inputs.Values`, is
    normalized (string keys, `float64` numbers) and merged in order by
    `value.Merge`, Helm's merge of `-f` files; the result is coalesced over the
    defaults by `coalesceValues`. The coalesced values are checked against
@@ -255,7 +258,8 @@ neither knows OKDP.
 | | `merge.go` | the instance's upstream values (`ReadUpstream`, `Upstreams.Show`), stage 9 (`FinalValues`), `protect` and `append` | `cache.go`, `values.go`, `schema.go`, `paths.go` |
 | `okdp` | `service.go` | `Definition`, `Service` (`service.yaml`) and its check (`Service.Check`) | `chart.Specs.Check`; read by `fsio.LoadDefinition` |
 | | `pipeline.go` | `Inputs`, `Result`, `Compile`: the order of the stages | calls `buildContext`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
-| | `context.go` | stages 1 to 4: parameters (`chart.Parameters`), requirements, platform context, the context | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream` |
+| | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's (`valuesLayers`) | `readJSON` (`connections.go`); called by `context.go` |
+| | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream` |
 | | `connections.go` | connection references, `complete`, `Dependency`, `readJSON` | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
@@ -459,13 +463,14 @@ in-memory maps, the oidc-dcr template is in the binary.
 ### Security boundaries
 
 The package, with the upstream charts its sources pin, is reviewed in its
-repository; the contracts and the platform's charts with the platform. The
-values layers and the instance files are input, from a console user or a
-GitOps pull request. The chart cache is the caller's, filled from the pinned
-references. The compiler enforces:
+repository; the contracts, the platform's charts and the platform values
+with the platform. The instance's values layers and files are input, from a
+console user or a GitOps pull request. The chart cache is the caller's,
+filled from the pinned references. The compiler enforces:
 
 | Boundary | Where | Reason |
 |---|---|---|
+| Platform values | `valuesLayers`, stage 1 | `global` comes from the package's `values.yaml` and the platform's layers (`Inputs.Platform`): an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the charts OKDP's objects and clients are rendered with (`charts`), and every chart receives `global` (`imageRegistry`) |
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
 | Credentials never inlined | `resolve` | an external connection carries contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and descriptors are not secret |
 | Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; a provided output holds only fields of its contract, its required ones, and no secret field (values are not checked against the contract's types) |
@@ -477,11 +482,12 @@ references. The compiler enforces:
 | Declared charts only | `Compile`, `clientCharts`, `objectsChart` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart or the `okdp` chart with one of its own: their keys are the compiler's, and their charts the platform's |
 | OAuth client charts | `clientCharts` | no base values, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
 
-Not decided by the compiler: the values layers are not told apart, so a
-later layer can change `global.okdp` like any parameter
+Not decided by the compiler: which layers are the platform's. What the
+caller gives as `Inputs.Platform` (`--platform`) is trusted as the platform
+values, and comes from the platform's repository, never from the instance's
+author; the keys of `global` an instance may set are the parameter schema's
+decision, reviewed with the package
 ([Platform values](specs/01_inputs_outputs.md#platform-values)).
-Which layers a user writes, and whether `global` is open to them, is the
-caller's decision, or the parameter schema's.
 
 ## Testing
 
@@ -528,7 +534,9 @@ upstream values, `protect` and `append`. `internal/okdp/pipeline_test.go`
 runs the whole pipeline on a minimal package and chart cache: schemas,
 upstream files, `protect` and `append`, objects and the `okdp` chart with
 the platform's charts (`TestObjects`), dependencies, one upstream chart for
-two keys (`TestSharedSource`). `internal/okdp/mapping_test.go` covers OKDP's
+two keys (`TestSharedSource`). `internal/okdp/layers_test.go` covers the
+platform's and the instance's layers: what an instance may set of `global`
+(`TestValuesLayers`). `internal/okdp/mapping_test.go` covers OKDP's
 sections and functions. `internal/okdp/oidc_test.go` covers the OAuth
 clients: the values the oidc-dcr template computes (the defaults compared
 whole; the names, client keys, platform settings), the modes and
@@ -550,8 +558,9 @@ platform's okdp-objects included), `contracts/`, `platform.yaml` (the
 platform values) and `instance.yaml` (the instance's values).
 `example/output/` is what the compile writes: `files/` as `okdp-compile
 --emit-dir`, `umbrella/` as `--umbrella`. `TestExample`
-(`internal/fsio/example_test.go`) compiles `instance.yaml` over
-`platform.yaml`, under the CLI's default release and namespace, and
+(`internal/fsio/example_test.go`) compiles `instance.yaml`, an instance
+layer, over `platform.yaml`, a platform layer, under the CLI's default
+release and namespace, and
 compares the files of `fsio.Files` and `fsio.Umbrella` with them byte for
 byte.
 After a change, `go test ./internal/fsio -update` rewrites them
@@ -561,14 +570,17 @@ fixtures); the diff is the change's effect, reviewed as such.
 ### Failure cases
 
 `testdata/<case>.yaml` at the repository root: instance values that must
-fail on the example. The first line is `# error: <message>` (`\n` for a line
-break), and `TestExampleErrors` applies the file over the platform values
-and expects an error containing the message. They cover the connection
-checks (wrong contract, unknown field, secret field), the example's
-`errors` rules (no `secretRef`, replicas without a database), a protected
-upstream path, a missing platform value, a parameter schema violation, and
-the OAuth client in `dcr` mode without a registration URL
-(`dcr-without-registration-url.yaml`).
+fail on the example; `testdata/platform/<case>.yaml`: platform values that
+must fail on it. The first line is `# error: <message>` (`\n` for a line
+break). `TestExampleErrors` applies an instance case as an instance layer
+over the platform values, a platform case as a platform layer after
+`platform.yaml`, and expects an error containing the message. The instance
+cases cover the connection checks (wrong contract, unknown field, secret
+field), the example's `errors` rules (no `secretRef`, replicas without a
+database), the protected upstream paths, a parameter schema violation, and
+an instance that sets `global` (`instance-sets-global.yaml`); the platform
+cases, a missing platform value and the OAuth client in `dcr` mode without
+a registration URL (`dcr-without-registration-url.yaml`).
 
 ## Limitations
 

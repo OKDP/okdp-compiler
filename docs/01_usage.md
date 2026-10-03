@@ -43,7 +43,8 @@ where the module can be fetched at that path.
 
 ```text
 okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>] [--instance <dir>]
-             [-f <values.yaml>]... [--release <name>] [--namespace <name>]
+             [--platform <platform.yaml>]... [-f <values.yaml>]...
+             [--release <name>] [--namespace <name>]
              [--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent <n>]
 okdp-compile --version
 ```
@@ -54,7 +55,8 @@ okdp-compile --version
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart as `helm pull -d <dir>` writes it, `<chart>-<version>.tgz`, or unpacked, `<chart>-<version>/` ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
 | `--instance` | none | instance directory: the upstream values files `service.yaml` names (`upstream.<key>.yaml`, by chart key; [instance values](specs/01_inputs_outputs.md#instance-values)) |
-| `-f` | none | a values file; repeatable, merged in order as `helm -f` files. The platform values come first ([platform values](specs/01_inputs_outputs.md#platform-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
+| `--platform` | none | a platform values file: `global`, `global.okdp` among them ([platform values](specs/01_inputs_outputs.md#platform-values)); repeatable, merged in order as `helm -f` files, before the `-f` files |
+| `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--platform` files. It sets no `global` but the keys the parameter schema declares under it ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | `demo-<name>` | release name; `<name>` is the `name` of `service.yaml` |
 | `--namespace` | `demo` | namespace |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file |
@@ -83,7 +85,7 @@ The final values are written by `--emit-dir`, not by `--out`.
 ```console
 $ export OKDP_CONTRACTS=example/input/contracts OKDP_CHARTS=example/input/charts
 $ bin/okdp-compile --package example/input/package \
-    -f example/input/platform.yaml -f example/input/instance.yaml --out /dev/stdout
+    --platform example/input/platform.yaml -f example/input/instance.yaml --out /dev/stdout
 charts:
   app:
     repository: https://charts.example.org
@@ -113,7 +115,7 @@ The computed values of a chart hold only what the mapping sets:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
-    -f example/input/platform.yaml -f example/input/instance.yaml \
+    --platform example/input/platform.yaml -f example/input/instance.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
 tag: "2.3"
@@ -136,7 +138,7 @@ The example's, `out/` here, are `example/output/files/`:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
-    -f example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
+    --platform example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
 $ ls out
 app.values.yaml
 okdp.charts.yaml
@@ -180,7 +182,7 @@ The example's are `example/output/umbrella/`:
 
 ```console
 $ bin/okdp-compile --package example/input/package \
-    -f example/input/platform.yaml -f example/input/instance.yaml --umbrella umbrella
+    --platform example/input/platform.yaml -f example/input/instance.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
 apiVersion: v2
 name: webapp
@@ -232,7 +234,7 @@ violation, every message of the mapping's `errors` section.
 
 ```console
 $ bin/okdp-compile --package example/input/package \
-    -f example/input/platform.yaml -f testdata/schema-violation.yaml
+    --platform example/input/platform.yaml -f testdata/schema-violation.yaml
 error: values don't meet the specifications of the schema(s) in the following chart(s):
 webapp:
 - at '/database': got number, want string
@@ -319,8 +321,9 @@ func main() {
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
-	// The values layers, in order, as helm -f files.
-	for _, f := range []string{"example/input/platform.yaml", "example/input/instance.yaml"} {
+	// The values layers, as helm -f files: the platform's, then the
+	// instance's.
+	read := func(f string) map[string]any {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			log.Fatal(err)
@@ -329,8 +332,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("%s: %v", f, err)
 		}
-		in.Values = append(in.Values, v)
+		return v
 	}
+	in.Platform = []map[string]any{read("example/input/platform.yaml")}
+	in.Values = []map[string]any{read("example/input/instance.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -396,7 +401,8 @@ charts:
 			"okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
 		},
 		Contracts: fstest.MapFS{}, // no connection, no provides: no contract read
-		Values:    []map[string]any{platform, {"replicas": 3}},
+		Platform:  []map[string]any{platform},
+		Values:    []map[string]any{{"replicas": 3}},
 		Release:   "demo-app",
 		Namespace: "demo",
 	})
@@ -434,8 +440,9 @@ base files. A `Definition{Service, Mapping, Files}` can also be built in Go.
 `compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
 `Instance` (`--instance`, `nil` when there is none), `Contracts`
 (`--contracts`; it may be empty when nothing references a contract),
-`Values` (the `-f` files, parsed, in order; the platform values first),
-`Release` and `Namespace`; all but `Instance` and `Values` are required
+`Platform` (the `--platform` files, parsed, in order), `Values` (the `-f`
+files, likewise), `Release` and `Namespace`; all but `Instance`,
+`Platform` and `Values` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
 `--emit-dir` writes, `Result.Computed` what `--out` writes under `values`,
 `Charts` (the index), `Objects` and `Dependencies` what both write
@@ -446,7 +453,8 @@ to write where it keeps them. `Result.Values` renders as in [rendering with
 Helm](#rendering-with-helm), `Result.Charts` being the index.
 
 - `compiler.ParseValues(b)` reads one values file as Helm does (YAML 1.1,
-  every document of the file merged in order), for `Inputs.Values`.
+  every document of the file merged in order), for `Inputs.Platform` and
+  `Inputs.Values`.
 - `compiler.ChartRef` is an upstream chart, `{Repository, Chart, Version}`:
   a `source` of `service.yaml`, an entry of `Result.Charts`.
 - `compiler.ObjectsChart` (`okdp`) is the chart key of
@@ -476,7 +484,7 @@ namespace; any error fails the job:
 for f in instances/*.yaml; do
   name=$(basename "$f" .yaml)   # the instance's release name
   bin/okdp-compile --package package --charts charts --contracts contracts \
-    -f platform.yaml -f "$f" --release "$name" --namespace demo \
+    --platform platform.yaml -f "$f" --release "$name" --namespace demo \
     --emit-dir "compiled/$name" || exit 1
 done
 git diff --exit-code compiled/
@@ -606,11 +614,12 @@ it.
 | `service.yaml: charts.app.source.version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version the chart cache holds |
 | `service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml` | `service.yaml` lists `okdp` | remove it; the platform names its chart ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>` | a chart the compile renders (a chart left out by `$if` is not read) is neither `<chart>-<version>/` nor `<chart>-<version>.tgz` of the chart cache; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version>` | run the command with `-d` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
-| `global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml` | the platform values name no objects chart | pass the platform values as the first `-f`; set it ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+| `global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml` | the platform values name no objects chart | pass the platform values with `--platform`; set it ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart checked as a source is (its repository, chart and version, the same messages); also `global.okdp.charts.oidcDcr`, and `... must be a map (repository, chart, version)`, `... must be a string` for its form | fix the platform values |
 | `database: unknown contract "database"` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
-| `global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml` | `require` in `service.yaml` lists it, and no layer sets it (or a later one sets it to `null`) | pass the platform values as the first `-f`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
+| `global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml` | `require` in `service.yaml` lists it, and no platform layer sets it (or a later one sets it to `null`) | pass the platform values with `--platform`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
+| `values layer 1: global.okdp is set by the platform (--platform, Inputs.Platform)`, `values layer 2: global is set by the platform ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--platform`; a package lets instances set a key of `global` by declaring it in `values.schema.json` ([platform values](specs/01_inputs_outputs.md#platform-values)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `values.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, the base values or the mapping |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
@@ -657,7 +666,7 @@ the compile. Where the cause or the fix is not in the message:
 | `global.okdp.oidc.dcr.ttlSeconds must be a whole number >= 0, got "600"` | a platform setting of the wrong type, here a quoted number; the types of the settings are checked in every mode, with or without a client | fix the platform values; `null` takes the default |
 | `oidcClients[0]: unknown key(s) redirectUri (allowed: name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret)` | a typo, or a registration field written as a client key | use a client key; a registration field goes under `request` |
 | `global.okdp.oidc.dcr.authMethod "" is not supported: OKDP registers its OAuth clients anonymously` | `dcr` mode, at least one client, and `authMethod` unset (`""`, as when the platform sets no `dcr` settings) or not `anonymous` | `authMethod: anonymous` in the platform values |
-| `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/dcr-without-registration-url.yaml`) | set it in the platform values |
+| `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/platform/dcr-without-registration-url.yaml`) | set it in the platform values |
 | `service.yaml: charts.oidc-dcr: the chart of oidcClients[0] is added by the compiler: remove it from service.yaml` | `service.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; rename the chart key or the client when it is another chart |
 | `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output` | `output` computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
 | `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>` | `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |

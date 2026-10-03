@@ -60,7 +60,8 @@ type Inputs struct {
 	Charts    fs.FS            // chart cache: the upstream charts, <chart>-<version>.tgz (helm pull) or <chart>-<version>/
 	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // the contract schemas: <contract>.schema.json
-	Values    []map[string]any // instance values layers, in order (helm -f); see chart.ParseValues
+	Platform  []map[string]any // platform values layers, in order (helm -f): global, global.okdp among them; see chart.ParseValues
+	Values    []map[string]any // instance values layers, in order, after Platform: no global but the keys the parameter schema declares (valuesLayers)
 	Release   string
 	Namespace string
 }
