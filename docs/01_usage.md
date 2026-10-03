@@ -475,7 +475,9 @@ Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 `compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`:
 `service.yaml` and `mapping.cel.yaml`, then keeps `fsys` (`Definition.Files`)
 for the files each compile reads, `values.yaml`, `values.schema.json` and the
-base files. A `Definition{Service, Mapping, Files}` can also be built in Go.
+base files. A `Definition{Service, Mapping, Files}` can also be built in Go;
+an entry of `Service.Require` is a `compiler.Requirement`, `{Key, If}`,
+`If` empty for a key required in every case.
 
 `compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
 `Instance` (`--instance`, `nil` when there is none), `Contracts`
@@ -514,9 +516,10 @@ Helm](#rendering-with-helm), `Result.Charts` being the index.
   `ctx.Err()`. Its options:
   - `compiler.WithCostLimit(n)` bounds the total CEL cost (cel-go's runtime
     cost: about one unit per operation, list element and character
-    compared) of the compile's expressions, the mapping's and the OAuth
-    client templates': past it, the compile fails with `the expressions of
-    the compile exceed its CEL cost limit (n)`. A server compiling packages
+    compared) of the compile's expressions, the conditions of `require`,
+    the mapping's and the OAuth client templates': past it, the compile
+    fails with `the expressions of the compile exceed its CEL cost limit
+    (n)`. A server compiling packages
     it does not review sets one, as an instance's values can make an
     expression iterate over them. The example costs under 100.
   - `compiler.WithoutObjectsChart()` leaves the
@@ -680,6 +683,7 @@ with status 2.
 | `service.yaml: charts.app.source is required: the upstream chart (repository, chart, version)` | a chart without its `source` | name the published chart that renders it ([sources](specs/02_service_definition.md#sources)) |
 | `service.yaml: charts.app.source.repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `service.yaml: charts.app.source.chart "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `http://`, `oci://`) or whose host and path are no directory of the chart cache (`https://`, `https://x/../y`), a chart that is not a chart's name | fix the source ([sources](specs/02_service_definition.md#sources)) |
 | `service.yaml: charts.app.source.version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version the chart cache holds |
+| `service.yaml: require[1]: unknown field if: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}`, `service.yaml: require[1] (oidc.issuerUri): $if: takes one expression, ${{ <condition> }}, got "platform.oidc.enabled"` | a `require` entry of another form | a key, or `{key, $if}` with one expression ([require](specs/02_service_definition.md#require)) |
 | `service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml` | `service.yaml` lists `okdp` | remove it; the platform names its chart ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `app: chart app-1.8.0 is not in the chart cache: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org` | a chart the compile renders (a chart left out by `$if` is not read) is neither in its repository's directory (`charts.example.org/app-1.8.0/` or `.tgz`) nor at the root of the chart cache (`app-1.8.0/` or `.tgz`); for an `oci://` repository the commands are `mkdir -p <chart cache>/<repository> && helm pull oci://<repository>/<chart> --version <version> -d <chart cache>/<repository>` | run the commands, `<chart cache>` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
 | `app: chart app-1.8.0 comes from 2 repositories, and the chart cache holds it only as app-1.8.0, which cannot tell them apart: pull each into its repository's directory: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org; mkdir -p <chart cache>/fork.example.org && helm pull app --repo https://fork.example.org --version 1.8.0 -d <chart cache>/fork.example.org` | the compile renders one chart name and version from two repositories (a fork, a generic name), and the chart cache holds it at its root only, not in this key's repository's directory | run the commands ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
@@ -687,7 +691,8 @@ with status 2.
 | `global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart checked as a source is (its repository, chart and version, the same messages); also `global.okdp.charts.oidcDcr`, and `... must be a map (repository, chart, version)`, `... must be a string` for its form | fix the platform values |
 | `database: unknown contract "database"` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
-| `global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml` | `require` in `service.yaml` lists it, and no platform layer sets it (or a later one sets it to `null`) | pass the platform values with `--platform`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
+| `global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml` | `require` in `service.yaml` lists it, in every case or under a condition that holds, and no platform layer sets it (or a later one sets it to `null`) | pass the platform values with `--platform`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
+| `service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: must be true or false, got null` | the condition of a `require` entry is not a boolean, or its evaluation fails (`no such key: ...`) | write a condition of `true` or `false` (`platform.oidc.enabled == true`), reading optional values with `.?` ([require](specs/02_service_definition.md#require)) |
 | `values layer 1: global.okdp is set by the platform (--platform, Inputs.Platform)`, `values layer 2: global is set by the platform ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--platform`; a package lets instances set a key of `global` by declaring it in `values.schema.json` ([platform values](specs/01_inputs_outputs.md#platform-values)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `values.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, the base values or the mapping |

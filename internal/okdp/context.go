@@ -3,7 +3,8 @@
 // requirements, derives the platform context from global.okdp (its settings
 // checked against their types), resolves the connection references
 // (connections.go), and reads the instance's upstream values
-// (chart.ReadUpstream).
+// (chart.ReadUpstream). The requirements under a condition are checked on
+// the context (requireWhen).
 package okdp
 
 import (
@@ -13,7 +14,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/cel-go/cel"
+
 	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -35,10 +39,14 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	}
 	global := value.AsMap(values["global"])
 	okdpG := value.AsMap(global["okdp"])
-	// 2. platform requirements.
-	for _, k := range svc.Require {
-		if !value.Truthy(value.Dig(okdpG, k)) {
-			return nil, nil, nil, nil, fmt.Errorf("global.okdp.%s is required. It is a platform value: set it in platform/platform-values.yaml", k)
+	// 2. platform requirements, those of every case; those under a
+	// condition need the context (requireWhen).
+	for _, r := range svc.Require {
+		if r.If != "" {
+			continue
+		}
+		if err := required(okdpG, r.Key); err != nil {
+			return nil, nil, nil, nil, err
 		}
 	}
 	// 3. platform context, from the settings checked against their types.
@@ -119,6 +127,33 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	// By parameter path, in string order, as the errors of the references.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
 	return ctx, values, ups, deps, nil
+}
+
+// requireWhen: the requirements under a condition, in order, each condition
+// evaluated on the context ctx with the mapping's host functions, within
+// budget: when it holds, the key must be set, as a requirement of every
+// case (stage 2).
+func requireWhen(budget *compile.Budget, rs Requirements, ctx M) error {
+	okdpG := value.AsMap(value.Dig(ctx, "global.okdp"))
+	var funcs []cel.EnvOption
+	for i, r := range rs {
+		if r.If == "" {
+			continue
+		}
+		if funcs == nil {
+			funcs = functions(ctx)
+		}
+		holds, err := compile.Condition(r.If, ctx, budget, funcs...)
+		if err != nil {
+			return fmt.Errorf("service.yaml: %s: $if: %w", entry(i, r.Key), err)
+		}
+		if holds {
+			if err := required(okdpG, r.Key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // platformSettings: the global.okdp settings the compiler reads, by dotted

@@ -505,11 +505,16 @@ its charts to instances this way:
 
 ### Requirements
 
-`require` of `service.yaml`: dotted paths under `global.okdp`. Each must be
-set and not empty (missing, `null`, `false`, `""`, `0`, an empty list or map
-fails), checked after the [parameter schema](#schema-check), before the
-connections and the mapping
-(`testdata/platform/missing-platform-value.yaml`):
+`require` of `service.yaml`: dotted paths under `global.okdp`, each
+required in every case, or when its condition holds
+([require](02_service_definition.md#require)). A required key must be set
+and not empty (missing, `null`, `false`, `""`, `0`, an empty list or map
+fails). The keys of every case are checked after the [parameter
+schema](#schema-check), before the connections and the mapping
+(`testdata/platform/missing-platform-value.yaml`); the conditions, in
+order, once the mapping's context is built (the platform context, the
+connections), before the [platform charts](#platform-charts) and the
+mapping. Both fail with the same message:
 
 ```
 global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml
@@ -532,11 +537,11 @@ global.okdp.ingress.className is required. It is a platform value: set it in pla
 Every compile checks the type of each of these settings when it is set,
 and that `global`, `global.okdp` and each map on the way to a setting
 (`oidc`, `proxy`, `ingress`, `certificateIssuers.selfSigned`...) are maps
-when set, after the [requirements](#requirements), in every mode. A `null`
-is not set. A value of another type is refused rather than read as not
-set: `oidc: false` would leave OIDC enabled, `proxy: <url>` give no proxy
-environment. The first violation is reported, in the order of the table
-(`charts` is checked later: [Platform charts](#platform-charts)):
+when set, after the [requirements](#requirements) of every case, in every
+mode. A `null` is not set. A value of another type is refused rather than
+read as not set: `oidc: false` would leave OIDC enabled, `proxy: <url>`
+give no proxy environment. The first violation is reported, in the order of
+the table (`charts` is checked later: [Platform charts](#platform-charts)):
 
 ```
 global.okdp.oidc must be a map, got false
@@ -629,8 +634,8 @@ passed as written. The other keys of `oidc.dcr` are kept in
 ([fields the compiler reads](#fields-the-compiler-reads)). Every compile
 checks the types of `image`, `caSecret`, `ttlSeconds`, `backoffLimit` and
 `waitTtlSeconds`, in every mode (`existing`, OIDC disabled, no client),
-after the [requirements](#requirements); the first violation is reported,
-in that order. The three numbers fail alike, and a
+after the [requirements](#requirements) of every case; the first violation
+is reported, in that order. The three numbers fail alike, and a
 quoted number (`"600"`) is a string. `registrationUrl` and `authMethod` are
 left as written, and checked only in `dcr` mode with a client (below):
 

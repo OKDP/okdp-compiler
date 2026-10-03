@@ -59,7 +59,9 @@ flowchart TD
   s3 --> s4["4: connections resolved"]
   contracts --> s4
   s4 --> deps["Result.Dependencies"]
-  s4 --> pc["platform charts<br/>global.okdp.charts"]
+  s4 --> rw["platform requirements<br/>under a condition"]
+  def -. "require, $if" .-> rw
+  rw --> pc["platform charts<br/>global.okdp.charts"]
   pc --> s5["5: mapping<br/>let, errors, output, instance, provides, objects, oidcClients"]
   def --> s5
   s5 -- oidcClients --> s6["6: OAuth clients<br/>checked; dcr mode: one chart per client"]
@@ -84,16 +86,18 @@ flowchart TD
 ```
 
 `fsio.LoadDefinition` (`internal/fsio/load.go`) decodes `service.yaml` into
-`okdp.Service`, checks it (`Service.Check`, `internal/okdp/service.go`), keeps
-`mapping.cel.yaml` as bytes and the package's filesystem as
-`Definition.Files`: the mapping is parsed by each compile, so a YAML error
-in it surfaces at `Compile`, and the other files of the package are read by
-each compile.
+`okdp.Service` (each `require` entry a key or `{key, $if}`:
+`Requirements.UnmarshalYAML`), checks it (`Service.Check`,
+`internal/okdp/service.go`), keeps `mapping.cel.yaml` as bytes and the
+package's filesystem as `Definition.Files`: the mapping is parsed by each
+compile, so a YAML error in it surfaces at `Compile`, and the other files
+of the package are read by each compile.
 
 `okdp.Compile` (`internal/okdp/pipeline.go`) checks its required inputs
 (`Definition.Files`, `Charts`, `Contracts`, `Release`, `Namespace`) and
 `service.yaml` again, for a `Definition` built in memory: a `name` and a
-`version`, no chart `okdp`, each chart's `source` a repository URL, a chart
+`version`, each `require` entry a key, its condition one expression, no
+chart `okdp`, each chart's `source` a repository URL, a chart
 name and a pinned version (`chart.Ref.Check`, `internal/chart/ref.go`;
 [Sources](specs/02_service_definition.md#sources)), the `upstream.from`
 entries and the `protect` and `append` paths (`chart.Specs.Check`,
@@ -111,8 +115,10 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `values.schema.json` (`schemaViolations`, which skips a missing schema;
    stage 4 does not); every violation is reported at once, under the
    `name` of `service.yaml`. Nothing below runs on invalid parameters.
-2. **Platform requirements**. Each `require` entry of `service.yaml` is a
-   dotted path under `global.okdp` that must be set and not empty.
+2. **Platform requirements**. Each `require` entry of `service.yaml`
+   without a condition is a dotted path under `global.okdp` that must be
+   set and not empty (`required`); an entry with one waits for the context
+   (stage 4).
 3. **Platform context**. The settings of `global.okdp` the compiler reads
    are checked against their types, and the maps on the way to them
    (`checkPlatform`, `platformSettings`): a value of another type, `null`
@@ -145,7 +151,12 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    covers a value whatever its source; they are checked and applied at stage
    9. The context is assembled: `release`, `values`, `global`, `platform`,
    `service`, `labels`, `selectorLabels`
-   ([Context](specs/02_service_definition.md#context)). `Compile` then reads
+   ([Context](specs/02_service_definition.md#context)). `Compile` then
+   checks the `require` entries with a condition (`requireWhen`): each
+   `$if`, in order, evaluated on the context with the mapping's host
+   functions, within the compile's budget (`compile.Condition`), its value
+   `true` or `false`; when it holds, the key is checked as at stage 2
+   ([require](specs/02_service_definition.md#require)). It then reads
    the platform's charts, `global.okdp.charts` (`platformCharts`,
    `internal/okdp/objects.go`): `objects`, required, the chart of the `okdp`
    chart, and `oidcDcr`, the chart of the OAuth clients, `DcrSource`
@@ -249,8 +260,8 @@ neither knows OKDP.
 |---|---|---|---|
 | `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
-| `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`; `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
-| | `check.go` | the directives of a document, checked before it is evaluated: each of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names | `Load`, `Doc.Section` |
+| `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`, `Condition` (a condition outside a document, `true` or `false`); `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
+| | `check.go` | the directives of a document, checked before it is evaluated: each of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names; `CheckCondition` | `Load`, `Doc.Section`; `CheckCondition` for `require` (`okdp`) |
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
@@ -260,10 +271,10 @@ neither knows OKDP.
 | | `paths.go` | the grammar of the `protect` and `append` paths | `spec.go`, `merge.go` |
 | | `parameters.go` | stage 1: `Parameters` | `values.go`, `schema.go` |
 | | `merge.go` | the instance's upstream values (`ReadUpstream`, `Upstreams.Show`), stage 9 (`FinalValues`), `protect` and `append` | `cache.go`, `values.go`, `schema.go`, `paths.go` |
-| `okdp` | `service.go` | `Definition`, `Service` (`service.yaml`) and its check (`Service.Check`) | `chart.Specs.Check`; read by `fsio.LoadDefinition` |
-| | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages | calls `buildContext`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
+| `okdp` | `service.go` | `Definition`, `Service` (`service.yaml`) and its check (`Service.Check`); `require`: `Requirements`, `Requirement`, their decoding and check, `required` (the error of a missing platform value) | `chart.Specs.Check`, `compile.CheckCondition`; read by `fsio.LoadDefinition` |
+| | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages | calls `buildContext`, `requireWhen`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's (`valuesLayers`) | `readJSON` (`connections.go`); called by `context.go` |
-| | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream` |
+| | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context; then the requirements under a condition (`requireWhen`) | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream`; `compile.Condition` and `functions` (`mapping.go`) for the conditions |
 | | `connections.go` | connection references, `complete`, `Dependency`, `readJSON` | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
@@ -599,7 +610,9 @@ the platform's charts (`TestObjects`), dependencies, one upstream chart for
 two keys (`TestSharedSource`). `internal/okdp/layers_test.go` covers the
 platform's and the instance's layers: what an instance may set of `global`
 (`TestValuesLayers`). `internal/okdp/mapping_test.go` covers OKDP's
-sections and functions. `internal/okdp/oidc_test.go` covers the OAuth
+sections and functions. `internal/okdp/service_test.go` covers `require`:
+its entries decoded and checked, the conditions evaluated in a whole
+compile (`TestRequireWhen`). `internal/okdp/oidc_test.go` covers the OAuth
 clients: the values the oidc-dcr template computes (the defaults compared
 whole; the names, client keys, platform settings), the modes and
 `oidcClientSecret`, the errors of the section and of the platform, and the

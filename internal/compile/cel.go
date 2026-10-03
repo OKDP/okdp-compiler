@@ -1002,3 +1002,24 @@ func Eval(expr string, scope M, funcs ...cel.EnvOption) (any, error) {
 	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs}
 	return e.eval(expr, scope)
 }
+
+// Condition: the condition s, ${{ <CEL> }} (CheckCondition), evaluated on
+// the context ctx with the host functions funcs, within budget (nil:
+// none). Its value must be true or false: unlike $if, it is not tested as
+// a Helm condition.
+func Condition(s string, ctx M, budget *Budget, funcs ...cel.EnvOption) (bool, error) {
+	if err := CheckCondition(s); err != nil {
+		return false, err
+	}
+	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs, budget: budget}
+	v, err := e.evalString(s, ctx)
+	if err != nil {
+		return false, err
+	}
+	b, ok := v.(bool)
+	if !ok {
+		p, _ := scan(s)
+		return false, fmt.Errorf("${{ %s }}: must be true or false, got %s", strings.TrimSpace(p[0].text), shape(v))
+	}
+	return b, nil
+}

@@ -480,3 +480,34 @@ func (doneCtx) Done() <-chan struct{} {
 	close(c)
 	return c
 }
+
+// TestCondition: a condition outside a document, one expression whose value
+// is true or false, within a budget.
+func TestCondition(t *testing.T) {
+	for s, want := range map[string]bool{"${{ values.on }}": true, "${{ values.extra.x > 2.0 }}": false} {
+		if got, err := Condition(s, mapCtx(), nil); err != nil || got != want {
+			t.Errorf("%s: got %v (%v), want %v", s, got, err, want)
+		}
+	}
+	for s, want := range map[string]string{
+		"${{ values.extra.k }}":     `${{ values.extra.k }}: must be true or false, got "v"`,
+		"${{ values.?nope }}":       "${{ values.?nope }}: must be true or false, got null",
+		"${{ values.items }}":       "${{ values.items }}: must be true or false, got a list",
+		"${{ values.nope }}":        "${{ values.nope }}: no such key: nope",
+		"true":                      `takes one expression, ${{ <condition> }}, got "true"`,
+		"${{ values.on }} and more": `takes one expression, ${{ <condition> }}, got "${{ values.on }} and more"`,
+	} {
+		if _, err := Condition(s, mapCtx(), nil); err == nil || err.Error() != want {
+			t.Errorf("%s: got %v, want %q", s, err, want)
+		}
+	}
+	b := NewBudget(context.Background(), math.MaxUint64)
+	if _, err := Condition("${{ values.items.all(i, i.n > 0.0) }}", mapCtx(), b); err != nil || b.used == 0 {
+		t.Errorf("cost: %v, %d counted", err, b.used)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := Condition("${{ values.on }}", mapCtx(), NewBudget(ctx, 0)); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: got %v, want context.Canceled", err)
+	}
+}

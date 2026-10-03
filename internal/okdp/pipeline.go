@@ -100,7 +100,8 @@ type settings struct {
 }
 
 // WithCostLimit: the total CEL cost the expressions of one compile may use,
-// the mapping's and the OAuth client templates' (0, the default: no limit).
+// the conditions of require, the mapping's and the OAuth client templates'
+// (0, the default: no limit).
 // Past the limit, the compile fails.
 func WithCostLimit(limit uint64) Option {
 	return func(s *settings) { s.costLimit = limit }
@@ -153,6 +154,10 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 	// What the mapping sees: values, platform context, resolved connections.
 	mctx, values, ups, deps, err := buildContext(def.Files, in, svc)
 	if err != nil {
+		return nil, err
+	}
+	// The platform values required under a condition, on that context.
+	if err := requireWhen(budget, svc.Require, mctx); err != nil {
 		return nil, err
 	}
 	// The charts the platform renders the compiler's own charts with.

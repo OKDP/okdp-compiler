@@ -25,7 +25,8 @@ instance values) and its outputs are specified in
 
 Decoded by `gopkg.in/yaml.v3`: YAML 1.2, unlike values files and the
 mapping (`appVersion: 1.10` is `"1.10"`; a plain `upstream: no` is a
-string, refused: [upstream](#upstream)). Unknown fields are ignored.
+string, refused: [upstream](#upstream)). Unknown fields are ignored,
+except in a [`require`](#require) entry.
 
 ### Service
 
@@ -36,12 +37,57 @@ string, refused: [upstream](#upstream)). Unknown fields are ignored.
 | `appVersion` | string | `""` | The application's version: `service.appVersion`, label `app.kubernetes.io/version` (left out when empty). |
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
-| `require` | list of strings | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty: [requirements](01_inputs_outputs.md#requirements). |
+| `require` | list of keys and `{key, $if}` | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty, in every case or when its condition holds: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
 | `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key: chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
 
 The versions are strings, as written: `appVersion: 1.10` is `"1.10"`.
 Without `name` or `version`, loading fails: `service.yaml: name is required`,
 `service.yaml: version is required`.
+
+### require
+
+An entry is a key under `global.okdp`, required in every case, or
+`{key, $if}`, the key required when the condition holds:
+
+```yaml
+require:
+  - ingress.suffix                     # in every case
+  - key: oidc.issuerUri                # when OIDC is enabled
+    $if: ${{ platform.oidc.enabled }}
+```
+
+`$if` is one expression, `${{ <condition> }}`, as in the mapping
+([`$if`](#if)). Every compile evaluates it on the [context](#context) of
+the mapping, its variables and host functions (no `let` binding), once the
+context is built and before the mapping, cancelled with the compile and
+counted in its CEL cost limit (`CompileContext`, `WithCostLimit`).
+Its value must be `true` or `false`: unlike the mapping's `$if`, it is not
+tested as a Helm condition. When it holds, the key is checked as a key of
+every case: [requirements](01_inputs_outputs.md#requirements).
+
+An entry of another form fails when `service.yaml` is loaded, and before
+every compile for a `Service` built in memory (`compiler.Requirement`,
+`{Key, If}`, `If` empty in every case). `<entry>` is `require[<i>]`, the
+position of the entry from 0, followed by ` (<key>)` once its key is read:
+
+| Case | Error |
+|---|---|
+| `require` is not a list | `service.yaml: require must be a list: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}` |
+| an entry neither a string nor a map | `service.yaml: <entry>: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}, got <value>` |
+| a field other than `key` and `$if` | `service.yaml: <entry>: unknown field <field>: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}` |
+| no `key`, no `$if` | `service.yaml: <entry>: no key: an entry is ...`, `service.yaml: <entry>: no $if: an entry is ... (a key alone is required in every case)` |
+| a `key` that is not a string, an empty key (`""`, an empty item) | `service.yaml: <entry>: key must be a key under global.okdp (ingress.suffix), got <value>`, `service.yaml: <entry>: an empty key: a key under global.okdp (ingress.suffix)` |
+| an `$if` that is not one expression (a literal, `""`, text around it) | `service.yaml: <entry>: $if: takes one expression, ${{ <condition> }}, got <value>` |
+
+A condition whose evaluation fails, or whose value is not `true` or
+`false`, fails the compile, `null` included (`platform.oidc.enabled` is
+`null` when a platform layer sets `enabled: null`: compare it,
+`platform.oidc.enabled == true`):
+
+```text
+service.yaml: require[1] (oidc.issuerUri): $if: ${{ values.nope }}: no such key: nope
+service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: must be true or false, got null
+```
 
 ### Chart
 
@@ -174,6 +220,8 @@ dependsOn: [database-server, ingress]
 require:                               # global.okdp.<path>, each non-empty
   - ingress.suffix
   - certificateIssuers.selfSigned.name
+  - key: oidc.issuerUri                # only when OIDC is enabled
+    $if: ${{ platform.oidc.enabled }}
 charts:
   app:                                 # output.app of the mapping
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}

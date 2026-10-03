@@ -166,6 +166,11 @@ func expression(v any, what string) error {
 	return fmt.Errorf("takes one expression, ${{ <%s> }}, got %s", what, shape(v))
 }
 
+// CheckCondition: v is a condition as $if takes it, one expression,
+// ${{ <condition> }}, with nothing around it; for a condition written
+// outside a document (Condition).
+func CheckCondition(v any) error { return expression(v, "condition") }
+
 // bindings: a let or $let map (kind): its names as written, each once,
 // none starting with $; its values checked as nodes. Null has none.
 func bindings(kind string, v any) error {

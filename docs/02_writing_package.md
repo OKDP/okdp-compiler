@@ -202,6 +202,8 @@ require:                                 # read by the mapping in every case
   - ingress.suffix
   - ingress.className
   - certificateIssuers.selfSigned.name
+  - key: oidc.issuerUri                  # read when OIDC is enabled
+    $if: ${{ platform.oidc.enabled }}
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
@@ -215,7 +217,7 @@ charts:
 
 - `require` lists the `global.okdp` keys the mapping reads in every case: the
   compile fails, naming the key, when one is missing or empty. A value needed
-  in one mode only is checked in `errors`
+  in one mode only takes the condition of that mode, `$if`
   ([recipe](#require-a-platform-value-in-one-mode)).
 - `source` names the upstream chart that renders the key's values; two keys
   may name one ([recipe](#render-a-chart-twice),
@@ -692,13 +694,19 @@ env:                                            # a list (superset)
 
 ### Require a platform value in one mode
 
+Declare it in `service.yaml`, with the condition of the mode, rather than
+imitating the compiler's message in `errors`:
+
 ```yaml
-errors:
-  - $if: ${{ platform.oidc.enabled && platform.oidc.?issuerUri.orValue('') == '' }}
-    message: >-
-      global.okdp.oidc.issuerUri is required. It is a platform value: set it
-      in platform/platform-values.yaml
+require:
+  - key: oidc.issuerUri
+    $if: ${{ platform.oidc.enabled }}
 ```
+
+When the condition holds, a missing or empty value fails the compile with
+the message of a value of every case. The condition sees the mapping's
+context, not its `let` bindings, and must be `true` or `false`
+([require](specs/02_service_definition.md#require)).
 
 Read an optional platform value with `.?` and `orValue`
 (`global.okdp.?storageClass.?data.orValue('')`): a missing key fails the
@@ -814,9 +822,10 @@ as `values.upstream.<key>`.
   rules, `global`, `connections`, and `upstream` for exactly the charts that
   accept instance values; strings pasted into files refuse `{{`, `}}` and
   line breaks.
-- [ ] `require` lists the platform values read in every mode, `errors` the
-  others; `protect` covers names, authentication, exposure, Secret wiring and
-  the switches kept off; `append` the lists carrying the platform's wiring.
+- [ ] `require` lists the platform values read in every mode, the others
+  with the condition of their mode; `protect` covers names, authentication,
+  exposure, Secret wiring and the switches kept off; `append` the lists
+  carrying the platform's wiring.
 - [ ] The mapping writes no literal image tag, no credential, no name that
   can exceed 63 characters outside a contract's convention; every OKDP
   object is labelled.

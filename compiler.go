@@ -37,6 +37,9 @@ type (
 	Definition = okdp.Definition
 	// Service: service.yaml.
 	Service = okdp.Service
+	// Requirement: an entry of require in service.yaml, a platform value the
+	// service needs: in every case, or when its condition (If) holds.
+	Requirement = okdp.Requirement
 	// ChartSpec: a chart of service.yaml, by key.
 	ChartSpec = chart.Spec
 	// Upstream: the instance upstream values a chart of service.yaml accepts.
@@ -103,7 +106,8 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 }
 
 // WithCostLimit: the total CEL cost the expressions of one compile may use,
-// the mapping's and the OAuth client templates' (0, the default: no limit).
+// the conditions of require, the mapping's and the OAuth client templates'
+// (0, the default: no limit).
 // Past the limit, the compile fails: a server bounds what a package's
 // expressions compute over the values an instance gives.
 func WithCostLimit(limit uint64) Option {

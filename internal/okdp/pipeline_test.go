@@ -45,7 +45,7 @@ global:
 			Version:    "1.2.3",
 			AppVersion: "4.5",
 			Charts:     chart.Specs{"app": {Source: appSource, Base: "base/app.yaml"}},
-			Require:    []string{"ingress.suffix"},
+			Require:    Requirements{{Key: "ingress.suffix"}},
 		},
 		Files: pkg,
 		Mapping: []byte(`
