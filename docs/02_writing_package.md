@@ -373,7 +373,8 @@ convention: they are always external (cnpg-postgresql publishes one
 connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
-contract; published under the release name (the default `name`), they must
+contract, its schema included (a `port` is a number, not a string built by
+an expression); published under the release name (the default `name`), they must
 also be what an internal reference to this instance resolves to: build the
 hosts and Service names from the contract's convention (trino's host is
 `trino-<namespace>.<suffix>`, hive-metastore's Service

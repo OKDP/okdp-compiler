@@ -4,6 +4,8 @@
 package okdp
 
 import (
+	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +13,13 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
+
+	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -100,11 +107,16 @@ func (r resolver) walk(schema M, v any, path string, failed map[string]error) {
 // resolve: a reference to its contract fields. An entry of connections is
 // external; any other name is an instance of the namespace (internal). The
 // first error is reported: the contract, then the fields of an external
-// connection in alphabetical order, then the required fields.
+// connection in alphabetical order, then the required fields, then the
+// violations of the contract by an external connection, all of them
+// (checkContract).
 func (r resolver) resolve(ref, contract, field string) (M, error) {
-	schema, err := readJSON(r.in.Contracts, contract+".schema.json")
-	if err != nil {
+	schema, sch, err := readContract(r.in.Contracts, contract)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%s: unknown contract %q", field, contract)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", field, err)
 	}
 	props := value.AsMap(schema["properties"])
 	out, source := M{}, "internal"
@@ -149,8 +161,16 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 			}
 		}
 	}
-	if err := complete(schema, out, fmt.Sprintf("%s (connection %q)", field, ref)); err != nil {
+	where := fmt.Sprintf("%s (connection %q)", field, ref)
+	if err := complete(schema, out, where); err != nil {
 		return nil, err
+	}
+	// An instance's fields follow from the contract; a connection's are
+	// written by hand.
+	if source == "external" {
+		if err := checkContract(sch, out, contract, where); err != nil {
+			return nil, err
+		}
 	}
 	if secretRef != nil {
 		out["secretRef"] = secretRef
@@ -163,8 +183,8 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 	return out, nil
 }
 
-// complete: a contract's defaults, then its derived fields, then the
-// required check (okdp.contract.complete).
+// complete: a contract's defaults, then its derived fields, again until
+// nothing changes, then the required check (okdp.contract.complete).
 func complete(schema, out M, where string) error {
 	props := value.AsMap(schema["properties"])
 	contract := value.Str(schema["x-okdp-contract"])
@@ -173,27 +193,33 @@ func complete(schema, out M, where string) error {
 		names = append(names, k)
 	}
 	sort.Strings(names)
-	// Defaults first: a derived field may come from a defaulted one.
-	for _, pass := range []string{"default", "derived"} {
-		for _, k := range names {
-			p := value.AsMap(props[k])
-			// Set fields are kept; secret fields stay in the Secret.
-			if _, set := out[k]; set || value.Truthy(p["x-okdp-secret"]) {
-				continue
-			}
-			derived, isDerived := p["x-okdp-derived"].(M)
-			if pass == "derived" && isDerived {
-				if src, ok := out[value.Str(derived["from"])]; ok {
-					if mv, ok := value.AsMap(derived["map"])[value.Str(src)]; ok {
-						out[k] = mv
-					}
+	// Defaults first: a derived field may come from a defaulted one. Until
+	// nothing changes: a conditional default may depend on a field set
+	// after it, one that sorts after it or a derived one. A field is set
+	// once: the loop ends.
+	for changed := true; changed; {
+		changed = false
+		for _, pass := range []string{"default", "derived"} {
+			for _, k := range names {
+				p := value.AsMap(props[k])
+				// Set fields are kept; secret fields stay in the Secret.
+				if _, set := out[k]; set || value.Truthy(p["x-okdp-secret"]) {
+					continue
 				}
-			} else if pass == "default" && !isDerived {
-				if d, ok := p["default"]; ok {
-					// A conditional default applies only when its condition holds.
-					cond := value.AsMap(p["x-ui-condition"])
-					if len(cond) == 0 || value.Str(out[value.Str(cond["field"])]) == value.Str(cond["value"]) {
-						out[k] = d
+				derived, isDerived := p["x-okdp-derived"].(M)
+				if pass == "derived" && isDerived {
+					if src, ok := out[value.Str(derived["from"])]; ok {
+						if mv, ok := value.AsMap(derived["map"])[value.Str(src)]; ok {
+							out[k], changed = mv, true
+						}
+					}
+				} else if pass == "default" && !isDerived {
+					if d, ok := p["default"]; ok {
+						// A conditional default applies only when its condition holds.
+						cond := value.AsMap(p["x-ui-condition"])
+						if len(cond) == 0 || value.Str(out[value.Str(cond["field"])]) == value.Str(cond["value"]) {
+							out[k], changed = d, true
+						}
 					}
 				}
 			}
@@ -213,8 +239,7 @@ func complete(schema, out M, where string) error {
 	return nil
 }
 
-// readJSON: a JSON file of fsys (a contract, the parameter schema), as a
-// map.
+// readJSON: a JSON file of fsys (the parameter schema), as a map.
 func readJSON(fsys fs.FS, name string) (M, error) {
 	b, err := fs.ReadFile(fsys, name)
 	if err != nil {
@@ -225,4 +250,134 @@ func readJSON(fsys fs.FS, name string) (M, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return value.AsMap(v), nil
+}
+
+// readContract: the contract name, the file <name>.schema.json of fsys: its
+// schema, for the keywords complete and resolve read, and the validator of
+// the values of its connections and outputs (checkContract): the schema
+// compiled as a chart's (chart.CompileSchema, x-* keywords ignored), its
+// secret fields left out of required, as they are in the credentials
+// Secret, never in the values. An error wrapping fs.ErrNotExist when there
+// is no such file; otherwise one naming the file and the cause when it
+// cannot be read, is not a JSON object or not a valid JSON Schema.
+func readContract(fsys fs.FS, name string) (M, *jsonschema.Schema, error) {
+	file := name + ".schema.json"
+	b, err := fs.ReadFile(fsys, file)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, err
+	}
+	fail := func(cause any) error {
+		return fmt.Errorf("the %s contract cannot be read: %s: %v", name, file, cause)
+	}
+	if err != nil {
+		// The file is named once.
+		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return nil, nil, fail(err)
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, nil, fail(err)
+	}
+	schema, ok := v.(M)
+	if !ok {
+		return nil, nil, fail("not a JSON object")
+	}
+	// Read again for the validator, which keeps the numbers as written.
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	if err != nil {
+		return nil, nil, fail(err)
+	}
+	d := value.AsMap(doc) // an object, as schema
+	if required, ok := d["required"].([]any); ok {
+		props := value.AsMap(schema["properties"])
+		kept := []any{}
+		for _, k := range required {
+			if !value.Truthy(value.AsMap(props[value.Str(k)])["x-okdp-secret"]) {
+				kept = append(kept, k)
+			}
+		}
+		d["required"] = kept
+		if len(kept) == 0 {
+			delete(d, "required") // draft-04 refuses an empty list
+		}
+	}
+	sch, err := chart.CompileSchema("file:///"+file, d)
+	if err != nil {
+		return nil, nil, fail(err)
+	}
+	return schema, sch, nil
+}
+
+// checkContract: values, the fields of a connection or an output once
+// completed, against the validator of their contract (readContract): every
+// violation, one line each, sorted by field then message:
+//
+//	<where>: field "port" violates the database contract: got string, want integer
+//
+// The field is a path in the values (tls.mode, catalogs[1]); a violation by
+// the values as a whole (minProperties) reads "the fields violate the
+// <contract> contract". Every keyword that fails is a violation, those
+// under a $ref or an allOf included; a failed anyOf or oneOf is one.
+func checkContract(sch *jsonschema.Schema, values M, contract, where string) error {
+	err := sch.Validate(any(values))
+	if err == nil {
+		return nil
+	}
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
+		return fmt.Errorf("%s: %w", where, err)
+	}
+	type violation struct{ field, msg string }
+	var found []violation
+	var visit func(e *jsonschema.ValidationError)
+	visit = func(e *jsonschema.ValidationError) {
+		switch e.ErrorKind.(type) {
+		case *kind.Schema, *kind.Group, *kind.Reference, *kind.AllOf:
+			if len(e.Causes) > 0 {
+				for _, c := range e.Causes {
+					visit(c)
+				}
+				return
+			}
+		}
+		// The message alone: the error of the keyword, at no location.
+		msg := (&jsonschema.ValidationError{ErrorKind: e.ErrorKind}).Error()
+		found = append(found, violation{fieldPath(values, e.InstanceLocation), strings.TrimPrefix(msg, "at '': ")})
+	}
+	visit(ve)
+	slices.SortFunc(found, func(a, b violation) int {
+		return cmp.Or(strings.Compare(a.field, b.field), strings.Compare(a.msg, b.msg))
+	})
+	lines := make([]string, len(found))
+	for i, v := range found {
+		if v.field == "" {
+			lines[i] = fmt.Sprintf("%s: the fields violate the %s contract: %s", where, contract, v.msg)
+		} else {
+			lines[i] = fmt.Sprintf("%s: field %q violates the %s contract: %s", where, v.field, contract, v.msg)
+		}
+	}
+	return errors.New(strings.Join(lines, "\n"))
+}
+
+// fieldPath: the location loc in v, as a path: tls.mode, catalogs[1].
+func fieldPath(v any, loc []string) string {
+	var sb strings.Builder
+	for _, tok := range loc {
+		if l, ok := v.([]any); ok {
+			fmt.Fprintf(&sb, "[%s]", tok)
+			v = nil
+			if i, err := strconv.Atoi(tok); err == nil && i >= 0 && i < len(l) {
+				v = l[i]
+			}
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('.')
+		}
+		sb.WriteString(tok)
+		v = value.AsMap(v)[tok]
+	}
+	return sb.String()
 }

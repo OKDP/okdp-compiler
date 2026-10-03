@@ -13,14 +13,15 @@ import (
 
 // dbContract: a database contract with defaults, a derived field, a
 // conditional default, a secret field (required: it is in the Secret, never
-// set), and a required boolean.
+// set), a required boolean, and a list.
 var dbContract = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "database",
 	"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc", "url": "https://${ref}.${suffix}"},
 	"properties": {
 		"host": {"type": "string"},
 		"url": {"type": "string"},
-		"engine": {"type": "string", "default": "postgresql"},
+		"engine": {"type": "string", "enum": ["postgresql", "mysql"], "default": "postgresql"},
+		"tags": {"type": "array", "items": {"type": "string"}},
 		"driver": {"type": "string", "x-okdp-derived": {"from": "engine", "map": {"postgresql": "pg", "mysql": "my"}}},
 		"ssl": {"type": "string", "default": "require", "x-ui-condition": {"field": "engine", "value": "postgresql"}},
 		"tls": {"type": "boolean", "default": false},
@@ -138,12 +139,83 @@ replicas[3]: connection "bad": field "port" is not part of the database contract
 	}
 }
 
+// TestResolveTypes: the fields of an external connection, completed,
+// against the contract's types: every violation at once, one line each,
+// sorted by parameter path then field. The secret field, required, is not
+// in the values: not reported. An internal reference is not checked.
+func TestResolveTypes(t *testing.T) {
+	values := M{
+		"main":     M{"db": "ext"},
+		"replicas": []any{"demo-pg", "ext2"},
+		"connections": M{
+			"ext":  M{"contract": "database", "host": 1, "engine": "oracle"},
+			"ext2": M{"contract": "database", "host": "h", "tls": "yes", "tags": []any{"a", 2}},
+		},
+	}
+	want := `main.db (connection "ext"): field "engine" violates the database contract: value must be one of 'postgresql', 'mysql'
+main.db (connection "ext"): field "host" violates the database contract: got number, want string
+replicas[1] (connection "ext2"): field "tags[1]" violates the database contract: got number, want string
+replicas[1] (connection "ext2"): field "tls" violates the database contract: got string, want boolean`
+	for range 20 {
+		if _, _, err := resolveCtx(values); err == nil || err.Error() != want {
+			t.Fatalf("got %v\nwant %s", err, want)
+		}
+	}
+}
+
 // TestResolveUnknownContract: a schema that references a missing contract.
 func TestResolveUnknownContract(t *testing.T) {
 	ch := maps.Clone(pkg)
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
 	if _, _, _, _, err := buildContext(ch, inputs(M{"q": "demo-mq"}), &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
 		t.Errorf("got %v", err)
+	}
+}
+
+// TestResolveUnreadableContract: a contract that is there but cannot be
+// read, parsed or compiled is reported as such, with its file and the cause.
+func TestResolveUnreadableContract(t *testing.T) {
+	ch := maps.Clone(pkg)
+	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
+	for name, tc := range map[string]struct {
+		contracts fstest.MapFS
+		want      string
+	}{
+		"not JSON":      {fstest.MapFS{"queue.schema.json": {Data: []byte(`{"properties": `)}}, `q: the queue contract cannot be read: queue.schema.json: unexpected end of JSON input`},
+		"not an object": {fstest.MapFS{"queue.schema.json": {Data: []byte(`[]`)}}, `q: the queue contract cannot be read: queue.schema.json: not a JSON object`},
+		"not a schema": {
+			fstest.MapFS{"queue.schema.json": {Data: []byte(`{"properties": {"port": {"type": 5}}}`)}},
+			`q: the queue contract cannot be read: queue.schema.json: "file:///queue.schema.json#" is not valid against metaschema`,
+		},
+		"a directory": {fstest.MapFS{"queue.schema.json/x": {}}, `q: the queue contract cannot be read: queue.schema.json: invalid argument`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := inputs(M{"q": "demo-mq"})
+			in.Contracts = tc.contracts
+			if _, _, _, _, err := buildContext(ch, in, &def.Service); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error starting with %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestCompleteUntilStable: a conditional default whose condition field sorts
+// after it, or is derived, applies: the defaults are applied until nothing
+// changes, whatever the order of the fields.
+func TestCompleteUntilStable(t *testing.T) {
+	schema := M{"properties": M{
+		"auth":   M{"default": "md5", "x-ui-condition": M{"field": "engine", "value": "postgresql"}},
+		"batch":  M{"default": true, "x-ui-condition": M{"field": "driver", "value": "pg"}},
+		"driver": M{"x-okdp-derived": M{"from": "engine", "map": M{"postgresql": "pg", "mysql": "my"}}},
+		"engine": M{"default": "postgresql"},
+	}}
+	for _, tc := range []struct{ in, want M }{
+		{M{}, M{"auth": "md5", "batch": true, "driver": "pg", "engine": "postgresql"}},
+		{M{"engine": "mysql"}, M{"driver": "my", "engine": "mysql"}},
+	} {
+		if err := complete(schema, tc.in, "x"); err != nil || !reflect.DeepEqual(tc.in, tc.want) {
+			t.Errorf("got %v %v, want %v", tc.in, err, tc.want)
+		}
 	}
 }
 

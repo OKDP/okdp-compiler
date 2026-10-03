@@ -1,7 +1,9 @@
 package okdp
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"slices"
 	"sort"
@@ -18,7 +20,8 @@ import (
 // and other instances reference by name. Built from the mapping's `instance`
 // and `provides` sections; every output is checked, its shape (checkOutput),
 // then against its contract (okdp.contract.provide), in the order of
-// provides, its fields in key order: the first error is reported. Then, as
+// provides, its fields in key order: the first error is reported, every
+// violation of the contract's types at once (checkContract). Then, as
 // okdp.descriptor renders them, the credentials Secret of every output given
 // a `secret` ({generate, stringData} or {stringData}), named after its
 // secretRef (default <name>-<contract>-credentials).
@@ -48,9 +51,12 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 			return nil, nil, fmt.Errorf("two %s outputs are named %q", contract, out)
 		}
 		seen[contract+"/"+out] = true
-		schema, err := readJSON(in.Contracts, contract+".schema.json")
-		if err != nil {
+		schema, sch, err := readContract(in.Contracts, contract)
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, fmt.Errorf("%s: unknown contract", where)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", where, err)
 		}
 		// Only contract fields, and no secret: those go to the credentials
 		// Secret. In key order, as every check of an output: the first error
@@ -67,6 +73,9 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 			}
 		}
 		if err := complete(schema, values, where); err != nil {
+			return nil, nil, err
+		}
+		if err := checkContract(sch, values, contract, where); err != nil {
 			return nil, nil, err
 		}
 		// Published under the release name, the values must be what an internal

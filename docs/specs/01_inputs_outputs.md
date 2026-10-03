@@ -341,24 +341,31 @@ Every reference that does not resolve is reported, at once, one line each,
 sorted by parameter path (string order, as the
 [dependencies](#dependencies)), as the violations of the parameter schema
 are. A reference gives one error, the first in this order: its contract
-(unknown; another one, for an external connection; no internal naming
-convention, for an internal one), the fields of an external connection in
-alphabetical order, the `required` fields in the contract's order. The
-same parameters give the same report from one compile to the next:
+(unknown, unreadable; another one, for an external connection; no internal
+naming convention, for an internal one), the fields of an external
+connection in alphabetical order, the `required` fields in the contract's
+order, then the contract's types for an external connection: every
+violation, one line each, sorted by field then message
+([Checks](#checks)). The same parameters give the same report from one
+compile to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
 replicas[1]: connection "store" has contract "s3", "database" is expected
+replicas[2] (connection "pg"): field "engine" violates the database contract: value must be one of 'postgresql', 'mysql'
+replicas[2] (connection "pg"): field "port" violates the database contract: got string, want integer
 ```
 
 | Case | Error | `testdata/` |
 |---|---|---|
 | no `<contract>.schema.json` | `<path>: unknown contract "<contract>"` | |
+| `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` | |
 | external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `wrong-contract.yaml` |
 | external, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `unknown-field.yaml` |
 | external, secret field | `<path>: connection "<name>": "<key>" is a secret field` | `secret-in-connection.yaml` |
 | internal, no `x-okdp-internal` | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract` | |
+| external, a value the contract's schema refuses | `<path> (connection "<name>"): field "<field>" violates the <contract> contract: <violation>`; `... the fields violate the <contract> contract: <violation>` for a keyword on the whole connection | `connection-types.yaml` |
 
 `testdata/no-secret-ref.yaml` (`database connection "shared-db" has no
 secretRef`) is not a check of the compiler: an external connection without
@@ -378,12 +385,15 @@ consume it.
 the name of the contract is the name of the file. The binary reads a
 directory: `--contracts`, `$OKDP_CONTRACTS` by default
 ([01_usage.md](../01_usage.md)). A contract is read when a reference or a
-`provides` item names it.
+`provides` item names it. No such file: `unknown contract`; a file that
+cannot be read, is not JSON, not an object or not a valid JSON Schema:
+`the <contract> contract cannot be read: <contract>.schema.json: <cause>`.
 
 ### Format
 
-A JSON Schema (draft-07 in okdp-lib-chart) with OKDP keywords. The compiler
-reads:
+A JSON Schema with OKDP keywords. The values
+of a connection or an output are checked against the schema
+([Checks](#checks)); besides, the compiler reads:
 
 | Keyword | On | Meaning |
 |---|---|---|
@@ -396,12 +406,10 @@ reads:
 | `x-okdp-internal: {<field>: <template>}` | the contract | the fields of an instance reached by its name: `${ref}`, `${namespace}`, `${suffix}` replaced ([Resolution](#resolution)) |
 | `x-okdp-contract` | the contract | the name in the `required` error message |
 
-Not read: `type`, `enum`, `pattern`, `minimum`, `maximum`,
-`additionalProperties`, `title`, `description`, `x-okdp-external`,
-`x-okdp-required`, `x-okdp-endpoint-from`, `x-okdp-icon`, `x-okdp-category`,
-`x-ui-placeholder`, `x-ui-widget`. The values are not validated against the
-schema (`port: "abc"`, `engine: oracle` pass), and an external connection is
-accepted for any contract, `x-okdp-external` or not.
+The other `x-*` keywords (`x-okdp-external`, `x-okdp-required`,
+`x-okdp-endpoint-from`, `x-okdp-icon`, `x-okdp-category`,
+`x-ui-placeholder`, `x-ui-widget`) are not read, nor checked: an external
+connection is accepted for any contract, `x-okdp-external` or not.
 
 `example/input/contracts/database.schema.json`, trimmed:
 
@@ -430,18 +438,20 @@ A conditional default, in a `database-server` contract:
 
 ### Completion
 
-A connection, consumed or provided, is completed in three passes over the
-fields not set, secret fields excepted:
+A connection, consumed or provided, is completed over the fields not set,
+secret fields excepted:
 
 1. defaults: `default`, when its `x-ui-condition` holds (a derived field's
    `default` is not used);
 2. derived: `x-okdp-derived`;
-3. required: every `required` field must be set.
+3. 1 and 2 again, until they set no field;
+4. required: every `required` field must be set.
 
-A field set is kept as it is. The fields are visited in alphabetical order:
-a conditional default whose condition field is itself defaulted applies only
-when that field sorts first (`sslMode` after `engine`). A derived field may
-follow from a defaulted one (`driver` from the default `engine`). An internal
+A field set is kept as it is. The fields are visited in alphabetical order,
+the passes repeated: a conditional default applies whether its condition
+field sorts before it or after it, is defaulted (`sslMode` on the default
+`engine`) or derived. A derived field may follow from a defaulted one
+(`driver` from the default `engine`). An internal
 reference has only its `x-okdp-internal` fields and the defaults: if they
 leave a `required` field unset, every internal reference to the contract
 fails.
@@ -449,13 +459,36 @@ fails.
 ### Checks
 
 - Consumed, external: the `contract` of the entry, every other key a
-  non-secret field, completed ([Connections](#connections)).
-- Consumed, internal: the contract has `x-okdp-internal`, completed.
+  non-secret field, completed, then valid against the schema
+  ([Connections](#connections)).
+- Consumed, internal: the contract has `x-okdp-internal`, completed. Its
+  values are not checked against the schema: they follow from the contract,
+  and are those the instance publishes, checked as provided.
 - Provided (`provides`): the contract exists, every key of `values` a
-  non-secret field, completed; and an output published under the release
-  name, of a contract with `x-okdp-internal`, has the values an internal
-  reference to the release resolves to
+  non-secret field, completed, then valid against the schema; and an output
+  published under the release name, of a contract with `x-okdp-internal`,
+  has the values an internal reference to the release resolves to
   ([Descriptor ConfigMap](#descriptor-configmap)).
+
+Valid against the schema: the completed values (no `secretRef`, no `okdp`),
+validated as a chart's values against its `values.schema.json`
+([Schema check](#schema-check): draft, formats, `$ref`), every keyword but
+`x-*` applying (`type`, `enum`, `pattern`, `minimum`, `items`,
+`additionalProperties`...). The secret fields, never in the values, are
+left out of the top-level `required`. Every violation is reported, one line
+each, sorted by field (a path in the values: `port`, `catalogs[1]`) then
+message:
+
+```
+<where>: field "<field>" violates the <contract> contract: <violation>
+<where>: the fields violate the <contract> contract: <violation>
+```
+
+`<where>`: `<path> (connection "<name>")` for a connection,
+`provides "<name>" (<contract>)` for an output; the second form for a
+keyword on the values as a whole (`minProperties`). The keywords under a
+`$ref` or an `allOf` are reported each; a failed `anyOf` or `oneOf` is one
+violation, without its alternatives.
 
 ## Platform values
 
@@ -1047,17 +1080,20 @@ order of `provides`, the fields of its `values` and of the contract's
 `x-okdp-internal` convention in alphabetical order. The first error is
 reported, as for an expression of the mapping: `provides` is the package's
 to fix, not the instance's, and the error is the same from one compile to
-the next. `<out>`: `provides "<name>" (<contract>)`; `<i>`: the item's
-position.
+the next; the schema's violations of that item all at once, one line each
+([Checks](#checks)). `<out>`: `provides "<name>" (<contract>)`; `<i>`: the
+item's position.
 
 | Case | Error |
 |---|---|
 | an item that is not a map | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>` |
 | `values`, `secretRef` or `secret` set, not a map | `provides[<i>]: values: must be a map of contract fields, got <value>` ([provides](02_service_definition.md#provides)) |
 | no `<contract>.schema.json` | `<out>: unknown contract` |
+| `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<out>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
 | a secret field | `<out>: "<key>" is a secret field, put it in the credentials Secret` |
 | required field not set | `<out>: field "<key>" is required by the <contract> contract` |
+| a value the contract's schema refuses | `<out>: field "<field>" violates the <contract> contract: <violation>`, one line each; `<out>: the fields violate the <contract> contract: <violation>` for a keyword on the whole `values` |
 | internal convention | `<out>: <field> is "<value>" but internal references to "<name>" resolve it to "<expected>"` |
 | same contract and name twice | `two <contract> outputs are named "<name>"` |
 

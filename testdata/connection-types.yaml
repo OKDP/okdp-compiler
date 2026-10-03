@@ -1,0 +1,12 @@
+# error: database (connection "shared-db"): field "engine" violates the database contract: value must be one of 'postgresql', 'mysql'\ndatabase (connection "shared-db"): field "port" violates the database contract: got string, want integer
+# The fields of an external connection, against the types of its contract
+# (example/input/contracts/database.schema.json): every violation.
+database: shared-db
+connections:
+  shared-db:
+    contract: database
+    engine: oracle
+    host: db.example.org
+    port: "5432"
+    dbName: webapp
+    secretRef: {name: shared-db-credentials}

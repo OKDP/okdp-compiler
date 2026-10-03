@@ -139,7 +139,9 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    (`walk`) together with a deep copy of the parameters, through
    `properties` (keys sorted) and `items`. Each reference is resolved
    (`resolve`) to an external connection or an instance of the namespace,
-   and completed against its contract (`complete`)
+   and completed against its contract (`readContract`, `complete`); an
+   external connection is then validated against the contract's schema
+   (`checkContract`)
    ([Connections](specs/01_inputs_outputs.md#connections)). The
    references that do not resolve are reported together, one line each,
    sorted by parameter path (`resolveAll`). Internal references are
@@ -192,7 +194,8 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 7. **Descriptor and credentials Secrets** (`descriptor`,
    `internal/okdp/descriptor.go`). Each `provides` entry is checked for its
    shape (`checkOutput`: a map, its `values`, `secretRef` and `secret`
-   maps), then checked and completed against its contract; published
+   maps), then checked and completed against its contract, and validated
+   against its schema (`checkContract`); published
    under the release name, it is compared with what the `resolver`
    computes for an internal reference to this instance
    (`x-okdp-internal`): provider and consumers compute the same names. An
@@ -264,7 +267,7 @@ neither knows OKDP.
 | | `check.go` | the directives of a document, checked before it is evaluated: each of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names; `CheckCondition` | `Load`, `Doc.Section`; `CheckCondition` for `require` (`okdp`) |
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
-| | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
+| | `schema.go` | JSON Schema validation, reported as Helm reports it; `CompileSchema`, a schema compiled as Helm compiles it | stages 1 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`) | the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`) |
 | | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`, else at the root; `readArchive`) | `merge.go` |
 | | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
@@ -275,7 +278,7 @@ neither knows OKDP.
 | | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages | calls `buildContext`, `requireWhen`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's (`valuesLayers`) | `readJSON` (`connections.go`); called by `context.go` |
 | | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context; then the requirements under a condition (`requireWhen`) | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream`; `compile.Condition` and `functions` (`mapping.go`) for the conditions |
-| | `connections.go` | connection references, `complete`, `Dependency`, `readJSON` | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
+| | `connections.go` | connection references, `complete`, `Dependency`, `readJSON`; the contracts (`readContract`) and the check of values against them (`checkContract`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `secrets.go` | `okdpGeneratedSecret`, credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go` |
@@ -514,7 +517,7 @@ filled from the pinned references. The compiler enforces:
 | Platform values | `valuesLayers`, stage 1 | `global` comes from the package's `values.yaml` and the platform's layers (`Inputs.Platform`): an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the charts OKDP's objects and clients are rendered with (`charts`), and every chart receives `global` (`imageRegistry`) |
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
 | Credentials never inlined | `resolve` | an external connection carries contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and descriptors are not secret |
-| Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; a provided output holds only fields of its contract, its required ones, and no secret field (values are not checked against the contract's types) |
+| Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`checkContract`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
 | Provider and consumers agree | `descriptor` | an output under the release name equals what internal references resolve to |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
 | No templates in upstream values | `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets |
@@ -654,7 +657,7 @@ break). `TestExampleErrors` applies an instance case as an instance layer
 over the platform values, a platform case as a platform layer after
 `platform.yaml`, and expects an error containing the message. The instance
 cases cover the connection checks (wrong contract, unknown field, secret
-field), the example's `errors` rules (no `secretRef`, replicas without a
+field, the contract's types), the example's `errors` rules (no `secretRef`, replicas without a
 database), the protected upstream paths, a parameter schema violation, and
 an instance that sets `global` (`instance-sets-global.yaml`); the platform
 cases, a missing platform value and the OAuth client in `dcr` mode without

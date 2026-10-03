@@ -33,12 +33,8 @@ func schemaViolations(fsys fs.FS, name string, values M) (string, error) {
 //   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
 //
 // The values are what the chart's templates see: Helm's coalesced values.
-// The schema is compiled as Helm 4 compiles it (santhosh-tekuri/jsonschema
-// v6, the version Helm 4.3 uses): the draft of its $schema, draft 2020-12
-// without one (Helm 4's default, checked with helm 4.3), formats asserted
-// for drafts before 2019-09 only. Unlike Helm, nothing is fetched: a $ref to
-// a file or a URL fails the compile (a urn: $ref accepts anything, as in
-// Helm). The violations are sorted by path: Helm's order varies between runs.
+// The schema is compiled as Helm 4 compiles it (CompileSchema). The
+// violations are sorted by path: Helm's order varies between runs.
 func checkSchema(name string, b []byte, values M) (_ string, err error) {
 	if b == nil {
 		return "", nil
@@ -53,14 +49,8 @@ func checkSchema(name string, b []byte, values M) (_ string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
-	c := jsonschema.NewCompiler()
-	c.DefaultDraft(jsonschema.Draft2020)
-	c.UseLoader(schemaLoader{})
 	const url = "file:///values.schema.json"
-	if err := c.AddResource(url, doc); err != nil {
-		return "", fmt.Errorf("%s: %w", name, err)
-	}
-	sch, err := c.Compile(url)
+	sch, err := CompileSchema(url, doc)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
@@ -74,6 +64,29 @@ func checkSchema(name string, b []byte, values M) (_ string, err error) {
 	}
 	sortCauses(ve)
 	return strings.TrimPrefix(ve.Error(), "jsonschema validation failed with '"+url+"#'\n"), nil
+}
+
+// CompileSchema: the JSON schema doc (as jsonschema.UnmarshalJSON reads
+// it), at url, compiled as Helm 4 compiles a chart's values.schema.json
+// (santhosh-tekuri/jsonschema v6, the version Helm 4.3 uses): the draft of
+// its $schema, draft 2020-12 without one (Helm 4's default, checked with
+// helm 4.3), formats asserted for drafts before 2019-09 only, unknown
+// keywords ignored. Unlike Helm, nothing is fetched: a $ref to a file or a
+// URL fails (a urn: $ref accepts anything, as in Helm). A panic of the
+// compiler is an error, as in Helm.
+func CompileSchema(url string, doc any) (_ *jsonschema.Schema, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("unable to validate schema: %v", r)
+		}
+	}()
+	c := jsonschema.NewCompiler()
+	c.DefaultDraft(jsonschema.Draft2020)
+	c.UseLoader(schemaLoader{})
+	if err := c.AddResource(url, doc); err != nil {
+		return nil, err
+	}
+	return c.Compile(url)
 }
 
 // sortCauses: the causes of e sorted by instance path then message, at

@@ -9,7 +9,8 @@ import (
 )
 
 // httpContract: an http contract with an internal naming convention and a
-// secret field.
+// secret field, required (it is in the Secret, never in the values); and a
+// contract that cannot be read.
 var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "http",
 	"x-okdp-internal": {"url": "https://${ref}.${suffix}"},
@@ -18,7 +19,8 @@ var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
 		"port": {"type": "integer", "default": 443},
 		"token": {"type": "string", "x-okdp-secret": true}
 	},
-	"required": ["url"]}`)}}
+	"required": ["url", "token"]}`)},
+	"broken.schema.json": {Data: []byte(`{`)}}
 
 // provideCompile: compiles the in-memory chart with this provides section.
 func provideCompile(provides string) (*Result, error) {
@@ -105,6 +107,8 @@ func TestDescriptorNoOutputs(t *testing.T) {
 func TestDescriptorErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ provides, want string }{
 		"unknown contract": {"  - {contract: ftp, values: {}}\n", `provides "demo-app" (ftp): unknown contract`},
+		"unreadable":       {"  - {contract: broken, values: {}}\n", `provides "demo-app" (broken): the broken contract cannot be read: broken.schema.json: unexpected end of JSON input`},
+		"type":             {"  - {contract: http, name: other, values: {url: u, port: '443'}}\n", `provides "other" (http): field "port" violates the http contract: got string, want integer`},
 		"unknown field":    {"  - {contract: http, values: {url: u, path: /}}\n", `field "path" is not part of the http contract`},
 		"secret field":     {"  - {contract: http, values: {url: u, token: t}}\n", `"token" is a secret field`},
 		"required field":   {"  - {contract: http, name: other, values: {}}\n", `field "url" is required by the http contract`},
@@ -137,6 +141,19 @@ func TestDescriptorReport(t *testing.T) {
 	for range 20 {
 		if _, err := provideCompile(provides); err == nil || err.Error() != want {
 			t.Fatalf("got %v, want %q", err, want)
+		}
+	}
+}
+
+// TestDescriptorTypes: the values of the first output that fails, completed,
+// against the contract's types: every violation at once, sorted by field.
+func TestDescriptorTypes(t *testing.T) {
+	provides := "  - {contract: http, name: a, values: {url: u}}\n  - {contract: http, name: b, values: {url: 1, port: '443'}}\n  - {contract: http, name: c, values: {url: 2}}\n"
+	want := `provides "b" (http): field "port" violates the http contract: got string, want integer
+provides "b" (http): field "url" violates the http contract: got number, want string`
+	for range 20 {
+		if _, err := provideCompile(provides); err == nil || err.Error() != want {
+			t.Fatalf("got %v\nwant %s", err, want)
 		}
 	}
 }

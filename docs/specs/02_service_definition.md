@@ -437,7 +437,7 @@ A list of outputs, the connections the instance publishes. Each item:
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
 | `name` | string | the release name | The output's name, the one other instances reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
-| `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields; under the release name, the values the contract's `x-okdp-internal` convention gives): [contracts](01_inputs_outputs.md#contracts). |
+| `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; under the release name, the values the contract's `x-okdp-internal` convention gives): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
 
@@ -457,7 +457,8 @@ provides[<i>]: secret: must be a map (generate, stringData), got <value>
 The contract checks then report
 `provides "<name>" (<contract>): <message>`. The items are checked in
 order, their fields in alphabetical order, and the first error is
-reported ([descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap)).
+reported, the schema's violations of that item all at once, one line each
+([descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap)).
 
 #### secret
 
