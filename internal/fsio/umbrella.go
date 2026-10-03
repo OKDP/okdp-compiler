@@ -6,7 +6,6 @@ package fsio
 import (
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
@@ -18,9 +17,6 @@ import (
 // values.yaml they would be defaults, and Helm drops the nulls of defaults:
 // a null that deletes an upstream default would be lost.
 const UmbrellaValues = "instance.values.yaml"
-
-// alias: a key Helm accepts as a dependency alias.
-var alias = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // umbrellaChart: the Chart.yaml of an umbrella, in Helm's key order.
 type umbrellaChart struct {
@@ -44,7 +40,8 @@ type umbrellaDependency struct {
 // aliased to the key when the key is not the chart's name (Helm then names
 // the subchart after the key: its .Chart.Name is the key); and
 // UmbrellaValues, the final values of each key under the key, each with its
-// own global. Indented by indent spaces (2 to 9).
+// own global. Indented by indent spaces (2 to 9). A key Helm refuses as an
+// alias fails (checkKey).
 func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]byte, error) {
 	svc := def.Service
 	if !chart.IsVersion(svc.Version) {
@@ -53,12 +50,12 @@ func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]
 	c := umbrellaChart{APIVersion: "v2", Name: svc.Name, Version: svc.Version, AppVersion: svc.AppVersion}
 	values := map[string]any{}
 	for _, key := range slices.Sorted(maps.Keys(res.Values)) {
+		if err := checkKey(key); err != nil {
+			return nil, err
+		}
 		ref := res.Charts[key]
 		d := umbrellaDependency{Name: ref.Chart, Repository: ref.Repository, Version: ref.Version}
 		if key != ref.Chart {
-			if !alias.MatchString(key) {
-				return nil, fmt.Errorf("chart %q: an umbrella dependency alias is letters, digits, - and _", key)
-			}
 			d.Alias = key
 		}
 		c.Dependencies = append(c.Dependencies, d)

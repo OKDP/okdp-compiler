@@ -1,6 +1,7 @@
 package chart
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -44,6 +45,21 @@ func TestRefCheck(t *testing.T) {
 			}
 		} else if err == nil || !strings.Contains(err.Error(), "service.yaml: "+want) {
 			t.Errorf("%s: got %v, want an error containing %q", source, err, want)
+		}
+	}
+}
+
+// TestSpecKeys: a chart key is a DNS label: it names files and the
+// umbrella's dependency alias.
+func TestSpecKeys(t *testing.T) {
+	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
+	for key, ok := range map[string]bool{
+		"app": true, "a-1": true, "0": true, strings.Repeat("a", 63): true,
+		"": false, "../escaped": false, "App": false, "my_app": false, "my.app": false, "-app": false, "app-": false, strings.Repeat("a", 64): false,
+	} {
+		err := Specs{key: {Source: src}}.Check()
+		if want := fmt.Sprintf("service.yaml: charts: key %q: a DNS label", key); ok && err != nil || !ok && (err == nil || !strings.HasPrefix(err.Error(), want)) {
+			t.Errorf("%q: got %v", key, err)
 		}
 	}
 }

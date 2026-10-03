@@ -10,7 +10,7 @@ import (
 
 // TestFiles: the final values of each chart, the index of the upstream
 // chart rendering each, and the dependencies, indented by 2 spaces, or as
-// asked.
+// asked; a key that would name a file out of the directory is refused.
 func TestFiles(t *testing.T) {
 	res := &okdp.Result{
 		Values: map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "console-oidc-dcr": {"b": 2}},
@@ -51,5 +51,10 @@ oidc-dcr:
 	}
 	if _, err := Files(res, 1); err == nil || err.Error() != "indent 1: 2 to 9 spaces" {
 		t.Errorf("indent 1: got %v", err)
+	}
+	// A key of a Result built by a caller.
+	bad := &okdp.Result{Values: map[string]map[string]any{"../app": {}}}
+	if _, err := Files(bad, DefaultIndent); err == nil || !strings.HasPrefix(err.Error(), `chart "../app": a key of the result names a file`) {
+		t.Errorf("../app: got %v", err)
 	}
 }

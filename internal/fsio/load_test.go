@@ -11,8 +11,8 @@ import (
 )
 
 // TestLoadDefinition: both files are required, service.yaml must parse,
-// name the service and its version, and pass its checks; the package's
-// other files are read by each compile.
+// as one document of known fields, name the service and its version, and
+// pass its checks; the package's other files are read by each compile.
 func TestLoadDefinition(t *testing.T) {
 	ok := fstest.MapFS{
 		"service.yaml": {Data: []byte(`name: demo
@@ -44,6 +44,9 @@ charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base
 		"no mapping":        {fstest.MapFS{"service.yaml": ok["service.yaml"]}, "mapping.cel.yaml"},
 		"bad service.yaml":  {fstest.MapFS{"service.yaml": {Data: []byte("charts: [")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: "},
 		"wrong field types": {fstest.MapFS{"service.yaml": {Data: []byte("charts: [a]\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: "},
+		"unknown fields":    {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nchrats: {}\ncharts: {app: {protcet: [p]}}\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: line 2: unknown field chrats (allowed: name, version, appVersion, roles, dependsOn, charts, require)\nservice.yaml: line 3: unknown field protcet (allowed: source, base, protect, append, upstream)"},
+		"two documents":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\n---\nname: other\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: line 3: a second YAML document: service.yaml is one document"},
+		"an empty file":     {fstest.MapFS{"service.yaml": {Data: []byte("# nothing\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: name is required"},
 		"no name":           {fstest.MapFS{"service.yaml": {Data: []byte("version: 1.0.0\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: name is required"},
 		"no version":        {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: version is required"},
 		"a chart check":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\ncharts: {app: {}}\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: charts.app.source is required"},

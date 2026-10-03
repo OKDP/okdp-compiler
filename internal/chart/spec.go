@@ -6,6 +6,7 @@ package chart
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 
 	"gopkg.in/yaml.v3"
@@ -43,27 +44,35 @@ type Upstream struct {
 }
 
 // upstreamOf: the chart whose instance upstream values the chart key
-// receives: itself when it accepts them, the chart its upstream.from names,
-// or "" when it receives none.
-func (s Specs) upstreamOf(key string) string {
+// receives: itself when it accepts them, the chart its upstream.from names;
+// false when it receives none.
+func (s Specs) upstreamOf(key string) (string, bool) {
 	switch spec := s[key]; {
 	case spec.Upstream.From != "":
-		return spec.Upstream.From
+		return spec.Upstream.From, true
 	case spec.Upstream.Enabled:
-		return key
+		return key, true
 	}
-	return ""
+	return "", false
 }
 
+// chartKey: a chart key, a DNS label (RFC 1123): 63 characters at most.
+var chartKey = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
 // Check: what the charts of service.yaml may not hold, refused when it is
-// loaded and before every compile: a chart without its source, a protect or
-// append path that does not follow the grammar of paths.go (a malformed path
-// would otherwise surface only when an instance sets a value under it, or
-// never, leaving a value unprotected), an upstream.from that does not name a
-// chart accepting upstream values of its own.
+// loaded and before every compile: a key that is not a DNS label (it names
+// files, which ../x would place out of their directory, and the umbrella's
+// dependency alias), a chart without its source, a protect or append path
+// that does not follow the grammar of paths.go (a malformed path would
+// otherwise surface only when an instance sets a value under it, or never,
+// leaving a value unprotected), an upstream.from that does not name a chart
+// accepting upstream values of its own.
 func (s Specs) Check() error {
 	for _, key := range slices.Sorted(maps.Keys(s)) {
 		spec := s[key]
+		if !chartKey.MatchString(key) {
+			return fmt.Errorf("service.yaml: charts: key %q: a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names files (<key>.values.yaml) and the umbrella's dependency alias", key)
+		}
 		if err := spec.Source.Check("service.yaml: charts." + key + ".source"); err != nil {
 			return err
 		}

@@ -46,7 +46,7 @@ dependencies:
 		version, key, want string
 	}{
 		"version": {"1.x", "app", `service.yaml: version "1.x": the version of the umbrella chart`},
-		"alias":   {"1.2.3", "my.app", `chart "my.app": an umbrella dependency alias`},
+		"alias":   {"1.2.3", "my.app", `chart "my.app": a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias`},
 	} {
 		d := *def
 		d.Service.Version = tc.version

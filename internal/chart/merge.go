@@ -105,8 +105,8 @@ func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, compute
 	// upstream.from receives the values of the chart it names, with that
 	// chart's protect and append: one set of values for two renders of an
 	// upstream chart, refused or appended the same way in both.
-	owner := specs.upstreamOf(key)
-	if up := ups[owner]; up != nil {
+	if owner, ok := specs.upstreamOf(key); ok && ups[owner] != nil {
+		up := ups[owner]
 		if up.err != nil {
 			return nil, "", up.err
 		}

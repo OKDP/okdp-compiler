@@ -86,7 +86,9 @@ flowchart TD
 ```
 
 `fsio.LoadDefinition` (`internal/fsio/load.go`) decodes `service.yaml` into
-`okdp.Service` (each `require` entry a key or `{key, $if}`:
+`okdp.Service`, strictly (`decodeService`: one document, an unknown field
+refused by yaml.v3's `KnownFields`, its error listing the fields of its
+place; each `require` entry a key or `{key, $if}`:
 `Requirements.UnmarshalYAML`), checks it (`Service.Check`,
 `internal/okdp/service.go`), keeps `mapping.cel.yaml` as bytes and the
 package's filesystem as `Definition.Files`: the mapping is parsed by each
@@ -97,8 +99,9 @@ of the package are read by each compile.
 (`Definition.Files`, `Charts`, `Contracts`, `Release`, `Namespace`) and
 `service.yaml` again, for a `Definition` built in memory: a `name` and a
 `version`, each `require` entry a key, its condition one expression, no
-chart `okdp`, each chart's `source` a repository URL, a chart
-name and a pinned version (`chart.Ref.Check`, `internal/chart/ref.go`;
+chart `okdp`, each chart key a DNS label (it names files and the
+umbrella's dependency alias), each chart's `source` a repository URL, a
+chart name and a pinned version (`chart.Ref.Check`, `internal/chart/ref.go`;
 [Sources](specs/02_service_definition.md#sources)), the `upstream.from`
 entries and the `protect` and `append` paths (`chart.Specs.Check`,
 `internal/chart/spec.go`). Then it runs:
@@ -276,7 +279,7 @@ neither knows OKDP.
 | | `schema.go` | JSON Schema validation, reported as Helm reports it; `CompileSchema`, a schema compiled as Helm compiles it | stages 1 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`) | the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`) |
 | | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`, else at the root; `readArchive`) | `merge.go` |
-| | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
+| | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` (the chart keys, DNS labels, among its checks) | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
 | | `paths.go` | the grammar of the `protect` and `append` paths | `spec.go`, `merge.go` |
 | | `parameters.go` | stage 1: `Parameters` | `values.go`, `schema.go` |
 | | `merge.go` | the instance's upstream values (`ReadUpstream`, `Upstreams.Show`), stage 9 (`FinalValues`), `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `internal/okdp` (`layers.go`, `connections.go`) |
@@ -293,9 +296,9 @@ neither knows OKDP.
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `descriptor.go` | stage 7 | `connections.go`, `secrets.go`, `labels.go` |
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
-| `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, checked, and `mapping.cel.yaml` | `okdp.Service.Check` |
-| | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content) | `okdp.Result` |
-| | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion` |
+| `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `mapping.cel.yaml` | `okdp.Service.Check` |
+| | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
+| | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion`, `checkKey` (`output.go`) |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go` and

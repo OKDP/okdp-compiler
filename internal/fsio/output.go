@@ -5,6 +5,9 @@ package fsio
 import (
 	"bytes"
 	"fmt"
+	"maps"
+	"regexp"
+	"slices"
 
 	"gopkg.in/yaml.v3"
 
@@ -30,8 +33,11 @@ func Document(res *okdp.Result, indent int) ([]byte, error) {
 // okdp.dependencies.yaml. Each is indented by indent spaces (2 to 9).
 func Files(res *okdp.Result, indent int) (map[string][]byte, error) {
 	files := map[string][]byte{}
-	for chart, v := range res.Values {
-		b, err := marshal(v, indent)
+	for _, chart := range slices.Sorted(maps.Keys(res.Values)) {
+		if err := checkKey(chart); err != nil {
+			return nil, err
+		}
+		b, err := marshal(res.Values[chart], indent)
 		if err != nil {
 			return nil, err
 		}
@@ -45,6 +51,22 @@ func Files(res *okdp.Result, indent int) (map[string][]byte, error) {
 		files[name] = b
 	}
 	return files, nil
+}
+
+// resultKey: a chart key as the outputs name it: a file
+// (<key>.values.yaml) and an umbrella dependency alias, letters, digits, -
+// and _ (Helm's rule for an alias). The keys of a compile follow it (DNS
+// labels, chart.Specs.Check, and the compiler's): this refuses those of a
+// Result built by a caller.
+var resultKey = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// checkKey: an error unless the outputs can name the chart key key
+// (resultKey).
+func checkKey(key string) error {
+	if !resultKey.MatchString(key) {
+		return fmt.Errorf("chart %q: a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias: letters, digits, - and _", key)
+	}
+	return nil
 }
 
 // marshal: v as a YAML document indented by indent spaces, 2 to 9 (what

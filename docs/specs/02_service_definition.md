@@ -25,8 +25,22 @@ instance values) and its outputs are specified in
 
 Decoded by `gopkg.in/yaml.v3`: YAML 1.2, unlike values files and the
 mapping (`appVersion: 1.10` is `"1.10"`; a plain `upstream: no` is a
-string, refused: [upstream](#upstream)). Unknown fields are ignored,
-except in a [`require`](#require) entry.
+string, refused: [upstream](#upstream)). Strictly: a field the tables below
+do not list fails rather than being ignored, where a misspelt `protect`
+would leave its paths unprotected, and so does a key that only holds an
+anchor (write the anchor at its first use, as in [sources](#sources)).
+Each unknown field is reported, one per line, with the fields of its place
+(the top level, a chart, a `source`); a [`require`](#require) entry and
+[`upstream`](#upstream) check their own forms:
+
+```text
+service.yaml: line 7: unknown field protcet (allowed: source, base, protect, append, upstream)
+```
+
+The file is one YAML document: a second one, after `---`, fails
+(`service.yaml: line <n>: a second YAML document: service.yaml is one document`),
+rather than being ignored. An empty file is a service without a name
+(`service.yaml: name is required`).
 
 ### Service
 
@@ -38,7 +52,7 @@ except in a [`require`](#require) entry.
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `require` | list of keys and `{key, $if}` | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty, in every case or when its condition holds: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
-| `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key: chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
+| `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key, a DNS label ([chart keys](#chart-keys)): chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
 
 The versions are strings, as written: `appVersion: 1.10` is `"1.10"`.
 Without `name` or `version`, loading fails: `service.yaml: name is required`,
@@ -103,6 +117,20 @@ How the chart defaults, `base`, the computed values and the instance
 upstream values combine: [merge precedence](01_inputs_outputs.md#merge-precedence).
 A chart is rendered only when the mapping outputs it; its source must then
 be in the chart cache ([chart cache](01_inputs_outputs.md#chart-cache)).
+
+### Chart keys
+
+A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
+a letter or a digit at each end, 63 characters at most (`app`,
+`admin-users`). It names files, the emitted `<key>.values.yaml` and the
+instance's `upstream.<key>.yaml`, and the umbrella's dependency alias
+([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
+(`""`, `../app`, `my_app`, `App`) fails when `service.yaml` is loaded, and
+by `Compile` for a definition built in memory:
+
+```text
+service.yaml: charts: key "../app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names files (<key>.values.yaml) and the umbrella's dependency alias
+```
 
 ### Sources
 

@@ -955,6 +955,13 @@ The files the binary writes from them:
 [umbrella chart](#umbrella-chart); `example/output/` holds those of the
 example ([Example](#example)).
 
+The keys of a compile are the chart keys of `service.yaml`, DNS labels
+([chart keys](02_service_definition.md#chart-keys)), and the compiler's
+(`okdp`, the OAuth client charts). `Files` and `Umbrella` name files and
+dependency aliases after them: for a `Result` built otherwise, a key Helm
+does not accept as an alias (letters, digits, `-`, `_`) fails,
+`chart "<key>": a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias: letters, digits, - and _`.
+
 ### Chart index
 
 `Result.Charts`: the upstream chart that renders each compiled chart, by
@@ -1281,8 +1288,7 @@ name the values were compiled for. Two files:
   `service.yaml` (`version` must be SemVer); `dependencies`, one per key of
   `Values`, sorted by key: the [chart index](#chart-index) entry of the key
   (`name`, `repository`, `version`), and `alias: <key>` when the key is not
-  the chart's name (a key Helm accepts as an alias: letters, digits, `-`,
-  `_`);
+  the chart's name;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
 

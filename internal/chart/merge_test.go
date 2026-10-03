@@ -120,6 +120,20 @@ func TestReadUpstream(t *testing.T) {
 	}
 }
 
+// TestFinalValuesNoUpstream: a chart that accepts no upstream values
+// receives none, also beside a chart keyed "" (Specs built in memory,
+// unchecked): no upstream values is not the chart "".
+func TestFinalValuesNoUpstream(t *testing.T) {
+	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
+	specs := Specs{"": {Source: src, Upstream: Upstream{Enabled: true}}, "app": {Source: src}}
+	values := M{"upstream": M{"": M{"a": 1.0}}}
+	cache := fstest.MapFS{"app-1.0.0/values.yaml": {Data: []byte("b: 2\n")}}
+	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, values, ReadUpstream(nil, specs, values))
+	if err != nil || out["app"]["a"] != nil {
+		t.Errorf("app: %v %#v", err, out["app"])
+	}
+}
+
 // TestFinalValuesShape: the values of a chart of the output must be a map,
 // whoever builds the output.
 func TestFinalValuesShape(t *testing.T) {

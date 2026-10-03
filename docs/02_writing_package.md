@@ -69,7 +69,10 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_C
 
 - The key names the chart's values everywhere (`output`, the instance's
   `upstream.<key>`, the emitted `<key>.values.yaml`); it need not be the
-  chart's name.
+  chart's name. It is a DNS label: lowercase letters, digits and `-`, 63
+  characters at most ([chart keys](specs/02_service_definition.md#chart-keys)).
+- `service.yaml` is read strictly: a field it does not define, a misspelt
+  `protect` among them, fails the load rather than being ignored.
 - A compile that needs a chart the cache lacks fails with the `mkdir -p`
   and `helm pull` commands that fetch it.
 - A chart rendered twice is two keys of one source
