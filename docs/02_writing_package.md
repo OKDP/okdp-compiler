@@ -301,9 +301,10 @@ provides:                  # the connections the instance publishes
   sees the previous ones, and hides a
   [context](specs/02_service_definition.md#context) variable of the
   same name (`labels`).
-- `output` holds only what is computed. A `$if` on a chart leaves it out:
-  it is neither compiled nor rendered (the webapp's `metrics`, trino's
-  `opa-kube-mgmt` and `opal`). `okdp` is not a key of `output`: the
+- `output` holds only what is computed. A `$if` on a chart, or a null
+  value, leaves it out: it is neither compiled nor rendered (the webapp's
+  `metrics`, trino's `opa-kube-mgmt` and `opal`). Any other value that is
+  not a map fails the compile. `okdp` is not a key of `output`: the
   compiler adds the okdp chart to every compile, so the descriptor always
   reaches the cluster
   ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).

@@ -14,11 +14,11 @@ import (
 // okdp.descriptor renders it today: service, version, url, usage, and the
 // connections the instance provides (outputs.yaml), which the console lists
 // and other instances reference by name. Built from the mapping's `instance`
-// and `provides` sections; every output is checked against its contract
-// (okdp.contract.provide). Then, as okdp.descriptor renders them, the
-// credentials Secret of every output given a `secret` ({generate, stringData}
-// or {stringData}), named after its secretRef (default
-// <name>-<contract>-credentials).
+// and `provides` sections; every output is checked, its shape (checkOutput),
+// then against its contract (okdp.contract.provide). Then, as
+// okdp.descriptor renders them, the credentials Secret of every output given
+// a `secret` ({generate, stringData} or {stringData}), named after its
+// secretRef (default <name>-<contract>-credentials).
 func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) {
 	svc := ctxService(ctx)
 	name, version := svc.Name, svc.Version
@@ -29,8 +29,11 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 	var credentials []any
 	contracts := map[string]bool{}
 	seen := map[string]bool{}
-	for _, x := range provides {
-		p := value.AsMap(x)
+	for i, x := range provides {
+		p, err := checkOutput(i, x)
+		if err != nil {
+			return nil, nil, err
+		}
 		contract := value.Str(p["contract"])
 		// An output is named after the release unless the mapping names it.
 		out := value.Str(p["name"])
@@ -127,6 +130,30 @@ func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []any, error) 
 			"outputs.yaml": outputs,
 		},
 	}, credentials, nil
+}
+
+// outputMaps: the keys of a provides item that are maps when set, and what
+// each holds.
+var outputMaps = []struct{ key, want string }{
+	{"values", "a map of contract fields"},
+	{"secretRef", "a map (name)"},
+	{"secret", "a map (generate, stringData)"},
+}
+
+// checkOutput: the i-th item of provides, a map whose values, secretRef and
+// secret are maps when set (null is not set).
+func checkOutput(i int, x any) (M, error) {
+	where := fmt.Sprintf("provides[%d]", i)
+	p, ok := x.(M)
+	if !ok {
+		return nil, fmt.Errorf("%s: must be a map (contract, name, values, secretRef, secret), got %s", where, value.Short(x))
+	}
+	for _, f := range outputMaps {
+		if _, err := shaped[M](where+": "+f.key, f.want, p[f.key]); err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
 }
 
 // trunc: s cut to n bytes, as Helm's trunc.

@@ -115,12 +115,33 @@ output:
 	}
 }
 
+// TestMappingNulls: a null section is empty; a null chart of output is left
+// out, as by $if.
+func TestMappingNulls(t *testing.T) {
+	res, err := runMapping([]byte("output: {x: '${{ null }}', web: ~, z: {}}\ninstance: ~\nprovides: '${{ null }}'\n"), mapCtx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (M{"z": M{}}); !reflect.DeepEqual(res.output, want) {
+		t.Errorf("output: got %#v, want %#v", res.output, want)
+	}
+	if len(res.instance) != 0 || res.provides != nil || res.objects != nil || res.clients != nil {
+		t.Errorf("sections: %#v", res)
+	}
+}
+
 // TestMappingErrors: OKDP's sections and functions, and where their errors
-// point.
+// point; a section of the wrong shape is refused.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
 		"function error":         {"output: {x: {v: '${{ okdpGeneratedSecret({}) }}'}}\n", "output: x: v: ${{ okdpGeneratedSecret({}) }}: okdp.generatedSecret: name is required"},
 		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "provides[0]: values: ${{ nope }}:"},
+		"output not a map":       {"output: [x]\n", `output: must be a map of charts to their values, got []interface {}{"x"}`},
+		"chart a scalar":         {"output: {x: {}, web: 'on'}\n", `output: web: must be a map of the chart's values, got "on"`},
+		"chart a list":           {"output: {x: \"${{ ['a'] }}\"}\n", `output: x: must be a map of the chart's values, got []interface {}{"a"}`},
+		"instance not a map":     {"instance: [https://x]\n", `instance: must be a map (url, usage), got []interface {}{"https://x"}`},
+		"provides not a list":    {"provides: {contract: http}\n", `provides: must be a list of outputs, got map[string]interface {}{"contract":"http"}`},
+		"objects not a list":     {"objects: x\n", `objects: must be a list of objects, got "x"`},
 		"oidcClients not a list": {"oidcClients: {a: 1}\n", "oidcClients: must be a list of OAuth clients"},
 	} {
 		t.Run(name, func(t *testing.T) {

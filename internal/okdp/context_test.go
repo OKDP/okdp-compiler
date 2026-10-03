@@ -121,6 +121,42 @@ func TestPlatformDcrSettings(t *testing.T) {
 	}
 }
 
+// TestPlatformTypes: each global.okdp setting the compiler reads, and each
+// map on the way to it, global included, of its type when set; null is not
+// set.
+func TestPlatformTypes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		global any
+		want   string
+	}{
+		"global":           {"x", `global must be a map, got "x"`},
+		"global.okdp":      {M{"okdp": []any{}}, "global.okdp must be a map, got []interface {}{}"},
+		"oidc":             {M{"okdp": M{"oidc": false}}, "global.okdp.oidc must be a map, got false"},
+		"oidc.dcr":         {M{"okdp": M{"oidc": M{"dcr": "https://idp/register"}}}, `global.okdp.oidc.dcr must be a map, got "https://idp/register"`},
+		"oidc.enabled":     {M{"okdp": M{"oidc": M{"enabled": "false"}}}, `global.okdp.oidc.enabled must be true or false, got "false"`},
+		"oidc.scope":       {M{"okdp": M{"oidc": M{"scope": []any{"openid"}}}}, `global.okdp.oidc.scope must be a string, got []interface {}{"openid"}`},
+		"proxy":            {M{"okdp": M{"proxy": "http://p:3128"}}, `global.okdp.proxy must be a map, got "http://p:3128"`},
+		"proxy.noProxy":    {M{"okdp": M{"proxy": M{"noProxy": []any{".svc"}}}}, `global.okdp.proxy.noProxy must be a string, got []interface {}{".svc"}`},
+		"ingress":          {M{"okdp": M{"ingress": "example.org"}}, `global.okdp.ingress must be a map, got "example.org"`},
+		"selfSigned":       {M{"okdp": M{"certificateIssuers": M{"selfSigned": "ca"}}}, `global.okdp.certificateIssuers.selfSigned must be a map, got "ca"`},
+		"in order":         {M{"okdp": M{"proxy": "p", "oidc": 1}}, "global.okdp.oidc must be a map, got 1"},
+		"null is not set":  {M{"okdp": M{"oidc": nil, "proxy": M{"noProxy": nil}, "ingress": M{"suffix": nil}}}, ""},
+		"no global":        {nil, ""},
+		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}}, "imageRegistry": 1}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := checkPlatform(tc.global); (err == nil) != (tc.want == "") || (err != nil && err.Error() != tc.want) {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+	// Checked before the platform context is derived: false no longer leaves
+	// OIDC enabled.
+	if _, err := platformCtx(t, M{"oidc": false}); err == nil || err.Error() != "global.okdp.oidc must be a map, got false" {
+		t.Errorf("compile: got %v", err)
+	}
+}
+
 // TestContextErrors: an unknown provisioning mode, unreadable package files.
 func TestContextErrors(t *testing.T) {
 	if _, err := platformCtx(t, M{"oidc": M{"clientProvisioning": "manual"}}); err == nil ||

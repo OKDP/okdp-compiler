@@ -29,7 +29,8 @@ func provideCompile(provides string) (*Result, error) {
 	return Compile(&d, in)
 }
 
-// TestDescriptor: the ConfigMap, its labels and its outputs.
+// TestDescriptor: the ConfigMap, its labels and its outputs (a null secret
+// is not set).
 func TestDescriptor(t *testing.T) {
 	res, err := provideCompile(`
   - contract: http
@@ -38,6 +39,7 @@ func TestDescriptor(t *testing.T) {
     name: public
     values: {url: https://public.example.org}
     secretRef: {name: public-credentials, extra: dropped}
+    secret: null
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +100,8 @@ func TestDescriptorNoOutputs(t *testing.T) {
 	}
 }
 
-// TestDescriptorErrors: every output is checked against its contract.
+// TestDescriptorErrors: every output is checked, its shape, then against
+// its contract.
 func TestDescriptorErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ provides, want string }{
 		"unknown contract": {"  - {contract: ftp, values: {}}\n", `provides "demo-app" (ftp): unknown contract`},
@@ -111,6 +114,10 @@ func TestDescriptorErrors(t *testing.T) {
 			"  - {contract: http, values: {url: https://elsewhere}}\n",
 			`url is "https://elsewhere" but internal references to "demo-app" resolve it to "https://demo-app.example.org"`,
 		},
+		"not a map":           {"  - {contract: http, name: other, values: {url: u}}\n  - ~\n", "provides[1]: must be a map (contract, name, values, secretRef, secret), got <nil>"},
+		"values not a map":    {"  - {contract: http, values: [url]}\n", `provides[0]: values: must be a map of contract fields, got []interface {}{"url"}`},
+		"secretRef not a map": {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", `provides[0]: secretRef: must be a map (name), got "creds"`},
+		"secret not a map":    {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", `provides[0]: secret: must be a map (generate, stringData), got []interface {}{"token"}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := provideCompile(tc.provides)

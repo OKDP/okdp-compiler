@@ -626,6 +626,7 @@ it.
 | `chart "my.app": an umbrella dependency alias is letters, digits, - and _` | `--umbrella` with a chart key Helm does not accept as an alias (a key that is not its chart's name is aliased) | rename the key in `service.yaml` and the mapping |
 | `<key>: upstream file <file>: no instance files (Inputs.Instance)` | `service.yaml` names upstream files, and no instance directory is given | pass `--instance` / `Inputs.Instance` |
 | `global.okdp.oidc.clientProvisioning "manual" is not one of existing, dcr` | wrong platform value | `existing` or `dcr` |
+| `global.okdp.oidc must be a map, got false`, `global.okdp.proxy.noProxy must be a string, got []interface {}{".svc"}` | a platform setting the compiler reads, or a map on the way to it, of another type (`oidc: false`, `proxy: <url>`, a list for a string); it would otherwise read as not set | fix the platform values; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
 | `$ref <url>: the schema may only reference itself (the compile reads no file or URL)` | a `values.schema.json` references a file or a URL | inline the referenced schema |
 
 ### Mapping
@@ -634,7 +635,9 @@ The errors of `mapping.cel.yaml`, mostly for package authors, are listed
 with their causes in [service definition](specs/02_service_definition.md#errors):
 the messages of its `errors` section, one per line; CEL errors prefixed with
 the section, key and list position path (`output: app: env[2]: value: ${{ ... }}: no such key: host`);
-YAML errors (`yaml: line <n>: ...`), which name no file. The `provides`
+sections of the wrong shape
+(`output: app: must be a map of the chart's values, got "on"`); YAML
+errors (`yaml: line <n>: ...`), which name no file. The `provides`
 checks are in [descriptor ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap),
 the OAuth client errors [below](#oauth-clients).
 

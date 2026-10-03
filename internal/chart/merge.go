@@ -23,11 +23,11 @@ import (
 )
 
 // FinalValues: the final values of each chart key of the mapping's output
-// (keyValues), which must be a key of specs, and the upstream chart that
-// renders them (its source). In key order: the first error is the same from
-// one compile to the next, also when a refused upstream value reaches two
-// keys (upstream.from). The schema violations of every key are reported
-// together.
+// (keyValues), which must be a key of specs and hold a map, and the
+// upstream chart that renders them (its source). In key order: the first
+// error is the same from one compile to the next, also when a refused
+// upstream value reaches two keys (upstream.from). The schema violations of
+// every key are reported together.
 //
 // cache: the chart cache, the upstream charts' defaults and schemas. pkg:
 // the package (its base files). values: the instance's merged values (their
@@ -40,7 +40,11 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M, ups Upstream
 		if _, ok := specs[key]; !ok {
 			return nil, nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", key)
 		}
-		f, bad, err := keyValues(charts, pkg, specs, key, value.AsMap(output[key]), values, ups)
+		computed, ok := output[key].(M)
+		if !ok {
+			return nil, nil, fmt.Errorf("mapping output %q: must be a map of the chart's values, got %s", key, value.Short(output[key]))
+		}
+		f, bad, err := keyValues(charts, pkg, specs, key, computed, values, ups)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", key, err)
 		}

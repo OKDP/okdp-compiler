@@ -86,3 +86,14 @@ func TestReadUpstream(t *testing.T) {
 		t.Error("a chart without upstream values has no upstream sources")
 	}
 }
+
+// TestFinalValuesShape: the values of a chart of the output must be a map,
+// whoever builds the output.
+func TestFinalValuesShape(t *testing.T) {
+	for _, v := range []any{nil, "x", []any{}} {
+		_, _, err := FinalValues(fstest.MapFS{}, fstest.MapFS{}, Specs{"app": {}}, M{"app": v}, M{}, nil)
+		if err == nil || !strings.HasPrefix(err.Error(), `mapping output "app": must be a map of the chart's values, got `) {
+			t.Errorf("%#v: got %v", v, err)
+		}
+	}
+}

@@ -53,8 +53,8 @@ files, and no other:
 OAuth client ([OAuth client charts](#oauth-client-charts)) or `okdp`
 ([the okdp chart](#the-okdp-chart)); it names the chart's values. A
 compiled chart: one the mapping outputs (`output.<key>`, not left out by
-`$if`), the okdp chart, and in `dcr` mode the chart of each OAuth client.
-Each is rendered by an upstream chart, its source
+`$if`, not null), the okdp chart, and in `dcr` mode the chart of each
+OAuth client. Each is rendered by an upstream chart, its source
 ([chart index](#chart-index)); several keys may share one. The base file
 may be any path of the package, `base/<key>.yaml` by convention; a path out
 of it (`../app.yaml`) fails. The service's name, versions and catalog
@@ -454,22 +454,38 @@ global.okdp.ingress.className is required. It is a platform value: set it in pla
 
 ### Fields the compiler reads
 
-| `global.okdp` | Used for |
-|---|---|
-| `ingress.suffix` | `${suffix}` of `x-okdp-internal`: internal references, provided outputs |
-| `certificateIssuers.selfSigned.name` | `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`) |
-| `charts.objects`, `charts.oidcDcr` | the upstream charts of the [okdp chart](#the-okdp-chart) and of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
-| `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
-| `oidc.scope` | `platform.oidc.scope`; the scope a client chart registers when its client sets none |
-| `oidc.dcr` | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
-| `oidc.issuerUri` | the OAuth client charts' wait for the provider (`waitForProvider.discoveryUrl`) |
-| `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | `platform.proxyEnv` |
+| `global.okdp` | Type | Used for |
+|---|---|---|
+| `ingress.suffix` | string | `${suffix}` of `x-okdp-internal`: internal references, provided outputs |
+| `certificateIssuers.selfSigned.name` | string | `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`) |
+| `charts.objects`, `charts.oidcDcr` | map | the upstream charts of the [okdp chart](#the-okdp-chart) and of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
+| `oidc.enabled` | `true` or `false` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
+| `oidc.clientProvisioning` | string | the same |
+| `oidc.scope` | string | `platform.oidc.scope`; the scope a client chart registers when its client sets none |
+| `oidc.dcr` | map | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
+| `oidc.issuerUri` | string | the OAuth client charts' wait for the provider (`waitForProvider.discoveryUrl`) |
+| `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | string | `platform.proxyEnv` |
+
+Every compile checks the type of each of these settings when it is set,
+and that `global`, `global.okdp` and each map on the way to a setting
+(`oidc`, `proxy`, `ingress`, `certificateIssuers.selfSigned`...) are maps
+when set, after the [requirements](#requirements), in every mode. A `null`
+is not set. A value of another type is refused rather than read as not
+set: `oidc: false` would leave OIDC enabled, `proxy: <url>` give no proxy
+environment. The first violation is reported, in the order of the table
+(`charts` is checked later: [Platform charts](#platform-charts)):
+
+```
+global.okdp.oidc must be a map, got false
+global.okdp.oidc.enabled must be true or false, got "false"
+global.okdp.proxy.noProxy must be a string, got []interface {}{".svc"}
+```
 
 The mapping sees `global.okdp` as written and `platform` as derived, with
 the defaults, the check of `clientProvisioning` (`existing` or `dcr`) and
-those of `oidc.dcr` (below): [Context](02_service_definition.md#context).
-`charts` is checked too ([Platform charts](#platform-charts)); the other
-values are not. `global` also reaches every upstream chart
+those of the keys of `oidc.dcr` (below):
+[Context](02_service_definition.md#context). The other values are not
+checked. `global` also reaches every upstream chart
 ([Merge precedence](#merge-precedence)).
 
 ### Platform charts
@@ -485,7 +501,8 @@ compiler adds itself, each a source as in `service.yaml`
 | `oidcDcr` | `{repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.5.0}` (`compiler.DcrSource`) | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes |
 
 Every compile checks them, after the [requirements](#requirements), the
-[OAuth client settings](#oauth-client-settings) and the
+types of the [settings the compiler reads](#fields-the-compiler-reads),
+the [OAuth client settings](#oauth-client-settings) and the
 [connections](#connections), before the mapping: `oidcDcr` when set, in
 every mode. `charts` must be a map of these two keys, each chart a map;
 `repository`, `chart` and `version` strings (other keys of a chart are
@@ -544,10 +561,12 @@ set, the camelCase one wins and the former is dropped. Its other keys are
 passed as written. The other keys of `oidc.dcr` are kept in
 `platform.oidc.dcr` and not used.
 
-Every compile checks the types of `image`, `caSecret`, `ttlSeconds`,
-`backoffLimit` and `waitTtlSeconds`, in every mode (`existing`, OIDC
-disabled, no client), after the [requirements](#requirements); the first
-violation is reported, in that order. The three numbers fail alike, and a
+`oidc.dcr` itself is a map when set
+([fields the compiler reads](#fields-the-compiler-reads)). Every compile
+checks the types of `image`, `caSecret`, `ttlSeconds`, `backoffLimit` and
+`waitTtlSeconds`, in every mode (`existing`, OIDC disabled, no client),
+after the [requirements](#requirements); the first violation is reported,
+in that order. The three numbers fail alike, and a
 quoted number (`"600"`) is a string. `registrationUrl` and `authMethod` are
 left as written, and checked only in `dcr` mode with a client (below):
 
@@ -949,11 +968,13 @@ from `name` and `appVersion` of `service.yaml`.
 | `secretRef` | `{name}` of `secretRef`; else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
 | `values` | `values` of the item, [completed](#completion) against the contract |
 
-Every item is checked against its contract. `<out>`: `provides "<name>"
-(<contract>)`.
+Every item is checked for its shape, then against its contract. `<out>`:
+`provides "<name>" (<contract>)`; `<i>`: the item's position.
 
 | Case | Error |
 |---|---|
+| an item that is not a map | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>` |
+| `values`, `secretRef` or `secret` set, not a map | `provides[<i>]: values: must be a map of contract fields, got <value>` ([provides](02_service_definition.md#provides)) |
 | no `<contract>.schema.json` | `<out>: unknown contract` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
 | a secret field | `<out>: "<key>" is a secret field, put it in the credentials Secret` |

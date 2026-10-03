@@ -110,10 +110,15 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `name` of `service.yaml`. Nothing below runs on invalid parameters.
 2. **Platform requirements**. Each `require` entry of `service.yaml` is a
    dotted path under `global.okdp` that must be set and not empty.
-3. **Platform context**. `platform` is derived from `global.okdp`: OIDC with
-   its defaults and client provisioning mode (`existing` or `dcr`, anything
-   else fails); the settings of the oidc-dcr Jobs, `global.okdp.oidc.dcr`,
-   their defaults applied and their types checked in every mode,
+3. **Platform context**. The settings of `global.okdp` the compiler reads
+   are checked against their types, and the maps on the way to them
+   (`checkPlatform`, `platformSettings`): a value of another type, `null`
+   excepted, fails rather than reads as not set
+   ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)).
+   `platform` is derived from `global.okdp`: OIDC with its defaults and
+   client provisioning mode (`existing` or `dcr`, anything else fails);
+   the settings of the oidc-dcr Jobs, `global.okdp.oidc.dcr`, their
+   defaults applied and their types checked in every mode,
    `registrationUrl` and `authMethod` excepted, left to stage 6
    (`dcrSettings`, `internal/okdp/oidc.go`;
    [OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings));
@@ -149,9 +154,12 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    expression returning messages, all messages collected, any message
    failing the compile (`bind`); then the sections (`Doc.Section`):
    `output`, `instance`, `provides`, `objects` and `oidcClients`, in that
-   order. Each `objects` item must be a whole
-   manifest, with a `kind` and a `metadata.name`; `oidcClients` must be a
-   list.
+   order, each of its shape (`shaped`): `output` a map of maps, a null
+   chart left out; `instance` a map; the others lists; `null` is empty,
+   another shape fails rather than reads as empty
+   ([sections](specs/02_service_definition.md#evaluation-order)). Each
+   `objects` item must be a whole manifest, with a `kind` and a
+   `metadata.name`.
 6. **OAuth clients** (`oidcClients`, `clientCharts`, `internal/okdp/oidc.go`).
    The clients are checked in every mode
    ([oidcClients](specs/02_service_definition.md#oidcclients)). In
@@ -166,11 +174,13 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    mapping's output, which `Result.Computed` shows
    ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
 7. **Descriptor and credentials Secrets** (`descriptor`,
-   `internal/okdp/descriptor.go`). Each `provides` entry is checked and
-   completed against its contract; published under the release name, it is
-   compared with what the `resolver` computes for an internal reference to
-   this instance (`x-okdp-internal`): provider and consumers compute the
-   same names. An entry with a `secret` gets its credentials Secret
+   `internal/okdp/descriptor.go`). Each `provides` entry is checked for its
+   shape (`checkOutput`: a map, its `values`, `secretRef` and `secret`
+   maps), then checked and completed against its contract; published
+   under the release name, it is compared with what the `resolver`
+   computes for an internal reference to this instance
+   (`x-okdp-internal`): provider and consumers compute the same names. An
+   entry with a `secret` gets its credentials Secret
    (`credentialsSecret`, `internal/okdp/secrets.go`) ([Descriptor
    ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap), [Credentials
    Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
@@ -184,7 +194,8 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    ([The okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
 9. **Final values** (`chart.FinalValues`, `internal/chart/merge.go`), for
    each chart of `output`, which must be a chart of `service.yaml`, a client
-   chart or `okdp`; a chart the mapping leaves out (`$if`) is not compiled.
+   chart or `okdp`, its values a map; a chart the mapping leaves out (`$if`,
+   null) is not compiled.
    The upstream chart is the key's `source`: the chart cache
    (`chartCache.get`, `internal/chart/cache.go`) reads it once per compile,
    from `<chart>-<version>/`, else from `<chart>-<version>.tgz` (its own

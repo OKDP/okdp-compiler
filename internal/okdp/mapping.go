@@ -13,6 +13,8 @@ package okdp
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/google/cel-go/cel"
@@ -33,13 +35,15 @@ type mapped struct {
 }
 
 // runMapping: runs a mapping (mapping.cel.yaml) on the context ctx, its
-// sections in order.
+// sections in order, each of its shape: null (absent, $if) is empty, a value
+// of another shape is refused. A null chart of output is left out, as by
+// $if.
 func runMapping(b []byte, ctx M) (*mapped, error) {
 	d, err := compile.Load(b, ctx, functions(ctx)...)
 	if err != nil {
 		return nil, err
 	}
-	res := &mapped{}
+	res := &mapped{output: M{}}
 	for _, k := range []string{"output", "instance", "provides", "objects", "oidcClients"} {
 		v, err := d.Section(k)
 		if err != nil {
@@ -47,21 +51,29 @@ func runMapping(b []byte, ctx M) (*mapped, error) {
 		}
 		switch k {
 		case "output":
-			res.output = value.AsMap(v)
+			var charts M
+			if charts, err = shaped[M]("output", "a map of charts to their values", v); err != nil {
+				return nil, err
+			}
+			for _, key := range slices.Sorted(maps.Keys(charts)) {
+				if charts[key] == nil {
+					continue
+				}
+				if res.output[key], err = shaped[M]("output: "+key, "a map of the chart's values", charts[key]); err != nil {
+					return nil, err
+				}
+			}
 		case "instance":
-			res.instance = value.AsMap(v)
+			res.instance, err = shaped[M]("instance", "a map (url, usage)", v)
 		case "provides":
-			res.provides = value.AsList(v)
+			res.provides, err = shaped[[]any]("provides", "a list of outputs", v)
 		case "objects":
-			if v != nil && value.AsList(v) == nil {
-				return nil, fmt.Errorf("objects: must be a list of objects")
-			}
-			res.objects = value.AsList(v)
+			res.objects, err = shaped[[]any]("objects", "a list of objects", v)
 		case "oidcClients":
-			if v != nil && value.AsList(v) == nil {
-				return nil, fmt.Errorf("oidcClients: must be a list of OAuth clients")
-			}
-			res.clients = value.AsList(v)
+			res.clients, err = shaped[[]any]("oidcClients", "a list of OAuth clients", v)
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 	// Every object is a whole manifest: a kind and a name at least.
@@ -72,6 +84,16 @@ func runMapping(b []byte, ctx M) (*mapped, error) {
 		}
 	}
 	return res, nil
+}
+
+// shaped: v, the value at where, as a T: its zero value when v is null, an
+// error when v is of another shape (want: what it must be).
+func shaped[T any](where, want string, v any) (T, error) {
+	t, ok := v.(T)
+	if !ok && v != nil {
+		return t, fmt.Errorf("%s: must be %s, got %s", where, want, value.Short(v))
+	}
+	return t, nil
 }
 
 // functions: the host functions OKDP adds for a document of the context

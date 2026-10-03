@@ -251,7 +251,8 @@ oidcClients:
 2. `errors`, every entry, then the messages fail the compile together
    ([the errors section](#the-errors-section)).
 3. `output`, `instance`, `provides`, `objects`, `oidcClients`, in this
-   order: each sees the context and every `let` binding.
+   order: each sees the context and every `let` binding, and is checked
+   for its shape once evaluated.
 4. The objects are checked (kind and name); then the OAuth clients, whose
    charts are added in `dcr` mode ([oidcClients](#oidcclients)); then the
    compile builds the descriptor from `instance` and `provides`, checked
@@ -260,6 +261,13 @@ oidcClients:
 
 A section does not see the others: there is no `output` or `instance`
 variable. A value used by several sections is a `let` binding.
+
+Each section has a shape: `output` and `instance` are maps, `provides`,
+`objects` and `oidcClients` lists. Absent or null (left out by `$if`, a
+null expression), a section is empty. A value of another shape fails the
+compile, `<section>: must be <shape>, got <value>`, rather than read as
+empty: `output: [app]` would otherwise render no chart. `<value>`: the
+value as Go's `%#v` prints it (`"x"`, `false`, `[]interface {}{"app"}`).
 
 A mapping that is not a YAML map fails with `the mapping must be a YAML map`;
 invalid YAML with the parser's error (`yaml: line <n>: ...`).
@@ -289,14 +297,20 @@ ignored.
 ### output
 
 A map: chart name → the values the mapping computes for that chart.
+Another value fails with
+`output: must be a map of charts to their values, got <value>`.
 
+- The values of a chart are a map:
+  `output: <key>: must be a map of the chart's values, got <value>`. A
+  scalar or a list is refused, not compiled as the chart's defaults alone;
+  a null (a null expression, `~`) leaves the chart out, as `$if` does.
 - Every key must be a chart of `service.yaml`:
   `mapping output "<key>": not a chart of service.yaml`. A key may not be
   the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
   `okdp`: `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output`
   ([the okdp chart](#the-okdp-chart)).
-- A chart the mapping leaves out (absent, or dropped by `$if`) is not
-  rendered: no `Result.Values` entry.
+- A chart the mapping leaves out (absent, dropped by `$if`, or null) is
+  not rendered: no `Result.Values` entry.
 - The values are the computed layer of the chart's final values:
   [merge precedence](01_inputs_outputs.md#merge-precedence).
 
@@ -318,8 +332,9 @@ A list of OKDP's own objects, whole manifests: the compiler adds nothing to
 them (namespace and labels are the mapping's). After evaluation, every item
 must be a map with a non-empty `kind` and `metadata.name`:
 `objects[<i>]: not an object with a kind and a metadata.name: <object>`.
-A value that is not a list fails with `objects: must be a list of objects`;
-absent or null, there are none. They follow the descriptor and the
+A value that is not a list fails with
+`objects: must be a list of objects, got <value>`; absent or null, there
+are none. They follow the descriptor and the
 credentials Secrets in `Result.Objects` and in the `okdp` chart:
 [outputs](01_inputs_outputs.md#outputs).
 
@@ -331,7 +346,9 @@ credentials Secrets in `Result.Objects` and in the `okdp` chart:
 | `usage` | how to use the instance, as text, trimmed, with one final newline |
 
 Other keys are ignored. Both go to the descriptor ConfigMap:
-[outputs](01_inputs_outputs.md#outputs).
+[outputs](01_inputs_outputs.md#outputs). A value that is not a map fails
+with `instance: must be a map (url, usage), got <value>`; absent or null,
+both are empty.
 
 ### provides
 
@@ -359,7 +376,20 @@ A list of outputs, the connections the instance publishes. Each item:
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
 
-Other keys are ignored. The contract checks report
+Other keys are ignored. A value that is not a list fails with
+`provides: must be a list of outputs, got <value>`; absent or null, there
+are none. Each item must be a map, and its `values`, `secretRef` and
+`secret` maps when set (null is not set); `<i>` is the item's position in
+the evaluated list:
+
+```text
+provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>
+provides[<i>]: values: must be a map of contract fields, got <value>
+provides[<i>]: secretRef: must be a map (name), got <value>
+provides[<i>]: secret: must be a map (generate, stringData), got <value>
+```
+
+The contract checks then report
 `provides "<name>" (<contract>): <message>`.
 
 #### secret
@@ -395,9 +425,9 @@ oidcClients:
 A list of the OAuth clients of the service, each a map. Items are
 evaluated as any other: `$if` leaves a client out, `$for` with `$each`, or
 `$spread`, gives several. A value that is not a list fails with
-`oidcClients: must be a list of OAuth clients`; absent or null, there are
-none. The platform provides the clients, or each service registers its
-own by OIDC Dynamic Client Registration, per
+`oidcClients: must be a list of OAuth clients, got <value>`; absent or
+null, there are none. The platform provides the clients, or each service
+registers its own by OIDC Dynamic Client Registration, per
 `global.okdp.oidc.clientProvisioning` ([context](#context)):
 
 | Mode | The compiler |
@@ -710,7 +740,10 @@ time: `undeclared reference to '<name>'`.
 | `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 
-`enabled` is tested as a Helm condition (empty is false).
+The settings these are derived from are checked against their types first
+(`global.okdp.oidc must be a map, got false`):
+[fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads).
+`enabled` is `true` or `false`; a `null` is kept, and reads as false.
 
 `labels` and `selectorLabels` (and the functions
 [`okdpLabels`, `okdpSelectorLabels`](#okdplabels-and-okdpselectorlabels)),
@@ -969,11 +1002,14 @@ Other errors of the mapping:
 | `line <n>: a map key must be a scalar`, `line <n>: unsupported map key "<key>"` | a list, map or null key |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
-| `objects: must be a list of objects`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
+| `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |
+| `objects: must be a list of objects, got <value>`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
+| `output: <key>: must be a map of the chart's values, got <value>` | a chart of [`output`](#output) whose values are a scalar or a list |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
 | `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
+| `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>`, `provides[<i>]: <key>: must be a map ..., got <value>` | a [`provides`](#provides) item, or its `values`, `secretRef` or `secret`, of another shape |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
-| `oidcClients: must be a list of OAuth clients` | [`oidcClients`](#oidcclients) is not a list |
+| `oidcClients: must be a list of OAuth clients, got <value>` | [`oidcClients`](#oidcclients) is not a list |
 | `<client>: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got <value>`, `<client>: unknown key(s) <keys> (allowed: name, grantTypes, ...)` | a client that is not a map, or has another key |
 | `<client>: name <value> must be lowercase letters, digits and "-" (it names the chart <name>-oidc-dcr, its objects and its Secret)` | a `name` that is not a string of that form |
 | `<client>: grantTypes is required: a list of OAuth grant types (authorization_code, refresh_token, client_credentials...)` | `grantTypes` absent, empty, or holding an item that is not a non-empty string |
