@@ -1,6 +1,7 @@
 package compile
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -139,6 +140,33 @@ output:
 	}
 	if _, err := runOutput("output: {x: {~: 1}}\n"); err == nil || !strings.Contains(err.Error(), "unsupported map key") {
 		t.Errorf("a null key: got %v", err)
+	}
+}
+
+// TestAliases: an alias is a copy of its anchor's node; an alias inside its
+// anchor, and aliases expanding to too many nodes, fail.
+func TestAliases(t *testing.T) {
+	out, err := runOutput("output: {x: {a: &a {k: [1]}, b: *a, c: [*a, *a]}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := M{"k": []any{float64(1)}}
+	if got, want := value.AsMap(out["x"]), (M{"a": a, "b": a, "c": []any{a, a}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %#v\nwant %#v", got, want)
+	}
+	// Ten aliases of the level before, five levels: 211,110 nodes at l5.
+	bomb := "l0: &l0 [x]\n"
+	for i := 1; i <= 5; i++ {
+		bomb += fmt.Sprintf("l%d: &l%d [%s*l%d]\n", i, i, strings.Repeat(fmt.Sprintf("*l%d, ", i-1), 9), i-1)
+	}
+	for name, tc := range map[string]struct{ src, want string }{
+		"a list in itself":   {"output: {a: &x [*x]}\n", "line 1: the alias *x is inside the anchor &x it refers to"},
+		"a map in itself":    {"output:\n  a: &x\n    b: {c: *x}\n", "line 3: the alias *x is inside the anchor &x it refers to"},
+		"excessive aliasing": {bomb, "line 6: excessive aliasing: the aliases expand to more than 100000 nodes"},
+	} {
+		if _, err := runOutput(tc.src); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
 	}
 }
 

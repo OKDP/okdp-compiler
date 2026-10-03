@@ -65,14 +65,38 @@ func (m *omap) name(k string) string {
 	return k
 }
 
+// maxAliasNodes: the nodes the aliases of one document may expand to, in
+// all. A few hundred bytes of aliases of aliases expand to millions of
+// nodes; Helm's reader refuses such excessive aliasing too.
+const maxAliasNodes = 100_000
+
+// reader: reads the nodes of one document, its aliases expanded. An alias
+// inside the anchor it refers to (a cycle) fails, and so do aliases that
+// expand to more than maxAliasNodes nodes in all.
+type reader struct {
+	open     map[*yaml.Node]bool // the anchored nodes being read
+	aliases  int                 // the aliases being expanded
+	line     int                 // the line of the outermost of them
+	expanded int                 // the nodes they have produced
+}
+
 // fromNode: a YAML node as data, maps as omap to keep their key order.
 // Scalars and keys are read as Helm reads values (YAML 1.1, see scalar and
 // mapKey): the mapping is YAML shaped like the upstream values, a snippet
 // copied from a values.yaml means the same in both.
-func fromNode(n *yaml.Node) (any, error) {
+func (r *reader) fromNode(n *yaml.Node) (any, error) {
+	if r.aliases > 0 {
+		if r.expanded++; r.expanded > maxAliasNodes {
+			return nil, fmt.Errorf("line %d: excessive aliasing: the aliases expand to more than %d nodes", r.line, maxAliasNodes)
+		}
+	}
+	if n.Anchor != "" {
+		r.open[n] = true
+		defer delete(r.open, n)
+	}
 	switch n.Kind {
 	case yaml.DocumentNode:
-		return fromNode(n.Content[0])
+		return r.fromNode(n.Content[0])
 	case yaml.MappingNode:
 		m := &omap{vals: map[string]any{}, raw: map[string]string{}}
 		for i := 0; i < len(n.Content); i += 2 {
@@ -80,7 +104,7 @@ func fromNode(n *yaml.Node) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			v, err := fromNode(n.Content[i+1])
+			v, err := r.fromNode(n.Content[i+1])
 			if err != nil {
 				return nil, err
 			}
@@ -95,7 +119,7 @@ func fromNode(n *yaml.Node) (any, error) {
 	case yaml.SequenceNode:
 		out := []any{}
 		for _, c := range n.Content {
-			v, err := fromNode(c)
+			v, err := r.fromNode(c)
 			if err != nil {
 				return nil, err
 			}
@@ -109,8 +133,17 @@ func fromNode(n *yaml.Node) (any, error) {
 			return nil, err
 		}
 		return value.Normalize(v), nil
+	// An alias: a copy of its anchor's node, unless it is inside it.
 	case yaml.AliasNode:
-		return fromNode(n.Alias)
+		if r.open[n.Alias] {
+			return nil, fmt.Errorf("line %d: the alias *%s is inside the anchor &%s it refers to", n.Line, n.Value, n.Value)
+		}
+		if r.aliases == 0 {
+			r.line = n.Line
+		}
+		r.aliases++
+		defer func() { r.aliases-- }()
+		return r.fromNode(n.Alias)
 	}
 	return nil, fmt.Errorf("unsupported YAML node at line %d", n.Line)
 }
@@ -570,7 +603,8 @@ func parseDoc(b []byte) (*omap, error) {
 	if doc.Kind == 0 {
 		return &omap{vals: map[string]any{}, raw: map[string]string{}}, nil
 	}
-	root, err := fromNode(&doc)
+	r := &reader{open: map[*yaml.Node]bool{}}
+	root, err := r.fromNode(&doc)
 	if err != nil {
 		return nil, err
 	}

@@ -542,11 +542,21 @@ Keys are decoded the same way, then written as text as sigs.k8s.io/yaml
 writes them: `on:` is the key `"true"`, `1.0:` is `"1"`, `0x10:` is `"16"`.
 A null key fails with `line <n>: unsupported map key "~"`, a key that is
 not a scalar with `line <n>: a map key must be a scalar`. A key given twice:
-the last value wins, at the position of the first. Anchors and aliases are
-resolved; merge keys are not: `<<` stays a key.
+the last value wins, at the position of the first. Merge keys are not
+resolved: `<<` stays a key.
 
 Binding names are the exception: the keys directly under `let` and `$let`
 are taken as written, so a binding `y`, `n` or `on` keeps its name.
+
+Anchors and aliases are resolved: an alias is a copy of its anchor's node.
+As Helm's reader, the mapping refuses a cycle, an alias inside the anchor
+it refers to (`a: &x [*x]`):
+`line <n>: the alias *x is inside the anchor &x it refers to`; and
+excessive aliasing, the aliases of the document expanding to more than
+100,000 nodes in all (a few hundred bytes of aliases of aliases expand to
+millions):
+`line <n>: excessive aliasing: the aliases expand to more than 100000 nodes`,
+`<n>` the line of the alias whose expansion passes the limit.
 
 ### Quoting
 
@@ -1011,6 +1021,7 @@ Other errors of the mapping:
 | `yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)); the message names no file |
 | `the mapping must be a YAML map` | the document is not a map |
 | `line <n>: a map key must be a scalar`, `line <n>: unsupported map key "<key>"` | a list, map or null key |
+| `line <n>: the alias *<name> is inside the anchor &<name> it refers to`, `line <n>: excessive aliasing: the aliases expand to more than 100000 nodes` | an alias cycle, too many nodes from aliases ([YAML reading](#yaml-reading)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
 | `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |

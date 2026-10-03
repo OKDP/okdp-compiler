@@ -347,6 +347,10 @@ sees a copy of the parameters while the merges use them as written.
   `let` and `$let` bind in order, each binding seeing the previous ones, and
   map keys are evaluated in order, so the error reported is stable.
   `sigs.k8s.io/yaml` goes through JSON and loses the order.
+- Aliases are expanded by the reader (`reader`), as nodes do not expand
+  them: an alias inside its own anchor fails rather than recursing forever,
+  and the nodes aliases produce are capped per document (`maxAliasNodes`,
+  100,000: about 80 ms of reading), so that an alias bomb fails as in Helm.
 - Scalars and keys decoded as YAML 1.1 (`scalar`, `mapKey`), not as yaml.v3's
   YAML 1.2: a snippet copied from an upstream `values.yaml` means the same in
   the mapping. Binding names are the exception, kept as written, so a
