@@ -709,7 +709,8 @@ realm), `toYaml` (okdp-examples' realms), `quote` for a string in Python or
 shell (airflow, superset). Data pasted into code is safer encoded: superset
 passes user formats as `base64.encode(bytes(toJson(d3Format)))`. Template
 code meant for the upstream chart's `tpl` stays literal
-(`{{ .Values.configMountPath }}`); `$${{` writes a literal `${{`.
+(`{{ .Values.configMountPath }}`); `$${{` writes a literal `${{`, and `$$`
+a key starting with `$` (`$$schema: ...` is the key `$schema`).
 
 ### Keys containing dots
 
@@ -757,7 +758,8 @@ as `values.upstream.<key>`.
   ([YAML reading](specs/02_service_definition.md#yaml-reading),
   [upstream](specs/02_service_definition.md#upstream)).
 - **Untested branches are not compiled.** An expression in a branch no case
-  takes is never evaluated, typos included
+  takes is never evaluated, typos included (the directives around it are
+  checked in every branch)
   ([expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
   give every branch a `ci/` case that takes it, and test both OIDC modes:
   the clients' charts are compiled, and the platform's `registrationUrl` and

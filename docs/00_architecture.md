@@ -247,6 +247,7 @@ neither knows OKDP.
 | `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `Files`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
 | `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
+| | `check.go` | the directives of a document, checked before it is evaluated: each of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names | `Load`, `Doc.Section` |
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
@@ -357,7 +358,17 @@ sees a copy of the parameters while the merges use them as written.
   YAML 1.2: a snippet copied from an upstream `values.yaml` means the same in
   the mapping. Binding names are the exception, kept as written, so a
   binding `n` is `n`, not `"false"`
-  ([YAML reading](specs/02_service_definition.md#yaml-reading)).
+  ([YAML reading](specs/02_service_definition.md#yaml-reading)). Merge keys
+  (`<<`) are resolved as Helm's reader resolves them, in the order written
+  (`TestHelmMergeKeys` compares with `ParseValues`); the one case where it
+  departs from YAML's merge keys, a key written before the `<<` that
+  replaces it, is refused rather than reproduced.
+- One YAML document: a second one fails, rather than being ignored as
+  `yaml.Unmarshal` ignores it.
+- Directives are checked before evaluation (`check.go`), in the whole
+  section: a misspelled `$` key fails rather than being written to the
+  values, in the branches no case takes too. Expressions stay checked when
+  evaluated ([Limitations](#limitations)).
 - Expressions are CEL: no I/O, every variable dynamically typed. An
   environment is built per set of variable names in scope, and cached for
   the compile.
@@ -541,7 +552,9 @@ Most source files have their `_test.go`, in memory (`fstest.MapFS`, as a
 server passes its inputs); the host functions, schemas and
 generated Secrets are tested against Helm, in `helm_test.go`.
 `internal/compile/cel_test.go` covers the language: directives, YAML 1.1,
-error paths. `internal/chart/spec_test.go` covers the source checks
+aliases and merge keys, the values of expressions, error paths and the
+mistakes the checks refuse. `internal/chart/spec_test.go` covers the
+source checks
 (`TestRefCheck`) and the `charts` section, `internal/chart/cache_test.go`
 the chart cache, unpacked or an archive with subcharts (`TestChartCache`),
 `internal/chart/merge_test.go` and `internal/chart/paths_test.go` the
@@ -640,7 +653,8 @@ a registration URL (`dcr-without-registration-url.yaml`).
   expression is compiled only when evaluated
   ([Expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
   a mistake in a branch passes until an instance takes it. Test cases need
-  to cover each branch.
+  to cover each branch. The directives, not the expressions, are checked
+  in every branch.
 - **OAuth clients are registered anonymously only.** In `dcr` mode, OIDC
   enabled, a mapping that declares a client needs
   `global.okdp.oidc.dcr.authMethod: anonymous`

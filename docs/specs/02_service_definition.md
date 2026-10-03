@@ -209,7 +209,9 @@ structure ([Directives](#directives)). Its top-level keys are the
 | [`provides`](#provides) | list | the connections the instance publishes |
 | [`oidcClients`](#oidcclients) | list | the OAuth clients of the service |
 
-Every section is optional. Other top-level keys are ignored, not evaluated.
+Every section is optional. Other top-level keys are ignored, not evaluated,
+but a top-level key starting with `$` fails:
+`<key>: not a directive of the top level: its keys are sections`.
 
 ```yaml
 let:
@@ -279,7 +281,10 @@ empty: `output: [app]` would otherwise render no chart. `<value>`: the
 value as Go's `%#v` prints it (`"x"`, `false`, `[]interface {}{"app"}`).
 
 A mapping that is not a YAML map fails with `the mapping must be a YAML map`;
-invalid YAML with the parser's error (`yaml: line <n>: ...`).
+invalid YAML with the parser's error (`yaml: line <n>: ...`). The mapping
+is one YAML document: a second one, after `---`, fails rather than being
+ignored, `line <n>: a second YAML document: the mapping is one document`.
+An empty or null document (comments, `---` or `~` at most) has no section.
 
 ### let
 
@@ -296,12 +301,14 @@ any other ([Expressions](#expressions), [Directives](#directives)); a value
 left out by `$if` binds null. The binding is named by the key as written
 ([YAML reading](#yaml-reading)); it is referenced by that name, which must
 be a CEL identifier (`my-var` reads as `my - var`). A binding referenced
-before its entry fails: `undeclared reference`.
+before its entry fails: `undeclared reference`. A name given twice fails
+(`let <name>: bound twice`), as does one starting with `$`
+(`let <name>: a binding name cannot start with $`).
 
 A binding with the name of a context variable replaces it for every later
 expression (a `let` named `labels` wins over the context's `labels`), not
-for the host functions ([Context](#context)). A `let` that is not a map is
-ignored.
+for the host functions ([Context](#context)). A `let` that is neither a map
+nor null fails: `let: must be a map of bindings, got <value>`.
 
 ### output
 
@@ -500,11 +507,14 @@ braces: `${{ {"k": "}}"}.k }}` is one expression. A scalar without the
 closing `}}` fails with `unterminated ${{ in "<scalar>"`.
 
 Map keys are never evaluated: `${{ x }}: 1` is the key `${{ x }}`. Computed
-keys come from [`$for`](#for) (`$key`) or [`$merge`](#merge).
+keys come from [`$for`](#for) (`$key`) or [`$merge`](#merge). A key
+starting with `$` is a [directive](#directives); `$$` writes one:
+`$$schema` is the key `$schema`.
 
 An expression is compiled when it is evaluated: one under a false `$if`,
-in a `$for` over no element, in a key a directive ignores or in an unknown
-section is never compiled, and its errors go unnoticed.
+in a `$for` over no element or in an unknown section is never compiled,
+and its errors go unnoticed. The directives around it are checked anyway
+([Directives](#directives)).
 
 The value of an expression is converted to data, as values hold it: maps
 with string keys, lists, numbers, strings, booleans and null, at any depth.
@@ -555,16 +565,29 @@ the same in the mapping.
 | `0777`, `0x1F`, `0b101`, `1_000` | `511`, `31`, `5`, `1000` |
 | `2001-12-14` | the string: timestamps are not decoded |
 | `~`, `null`, empty | null |
+| `.nan`, `.inf`, `-.inf` (any case) | refused, Helm cannot read them back from the final values: `line <n>: not a finite number: .inf (quote it for the text)` |
 
 Keys are decoded the same way, then written as text as sigs.k8s.io/yaml
 writes them: `on:` is the key `"true"`, `1.0:` is `"1"`, `0x10:` is `"16"`.
 A null key fails with `line <n>: unsupported map key "~"`, a key that is
 not a scalar with `line <n>: a map key must be a scalar`. A key given twice:
-the last value wins, at the position of the first. Merge keys are not
-resolved: `<<` stays a key.
+the last value wins, at the position of the first.
 
 Binding names are the exception: the keys directly under `let` and `$let`
-are taken as written, so a binding `y`, `n` or `on` keeps its name.
+are taken as written, so a binding `y`, `n` or `on` keeps its name, and
+`y`, `Y` and `yes` are three bindings.
+
+Merge keys are resolved as Helm's reader resolves them: `<<: *a` merges the
+keys of the map `a` (or of a map written in place), `<<: [*a, *b]` those of
+each map of the list, the first map winning; a merged value is not merged
+deeper, it replaces. The keys apply in the order written: a key written
+after `<<` replaces the merged one. Helm's reader also lets the merge
+replace a key written before it, where YAML's merge keys keep the written
+one: the mapping refuses this case,
+`line <n>: <key> is written before the merge key << that replaces it: write it after <<`.
+Any other merge fails:
+`line <n>: the merge key << takes a map, or a list of maps`. A quoted
+`"<<"` is a key.
 
 Anchors and aliases are resolved: an alias is a copy of its anchor's node.
 As Helm's reader, the mapping refuses a cycle, an alias inside the anchor
@@ -604,10 +627,33 @@ or write a long expression as a `>-` block scalar.
 A map is evaluated in this order: `$if`; then `$for` (with `$key`,
 `$value`, `$let`); else `$value`; else each key in order, then `$merge`. A
 list item that is a map: `$for` (with `$each`, `$let`); else `$spread`;
-else the item is evaluated as a map. `$if`, `$value`, `$for` and `$merge`
-are thus reserved in any map, `$for` and `$spread` in a list item; `$key`,
-`$each` and `$let` elsewhere are ordinary keys. Directives nest: a `$for`
-in an `$each` sees the outer variable.
+else the item is evaluated as a map. Directives nest: a `$for` in an
+`$each` sees the outer variable.
+
+A key starting with `$` is a directive. The directives of a section (of
+`let` and `errors` with the document) are checked before it is evaluated,
+in every branch, under a false `$if` or in a `$for` over no element too.
+Each must be one of its place, the place taking its form from `$for`,
+`$spread` or `$value`:
+
+| Place | Holds |
+|---|---|
+| a map | keys, `$if`, `$value`, `$for`, `$merge` |
+| a list item | keys, `$if`, `$value`, `$merge`, `$for`, `$spread` |
+| a map with `$for` | `$if`, `$for`, `$key` and `$value` (required), `$let` |
+| a map with `$value` | `$if`, `$value` |
+| a list item with `$for` | `$for`, `$each` (required), `$let` |
+| a list item with `$spread` | `$spread` |
+
+| Mistake | Error |
+|---|---|
+| an unknown directive (`$iff`, `$Each`) | `<where><key>: unknown directive (the key <key> is written $<key>)` |
+| a key out of its place | `<where><key>: not in <place>, which holds <keys>` |
+| `$for` without its keys | `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` |
+| `$if`, `$merge`, `$spread` not one expression | `<where>$if: takes one expression, ${{ <condition> }}, got <value>` (`<map>`, `<list>`) |
+
+A key starting with `$` is written with one more `$`, as `$${{` writes a
+literal `${{`: `$$schema: x` is the key `$schema`, `$$$x` the key `$$x`.
 
 ### `$if`
 
@@ -623,11 +669,11 @@ labels:
   tier: {$if: "${{ values.replicas > 1 }}", $value: ha}
 ```
 
-The value is evaluated as a scalar, then tested as a Helm condition: null,
-`false`, `0`, `""`, `[]` and `{}` are false, anything else is true. It must
-be an expression: a literal is text, so `$if: false` (or `no`, `0`) is the
-non-empty text `"false"` and keeps the map; interpolated text
-(`x${{ c }}`) is always true. Only an empty or null literal is false.
+The value is one expression, `${{ <condition> }}`, tested as a Helm
+condition: null, `false`, `0`, `""`, `[]` and `{}` are false, anything else
+is true. Anything else fails: a literal (`$if: false`, `no`, `0`, null) or
+text around an expression (`x${{ c }}`, always true), with
+`$if: takes one expression, ${{ <condition> }}, got <value>`.
 
 On a map, `$if` guards everything else (`$for`, `$value`, `$merge`, the
 keys). A map left out is:
@@ -641,16 +687,16 @@ keys). A map left out is:
 | a `let` or `$let` value | the binding is null |
 | a section (`output`, ...) | the section is empty |
 
-On a list item carrying `$for` or `$spread`, `$if` is ignored: put the
+On a list item carrying `$for` or `$spread`, `$if` fails: put the
 condition in the expression (`$for: "s in (oidcOn ? [platform.oidcClientSecret] : [])"`,
 `$spread: ${{ cond ? list : [] }}`).
 
 ### `$value`
 
 The map stands for the value of `$value`, which need not be a map:
-`{$if: cond, $value: x}` is a conditional scalar or list. Every other key of
-the map, `$merge` included, is ignored. In a list, a `$value` list is one
-item, not spliced.
+`{$if: cond, $value: x}` is a conditional scalar or list. The map holds
+`$if` and `$value` only: any other key, `$merge` included, fails. In a
+list, a `$value` list is one item, not spliced.
 
 ### `$for`
 
@@ -678,8 +724,9 @@ dags:
 ```
 
 `$key` is converted to text ([`str`](#str-and-first)); a later element with
-the same key wins. The result has these keys only: other keys of the map,
-`$merge` included, are ignored. No element gives `{}`.
+the same key wins. No element gives `{}`. The map holds `$if`, `$for`,
+`$key`, `$value` and `$let` only: any other key, `$merge` included, fails;
+without `$key` or `$value`: `$for: in a map, needs $key and $value`.
 
 In a list item, `$each` gives the items of each element:
 
@@ -696,7 +743,8 @@ env:
 A list value of `$each` (a YAML list, or an expression returning a list) is
 spliced: its items are added; any other value is one item; a value left out
 by `$if` adds nothing. A list as one item is nested: `$each: [[a, b]]`.
-Other keys of the item, `$if` included, are ignored.
+The item holds `$for`, `$each` and `$let` only: any other key, `$if`
+included, fails; without `$each`: `$for: in a list item, needs $each`.
 
 ### `$let`
 
@@ -715,8 +763,10 @@ pyspark:
 With `$for` only: a map of bindings, evaluated for each element, in order,
 after the variable; each sees the enclosing scope, the variable and the
 bindings before it. Values are nodes (directives included; left out by
-`$if`, null). Names are taken as written. A `$let` that is not a map is
-ignored; without `$for`, `$let` is an ordinary key. An error is reported as
+`$if`, null). Names are taken as written, as in [let](#let): each once
+(`$let <name>: bound twice`), none starting with `$`. A `$let` without
+`$for` fails, and so does one that is neither a map nor null:
+`$let: must be a map of bindings, got <value>`. An error is reported as
 `$let <name>: <error>`.
 
 ### `$merge`
@@ -733,8 +783,8 @@ spark-defaults:
 In a map, after its other keys are evaluated, the map the expression
 returns is merged over them, wherever `$merge` is written: maps merge key
 by key at any depth; lists, scalars and nulls replace (Helm's merge of `-f`
-files). A value that is not a map merges nothing, a literal YAML map
-included (`$merge` takes an expression).
+files). `$merge` takes one expression: a literal YAML map fails. A value
+that is not a map (null included) merges nothing.
 
 ### `$spread`
 
@@ -745,9 +795,10 @@ objects:
           'stringData': {'client_id': 'root'}}) }}
 ```
 
-A list item replaced by the items of the list the expression returns. A
-value that is not a list (null included) adds nothing. Other keys of the
-item, `$if` included, are ignored.
+A list item replaced by the items of the list the expression returns.
+`$spread` takes one expression: a literal YAML list fails. A value that is
+not a list (null included) adds nothing. The item holds `$spread` only: any
+other key, `$if` included, fails.
 
 ## Context
 
@@ -997,9 +1048,10 @@ okdp-examples: s3SecretRef is required
 okdp-examples: realm "data" has no catalog_admin
 ```
 
-An `errors` that is not a list is ignored. An item whose evaluation fails
-stops the compile with that error, prefixed with the position of the item
-as written (`errors[1]: `, `errors[1]: message: `).
+An `errors` that is neither a list nor null fails:
+`errors: must be a list of rules, got <value>`. An item whose evaluation
+fails stops the compile with that error, prefixed with the position of the
+item as written (`errors[1]: `, `errors[1]: message: `).
 
 ### Compile errors
 
@@ -1039,8 +1091,14 @@ Other errors of the mapping:
 |---|---|
 | `yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)); the message names no file |
 | `the mapping must be a YAML map` | the document is not a map |
+| `line <n>: a second YAML document: the mapping is one document` | a `---` followed by a second document ([sections](#evaluation-order)) |
 | `line <n>: a map key must be a scalar`, `line <n>: unsupported map key "<key>"` | a list, map or null key |
 | `line <n>: the alias *<name> is inside the anchor &<name> it refers to`, `line <n>: excessive aliasing: the aliases expand to more than 100000 nodes` | an alias cycle, too many nodes from aliases ([YAML reading](#yaml-reading)) |
+| `line <n>: <key> is written before the merge key << that replaces it: write it after <<`, `line <n>: the merge key << takes a map, or a list of maps` | a merge key ([YAML reading](#yaml-reading)) |
+| `line <n>: not a finite number: <scalar> (quote it for the text)` | `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
+| `<key>: not a directive of the top level: its keys are sections`, `let: must be a map of bindings, got <value>`, `errors: must be a list of rules, got <value>` | the top level ([sections](#sections)) |
+| `let <name>: bound twice`, `let <name>: a binding name cannot start with $` (`$let` likewise) | a [`let`](#let) or [`$let`](#let-1) name |
+| `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>` | a directive ([directives](#directives)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
 | `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |

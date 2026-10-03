@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/cel-go/cel"
@@ -30,6 +32,38 @@ func helmJSON(t *testing.T, path string) any {
 		t.Fatalf("%s: %v", path, err)
 	}
 	return v
+}
+
+// TestHelmMergeKeys: a mapping reads merge keys (<<) as Helm reads a values
+// file (chart.ParseValues, sigs.k8s.io/yaml).
+func TestHelmMergeKeys(t *testing.T) {
+	src := `a: &a {x: 1, y: {p: 1}}
+c: &c {y: 3, z: 3}
+alias: {<<: *a}
+after: {<<: *a, x: 2}
+list: {<<: [*a, *c], w: 1}
+inline: {<<: {x: 4}}
+nested: {<<: {<<: *c, q: 1}}
+twice: {<<: *a, <<: *c}
+empty: {<<: [], k: 1}
+quoted: {"<<": *c}
+tagged: {!!merge <<: *c}
+`
+	helm, err := chart.ParseValues([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := Load([]byte("output:\n  x:\n    "+strings.ReplaceAll(src, "\n", "\n    ")), M{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.Section("output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.AsMap(out)["x"]; !reflect.DeepEqual(got, helm) {
+		t.Errorf("got  %#v\nhelm %#v", got, helm)
+	}
 }
 
 // TestHelmFunctions: sha256, toJson, toPrettyJson, toYaml and quote called

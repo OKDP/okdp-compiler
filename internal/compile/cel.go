@@ -7,6 +7,7 @@
 //	key: ${{ expr }}              the whole scalar: the value keeps the expression's type
 //	key: text ${{ expr }} text    interpolation: the value is a string
 //	$${{                          a literal "${{"
+//	$$key: ...                    a key starting with $, $key
 //	key: {$if: ${{ cond }}, ...}  the key is left out when cond is false
 //	key: {$if: ..., $value: x}    same, for a value that is not a map
 //	key: {$for: c in <expr>, $key: ..., $value: ...}   a map built from a list
@@ -26,7 +27,10 @@
 package compile
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"sort"
@@ -48,22 +52,33 @@ import (
 // M: a values map (value.M).
 type M = value.M
 
-// omap: an ordered YAML map
-// A let binding can reference previous ones. Must stay sequential.
+// omap: an ordered YAML map: its keys as Helm reads them (YAML 1.1), each
+// once, in order; and its entries as written, every one, for the maps whose
+// keys are binding names (let, $let): a binding y or Y keeps its name,
+// YAML 1.1 does not make both the key "true". Bindings are sequential, each
+// seeing the previous ones.
 type omap struct {
-	keys []string
-	vals map[string]any
-	raw  map[string]string // key -> the key as written
+	keys    []string
+	vals    map[string]any
+	written []entry
 }
 
-// name: key k as written, for the keys that are binding names (let and
-// $let): a binding n or y keeps its name, YAML 1.1 does not make it a
-// boolean.
-func (m *omap) name(k string) string {
-	if r, ok := m.raw[k]; ok {
-		return r
+// entry: a key of a map as written, and its value.
+type entry struct {
+	name string
+	val  any
+}
+
+// newOmap: an empty omap.
+func newOmap() *omap { return &omap{vals: map[string]any{}} }
+
+// put: k bound to v. A key given twice: the last value wins, at the
+// position of the first, as in Helm values.
+func (m *omap) put(k string, v any) {
+	if _, dup := m.vals[k]; !dup {
+		m.keys = append(m.keys, k)
 	}
-	return k
+	m.vals[k] = v
 }
 
 // maxAliasNodes: the nodes the aliases of one document may expand to, in
@@ -99,24 +114,7 @@ func (r *reader) fromNode(n *yaml.Node) (any, error) {
 	case yaml.DocumentNode:
 		return r.fromNode(n.Content[0])
 	case yaml.MappingNode:
-		m := &omap{vals: map[string]any{}, raw: map[string]string{}}
-		for i := 0; i < len(n.Content); i += 2 {
-			k, err := mapKey(n.Content[i])
-			if err != nil {
-				return nil, err
-			}
-			v, err := r.fromNode(n.Content[i+1])
-			if err != nil {
-				return nil, err
-			}
-			// A key given twice: the last value wins, as in Helm values.
-			if _, dup := m.vals[k]; !dup {
-				m.keys = append(m.keys, k)
-				m.raw[k] = n.Content[i].Value
-			}
-			m.vals[k] = v
-		}
-		return m, nil
+		return r.mapping(n)
 	case yaml.SequenceNode:
 		out := []any{}
 		for _, c := range n.Content {
@@ -128,10 +126,15 @@ func (r *reader) fromNode(n *yaml.Node) (any, error) {
 		}
 		return out, nil
 	// A scalar: decoded as YAML 1.1 types (int, bool...), then normalized.
+	// .nan and .inf are refused: Helm cannot read them back from the final
+	// values.
 	case yaml.ScalarNode:
 		v, err := scalar(n)
 		if err != nil {
 			return nil, err
+		}
+		if f, ok := v.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
+			return nil, fmt.Errorf("line %d: not a finite number: %s (quote it for the text)", n.Line, n.Value)
 		}
 		return value.Normalize(v), nil
 	// An alias: a copy of its anchor's node, unless it is inside it.
@@ -147,6 +150,80 @@ func (r *reader) fromNode(n *yaml.Node) (any, error) {
 		return r.fromNode(n.Alias)
 	}
 	return nil, fmt.Errorf("unsupported YAML node at line %d", n.Line)
+}
+
+// mapping: a map node as an omap. A merge key (<<) merges a map in, as
+// Helm's reader does: in the order written, so a key written after <<
+// replaces the merged one. A key written before a << that replaces it
+// fails: Helm's reader would take the merged value, where YAML's merge keys
+// keep the written one.
+func (r *reader) mapping(n *yaml.Node) (*omap, error) {
+	m := newOmap()
+	keys := map[string]*yaml.Node{} // the keys written so far
+	for i := 0; i < len(n.Content); i += 2 {
+		kn, vn := n.Content[i], n.Content[i+1]
+		if kn.Kind == yaml.ScalarNode && kn.Value == "<<" && kn.ShortTag() == "!!merge" {
+			merged, err := r.merged(vn)
+			if err != nil {
+				return nil, err
+			}
+			for _, k := range merged.keys {
+				if w, ok := keys[k]; ok {
+					return nil, fmt.Errorf("line %d: %s is written before the merge key << that replaces it: write it after <<", w.Line, w.Value)
+				}
+				m.put(k, merged.vals[k])
+			}
+			m.written = append(m.written, merged.written...)
+			continue
+		}
+		k, err := mapKey(kn)
+		if err != nil {
+			return nil, err
+		}
+		v, err := r.fromNode(vn)
+		if err != nil {
+			return nil, err
+		}
+		m.put(k, v)
+		keys[k] = kn
+		name := kn.Value
+		if kn.Kind == yaml.AliasNode {
+			name = kn.Alias.Value
+		}
+		m.written = append(m.written, entry{name, v})
+	}
+	return m, nil
+}
+
+// merged: the map a merge key merges: a map, an alias of a map, or a list
+// of them, the first map of the list winning.
+func (r *reader) merged(n *yaml.Node) (*omap, error) {
+	items := []*yaml.Node{n}
+	if n.Kind == yaml.SequenceNode {
+		items = n.Content
+	}
+	out := newOmap()
+	for _, it := range items {
+		target := it
+		if it.Kind == yaml.AliasNode {
+			target = it.Alias
+		}
+		if target.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("line %d: the merge key << takes a map, or a list of maps", it.Line)
+		}
+		v, err := r.fromNode(it)
+		if err != nil {
+			return nil, err
+		}
+		m := v.(*omap)
+		for _, k := range m.keys {
+			if _, ok := out.vals[k]; !ok {
+				out.put(k, m.vals[k])
+			}
+		}
+		out.written = append(out.written, m.written...)
+	}
+	return out, nil
 }
 
 // yaml11Bools: the plain scalars YAML 1.1 (Helm's sigs.k8s.io/yaml) reads
@@ -498,12 +575,12 @@ func with(scope M, k string, v any) M {
 func (e *celEngine) iteration(m *omap, scope M, name string, item any) (M, error) {
 	s := with(scope, name, item)
 	if lets, ok := m.vals["$let"].(*omap); ok {
-		for _, k := range lets.keys {
-			v, _, err := e.node(lets.vals[k], s)
+		for _, b := range lets.written {
+			v, _, err := e.node(b.val, s)
 			if err != nil {
-				return nil, atKey("$let "+lets.name(k), err)
+				return nil, atKey("$let "+b.name, err)
 			}
-			s = with(s, lets.name(k), v)
+			s = with(s, b.name, v)
 		}
 	}
 	return s, nil
@@ -663,7 +740,8 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 		if v, ok := t.vals["$value"]; ok {
 			return e.node(v, scope)
 		}
-		// A plain map: each key in order, then $merge on top.
+		// A plain map: each key in order, then $merge on top. A key
+		// starting with $$ is written with one $ less.
 		out := M{}
 		for _, k := range t.keys {
 			if k == "$if" || k == "$merge" {
@@ -673,9 +751,13 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 			if err != nil {
 				return nil, false, atKey(k, err)
 			}
-			if keep {
-				out[k] = v
+			if !keep {
+				continue
 			}
+			if strings.HasPrefix(k, "$$") {
+				k = k[1:]
+			}
+			out[k] = v
 		}
 		if spec, ok := t.vals["$merge"]; ok {
 			v, err := e.evalString(value.Str(spec), scope)
@@ -690,19 +772,29 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 }
 
 // parseDoc: a YAML + CEL document (a mapping, a template), its maps
-// ordered. An empty document (no node, comments at most) has no section.
+// ordered. It is one YAML document: a second one fails rather than being
+// ignored. An empty or null document (comments or --- at most) has no
+// section.
 func parseDoc(b []byte) (*omap, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(b, &doc); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	var doc, next yaml.Node
+	if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
+		return newOmap(), nil
+	} else if err != nil {
 		return nil, err
 	}
-	if doc.Kind == 0 {
-		return &omap{vals: map[string]any{}, raw: map[string]string{}}, nil
+	if err := dec.Decode(&next); err == nil {
+		return nil, fmt.Errorf("line %d: a second YAML document: the mapping is one document", next.Line)
+	} else if !errors.Is(err, io.EOF) {
+		return nil, err
 	}
 	r := &reader{open: map[*yaml.Node]bool{}}
 	root, err := r.fromNode(&doc)
 	if err != nil {
 		return nil, err
+	}
+	if root == nil {
+		return newOmap(), nil
 	}
 	top, ok := root.(*omap)
 	if !ok {
@@ -718,12 +810,12 @@ func (e *celEngine) bind(top *omap, ctx M) (M, error) {
 	scope := M{}
 	maps.Copy(scope, ctx)
 	if lets, ok := top.vals["let"].(*omap); ok {
-		for _, k := range lets.keys {
-			v, _, err := e.node(lets.vals[k], scope)
+		for _, b := range lets.written {
+			v, _, err := e.node(b.val, scope)
 			if err != nil {
-				return nil, atKey("let "+lets.name(k), err)
+				return nil, atKey("let "+b.name, err)
 			}
-			scope[lets.name(k)] = v
+			scope[b.name] = v
 		}
 	}
 	var msgs []string
@@ -785,11 +877,15 @@ type Doc struct {
 
 // Load: the document b on the context ctx, with the host functions funcs
 // besides the language's own (str, first, and those of functions.go): its
-// maps read in order as YAML 1.1, its let bindings evaluated in order, then
-// its errors section, every message collected before failing.
+// maps read in order as YAML 1.1, its top level, let and errors checked
+// (checkTop), its let bindings evaluated in order, then its errors section,
+// every message collected before failing.
 func Load(b []byte, ctx M, funcs ...cel.EnvOption) (*Doc, error) {
 	top, err := parseDoc(b)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkTop(top); err != nil {
 		return nil, err
 	}
 	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs}
@@ -800,10 +896,13 @@ func Load(b []byte, ctx M, funcs ...cel.EnvOption) (*Doc, error) {
 	return &Doc{top: top, e: e, scope: scope}, nil
 }
 
-// Section: the top-level key k of the document evaluated, nil when the
-// document has none; an error is reported at its path under k (output: app:
-// env[2]: ...).
+// Section: the top-level key k of the document, its directives checked,
+// evaluated; nil when the document has none. An error is reported at its
+// path under k (output: app: env[2]: ...).
 func (d *Doc) Section(k string) (any, error) {
+	if err := check(d.top.vals[k], false); err != nil {
+		return nil, atKey(k, err)
+	}
 	v, _, err := d.e.node(d.top.vals[k], d.scope)
 	if err != nil {
 		return nil, atKey(k, err)
