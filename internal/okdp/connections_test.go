@@ -29,18 +29,21 @@ var dbContract = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 	},
 	"required": ["host", "tls", "password"]}`)}}
 
-// resolveSchema: parameters with references in a nested object, and in a
-// list of references.
+// resolveSchema: parameters with references in a nested object, in a list
+// of references, and one of any type.
 const resolveSchema = `{"properties": {
 	"main": {"properties": {"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}},
 	"replicas": {"type": "array", "items": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}},
+	"untyped": {"x-okdp-connection-ref": {"contract": "database"}},
 	"other": {"type": "string"}}}`
 
-// resolveCtx: the context of the in-memory package with resolveSchema.
-func resolveCtx(values M) (M, []Dependency, error) {
+// resolveCtx: the context of the in-memory package with resolveSchema, the
+// instance's values over these platform layers.
+func resolveCtx(values M, platform ...map[string]any) (M, []Dependency, error) {
 	ch := maps.Clone(pkg)
 	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
+	in.Platform = append(in.Platform, platform...)
 	in.Contracts = dbContract
 	ctx, _, _, deps, err := buildContext(ch, in, &def.Service)
 	if err != nil {
@@ -54,6 +57,7 @@ func TestResolve(t *testing.T) {
 	values, deps, err := resolveCtx(M{
 		"main":     M{"db": "demo-pg"},
 		"replicas": []any{"ext", ""},
+		"untyped":  nil,
 		"other":    "demo-pg",
 		"connections": M{"ext": M{
 			"contract": "database", "description": "a replica", "engine": "mysql",
@@ -83,6 +87,9 @@ func TestResolve(t *testing.T) {
 	if values["replicas"].([]any)[1] != "" {
 		t.Error("an empty reference is left as it is")
 	}
+	if v, ok := values["untyped"]; !ok || v != nil {
+		t.Error("a null reference is left as it is")
+	}
 	if values["other"] != "demo-pg" {
 		t.Error("a field without x-okdp-connection-ref is left as it is")
 	}
@@ -106,6 +113,9 @@ func TestResolveErrors(t *testing.T) {
 		"wrong contract": {ext(M{"contract": "s3"}), `replicas[0]: connection "ext" has contract "s3", "database" is expected`},
 		"unknown field":  {ext(M{"port": 1}), `field "port" is not part of the database contract`},
 		"secret field":   {ext(M{"password": "p"}), `"password" is a secret field`},
+		"not a string":   {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
+		"not a release":  {M{"replicas": []any{strings.Repeat("a", 54)}}, `replicas[0]: "` + strings.Repeat("a", 54) + `" is not a connection, nor a release name`},
+		"a template":     {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `values layer 1: replicas[0]: the value contains "{{"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := resolveCtx(tc.values)
@@ -116,14 +126,16 @@ func TestResolveErrors(t *testing.T) {
 	}
 }
 
-// TestResolveReport: every reference that does not resolve is reported at
-// once, one line each, sorted by parameter path, the fields of a connection
-// checked in key order: the same report from one compile to the next (the
-// walk used to follow map order and stop at the first error).
+// TestResolveReport: every reference that does not resolve, or is not a
+// string, is reported at once, one line each, sorted by parameter path, the
+// fields of a connection checked in key order: the same report from one
+// compile to the next (the walk used to follow map order and stop at the
+// first error).
 func TestResolveReport(t *testing.T) {
 	values := M{
 		"main":     M{"db": "bad"},
-		"replicas": []any{"demo-pg", "s3", "", "bad"},
+		"replicas": []any{"demo-pg", "s3", "", "bad", "Demo_PG"},
+		"untyped":  M{"host": "h"},
 		"connections": M{
 			"bad": M{"contract": "database", "host": "h", "tls": true, "zone": "a", "port": 1},
 			"s3":  M{"contract": "s3"},
@@ -131,7 +143,9 @@ func TestResolveReport(t *testing.T) {
 	}
 	want := `main.db: connection "bad": field "port" is not part of the database contract
 replicas[1]: connection "s3" has contract "s3", "database" is expected
-replicas[3]: connection "bad": field "port" is not part of the database contract`
+replicas[3]: connection "bad": field "port" is not part of the database contract
+replicas[4]: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most
+untyped: a connection reference must be a string, got map[string]interface {}{"host":"h"}`
 	for range 20 {
 		if _, _, err := resolveCtx(values); err == nil || err.Error() != want {
 			t.Fatalf("got %v\nwant %s", err, want)
@@ -160,6 +174,17 @@ replicas[1] (connection "ext2"): field "tls" violates the database contract: got
 		if _, _, err := resolveCtx(values); err == nil || err.Error() != want {
 			t.Fatalf("got %v\nwant %s", err, want)
 		}
+	}
+}
+
+// TestResolveTemplate: "{{" in a resolved connection fails, whatever layer
+// it comes from: here a connection of the platform's layers, which the
+// check of the instance's layers does not cover.
+func TestResolveTemplate(t *testing.T) {
+	platform := map[string]any{"connections": M{"ext": M{"contract": "database", "host": "{{ .Values.host }}", "tls": true}}}
+	want := `replicas[0] (connection "ext"): field "host": the value contains "{{"`
+	if _, _, err := resolveCtx(M{"replicas": []any{"ext"}}, platform); err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
 	}
 }
 

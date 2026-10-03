@@ -107,7 +107,10 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `buildContext`, `internal/okdp/context.go`). `global` is the platform's
    (`valuesLayers`, `internal/okdp/layers.go`): an instance layer that sets
    it fails, but for the keys `values.schema.json` declares under it,
-   `okdp` excepted. The package's `values.yaml` is read as Helm reads it.
+   `okdp` excepted. Then an instance layer, normalized, with `{{` in a key
+   or a string, at any depth, fails (`chart.NoTemplate`,
+   `internal/chart/merge.go`); the platform's layers and `values.yaml` are
+   not checked. The package's `values.yaml` is read as Helm reads it.
    Each layer, those of `Inputs.Platform` then those of `Inputs.Values`, is
    normalized (string keys, `float64` numbers) and merged in order by
    `value.Merge`, Helm's merge of `-f` files; the result is coalesced over the
@@ -137,11 +140,14 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 4. **Connections** (`resolver`, `internal/okdp/connections.go`).
    `values.schema.json` is read again as JSON (so it must exist) and walked
    (`walk`) together with a deep copy of the parameters, through
-   `properties` (keys sorted) and `items`. Each reference is resolved
-   (`resolve`) to an external connection or an instance of the namespace,
-   and completed against its contract (`readContract`, `complete`); an
-   external connection is then validated against the contract's schema
-   (`checkContract`)
+   `properties` (keys sorted) and `items`. A reference must be a string,
+   `null` and `""` being not set. Each is resolved (`resolve`) to an
+   external connection or an instance of the namespace, whose name must be
+   a release name (`isRelease`, `internal/okdp/names.go`), and completed
+   against its contract (`readContract`, `complete`); an external
+   connection is then validated against the contract's schema
+   (`checkContract`); last, the connection must hold no `{{`
+   (`chart.NoTemplate`)
    ([Connections](specs/01_inputs_outputs.md#connections)). The
    references that do not resolve are reported together, one line each,
    sorted by parameter path (`resolveAll`). Internal references are
@@ -273,12 +279,13 @@ neither knows OKDP.
 | | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
 | | `paths.go` | the grammar of the `protect` and `append` paths | `spec.go`, `merge.go` |
 | | `parameters.go` | stage 1: `Parameters` | `values.go`, `schema.go` |
-| | `merge.go` | the instance's upstream values (`ReadUpstream`, `Upstreams.Show`), stage 9 (`FinalValues`), `protect` and `append` | `cache.go`, `values.go`, `schema.go`, `paths.go` |
+| | `merge.go` | the instance's upstream values (`ReadUpstream`, `Upstreams.Show`), stage 9 (`FinalValues`), `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `internal/okdp` (`layers.go`, `connections.go`) |
 | `okdp` | `service.go` | `Definition`, `Service` (`service.yaml`) and its check (`Service.Check`); `require`: `Requirements`, `Requirement`, their decoding and check, `required` (the error of a missing platform value) | `chart.Specs.Check`, `compile.CheckCondition`; read by `fsio.LoadDefinition` |
 | | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages | calls `buildContext`, `requireWhen`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
-| | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's (`valuesLayers`) | `readJSON` (`connections.go`); called by `context.go` |
+| | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's, no `{{` in the instance's (`valuesLayers`) | `readJSON` (`connections.go`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context; then the requirements under a condition (`requireWhen`) | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream`; `compile.Condition` and `functions` (`mapping.go`) for the conditions |
 | | `connections.go` | connection references, `complete`, `Dependency`, `readJSON`; the contracts (`readContract`) and the check of values against them (`checkContract`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
+| | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `secrets.go` | `okdpGeneratedSecret`, credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go` |
@@ -450,7 +457,8 @@ The compiler stops at values:
 - the result is data: checked against the upstream schema at compile time,
   diffed in a pull request, compared with a previous render;
 - no Helm template code runs in the compiler, and none can come in through
-  instance values (`{{` is refused).
+  instance values: `{{` is refused in the instance's layers, its upstream
+  values files and every resolved connection.
 
 The cost: what an upstream chart has no value for cannot be changed, and
 neither can the chart itself ([Limitations](#limitations)). OKDP's own
@@ -516,11 +524,12 @@ filled from the pinned references. The compiler enforces:
 |---|---|---|
 | Platform values | `valuesLayers`, stage 1 | `global` comes from the package's `values.yaml` and the platform's layers (`Inputs.Platform`): an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the charts OKDP's objects and clients are rendered with (`charts`), and every chart receives `global` (`imageRegistry`) |
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
+| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below. An internal reference is a release name (`isRelease`): it becomes hosts, Secret names and `Dependency.Instance` |
 | Credentials never inlined | `resolve` | an external connection carries contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and descriptors are not secret |
 | Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`checkContract`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
 | Provider and consumers agree | `descriptor` | an output under the release name equals what internal references resolve to |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
-| No templates in upstream values | `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets |
+| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the instance's layers (parameters, `connections`, inline upstream values), of its upstream values files, and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
 | Upstream schemas | stage 10 | an upstream chart's rules fail the compile, not the deployment |
 | Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart the compile checks the values against is the chart the deployer renders |
 | Declared charts only | `Compile`, `clientCharts`, `objectsChart` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart or the `okdp` chart with one of its own: their keys are the compiler's, and their charts the platform's |

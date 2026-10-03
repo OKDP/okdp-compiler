@@ -255,9 +255,12 @@ list, with the one item schema). `$ref`, `allOf`, `anyOf`, `oneOf`,
 | `properties.backends.items.properties.database` | `backends: [{database: demo-db}]` | `backends[0].database` |
 
 The path names the parameter in errors and [dependencies](#dependencies). A
-reference that is `""` (not set), or not a string, is left as it is. The
-packages of platform-charts declare them in lists of objects, e.g. the
-catalogs of trino:
+reference that is `""` or `null` is not set, and left as it is. Any other
+value that is not a string (a map, a number, a list: the schema check lets
+it through when the property does not say `"type": "string"`) fails: it
+would reach the mapping unresolved, past the contract
+([Connection errors](#connection-errors)). The packages of platform-charts
+declare references in lists of objects, e.g. the catalogs of trino:
 
 ```json
 "hiveCatalogs": {"type": "array", "items": {"type": "object", "properties": {
@@ -268,7 +271,10 @@ catalogs of trino:
 ### Resolution
 
 A reference `<name>` is external when `connections.<name>` is a map; any
-other name is internal: an instance (a release) of the namespace.
+other name is internal: an instance (a release) of the namespace, so a
+release name: a DNS-1123 label of 53 characters at most (lowercase letters,
+digits and `-`, a letter or digit at each end), as Helm accepts it. It
+becomes hosts, Secret names and a [dependency](#dependencies).
 
 External: the entry of `connections`, as the layers give it.
 
@@ -299,7 +305,12 @@ publishes. A contract without `x-okdp-internal` accepts external connections
 only. The instance is not looked up: each internal reference is recorded as
 a [dependency](#dependencies).
 
-Both are then [completed](#completion) against the contract.
+Both are then [completed](#completion) against the contract. The result,
+`secretRef` and `okdp` included, may not contain `{{` in a key or a string,
+whatever it comes from: the instance's layers refuse it already
+([Layers](#layers)), and a connection of the platform's layers, a
+contract's default or `${namespace}` and `${suffix}` are checked here, as
+the connection reaches the charts' values through the mapping.
 
 ### What the mapping receives
 
@@ -337,35 +348,40 @@ Secret `secretRef.name`. How the mapping uses `values`:
 
 `<path>`: the parameter path; `<name>`: the reference.
 
-Every reference that does not resolve is reported, at once, one line each,
-sorted by parameter path (string order, as the
+Every reference that does not resolve, or is not a string, is reported, at
+once, one line each, sorted by parameter path (string order, as the
 [dependencies](#dependencies)), as the violations of the parameter schema
-are. A reference gives one error, the first in this order: its contract
-(unknown, unreadable; another one, for an external connection; no internal
-naming convention, for an internal one), the fields of an external
-connection in alphabetical order, the `required` fields in the contract's
-order, then the contract's types for an external connection: every
-violation, one line each, sorted by field then message
-([Checks](#checks)). The same parameters give the same report from one
-compile to the next:
+are. A reference gives one error, the first in this order: its type, its
+contract (unknown, unreadable; another one, for an external connection; no
+internal naming convention, then a name that is not a release name, for an
+internal one), the fields of an external connection in alphabetical order,
+the `required` fields in the contract's order, then the contract's types
+for an external connection: every violation, one line each, sorted by field
+then message ([Checks](#checks)); last, `{{` in the connection, the first
+one found by path (keys sorted, items in order). The same parameters give
+the same report from one compile to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
 replicas[1]: connection "store" has contract "s3", "database" is expected
 replicas[2] (connection "pg"): field "engine" violates the database contract: value must be one of 'postgresql', 'mysql'
 replicas[2] (connection "pg"): field "port" violates the database contract: got string, want integer
+replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most
 ```
 
 | Case | Error | `testdata/` |
 |---|---|---|
+| neither a string nor `null` | `<path>: a connection reference must be a string, got <value>` | |
 | no `<contract>.schema.json` | `<path>: unknown contract "<contract>"` | |
 | `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` | |
 | external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `wrong-contract.yaml` |
 | external, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `unknown-field.yaml` |
 | external, secret field | `<path>: connection "<name>": "<key>" is a secret field` | `secret-in-connection.yaml` |
 | internal, no `x-okdp-internal` | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | |
+| internal, not a release name | `<path>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract` | |
 | external, a value the contract's schema refuses | `<path> (connection "<name>"): field "<field>" violates the <contract> contract: <violation>`; `... the fields violate the <contract> contract: <violation>` for a keyword on the whole connection | `connection-types.yaml` |
+| `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
 
 `testdata/no-secret-ref.yaml` (`database connection "shared-db" has no
 secretRef`) is not a check of the compiler: an external connection without
@@ -708,6 +724,29 @@ An instance layer sets no `global` but the keys the parameter schema
 declares under it ([Platform values](#platform-values)). Merge, nulls and
 schema: [Parameters](#parameters).
 
+No key or string of an instance layer, at any depth, may contain `{{`,
+whatever key it is under: parameters, `connections`, `upstream`. A
+parameter reaches the charts' values through the mapping, and some
+upstream charts pass their values to `tpl`, where template code could call
+`lookup` and read the cluster's Secrets. Each layer is checked in order,
+normalized as it is merged, before the [schema check](#schema-check); the
+first `{{` in path order (keys sorted, items in order) fails, the layer
+numbered from 1 and the path written as in [protect](#protect) errors, a
+list item `[<i>]`:
+
+```
+values layer 1: database: the value contains "{{"
+values layer 2: upstream.app.podAnnotations["example.org/{{ x }}"]: the key contains "{{"
+```
+
+A value of a type values do not hold (a Go value an in-memory layer gives
+that is not normalized) fails as well, rather than passes unchecked:
+`values layer 1: <path>: cannot be checked for "{{": <type> is not a values
+type`. The platform's layers and the package's `values.yaml` are not
+checked: they are reviewed with the platform and the package
+([security boundaries](../00_architecture.md#security-boundaries)). A
+connection resolved from them is ([Resolution](#resolution)).
+
 ### Upstream values
 
 Values given to an upstream chart as they are, over the values the mapping
@@ -740,8 +779,15 @@ upstream:
 Each source, file or inline, is checked, then merged over the values so far
 ([Merge precedence](#merge-precedence)):
 
-- templates: no key or value may contain `{{`. The values reach the chart as
-  data, Helm does not render them;
+- templates: no key or string may contain `{{`, the first one found by
+  path reported, nor a value of a type values do not hold. The values reach
+  the chart as data, Helm does not render them. The inline values an
+  instance layer gives are refused before, with the layer
+  ([Layers](#layers)); this check covers the files, and the inline values
+  of the package's `values.yaml` and of the platform's layers. A file is
+  checked when it is read, before the mapping runs: one with `{{` is left
+  out of `values.upstream.<key>`, which a mapping could copy into another
+  chart, and fails the compile of its chart;
 - [protect](#protect): `global` and the protected paths are refused;
 - [append](#append): the listed lists are appended to.
 
@@ -786,13 +832,12 @@ ones.
 
 ### Upstream errors
 
-`<src>`: `upstream.<key>` for inline values, the file name for a file.
 `<at>`: `upstream.<key>.<path>` for inline values, `<file>: <path>` for a
 file.
 
 | Case | Error |
 |---|---|
-| a template | `<key>: <src>: a key or value contains "{{"` |
+| a template (in inline values an instance layer gives, the layer fails before: [Layers](#layers)) | `<key>: <at>: the value contains "{{"`, `<key>: <at>: the key contains "{{"`; `<key>: <at>: cannot be checked for "{{": <type> is not a values type` |
 | a protected path | `<key>: <at>: <protected> is set by the platform and cannot be changed` |
 | an appended path, not a list | `<key>: <at> must be a list` |
 | a listed file missing | `<key>: open <file>: ...` |
@@ -1210,8 +1255,9 @@ and `Values`.
 ### Dependencies
 
 `Dependencies`: one item per internal [connection reference](#resolution),
-sorted by `field` (string order). Two references to one instance give two
-items; external and empty references give none. `nil` when there is none.
+sorted by `field` (string order), its `instance` a release name. Two
+references to one instance give two items; external and empty references
+give none. `nil` when there is none.
 
 ```go
 type Dependency struct {

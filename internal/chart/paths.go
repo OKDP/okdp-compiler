@@ -142,19 +142,23 @@ func parseBracket(s string) (pathSeg, int, error) {
 // character in brackets (annotations["nginx.ingress.kubernetes.io/auth-type"]).
 // parsePath reads it back as these literal keys.
 func formatPath(keys []string) string {
-	var b strings.Builder
-	for i, k := range keys {
-		if k != "" && !strings.ContainsAny(k, specialKey) {
-			if i > 0 {
-				b.WriteByte('.')
-			}
-			b.WriteString(k)
-			continue
-		}
-		r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `*`, `\*`)
-		b.WriteString(`["` + r.Replace(k) + `"]`)
+	p := ""
+	for _, k := range keys {
+		p = keyPath(p, k)
 	}
-	return b.String()
+	return p
+}
+
+// keyPath: the path p followed by the key k, as formatPath writes it.
+func keyPath(p, k string) string {
+	if k != "" && !strings.ContainsAny(k, specialKey) {
+		if p == "" {
+			return k
+		}
+		return p + "." + k
+	}
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `*`, `\*`)
+	return p + `["` + r.Replace(k) + `"]`
 }
 
 // matchKeys: the keys of m a segment names, sorted: its key when m has it,

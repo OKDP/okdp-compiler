@@ -61,7 +61,8 @@ func (r resolver) resolveAll(schema, params M) error {
 // walk follows the parameter schema and replaces every string carrying an
 // x-okdp-connection-ref with the resolved connection (okdp.connection), in
 // path order (keys sorted, items in order); the error of a reference that
-// does not resolve is recorded in failed, by parameter path.
+// does not resolve, or is neither a string nor null, is recorded in failed,
+// by parameter path.
 func (r resolver) walk(schema M, v any, path string, failed map[string]error) {
 	// visit: x, at p, of the schema s; set replaces it with its connection.
 	visit := func(s M, x any, p string, set func(M)) {
@@ -70,8 +71,15 @@ func (r resolver) walk(schema M, v any, path string, failed map[string]error) {
 			r.walk(s, x, p, failed)
 			return
 		}
-		// A reference: replaced by the connection. Empty means not set.
-		if name, ok := x.(string); ok && name != "" {
+		// A reference: replaced by the connection. Null or empty means not
+		// set; another value would reach the mapping unresolved, past the
+		// contract.
+		name, isString := x.(string)
+		if x != nil && !isString {
+			failed[p] = fmt.Errorf("%s: a connection reference must be a string, got %s", p, value.Short(x))
+			return
+		}
+		if name != "" {
 			c, err := r.resolve(name, value.Str(ref["contract"]), p)
 			if err != nil {
 				failed[p] = err
@@ -105,11 +113,12 @@ func (r resolver) walk(schema M, v any, path string, failed map[string]error) {
 }
 
 // resolve: a reference to its contract fields. An entry of connections is
-// external; any other name is an instance of the namespace (internal). The
-// first error is reported: the contract, then the fields of an external
-// connection in alphabetical order, then the required fields, then the
-// violations of the contract by an external connection, all of them
-// (checkContract).
+// external; any other name is an instance of the namespace (internal), a
+// release name. The first error is reported: the contract, then the name of
+// an internal reference, the fields of an external connection in
+// alphabetical order, then the required fields, then the violations of the
+// contract by an external connection, all of them (checkContract), then
+// "{{" in the connection (chart.NoTemplate).
 func (r resolver) resolve(ref, contract, field string) (M, error) {
 	schema, sch, err := readContract(r.in.Contracts, contract)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -150,6 +159,10 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s: %q is not a connection, and the %s contract has no internal naming convention", field, ref, contract)
 		}
+		// Its name goes into hosts, Secret names and the dependency.
+		if !isRelease(ref) {
+			return nil, fmt.Errorf("%s: %q is not a connection, nor a release name: lowercase letters, digits and \"-\", a letter or digit at each end, %d characters at most", field, ref, releaseMax)
+		}
 		for k, tpl := range conv {
 			out[k] = strings.NewReplacer("${ref}", ref, "${namespace}", r.in.Namespace, "${suffix}", r.suffix).Replace(value.Str(tpl))
 		}
@@ -177,6 +190,11 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 	}
 	// Where it comes from, for the mapping (e.g. error messages).
 	out["okdp"] = M{"ref": ref, "contract": contract, "source": source}
+	// No template code in what the mapping receives, whatever layer or
+	// default it comes from.
+	if err := chart.NoTemplate(out, func(p string) string { return fmt.Sprintf("%s: field %q", where, p) }); err != nil {
+		return nil, err
+	}
 	if source == "internal" && r.deps != nil {
 		*r.deps = append(*r.deps, Dependency{Instance: ref, Contract: contract, Field: field})
 	}

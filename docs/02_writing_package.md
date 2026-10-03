@@ -184,14 +184,19 @@ upstream: {}              # values of the upstream charts, by chart
   ([platform values](specs/01_inputs_outputs.md#platform-values)).
 - A string pasted into a configuration file, a script or a template refuses
   `{{`, `}}` and line breaks (the `not` pattern above, as in trino, airflow,
-  superset and polaris).
+  superset and polaris). The compiler refuses `{{` in every instance value
+  anyway ([layers](specs/01_inputs_outputs.md#layers)); the pattern makes
+  the console refuse it before committing, and covers the rest.
 - `x-okdp-connection-ref` makes a string a
   [connection reference](specs/01_inputs_outputs.md#connections),
-  on the items of a list too (trino's `hiveCatalogs[].metastore`).
+  on the items of a list too (trino's `hiveCatalogs[].metastore`). Give it
+  `"type": "string"`: the compiler refuses any other value but `null`, after
+  the schema check.
 - `upstream` declares one object per chart key that accepts instance values:
   the inline values of any other chart would be ignored without a word. The
-  compiler refuses `{{` in them (upstream charts pass some values to `tpl`);
-  `noTemplate` makes the console refuse it before committing.
+  compiler refuses `{{` in them, as in every instance value (upstream
+  charts pass some values to `tpl`); `noTemplate` makes the console refuse
+  it before committing.
 - `title`, `description` and the `x-ui-*` hints (`x-ui-group`, `x-ui-order`,
   `x-ui-advanced`, `x-ui-condition`...) build the console form.
 
@@ -346,7 +351,8 @@ A parameter carrying `x-okdp-connection-ref` names either an entry of
 namespace (internal). Before the mapping runs, the compiler replaces the name
 with the connection, completed against its contract
 ([what the mapping receives](specs/01_inputs_outputs.md#what-the-mapping-receives)).
-A reference left empty stays `""`.
+A reference left empty stays `""` (or `null`); a name that is not an entry
+of `connections` must be a release name.
 
 ```yaml
 # instance values: an external database

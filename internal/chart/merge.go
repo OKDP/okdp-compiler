@@ -10,7 +10,6 @@
 package chart
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -145,9 +144,9 @@ func layered(defaults M, layers ...M) M {
 // in upstream.<chart>.yaml would bypass it.
 type chartUpstream struct {
 	layers []upstreamLayer
-	// err: a file that cannot be read (missing, not YAML). It is reported
-	// when the chart is compiled, as when the files were read after the
-	// mapping: a chart the mapping leaves out does not need them.
+	// err: a file that cannot be read (missing, not YAML) or holds "{{". It
+	// is reported when the chart is compiled, as when the files were read
+	// after the mapping: a chart the mapping leaves out does not need them.
 	err error
 }
 
@@ -166,7 +165,9 @@ type Upstreams map[string]*chartUpstream
 // accepts them, by chart: the files its upstream entry names
 // (upstream.<chart>.yaml, when it exists, by default) in the instance files,
 // then the inline upstream.<chart> of the merged instance values. Empty
-// sources are left out, as applyUpstream ignores them.
+// sources are left out, as applyUpstream ignores them, and so is a file with
+// "{{" (NoTemplate): the mapping, which sees the values, could otherwise copy
+// template code into another chart.
 func ReadUpstream(instance fs.FS, specs Specs, values M) Upstreams {
 	inline := value.AsMap(values["upstream"])
 	out := Upstreams{}
@@ -181,6 +182,9 @@ func ReadUpstream(instance fs.FS, specs Specs, values M) Upstreams {
 		}
 		for _, f := range files {
 			u, err := readUpstream(instance, path.Clean(f), optional)
+			if err == nil {
+				err = NoTemplate(u, source{file: f}.at)
+			}
 			if err != nil {
 				if up.err == nil {
 					up.err = err
@@ -225,7 +229,9 @@ func (u Upstreams) Show(params M, specs Specs) {
 // (values.upstream.<chart>): the sources merged in order as applyUpstream
 // merges them into the chart's values, the lists of appendPaths appended,
 // so that a rule of the mapping checks what will be applied. Unchecked:
-// protect and the "{{" check apply when the chart is compiled.
+// protect and the "{{" check apply when the chart is compiled; no template
+// code of the instance is there all the same (its files are checked when
+// read, its values layers by the caller).
 func (up *chartUpstream) view(appendPaths []string) M {
 	v := M{}
 	for _, l := range up.layers {
@@ -281,8 +287,8 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 		return nil
 	}
 	// No templates: the values reach the chart as data.
-	if b, _ := json.Marshal(user); strings.Contains(string(b), "{{") {
-		return fmt.Errorf("%s: a key or value contains \"{{\"", src.at(""))
+	if err := NoTemplate(user, src.at); err != nil {
+		return err
 	}
 	// Refuse any protected path, or a parent of it given as a non-map. A
 	// path may name a key containing dots, or a family of keys, in brackets
@@ -298,6 +304,46 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 		}
 	}
 	return mergeUpstream(values, user, src, appendPaths)
+}
+
+// NoTemplate: no key or string of v, at any depth, contains "{{". Values
+// reach a chart as data, and some charts pass them to tpl, where template
+// code could call lookup and read the cluster's Secrets. The first one
+// found, in path order (keys sorted, items in order), fails, at(p) naming
+// where: p, its path in v (formatPath, [i] for an item). A value of a type
+// values do not hold (package value) fails too: it could not be checked.
+func NoTemplate(v any, at func(p string) string) error {
+	return noTemplate(v, "", at)
+}
+
+// noTemplate: NoTemplate on v, found at the path p.
+func noTemplate(v any, p string, at func(string) string) error {
+	switch t := v.(type) {
+	case nil, bool, float64:
+	case string:
+		if strings.Contains(t, "{{") {
+			return fmt.Errorf("%s: the value contains \"{{\"", at(p))
+		}
+	case M:
+		for _, k := range slices.Sorted(maps.Keys(t)) {
+			kp := keyPath(p, k)
+			if strings.Contains(k, "{{") {
+				return fmt.Errorf("%s: the key contains \"{{\"", at(kp))
+			}
+			if err := noTemplate(t[k], kp, at); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, x := range t {
+			if err := noTemplate(x, fmt.Sprintf("%s[%d]", p, i), at); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("%s: cannot be checked for \"{{\": %T is not a values type", at(p), v)
+	}
+	return nil
 }
 
 // mergeUpstream: user over values, the lists at appendPaths appended to the

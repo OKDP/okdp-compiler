@@ -857,7 +857,7 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace` |
-| `values` | The parameters: the package's `values.yaml`, the platform's and the instance's values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` when not set ([connections](01_inputs_outputs.md#connections)). Without `global` and `connections`. `upstream.<key>` of a chart that accepts upstream values is its files then its inline values, merged as they will be applied (the `append` lists appended); the other keys of `upstream` stay as written. |
+| `values` | The parameters: the package's `values.yaml`, the platform's and the instance's values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection, nor in its upstream files (a file with `{{` is left out). Without `global` and `connections`. `upstream.<key>` of a chart that accepts upstream values is its files then its inline values, merged as they will be applied (the `append` lists appended); the other keys of `upstream` stay as written. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version, appVersion}` of `service.yaml`, as written ([service](#service)). |
