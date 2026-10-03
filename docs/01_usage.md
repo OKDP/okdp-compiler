@@ -39,6 +39,17 @@ the `-ldflags` above, `--version` prints `dev`. The module path is
 `go install github.com/okdp/okdp-compiler/cmd/okdp-compile@<version>` works
 where the module can be fetched at that path.
 
+A version is a tag `vX.Y.Z`, the version of the Go module and of the CLI
+(`make build` takes it from `git describe`). Releases are made by
+release-please (`.github/workflows/release-please.yml`): each push to `main`
+updates a release pull request with the next version and `CHANGELOG.md`,
+computed from the [conventional commits](https://www.conventionalcommits.org)
+since the last release (`fix:` a patch; `feat:` a minor version; `!`, a
+breaking change, a minor version before 1.0, then a major one); merging it
+tags the version and publishes the GitHub release.
+`.release-please-manifest.json` holds the current version,
+`release-please-config.json` the settings.
+
 ## Command line
 
 ```text
