@@ -506,10 +506,28 @@ An expression is compiled when it is evaluated: one under a false `$if`,
 in a `$for` over no element, in a key a directive ignores or in an unknown
 section is never compiled, and its errors go unnoticed.
 
-The value of an expression is plain data: every number (int, uint, double)
-becomes a double, written without decimals when integral; a duration or a
-timestamp becomes its text (`3600s`, RFC 3339), bytes their base64 text, an
-optional its value or null.
+The value of an expression is converted to data, as values hold it: maps
+with string keys, lists, numbers, strings, booleans and null, at any depth.
+
+| CEL value | Data |
+|---|---|
+| int, uint, double | a double, written without decimals when integral; an integer beyond 2^53 is rounded (`string(x)` keeps its digits) |
+| duration, timestamp | its text, as `string()` writes it: `3600s`, RFC 3339 |
+| bytes | their text, as the host functions take them (`b'abc'` is `"abc"`) |
+| optional | its value, or null when it has none: `{'n': values.?nope}` is `{n: null}` |
+
+What values cannot hold fails the expression, at its position in the
+value:
+
+| Value | Error |
+|---|---|
+| a NaN or an infinite number (`0.0/0.0`): Helm cannot read it back | `not a finite number: NaN` |
+| a map key that is not a string (`[{1: 2}]`) | `[0]: a map key must be a string, got int 1` |
+| bytes that are not UTF-8 text (`base64.decode` of binary data) | `bytes that are not UTF-8 text (encode them with base64.encode)` |
+| a type (`type(x)`) | `a CEL type has no data form` |
+
+A host function's argument is converted the same way, but keeps these:
+`str` prints `NaN`, a key `1` as `"1"`, a type as its name.
 
 ### Numbers
 
@@ -834,9 +852,9 @@ is deterministic. A call matching none of these fails:
 ### `str` and `first`
 
 - `str(x)`: `x` as text, as Go templates print it: null is `""`, a string
-  itself, a number as a float64 ([Numbers](#numbers)), `true`, a list
-  `[a b]`, a map `map[k:v]`. Interpolation converts every expression's
-  value with it.
+  itself, bytes their text, a number as a float64 ([Numbers](#numbers)),
+  `true`, a list `[a b]`, a map `map[k:v]`. Interpolation converts every
+  expression's value with it.
 - `first(list)`: the first element that is not empty (null, `false`, `0`,
   `""`, `[]`, `{}`), else `""`. `first([x, d])` is Helm's `x | default d`.
   The argument must be a list.
@@ -1012,6 +1030,7 @@ output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclare
 let db: ${{ values.databse }}: no such key: databse
 output: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
 objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdp.generatedSecret: name is required
+output: app: config: ${{ {'ratio': a / b} }}: ratio: not a finite number: +Inf
 ```
 
 Other errors of the mapping:

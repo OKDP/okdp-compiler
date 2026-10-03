@@ -5,7 +5,6 @@ go 1.25.0
 require (
 	github.com/google/cel-go v0.26.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -22,6 +21,7 @@ require (
 	golang.org/x/text v0.27.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240826202546-f6391c0de4c7 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240826202546-f6391c0de4c7 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 )

@@ -111,6 +111,41 @@ func TestMappingDirectives(t *testing.T) {
 	}
 }
 
+// TestExpressionValues: the value of an expression is data, wherever its
+// optionals, numbers, bytes, timestamps are; what the values cannot hold
+// fails, at its position in the value.
+func TestExpressionValues(t *testing.T) {
+	for expr, want := range map[string]any{
+		"{'n': values.?nope, 'o': values.?extra.k, 'l': [1, 2u]}": M{"n": nil, "o": "v", "l": []any{float64(1), float64(2)}},
+		"[optional.of([optional.none()])]":                        []any{[]any{nil}},
+		"9007199254740993":                                        float64(9007199254740992),
+		"b'abc'":                                                  "abc",
+		"[duration('1h'), timestamp('2024-01-02T03:04:05Z')]":     []any{"3600s", "2024-01-02T03:04:05Z"},
+		"first([0, {'a': values.?nope}])":                         M{"a": nil},
+		"[str(b'abc'), str({1: 0.0/0.0}), toJson(b'abc')]":        []any{"abc", "map[1:NaN]", `"abc"`},
+	} {
+		if got, err := Eval(expr, mapCtx()); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %#v (%v), want %#v", expr, got, err, want)
+		}
+	}
+	for expr, want := range map[string]string{
+		"0.0/0.0":                "${{ 0.0/0.0 }}: not a finite number: NaN",
+		"{'a': [1.0, -1.0/0.0]}": "${{ {'a': [1.0, -1.0/0.0]} }}: a[1]: not a finite number: -Inf",
+		"[{1: 2}]":               "${{ [{1: 2}] }}: [0]: a map key must be a string, got int 1",
+		"{'k': {true: 1}}":       "${{ {'k': {true: 1}} }}: k: a map key must be a string, got bool true",
+		"b'\\xff'":               "${{ b'\\xff' }}: bytes that are not UTF-8 text (encode them with base64.encode)",
+		"type(1)":                "${{ type(1) }}: a CEL type has no data form",
+		"toJson(0.0/0.0)":        "${{ toJson(0.0/0.0) }}: toJson: json: unsupported value: NaN",
+	} {
+		if _, err := Eval(expr, mapCtx()); err == nil || err.Error() != want {
+			t.Errorf("%s: got %v, want %q", expr, err, want)
+		}
+	}
+	if _, err := runOutput("output: {x: {l: [1, '${{ 1.0/0.0 }}']}}\n"); err == nil || err.Error() != "output: x: l[1]: ${{ 1.0/0.0 }}: not a finite number: +Inf" {
+		t.Errorf("an error at its path: got %v", err)
+	}
+}
+
 // TestMappingYAML11: the mapping's scalars and keys are read as Helm reads
 // values (YAML 1.1), except binding names (let, $let).
 func TestMappingYAML11(t *testing.T) {

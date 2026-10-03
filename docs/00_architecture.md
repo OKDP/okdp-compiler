@@ -246,7 +246,7 @@ neither knows OKDP.
 |---|---|---|---|
 | `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `Files`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
-| `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`; `Native`, a CEL value as data | registers `str`, `first`, the functions of `functions.go`, then the caller's |
+| `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it | stages 1 and 10 |
@@ -336,8 +336,10 @@ template's `if` takes as true.
 Values are `value.M` (`map[string]any`): string keys, `float64` numbers,
 `[]any` lists, which is what Helm values are after their JSON round trip.
 In-memory layers are normalized to it (`value.Normalize`), CEL results are
-converted back to it (`compile.Native`, through `structpb`), so a value
-computed by CEL and the same value read from a file are equal. Stages work
+converted back to it (`toData`, recursively: optionals unwrapped, every
+number a float64; a NaN, an infinity or a key that is not a string fails
+the expression, as Helm could not read it back), so a value computed by
+CEL and the same value read from a file are equal. Stages work
 on deep copies: the caller's inputs are never modified, and the mapping
 sees a copy of the parameters while the merges use them as written.
 

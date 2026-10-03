@@ -61,12 +61,9 @@ func quote(text string) string {
 	return fmt.Sprintf("%q", text)
 }
 
-// Text: a CEL value as text, as Helm's sprig functions take it (value.Str;
-// bytes as they are).
+// Text: a CEL value as text, as Helm's sprig functions take it: value.Str
+// of its data (Native), bytes as they are.
 func Text(v ref.Val) string {
-	if b, ok := v.(types.Bytes); ok {
-		return string(b)
-	}
 	return value.Str(Native(v))
 }
 

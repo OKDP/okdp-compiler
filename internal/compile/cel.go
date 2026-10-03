@@ -28,17 +28,18 @@ package compile
 import (
 	"fmt"
 	"maps"
-	"reflect"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	"github.com/google/cel-go/ext"
-	"google.golang.org/protobuf/types/known/structpb"
 	"gopkg.in/yaml.v3"
 
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -234,10 +235,14 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 	opts := []cel.EnvOption{
 		ext.Strings(), ext.Lists(), ext.Bindings(), ext.TwoVarComprehensions(), ext.Encoders(), cel.OptionalTypes(),
 		cel.Function("str", cel.Overload("str_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(value.Str(Native(v))) }))),
+			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(Text(v)) }))),
 		cel.Function("first", cel.Overload("first_list", []*cel.Type{cel.ListType(cel.DynType)}, cel.DynType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				for _, x := range Native(v).([]any) {
+				l, ok := Native(v).([]any)
+				if !ok {
+					return types.NewErr("first: the argument must be a list, got %s", value.Short(Native(v)))
+				}
+				for _, x := range l {
 					if value.Truthy(x) {
 						return types.DefaultTypeAdapter.NativeToValue(x)
 					}
@@ -259,13 +264,99 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 	return env, nil
 }
 
-// Native: a CEL value as plain Go data (maps, lists, float64, string, bool, nil).
+// Native: a CEL value as data, as a host function takes it (toData): what
+// the values cannot hold is kept or written as text (str prints NaN, a map
+// key 1 is "1", a type is its name).
 func Native(v ref.Val) any {
-	pb, err := v.ConvertToNative(reflect.TypeFor[*structpb.Value]())
-	if err != nil {
-		return v.Value()
+	out, _ := toData(v, false)
+	return out
+}
+
+// toData: a CEL value as data, the values' model: maps with string keys,
+// []any lists, float64 numbers (int, uint and double alike), strings,
+// booleans, null. An optional is its value, or null when it has none; a
+// timestamp or a duration its text (CEL's string()); bytes their text, as
+// the host functions take them. strict refuses what the values cannot
+// hold, at its position in the value: a NaN or infinite number (Helm cannot
+// read it back), a map key that is not a string, bytes that are not UTF-8,
+// a type.
+func toData(v ref.Val, strict bool) (any, error) {
+	switch t := v.(type) {
+	case types.Null:
+		return nil, nil
+	case types.Bool:
+		return bool(t), nil
+	case types.String:
+		return string(t), nil
+	case types.Int:
+		return float64(t), nil
+	case types.Uint:
+		return float64(t), nil
+	case types.Double:
+		f := float64(t)
+		if strict && (math.IsNaN(f) || math.IsInf(f, 0)) {
+			return nil, fmt.Errorf("not a finite number: %v", f)
+		}
+		return f, nil
+	case types.Bytes:
+		if strict && !utf8.Valid(t) {
+			return nil, fmt.Errorf("bytes that are not UTF-8 text (encode them with base64.encode)")
+		}
+		return string(t), nil
+	case types.Timestamp, types.Duration:
+		if s, ok := v.ConvertToType(types.StringType).(types.String); ok {
+			return string(s), nil
+		}
+	case *types.Optional:
+		if !t.HasValue() {
+			return nil, nil
+		}
+		return toData(t.GetValue(), strict)
+	case traits.Lister:
+		out := []any{}
+		for it, i := t.Iterator(), 0; it.HasNext() == types.True; i++ {
+			x, err := toData(it.Next(), strict)
+			if err != nil {
+				return nil, atIndex(i, err)
+			}
+			out = append(out, x)
+		}
+		return out, nil
+	case traits.Mapper:
+		return mapData(t, strict)
 	}
-	return pb.(*structpb.Value).AsInterface()
+	if strict {
+		return nil, fmt.Errorf("a CEL %s has no data form", v.Type().TypeName())
+	}
+	return fmt.Sprint(v.Value()), nil
+}
+
+// mapData: a CEL map as data (toData), its keys in order, so that the error
+// reported is stable.
+func mapData(m traits.Mapper, strict bool) (M, error) {
+	type entry struct {
+		key  ref.Val
+		text string
+	}
+	var keys []entry
+	for it := m.Iterator(); it.HasNext() == types.True; {
+		k := it.Next()
+		keys = append(keys, entry{k, fmt.Sprint(k.Value())})
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].text < keys[j].text })
+	out := M{}
+	for _, k := range keys {
+		if _, ok := k.key.(types.String); !ok && strict {
+			return nil, fmt.Errorf("a map key must be a string, got %s %s", k.key.Type().TypeName(), k.text)
+		}
+		v, _ := m.Find(k.key)
+		x, err := toData(v, strict)
+		if err != nil {
+			return nil, atKey(k.text, err)
+		}
+		out[k.text] = x
+	}
+	return out, nil
 }
 
 // eval: compiles and evaluates one CEL expression in scope.
@@ -290,7 +381,12 @@ func (e *celEngine) eval(expr string, scope M) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
 	}
-	return Native(out), nil
+	// The value as data: what the values cannot hold fails the expression.
+	v, err := toData(out, true)
+	if err != nil {
+		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
+	}
+	return v, nil
 }
 
 // piece: a literal text, or the source of an expression.
