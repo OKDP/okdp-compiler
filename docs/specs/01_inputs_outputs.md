@@ -414,11 +414,12 @@ are. A reference gives one error, the first in this order: its type, its
 contract (unknown, unreadable; another one, for an external connection; no
 internal naming convention, then a name that is not a release name, for an
 internal one), the fields of an external connection in alphabetical order,
-the `required` fields in the contract's order, then the contract's types
-for an external connection: every violation, one line each, sorted by field
-then message ([Checks](#checks)); last, `{{` in the connection, the first
-one found by path (keys sorted, items in order). The same parameters give
-the same report from one compile to the next:
+the `required` fields: every field not set, one line each, in alphabetical
+order; then the contract's types for an external connection: every
+violation, one line each, sorted by field then message ([Checks](#checks));
+last, `{{` in the connection, the first one found by path (keys sorted,
+items in order). The same parameters give the same report from one compile
+to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
@@ -438,7 +439,7 @@ replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letter
 | external, secret field | `<path>: connection "<name>": "<key>" is a secret field` | `secret-in-connection.yaml` |
 | internal, no `x-okdp-internal` | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | |
 | internal, not a release name | `<path>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | |
-| required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract` | |
+| required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
 | external, a value the contract's schema refuses | `<path> (connection "<name>"): field "<field>" violates the <contract> contract: <violation>`; `... the fields violate the <contract> contract: <violation>` for a keyword on the whole connection | `connection-types.yaml` |
 | `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
 
@@ -520,7 +521,8 @@ secret fields excepted:
    `default` is not used);
 2. derived: `x-okdp-derived`;
 3. 1 and 2 again, until they set no field;
-4. required: every `required` field must be set.
+4. required: every `required` field must be set; the fields not set are
+   reported at once, one line each, in alphabetical order.
 
 A field set is kept as it is. The fields are visited in alphabetical order,
 the passes repeated: a conditional default applies whether its condition
@@ -1193,19 +1195,20 @@ order of `provides`, the fields of its `values` and of the contract's
 `x-okdp-internal` convention in alphabetical order. The first error is
 reported, as for an expression of the mapping: `provides` is the package's
 to fix, not the instance's, and the error is the same from one compile to
-the next; the schema's violations of that item all at once, one line each
-([Checks](#checks)). `<out>`: `provides "<name>" (<contract>)`; `<i>`: the
-item's position.
+the next; the required fields that item lacks, and the schema's violations
+of that item, all at once, one line each ([Checks](#checks)). `<out>`:
+`provides "<name>" (<contract>)`; `<i>`: the item's position.
 
 | Case | Error |
 |---|---|
 | an item that is not a map | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>` |
 | `values`, `secretRef` or `secret` set, not a map | `provides[<i>]: values: must be a map of contract fields, got <value>` ([provides](02_service_definition.md#provides)) |
+| the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `provides[<i>]: secret: generate must be a list of generated keys, got <value>`, `provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` ([secret](02_service_definition.md#secret)) |
 | no `<contract>.schema.json` | `<out>: unknown contract` |
 | `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<out>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
 | a secret field | `<out>: "<key>" is a secret field, put it in the credentials Secret` |
-| required field not set | `<out>: field "<key>" is required by the <contract> contract` |
+| required field not set | `<out>: field "<key>" is required by the <contract> contract`, one line per field |
 | a value the contract's schema refuses | `<out>: field "<field>" violates the <contract> contract: <violation>`, one line each; `<out>: the fields violate the <contract> contract: <violation>` for a keyword on the whole `values` |
 | internal convention | `<out>: <field> is "<value>" but internal references to "<name>" resolve it to "<expected>"` |
 | a `secretRef` without a `name`, or whose `name` is not a non-empty string | `<out>: secretRef.name must be the name of a Secret, got <value>` |
@@ -1226,8 +1229,8 @@ compile ([objects section](#objects-section)).
 
 | `secret` | Objects |
 |---|---|
-| `{stringData: {...}}` | a `v1` `Secret`, `type: Opaque`, `stringData` as given; labels: the labels and the credentials label |
-| `{generate: [<keys>], stringData: {...}}` | per key, a `generators.external-secrets.io/v1alpha1` `Password` named `<secret>-<key>`; then the `external-secrets.io/v1` `ExternalSecret` `<secret>` writing the Secret: the generated keys and the static `stringData` ones (`stringData` optional) |
+| `{stringData: {...}}` | a `v1` `Secret`, `type: Opaque`, `stringData` as given (strings); labels: the labels and the credentials label |
+| `{generate: [<keys>], stringData: {...}}` | per key, a `generators.external-secrets.io/v1alpha1` `Password` named `<secret>-<key>`; then the `external-secrets.io/v1` `ExternalSecret` `<secret>` writing the Secret: the generated keys and the static `stringData` ones (`stringData` optional; strings, numbers or booleans, written as text) |
 | neither, in a non-empty `secret` | error: `<service>: output "<name>": secret needs stringData or generate` (`<service>`: `name` of `service.yaml`) |
 
 A generated Secret is what `okdpGeneratedSecret` renders

@@ -712,13 +712,13 @@ with status 2.
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field` | a secret field written in the connection | put it in a Secret named by `secretRef` |
-| `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing | set it |
+| `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): field "port" violates the database contract: got string, want integer`, `... field "engine" violates the database contract: value must be one of 'postgresql', 'mysql'` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
 | `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | the name is not in `connections`, and the contract cannot resolve an instance | add the connection under `connections` |
 | `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
 | `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (an instance's files fail earlier, `values layer <n>: ...`) | fix the platform values or the contract |
-| several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, sorted by parameter path, with its first error (the fields of a connection in alphabetical order), or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
+| several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, sorted by parameter path, with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
 | `webapp: database connection "shared-db" has no secretRef, the password cannot be read` | not a compiler check: a message of the example mapping's `errors` section | add `secretRef: {name: ...}` to the connection |
 | `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `service.yaml` protects (`protect`, and always `global`); a file name replaces `upstream.<key>` for an instance file | remove the value; set it through the parameters when the package offers one |
 | `app: upstream.app.yaml: podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in an instance's upstream values file (in the inline upstream values of an instance file, that file fails before: `values layer <n>: ...`) | remove it |
@@ -736,8 +736,11 @@ with their causes in [service definition](specs/02_service_definition.md#errors)
 the messages of its `errors` section, one per line; CEL errors prefixed with
 the section, key and list position path (`output: app: env[2]: value: ${{ ... }}: no such key: host`);
 sections of the wrong shape
-(`output: app: must be a map of the chart's values, got "on"`); YAML
-errors (`yaml: line <n>: ...`), which name no file. The `provides`
+(`output: app: must be a map of the chart's values, got "on"`,
+`instance: url: must be a string, got 8080`); arguments of
+`okdpGeneratedSecret` unknown or of the wrong type
+(`okdp.generatedSecret: keys[0]: unknown field(s) lenght (allowed: key, length, digits, symbols, noUpper, transform)`);
+YAML errors (`yaml: line <n>: ...`), which name no file. The `provides`
 checks are in [descriptor ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap),
 the OAuth client errors [below](#oauth-clients).
 

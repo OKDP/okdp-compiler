@@ -265,6 +265,20 @@ func TestCompleteUntilStable(t *testing.T) {
 	}
 }
 
+// TestCompleteRequired: every required field not set is reported at once,
+// one line each, in alphabetical order, not in the contract's; false is a
+// value, a secret field is never set.
+func TestCompleteRequired(t *testing.T) {
+	schema := M{"x-okdp-contract": "database", "required": []any{"user", "tls", "host", "password"}, "properties": M{
+		"host": M{}, "tls": M{}, "user": M{}, "password": M{"x-okdp-secret": true},
+	}}
+	want := `x: field "host" is required by the database contract
+x: field "user" is required by the database contract`
+	if err := complete(schema, M{"tls": false, "user": ""}, "x"); err == nil || err.Error() != want {
+		t.Errorf("got %v\nwant %s", err, want)
+	}
+}
+
 // TestCompileOutputErrors: the mapping may only output charts of
 // service.yaml, and their base values file must exist.
 func TestCompileOutputErrors(t *testing.T) {

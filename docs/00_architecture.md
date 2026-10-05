@@ -187,8 +187,9 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    failing the compile (`bind`); then the sections (`Doc.Section`):
    `output`, `instance`, `provides`, `objects` and `oidcClients`, in that
    order, each of its shape (`shaped`): `output` a map of maps, a null
-   chart left out; `instance` a map; the others lists; `null` is empty,
-   another shape fails rather than reads as empty
+   chart left out; `instance` a map, its `url` and `usage` strings; the
+   others lists; `null` is empty, another shape fails rather than reads as
+   empty or is printed
    ([sections](specs/02_service_definition.md#evaluation-order)). Each
    `objects` item must be a whole manifest, with a `kind` and a
    `metadata.name`.
@@ -210,7 +211,9 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
 7. **Descriptor and credentials Secrets** (`descriptor`,
    `internal/okdp/descriptor.go`). Each `provides` entry is checked for its
    shape (`checkOutput`: a map, its `values`, `secretRef` and `secret`
-   maps), then checked and completed against its contract, and validated
+   maps, the secret's `generate` a list of keys checked as
+   `okdpGeneratedSecret`'s, its `stringData` a map of strings), then
+   checked and completed against its contract, and validated
    against its schema (`checkContract`); published
    under the release name, it is compared with what the `resolver`
    computes for an internal reference to this instance
@@ -302,7 +305,7 @@ neither knows OKDP.
 | | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference; `pipeline.go`, for the release and namespace; `oidc.go`, for a client's name |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
-| | `secrets.go` | `okdpGeneratedSecret`, credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go` |
+| | `secrets.go` | `okdpGeneratedSecret` and the check of its arguments (`checkSecretArgs`, `password`), credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go`; `checkOutput` checks a secret's `generate` with `password` |
 | | `oidc.go` | stage 6: the `oidcClients` checks, the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts (`clientCharts`), `DcrSource`; the oidc-dcr settings (`dcrSettings`, stage 3) | evaluates `oidc-dcr.cel.yaml` with `compile.EvalTemplate` and `functions`; used by `context.go` and `pipeline.go` |
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `descriptor.go` | stage 7 | `connections.go`, `secrets.go`, `labels.go` |

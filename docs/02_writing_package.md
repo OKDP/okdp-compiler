@@ -340,7 +340,7 @@ provides:                  # the connections the instance publishes
   upstream chart (cnpg-postgresql) declares no chart and writes everything
   here.
 - `instance.url` is what the console opens (none without a UI); `usage` is
-  shown with the instance.
+  shown with the instance. Both are strings: write a number with `str`.
 
 Besides CEL's own, [host functions](specs/02_service_definition.md#host-functions)
 (`str`, `sha256`, `toJson`, `okdpFullname`, `okdpLabels`,

@@ -37,7 +37,8 @@ type mapped struct {
 // runMapping: runs a mapping (mapping.cel.yaml) on the context ctx, within
 // budget (nil: none), its sections in order, each of its shape: null
 // (absent, $if) is empty, a value of another shape is refused. A null chart
-// of output is left out, as by $if.
+// of output is left out, as by $if; instance's url and usage are strings
+// when set.
 func runMapping(budget *compile.Budget, b []byte, ctx M) (*mapped, error) {
 	d, err := compile.Load(b, ctx, budget, functions(ctx)...)
 	if err != nil {
@@ -64,7 +65,14 @@ func runMapping(budget *compile.Budget, b []byte, ctx M) (*mapped, error) {
 				}
 			}
 		case "instance":
-			res.instance, err = shaped[M]("instance", "a map (url, usage)", v)
+			// url and usage are text: another value would be printed.
+			if res.instance, err = shaped[M]("instance", "a map (url, usage)", v); err == nil {
+				for _, key := range []string{"url", "usage"} {
+					if _, err = shaped[string]("instance: "+key, "a string", res.instance[key]); err != nil {
+						break
+					}
+				}
+			}
 		case "provides":
 			res.provides, err = shaped[[]any]("provides", "a list of outputs", v)
 		case "objects":
@@ -110,7 +118,11 @@ func functions(ctx M) []cel.EnvOption {
 				cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(fullname(release, compile.Text(v))) }))),
 		cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				out, err := generatedSecret(ctx, value.AsMap(compile.Native(v)))
+				args, err := shaped[M]("okdp.generatedSecret", "a map of arguments ("+strings.Join(secretArgs, ", ")+")", compile.Native(v))
+				var out []any
+				if err == nil {
+					out, err = generatedSecret(ctx, args)
+				}
 				if err != nil {
 					return types.NewErr("%s", err.Error())
 				}

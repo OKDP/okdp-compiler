@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -140,6 +141,8 @@ func TestMappingErrors(t *testing.T) {
 		"chart a scalar":         {"output: {x: {}, web: 'on'}\n", `output: web: must be a map of the chart's values, got "on"`},
 		"chart a list":           {"output: {x: \"${{ ['a'] }}\"}\n", `output: x: must be a map of the chart's values, got []interface {}{"a"}`},
 		"instance not a map":     {"instance: [https://x]\n", `instance: must be a map (url, usage), got []interface {}{"https://x"}`},
+		"url not a string":       {"instance: {url: 8080, usage: ~}\n", `instance: url: must be a string, got 8080`},
+		"usage not a string":     {"instance: {usage: [a]}\n", `instance: usage: must be a string, got []interface {}{"a"}`},
 		"provides not a list":    {"provides: {contract: http}\n", `provides: must be a list of outputs, got map[string]interface {}{"contract":"http"}`},
 		"objects not a list":     {"objects: x\n", `objects: must be a list of objects, got "x"`},
 		"oidcClients not a list": {"oidcClients: {a: 1}\n", "oidcClients: must be a list of OAuth clients"},
@@ -150,5 +153,43 @@ func TestMappingErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestGeneratedSecretArgs: okdpGeneratedSecret refuses an argument, a key
+// field, of another type, rather than render it as empty or printed; a
+// number or a boolean written as text is taken as Helm prints it.
+func TestGeneratedSecretArgs(t *testing.T) {
+	funcs := functions(mapCtx())
+	for name, tc := range map[string]struct{ args, want string }{
+		"not a map":        {`'s'`, `okdp.generatedSecret: must be a map of arguments (name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion), got "s"`},
+		"unknown":          {`{'name': 's', 'key': [], 'ctx': null}`, `okdp.generatedSecret: unknown argument(s) key (allowed: name, keys, `},
+		"name":             {`{'name': 5}`, `okdp.generatedSecret: name must be a string, got 5`},
+		"string":           {`{'name': 's', 'refreshInterval': 30}`, `okdp.generatedSecret: refreshInterval must be a string, got 30`},
+		"keys":             {`{'name': 's', 'keys': {'key': 'k'}}`, `okdp.generatedSecret: keys must be a list of generated keys, got map[string]interface {}{"key":"k"}`},
+		"stringData":       {`{'name': 's', 'stringData': ['a']}`, `okdp.generatedSecret: stringData must be a map of strings, numbers or booleans, got []interface {}{"a"}`},
+		"stringData value": {`{'name': 's', 'stringData': {'a': 'x', 'b': null}}`, `okdp.generatedSecret: stringData "b" must be a string, a number or a boolean, got <nil>`},
+		"labels":           {`{'name': 's', 'labels': {'team': 3}}`, `okdp.generatedSecret: labels "team" must be a string, got 3`},
+		"key not a map":    {`{'name': 's', 'keys': ['k']}`, `okdp.generatedSecret: keys[0]: must be a map (key, length, digits, symbols, noUpper, transform), got "k"`},
+		"key field":        {`{'name': 's', 'keys': [{'key': 'k', 'lenght': 20}]}`, `okdp.generatedSecret: keys[0]: unknown field(s) lenght (allowed: key, length, `},
+		"key type":         {`{'name': 's', 'keys': [{'key': 5}]}`, `okdp.generatedSecret: keys[0]: key must be a string, got 5`},
+		"length":           {`{'name': 's', 'keys': [{'key': 'k'}, {'key': 'l', 'length': 'long'}]}`, `okdp.generatedSecret: keys[1]: length must be a whole number >= 0, got "long"`},
+		"digits null":      {`{'name': 's', 'keys': [{'key': 'k', 'digits': null}]}`, `okdp.generatedSecret: keys[0]: digits must be a whole number >= 0, got <nil>`},
+		"symbols":          {`{'name': 's', 'keys': [{'key': 'k', 'symbols': -1}]}`, `okdp.generatedSecret: keys[0]: symbols must be a whole number >= 0, got -1`},
+		"noUpper":          {`{'name': 's', 'keys': [{'key': 'k', 'noUpper': 1}]}`, `okdp.generatedSecret: keys[0]: noUpper must be true or false, got 1`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := compile.Eval("okdpGeneratedSecret("+tc.args+")", M{}, funcs...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+	got, err := compile.Eval(`okdpGeneratedSecret({'name': 's', 'keys': [{'key': 'k', 'length': '20', 'noUpper': 'true'}]})`, M{}, funcs...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec := value.AsMap(value.AsMap(value.AsList(got)[0])["spec"]); spec["length"] != float64(20) || spec["noUpper"] != true {
+		t.Errorf("Password spec: %#v", spec)
 	}
 }

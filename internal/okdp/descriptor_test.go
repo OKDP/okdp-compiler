@@ -118,12 +118,16 @@ func TestDescriptorErrors(t *testing.T) {
 			"  - {contract: http, values: {url: https://elsewhere}}\n",
 			`url is "https://elsewhere" but internal references to "demo-app" resolve it to "https://demo-app.example.org"`,
 		},
-		"not a map":           {"  - {contract: http, name: other, values: {url: u}}\n  - ~\n", "provides[1]: must be a map (contract, name, values, secretRef, secret), got <nil>"},
-		"values not a map":    {"  - {contract: http, values: [url]}\n", `provides[0]: values: must be a map of contract fields, got []interface {}{"url"}`},
-		"secretRef not a map": {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", `provides[0]: secretRef: must be a map (name), got "creds"`},
-		"secret not a map":    {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", `provides[0]: secret: must be a map (generate, stringData), got []interface {}{"token"}`},
-		"secretRef no name":   {"  - {contract: http, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", `provides "other" (http): secretRef.name must be the name of a Secret, got <nil>`},
-		"secretRef name":      {"  - {contract: http, name: other, values: {url: u}, secretRef: {name: 1}}\n", `provides "other" (http): secretRef.name must be the name of a Secret, got 1`},
+		"not a map":            {"  - {contract: http, name: other, values: {url: u}}\n  - ~\n", "provides[1]: must be a map (contract, name, values, secretRef, secret), got <nil>"},
+		"values not a map":     {"  - {contract: http, values: [url]}\n", `provides[0]: values: must be a map of contract fields, got []interface {}{"url"}`},
+		"secretRef not a map":  {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", `provides[0]: secretRef: must be a map (name), got "creds"`},
+		"secret not a map":     {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", `provides[0]: secret: must be a map (generate, stringData), got []interface {}{"token"}`},
+		"generate not a list":  {"  - {contract: http, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", `provides[0]: secret: generate must be a list of generated keys, got map[string]interface {}{"token":20}`},
+		"generated key":        {"  - {contract: http, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", `provides[0]: secret: generate[0]: length must be a whole number >= 0, got "long"`},
+		"stringData not a map": {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: [token]}}\n", `provides[0]: secret: stringData must be a map of strings, got []interface {}{"token"}`},
+		"stringData a number":  {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", `provides[0]: secret: stringData "token" must be a string, got 5`},
+		"secretRef no name":    {"  - {contract: http, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", `provides "other" (http): secretRef.name must be the name of a Secret, got <nil>`},
+		"secretRef name":       {"  - {contract: http, name: other, values: {url: u}, secretRef: {name: 1}}\n", `provides "other" (http): secretRef.name must be the name of a Secret, got 1`},
 		"one Secret": {
 			"  - {contract: http, name: a, values: {url: u}, secretRef: {name: s}, secret: {stringData: {token: t}}}\n  - {contract: http, name: b, values: {url: u}, secretRef: {name: s}, secret: {stringData: {token: t}}}\n",
 			`the credentials Secret of provides "b" (http): the credentials Secret of provides "a" (http) is the same object, Secret "s" in namespace "demo"`,
@@ -179,6 +183,14 @@ func TestDescriptorSecret(t *testing.T) {
 	}
 	if l := value.AsMap(value.AsMap(res.Objects[1]["metadata"])["labels"]); l["okdp.io/credentials-http"] != "true" {
 		t.Errorf("labels: %#v", l)
+	}
+	// Generated, the Secret's stringData is written as text, a number too.
+	res, err = provideCompile("  - {contract: http, name: other, values: {url: u}, secret: {generate: [{key: token}], stringData: {port: 443}}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if es := res.Objects[len(res.Objects)-1]; value.Dig(es, "spec.target.template.data.port") != "443" {
+		t.Errorf("ExternalSecret: %#v", es)
 	}
 }
 

@@ -21,10 +21,11 @@ import (
 // name. Built from the mapping's `instance` and `provides` sections; every
 // output is checked, its shape (checkOutput), then against its contract
 // (okdp.contract.provide), in the order of provides, its fields in key
-// order: the first error is reported, every violation of the contract's
-// types at once (checkContract). Then, as okdp.descriptor renders them, the
-// credentials Secret of every output given a `secret` ({generate,
-// stringData} or {stringData}), named after its secretRef (default
+// order: the first error is reported, every required field not set at once
+// (complete), every violation of the contract's types at once
+// (checkContract). Then, as okdp.descriptor renders them, the credentials
+// Secret of every output given a `secret` ({generate, stringData} or
+// {stringData}), named after its secretRef (default
 // <name>-<contract>-credentials). A secretRef that is set (not empty) names
 // a Secret: its name is required.
 func descriptor(in Inputs, ctx M, instance M, provides []any) (M, []ownObject, error) {
@@ -162,7 +163,10 @@ var outputMaps = []struct{ key, want string }{
 }
 
 // checkOutput: the i-th item of provides, a map whose values, secretRef and
-// secret are maps when set (null is not set).
+// secret are maps when set (null is not set); the secret's generate a list
+// of generated keys, each as a key of okdpGeneratedSecret (password), and
+// its stringData a map of strings: of strings, numbers and booleans with
+// generate, as okdpGeneratedSecret writes them as text.
 func checkOutput(i int, x any) (M, error) {
 	where := fmt.Sprintf("provides[%d]", i)
 	p, ok := x.(M)
@@ -173,6 +177,21 @@ func checkOutput(i int, x any) (M, error) {
 		if _, err := shaped[M](where+": "+f.key, f.want, p[f.key]); err != nil {
 			return nil, err
 		}
+	}
+	where += ": secret"
+	secret := value.AsMap(p["secret"])
+	keys, ok := secret["generate"].([]any)
+	if !ok && secret["generate"] != nil {
+		return nil, fmt.Errorf("%s: generate must be a list of generated keys, got %s", where, value.Short(secret["generate"]))
+	}
+	for j, k := range keys {
+		if _, err := password(fmt.Sprintf("%s: generate[%d]", where, j), k); err != nil {
+			return nil, err
+		}
+	}
+	// A plain Secret's stringData holds strings only.
+	if err := checkTextMap(where, "stringData", secret["stringData"], len(keys) > 0); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

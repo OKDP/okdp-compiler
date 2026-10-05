@@ -354,7 +354,9 @@ Each section has a shape: `output` and `instance` are maps, `provides`,
 `objects` and `oidcClients` lists. Absent or null (left out by `$if`, a
 null expression), a section is empty. A value of another shape fails the
 compile, `<section>: must be <shape>, got <value>`, rather than read as
-empty: `output: [app]` would otherwise render no chart. `<value>`: the
+empty: `output: [app]` would otherwise render no chart. A chart of
+`output` that is not a map fails too, and an `instance` key, `url` or
+`usage`, that is not a string ([instance](#instance)). `<value>`: the
 value as Go's `%#v` prints it (`"x"`, `false`, `[]interface {}{"app"}`).
 
 A mapping that is not a YAML map fails with `the mapping must be a YAML map`;
@@ -440,13 +442,15 @@ each object its own name`
 
 | Key | Meaning |
 |---|---|
-| `url` | the instance's URL, as text, trimmed |
-| `usage` | how to use the instance, as text, trimmed, with one final newline |
+| `url` | the instance's URL, a string, trimmed |
+| `usage` | how to use the instance, a string, trimmed, with one final newline |
 
 Other keys are ignored. Both go to the descriptor ConfigMap:
 [outputs](01_inputs_outputs.md#outputs). A value that is not a map fails
 with `instance: must be a map (url, usage), got <value>`; absent or null,
-both are empty.
+both are empty. `url` and `usage` are strings when set (null is not set):
+another value fails rather than is printed as text,
+`instance: url: must be a string, got 8080`.
 
 ### provides
 
@@ -477,28 +481,42 @@ A list of outputs, the connections the instance publishes. Each item:
 Other keys are ignored. A value that is not a list fails with
 `provides: must be a list of outputs, got <value>`; absent or null, there
 are none. Each item must be a map, and its `values`, `secretRef` and
-`secret` maps when set (null is not set); `<i>` is the item's position in
-the evaluated list:
+`secret` maps when set (null is not set), the `generate` and `stringData`
+of its `secret` of their types ([secret](#secret)); `<i>` is the item's
+position in the evaluated list, `<j>` the key's in `generate`:
 
 ```text
 provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>
 provides[<i>]: values: must be a map of contract fields, got <value>
 provides[<i>]: secretRef: must be a map (name), got <value>
 provides[<i>]: secret: must be a map (generate, stringData), got <value>
+provides[<i>]: secret: generate must be a list of generated keys, got <value>
+provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>
+provides[<i>]: secret: stringData must be a map of strings, got <value>
+provides[<i>]: secret: stringData "<key>" must be a string, got <value>
 ```
 
-The contract checks then report
+A key of `generate` fails as one of `okdpGeneratedSecret`'s `keys`
+([`okdpGeneratedSecret`](#okdpgeneratedsecret)), `generate[<j>]` for
+`keys[<j>]`. With a `generate`, `stringData` takes numbers and booleans
+too: `... must be a map of strings, numbers or booleans`,
+`... must be a string, a number or a boolean`. The contract checks then report
 `provides "<name>" (<contract>): <message>`. The items are checked in
 order, their fields in alphabetical order, and the first error is
-reported, the schema's violations of that item all at once, one line each
+reported; the required fields the item lacks, and the schema's violations
+of that item, all at once, one line each
 ([descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap)).
 
 #### secret
 
 `{generate: [<key>, ...], stringData: {...}}` renders a generated Secret
 ([`okdpGeneratedSecret`](#okdpgeneratedsecret), `keys` = `generate`, same
-key fields; `stringData` optional), `{stringData: {...}}` a plain Secret
-with these keys.
+key fields, checked the same way; `stringData` optional, strings, numbers
+or booleans, written as text), `{stringData: {...}}` a plain Secret with
+these keys, strings only: a Secret's `stringData` holds strings, the API
+server refuses a number. A `generate` that is not a list, a `stringData`
+that is not a map, fail rather than render a Secret without these keys,
+before the contract checks; null is not set.
 
 The Secret is named after `secretRef.name` when given, else
 `<name>-<contract>-credentials`, which then becomes the output's
@@ -1036,29 +1054,42 @@ generates in the cluster, as `okdp.generatedSecret` renders them, for
 `$spread` in [`objects`](#objects). The `provides[].secret` `generate` form
 uses it too.
 
-| Key of `args` | Default | Meaning |
-|---|---|---|
-| `name` | required | name of the Secret, and of the ExternalSecret writing it |
-| `keys` | `[]` | the generated keys, below |
-| `stringData` | `{}` | static keys, as text (`str`; null is `<nil>`); a value containing `{{` is written as a template string literal |
-| `labels` | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](#context) |
-| `annotations` | `{}` | annotations of every object |
-| `type` | none | type of the Secret |
-| `namespace` | `release.namespace` | namespace of every object |
-| `refreshInterval` | `"0"` | refresh interval of the ExternalSecret: `"0"` generates once |
-| `apiVersion` | `external-secrets.io/v1` | apiVersion of the ExternalSecret |
+| Key of `args` | Type | Default | Meaning |
+|---|---|---|---|
+| `name` | string | required | name of the Secret, and of the ExternalSecret writing it |
+| `keys` | list | `[]` | the generated keys, below |
+| `stringData` | map of strings, numbers or booleans | `{}` | static keys, as text (`str`); a value containing `{{` is written as a template string literal |
+| `labels` | map of strings | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](#context) |
+| `annotations` | map of strings | `{}` | annotations of every object |
+| `type` | string | none | type of the Secret |
+| `namespace` | string | `release.namespace` | namespace of every object |
+| `refreshInterval` | string | `"0"` | refresh interval of the ExternalSecret, a duration (`1h`): `"0"` generates once |
+| `apiVersion` | string | `external-secrets.io/v1` | apiVersion of the ExternalSecret |
 
-| Key of `keys[]` | Default | Meaning |
-|---|---|---|
-| `key` | required | the Secret's key |
-| `length` | `32` | length of the generated value |
-| `digits` | `6` | number of digits; `0` when given as `0` |
-| `symbols` | `0` | number of symbols |
-| `noUpper` | `false` | no upper-case letters |
-| `transform` | none | `sha256` (the key holds the value's `sha256sum`) or `b64enc` |
+| Key of `keys[]` | Type | Default | Meaning |
+|---|---|---|---|
+| `key` | string | required | the Secret's key |
+| `length` | whole number >= 0 | `32` | length of the generated value |
+| `digits` | whole number >= 0 | `6` | number of digits; `0` when given as `0` |
+| `symbols` | whole number >= 0 | `0` | number of symbols |
+| `noUpper` | `true` or `false` | `false` | no upper-case letters |
+| `transform` | string | none | `sha256` (the key holds the value's `sha256sum`) or `b64enc` |
 
 An empty value (null, `""`, `0`, `false`) takes the default, as Helm's
-`default` does, except `digits`.
+`default` does, except `digits`. `length`, `digits`, `symbols` and
+`noUpper` are checked as `okdp.generatedSecret` prints them into the
+Password: a string that prints a value of the type is taken
+(`length: '32'` is `32`, `noUpper: 'true'` is `true`), another value
+fails (`length: long`, `symbols: -1`, `noUpper: 1`, `digits: null`, which
+Helm prints as null).
+
+Every argument and key field is checked for its type when set, a null
+argument being not set: a value of another type fails rather than reads
+as empty or is printed (a `stringData` value null, a list or a map, which
+Helm prints as `<nil>` or as Go does), and so does an argument or a key
+field the function does not know, unless null: a typo would otherwise be
+ignored (`lenght`). The arguments are checked first, then each key in
+order; the first error is reported.
 
 It returns one `generators.external-secrets.io/v1alpha1` `Password` per
 key, in order, then the `ExternalSecret`. A Password is named
@@ -1068,10 +1099,29 @@ than 63 characters is cut to 54, without a trailing `-`, and suffixed with
 [`labels`](#context). The Secret's data are the `stringData` keys, then each
 generated key; a generated key replaces a `stringData` key of the same name.
 
-Errors: `okdp.generatedSecret: name is required`,
-`okdp.generatedSecret: every key needs a name`,
-`okdp.generatedSecret: <name>: keys "<a>" and "<b>" give the same generator name "<n>"`,
-`okdp.generatedSecret: unknown transform "<t>" (supported: sha256, b64enc)`.
+Errors (`<arg>`: `name`, `type`, `namespace`, `refreshInterval` or
+`apiVersion`; `<map>`: `labels` or `annotations`; `<number>`: `length`,
+`digits` or `symbols`; `<j>`: the key's position in `keys`):
+
+```text
+okdp.generatedSecret: must be a map of arguments (name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion), got <value>
+okdp.generatedSecret: unknown argument(s) <names> (allowed: name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion)
+okdp.generatedSecret: name is required
+okdp.generatedSecret: <arg> must be a string, got <value>
+okdp.generatedSecret: keys must be a list of generated keys, got <value>
+okdp.generatedSecret: stringData must be a map of strings, numbers or booleans, got <value>
+okdp.generatedSecret: stringData "<key>" must be a string, a number or a boolean, got <value>
+okdp.generatedSecret: <map> must be a map of strings, got <value>
+okdp.generatedSecret: <map> "<key>" must be a string, got <value>
+okdp.generatedSecret: keys[<j>]: must be a map (key, length, digits, symbols, noUpper, transform), got <value>
+okdp.generatedSecret: keys[<j>]: unknown field(s) <names> (allowed: key, length, digits, symbols, noUpper, transform)
+okdp.generatedSecret: keys[<j>]: key must be a string, got <value>
+okdp.generatedSecret: keys[<j>]: <number> must be a whole number >= 0, got <value>
+okdp.generatedSecret: keys[<j>]: noUpper must be true or false, got <value>
+okdp.generatedSecret: every key needs a name
+okdp.generatedSecret: <name>: keys "<a>" and "<b>" give the same generator name "<n>"
+okdp.generatedSecret: unknown transform "<t>" (supported: sha256, b64enc)
+```
 
 ### `oidcClientSecret`
 
@@ -1189,12 +1239,15 @@ Other errors of the mapping:
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
 | `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |
+| `instance: url: must be a string, got <value>`, `instance: usage: must be a string, got <value>` | an [`instance`](#instance) key that is not a string |
 | `objects: must be a list of objects, got <value>`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
 | `<object>: <other> is the same object, <kind> "<name>" in namespace "<namespace>": give each object its own name` | two of OKDP's own objects, the descriptor, the credentials Secrets and [`objects`](#objects), of one API group, kind, namespace and name ([objects section](01_inputs_outputs.md#objects-section)) |
+| `<where>${{ <expression> }}: okdp.generatedSecret: <message>` | an argument of [`okdpGeneratedSecret`](#okdpgeneratedsecret) missing, unknown or of another type |
 | `output: <key>: must be a map of the chart's values, got <value>` | a chart of [`output`](#output) whose values are a scalar or a list |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
 | `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
 | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>`, `provides[<i>]: <key>: must be a map ..., got <value>` | a [`provides`](#provides) item, or its `values`, `secretRef` or `secret`, of another shape |
+| `provides[<i>]: secret: generate must be a list of generated keys, got <value>`, `provides[<i>]: secret: generate[<j>]: <message>`, `provides[<i>]: secret: stringData must be a map of strings, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` | the `generate` or `stringData` of a [`secret`](#secret) of another type; a key of `generate` as one of `okdpGeneratedSecret`'s `keys` |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `provides "<name>" (<contract>): secretRef.name must be the name of a Secret, got <value>` | [`provides`](#provides) |
 | `oidcClients: must be a list of OAuth clients, got <value>` | [`oidcClients`](#oidcclients) is not a list |
 | `<client>: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got <value>`, `<client>: unknown key(s) <keys> (allowed: name, grantTypes, ...)` | a client that is not a map, or has another key |

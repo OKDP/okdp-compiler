@@ -202,7 +202,9 @@ func (r resolver) resolve(ref, contract, field string) (M, error) {
 }
 
 // complete: a contract's defaults, then its derived fields, again until
-// nothing changes, then the required check (okdp.contract.complete).
+// nothing changes, then the required check (okdp.contract.complete): every
+// required field not set, one line each, in alphabetical order, as the
+// violations of checkContract.
 func complete(schema, out M, where string) error {
 	props := value.AsMap(schema["properties"])
 	contract := value.Str(schema["x-okdp-contract"])
@@ -246,13 +248,23 @@ func complete(schema, out M, where string) error {
 	// false is a value: only missing or empty fails. A secret field is never
 	// set: it is in the credentials Secret.
 	required, _ := schema["required"].([]any)
+	var missing []string
 	for _, k := range required {
-		if value.Truthy(value.AsMap(props[value.Str(k)])["x-okdp-secret"]) {
+		f := value.Str(k)
+		if value.Truthy(value.AsMap(props[f])["x-okdp-secret"]) {
 			continue
 		}
-		if !value.Truthy(out[value.Str(k)]) && out[value.Str(k)] != false {
-			return fmt.Errorf("%s: field %q is required by the %s contract", where, k, contract)
+		if !value.Truthy(out[f]) && out[f] != false {
+			missing = append(missing, f)
 		}
+	}
+	sort.Strings(missing)
+	lines := make([]string, len(missing))
+	for i, f := range missing {
+		lines[i] = fmt.Sprintf("%s: field %q is required by the %s contract", where, f, contract)
+	}
+	if len(lines) > 0 {
+		return errors.New(strings.Join(lines, "\n"))
 	}
 	return nil
 }
