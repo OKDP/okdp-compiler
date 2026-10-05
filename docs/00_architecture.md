@@ -36,7 +36,7 @@ Callers: a Go program embeds the package at the module's root
 CI or scripts.
 The library depends on neither Helm nor the Kubernetes client libraries:
 cel-go for expressions, `santhosh-tekuri/jsonschema/v6` for schemas,
-`sigs.k8s.io/yaml` for values, `gopkg.in/yaml.v3` for the mapping, the
+`sigs.k8s.io/yaml` for values, `go.yaml.in/yaml/v3` for the mapping, the
 oidc-dcr template and `service.yaml`.
 
 ## Compile pipeline

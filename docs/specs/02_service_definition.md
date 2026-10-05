@@ -23,7 +23,7 @@ instance values) and its outputs are specified in
 
 ## service.yaml
 
-Decoded by `gopkg.in/yaml.v3`: YAML 1.2, unlike values files and the
+Decoded by `go.yaml.in/yaml/v3`: YAML 1.2, unlike values files and the
 mapping (`appVersion: 1.10` is `"1.10"`; a plain `upstream: no` is a
 string, refused: [upstream](#upstream)). Strictly: a field the tables below
 do not list fails rather than being ignored, where a misspelt `protect`

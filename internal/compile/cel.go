@@ -46,7 +46,7 @@ import (
 	"cel.dev/cel-go/common/types/traits"
 	"cel.dev/cel-go/ext"
 	"cel.dev/cel-go/interpreter"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/value"
 )

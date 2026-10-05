@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"slices"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Specs: the charts of service.yaml, by key.
