@@ -289,7 +289,7 @@ neither knows OKDP.
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it; `CompileSchema`, a schema compiled as Helm compiles it | stages 1 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`) | the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`) |
-| | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`, else at the root; `readArchive`) | `merge.go` |
+| | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`, else at the root; `readArchive`, an archive as Helm's loader reads it; the 100 MiB cap, `maxChartSize`) | `merge.go` |
 | | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` (the chart keys, DNS labels, among its checks) | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
 | | `paths.go` | the grammar of the `protect` and `append` paths | `spec.go`, `merge.go` |
 | | `parameters.go` | stage 1: `Parameters` | `values.go`, `schema.go` |
@@ -350,7 +350,10 @@ template's `if` takes as true.
 
 - Reading: values files, the upstream charts' `values.yaml` included, as
   Helm 4's loader reads them (`loadValues`, `sigs.k8s.io/yaml`, YAML 1.1)
-  ([Values files](specs/01_inputs_outputs.md#values-files)).
+  ([Values files](specs/01_inputs_outputs.md#values-files)); the chart
+  archives as it reads them (`readArchive`): names written on Windows,
+  paths out of the chart refused, 100 MiB at most
+  ([Chart cache](specs/01_inputs_outputs.md#chart-cache)).
 - Merging: `value.Merge` is Helm's `MergeMaps`, `coalesceValues` Helm 4's
   `CoalesceValues`
   ([Layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
@@ -369,6 +372,7 @@ template's `if` takes as true.
   newer Go and Kubernetes versions than the programs that embed this
   package. `coalesceValues`, `coalesceTables`, `cleanNil`, `value.Merge`
   and `loadValues` follow helm v4.3.0; the fixtures guard the copy.
+  `readArchive` follows its `LoadArchiveFiles`, `TestReadArchive` guards it.
 
 ### One data model
 
@@ -632,7 +636,9 @@ source checks
 (`TestRefCheck`) and the `charts` section, `internal/chart/cache_test.go`
 the chart cache, unpacked or an archive with subcharts, in its
 repository's directory or at the root, one chart name and version of two
-repositories (`TestChartCache`, `TestFinalValuesRepositories`), and the
+repositories (`TestChartCache`, `TestFinalValuesRepositories`), an archive
+written on Windows or by `git archive` and the paths Helm refuses
+(`TestReadArchive`), the 100 MiB cap (`TestChartSize`), and the
 repository's directory (`TestRefCacheDir`),
 `internal/chart/merge_test.go` and `internal/chart/paths_test.go` the
 upstream values, `protect` and `append`. `internal/okdp/pipeline_test.go`

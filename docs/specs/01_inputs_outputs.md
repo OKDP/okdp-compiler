@@ -176,7 +176,22 @@ compiler reads `values.yaml` and `values.schema.json` only: at the root of
 the directory, or in the archive's top-level directory, not those of its
 subcharts (`<chart>/charts/<sub>/values.yaml`). A chart without
 `values.yaml` has no defaults, one without `values.schema.json` no
-[schema check](#schema-check-of-the-final-values). Each chart is read once
+[schema check](#schema-check-of-the-final-values).
+
+An archive is read as Helm's loader reads one (`LoadArchiveFiles`, the
+same in Helm 3.19, 4.2 and 4.3): an entry's name is split on `\` when it
+has one (an archive written on Windows), on `/` otherwise, and its first
+segment, the chart's directory, dropped. An entry at the archive's root, an
+absolute path, a path out of the chart (`..`) or a Windows drive (`C:/`)
+fails in Helm's words, in any entry, read or not. A chart is capped at 100
+MiB decompressed: an archive counts every file and fails at the cap, as
+Helm does; an unpacked chart counts the two files read and fails over the
+cap, as Helm 4.3 counts all of its files. Helm 4.2 and 3.19, which the
+deployers embed
+([GitOps](../01_usage.md#gitops)), also refuse a file over 5 MiB; Helm 4.3
+no longer does, nor does the compiler: such a chart compiles, and fails to
+render with them. A UTF-8 byte order mark at the start of either file is
+dropped, as Helm drops it. Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
 it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
 objects chart in every compile. `example/input/charts/` holds the
@@ -195,6 +210,9 @@ oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: mkdir -p <chart cache>
 app: chart app-1.8.0 comes from 2 repositories, and the chart cache holds it only as app-1.8.0, which cannot tell them apart: pull each into its repository's directory: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org; mkdir -p <chart cache>/fork.example.org && helm pull app --repo https://fork.example.org --version 1.8.0 -d <chart cache>/fork.example.org
 app: charts.example.org/app-1.8.0/values.yaml: cannot unmarshal yaml document: ...
 app: charts.example.org/app-1.8.0.tgz: gzip: invalid header
+app: charts.example.org/app-1.8.0.tgz: chart illegally references parent directory
+app: charts.example.org/app-1.8.0.tgz: decompressed chart is larger than the maximum size 104857600
+app: charts.example.org/app-1.8.0/values.yaml: chart exceeds maximum decompressed size of 104857600 bytes
 ```
 
 ## Parameters
