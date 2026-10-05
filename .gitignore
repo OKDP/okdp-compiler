@@ -1,5 +1,6 @@
-# Binaries
+# Binaries; dist/, goreleaser's
 bin/
+dist/
 
 # Test binary and coverage
 *.test

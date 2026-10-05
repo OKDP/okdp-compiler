@@ -12,8 +12,48 @@ The commands below run from the repository root, after `make build`.
 
 ## Install
 
-Go 1.27 or later (`go 1.27.0` in `go.mod`). Helm is not needed to compile,
-only to render the result.
+`okdp-compile` is a single binary: download a release's, install it with
+`go install`, or build it from a checkout. Helm is not needed to
+compile, only to render the result.
+
+### Release archives
+
+Each GitHub release attaches the binaries of its version, built by
+goreleaser (`.goreleaser.yaml`): `okdp-compile_<version>_<os>_<arch>.tar.gz`,
+a `.zip` for `windows`, for `<os>` `linux`, `darwin` or `windows` and
+`<arch>` `amd64` or `arm64`, each holding `okdp-compile` (`.exe` on
+Windows), `LICENSE` and `README.md`, and
+`okdp-compile_<version>_checksums.txt`, their SHA-256 sums. `<version>` is
+the tag without its `v`. From the releases of github.com/OKDP/okdp-compiler,
+where the repository is to be published:
+
+```bash
+version=X.Y.Z os=linux arch=amd64
+url=https://github.com/OKDP/okdp-compiler/releases/download/v$version
+curl -fsSLO "$url/okdp-compile_${version}_${os}_${arch}.tar.gz"
+curl -fsSLO "$url/okdp-compile_${version}_checksums.txt"
+sha256sum --ignore-missing -c "okdp-compile_${version}_checksums.txt"
+tar -xzf "okdp-compile_${version}_${os}_${arch}.tar.gz" okdp-compile
+./okdp-compile --version    # X.Y.Z
+```
+
+### `go install`
+
+```bash
+go install github.com/okdp/okdp-compiler/cmd/okdp-compile@vX.Y.Z
+```
+
+builds a release with Go 1.27 or later and installs it in `$GOBIN`
+(`$(go env GOPATH)/bin` by default); `--version` prints `X.Y.Z`. The go
+command finds a module by its path, through the Go module proxy by
+default: this needs the module served at its path,
+`github.com/okdp/okdp-compiler` (`go.mod`). The repository is to be
+published as github.com/OKDP/okdp-compiler; until the module is served at
+its path, download a release archive or build from a checkout.
+
+### From a checkout
+
+Go 1.27 or later (`go 1.27.0` in `go.mod`):
 
 ```bash
 make build                  # bin/okdp-compile
@@ -25,8 +65,9 @@ make                        # every target
 
 `make build` sets the version printed by `--version` with
 `-ldflags "-X main.version=..."`: `git describe --tags --always --dirty`
-without the leading `v` of the tag, the commit hash when there is no tag,
-`dev` outside a git checkout. `VERSION` overrides it:
+without the leading `v` of the tag, the commit hash when there is no tag;
+outside a checkout, nothing, and the binary reads its build info (below).
+`VERSION` overrides it:
 
 ```console
 $ make build VERSION=1.2.3
@@ -35,22 +76,32 @@ $ bin/okdp-compile --version
 1.2.3
 ```
 
-`go install ./cmd/okdp-compile` from a checkout installs it in `$GOBIN`; without
-the `-ldflags` above, `--version` prints `dev`. The module path is
-`github.com/okdp/okdp-compiler` (`go.mod`):
-`go install github.com/okdp/okdp-compiler/cmd/okdp-compile@<version>` works
-where the module can be fetched at that path.
+Without these `-ldflags` (`go build ./cmd/okdp-compile`, or
+`go install ./cmd/okdp-compile`, which installs it in `$GOBIN`),
+`--version` prints the version Go records in the binary, without its
+leading `v`: in a checkout, a pseudo-version Go derives from the last tag
+and the commit, `0.1.1-0.20261012192101-1872c2523100`, `+dirty` with
+uncommitted changes; `dev` when Go records none (`-buildvcs=false`,
+sources outside git).
+
+### Versions and releases
 
 A version is a tag `vX.Y.Z`, the version of the Go module and of the CLI
-(`make build` takes it from `git describe`). Releases are made by
-release-please (`.github/workflows/release-please.yml`): each push to `main`
-updates a release pull request with the next version and `CHANGELOG.md`,
-computed from the [conventional commits](https://www.conventionalcommits.org)
-since the last release (`fix:` a patch; `feat:` a minor version; `!`, a
-breaking change, a minor version before 1.0, then a major one); merging it
-tags the version and publishes the GitHub release.
+(`make build` takes it from `git describe`; `--version` prints it without
+the `v`). Releases are made by release-please
+(`.github/workflows/release-please.yml`): each push to `main` updates a
+release pull request with the next version and `CHANGELOG.md`, computed
+from the [conventional commits](https://www.conventionalcommits.org) since
+the last release (`fix:` a patch; `feat:` a minor version; `!`, a breaking
+change, a minor version before 1.0, then a major one); merging it tags the
+version and publishes the GitHub release. The same workflow then runs
+goreleaser on the tag: it builds the [release archives](#release-archives),
+`-X main.version=X.Y.Z`, and attaches them to the release, whose notes it
+keeps (a tag created with the workflow's token triggers no other
+workflow).
 `.release-please-manifest.json` holds the current version,
-`release-please-config.json` the settings.
+`release-please-config.json` the settings, `.goreleaser.yaml` the
+binaries'.
 
 ## Command line
 

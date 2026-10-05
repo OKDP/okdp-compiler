@@ -1,7 +1,8 @@
 .PHONY: build test race cover lint fmt tidy example fixtures check help
 
-# Version printed by `okdp-compile --version`, without the leading "v" of the tag.
-VERSION ?= $(or $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//'),dev)
+# Version printed by `okdp-compile --version`, without the leading "v" of the
+# tag; empty outside a checkout, the binary then reads its build info.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 LDFLAGS := -X main.version=$(VERSION)
 
 # golangci-lint at the version tools/go.mod pins: a module of its own, its

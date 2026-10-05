@@ -1,0 +1,49 @@
+# The okdp-compile binaries of a release: goreleaser builds them from the
+# release's tag, vX.Y.Z, and attaches them to its GitHub release, which
+# release-please has published with its notes
+# (.github/workflows/release-please.yml). Locally, `goreleaser release
+# --snapshot --clean` builds them into dist/ and publishes nothing;
+# `goreleaser check` checks this file.
+version: 2
+
+project_name: okdp-compiler
+
+builds:
+  - id: okdp-compile
+    main: ./cmd/okdp-compile
+    binary: okdp-compile
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # --version prints the tag without its leading v, as make build does.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    # The files' time is the commit's: the same tag builds the same binaries.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: okdp-compile
+    ids: [okdp-compile]
+    name_template: "okdp-compile_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "okdp-compile_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# The release notes are release-please's, CHANGELOG.md: goreleaser writes
+# none and keeps those of the release it adds the archives to.
+changelog:
+  disable: true
+
+release:
+  mode: keep-existing

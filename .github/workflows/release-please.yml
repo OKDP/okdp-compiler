@@ -3,6 +3,11 @@
 # commits since the last release; merging it tags vX.Y.Z and publishes the
 # GitHub release. Settings: release-please-config.json; the current version:
 # .release-please-manifest.json.
+#
+# Then, when a release was created, goreleaser builds the okdp-compile
+# binaries of its tag and attaches them to it, its notes kept
+# (.goreleaser.yaml). It runs here, not on the tag: a tag pushed with
+# GITHUB_TOKEN triggers no other workflow.
 name: release-please
 
 on:
@@ -16,8 +21,38 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  goreleaser:
+    needs: release-please
+    if: needs.release-please.outputs.release_created
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      # No cache: the binaries are built from downloaded modules, not from a
+      # cache another workflow run could have written.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      # goreleaser itself pinned: the action downloads that release.
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.18.3
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

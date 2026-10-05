@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -70,6 +71,38 @@ func TestParse(t *testing.T) {
 			t.Errorf("%s: %v %#v", args, err, o)
 		case want != "" && (err == nil || !strings.Contains(stderr.String(), want) || !strings.Contains(stderr.String(), "Usage of okdp-compile")):
 			t.Errorf("%s: got %v, want %q and the usage on stderr, got %q", args, err, want, stderr.String())
+		}
+	}
+}
+
+// TestVersionOf: the version --version prints, by how the binary was built.
+func TestVersionOf(t *testing.T) {
+	const module = "github.com/okdp/okdp-compiler"
+	// built: the build info of okdp-compile, built in module m, with deps.
+	built := func(m debug.Module, deps ...*debug.Module) *debug.BuildInfo {
+		return &debug.BuildInfo{Path: module + "/cmd/okdp-compile", Main: m, Deps: deps}
+	}
+	at := func(v string) debug.Module { return debug.Module{Path: module, Version: v} }
+	// another: a main module whose path is a prefix of the package's.
+	another := debug.Module{Path: "github.com/okdp", Version: "(devel)"}
+	for name, tc := range map[string]struct {
+		set  string
+		info *debug.BuildInfo
+		want string
+	}{
+		"set at build time":      {"1.2.3", built(at("v0.1.0")), "1.2.3"},
+		"go install @v0.1.0":     {"", built(at("v0.1.0")), "0.1.0"},
+		"go build in a checkout": {"", built(at("v0.1.1-0.20261012192101-1872c2523100+dirty")), "0.1.1-0.20261012192101-1872c2523100+dirty"},
+		"no VCS information":     {"", built(at("(devel)")), "dev"},
+		"no build info":          {"", nil, "dev"},
+		"go tool in another module": {"", built(another,
+			&debug.Module{Path: "cel.dev/cel-go", Version: "v0.32.0"},
+			&debug.Module{Path: module, Version: "v0.2.0"}), "0.2.0"},
+		"replaced by a directory": {"", built(another,
+			&debug.Module{Path: module, Version: "v0.2.0", Replace: &debug.Module{Path: "../okdp-compiler"}}), "dev"},
+	} {
+		if got := versionOf(tc.set, tc.info); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
 		}
 	}
 }

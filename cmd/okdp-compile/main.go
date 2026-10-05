@@ -14,13 +14,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	compiler "github.com/okdp/okdp-compiler"
 )
 
-// version: set at build time (-ldflags "-X main.version=...").
-var version = "dev"
+// version: set at build time (-ldflags "-X main.version=..."): make build,
+// the release binaries. Unset, --version prints the module's (versionOf).
+var version string
 
 // multi: a repeatable string flag (--platform, -f).
 type multi []string
@@ -53,13 +55,46 @@ func main() {
 	case err != nil:
 		os.Exit(2)
 	case o.version:
-		fmt.Println(version)
+		info, _ := debug.ReadBuildInfo()
+		fmt.Println(versionOf(version, info))
 		return
 	}
 	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+// versionOf: the version --version prints. set, the version set at build
+// time, when there is one; else the version of the module of the main
+// package in info, the build info, without the leading v of its tag: go
+// install ...@v0.1.0 gives 0.1.0, go build in a checkout the pseudo-version
+// Go derives from the last tag and the commit (+dirty with uncommitted
+// changes), go tool in another module the version it requires; else dev: no
+// build info, a build without VCS information ((devel)), a module replaced
+// by a directory.
+func versionOf(set string, info *debug.BuildInfo) string {
+	if set != "" {
+		return set
+	}
+	if info == nil {
+		return "dev"
+	}
+	// The module of the main package: the longest module path it is in.
+	var mod *debug.Module
+	for _, m := range append([]*debug.Module{&info.Main}, info.Deps...) {
+		in := info.Path == m.Path || strings.HasPrefix(info.Path, m.Path+"/")
+		if in && (mod == nil || len(m.Path) > len(mod.Path)) {
+			mod = m
+		}
+	}
+	if mod != nil && mod.Replace != nil {
+		mod = mod.Replace
+	}
+	if mod == nil || mod.Version == "" || mod.Version == "(devel)" {
+		return "dev"
+	}
+	return strings.TrimPrefix(mod.Version, "v")
 }
 
 // parse: the flags of args, the arguments after the program's name. A usage

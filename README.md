@@ -94,6 +94,15 @@ platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).
 
 ## Binary
 
+Each GitHub release attaches `okdp-compile` for Linux, macOS and Windows,
+amd64 and arm64, as archives with their SHA-256 sums
+(`okdp-compile_<version>_<os>_<arch>.tar.gz`, `.zip` for Windows), built by
+goreleaser. Once the module is served at its path,
+`github.com/okdp/okdp-compiler` (the repository is to be published as
+github.com/OKDP/okdp-compiler), `go install` installs a release:
+`go install github.com/okdp/okdp-compiler/cmd/okdp-compile@vX.Y.Z`. From a
+checkout, `make build` ([install](docs/01_usage.md#install)):
+
 ```bash
 make build    # bin/okdp-compile
 export OKDP_CONTRACTS=example/input/contracts   # or --contracts
