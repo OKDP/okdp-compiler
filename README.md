@@ -176,3 +176,12 @@ directory holding any other file is refused. `--release` and
 ## Documentation
 
 [docs/README.md](docs/README.md) indexes the documentation
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md): the requirements, the `make` targets,
+the tests and their data, the Helm fixtures, the commits and releases.
+
+## License
+
+Apache License 2.0: [LICENSE](LICENSE).

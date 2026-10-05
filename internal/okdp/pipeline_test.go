@@ -496,7 +496,7 @@ objects:
 		"in service.yaml": {"{}\n", chart.Specs{"okdp": {Source: objectsSource}}, nil, "service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml"},
 		"no objects chart": {
 			"{}\n", nil, M{"global": M{"okdp": M{"charts": nil}}},
-			"global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value",
+			"global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in the platform's values (--platform, Inputs.Platform)",
 		},
 		"not a map":    {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": "okdp-objects"}}}}, `global.okdp.charts.objects must be a map (repository, chart, version), got "okdp-objects"`},
 		"not a string": {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": 1}}}}}, "global.okdp.charts.objects.version must be a string, got 1"},

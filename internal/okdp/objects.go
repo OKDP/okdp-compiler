@@ -45,7 +45,7 @@ func platformCharts(okdp M, needObjects bool) (objects, dcr chart.Ref, err error
 		return objects, dcr, fmt.Errorf("global.okdp.charts: unknown key(s) %s (allowed: objects, oidcDcr)", strings.Join(unknown, ", "))
 	}
 	if charts["objects"] == nil && needObjects {
-		return objects, dcr, errors.New("global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml")
+		return objects, dcr, errors.New("global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). " + platformValue)
 	}
 	if charts["objects"] != nil {
 		if objects, err = platformChart(charts["objects"], "global.okdp.charts.objects"); err != nil {

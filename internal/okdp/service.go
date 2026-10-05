@@ -137,12 +137,18 @@ func (rs Requirements) check() error {
 
 // required: the error of a platform value key that is missing or empty
 // (null, false, "", 0, [] or {}) in okdpG, global.okdp; nil when it is set.
+// It names the input the value comes from (platformValue), not a file.
 func required(okdpG M, key string) error {
 	if value.Truthy(value.Dig(okdpG, key)) {
 		return nil
 	}
-	return fmt.Errorf("global.okdp.%s is required. It is a platform value: set it in platform/platform-values.yaml", key)
+	return fmt.Errorf("global.okdp.%s is required. %s", key, platformValue)
 }
+
+// platformValue: the end of the error of a missing platform value: the
+// input that sets it, the platform's values layers, by the binary's flag
+// and the library's field.
+const platformValue = "It is a platform value: set it in the platform's values (--platform, Inputs.Platform)"
 
 // meta: what the mapping and OKDP's objects see of the package.
 func (s *Service) meta() serviceMeta {

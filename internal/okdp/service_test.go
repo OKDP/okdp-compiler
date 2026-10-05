@@ -84,7 +84,7 @@ func TestRequireWhen(t *testing.T) {
 		_, err := CompileContext(context.Background(), &d, inputs(layers...), opts...)
 		return err
 	}
-	missing := "global.okdp.oidc.issuerUri is required. It is a platform value: set it in platform/platform-values.yaml"
+	missing := "global.okdp.oidc.issuerUri is required. It is a platform value: set it in the platform's values (--platform, Inputs.Platform)"
 	issuer := M{"global": M{"okdp": M{"oidc": M{"issuerUri": "https://sso.example.org"}}}}
 	disabled := M{"global": M{"okdp": M{"oidc": M{"enabled": false}}}}
 	for name, tc := range map[string]struct {

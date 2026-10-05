@@ -635,7 +635,7 @@ connections), before the [platform charts](#platform-charts) and the
 mapping. Both fail with the same message:
 
 ```
-global.okdp.ingress.className is required. It is a platform value: set it in platform/platform-values.yaml
+global.okdp.ingress.className is required. It is a platform value: set it in the platform's values (--platform, Inputs.Platform)
 ```
 
 ### Fields the compiler reads
@@ -699,7 +699,7 @@ The first violation is reported, in this order:
 ```
 global.okdp.charts must be a map (objects, oidcDcr), got "okdp-objects"
 global.okdp.charts: unknown key(s) oidcDCR (allowed: objects, oidcDcr)
-global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in platform/platform-values.yaml
+global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in the platform's values (--platform, Inputs.Platform)
 global.okdp.charts.objects must be a map (repository, chart, version), got "okdp-objects"
 global.okdp.charts.objects.version must be a string, got 1
 global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range

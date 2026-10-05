@@ -118,7 +118,7 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	ctx := M{
 		"release":  M{"name": in.Release, "namespace": in.Namespace},
 		"values":   params,
-		"global":   M{"okdp": value.Copy(okdpG)}, // platform-values.yaml, as written
+		"global":   M{"okdp": value.Copy(okdpG)}, // the platform values, as written
 		"platform": platform,                     // derived from it by the compiler
 	}
 	// The package: service (name, version, appVersion), labels and
