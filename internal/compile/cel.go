@@ -40,12 +40,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
-	"github.com/google/cel-go/common/types/ref"
-	"github.com/google/cel-go/common/types/traits"
-	"github.com/google/cel-go/ext"
-	"github.com/google/cel-go/interpreter"
+	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
+	"cel.dev/cel-go/ext"
+	"cel.dev/cel-go/interpreter"
 	"gopkg.in/yaml.v3"
 
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -325,6 +325,23 @@ func NewBudget(ctx context.Context, limit uint64) *Budget {
 // checks of the context.
 const interruptEvery = 100
 
+// libraries: the CEL extensions of the language, each at a pinned version.
+// A cel-go release adds functions to a library under a new version, which
+// would otherwise reach every mapping with the upgrade: a version is raised
+// on purpose, with the library's functions in the docs. Those of cel-go
+// v0.32.0: strings 5 (the cost of its functions, format's precision at most
+// 100), encoders 1 (json.encode, and its cost), optional types 2.
+func libraries() []cel.EnvOption {
+	return []cel.EnvOption{
+		ext.Strings(ext.StringsVersion(5)),
+		ext.Lists(ext.ListsVersion(3)),
+		ext.Bindings(ext.BindingsVersion(1)),
+		ext.TwoVarComprehensions(ext.TwoVarComprehensionsVersion(0)),
+		ext.Encoders(ext.EncodersVersion(1)),
+		cel.OptionalTypes(cel.OptionalTypesVersion(2)),
+	}
+}
+
 // env: the CEL environment for these variable names, cached.
 func (e *celEngine) env(names []string) (*cel.Env, error) {
 	// One environment per set of variable names, built once.
@@ -335,8 +352,7 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 	}
 	// CEL extensions, then the functions documents may call: the language's,
 	// then the caller's.
-	opts := []cel.EnvOption{
-		ext.Strings(), ext.Lists(), ext.Bindings(), ext.TwoVarComprehensions(), ext.Encoders(), cel.OptionalTypes(),
+	opts := append(libraries(),
 		cel.Function("str", cel.Overload("str_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(Text(v)) }))),
 		cel.Function("first", cel.Overload("first_list", []*cel.Type{cel.ListType(cel.DynType)}, cel.DynType,
@@ -352,7 +368,7 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 				}
 				return types.String("")
 			}))),
-	}
+	)
 	opts = append(opts, hostFunctions()...)
 	opts = append(opts, e.funcs...)
 	// Every variable is dynamic: values are plain YAML data.

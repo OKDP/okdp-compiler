@@ -12,7 +12,7 @@ The commands below run from the repository root, after `make build`.
 
 ## Install
 
-Go 1.25 or later (`go 1.25.0` in `go.mod`). Helm is not needed to compile,
+Go 1.27 or later (`go 1.27.0` in `go.mod`). Helm is not needed to compile,
 only to render the result.
 
 ```bash

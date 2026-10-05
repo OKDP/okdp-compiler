@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/types/ref"
+
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -150,6 +153,24 @@ func TestExpressionValues(t *testing.T) {
 	}
 	if _, err := runOutput("output: {x: {l: [1, '${{ 1.0/0.0 }}']}}\n"); err == nil || err.Error() != "output: x: l[1]: ${{ 1.0/0.0 }}: not a finite number: +Inf" {
 		t.Errorf("an error at its path: got %v", err)
+	}
+}
+
+// TestLibraries: the CEL extensions at their pinned versions (libraries):
+// json.encode (encoders 1), format's precision at most 100 (strings 5),
+// last (optional types 2).
+func TestLibraries(t *testing.T) {
+	for expr, want := range map[string]any{
+		"json.encode({'b': [1, 'x'], 'a': 2.5})": `{"a":2.5,"b":[1,"x"]}`,
+		"'%.2f'.format([1.0])":                   "1.00",
+		"[1, 2].last()":                          float64(2),
+	} {
+		if got, err := Eval(expr, mapCtx()); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %#v (%v), want %#v", expr, got, err, want)
+		}
+	}
+	if _, err := Eval("'%.101f'.format([1.0])", mapCtx()); err == nil || !strings.Contains(err.Error(), "precision") {
+		t.Errorf("a precision over 100: got %v", err)
 	}
 }
 
@@ -465,20 +486,17 @@ func TestBudget(t *testing.T) {
 	for i := range items {
 		items[i] = float64(i)
 	}
-	_, err = Load([]byte("let:\n  a: ${{ values.items.map(i, i * 2.0) }}\n"), M{"values": M{"items": items}}, NewBudget(doneCtx{context.Background()}, 0))
-	if err == nil || !strings.Contains(err.Error(), "operation interrupted") {
-		t.Errorf("interrupted: got %v", err)
+	// stop cancels the context at its first call, after the check before
+	// the evaluation.
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	stop := cel.Function("stop", cel.Overload("stop_dyn", []*cel.Type{cel.DynType}, cel.DynType,
+		cel.UnaryBinding(func(v ref.Val) ref.Val { calls++; cancel(); return v })))
+	_, err = Load([]byte("let:\n  a: ${{ values.items.map(i, stop(i)) }}\n"), M{"values": M{"items": items}}, NewBudget(ctx, 0), stop)
+	if !errors.Is(err, context.Canceled) || calls > interruptEvery {
+		t.Errorf("interrupted: got %v after %d of %d items", err, calls, len(items))
 	}
-}
-
-// doneCtx: a context done though its Err is nil, so that the check before
-// an evaluation passes and the evaluation sees it.
-type doneCtx struct{ context.Context }
-
-func (doneCtx) Done() <-chan struct{} {
-	c := make(chan struct{})
-	close(c)
-	return c
 }
 
 // TestCondition: a condition outside a document, one expression whose value

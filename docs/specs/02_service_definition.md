@@ -970,17 +970,19 @@ of the compile context, `oidcClientSecret` its `release` and
 Besides the CEL standard library (operators, `has`, `size`, `type`,
 `matches`, `contains`, `startsWith`, `endsWith`, conversions `int`,
 `double`, `string`, `bool`, `bytes`, `duration`, `timestamp`, macros `all`,
-`exists`, `exists_one`, `map`, `filter`), the environment enables, at their
-latest version:
+`exists`, `exists_one`, `map`, `filter`), the environment enables these
+libraries of cel-go v0.32.0, each at a pinned version: a cel-go upgrade
+does not change what a mapping may call until the compiler raises a
+version.
 
-| Library | Functions |
-|---|---|
-| strings (`ext.Strings`) | `charAt`, `indexOf`, `lastIndexOf`, `lowerAscii`, `upperAscii`, `replace`, `split`, `substring`, `trim`, `join`, `format`, `reverse`, `strings.quote` |
-| lists (`ext.Lists`) | `lists.range`, `slice`, `flatten`, `distinct`, `reverse`, `sort`, `sortBy` |
-| bindings (`ext.Bindings`) | `cel.bind(name, value, expr)` |
-| two-variable comprehensions (`ext.TwoVarComprehensions`) | `all(k, v, ...)`, `exists(k, v, ...)`, `existsOne`, `transformList`, `transformMap`, `transformMapEntry` |
-| encoders (`ext.Encoders`) | `base64.encode`, `base64.decode` |
-| optional types (`cel.OptionalTypes`) | `x.?field`, `m[?key]`, `l[?index]`, `orValue`, `hasValue`, `value`, `or`, `optional.of`, `optional.none`, `optional.ofNonZeroValue`, optional entries `{?'k': opt}` |
+| Library | Version | Functions |
+|---|---|---|
+| strings (`ext.Strings`) | 5 | `charAt`, `indexOf`, `lastIndexOf`, `lowerAscii`, `upperAscii`, `replace`, `split`, `substring`, `trim`, `join`, `format` (a precision of 100 at most), `reverse`, `strings.quote` |
+| lists (`ext.Lists`) | 3 | `lists.range`, `slice`, `flatten`, `distinct`, `reverse`, `sort`, `sortBy` |
+| bindings (`ext.Bindings`) | 1 | `cel.bind(name, value, expr)` |
+| two-variable comprehensions (`ext.TwoVarComprehensions`) | 0 | `all(k, v, ...)`, `exists(k, v, ...)`, `existsOne`, `transformList`, `transformMap`, `transformMapEntry` |
+| encoders (`ext.Encoders`) | 1 | `base64.encode`, `base64.decode`, `json.encode` (compact, keys sorted; `toJson` is Helm's) |
+| optional types (`cel.OptionalTypes`) | 2 | `x.?field`, `m[?key]`, `l[?index]`, `orValue`, `hasValue`, `value`, `or`, `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `optFlatMap`, `l.first()` and `l.last()` (optionals: not the host function `first(list)`), optional entries `{?'k': opt}` |
 
 The math, sets and regex extensions are not enabled.
 
