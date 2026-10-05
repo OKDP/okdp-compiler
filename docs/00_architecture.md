@@ -601,9 +601,10 @@ To regenerate: `go test ./internal/chart -run TestHelmValues -update`
 (writes each `final.yaml`), `go test ./internal/fsio -run TestHelmUmbrella
 -update` (writes the umbrella), then
 `OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh` (it also needs
-python3 with PyYAML). A behaviour copied from Helm or okdp-lib-chart gets a
-case here, and only what no other case covers: a fixture is Helm's whole
-output, labels and all.
+python3 with PyYAML); `make fixtures OKDP_LIB_CHART=../okdp-lib-chart` runs
+the three, `UMBRELLA_HELMS` passed on. A behaviour copied from Helm or
+okdp-lib-chart gets a case here, and only what no other case covers: a
+fixture is Helm's whole output, labels and all.
 
 The umbrella is also rendered with the Helm versions the deployers embed
 ([GitOps](01_usage.md#gitops)): `UMBRELLA_HELMS`, helm binaries separated
@@ -634,7 +635,10 @@ server passes its inputs); the host functions, schemas and
 generated Secrets are tested against Helm, in `helm_test.go`.
 `internal/compile/cel_test.go` covers the language: directives, YAML 1.1,
 aliases and merge keys, the values of expressions, error paths and the
-mistakes the checks refuse. `internal/chart/spec_test.go` covers the
+mistakes the checks refuse; and the CEL libraries table of the
+[service definition](specs/02_service_definition.md#cel-libraries), each
+library at the version `pinnedLibraries` enables (`TestLibraryVersions`):
+a version is raised with the docs. `internal/chart/spec_test.go` covers the
 source checks
 (`TestRefCheck`) and the `charts` section, `internal/chart/cache_test.go`
 the chart cache, unpacked or an archive with subcharts, in its
@@ -688,7 +692,8 @@ layer, over `platform.yaml`, a platform layer, under the release
 `fsio.Files` and `fsio.Umbrella` with them byte for byte.
 After a change, `go test ./internal/fsio -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
-fixtures); the diff is the change's effect, reviewed as such.
+fixtures; `make example` only them); the diff is the change's effect,
+reviewed as such.
 
 ### Failure cases
 
@@ -704,6 +709,23 @@ database), the protected upstream paths, a parameter schema violation, and
 an instance that sets `global` (`instance-sets-global.yaml`); the platform
 cases, a missing platform value and the OAuth client in `dcr` mode without
 a registration URL (`dcr-without-registration-url.yaml`).
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on each pull request and push to `main`,
+with the Go version of `go.mod`: gofmt, `go vet`, golangci-lint,
+`go mod tidy -diff` of `go.mod` and of `tools/go.mod`, the build, and
+`go test -race ./...`; `make check` runs the same locally. golangci-lint is
+pinned by the `tool` directive of `tools/go.mod`, a module of its own: its
+dependencies stay out of the library's `go.mod`, and so out of the module
+graph of every program that imports the library. It runs from the root as
+`go tool -modfile=tools/go.mod golangci-lint run ./...` (`make lint`), and
+is tidied in its directory, `go -C tools mod tidy` (`make tidy`): with
+`-modfile`, tidy would read the library's packages. `.golangci.yml` enables
+the default linters and those that report mistakes or older idioms here
+without noise. Dependabot (`.github/dependabot.yml`) proposes the updates
+weekly: the library's modules (`deps:`), golangci-lint and the actions
+(`ci:`).
 
 ## Limitations
 

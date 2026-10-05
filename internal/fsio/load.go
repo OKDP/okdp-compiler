@@ -98,8 +98,8 @@ func serviceFields(typ string) []string {
 			continue
 		}
 		var names []string
-		for i := range t.NumField() {
-			if name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ","); name != "" {
+		for f := range t.Fields() {
+			if name, _, _ := strings.Cut(f.Tag.Get("yaml"), ","); name != "" {
 				names = append(names, name)
 			}
 		}

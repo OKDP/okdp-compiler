@@ -325,21 +325,39 @@ func NewBudget(ctx context.Context, limit uint64) *Budget {
 // checks of the context.
 const interruptEvery = 100
 
-// libraries: the CEL extensions of the language, each at a pinned version.
-// A cel-go release adds functions to a library under a new version, which
-// would otherwise reach every mapping with the upgrade: a version is raised
-// on purpose, with the library's functions in the docs. Those of cel-go
-// v0.32.0: strings 5 (the cost of its functions, format's precision at most
-// 100), encoders 1 (json.encode, and its cost), optional types 2.
+// library: a CEL extension of the language at its pinned version; name is
+// the function enabling it, as the CEL libraries table of the service
+// definition spec names it.
+type library struct {
+	name    string
+	version uint32
+	enable  func(version uint32) cel.EnvOption
+}
+
+// pinnedLibraries: the CEL extensions of the language, each at a pinned
+// version. A cel-go release adds functions to a library under a new
+// version, which would otherwise reach every mapping with the upgrade: a
+// version is raised on purpose, with the library's functions in the docs
+// (TestLibraryVersions compares this table with the docs' one). Those of
+// cel-go v0.32.0: strings 5 (the cost of its functions, format's precision
+// at most 100), encoders 1 (json.encode, and its cost), optional types 2.
+var pinnedLibraries = []library{
+	{"ext.Strings", 5, func(v uint32) cel.EnvOption { return ext.Strings(ext.StringsVersion(v)) }},
+	{"ext.Lists", 3, func(v uint32) cel.EnvOption { return ext.Lists(ext.ListsVersion(v)) }},
+	{"ext.Bindings", 1, func(v uint32) cel.EnvOption { return ext.Bindings(ext.BindingsVersion(v)) }},
+	{"ext.TwoVarComprehensions", 0, func(v uint32) cel.EnvOption { return ext.TwoVarComprehensions(ext.TwoVarComprehensionsVersion(v)) }},
+	{"ext.Encoders", 1, func(v uint32) cel.EnvOption { return ext.Encoders(ext.EncodersVersion(v)) }},
+	{"cel.OptionalTypes", 2, func(v uint32) cel.EnvOption { return cel.OptionalTypes(cel.OptionalTypesVersion(v)) }},
+}
+
+// libraries: the options enabling the CEL extensions, at their pinned
+// versions (pinnedLibraries).
 func libraries() []cel.EnvOption {
-	return []cel.EnvOption{
-		ext.Strings(ext.StringsVersion(5)),
-		ext.Lists(ext.ListsVersion(3)),
-		ext.Bindings(ext.BindingsVersion(1)),
-		ext.TwoVarComprehensions(ext.TwoVarComprehensionsVersion(0)),
-		ext.Encoders(ext.EncodersVersion(1)),
-		cel.OptionalTypes(cel.OptionalTypesVersion(2)),
+	opts := make([]cel.EnvOption, 0, len(pinnedLibraries))
+	for _, l := range pinnedLibraries {
+		opts = append(opts, l.enable(l.version))
 	}
+	return opts
 }
 
 // env: the CEL environment for these variable names, cached.
@@ -514,7 +532,7 @@ func (e *celEngine) run(env *cel.Env, ast *cel.Ast, scope M) (ref.Val, error) {
 		if err != nil {
 			return nil, err
 		}
-		out, _, err := prg.Eval(map[string]any(scope))
+		out, _, err := prg.Eval(scope)
 		return out, err
 	}
 	if err := b.ctx.Err(); err != nil {
@@ -531,7 +549,7 @@ func (e *celEngine) run(env *cel.Env, ast *cel.Ast, scope M) (ref.Val, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, details, err := prg.ContextEval(b.ctx, map[string]any(scope))
+	out, details, err := prg.ContextEval(b.ctx, scope)
 	if details != nil && details.ActualCost() != nil {
 		b.used += *details.ActualCost()
 	}

@@ -1,0 +1,48 @@
+# golangci-lint v2, the version pinned in tools/go.mod: make lint, or
+# go tool -modfile=tools/go.mod golangci-lint run ./...
+# The default linters (errcheck, govet, ineffassign, staticcheck, unused),
+# and those that find mistakes or older idioms here without noise. Left out:
+# the style linters (revive, godot, perfsprint...); gosec, nilnil, unparam,
+# dupword and govet's shadow, whose reports here are deliberate (the modes
+# of the files written, the paths given to read, a nil value without an
+# error, "the chart key key").
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - intrange
+    - makezero
+    - misspell
+    - modernize
+    - nilerr
+    - nilnesserr
+    - nolintlint
+    - predeclared
+    - reassign
+    - thelper
+    - unconvert
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+  settings:
+    errorlint:
+      # A *nodeError is asserted, not unwrapped: the error of a path step.
+      asserts: false
+    govet:
+      enable:
+        - nilness
+        - unusedwrite
+    misspell:
+      ignore-rules:
+        # The unknown field of a generated Secret's key, in a test.
+        - lenght
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

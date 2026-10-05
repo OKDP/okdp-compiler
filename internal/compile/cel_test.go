@@ -5,7 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -171,6 +175,58 @@ func TestLibraries(t *testing.T) {
 	}
 	if _, err := Eval("'%.101f'.format([1.0])", mapCtx()); err == nil || !strings.Contains(err.Error(), "precision") {
 		t.Errorf("a precision over 100: got %v", err)
+	}
+}
+
+// TestLibraryVersions: the CEL libraries table of the service definition
+// spec lists the libraries enabled (pinnedLibraries), each at its pinned
+// version: a version is raised with the docs.
+func TestLibraryVersions(t *testing.T) {
+	const spec = "docs/specs/02_service_definition.md"
+	b, err := os.ReadFile(filepath.Join("..", "..", spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(b), "\n### CEL libraries\n")
+	if !ok {
+		t.Fatalf("%s: no CEL libraries section", spec)
+	}
+	section, _, _ = strings.Cut(section, "\n#")
+	// The table's rows after its header: the Version column, by the
+	// function in the Library column (strings (`ext.Strings`)).
+	docs := map[string]string{}
+	var header []string
+	for line := range strings.Lines(section) {
+		if !strings.HasPrefix(line, "|") || strings.HasPrefix(line, "|---") {
+			continue
+		}
+		cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
+		for i := range cells {
+			cells[i] = strings.TrimSpace(cells[i])
+		}
+		if header == nil {
+			header = cells
+			continue
+		}
+		lib, ver := slices.Index(header, "Library"), slices.Index(header, "Version")
+		if lib < 0 || ver < 0 || len(cells) <= max(lib, ver) {
+			t.Fatalf("%s: a CEL libraries row without a Library and a Version: %q", spec, line)
+		}
+		_, name, _ := strings.Cut(cells[lib], "`")
+		name, _, _ = strings.Cut(name, "`")
+		docs[name] = cells[ver]
+	}
+	for _, l := range pinnedLibraries {
+		want := strconv.FormatUint(uint64(l.version), 10)
+		if got, ok := docs[l.name]; !ok {
+			t.Errorf("%s: %s is not in the CEL libraries table", spec, l.name)
+		} else if got != want {
+			t.Errorf("%s: %s at version %s, pinned at %s (pinnedLibraries)", spec, l.name, got, want)
+		}
+		delete(docs, l.name)
+	}
+	for name := range docs {
+		t.Errorf("%s: %s in the CEL libraries table is not enabled (pinnedLibraries)", spec, name)
 	}
 }
 

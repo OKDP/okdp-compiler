@@ -18,7 +18,9 @@ only to render the result.
 ```bash
 make build                  # bin/okdp-compile
 make test                   # go test ./...
-make lint                   # golangci-lint run ./...
+make lint                   # golangci-lint, the version tools/go.mod pins
+make check                  # what CI runs: gofmt, vet, lint, tidy, race tests
+make                        # every target
 ```
 
 `make build` sets the version printed by `--version` with

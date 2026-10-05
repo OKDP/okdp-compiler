@@ -1,0 +1,65 @@
+# CI: on each pull request and push to main, the checks of `make check`:
+# lint (gofmt, go vet, golangci-lint at the version tools/go.mod pins,
+# go.mod and tools/go.mod tidy) and test (the CLI built, the tests with the
+# race detector). Go is the version go.mod declares, the oldest the module
+# supports.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: gofmt
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "::error::not formatted, run make fmt"
+            gofmt -d .
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        run: go tool -modfile=tools/go.mod golangci-lint run ./...
+      - name: go mod tidy
+        run: |
+          go mod tidy -diff
+          go -C tools mod tidy -diff
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          go build ./...
+          make build
+      - name: Test with the race detector
+        run: go test -race ./...

@@ -1,6 +1,7 @@
 package chart
 
 import (
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -38,9 +39,7 @@ func TestApplyUpstream(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := computed()
-			for k, v := range tc.want {
-				want[k] = v
-			}
+			maps.Copy(want, tc.want)
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("got  %#v\nwant %#v", got, want)
 			}
