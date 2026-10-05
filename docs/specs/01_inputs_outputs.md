@@ -197,7 +197,8 @@ it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
 objects chart in every compile. `example/input/charts/` holds the
 example's charts unpacked, their `values.yaml` only: enough to compile, not
 to render (`charts.example.org/app-1.8.0/`,
-`registry.example.org/okdp/okdp-objects-1.0.0/`).
+`registry.example.org/okdp/okdp-objects-1.0.0/`,
+`quay.io/adaltas/oidc-dcr-0.5.0/`).
 
 A chart the cache does not hold fails with the commands that download it
 into its repository's directory, prefixed with the chart key; a chart name
@@ -885,8 +886,9 @@ replacing it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
-come first and `LOG_LEVEL` follows
-(`example/output/files/app.values.yaml`); when `upstream.app.yaml` and the
+come first, then `TZ`, of `upstream.app.yaml` (`example/input/instance/`),
+then `LOG_LEVEL`, of the inline values
+(`example/output/files/app.values.yaml`): when `upstream.app.yaml` and the
 inline values both set `env`, the items of the file come before the inline
 ones.
 
@@ -1045,7 +1047,7 @@ The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
 ([equivalence with Helm](#equivalence-with-helm)).
 
-The example's in `dcr` mode (`okdp.charts.yaml`):
+The example's in `dcr` mode (`example/output/dcr/okdp.charts.yaml`):
 
 ```yaml
 app:
@@ -1121,8 +1123,9 @@ The client keys, their types and defaults:
 chart's defaults: its default `mapping.keyMapping` entries stay, so the
 Secret also holds `registration_client_uri` and `registration_access_token`
 of the registration response (oidc-dcr 0.5.0). The example's final values
-in `dcr` mode, with the platform's settings above and oidc-dcr 0.5.0 in the
-chart cache, trimmed:
+in `dcr` mode (`example/output/dcr/`), with the platform's settings above
+(`example/input/platform-dcr.yaml`, after `platform.yaml`) and oidc-dcr
+0.5.0 in the chart cache, trimmed:
 
 ```yaml
 # app.values.yaml
@@ -1415,9 +1418,13 @@ same but for `hasKey`, `toYaml` and `range`.
 
 `example/output/files/`, what `--emit-dir` writes for the example: release
 `demo-webapp`, namespace `demo`, `example/input/instance.yaml`
-(`replicas: 2`, `database: demo-db`, an `env` entry in `upstream.app`) over
-`example/input/platform.yaml` (`existing` mode: no OAuth client chart,
-[OAuth client charts](#oauth-client-charts)).
+(`replicas: 2`, `database: demo-db`, an `env` entry in `upstream.app`) and
+the instance file `example/input/instance/upstream.app.yaml` (a memory
+limit, an `env` entry) over `example/input/platform.yaml` (`existing` mode:
+no OAuth client chart, [OAuth client charts](#oauth-client-charts)).
+`example/output/dcr/` is the same compile in `dcr` mode, with
+`example/input/platform-dcr.yaml` after `platform.yaml`: the OAuth client's
+chart, `oidc-dcr` ([its values](#oauth-client-charts)).
 
 `app.values.yaml`, annotated:
 
@@ -1442,6 +1449,8 @@ env:
       secretKeyRef:
         key: password
         name: demo-db-database-credentials
+  - name: TZ                              # upstream.app.yaml, appended
+    value: Europe/Paris
   - name: LOG_LEVEL                       # upstream.app, appended
     value: debug
 fullnameOverride: demo-webapp-app         # computed
@@ -1456,7 +1465,7 @@ ingress:
 replicaCount: 2                           # computed: values.replicas
 resources:                                # base values
   limits:
-    memory: 256Mi
+    memory: 512Mi                         # upstream.app.yaml
   requests:
     cpu: 100m
     memory: 128Mi

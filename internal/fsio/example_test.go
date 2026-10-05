@@ -17,15 +17,16 @@ var update = flag.Bool("update", false, "rewrite example/output/ and testdata/he
 
 // The example: what a compile reads (example/input) and writes
 // (example/output: files/ as `okdp-compile --emit-dir`, umbrella/ as
-// `--umbrella`).
+// `--umbrella`, dcr/ as `--emit-dir` in dcr mode).
 var (
 	input  = filepath.Join("..", "..", "example", "input")
 	output = filepath.Join("..", "..", "example", "output")
 )
 
-// exampleCompile: the example package compiled with its chart cache and
-// contracts, the platform values (platform.yaml, then these platform files)
-// and these instance files, under the example's release and namespace.
+// exampleCompile: the example package compiled with its chart cache,
+// instance files and contracts, the platform values (platform.yaml, then
+// these platform files) and these instance values files, under the
+// example's release and namespace.
 func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition, *okdp.Result, error) {
 	t.Helper()
 	def, err := LoadDefinition(os.DirFS(filepath.Join(input, "package")))
@@ -34,6 +35,7 @@ func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition
 	}
 	in := okdp.Inputs{
 		Charts:    os.DirFS(filepath.Join(input, "charts")),
+		Instance:  os.DirFS(filepath.Join(input, "instance")),
 		Contracts: os.DirFS(filepath.Join(input, "contracts")),
 		Platform:  readLayers(t, append([]string{filepath.Join(input, "platform.yaml")}, platform...)),
 		Values:    readLayers(t, instance),
@@ -62,11 +64,14 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 	return layers
 }
 
-// TestExample compiles the example instance (example/input/instance.yaml)
-// and compares what it writes with example/output/, byte for byte: files/,
-// what --emit-dir writes, and umbrella/, what --umbrella writes.
+// TestExample compiles the example instance (example/input/instance.yaml,
+// example/input/instance/) and compares what it writes with
+// example/output/, byte for byte: files/, what --emit-dir writes, and
+// umbrella/, what --umbrella writes; dcr/, what --emit-dir writes with
+// platform-dcr.yaml after platform.yaml.
 func TestExample(t *testing.T) {
-	def, res, err := exampleCompile(t, nil, []string{filepath.Join(input, "instance.yaml")})
+	instance := []string{filepath.Join(input, "instance.yaml")}
+	def, res, err := exampleCompile(t, nil, instance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +85,14 @@ func TestExample(t *testing.T) {
 	}
 	checkDir(t, "files", files)
 	checkDir(t, "umbrella", umbrella)
+	_, res, err = exampleCompile(t, []string{filepath.Join(input, "platform-dcr.yaml")}, instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files, err = Files(res, DefaultIndent); err != nil {
+		t.Fatal(err)
+	}
+	checkDir(t, "dcr", files)
 }
 
 // checkDir: example/output/<dir> holds these files, and only them, byte for

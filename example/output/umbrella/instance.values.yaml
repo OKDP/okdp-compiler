@@ -19,6 +19,8 @@ app:
         secretKeyRef:
           key: password
           name: demo-db-database-credentials
+    - name: TZ
+      value: Europe/Paris
     - name: LOG_LEVEL
       value: debug
   fullnameOverride: demo-webapp-app
@@ -57,7 +59,7 @@ app:
   replicaCount: 2
   resources:
     limits:
-      memory: 256Mi
+      memory: 512Mi
     requests:
       cpu: 100m
       memory: 128Mi

@@ -2,14 +2,19 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rogpeppe/go-internal/testscript"
 )
 
 // The example: what a compile reads (example/input) and writes
@@ -19,6 +24,12 @@ var (
 	output = filepath.Join("..", "..", "example", "output")
 )
 
+// TestMain: the test binary is also okdp-compile, the command of the
+// scripts (TestScript).
+func TestMain(m *testing.M) {
+	testscript.Main(m, map[string]func(){"okdp-compile": main})
+}
+
 // example: the options that compile the example instance into dir: files/
 // (--emit-dir), umbrella/ (--umbrella) and out.yaml (--out).
 func example(dir string) options {
@@ -26,6 +37,7 @@ func example(dir string) options {
 		pkg:       filepath.Join(input, "package"),
 		charts:    filepath.Join(input, "charts"),
 		contracts: filepath.Join(input, "contracts"),
+		instance:  filepath.Join(input, "instance"),
 		platform:  multi{filepath.Join(input, "platform.yaml")},
 		values:    multi{filepath.Join(input, "instance.yaml")},
 		release:   "demo-webapp",
@@ -109,7 +121,7 @@ func TestVersionOf(t *testing.T) {
 
 // TestRun: the example compiled into directories holding the files of a
 // previous compile: they hold what example/output holds, a file no longer
-// written removed.
+// written removed; dcr/, its --emit-dir in dcr mode.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	o := example(dir)
@@ -122,6 +134,12 @@ func TestRun(t *testing.T) {
 		}
 	}
 	if err := run(o); err != nil {
+		t.Fatal(err)
+	}
+	dcr := example(dir)
+	dcr.platform = append(dcr.platform, filepath.Join(input, "platform-dcr.yaml"))
+	dcr.emitDir, dcr.umbrella, dcr.out = filepath.Join(dir, "dcr"), "", ""
+	if err := run(dcr); err != nil {
 		t.Fatal(err)
 	}
 	want := tree(t, output)
@@ -198,5 +216,44 @@ func TestRunErrors(t *testing.T) {
 				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
 			}
 		})
+	}
+}
+
+// TestScript runs the scripts of testdata/cli: okdp-compile as a
+// process, its exit status, stdout and stderr, $OKDP_CHARTS and
+// $OKDP_CONTRACTS. A script runs from the repository root, as the commands
+// of the documentation, with no $OKDP_* variable but those it sets; its
+// files and outputs are under $WORK.
+func TestScript(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testscript.Run(t, testscript.Params{
+		Dir:                 filepath.Join(root, "testdata", "cli"),
+		Setup:               func(e *testscript.Env) error { e.Cd = root; return nil },
+		Cmds:                map[string]func(*testscript.TestScript, bool, []string){"status": status},
+		RequireExplicitExec: true,
+	})
+}
+
+// status <n> <command> [args...]: runs the command, which must exit with
+// status n; the next stdout and stderr commands read its output.
+func status(ts *testscript.TestScript, neg bool, args []string) {
+	if neg || len(args) < 2 {
+		ts.Fatalf("usage: status <n> <command> [args...]")
+	}
+	want, err := strconv.Atoi(args[0])
+	ts.Check(err)
+	got := 0
+	if err := ts.Exec(args[1], args[2:]...); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			ts.Fatalf("%s: %v", args[1], err)
+		}
+		got = exit.ExitCode()
+	}
+	if got != want {
+		ts.Fatalf("exit status %d, want %d", got, want)
 	}
 }

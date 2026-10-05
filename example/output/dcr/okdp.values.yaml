@@ -1,0 +1,47 @@
+global:
+  okdp:
+    certificateIssuers:
+      selfSigned:
+        name: okdp-ca
+    charts:
+      objects:
+        chart: okdp-objects
+        repository: oci://registry.example.org/okdp
+        version: 1.0.0
+    ingress:
+      className: nginx
+      suffix: okdp.example.org
+    oidc:
+      clientProvisioning: dcr
+      dcr:
+        authMethod: anonymous
+        registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
+        ttlSeconds: 300
+      issuerUri: https://sso.okdp.example.org/realms/okdp
+objects:
+  - apiVersion: v1
+    data:
+      outputs.yaml: |
+        - contract: http
+          name: demo-webapp
+          values:
+            internalUrl: http://demo-webapp-app.demo.svc:8080
+            url: https://demo-webapp.okdp.example.org
+      service: webapp
+      url: https://demo-webapp.okdp.example.org
+      usage: |
+        A web application. Open https://demo-webapp.okdp.example.org
+      version: 1.0.0
+    kind: ConfigMap
+    metadata:
+      labels:
+        app.kubernetes.io/instance: demo-webapp
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: webapp
+        app.kubernetes.io/part-of: okdp
+        app.kubernetes.io/version: "2.3"
+        okdp.io/instance: demo-webapp
+        okdp.io/provides-http: "true"
+        okdp.io/service: webapp
+      name: demo-webapp-okdp
+      namespace: demo

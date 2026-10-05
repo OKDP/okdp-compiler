@@ -504,7 +504,8 @@ values, oidc-dcr with a default (`DcrSource`)
   The package-level variables are read-only: tables, a regular expression,
   the embedded template. A `Definition` can be shared between goroutines,
   and is not changed: the client charts and the `okdp` chart are added to a
-  copy of its charts. Each compile reads an upstream chart from the chart
+  copy of its charts (`TestConcurrentCompile` races it under `go test
+  -race`). Each compile reads an upstream chart from the chart
   cache once, however many keys it renders. Caching across compiles, if
   any, is the caller's: a chart cache keyed by pinned versions never goes
   stale.
@@ -673,7 +674,19 @@ the loading of a package, `internal/fsio/output_test.go` the files
 the umbrella's chart and values. `cmd/okdp-compile/main_test.go` runs the
 command line on the example: the refused arguments and options, the stale
 files removed, nothing written when a compile, an output or a directory
-fails.
+fails; and, with `testscript`, the scripts of
+`testdata/cli/` (`TestScript`), which run the binary as
+a process from the repository root: its exit statuses (0, 1 for an error, 2
+for a usage error), `$OKDP_CHARTS` and `$OKDP_CONTRACTS` and the flags that
+override them, what it prints on stdout and stderr, one script per concern.
+The public package is tested through the example in the root package:
+`example_test.go` holds the Go programs of README.md and
+[usage](01_usage.md#go-library) as examples, with their output, and
+`TestDocPrograms` checks that the documentation shows those programs and
+outputs; `ExampleCompileContext` uses the options; `compiler_test.go`
+compiles the example in the `existing` and `dcr` modes from goroutines
+sharing one `Definition` and the same values layers
+(`TestConcurrentCompile`, meaningful under `go test -race`).
 
 ### Example
 
@@ -681,15 +694,21 @@ fails.
 `package/` (`service.yaml`, `mapping.cel.yaml` with a database connection
 and an OAuth client, `values.yaml`, `values.schema.json`, `base/app.yaml`),
 `charts/` (the chart cache: the `values.yaml` of each chart only, in its
-repository's directory, the platform's okdp-objects included),
-`contracts/`, `platform.yaml` (the
-platform values) and `instance.yaml` (the instance's values).
+repository's directory, the platform's okdp-objects and oidc-dcr
+included), `contracts/`, `platform.yaml` (the platform values),
+`platform-dcr.yaml` (a platform layer after it: the OAuth clients in `dcr`
+mode), `instance.yaml` (the instance's values) and `instance/` (its files:
+`upstream.app.yaml`, the instance's upstream values of `app`).
 `example/output/` is what the compile writes: `files/` as `okdp-compile
---emit-dir`, `umbrella/` as `--umbrella`. `TestExample`
-(`internal/fsio/example_test.go`) compiles `instance.yaml`, an instance
-layer, over `platform.yaml`, a platform layer, under the release
+--emit-dir`, `umbrella/` as `--umbrella`, and `dcr/` as `--emit-dir` with
+`platform-dcr.yaml`. `TestExample` (`internal/fsio/example_test.go`)
+compiles `instance.yaml`, an instance layer, over `platform.yaml`, a
+platform layer, with the instance files of `instance/`, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of
-`fsio.Files` and `fsio.Umbrella` with them byte for byte.
+`fsio.Files` and `fsio.Umbrella` with them byte for byte; then the same with
+`platform-dcr.yaml` after `platform.yaml`, the files of `fsio.Files` with
+`dcr/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks that the
+command line writes `example/output/`.
 After a change, `go test ./internal/fsio -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures; `make example` only them); the diff is the change's effect,

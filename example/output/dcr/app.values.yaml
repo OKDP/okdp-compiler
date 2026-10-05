@@ -1,0 +1,69 @@
+env:
+  - name: OIDC_ISSUER
+    value: https://sso.okdp.example.org/realms/okdp
+  - name: OIDC_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        key: client_id
+        name: demo-webapp-demo-dcr
+  - name: OIDC_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        key: client_secret
+        name: demo-webapp-demo-dcr
+  - name: DB_URL
+    value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        key: password
+        name: demo-db-database-credentials
+  - name: TZ
+    value: Europe/Paris
+  - name: LOG_LEVEL
+    value: debug
+fullnameOverride: demo-webapp-app
+global:
+  okdp:
+    certificateIssuers:
+      selfSigned:
+        name: okdp-ca
+    charts:
+      objects:
+        chart: okdp-objects
+        repository: oci://registry.example.org/okdp
+        version: 1.0.0
+    ingress:
+      className: nginx
+      suffix: okdp.example.org
+    oidc:
+      clientProvisioning: dcr
+      dcr:
+        authMethod: anonymous
+        registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
+        ttlSeconds: 300
+      issuerUri: https://sso.okdp.example.org/realms/okdp
+image:
+  repository: example/webapp
+  tag: "2.3"
+ingress:
+  annotations:
+    cert-manager.io/cluster-issuer: okdp-ca
+  className: nginx
+  enabled: true
+  hosts:
+    - host: demo-webapp.okdp.example.org
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - demo-webapp.okdp.example.org
+      secretName: demo-webapp-tls
+replicaCount: 2
+resources:
+  limits:
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi

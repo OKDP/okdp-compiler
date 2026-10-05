@@ -1,0 +1,57 @@
+# The chart cache's copy of oidc-dcr 0.5.0 (oci://quay.io/adaltas), the
+# chart of the OAuth clients in dcr mode: its defaults, without their
+# comments, all a compile reads of it.
+enabled: true
+image:
+  registry: quay.io
+  repository: adaltas/oidc-dcr-job
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+registrationUrl: ""
+request: {}
+tls:
+  insecure: false
+  certificate: ""
+secret: ""
+fullnameOverride: ""
+commonLabels: {}
+security:
+  serviceAccount: ""
+  role: ""
+ttlSeconds: 0
+backoffLimit: 1
+waitForProvider:
+  discoveryUrl: ""
+  ttlSeconds: 600
+mapping:
+  useDefault: true
+  keyMapping:
+    registration_client_uri: ".registration_client_uri"
+    registration_access_token: ".registration_access_token"
+  defaultKeys:
+    client_id: ".client_id"
+    client-id: ".client_id"
+    clientId: ".client_id"
+    ClientId: ".client_id"
+    ClientID: ".client_id"
+    clientid: ".client_id"
+    oidc_client_id: ".client_id"
+    oidc-client-id: ".client_id"
+    oidcClientId: ".client_id"
+    OIDC_CLIENT_ID: ".client_id"
+    CLIENT_ID: ".client_id"
+    CLIENTID: ".client_id"
+    Client_ID: ".client_id"
+    client_secret: ".client_secret"
+    client-secret: ".client_secret"
+    clientSecret: ".client_secret"
+    ClientSecret: ".client_secret"
+    clientsecret: ".client_secret"
+    oidc_client_secret: ".client_secret"
+    oidc-client-secret: ".client_secret"
+    oidcClientSecret: ".client_secret"
+    OIDC_CLIENT_SECRET: ".client_secret"
+    CLIENT_SECRET: ".client_secret"
+    CLIENTSECRET: ".client_secret"
+    Client_Secret: ".client_secret"

@@ -1,0 +1,18 @@
+# --help and --version: status 0.
+status 0 okdp-compile --help
+! stdout .
+stderr '^Usage of okdp-compile:$'
+status 0 okdp-compile --version
+stdout .
+! stderr .
+
+# A usage error: status 2, the message and the usage on stderr.
+status 2 okdp-compile --nope
+! stdout .
+stderr '^flag provided but not defined: -nope$'
+stderr '^Usage of okdp-compile:$'
+status 2 okdp-compile --emit-dir
+stderr '^flag needs an argument: -emit-dir$'
+status 2 okdp-compile -f a.yaml b.yaml
+stderr '^unexpected argument "b.yaml": every input is a flag \(-f before each values file\)$'
+stderr '^Usage of okdp-compile:$'

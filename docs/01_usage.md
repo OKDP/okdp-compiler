@@ -151,7 +151,7 @@ The final values are written by `--emit-dir`, not by `--out`.
 
 ```console
 $ export OKDP_CONTRACTS=example/input/contracts OKDP_CHARTS=example/input/charts
-$ bin/okdp-compile --package example/input/package \
+$ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml --out /dev/stdout
 charts:
@@ -182,7 +182,7 @@ values:
 The computed values of a chart hold only what the mapping sets:
 
 ```console
-$ bin/okdp-compile --package example/input/package \
+$ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml \
     --out compiled.yaml --emit-dir out
@@ -206,7 +206,7 @@ The directory is created if needed, and holds these files only:
 The example's, `out/` here, are `example/output/files/`:
 
 ```console
-$ bin/okdp-compile --package example/input/package \
+$ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
 $ ls out
@@ -228,6 +228,22 @@ okdp:
 In `dcr` mode (`global.okdp.oidc.clientProvisioning: dcr`), the webapp's
 OAuth client adds the chart `oidc-dcr`, which `service.yaml` does not list,
 any more than `okdp`: `oidc-dcr.values.yaml`, and its entry in the index.
+The example's, with `platform-dcr.yaml` after `platform.yaml`, are
+`example/output/dcr/`:
+
+```console
+$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+    --release demo-webapp --namespace demo \
+    --platform example/input/platform.yaml --platform example/input/platform-dcr.yaml \
+    -f example/input/instance.yaml --emit-dir out-dcr
+$ ls out-dcr
+app.values.yaml
+oidc-dcr.values.yaml
+okdp.charts.yaml
+okdp.dependencies.yaml
+okdp.values.yaml
+```
+
 A chart the mapping leaves out (`$if`) has no file and no index entry.
 
 Before anything is written, the files of the directory are checked: those
@@ -261,7 +277,7 @@ deletes an upstream default
 The example's are `example/output/umbrella/`:
 
 ```console
-$ bin/okdp-compile --package example/input/package \
+$ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml -f example/input/instance.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
@@ -409,7 +425,8 @@ func main() {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("example/input/charts"), // the chart cache
+		Charts:    os.DirFS("example/input/charts"),   // the chart cache
+		Instance:  os.DirFS("example/input/instance"), // the instance's upstream values files
 		Contracts: os.DirFS("example/input/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -460,8 +477,8 @@ From memory, with `fstest.MapFS`: no file is read.
 package main
 
 import (
+	"fmt"
 	"log"
-	"os"
 	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
@@ -506,7 +523,7 @@ charts:
 	if err != nil {
 		log.Fatal(err)
 	}
-	os.Stdout.Write(files["app.values.yaml"])
+	fmt.Print(string(files["app.values.yaml"]))
 }
 ```
 
@@ -522,6 +539,11 @@ image:
   tag: "4.5"
 replicaCount: 3
 ```
+
+Both programs are examples of `example_test.go` (`ExampleCompile`,
+`ExampleFiles`, as README's is `Example`): `go test` runs them, and checks
+that they are the programs above and print what they show
+(`TestDocPrograms`).
 
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
@@ -567,11 +589,13 @@ Helm](#rendering-with-helm), `Result.Charts` being the index.
   chart a chart cache needs for a `dcr` platform.
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
-  the inputs are not changed.
+  the inputs are not changed (`TestConcurrentCompile`, under `go test
+  -race`).
 - `compiler.CompileContext(ctx, def, in, opts...)` is `Compile` cancelled
   with `ctx`: between the stages, and inside an expression at the next
   check of a comprehension (every 100 iterations); it then returns
-  `ctx.Err()`. Its options:
+  `ctx.Err()`. Its options (`ExampleCompileContext` compiles the example
+  with both):
   - `compiler.WithCostLimit(n)` bounds the total CEL cost (cel-go's runtime
     cost: about one unit per operation, list element and character
     compared) of the compile's expressions, the conditions of `require`,
