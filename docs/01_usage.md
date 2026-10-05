@@ -372,7 +372,9 @@ Do not add the base values, the instance files or the values files of the
 compile: the final values already merge the chart's own defaults, the base
 values, the computed values and the instance's upstream values
 ([merge precedence](specs/01_inputs_outputs.md#merge-precedence)), and give
-what Helm gives with them. A chart the index does not list is not rendered.
+what Helm gives with them, Helm 4 or 3.19 (Helm 3 reads the first document
+of a values file only: an upstream chart whose `values.yaml` has several
+documents needs Helm 4). A chart the index does not list is not rendered.
 
 The example's chart cache, `example/input/charts/`, holds only the charts'
 `values.yaml`, enough to compile but not to render, and its `app` and
@@ -701,8 +703,9 @@ Both fetch the dependencies from their repositories: a private repository
 needs its credentials there. Each renders with the Helm it embeds (latest
 patch releases, October 2026): Flux 2.9 Helm 4.2.4 (helm-controller 1.6), Flux 2.8 Helm 4.2.0
 (helm-controller 1.5), Flux 2.7 Helm 3.19.2 (helm-controller 1.4); Argo CD
-3.5 Helm 4.2.1, Argo CD 3.4 and 3.3 Helm 3.19.4. The umbrella is checked
-with each ([`--umbrella`](#--umbrella)).
+3.5 Helm 4.2.1, Argo CD 3.4 and 3.3 Helm 3.19.4. The umbrella, the final
+values and the schema reports are checked with each ([`--umbrella`](#--umbrella),
+[Helm fixtures](00_architecture.md#helm-fixtures)).
 
 **OAuth clients.** In `dcr` mode the index lists one chart per OAuth client
 (`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr chart;

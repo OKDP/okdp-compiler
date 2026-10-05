@@ -72,7 +72,25 @@ type umbrellaRender struct {
 	known    map[string]map[string]any
 }
 
-// umbrellaRenders: the renders of testdata/helm/umbrella, by file.
+// helmVersions: the Helm versions testdata/helm/SOURCE records: the helm
+// on the PATH (helm) and the deployers' (helms).
+func helmVersions(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(helmdata, "SOURCE"))
+	if err != nil {
+		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
+	}
+	var out []string
+	for line := range strings.Lines(string(b)) {
+		if f := strings.Fields(line); len(f) > 0 && (f[0] == "helm" || f[0] == "helms") {
+			out = append(out, f[1:]...)
+		}
+	}
+	return out
+}
+
+// umbrellaRenders: the renders of testdata/helm/umbrella, by file; each
+// version of testdata/helm/SOURCE in one.
 var umbrellaRenders = map[string]umbrellaRender{
 	"helm.json": {versions: "4.3.0, 4.2.4, 4.2.1, 4.2.0"},
 	// Helm 3 reads the first document of a values.yaml only: the a of the
@@ -168,6 +186,21 @@ func TestHelmUmbrella(t *testing.T) {
 		if _, ok := umbrellaRenders[filepath.Base(path)]; !ok {
 			t.Errorf("%s: a render of no known Helm version: add it to umbrellaRenders", path)
 		}
+	}
+	listed := map[string]string{} // version -> file
+	for file, r := range umbrellaRenders {
+		for v := range strings.SplitSeq(r.versions, ", ") {
+			listed[v] = file
+		}
+	}
+	for _, v := range helmVersions(t) {
+		if _, ok := listed[v]; !ok {
+			t.Errorf("Helm %s (testdata/helm/SOURCE): add it to the versions of the file it renders in umbrellaRenders", v)
+		}
+		delete(listed, v)
+	}
+	for v, file := range listed {
+		t.Errorf("Helm %s (umbrellaRenders, %s): not in testdata/helm/SOURCE", v, file)
 	}
 	for file, r := range umbrellaRenders {
 		helm, ok := helmJSON(t, filepath.Join(dir, file)).(map[string]any)

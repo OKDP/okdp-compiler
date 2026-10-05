@@ -242,7 +242,10 @@ chart from its defaults and `-f` files. `global` is the platform's
 | `env: [A]` | `env: [B]` | `env: [B]` |
 
 The corner cases (a `null` at the top level or in a nested map, over a
-`null` default) follow Helm 4: `testdata/helm/values/nulls`.
+`null` default) follow Helm 4: `testdata/helm/values/nulls`. Helm 3 keeps
+the `null` defaults the values leave unset, and deletes a key below the
+top level that `values.yaml` and the values both set to `null`
+([Equivalence with Helm](#equivalence-with-helm)).
 
 ### Schema check
 
@@ -268,6 +271,10 @@ webapp:
 - at '/metrics/enabled': got string, want boolean
 - at '/replicas': minimum: got 0, want 1
 ```
+
+`testdata/helm/schema` holds what Helm reports on each case
+(`TestHelmSchema`): Helm 4.3.0 and the versions the deployers embed, 4.2
+and 3.19, report the same.
 
 ### Reserved keys
 
@@ -970,9 +977,16 @@ renders, `global` and the [appended](#append) lists aside. `<source>`:
 `oci://<repository>/<chart> --version <version>`, or its archive in the
 chart cache.
 `testdata/helm/values` holds what Helm computes on each case
-(`TestHelmValues`). Helm 3 reads the first document of a values file only:
-with it, a chart whose `values.yaml` has several documents renders
-differently ([Umbrella chart](#umbrella-chart)).
+(`TestHelmValues`), with Helm 4.3.0 and the versions the deployers embed
+([GitOps](../01_usage.md#gitops)): Helm 4.2.4, 4.2.1 and 4.2.0 render as
+Helm 4.3.0. Helm 3.19.4 and 3.19.2 coalesce some nulls differently (a
+`null` default the values leave unset is kept, a key below the top level
+that `values.yaml` and the values both set to `null` is deleted:
+`helm3.json`), and render the final values as they render the layers, but
+for one case: Helm 3 reads the first document of a values file only. With
+it, a chart whose `values.yaml` has several documents gets back the keys
+of the first document that a later one deletes (`documents/helm3-final.json`):
+such a chart needs Helm 4 ([Umbrella chart](#umbrella-chart)).
 
 ### Schema check of the final values
 

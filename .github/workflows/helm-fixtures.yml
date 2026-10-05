@@ -1,0 +1,82 @@
+# Helm fixtures: regenerates testdata/helm (make fixtures) with what
+# testdata/helm/SOURCE records, and fails when the result differs from the
+# committed fixtures (docs/00_architecture.md#helm-fixtures). SOURCE names
+# the helm on the PATH (helm) and the deployers' Helm versions (helms, given
+# to generate.sh as UMBRELLA_HELMS), each downloaded from https://get.helm.sh
+# and checked against its .sha256sum.
+name: helm-fixtures
+
+on:
+  pull_request:
+    paths:
+      - testdata/helm/**
+      - internal/chart/**
+      - .github/workflows/helm-fixtures.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read testdata/helm/SOURCE
+        id: source
+        run: |
+          src=testdata/helm/SOURCE
+          helm=$(awk '$1 == "helm" { print $2 }' "$src")
+          helms=$(awk '$1 == "helms" { $1 = ""; print substr($0, 2) }' "$src")
+          if [[ -z $helm ]]; then
+            echo "::error file=$src::no helm version"
+            exit 1
+          fi
+          {
+            echo "helm=$helm"
+            echo "helms=$helms"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install Helm
+        env:
+          HELM: ${{ steps.source.outputs.helm }}
+          HELMS: ${{ steps.source.outputs.helms }}
+        run: |
+          dir=$RUNNER_TEMP/helm
+          mkdir -p "$dir"
+          cd "$dir"
+          for v in $HELM $HELMS; do
+            [[ -d v$v ]] && continue
+            curl -fsSL --remote-name-all "https://get.helm.sh/helm-v$v-linux-amd64.tar.gz" "https://get.helm.sh/helm-v$v-linux-amd64.tar.gz.sha256sum"
+            sha256sum -c "helm-v$v-linux-amd64.tar.gz.sha256sum"
+            mkdir "v$v"
+            tar -C "v$v" -xzf "helm-v$v-linux-amd64.tar.gz"
+          done
+          echo "$dir/v$HELM/linux-amd64" >> "$GITHUB_PATH"
+          deployers=
+          for v in $HELMS; do deployers+="${deployers:+ }$dir/v$v/linux-amd64/helm"; done
+          echo "UMBRELLA_HELMS=$deployers" >> "$GITHUB_ENV"
+
+      - name: Install PyYAML
+        run: python3 -c 'import yaml' 2> /dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
+
+      - name: Regenerate the fixtures
+        run: |
+          helm version
+          make fixtures
+
+      - name: Compare with the committed fixtures
+        run: |
+          git add --intent-to-add testdata/helm
+          git diff --exit-code testdata/helm

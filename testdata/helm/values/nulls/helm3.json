@@ -1,0 +1,32 @@
+{
+  "emptyNull": null,
+  "list": [
+    3
+  ],
+  "mapOverScalar": {
+    "a": 1
+  },
+  "newNull": null,
+  "nullThenMap": {
+    "a": 1
+  },
+  "scalarOverMap": "s",
+  "tbl": {
+    "a": 10,
+    "b": 2,
+    "keep": {
+      "d": 4
+    },
+    "nested": {
+      "c": 3,
+      "defaultNull": "z",
+      "newNull": null
+    },
+    "newMap": {
+      "e": null,
+      "f": 5
+    },
+    "newNull": null
+  },
+  "top": "x"
+}

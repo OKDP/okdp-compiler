@@ -1,42 +1,165 @@
 #!/usr/bin/env bash
 # Regenerates the Helm outputs the compiler tests compare with, using the helm
-# binary on the PATH (Helm 4) and the okdp-lib-chart checkout $OKDP_LIB_CHART
-# (its templates are what the compiler reproduces). Run from anywhere:
+# binary on the PATH (Helm 4, the reference) and the helm binaries the
+# deployers embed ($UMBRELLA_HELMS). Run from anywhere:
 #
 #   go test ./internal/chart -run TestHelmValues -update   # values/<case>/final.yaml
 #   go test ./internal/fsio -run TestHelmUmbrella -update  # umbrella/Chart.yaml, instance.values.yaml
 #   UMBRELLA_HELMS="<helm> ..." testdata/helm/generate.sh
 #
+# It needs bash (3.2 or later) and python3 with PyYAML; nothing that differs
+# between the GNU and BSD tools.
+#
+# $UMBRELLA_HELMS: the paths of the deployers' helm binaries, separated by
+#   spaces (docs/00_architecture.md#helm-fixtures). Each renders every
+#   fixture again; the binaries of one major version must render the same.
+#   What a major version M renders differently from the helm on the PATH
+#   goes beside the reference file, helm renamed helmM (helm3.json,
+#   helm3-final.json, helm3.txt), removed when it renders the same. Unset,
+#   the helm<M> files and their versions in SOURCE are left as they are.
+#
 # values/<case>/: a chart whose values.yaml is <case>/values.yaml, rendered
 #   with -f <case>/layer-*.yaml in order: .Values as JSON in helm.json; and
 #   rendered with -f <case>/final.yaml (the compiler's final values for these
-#   layers): helm-final.json.
+#   layers): helm-final.json. helm<M>.json: Helm M with the layers, where it
+#   differs from helm.json; helm<M>-final.json: Helm M with the final values,
+#   where it differs from Helm M with the layers.
 # umbrella/: the umbrella the compiler writes over the values cases
 #   (Chart.yaml, instance.values.yaml), each case's chart a dependency named
 #   after the case, rendered with -f instance.values.yaml: the .Values of
-#   each subchart, by its .Chart.Name (the key), in helm.json. Rendered too
-#   by each helm binary of $UMBRELLA_HELMS (paths, separated by spaces; the
-#   deployers' Helm versions): helm<major>.json, none when it is helm.json;
-#   the binaries of one major version must render the same.
+#   each subchart, by its .Chart.Name (the key), in helm.json; helm<M>.json.
 # schema/<case>/: a chart with <case>/values.schema.json and values.yaml,
 #   rendered with -f <case>/layer-*.yaml: what helm reports in helm.txt
 #   ("ok" when the values are valid; Helm's order varies, a report with the
-#   same lines is not rewritten).
+#   same lines is not rewritten); helm<M>.txt where the lines differ.
 # functions/: Helm's sha256sum, toJson, toPrettyJson, toYaml and quote of
-#   each input of functions/values.yaml, and okdp.fullname of each suffix:
-#   helm.json.
+#   each input of functions/values.yaml (given with -f: user values, whose
+#   nulls every Helm version keeps): helm.json; helm<M>.json.
+# SOURCE: what rendered the fixtures: the version of the helm on the PATH
+#   (helm) and the deployers' (helms).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-tmp=$(mktemp -d)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/helm-fixtures.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+r=$tmp/r # the renders
+mkdir "$r"
+label= # the fixture rendered, for the messages
 
-# render <release> <chart dir> <out> [helm args]: the data.out key of the
+if ! ref=$(helm version --template '{{.Version}}' 2> /dev/null); then
+  echo "no helm on the PATH" >&2
+  exit 1
+fi
+ref=${ref#v}
+
+# The deployers' binaries (helms) and their versions, latest first; lead[i]:
+# the index of the latest binary of the major version of helms[i]; majors:
+# the major versions, each with the index of its latest binary in leads.
+helms=() versions=() lead=() majors=() leads=()
+read -ra given <<< "${UMBRELLA_HELMS:-}"
+for ((i = 0; i < ${#given[@]}; i++)); do
+  if ! v=$("${given[i]}" version --template '{{.Version}}' 2> /dev/null) || [[ -z $v ]]; then
+    echo "UMBRELLA_HELMS: ${given[i]} is not a helm binary" >&2
+    exit 1
+  fi
+  echo "${v#v} ${given[i]}"
+done > "$tmp/helms"
+sort -t. -k1,1nr -k2,2nr -k3,3nr "$tmp/helms" > "$tmp/helms.sorted"
+while read -r v h; do
+  m=${v%%.*} l=${#helms[@]}
+  for ((k = 0; k < ${#majors[@]}; k++)); do
+    if [[ ${majors[k]} == "$m" ]]; then l=${leads[k]}; fi
+  done
+  if ((l == ${#helms[@]})); then majors+=("$m") leads+=("$l"); fi
+  helms+=("$h") versions+=("$v") lead+=("$l")
+done < "$tmp/helms.sorted"
+
+# versions_of <major>: the deployers' versions of a major version.
+versions_of() {
+  local i out=
+  for ((i = 0; i < ${#versions[@]}; i++)); do
+    if [[ ${versions[i]%%.*} == "$1" ]]; then out+="${out:+, }${versions[i]}"; fi
+  done
+  echo "$out"
+}
+
+# same <kind> <a> <b>: whether two renders are the same: bytes, lines (the
+# same lines in any order) or yaml (the same YAML documents).
+same() {
+  case $1 in
+    bytes) cmp -s "$2" "$3" ;;
+    lines) [[ -f $3 ]] && cmp -s <(sort "$2") <(sort "$3") ;;
+    yaml) cmp -s "$2" "$3" || python3 -c '
+import sys, yaml
+try:
+    a, b = (list(yaml.safe_load_all(open(f))) for f in sys.argv[1:])
+except (OSError, yaml.YAMLError):
+    sys.exit(1)
+sys.exit(a != b)' "$2" "$3" ;;
+  esac
+}
+
+# put <kind> <src> <dest>: <src> copied to <dest>, unless they are the same.
+put() {
+  same "$1" "$2" "$3" || cp "$2" "$3"
+}
+
+# run <kind> <name> <fn> [args]: <fn> <helm> <file> [args] writes what the
+# binary <helm> renders in <file>: the helm on the PATH in $r/<name>, the
+# deployers' binary i in $r/<name>.<i>; the binaries of one major version
+# must render the same (<kind>, as same compares).
+run() {
+  local kind=$1 name=$2 fn=$3 i l
+  shift 3
+  "$fn" helm "$r/$name" "$@"
+  for ((i = 0; i < ${#helms[@]}; i++)); do
+    "$fn" "${helms[i]}" "$r/$name.$i" "$@"
+    l=${lead[i]}
+    if ((l != i)) && ! same "$kind" "$r/$name.$i" "$r/$name.$l"; then
+      echo "$label: Helm ${versions[i]} renders differently from Helm ${versions[l]}" >&2
+      exit 1
+    fi
+  done
+}
+
+# keep <kind> <name> <out> [<base>]: the render of <name> by each major
+# version M of the deployers in <out> with helm renamed helmM, removed when
+# it is the same as <out>, or as M's render of <base>.
+keep() {
+  local kind=$1 name=$2 out=$3 base=${4:-} k j b dest against
+  for ((k = 0; k < ${#majors[@]}; k++)); do
+    j=${leads[k]} b=${out##*/}
+    dest=${out%/*}/${b/helm/helm${majors[k]}}
+    against=$out
+    if [[ -n $base ]]; then against=$r/$base.$j; fi
+    if same "$kind" "$r/$name.$j" "$against"; then
+      rm -f "$dest"
+    else
+      put "$kind" "$r/$name.$j" "$dest"
+      echo "${dest#"$here"/}: Helm $(versions_of "${majors[k]}")"
+    fi
+  done
+}
+
+# alike <kind> <name>: every deployer's binary renders <name> as the helm on
+# the PATH does.
+alike() {
+  local i
+  for ((i = 0; i < ${#helms[@]}; i++)); do
+    if ! same "$1" "$r/$2.$i" "$r/$2"; then
+      echo "$label: Helm ${versions[i]} renders differently from Helm $ref:" >&2
+      diff "$r/$2" "$r/$2.$i" >&2 || true
+      exit 1
+    fi
+  done
+}
+
+# render <helm> <out> <release> <chart> [helm args]: the data.out key of the
 # first object the chart renders.
 render() {
-  local release=$1 chart=$2 out=$3
-  shift 3
-  if ! helm template "$release" "$chart" --namespace demo "$@" > "$tmp/render.yaml" 2> "$tmp/render.err"; then
-    echo "$out: helm template failed:" >&2
+  local helm=$1 out=$2 release=$3 chart=$4
+  shift 4
+  if ! "$helm" template "$release" "$chart" --namespace demo "$@" > "$tmp/render.yaml" 2> "$tmp/render.err"; then
+    echo "$label ($helm): helm template failed:" >&2
     cat "$tmp/render.err" >&2
     exit 1
   fi
@@ -60,12 +183,17 @@ data:
   out: {{ toPrettyJson .Values | quote }}
 EOF
 for c in "$here"/values/*/; do
+  c=${c%/} label=values/${c##*/}
   cp "$c/values.yaml" "$chart/values.yaml"
   layers=()
   for l in "$c"/layer-*.yaml; do layers+=(-f "$l"); done
-  render t "$chart" "$c/helm.json" "${layers[@]}"
+  run bytes layers render t "$chart" "${layers[@]}"
+  cp "$r/layers" "$c/helm.json"
+  keep bytes layers "$c/helm.json"
   if [[ -f $c/final.yaml ]]; then
-    render t "$chart" "$c/helm-final.json" -f "$c/final.yaml"
+    run bytes final render t "$chart" -f "$c/final.yaml"
+    cp "$r/final" "$c/helm-final.json"
+    keep bytes final "$c/helm-final.json" layers
   fi
 done
 
@@ -97,51 +225,35 @@ out = {d["metadata"]["name"]: json.loads(d["data"]["out"]) for d in yaml.safe_lo
 json.dump(out, open(sys.argv[2], "w"), indent=2, sort_keys=True)
 open(sys.argv[2], "a").write("\n")' "$tmp/render.yaml" "$out"
 }
-umbrella helm "$here/umbrella/helm.json"
-declare -A first # major -> the first version rendered
-read -ra helms <<< "${UMBRELLA_HELMS:-}"
-for h in "${helms[@]}"; do
-  v=$("$h" version --template '{{.Version}}' 2> /dev/null)
-  major=${v#v}
-  major=${major%%.*}
-  umbrella "$h" "$tmp/umbrella-$v.json"
-  out=helm$major.json
-  if [[ -n ${first[$major]:-} ]]; then
-    if ! cmp -s "$tmp/umbrella-$v.json" "$tmp/umbrella-${first[$major]}.json"; then
-      echo "umbrella: Helm $v renders differently from Helm ${first[$major]}" >&2
-      exit 1
-    fi
-  else
-    first[$major]=$v
-    if cmp -s "$tmp/umbrella-$v.json" "$here/umbrella/helm.json"; then
-      rm -f "$here/umbrella/$out"
-    else
-      cp "$tmp/umbrella-$v.json" "$here/umbrella/$out"
-    fi
-  fi
-  [[ -f $here/umbrella/$out ]] || out=helm.json
-  echo "umbrella: Helm $v renders $out"
-done
+label=umbrella
+run bytes umbrella umbrella
+cp "$r/umbrella" "$here/umbrella/helm.json"
+keep bytes umbrella "$here/umbrella/helm.json"
 
+# report <helm> <out> [helm args]: what helm reports on the values of the
+# schema chart, ok when they are valid.
+report() {
+  local helm=$1 out=$2
+  shift 2
+  if "$helm" template t "$chart" "$@" > /dev/null 2> "$tmp/err"; then
+    echo ok > "$out"
+  else
+    awk '!/^level=/' "$tmp/err" > "$out"
+  fi
+}
 newchart schema
 printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n' > "$chart/templates/x.yaml"
 for c in "$here"/schema/*/; do
+  c=${c%/} label=schema/${c##*/}
   cp "$c/values.yaml" "$c/values.schema.json" "$chart/"
   layers=()
   for l in "$c"/layer-*.yaml; do layers+=(-f "$l"); done
-  if helm template t "$chart" "${layers[@]}" > /dev/null 2> "$tmp/err"; then
-    echo ok > "$c/helm.txt"
-  else
-    grep -v '^level=' "$tmp/err" > "$tmp/report"
-    # Kept when only the order changes.
-    if ! cmp -s <(sort "$tmp/report") <(sort "$c/helm.txt" 2> /dev/null); then
-      mv "$tmp/report" "$c/helm.txt"
-    fi
-  fi
+  run lines report report "${layers[@]}"
+  put lines "$r/report" "$c/helm.txt" # kept when only the order changes
+  keep lines report "$c/helm.txt"
 done
 
 newchart functions
-cp "$here/functions/values.yaml" "$chart/values.yaml"
 cat > "$chart/templates/functions.yaml" <<'EOF'
 {{- $out := dict }}
 {{- range $k, $v := .Values.inputs }}
@@ -156,7 +268,10 @@ metadata:
 data:
   out: {{ toJson (dict "functions" $out) | quote }}
 EOF
-render demo-a-rather-long-release-name-for-names "$chart" "$here/functions/helm.json"
+label=functions
+run bytes functions render demo "$chart" -f "$here/functions/values.yaml"
+cp "$r/functions" "$here/functions/helm.json"
+keep bytes functions "$here/functions/helm.json"
 
 # The chart of the secrets cases (the tests build the same).
 svc='apiVersion: v2\nname: svc\nversion: 1.2.3\nappVersion: "4.5"\n'
@@ -164,25 +279,61 @@ svc='apiVersion: v2\nname: svc\nversion: 1.2.3\nappVersion: "4.5"\n'
 # secrets/generated/<case>.yaml: okdp.generatedSecret with the arguments
 # under args, rendered in <case>.helm.yaml (or the first line of the error
 # in <case>.helm.txt).
+#
+# secret <helm> <out> <case>: the objects, or the first line of the error
+# (<out>.failed then exists).
+secret() {
+  local helm=$1 out=$2 f=$3
+  rm -f "$out.failed"
+  if ! "$helm" template demo-secrets "$chart" --namespace demo -f "$f" > "$out" 2> "$tmp/err"; then
+    awk '!/^level=/ { print; exit }' "$tmp/err" > "$out"
+    touch "$out.failed"
+  fi
+}
 newchart secrets
-printf "$svc" > "$chart/Chart.yaml"
+printf '%b' "$svc" > "$chart/Chart.yaml"
 printf '{{ include "okdp.generatedSecret" (merge (dict "ctx" $) .Values.args) }}\n' > "$chart/templates/secret.yaml"
 for f in "$here"/secrets/generated/*.yaml; do
-  [[ $f == *.helm.yaml ]] && continue
+  case $f in *.helm.yaml) continue ;; esac
+  label=secrets/generated/${f##*/}
+  run yaml secret secret "$f"
+  alike yaml secret
   rm -f "${f%.yaml}.helm.yaml" "${f%.yaml}.helm.txt"
-  if helm template demo-secrets "$chart" --namespace demo -f "$f" > "$tmp/out" 2> "$tmp/err"; then
-    mv "$tmp/out" "${f%.yaml}.helm.yaml"
+  if [[ -f $r/secret.failed ]]; then
+    cp "$r/secret" "${f%.yaml}.helm.txt"
   else
-    grep -v -m1 '^level=' "$tmp/err" > "${f%.yaml}.helm.txt"
+    cp "$r/secret" "${f%.yaml}.helm.yaml"
   fi
 done
 
 # secrets/descriptor/: okdp.descriptor of a chart with outputs.tpl (outputs
 # with a secret), in helm.yaml.
+descriptor() {
+  "$1" template demo-secrets "$chart" --namespace demo > "$2"
+}
 newchart svc
 d=$here/secrets/descriptor
-printf "$svc" > "$chart/Chart.yaml"
-sed -i '/define "okdp.instance.\(url\|usage\|outputs\)"/d' "$chart/templates/_descriptor.tpl"
+printf '%b' "$svc" > "$chart/Chart.yaml"
+sed -e '/define "okdp\.instance\.url"/d' -e '/define "okdp\.instance\.usage"/d' -e '/define "okdp\.instance\.outputs"/d' \
+  "$chart/templates/_descriptor.tpl" > "$tmp/_descriptor.tpl"
+mv "$tmp/_descriptor.tpl" "$chart/templates/_descriptor.tpl"
 cp "$d/outputs.tpl" "$chart/templates/_outputs.tpl"
 printf '{{ include "okdp.descriptor" . }}\n' > "$chart/templates/descriptor.yaml"
-helm template demo-secrets "$chart" --namespace demo > "$d/helm.yaml"
+label=secrets/descriptor
+run yaml descriptor descriptor
+alike yaml descriptor
+cp "$r/descriptor" "$d/helm.yaml"
+
+# SOURCE.
+if ((${#versions[@]})); then
+  deployers=${versions[*]}
+else
+  deployers=$(sed -n 's/^helms //p' "$here/SOURCE" 2> /dev/null || true)
+  echo "UMBRELLA_HELMS unset: the helm<major> files and the helms of SOURCE are left as they are" >&2
+fi
+{
+  echo "# What rendered the fixtures of testdata/helm (generate.sh): the helm on"
+  echo "# the PATH and the deployers' (UMBRELLA_HELMS)."
+  echo "helm $ref"
+  echo "helms${deployers:+ $deployers}"
+} > "$here/SOURCE"

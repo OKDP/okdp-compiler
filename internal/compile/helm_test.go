@@ -15,7 +15,9 @@ import (
 )
 
 // Tests against what Helm computes: the fixtures of testdata/helm are
-// written by `helm template` (testdata/helm/generate.sh, Helm 4).
+// written by `helm template` (testdata/helm/generate.sh: Helm 4 on the PATH,
+// and the deployers' versions where they render differently; the versions
+// in testdata/helm/SOURCE).
 
 // helmdata: testdata/helm, at the repository root.
 var helmdata = filepath.Join("..", "..", "testdata", "helm")
@@ -68,7 +70,9 @@ tagged: {!!merge <<: *c}
 
 // TestHelmFunctions: sha256, toJson, toPrettyJson, toYaml and quote called
 // from CEL, against Helm's sha256sum (of toString), toJson, toPrettyJson,
-// toYaml and quote on the same inputs (testdata/helm/functions).
+// toYaml and quote on the same inputs (testdata/helm/functions: helm.json,
+// and helm<major>.json where a deployer's major version renders
+// differently).
 func TestHelmFunctions(t *testing.T) {
 	dir := filepath.Join(helmdata, "functions")
 	b, err := os.ReadFile(filepath.Join(dir, "values.yaml"))
@@ -79,23 +83,27 @@ func TestHelmFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	helm := value.AsMap(helmJSON(t, filepath.Join(dir, "helm.json")))
 	e := &celEngine{envs: map[string]*cel.Env{}}
-	for name, x := range value.AsMap(in["inputs"]) {
-		want := value.AsMap(value.AsMap(helm["functions"])[name])
-		for _, f := range []string{"sha256", "toJson", "toPrettyJson", "toYaml", "quote"} {
-			w, ok := want[f]
-			if !ok {
-				continue // sha256sum of a null: Helm's toString gives "<nil>"
-			}
-			got, err := e.eval(f+"(x)", M{"x": x})
-			switch {
-			// Helm prints "" when the encoder fails; the compile fails.
-			case err != nil && w == "":
-			case err != nil:
-				t.Errorf("%s(%s): %v", f, name, err)
-			case got != w:
-				t.Errorf("%s(%s):\n got %q\nwant %q", f, name, got, w)
+	helmJSON(t, filepath.Join(dir, "helm.json")) // there, at least
+	renders, _ := filepath.Glob(filepath.Join(dir, "helm*.json"))
+	for _, path := range renders {
+		helm := value.AsMap(helmJSON(t, path))
+		for name, x := range value.AsMap(in["inputs"]) {
+			want := value.AsMap(value.AsMap(helm["functions"])[name])
+			for _, f := range []string{"sha256", "toJson", "toPrettyJson", "toYaml", "quote"} {
+				w, ok := want[f]
+				if !ok {
+					continue // sha256sum of a null: Helm's toString gives "<nil>"
+				}
+				got, err := e.eval(f+"(x)", M{"x": x})
+				switch {
+				// Helm prints "" when the encoder fails; the compile fails.
+				case err != nil && w == "":
+				case err != nil:
+					t.Errorf("%s: %s(%s): %v", filepath.Base(path), f, name, err)
+				case got != w:
+					t.Errorf("%s: %s(%s):\n got %q\nwant %q", filepath.Base(path), f, name, got, w)
+				}
 			}
 		}
 	}

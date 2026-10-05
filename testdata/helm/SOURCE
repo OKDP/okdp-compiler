@@ -1,0 +1,4 @@
+# What rendered the fixtures of testdata/helm (generate.sh): the helm on
+# the PATH and the deployers' (UMBRELLA_HELMS).
+helm 4.3.0
+helms 4.2.4 4.2.1 4.2.0 3.19.4 3.19.2

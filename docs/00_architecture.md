@@ -363,9 +363,13 @@ template's `if` takes as true.
 - Final values: written so that Helm 3 or 4, coalescing them over the chart
   defaults, sees what it would see with the base, computed and upstream
   values as `-f` files
-  ([Equivalence with Helm](specs/01_inputs_outputs.md#equivalence-with-helm)).
+  ([Equivalence with Helm](specs/01_inputs_outputs.md#equivalence-with-helm)),
+  checked with Helm 4.3 and the 4.2 and 3.19 releases the deployers embed;
+  Helm 3 reads the first document of a values file only, an upstream
+  `values.yaml` of several documents needs Helm 4.
 - Schemas: validated as Helm 4.3 validates them (`santhosh-tekuri/jsonschema`
-  v6), on the coalesced values the templates see, reported in Helm's words,
+  v6), on the coalesced values the templates see, reported in Helm's words
+  (Helm 4.2 and 3.19 report the same),
   sorted by path since Helm's order varies between runs
   ([Schema check](specs/01_inputs_outputs.md#schema-check)).
 - Functions: a host function that reproduces a Helm, sprig or okdp-lib-chart
@@ -583,51 +587,64 @@ fixtures, helm is needed only to regenerate them.
 ### Helm fixtures
 
 `testdata/helm` holds what `helm template` computes on the same
-inputs, written by `generate.sh` with Helm 4 on the `PATH` and an
-okdp-lib-chart checkout (`OKDP_LIB_CHART`), whose templates are what the
-compiler reproduces. Each case renders a small chart carrying the
-library's templates, and stores its output or its error; the
+inputs, written by `generate.sh` with Helm 4 on the `PATH` and the Helm
+versions the deployers embed ([GitOps](01_usage.md#gitops)). Each case
+renders a small chart, and stores its output or its error; the
 `helm_test.go` of the package that reproduces each behaviour compares:
 
 | Fixture | Helm's side | Test |
 |---|---|---|
-| `values/<case>/` | `.Values` with the `layer-*.yaml` files (`helm.json`), and with the compiler's `final.yaml` (`helm-final.json`) | `chart`: `TestHelmValues`, coalescing as Helm, and final values that Helm renders back to the same `.Values` |
-| `schema/<case>/` | Helm's error report, or `ok` (`helm.txt`) | `chart`: `TestHelmSchema` |
-| `functions/` | `sha256sum`, `toJson`, `toPrettyJson`, `toYaml`, `quote`, `okdp.fullname` | `compile`: `TestHelmFunctions`; `okdp`: `TestHelmFullname` |
-| `secrets/generated/` | the objects of `okdp.generatedSecret`, or its error | `okdp`: `TestHelmGeneratedSecret`, without the `helm.sh/chart` labels the compiler does not set (`withoutChartLabel`) |
-| `secrets/descriptor/` | `okdp.descriptor` of outputs with a `secret` | `okdp`: `TestHelmDescriptorSecrets`, the same |
+| `values/<case>/` | `.Values` with the `layer-*.yaml` files (`helm.json`), and with the compiler's `final.yaml` (`helm-final.json`); with each other Helm major version, where it differs (`helm3.json`), and where it renders the final values differently from the layers (`helm3-final.json`) | `chart`: `TestHelmValues`, coalescing as Helm, and final values that each version renders back to the same `.Values`, but for each known difference of a version (`helmFinalKnown`) |
+| `schema/<case>/` | Helm's error report, or `ok` (`helm.txt`; `helm3.txt` where a version reports differently) | `chart`: `TestHelmSchema`, each report |
+| `functions/` | `sha256sum`, `toJson`, `toPrettyJson`, `toYaml`, `quote` of inputs given with `-f`, and `okdp.fullname` (`helm.json`; `helm3.json` where a version renders differently) | `compile`: `TestHelmFunctions`; `okdp`: `TestHelmFullname`, each render |
+| `secrets/generated/` | the objects of `okdp.generatedSecret`, or its error, the same with every version | `okdp`: `TestHelmGeneratedSecret`, without the `helm.sh/chart` labels the compiler does not set (`withoutChartLabel`) |
+| `secrets/descriptor/` | `okdp.descriptor` of outputs with a `secret`, the same with every version | `okdp`: `TestHelmDescriptorSecrets`, the same |
 | `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`); with each other Helm major version, where it differs (`helm3.json`) | `fsio`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart, and each known difference of a version (`umbrellaRenders`) |
+
+`SOURCE` records what rendered them, written by `generate.sh`: the version
+of the helm on the `PATH` (`helm`), the deployers' versions (`helms`), and
+the okdp-lib-chart repository and commit (`-dirty` when its templates were
+modified).
 
 To regenerate: `go test ./internal/chart -run TestHelmValues -update`
 (writes each `final.yaml`), `go test ./internal/fsio -run TestHelmUmbrella
--update` (writes the umbrella), then
-`OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh` (it also needs
-python3 with PyYAML); `make fixtures OKDP_LIB_CHART=../okdp-lib-chart` runs
-the three, `UMBRELLA_HELMS` passed on. A behaviour copied from Helm or
-okdp-lib-chart gets a case here, and only what no other case covers: a
-fixture is Helm's whole output, labels and all.
-
-The umbrella is also rendered with the Helm versions the deployers embed
-([GitOps](01_usage.md#gitops)): `UMBRELLA_HELMS`, helm binaries separated
-by spaces, downloaded from `https://get.helm.sh`, checked against their
-`.sha256sum` and kept out of the repository:
+-update` (writes the umbrella), then `generate.sh` (bash 3.2 or later,
+python3 with PyYAML; the GNU or the BSD tools), with the deployers'
+helm binaries in `UMBRELLA_HELMS`, separated by spaces, downloaded from
+`https://get.helm.sh`, checked against their `.sha256sum` and kept out of
+the repository; `make fixtures` runs the three, `UMBRELLA_HELMS` passed
+on:
 
 ```bash
 h=$(mktemp -d)
-for v in 4.2.4 4.2.1 4.2.0 3.19.4 3.19.2; do
+for v in $(sed -n 's/^helms //p' testdata/helm/SOURCE); do
   (cd "$h" && curl -fsSL --remote-name-all https://get.helm.sh/helm-v$v-linux-amd64.tar.gz{,.sha256sum} &&
     sha256sum -c helm-v$v-linux-amd64.tar.gz.sha256sum && mkdir v$v && tar -C v$v -xzf helm-v$v-linux-amd64.tar.gz)
 done
-UMBRELLA_HELMS="$(echo "$h"/v*/linux-amd64/helm)" OKDP_LIB_CHART=../okdp-lib-chart testdata/helm/generate.sh
+make fixtures UMBRELLA_HELMS="$(echo "$h"/v*/linux-amd64/helm)"
 ```
 
-Each binary renders `umbrella/helm<major>.json`, removed when it renders
-`helm.json`; two versions of one major version that render differently
-fail. A new render, a new version or a new difference goes in
-`umbrellaRenders` (`internal/fsio/helm_test.go`) and in the
-[Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart) spec. Without
-`UMBRELLA_HELMS`, `helm3.json` is left as it is: regenerate it whenever
-the umbrella changes.
+(On macOS: `darwin-arm64`, and `shasum -a 256 -c`.) Each binary renders
+every fixture again, and two versions of one major version that render
+differently fail. What a major version renders differently from the helm
+on the `PATH` goes beside the reference file, `helm` renamed
+`helm<major>`, removed when it renders the same. A new version or a new difference
+goes in `umbrellaRenders` (`internal/fsio/helm_test.go`) or
+`helmFinalKnown` (`internal/chart/helm_test.go`), and in the spec
+([Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart),
+[Equivalence with Helm](specs/01_inputs_outputs.md#equivalence-with-helm)).
+Without `UMBRELLA_HELMS`, the `helm<major>` files and the `helms` of
+`SOURCE` are left as they are.
+
+The `helm-fixtures` workflow (`.github/workflows/helm-fixtures.yml`)
+regenerates them (`make fixtures`) on each pull request that touches
+`testdata/helm` or `internal/chart`, with the Helm versions of `SOURCE`,
+and fails when they differ from the
+committed ones.
+
+A behaviour copied from Helm gets a case here, and only what no other case
+covers: a fixture is Helm's whole output, labels and
+all.
 
 ### Unit tests
 
@@ -744,7 +761,8 @@ is tidied in its directory, `go -C tools mod tidy` (`make tidy`): with
 the default linters and those that report mistakes or older idioms here
 without noise. Dependabot (`.github/dependabot.yml`) proposes the updates
 weekly: the library's modules (`deps:`), golangci-lint and the actions
-(`ci:`).
+(`ci:`). `.github/workflows/helm-fixtures.yml` regenerates the
+[Helm fixtures](#helm-fixtures) on the pull requests that touch them.
 
 ## Limitations
 

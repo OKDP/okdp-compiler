@@ -18,7 +18,9 @@ import (
 var update = flag.Bool("update", false, "rewrite the final.yaml of testdata/helm/values from the current compiler")
 
 // Tests against what Helm computes: the fixtures of testdata/helm are
-// written by `helm template` (testdata/helm/generate.sh, Helm 4).
+// written by `helm template` (testdata/helm/generate.sh: Helm 4 on the PATH,
+// and the deployers' versions where they render differently; the versions
+// in testdata/helm/SOURCE).
 
 // helmdata: testdata/helm, at the repository root.
 var helmdata = filepath.Join("..", "..", "testdata", "helm")
@@ -37,15 +39,66 @@ func helmJSON(t *testing.T, path string) any {
 	return v
 }
 
+// helmMajors: the major versions of the deployers' Helm versions that
+// testdata/helm/SOURCE records (helms), each with its versions: the
+// versions generate.sh renders a helm<major> file with, where they render
+// differently from Helm 4 on the PATH.
+func helmMajors(t *testing.T) map[string][]string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(helmdata, "SOURCE"))
+	if err != nil {
+		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
+	}
+	majors := map[string][]string{}
+	for line := range strings.Lines(string(b)) {
+		if f := strings.Fields(line); len(f) > 0 && f[0] == "helms" {
+			for _, v := range f[1:] {
+				m, _, _ := strings.Cut(v, ".")
+				majors[m] = append(majors[m], v)
+			}
+		}
+	}
+	return majors
+}
+
+// helmFinalKnown: by Helm major version, the values cases whose final
+// values that version renders differently from their layers
+// (helm<major>-final.json), and what it renders instead of what Helm 4
+// renders (helm-final.json): by top-level key, the value.
+var helmFinalKnown = map[string]map[string]M{
+	// Helm 3 reads the first document of a values file only: the a of the
+	// first document of documents/values.yaml, which a later document
+	// deletes, is back.
+	"3": {"documents": {"a": 1.0}},
+}
+
+// helmVariant: the render of a deployer's major version in the case
+// directory dir, beside the reference file name (helm.json: helm3.json),
+// nil when it renders as the reference.
+func helmVariant(t *testing.T, dir, name, major string) any {
+	t.Helper()
+	path := filepath.Join(dir, strings.Replace(name, "helm", "helm"+major, 1))
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	return helmJSON(t, path)
+}
+
 // TestHelmValues: for each testdata/helm/values/<case>, the chart defaults
 // (values.yaml) and the -f layers (layer-*.yaml) read and coalesced as Helm
 // does (helm.json); and the final values the compiler writes for these
 // layers (final.yaml, rewritten by -update), which Helm renders the same
-// (helm-final.json).
+// (helm-final.json). Each deployer's major version renders them as it
+// renders the layers (helm<major>.json, or helm.json), but for the known
+// differences (helmFinalKnown).
 func TestHelmValues(t *testing.T) {
 	cases, _ := filepath.Glob(filepath.Join(helmdata, "values", "*"))
 	if len(cases) == 0 {
 		t.Fatal("no cases")
+	}
+	var majors map[string][]string
+	if !*update {
+		majors = helmMajors(t)
 	}
 	for _, dir := range cases {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
@@ -101,13 +154,56 @@ func TestHelmValues(t *testing.T) {
 			if got := coalesceValues(defaults, final); !reflect.DeepEqual(any(got), want) {
 				t.Errorf("final values coalesced:\n got %#v\nwant %#v", got, want)
 			}
+			// The renders of the deployers' Helm versions: helm<major>.json
+			// where a major version renders the layers differently from
+			// helm.json, helm<major>-final.json where it renders the final
+			// values differently from the layers, only for a known
+			// difference.
+			variants, _ := filepath.Glob(filepath.Join(dir, "helm[0-9]*.json"))
+			for _, path := range variants {
+				rest := strings.TrimPrefix(filepath.Base(path), "helm")
+				major := rest[:len(rest)-len(strings.TrimLeft(rest, "0123456789"))]
+				if majors[major] == nil {
+					t.Errorf("%s: a render of Helm %s, which SOURCE does not list (run generate.sh)", path, major)
+				}
+			}
+			for major, versions := range majors {
+				helmLayers := helmVariant(t, dir, "helm.json", major)
+				if helmLayers == nil {
+					helmLayers = want
+				}
+				got := helmVariant(t, dir, "helm-final.json", major)
+				known, isKnown := helmFinalKnown[major][filepath.Base(dir)]
+				switch {
+				case got == nil && isKnown:
+					t.Errorf("Helm %s renders the final values as the layers: drop the known difference (helmFinalKnown)", strings.Join(versions, ", "))
+				case got == nil:
+				case reflect.DeepEqual(got, helmLayers):
+					t.Errorf("helm%s-final.json: the layers' render (run generate.sh)", major)
+				case !isKnown:
+					t.Errorf("Helm %s renders the final values differently from the layers:\n got %#v\nwant %#v", strings.Join(versions, ", "), got, helmLayers)
+				default:
+					// What Helm 4 renders, but for the known keys.
+					expect := value.AsMap(helmJSON(t, filepath.Join(dir, "helm-final.json")))
+					for k, x := range known {
+						if reflect.DeepEqual(expect[k], x) {
+							t.Errorf("Helm %s: %s is %#v with Helm 4 too: not a difference", strings.Join(versions, ", "), k, x)
+						}
+						expect[k] = x
+					}
+					if !reflect.DeepEqual(got, any(expect)) {
+						t.Errorf("Helm %s renders the final values:\n got %#v\nwant %#v (Helm 4's, but for the known difference)", strings.Join(versions, ", "), got, expect)
+					}
+				}
+			}
 		})
 	}
 }
 
 // TestHelmSchema: for each testdata/helm/schema/<case>, the violations of
 // values.schema.json by the coalesced values, as Helm reports them
-// (helm.txt; Helm's order varies, the lines are compared sorted).
+// (helm.txt; Helm's order varies, the lines are compared sorted), with each
+// deployer's version.
 func TestHelmSchema(t *testing.T) {
 	cases, _ := filepath.Glob(filepath.Join(helmdata, "schema", "*"))
 	if len(cases) == 0 {
@@ -137,29 +233,38 @@ func TestHelmSchema(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			b, err := os.ReadFile(filepath.Join(dir, "helm.txt"))
-			if err != nil {
+			if _, err := os.Stat(filepath.Join(dir, "helm.txt")); err != nil {
 				t.Fatalf("%v (run testdata/helm/generate.sh)", err)
 			}
-			helm := strings.TrimSpace(string(b))
-			if helm == "ok" {
-				if v != "" {
-					t.Errorf("Helm accepts the values, got:\n%s", v)
+			// helm.txt, and helm<major>.txt where a deployer's major version
+			// reports differently: each is the compiler's report.
+			reports, _ := filepath.Glob(filepath.Join(dir, "helm*.txt"))
+			for _, path := range reports {
+				name := filepath.Base(path)
+				b, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
 				}
-				return
-			}
-			// Helm: "Error: <message>", "<chart>:", then the violations.
-			lines := strings.Split(helm, "\n")
-			got := schemaError("values", map[string]string{"schema": v})
-			if got == nil {
-				t.Fatalf("no violation, Helm reports:\n%s", helm)
-			}
-			if want := strings.TrimPrefix(lines[0], "Error: ") + "\n" + lines[1]; !strings.HasPrefix(got.Error(), want) {
-				t.Errorf("got %q, want it to start with %q", got.Error(), want)
-			}
-			want := slices.Sorted(slices.Values(lines[2:]))
-			if g := slices.Sorted(slices.Values(strings.Split(v, "\n"))); !slices.Equal(g, want) {
-				t.Errorf("got\n%s\nwant (sorted)\n%s", strings.Join(g, "\n"), strings.Join(want, "\n"))
+				helm := strings.TrimSpace(string(b))
+				if helm == "ok" {
+					if v != "" {
+						t.Errorf("%s: Helm accepts the values, got:\n%s", name, v)
+					}
+					continue
+				}
+				// Helm: "Error: <message>", "<chart>:", then the violations.
+				lines := strings.Split(helm, "\n")
+				got := schemaError("values", map[string]string{"schema": v})
+				if got == nil {
+					t.Fatalf("%s: no violation, Helm reports:\n%s", name, helm)
+				}
+				if want := strings.TrimPrefix(lines[0], "Error: ") + "\n" + lines[1]; !strings.HasPrefix(got.Error(), want) {
+					t.Errorf("%s: got %q, want it to start with %q", name, got.Error(), want)
+				}
+				want := slices.Sorted(slices.Values(lines[2:]))
+				if g := slices.Sorted(slices.Values(strings.Split(v, "\n"))); !slices.Equal(g, want) {
+					t.Errorf("%s: got\n%s\nwant (sorted)\n%s", name, strings.Join(g, "\n"), strings.Join(want, "\n"))
+				}
 			}
 		})
 	}
