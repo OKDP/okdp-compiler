@@ -496,7 +496,12 @@ Helm](#rendering-with-helm), `Result.Charts` being the index.
 
 - `compiler.ParseValues(b)` reads one values file as Helm does (YAML 1.1,
   every document of the file merged in order), for `Inputs.Platform` and
-  `Inputs.Values`.
+  `Inputs.Values`. A layer built in Go may hold other types than
+  `map[string]any` and `[]any` (`map[string]string`, `[]string`, `int32`,
+  a struct by its `json` tags): it is read as the values it would be once
+  written to a file and read back
+  ([values files](specs/01_inputs_outputs.md#values-files)); what a file
+  cannot hold fails, its layer and path named.
 - `compiler.ChartRef` is an upstream chart, `{Repository, Chart, Version}`:
   a `source` of `service.yaml`, an entry of `Result.Charts`.
 - `compiler.ObjectsChart` (`okdp`) is the chart key of
@@ -700,6 +705,7 @@ with status 2.
 | `service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: must be true or false, got null` | the condition of a `require` entry is not a boolean, or its evaluation fails (`no such key: ...`) | write a condition of `true` or `false` (`platform.oidc.enabled == true`), reading optional values with `.?` ([require](specs/02_service_definition.md#require)) |
 | `values layer 1: global.okdp is set by the platform (--platform, Inputs.Platform)`, `values layer 2: global is set by the platform ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--platform`; a package lets instances set a key of `global` by declaring it in `values.schema.json` ([platform values](specs/01_inputs_outputs.md#platform-values)) |
 | `values layer 1: connections.shared-db.host: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, connections, inline upstream values; the platform's files are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
+| `values layer 2: hooks[0]: a func() cannot be a value`, `platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Platform`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key other than a string, a number or a boolean, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `values.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, the base values or the mapping |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |

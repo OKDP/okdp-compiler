@@ -46,7 +46,12 @@ type (
 	Upstream = chart.Upstream
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
-	// Inputs: what one compile reads besides the package.
+	// Inputs: what one compile reads besides the package. Its values
+	// layers, Platform and Values, may hold Go values of other types than
+	// map[string]any and []any (map[string]string, []string, int32, a
+	// struct by its json tags): each is read as the values it would be once
+	// written to a values file and read by Helm; what values cannot hold (a
+	// func, a NaN) fails the compile, its layer and path named.
 	Inputs = okdp.Inputs
 	// Result: what a compile produces.
 	Result = okdp.Result

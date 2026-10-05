@@ -11,8 +11,8 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Package files | `Definition.Files` (`fs.FS`) | yes | [Package files](#package-files) |
 | Chart cache | `Inputs.Charts` (`fs.FS`) | yes | [Chart cache](#chart-cache) |
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
-| Platform values layers | `Inputs.Platform` (`[]map[string]any`) | no | [Parameters](#parameters), [Platform values](#platform-values) |
-| Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values) |
+| Platform values layers | `Inputs.Platform` (`[]map[string]any`) | no | [Parameters](#parameters), [Platform values](#platform-values), [Values files](#values-files) |
+| Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
 | Instance files | `Inputs.Instance` (`fs.FS`) | no | [Upstream values](#upstream-values) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
@@ -104,8 +104,39 @@ cache](#chart-cache)), the base files, the
 
 `testdata/helm/values/documents` and `yaml11` hold what Helm reads
 from such files. Values built in memory and given in `Inputs.Platform` or
-`Inputs.Values` are normalized the same way: `map[any]any` keys printed as
-strings, `int`, `int64`, `uint64` and `float32` as float64.
+`Inputs.Values` are read as the values they would be once written to a
+file and read back, at any depth, whatever their Go types
+(`value.Normalize`):
+
+- A map of any type is a map: `map[string]string`, `map[string][]string`,
+  a named map type, `map[any]any`. Its keys are strings: a number or a
+  boolean is printed as Helm reads a YAML key (`map[any]any{1: x}` and
+  `map[int]string{1: x}` have the key `"1"`), an `encoding.TextMarshaler`
+  is its text.
+- A slice or an array is a list (`[]string`, `[2]int`); a `[]byte` is its
+  base64 text, as `encoding/json` writes it.
+- Every number is a float64, of any integer or float type (a `float32` as
+  its shortest decimal: `float32(0.1)` is `0.1`); an integer past 2^53
+  rounds, as Helm reads it. A `json.Number` is a number.
+- A pointer or an interface is what it points to, `null` when nil; a nil
+  map or slice is empty, not `null`.
+- A struct, a `json.Marshaler` or an `encoding.TextMarshaler`
+  (`time.Time`, `json.RawMessage`) is what `encoding/json` writes: a struct
+  by its `json` tags.
+
+What a values file cannot hold fails the compile, before the parameters
+are computed, with the layer (`platform layer <n>`, `values layer <n>`:
+the n-th of `Inputs.Platform`, of `Inputs.Values`) and the path of the
+value: a func, a chan, a complex, a NaN or an infinity, a string or a key
+that is not UTF-8, a key of another type (`null`, a struct), two keys that
+read as the same (`1` and `"1"`), a map, slice or pointer that contains
+itself:
+
+```
+values layer 2: hooks[0]: a func() cannot be a value
+platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN
+values layer 1: labels: two keys read as "1"
+```
 
 JSON files (`values.schema.json` of the package and of the upstream charts,
 the contracts) are strict JSON: no comments.
@@ -749,10 +780,9 @@ values layer 1: database: the value contains "{{"
 values layer 2: upstream.app.podAnnotations["example.org/{{ x }}"]: the key contains "{{"
 ```
 
-A value of a type values do not hold (a Go value an in-memory layer gives
-that is not normalized) fails as well, rather than passes unchecked:
-`values layer 1: <path>: cannot be checked for "{{": <type> is not a values
-type`. The platform's layers and the package's `values.yaml` are not
+A layer is normalized before it is checked: a Go value an in-memory layer
+gives that values cannot hold has failed then, with its layer and path
+([values files](#values-files)). The platform's layers and the package's `values.yaml` are not
 checked: they are reviewed with the platform and the package
 ([security boundaries](../00_architecture.md#security-boundaries)). A
 connection resolved from them is ([Resolution](#resolution)).

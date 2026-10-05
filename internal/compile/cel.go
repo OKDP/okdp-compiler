@@ -138,7 +138,7 @@ func (r *reader) fromNode(n *yaml.Node) (any, error) {
 		if f, ok := v.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
 			return nil, fmt.Errorf("line %d: not a finite number: %s (quote it for the text)", n.Line, n.Value)
 		}
-		return value.Normalize(v), nil
+		return value.Normalize(v)
 	// An alias: a copy of its anchor's node, unless it is inside it.
 	case yaml.AliasNode:
 		if r.open[n.Alias] {

@@ -63,7 +63,7 @@ type Inputs struct {
 	Charts    fs.FS            // chart cache: the upstream charts, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/, <repository> the URL without its scheme
 	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // the contract schemas: <contract>.schema.json
-	Platform  []map[string]any // platform values layers, in order (helm -f): global, global.okdp among them; see chart.ParseValues
+	Platform  []map[string]any // platform values layers, in order (helm -f): global, global.okdp among them; see chart.ParseValues; Go values of any type, read as Helm values (value.Normalize)
 	Values    []map[string]any // instance values layers, in order, after Platform: no global but the keys the parameter schema declares (valuesLayers)
 	Release   string           // the Helm release: a DNS-1123 label of 53 characters at most
 	Namespace string           // the release's namespace: a DNS-1123 label

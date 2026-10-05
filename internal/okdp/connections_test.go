@@ -98,6 +98,27 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// TestResolveGoTypes: values a Go caller builds with other types than M and
+// []any resolve as the same values read from a file: a []string of
+// references passes the schema (type: array), a map[string]string entry of
+// connections is an external connection.
+func TestResolveGoTypes(t *testing.T) {
+	values, deps, err := resolveCtx(M{
+		"replicas":    []string{"ext"},
+		"connections": map[string]map[string]string{"ext": {"contract": "database", "host": "replica.example.org"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{
+		"host": "replica.example.org", "engine": "postgresql", "driver": "pg", "ssl": "require", "tls": false,
+		"okdp": M{"ref": "ext", "contract": "database", "source": "external"},
+	}
+	if got := value.AsList(values["replicas"]); len(got) != 1 || !reflect.DeepEqual(got[0], want) || len(deps) > 0 {
+		t.Errorf("got %#v, dependencies %#v\nwant [%#v], none", got, deps, want)
+	}
+}
+
 // TestResolveErrors: contract checks on references.
 func TestResolveErrors(t *testing.T) {
 	ext := func(fields M) M {

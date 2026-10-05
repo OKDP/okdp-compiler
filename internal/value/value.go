@@ -13,38 +13,19 @@ import (
 // M: a values map (YAML or JSON object).
 type M = map[string]any
 
-// Normalize: maps with string keys, every number a float64 (as Helm values,
-// which go through JSON), for values a caller built in memory.
-func Normalize(v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		out := M{}
-		for k, x := range t {
-			out[k] = Normalize(x)
-		}
-		return out
-	case map[any]any:
-		out := M{}
-		for k, x := range t {
-			out[fmt.Sprint(k)] = Normalize(x)
-		}
-		return out
-	case []any:
-		out := make([]any, len(t))
-		for i, x := range t {
-			out[i] = Normalize(x)
-		}
-		return out
-	case int:
-		return float64(t)
-	case int64:
-		return float64(t)
-	case uint64:
-		return float64(t)
-	case float32:
-		return float64(t)
-	}
-	return v
+// Normalize: v, a value a caller built in memory, as Helm values are after
+// their JSON round trip, in a copy (normalize.go). At any depth: a map, of
+// any type, is an M, a number or a boolean key printed as Helm reads a YAML
+// key (1, true); a slice or an array is a []any; every number is a
+// float64; a pointer or an interface is what it points to (null when nil);
+// a nil map or slice is empty. A struct, a json.Marshaler or an
+// encoding.TextMarshaler (time.Time, json.RawMessage), a []byte (base64)
+// and a json.Number are what encoding/json writes. What values cannot hold
+// fails, its path named (env[1], annotations["a.b/c"]): a func, a chan, a
+// complex, a NaN or an infinity, text that is not UTF-8, a key of another
+// type, two keys that read as the same, a value that contains itself.
+func Normalize(v any) (any, error) {
+	return normalizer{}.value(v, "")
 }
 
 // Copy: a copy of v that shares no map or list with it.

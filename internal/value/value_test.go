@@ -1,16 +1,75 @@
 package value
 
 import (
+	"encoding/json"
+	"math"
 	"reflect"
 	"testing"
+	"time"
 )
 
-// TestNormalize: string keys, and every number a float64.
+// TestNormalize: Go values of any type as Helm values after their JSON
+// round trip: M maps, []any lists, float64 numbers, at any depth.
 func TestNormalize(t *testing.T) {
-	in := map[any]any{"a": 1, 2: []any{int64(3), uint64(4), float32(0.5)}, "m": map[string]any{"b": "x"}}
-	want := M{"a": float64(1), "2": []any{float64(3), float64(4), float64(0.5)}, "m": M{"b": "x"}}
-	if got := Normalize(in); !reflect.DeepEqual(got, want) {
-		t.Errorf("got %#v, want %#v", got, want)
+	type labels map[string]string
+	n, three := 7, int8(3)
+	for name, tc := range map[string]struct{ in, want any }{
+		"map[any]any":      {map[any]any{"a": 1, 2: []any{int64(3), uint64(4), float32(0.5)}, true: map[string]any{"b": "x"}, 1.5: nil}, M{"a": 1.0, "2": []any{3.0, 4.0, 0.5}, "true": M{"b": "x"}, "1.5": nil}},
+		"typed maps":       {M{"conn": map[string]string{"host": "h"}, "env": map[string][]string{"A": {"x"}}, "labels": labels{"tier": "ha"}}, M{"conn": M{"host": "h"}, "env": M{"A": []any{"x"}}, "labels": M{"tier": "ha"}}},
+		"lists":            {M{"tags": []string{"a", "b"}, "ports": [2]uint16{80, 443}, "deep": [][]int{{1}}}, M{"tags": []any{"a", "b"}, "ports": []any{80.0, 443.0}, "deep": []any{[]any{1.0}}}},
+		"numbers":          {[]any{three, uint32(4), int64(1)<<53 + 1, float32(0.1), json.Number("1e3")}, []any{3.0, 4.0, 9007199254740992.0, 0.1, 1000.0}},
+		"integer keys":     {map[int]bool{10: true}, M{"10": true}},
+		"pointers":         {M{"n": &n, "nil": (*int)(nil), "any": any(nil)}, M{"n": 7.0, "nil": nil, "any": nil}},
+		"nil map and list": {M{"m": map[string]string(nil), "l": []string(nil)}, M{"m": M{}, "l": []any{}}},
+		"as encoding/json": {
+			M{"s": struct {
+				Name string `json:"name"`
+				Skip int    `json:"-"`
+			}{"x", 1}, "t": time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), "raw": json.RawMessage(`{"a": [1]}`), "b": []byte("hi")},
+			M{"s": M{"name": "x"}, "t": "2026-01-02T03:04:05Z", "raw": M{"a": []any{1.0}}, "b": "aGk="},
+		},
+	} {
+		got, err := Normalize(tc.in)
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: got %#v, %v, want %#v", name, got, err, tc.want)
+		}
+	}
+	// A copy: the input is not changed, nor shared.
+	in := M{"m": M{"l": []any{"x"}}}
+	got, _ := Normalize(in)
+	AsMap(AsMap(got)["m"])["l"].([]any)[0] = "y"
+	if !reflect.DeepEqual(in, M{"m": M{"l": []any{"x"}}}) {
+		t.Errorf("the input changed: %#v", in)
+	}
+}
+
+// TestNormalizeErrors: what values cannot hold fails, at its path.
+func TestNormalizeErrors(t *testing.T) {
+	cycle := M{}
+	cycle["self"] = []any{cycle}
+	for _, tc := range []struct {
+		in   any
+		want string
+	}{
+		{M{"hook": func() {}}, "hook: a func() cannot be a value"},
+		{M{"a.b": []any{1, make(chan int)}}, `["a.b"][1]: a chan int cannot be a value`},
+		{M{"c": complex(1, 2)}, "c: a complex128 cannot be a value"},
+		{M{"x": M{"y": math.NaN()}}, "x.y: not a finite number: NaN"},
+		{M{"x": float32(math.Inf(1))}, "x: not a finite number: +Inf"},
+		{M{"n": json.Number("1e400")}, "n: not a finite number: +Inf"},
+		{M{"n": json.Number("one")}, `n: json.Number "one" is not a number`},
+		{M{"s": "\xff"}, `s: a string that is not UTF-8: "\xff"`},
+		{M{"m": map[string]int{"\xff": 1}}, `m: a map key that is not UTF-8: "\xff"`},
+		{M{"m": map[any]any{nil: 1}}, "m: a map key must be a string, a number or a boolean, got null"},
+		{M{"m": map[[2]int]int{{1, 2}: 1}}, "m: a map key must be a string, a number or a boolean, got [2]int"},
+		{M{"m": map[any]any{1: "a", "1": "b"}}, `m: two keys read as "1"`},
+		{M{"s": struct{ F func() }{}}, "s: json: unsupported type: func()"},
+		{cycle, "self[0]: the value contains itself"},
+		{func() {}, "a func() cannot be a value"},
+	} {
+		if _, err := Normalize(tc.in); err == nil || err.Error() != tc.want {
+			t.Errorf("got %v, want %s", err, tc.want)
+		}
 	}
 }
 

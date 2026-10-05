@@ -9,10 +9,11 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// Parameters: the values layers merged in order (helm -f), coalesced over
-// the defaults of pkg (values.yaml), checked against its parameter schema
-// (values.schema.json, none when it has no such file), as Helm checks
-// values.schema.json. Every violation is reported at once, under name.
+// Parameters: the values layers, normalized (value.Normalize), merged in
+// order (helm -f), coalesced over the defaults of pkg (values.yaml),
+// checked against its parameter schema (values.schema.json, none when it
+// has no such file), as Helm checks values.schema.json. Every violation is
+// reported at once, under name.
 func Parameters(pkg fs.FS, name string, layers []map[string]any) (M, error) {
 	defaults, err := readValues(pkg, "values.yaml")
 	if err != nil {
@@ -20,7 +21,7 @@ func Parameters(pkg fs.FS, name string, layers []map[string]any) (M, error) {
 	}
 	user := M{}
 	for _, v := range layers {
-		user = value.Merge(user, value.AsMap(value.Normalize(v)))
+		user = value.Merge(user, v)
 	}
 	values := coalesceValues(defaults, user)
 	v, err := schemaViolations(pkg, "values.schema.json", values)

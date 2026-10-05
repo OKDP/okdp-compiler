@@ -118,7 +118,9 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `internal/chart/merge.go`); the platform's layers and `values.yaml` are
    not checked. The package's `values.yaml` is read as Helm reads it.
    Each layer, those of `Inputs.Platform` then those of `Inputs.Values`, is
-   normalized (string keys, `float64` numbers) and merged in order by
+   normalized by `valuesLayers` (`value.Normalize`: string keys, `[]any`
+   lists, `float64` numbers, whatever the Go types; what values cannot hold
+   fails, the layer and path named) and merged in order by
    `value.Merge`, Helm's merge of `-f` files; the result is coalesced over the
    defaults by `coalesceValues`. The coalesced values are checked against
    `values.schema.json` (`schemaViolations`, which skips a missing schema;
@@ -280,6 +282,7 @@ neither knows OKDP.
 |---|---|---|---|
 | `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
+| | `normalize.go` | `Normalize`'s reading of Go values of any type, by reflection, and its errors | `valuesLayers` (`okdp`), the mapping's scalars (`compile`) |
 | `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`, `Condition` (a condition outside a document, `true` or `false`); `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
 | | `check.go` | the directives of a document, checked before it is evaluated: each of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names; `CheckCondition` | `Load`, `Doc.Section`; `CheckCondition` for `require` (`okdp`) |
 | | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
@@ -293,7 +296,7 @@ neither knows OKDP.
 | | `merge.go` | the instance's upstream values (`ReadUpstream`, `Upstreams.Show`), stage 9 (`FinalValues`), `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `internal/okdp` (`layers.go`, `connections.go`) |
 | `okdp` | `service.go` | `Definition`, `Service` (`service.yaml`) and its check (`Service.Check`); `require`: `Requirements`, `Requirement`, their decoding and check, `required` (the error of a missing platform value) | `chart.Specs.Check`, `compile.CheckCondition`; read by `fsio.LoadDefinition` |
 | | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages | calls `buildContext`, `requireWhen`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
-| | `layers.go` | stage 1: the values layers, the platform's then the instance's; `global` is the platform's, no `{{` in the instance's (`valuesLayers`) | `readJSON` (`connections.go`), `chart.NoTemplate`; called by `context.go` |
+| | `layers.go` | stage 1: the values layers, the platform's then the instance's, normalized (`value.Normalize`); `global` is the platform's, no `{{` in the instance's (`valuesLayers`) | `readJSON` (`connections.go`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context; then the requirements under a condition (`requireWhen`) | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `chart.ReadUpstream`; `compile.Condition` and `functions` (`mapping.go`) for the conditions |
 | | `connections.go` | connection references, `complete`, `Dependency`, `readJSON`; the contracts (`readContract`) and the check of values against them (`checkContract`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
 | | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference; `pipeline.go`, for the release and namespace; `oidc.go`, for a client's name |
@@ -371,11 +374,16 @@ template's `if` takes as true.
 
 Values are `value.M` (`map[string]any`): string keys, `float64` numbers,
 `[]any` lists, which is what Helm values are after their JSON round trip.
-In-memory layers are normalized to it (`value.Normalize`), CEL results are
-converted back to it (`toData`, recursively: optionals unwrapped, every
-number a float64; a NaN, an infinity or a key that is not a string fails
-the expression, as Helm could not read it back), so a value computed by
-CEL and the same value read from a file are equal. Stages work
+In-memory layers, of any Go type, are normalized to it (`value.Normalize`,
+`internal/value/normalize.go`): by reflection rather than a JSON round
+trip, which gives the same values but names no path in its errors, refuses
+`map[any]any` and turns text that is not UTF-8 into U+FFFD; what only
+`encoding/json` gives a meaning to (a struct, a `MarshalJSON` method) goes
+through it ([values files](specs/01_inputs_outputs.md#values-files)). CEL
+results are converted back to it (`toData`, recursively: optionals
+unwrapped, every number a float64; a NaN, an infinity or a key that is not
+a string fails the expression, as Helm could not read it back), so a value
+computed by CEL and the same value read from a file are equal. Stages work
 on deep copies: the caller's inputs are never modified, and the mapping
 sees a copy of the parameters while the merges use them as written.
 
@@ -633,7 +641,11 @@ upstream files, `protect` and `append`, objects and the `okdp` chart with
 the platform's charts (`TestObjects`), dependencies, one upstream chart for
 two keys (`TestSharedSource`). `internal/okdp/layers_test.go` covers the
 platform's and the instance's layers: what an instance may set of `global`
-(`TestValuesLayers`). `internal/okdp/mapping_test.go` covers OKDP's
+(`TestValuesLayers`), layers of Go types that merge as the same values
+read from a file, and the layer and path of what values cannot hold
+(`TestValuesLayersGoTypes`); `internal/value/value_test.go` the reading of
+each Go type (`TestNormalize`, `TestNormalizeErrors`).
+`internal/okdp/mapping_test.go` covers OKDP's
 sections and functions. `internal/okdp/service_test.go` covers `require`:
 its entries decoded and checked, the conditions evaluated in a whole
 compile (`TestRequireWhen`). `internal/okdp/oidc_test.go` covers the OAuth

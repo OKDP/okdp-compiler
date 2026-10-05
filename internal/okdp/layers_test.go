@@ -2,6 +2,7 @@ package okdp
 
 import (
 	"maps"
+	"math"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -51,5 +52,38 @@ func TestValuesLayers(t *testing.T) {
 	in.Platform = []map[string]any{{"global": M{"imageRegistry": "{{ .Values.registry }}"}}}
 	if _, err := Compile(withFiles(files), in); err != nil {
 		t.Errorf("a template in a platform layer: %v", err)
+	}
+}
+
+// TestValuesLayersGoTypes: layers a Go caller builds with other types than
+// M are the same values read from a file: a map[string]string global merges
+// with the defaults of values.yaml rather than replacing them, an int32 is
+// a number. What values cannot hold fails, its layer and path named.
+func TestValuesLayersGoTypes(t *testing.T) {
+	in := inputs(map[string]any{"replicas": int32(2)})
+	in.Platform = []map[string]any{{"global": map[string]string{"imageRegistry": "platform.example.org"}}}
+	res, err := Compile(def, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := res.Values["app"]
+	if g := value.AsMap(app["global"]); g["imageRegistry"] != "platform.example.org" || value.Dig(g, "okdp.ingress.suffix") != "example.org" {
+		t.Errorf("global: %#v", g)
+	}
+	if app["replicaCount"] != float64(2) {
+		t.Errorf("replicaCount: %#v", app["replicaCount"])
+	}
+	for name, tc := range map[string]struct {
+		platform, instance []map[string]any
+		want               string
+	}{
+		"platform": {[]map[string]any{{"global": M{"proxy": M{"no.proxy": math.NaN()}}}}, nil, `platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN`},
+		"instance": {nil, []map[string]any{{}, {"hooks": []any{func() {}}}}, "values layer 2: hooks[0]: a func() cannot be a value"},
+	} {
+		in := inputs()
+		in.Platform, in.Values = tc.platform, tc.instance
+		if _, err := Compile(def, in); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: got %v, want %s", name, err, tc.want)
+		}
 	}
 }
