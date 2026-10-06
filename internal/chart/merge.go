@@ -1,5 +1,5 @@
 // Merge: the final values of each upstream chart, the values file Helm
-// renders it with: upstream defaults < base values < computed values <
+// renders it with: upstream defaults < OKDP's defaults < computed values <
 // instance upstream values, global copied down. The layers are merged as
 // Helm merges its -f files.
 //
@@ -28,7 +28,7 @@ import (
 //
 // cache: the chart cache, the upstream charts' defaults and schemas: the
 // sources of the keys of output, together (newChartCache). pkg:
-// the package (its base files). values: the instance's merged values (their
+// the package (its defaults files). values: the instance's merged values (their
 // global, and their upstream values).
 func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
@@ -64,11 +64,11 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]
 }
 
 // keyValues: what the upstream chart is rendered with (`helm template
-// <source> -f <final values>`). The base values, the computed values and the
+// <source> -f <final values>`). OKDP's defaults, the computed values and the
 // instance's upstream values are merged as Helm merges -f files (MergeMaps:
 // maps merge, lists and scalars replace, a null replaces and stays), over
 // the chart's own defaults without their nulls. Rendered by Helm, these
-// values give exactly what `helm template <source> -f base -f computed -f
+// values give exactly what `helm template <source> -f defaults -f computed -f
 // <upstream>` gives, with Helm 3 or 4: a null
 // that deletes a default stays null (Helm deletes the key when it renders),
 // a null where there is no default stays (Helm keeps it), and the null
@@ -86,15 +86,15 @@ func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, compute
 		return nil, "", err
 	}
 	defaults := upstream.defaults
-	// Upstream chart defaults first, then OKDP's fixed values for this chart
-	// (base), then what the mapping computed.
-	base := M{}
-	if spec.Base != "" {
-		if base, err = readValues(files, path.Clean(spec.Base)); err != nil {
+	// Upstream chart defaults first, then OKDP's defaults for this chart,
+	// then what the mapping computed.
+	okdpDefaults := M{}
+	if spec.Defaults != "" {
+		if okdpDefaults, err = readValues(files, path.Clean(spec.Defaults)); err != nil {
 			return nil, "", err
 		}
 	}
-	out := layered(defaults, base, computed)
+	out := layered(defaults, okdpDefaults, computed)
 	// Last, the instance's upstream values (upstream.<chart>), when the chart
 	// accepts them, checked ("{{", protect, append). The mapping has seen
 	// them; these checks are what the platform enforces whatever the mapping

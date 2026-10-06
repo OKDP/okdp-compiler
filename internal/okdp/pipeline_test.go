@@ -21,7 +21,7 @@ import (
 var (
 	pkg = fstest.MapFS{
 		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
-		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
+		"app.defaults.yaml":  {Data: []byte("image: {tag: \"4.5\"}\n")},
 	}
 	// The platform values every compile gets, the first platform layer of
 	// inputs.
@@ -41,7 +41,7 @@ var (
 		Service: Service{
 			Name:    "demo",
 			Version: "1.2.3",
-			Charts:  chart.Specs{"app": {Source: appSource, Base: "base/app.yaml"}},
+			Charts:  chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml"}},
 			Require: Requirements{{Key: "ingress.suffix"}},
 		},
 		Files: pkg,
@@ -261,7 +261,7 @@ func TestUpstreamValues(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = chart.Specs{"app": {Source: appSource, Base: "base/app.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
+			d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
 			res, err := Compile(&d, inputs(inline))
 			if err != nil {
 				t.Fatal(err)
@@ -292,7 +292,7 @@ errors:
 output:
   app: {}
 `)
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Base: "base/app.yaml", Upstream: chart.Upstream{Enabled: true}}}
+	d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: chart.Upstream{Enabled: true}}}
 	for name, tc := range map[string]struct {
 		inline M      // upstream.app
 		want   string // the error, or the image tag applied
@@ -344,7 +344,7 @@ func TestCompileSchemas(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = chart.Specs{"app": {Source: appSource, Base: "base/app.yaml", Upstream: chart.Upstream{Enabled: true}}}
+			d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: chart.Upstream{Enabled: true}}}
 			_, err := Compile(&d, withCharts(inputs(tc.values), tc.files))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
@@ -466,7 +466,7 @@ objects:
 // its own values; Result.Charts maps every chart to its source.
 func TestSharedSource(t *testing.T) {
 	var svc Service
-	if err := yaml.Unmarshal([]byte("charts:\n  canary: {source: {repository: https://charts.example.org, chart: app, version: 1.0.0}, base: base/app.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Source != appSource {
+	if err := yaml.Unmarshal([]byte("charts:\n  canary: {source: {repository: https://charts.example.org, chart: app, version: 1.0.0}, defaults: app.defaults.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Source != appSource {
 		t.Fatalf("service.yaml: %v %#v", err, svc)
 	}
 	mapping := "output:\n  app: {}\n  canary: {replicaCount: '${{ values.replicas }}'}\n"
@@ -482,7 +482,7 @@ func TestSharedSource(t *testing.T) {
 	}
 	canary := res.Values["canary"]
 	if canary["replicaCount"] != float64(2) || value.Dig(canary, "image.tag") != "4.5" || canary["labels"] == nil {
-		t.Errorf("canary: app's defaults and its base values, then the computed ones: %#v", canary)
+		t.Errorf("canary: app's defaults and OKDP's, then the computed ones: %#v", canary)
 	}
 	// app's schema, reported under each chart's key.
 	in := withCharts(inputs(M{"replicas": 5}), fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}})

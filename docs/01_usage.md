@@ -115,7 +115,7 @@ okdp-compile --version
 
 | Flag | Default | |
 |---|---|---|
-| `--package` | required | package directory: `service.yaml`, `values.cel.yaml`, `config.schema.json` at its root, and the base files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `--package` | required | package directory: `service.yaml`, `values.cel.yaml`, `config.schema.json` at its root, and the defaults files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart in its repository's directory, the URL without its scheme, as `helm pull -d <dir>/<repository>` writes it, `<repository>/<chart>-<version>.tgz`, or unpacked, `<repository>/<chart>-<version>/` (`quay.io/adaltas/oidc-dcr-0.5.0.tgz`); else `<chart>-<version>` at its root ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
 | `--platform` | none | a platform values file: `global`, `global.okdp` among them ([platform values](specs/01_inputs_outputs.md#platform-values)); repeatable, merged in order as `helm -f` files, before the `-f` files |
@@ -146,7 +146,7 @@ the upstream chart that renders it, `repository`, `chart`, `version`),
 `dependencies` (`Result.Dependencies`),
 `objects` (`Result.Objects`) and `values` (`Result.Computed`: chart key ->
 what the mapping computed, before the merge with the chart defaults, the
-base values and the instance's upstream values; in `dcr` mode, also the
+OKDP's defaults and the instance's upstream values; in `dcr` mode, also the
 values of the [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
 The final values are written by `--emit-dir`, not by `--out`.
 
@@ -154,7 +154,7 @@ The final values are written by `--emit-dir`, not by `--out`.
 $ export OKDP_CONTRACTS=examples/02_advanced/input/contracts OKDP_CHARTS=examples/02_advanced/input/charts
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --out /dev/stdout
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --out /dev/stdout
 charts:
   app:
     repository: https://charts.example.org
@@ -181,12 +181,12 @@ values:
 ```
 
 The computed values of a chart hold only what the mapping sets; the image,
-from the base values over the chart's defaults, is in the final values only:
+from OKDP's defaults over the chart's defaults, is in the final values only:
 
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
 null
@@ -212,7 +212,7 @@ but for its `install.sh`:
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --emit-dir out
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --emit-dir out
 $ ls out
 app.values.yaml
 okdp.values.yaml
@@ -228,7 +228,7 @@ The example's, with `platform-dcr.yaml` after `platform.yaml`, are
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
     --platform examples/02_advanced/input/platform.yaml --platform examples/02_advanced/input/platform-dcr.yaml \
-    -f examples/02_advanced/input/instance/config.yaml --emit-dir out-dcr
+    -f examples/02_advanced/input/config.yaml --emit-dir out-dcr
 $ ls out-dcr
 app.values.yaml
 oidc-dcr.values.yaml
@@ -268,7 +268,7 @@ The example's, `examples/02_advanced/output-no-dcr/helm-cmd/install.sh`:
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml \
     --emit-dir out --mkinstall
 $ cat out/install.sh
 #!/bin/sh
@@ -309,7 +309,7 @@ The example's, the instance referencing `demo-db` in `database`:
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml \
     --emit-dir out --mkdag
 $ cat out/okdp.dependencies.yaml
 - instance: demo-db
@@ -340,7 +340,7 @@ The example's are `examples/02_advanced/output-no-dcr/umbrella-chart/`:
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --umbrella umbrella
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
 apiVersion: v2
 name: webapp
@@ -428,9 +428,10 @@ as an archive renders from it too: `helm template <release>
 platform's oidc-dcr chart for an OAuth client chart, the platform's objects
 chart for `okdp` ([platform charts](specs/01_inputs_outputs.md#platform-charts)):
 one upstream chart may render several keys, each with its own values file.
-Do not add the base values or the values files of the compile: the final values already merge the chart's own defaults, the base
-values, the computed values and the instance's upstream values
-([merge precedence](specs/01_inputs_outputs.md#merge-precedence)), and give
+Do not add OKDP's defaults or the values files of the compile: the final
+values already merge the chart's own defaults, OKDP's defaults, the
+computed values and the instance's upstream values ([merge
+precedence](specs/01_inputs_outputs.md#merge-precedence)), and give
 what Helm gives with them, Helm 4 or 3.19 (Helm 3 reads the first document
 of a values file only: an upstream chart whose `values.yaml` has several
 documents needs Helm 4). A chart the index does not list is not rendered.
@@ -505,7 +506,7 @@ func main() {
 		return v
 	}
 	in.Platform = []map[string]any{read("examples/02_advanced/input/platform.yaml")}
-	in.Values = []map[string]any{read("examples/02_advanced/input/instance/config.yaml")}
+	in.Values = []map[string]any{read("examples/02_advanced/input/config.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -551,11 +552,11 @@ version: 1.2.3
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.0.0}
-    base: base/app.yaml
+    defaults: app.defaults.yaml
 `)},
 		"values.cel.yaml":    {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
 		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
-		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
+		"app.defaults.yaml":  {Data: []byte("image: {tag: \"4.5\"}\n")},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -608,9 +609,10 @@ Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
 `compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`:
 `service.yaml` and `values.cel.yaml`, then keeps `fsys` (`Definition.Files`)
-for the files each compile reads, `config.schema.json` and the base files. A `Definition{Service, Mapping, Files}` can also be built in Go;
-an entry of `Service.Require` is a `compiler.Requirement`, `{Key, If}`,
-`If` empty for a key required in every case.
+for the files each compile reads, `config.schema.json` and the defaults
+files. A `Definition{Service, Mapping, Files}` can also be built in Go; an
+entry of `Service.Require` is a `compiler.Requirement`, `{Key, If}`, `If`
+empty for a key required in every case.
 
 `compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
 `Contracts` (`--contracts`; it may be empty when nothing references a
@@ -827,7 +829,7 @@ with status 2.
 | `open config.schema.json: no such file or directory` | the package has no parameter schema; it is always read (the parameters' defaults and the connection references are declared in it) | add it ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `config.schema.json#/allOf/0/properties/a/default: a default applies only to a property reached from the root through properties`, `config.schema.json#/properties/a/default: a property under it has a default too (...): keep one`, `config.schema.json#/properties/replicas/default: the default does not meet its property's schema: ...` | a `default` where whether it applies depends on the values, two defaults on one path, or a default its property's schema rejects | move the default to the property it gives a value, keep one of the two, or fix it ([defaults](specs/01_inputs_outputs.md#defaults)) |
 | `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |
-| `service.yaml: line 7: unknown field protcet (allowed: source, base, protect, append, upstream)` | a field `service.yaml` does not define, here a misspelt `protect` in a chart; one line per unknown field | fix the name ([service.yaml](specs/02_service_definition.md#serviceyaml)) |
+| `service.yaml: line 7: unknown field protcet (allowed: source, defaults, protect, append, upstream)` | a field `service.yaml` does not define, here a misspelt `protect` in a chart; one line per unknown field | fix the name ([service.yaml](specs/02_service_definition.md#serviceyaml)) |
 | `service.yaml: line 12: a second YAML document: service.yaml is one document` | a `---` followed by a second document | one document |
 | `service.yaml: charts: key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names files (<key>.values.yaml) and the umbrella's dependency alias` | a chart key that is not a DNS label: `""`, `../app`, an upper case letter, `_` or `.` | rename the key in `service.yaml` and the mapping ([chart keys](specs/02_service_definition.md#chart-keys)) |
 | `service.yaml: line 19: upstream off: write true or false (service.yaml is read as YAML 1.2, where off is not a boolean; quote a path of that name)` | a chart's `upstream` written as a YAML 1.1 boolean (`no`, `off`, `yes`, `on`...), a string in `service.yaml` | `true` or `false`; quote a file of that name ([upstream](specs/02_service_definition.md#upstream)) |
@@ -850,7 +852,7 @@ with status 2.
 | `values layer 1: connections.shared-db.host: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, connections, upstream values; the platform's files are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
 | `values layer 2: hooks[0]: a func() cannot be a value`, `platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Platform`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key other than a string, a number or a boolean, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
-| `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, the base values or the mapping |
+| `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field` | a secret field written in the connection | put it in a Secret named by `secretRef` |

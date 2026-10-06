@@ -5,9 +5,9 @@
 // that contains a dot, and many keys the platform sets do: annotations
 // (nginx.ingress.kubernetes.io/auth-url), Spark properties
 // (spark.ui.filters), environment maps. A service had to refuse those in
-// its mapping's errors section instead, which saw the inline upstream
-// values only. A key may now be written in brackets, as one literal key,
-// and end with a glob, for a family of keys (every auth-* annotation):
+// its mapping's errors section instead. A key may now be written in
+// brackets, as one literal key, and end with a glob, for a family of keys
+// (every auth-* annotation):
 //
 //	path    = segment *( "." key / bracket )
 //	segment = key / bracket                  the first key: plain or bracketed

@@ -1,6 +1,7 @@
 // Package compiler compiles an OKDP service instance into the values of its
 // upstream charts: the public API of okdp-compiler. A package (service.yaml,
-// values.cel.yaml, its parameters and base values) is read from any fs.FS
+// values.cel.yaml, its parameters and OKDP's defaults for its charts) is
+// read from any fs.FS
 // (LoadDefinition), compiled for one instance (Compile), and written as
 // files (Files, Document):
 //

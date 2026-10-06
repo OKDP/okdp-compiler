@@ -1,7 +1,7 @@
 # Writing a package
 
 How to package an upstream application for OKDP: a directory of parameters,
-base values and a service definition, compiled by `okdp-compile`. The steps
+OKDP's defaults and a service definition, compiled by `okdp-compile`. The steps
 follow a `webapp` service, of which the example of this repository is a
 smaller version (`examples/02_advanced/input/service/`;
 `examples/01_minimal/input/service/` is the smallest package); the recipes and
@@ -15,12 +15,13 @@ in [usage](01_usage.md), the internals in [architecture](00_architecture.md).
 
 A package is a directory of a git repository, not a chart. It carries the
 parameters an instance sets (`config.schema.json`, their defaults
-included), OKDP's fixed values for each upstream chart (`base/`), and the
-service definition. `service.yaml` names the service, the upstream charts it is
-made of, each by its source (repository, chart, pinned version), and what
-an instance may override; `values.cel.yaml` says how the values of each
-chart follow from the parameters, the platform values (`global.okdp`) and
-the connections, and declares the service's OAuth clients. `okdp-compile`
+included), OKDP's defaults for each upstream chart
+(`<key>.defaults.yaml`), and the service definition. `service.yaml` names
+the service, the upstream charts it is made of, each by its source
+(repository, chart, pinned version), and what an instance may override;
+`values.cel.yaml` says how the values of each chart follow from the
+parameters, the platform values (`global.okdp`) and the connections, and
+declares the service's OAuth clients. `okdp-compile`
 turns the values of one instance into the final values of every chart and
 OKDP's own objects; a deployer then renders each upstream chart from its
 repository with its values, as the
@@ -29,10 +30,10 @@ the package is published as a chart.
 
 ```
 <name>/
-├── service.yaml            name, version, roles, dependsOn; the charts and their sources, base values, required platform values, protect, append
+├── service.yaml            name, version, roles, dependsOn; the charts and their sources, OKDP's defaults, required platform values, protect, append
 ├── values.cel.yaml         computed values, OAuth clients, OKDP's own objects, descriptor, provided connections
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
-├── base/<key>.yaml         base values of each chart: plain YAML
+├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
 ├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --platform
 ├── ci/<case>-values.yaml   test instances, without global
 └── README.md               parameters, platform values read, charts, known gaps
@@ -79,7 +80,7 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_C
 - A chart rendered twice is two keys of one source
   ([recipe](#render-a-chart-twice)).
 - The chart is rendered as published. A bundled subchart the package does
-  not use is disabled by values, in the base values, and protected (superset
+  not use is disabled by values, in OKDP's defaults, and protected (superset
   disables the bundled `postgresql` and `redis` and runs a Valkey of its
   own). Part of a chart alone (trust-manager's CRDs, in cert-manager) cannot
   be rendered: render the chart with its switches, or leave the part to
@@ -213,11 +214,11 @@ require:                                 # read by the mapping in every case
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    base: base/app.yaml                  # OKDP's fixed values, plain YAML
+    defaults: app.defaults.yaml          # OKDP's defaults, plain YAML
     upstream: true                       # the instance's upstream.app
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
     append: [env]
-  metrics:                               # no base values, no instance values
+  metrics:                               # no OKDP defaults, no instance values
     source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
 ```
 
@@ -230,12 +231,12 @@ charts:
   [sources](specs/02_service_definition.md#sources)). `okdp` and the charts
   of the OAuth clients (`oidc-dcr`, `<name>-oidc-dcr`) are not listed: the
   compiler adds them ([OAuth clients](#oauth-clients)).
-- `base` holds what depends on no parameter, platform value or connection:
+- `defaults` holds what depends on no parameter, platform value or connection:
   images, probes, switches, static configuration. The mapping's values go
   over it, the instance's over both
   ([merge precedence](specs/01_inputs_outputs.md#merge-precedence)).
-- `upstream` lets an instance set any value of the chart, from its files
-  and its inline `upstream.<key>` values
+- `upstream` lets an instance set any value of the chart, under
+  `upstream.<key>` of its values
   ([upstream](specs/02_service_definition.md#upstream)). Leave it out
   for a chart an instance has no reason to set (the webapp's `metrics`).
 - `protect` refuses instance values on a path, under it, or a non-map on the
@@ -550,12 +551,12 @@ phases) are two chart keys of `service.yaml` with the same source:
 charts:
   polaris-admin:
     source: &admin {repository: https://charts.example.org, chart: polaris-admin, version: 1.0.0}
-    base: base/polaris-admin-bootstrap.yaml
+    defaults: polaris-admin.defaults.yaml
     upstream: true                     # the instance's upstream.polaris-admin
     protect: [fullnameOverride, phase, realms]
   polaris-admin-principals:            # the values of a second render
     source: *admin                     # the same chart
-    base: base/polaris-admin-principals.yaml
+    defaults: polaris-admin-principals.defaults.yaml
     upstream: {from: polaris-admin}    # the instance values of polaris-admin, its protect
 ```
 
@@ -575,10 +576,9 @@ with it, each with its own values file: the index maps both to the same
 source ([rendering with Helm](01_usage.md#rendering-with-helm)). Everything
 else is keyed by the key ([sources](specs/02_service_definition.md#sources)).
 `upstream: {from: polaris-admin}` gives the second render the instance's
-upstream values of the first, its files and its inline values, with the
-first key's `protect` and `append`: an instance sets both renders at once,
-refused or appended the same way, and the mapping sees the values once, as
-`values.upstream.polaris-admin`
+upstream values of the first, with the first key's `protect` and `append`:
+an instance sets both renders at once, refused or appended the same way,
+and the mapping sees the values once, as `values.upstream.polaris-admin`
 ([upstream](specs/02_service_definition.md#upstream)).
 
 ### Generated secrets
@@ -769,7 +769,7 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - **Numbers are doubles.** `values.replicas * 2` has no overload, write
   `* 2.0` or `int(values.replicas) * 2`; `str()` prints 1000000 as `1e+06`
   ([numbers](specs/02_service_definition.md#numbers)).
-- **YAML 1.1.** The mapping, the base values and the upstream charts'
+- **YAML 1.1.** The mapping, OKDP's defaults and the upstream charts'
   defaults are read as Helm reads values: plain `no`, `off`, `y` are booleans, `0440` is
   the octal 288. Quote a string that looks like one (`"no"`). `service.yaml`
   alone is read as YAML 1.2: `upstream: no` is refused, write `false`
@@ -786,9 +786,9 @@ A rule no path expresses (a value that depends on a parameter) goes in
   (`${{ values.?x.orValue(null) }}`) removes the upstream chart's default at
   render: leave the key out with `$if`. A parameter set to `null` by a values
   layer loses its default: read it with `values.?x.orValue(<default>)`.
-- **Lists replace.** A list of the mapping replaces the list of the base
-  values, and an instance's list replaces the mapping's unless the path is in
-  `append`. Keep each list wholly in the base values or in the mapping.
+- **Lists replace.** A list of the mapping replaces the list of OKDP's
+  defaults, and an instance's list replaces the mapping's unless the path is in
+  `append`. Keep each list wholly in OKDP's defaults or in the mapping.
 - **Names longer than 63 characters.** `${{ release.name }}-something`
   overflows with long project and instance names: a release has up to 53
   characters (Helm's limit, checked by the compiler), which leaves 10 for
@@ -802,8 +802,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - **No credential in values.** Connections and values carry `secretRef`
   names, never passwords: values end up in Git and in readable objects. A
   secret field in a connection or in `provides` fails the compile.
-- **No literal version in the mapping.** Pin the image tag in the base
-  values, next to the chart's default: a literal in the mapping is missed
+- **No literal version in the mapping.** Pin the image tag in OKDP's
+  defaults, next to the chart's default: a literal in the mapping is missed
   when the chart is bumped.
 - **An unset connection is `""`.** `values.database.host` fails on an empty
   reference: test `type(...) == map` first, or report it in `errors`.

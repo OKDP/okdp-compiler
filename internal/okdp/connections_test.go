@@ -280,7 +280,7 @@ x: field "user" is required by the database contract`
 }
 
 // TestCompileOutputErrors: the mapping may only output charts of
-// service.yaml, and their base values file must exist.
+// service.yaml, and their defaults file must exist.
 func TestCompileOutputErrors(t *testing.T) {
 	d := *def
 	d.Mapping = []byte("output: {db: {}}\n")
@@ -288,8 +288,8 @@ func TestCompileOutputErrors(t *testing.T) {
 		t.Errorf("unknown chart: got %v", err)
 	}
 	d = *def
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Base: "base/missing.yaml"}}
-	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open base/missing.yaml") {
-		t.Errorf("missing base values: got %v", err)
+	d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "missing.defaults.yaml"}}
+	if _, err := Compile(&d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open missing.defaults.yaml") {
+		t.Errorf("missing defaults file: got %v", err)
 	}
 }

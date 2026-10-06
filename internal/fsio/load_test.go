@@ -20,7 +20,7 @@ version: 1.0.0
 roles: [web]
 dependsOn: [ingress]
 require: [a, {key: b, $if: "${{ values.on }}"}]
-charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base: f.yaml, protect: [p]}}
+charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, defaults: f.yaml, protect: [p]}}
 `)},
 		"values.cel.yaml": {Data: []byte("output: {}\n")},
 	}
@@ -30,7 +30,7 @@ charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base
 	}
 	want := okdp.Service{
 		Name: "demo", Version: "1.0.0", Roles: []string{"web"}, DependsOn: []string{"ingress"},
-		Require: okdp.Requirements{{Key: "a"}, {Key: "b", If: "${{ values.on }}"}}, Charts: chart.Specs{"app": {Source: chart.Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}, Base: "f.yaml", Protect: []string{"p"}}},
+		Require: okdp.Requirements{{Key: "a"}, {Key: "b", If: "${{ values.on }}"}}, Charts: chart.Specs{"app": {Source: chart.Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}, Defaults: "f.yaml", Protect: []string{"p"}}},
 	}
 	if !reflect.DeepEqual(d.Service, want) || string(d.Mapping) != "output: {}\n" || d.Files == nil {
 		t.Errorf("got %#v", d)
@@ -43,7 +43,7 @@ charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base
 		"no mapping":        {fstest.MapFS{"service.yaml": ok["service.yaml"]}, "values.cel.yaml"},
 		"bad service.yaml":  {fstest.MapFS{"service.yaml": {Data: []byte("charts: [")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: "},
 		"wrong field types": {fstest.MapFS{"service.yaml": {Data: []byte("charts: [a]\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: "},
-		"unknown fields":    {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nchrats: {}\ncharts: {app: {protcet: [p]}}\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: line 2: unknown field chrats (allowed: name, version, roles, dependsOn, charts, require)\nservice.yaml: line 3: unknown field protcet (allowed: source, base, protect, append, upstream)"},
+		"unknown fields":    {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nchrats: {}\ncharts: {app: {protcet: [p]}}\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: line 2: unknown field chrats (allowed: name, version, roles, dependsOn, charts, require)\nservice.yaml: line 3: unknown field protcet (allowed: source, defaults, protect, append, upstream)"},
 		"two documents":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\n---\nname: other\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: line 3: a second YAML document: service.yaml is one document"},
 		"an empty file":     {fstest.MapFS{"service.yaml": {Data: []byte("# nothing\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: name is required"},
 		"no name":           {fstest.MapFS{"service.yaml": {Data: []byte("version: 1.0.0\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: name is required"},

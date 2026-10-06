@@ -82,8 +82,8 @@ func platformChart(v any, where string) (chart.Ref, error) {
 }
 
 // objectsChart: the charts of svc plus the okdp chart (ObjectsChart),
-// rendered by the platform's objects chart, its values the objects (no base
-// values, no instance values), added to the mapping's output, which may not
+// rendered by the platform's objects chart, its values the objects (no OKDP
+// defaults, no instance values), added to the mapping's output, which may not
 // list it. svc is not changed.
 func objectsChart(svc *Service, objects []map[string]any, output M, src chart.Ref) (*Service, error) {
 	if _, ok := output[ObjectsChart]; ok {

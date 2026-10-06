@@ -305,7 +305,7 @@ func dcrImage(img M) M {
 
 // clientCharts: the charts of service.yaml, plus the chart of each client
 // compiled in dcr mode (the chart key of the client, rendered by the
-// platform's oidc-dcr chart src, no base values, no instance values), its
+// platform's oidc-dcr chart src, no OKDP defaults, no instance values), its
 // values added to the mapping's output. The compiler owns these charts:
 // neither service.yaml nor the mapping's output may list them, in any mode.
 // svc is not changed.

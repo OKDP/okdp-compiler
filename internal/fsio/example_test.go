@@ -67,7 +67,7 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 }
 
 // TestExample compiles the instance of each example
-// (input/instance/config.yaml) and compares what it writes with the
+// (input/config.yaml) and compares what it writes with the
 // example's outputs, byte for byte. 01_minimal: output/helm-cmd/, what
 // --emit-dir --mkinstall writes, and output/umbrella-chart/, what
 // --umbrella writes; nothing references a contract. 02_advanced:
@@ -85,7 +85,7 @@ func TestExample(t *testing.T) {
 			Charts:    os.DirFS(filepath.Join(in, "charts")),
 			Contracts: fstest.MapFS{},
 			Platform:  readLayers(t, []string{filepath.Join(in, "platform.yaml")}),
-			Values:    readLayers(t, []string{filepath.Join(in, "instance", "config.yaml")}),
+			Values:    readLayers(t, []string{filepath.Join(in, "config.yaml")}),
 			Release:   "demo-hello",
 			Namespace: "demo",
 		})
@@ -100,7 +100,7 @@ func TestExample(t *testing.T) {
 		checkDir(t, "01_minimal/output/umbrella-chart", umbrella)
 	})
 	t.Run("02_advanced", func(t *testing.T) {
-		instance := []string{filepath.Join(input, "instance", "config.yaml")}
+		instance := []string{filepath.Join(input, "config.yaml")}
 		def, res, err := exampleCompile(t, nil, instance)
 		if err != nil {
 			t.Fatal(err)

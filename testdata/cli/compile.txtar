@@ -1,6 +1,6 @@
 # A compile: status 0, nothing printed, the example's outputs written.
 env OKDP_CHARTS=examples/02_advanced/input/charts OKDP_CONTRACTS=examples/02_advanced/input/contracts
-status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --emit-dir $WORK/files --mkinstall --umbrella $WORK/umbrella
+status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --emit-dir $WORK/files --mkinstall --umbrella $WORK/umbrella
 ! stdout .
 ! stderr .
 cmp $WORK/files/app.values.yaml examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml

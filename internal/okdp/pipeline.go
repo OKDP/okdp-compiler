@@ -69,7 +69,7 @@ type Inputs struct {
 // Result: what a compile produces.
 type Result struct {
 	// Computed: chart -> the values the mapping computed, before the merge
-	// with the upstream defaults, the base values and the instance values.
+	// with the upstream defaults, OKDP's defaults and the instance values.
 	Computed map[string]any
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any

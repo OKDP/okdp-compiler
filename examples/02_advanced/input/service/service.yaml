@@ -15,7 +15,7 @@ require:                               # platform values the service needs, unde
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    base: base/app.yaml                # OKDP's fixed values, over the chart's own
+    defaults: app.defaults.yaml        # OKDP's defaults, over the chart's own
     upstream: true                     # the instance may set any value, under upstream.app
     # ...except these, set by the platform; and its env is appended to.
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls, 'ingress.annotations["cert-manager.io/*"]']

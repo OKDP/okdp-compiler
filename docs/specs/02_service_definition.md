@@ -5,7 +5,7 @@ a package that `compiler.LoadDefinition(fsys)` reads.
 
 | File | Content |
 |---|---|
-| [`service.yaml`](#serviceyaml) | the engine-neutral part: the service's name and versions, the upstream charts and their sources, their base values, what an instance may override, the platform values the service needs |
+| [`service.yaml`](#serviceyaml) | the engine-neutral part: the service's name and versions, the upstream charts and their sources, OKDP's defaults for them, what an instance may override, the platform values the service needs |
 | [`values.cel.yaml`](#valuescelyaml) | the mapping: YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives; it computes the values of each chart, OKDP's own objects and what the instance publishes, and declares the service's OAuth clients |
 
 Both files are required: a missing one fails `LoadDefinition` with the read
@@ -14,7 +14,7 @@ fails with `service.yaml: <error>`. `LoadDefinition` only reads
 `values.cel.yaml`: each `Compile` parses and evaluates it, so its errors
 are compile errors ([Errors](#errors)). It keeps the package
 (`Definition.Files`): each compile reads its other files,
-`config.schema.json` and the base files
+`config.schema.json` and the defaults files
 ([package files](01_inputs_outputs.md#package-files)).
 
 The other inputs of a compile (the chart cache, contracts, platform and
@@ -34,7 +34,7 @@ Each unknown field is reported, one per line, with the fields of its place
 [`upstream`](#upstream) check their own forms:
 
 ```text
-service.yaml: line 7: unknown field protcet (allowed: source, base, protect, append, upstream)
+service.yaml: line 7: unknown field protcet (allowed: source, defaults, protect, append, upstream)
 ```
 
 The file is one YAML document: a second one, after `---`, fails
@@ -106,12 +106,12 @@ service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: mu
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `source` | `{repository, chart, version}` | required | The upstream chart that renders the key's values: [sources](#sources). |
-| `base` | string | none | Path, in the package, of OKDP's fixed values for this chart, over its `values.yaml` and under the computed values (by convention `base/<key>.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
+| `defaults` | string | none | Path, in the package, of OKDP's defaults for this chart, over its `values.yaml` and under the computed values (by convention `<key>.defaults.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
 | `upstream` | `true`, `false` or `{from: <key>}` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
 | `protect` | list of paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
 | `append` | list of paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
 
-How the chart defaults, `base`, the computed values and the instance
+How the chart's own defaults, OKDP's (`defaults`), the computed values and the instance
 upstream values combine: [merge precedence](01_inputs_outputs.md#merge-precedence).
 A chart is rendered only when the mapping outputs it; its source must then
 be in the chart cache ([chart cache](01_inputs_outputs.md#chart-cache)).
@@ -136,12 +136,12 @@ service.yaml: charts: key "../app": a DNS label (lowercase letters, digits and -
 charts:
   polaris-admin:
     source: &admin {repository: https://charts.example.org, chart: polaris-admin, version: 1.0.0}
-    base: base/polaris-admin-bootstrap.yaml
+    defaults: polaris-admin.defaults.yaml
     upstream: true
     protect: [fullnameOverride, phase, realms]
   polaris-admin-principals:            # the values of a second render
     source: *admin                     # the same chart
-    base: base/polaris-admin-principals.yaml
+    defaults: polaris-admin-principals.defaults.yaml
     upstream: {from: polaris-admin}    # the instance values of polaris-admin, with its protect
 ```
 
@@ -246,19 +246,19 @@ require:                               # global.okdp.<path>, each non-empty
 charts:
   app:                                 # output.app of the mapping
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    base: base/app.yaml                # OKDP's fixed values, over the chart's values.yaml
+    defaults: app.defaults.yaml        # OKDP's defaults, over the chart's values.yaml
     upstream: true                     # the instance's upstream.app
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, 'ingress.annotations["cert-manager.io/*"]']
     append: [env]                      # instance lists appended to the computed ones
   admin:
     source: &admin {repository: oci://registry.example.org/charts, chart: admin, version: 0.3.1}
-    base: base/admin.yaml
+    defaults: admin.defaults.yaml
     upstream: true                     # the instance's upstream.admin
   admin-users:                         # output.admin-users, a second render of the admin chart
     source: *admin
-    base: base/admin-users.yaml
+    defaults: admin-users.defaults.yaml
     upstream: {from: admin}            # the instance values of admin
-  metrics:                             # no base values, no instance values
+  metrics:                             # no OKDP defaults, no instance values
     source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
 ```
 

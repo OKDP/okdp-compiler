@@ -29,9 +29,9 @@ func Example() {
 	chartsFS := os.DirFS("examples/02_advanced/input/charts")
 	contractsFS := os.DirFS("examples/02_advanced/input/contracts")
 	platformValues := values("examples/02_advanced/input/platform.yaml")
-	instanceValues := values("examples/02_advanced/input/instance/config.yaml")
+	instanceValues := values("examples/02_advanced/input/config.yaml")
 
-	def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, base/
+	def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func ExampleCompile() {
 		return v
 	}
 	in.Platform = []map[string]any{read("examples/02_advanced/input/platform.yaml")}
-	in.Values = []map[string]any{read("examples/02_advanced/input/instance/config.yaml")}
+	in.Values = []map[string]any{read("examples/02_advanced/input/config.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -121,11 +121,11 @@ version: 1.2.3
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.0.0}
-    base: base/app.yaml
+    defaults: app.defaults.yaml
 `)},
 		"values.cel.yaml":    {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
 		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
-		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
+		"app.defaults.yaml":  {Data: []byte("image: {tag: \"4.5\"}\n")},
 	})
 	if err != nil {
 		log.Fatal(err)

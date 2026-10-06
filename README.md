@@ -17,7 +17,7 @@ Two ways to use it:
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, base/
+def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 if err != nil {
 	log.Fatal(err)
 }
@@ -52,7 +52,7 @@ template` (`testdata/helm`): every values file is read as Helm
 reads it (YAML 1.1), the layers are merged and coalesced as Helm does, the
 parameters are checked against the package's `config.schema.json` and the
 final values against the charts' `values.schema.json`, and `res.Values[chart]`, rendered by Helm, gives what
-Helm gives with the base values, the computed values and the instance's
+Helm gives with OKDP's defaults, the computed values and the instance's
 upstream values as `-f` files
 ([Helm fidelity](docs/00_architecture.md#helm-fidelity)).
 
@@ -116,16 +116,16 @@ export OKDP_CONTRACTS=$in/contracts   # or --contracts
 export OKDP_CHARTS=$in/charts         # or --charts
 bin/okdp-compile --package $in/service \
   --release demo-webapp --namespace demo \
-  --platform $in/platform.yaml -f $in/instance/config.yaml \
+  --platform $in/platform.yaml -f $in/config.yaml \
   --emit-dir out/output-no-dcr/helm-cmd --mkinstall --umbrella out/output-no-dcr/umbrella-chart
 bin/okdp-compile --package $in/service \
   --release demo-webapp --namespace demo \
   --platform $in/platform.yaml --platform $in/platform-dcr.yaml \
-  -f $in/instance/config.yaml --emit-dir out/output-dcr/helm-cmd --mkinstall
+  -f $in/config.yaml --emit-dir out/output-dcr/helm-cmd --mkinstall
 # out/ now holds the outputs of examples/02_advanced/, byte for byte
 bin/okdp-compile --package $in/service \
   --release demo-webapp --namespace demo \
-  --platform $in/platform.yaml -f $in/instance/config.yaml -f testdata/protected-upstream.yaml
+  --platform $in/platform.yaml -f $in/config.yaml -f testdata/protected-upstream.yaml
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
 
@@ -171,7 +171,7 @@ directory holding any other file is refused. `--release` and
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
 | `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/` (`helm-cmd/` with `--emit-dir --mkinstall`, `umbrella-chart/` with `--umbrella`), checked by `go test` ([example](docs/00_architecture.md#example)) |
-| `examples/02_advanced/input/` | an example compile's inputs: the package (`service/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`, and `platform-dcr.yaml` after it for `dcr` mode), the instance (`instance/`: its values, `config.yaml`, and its upstream values files) ([example](docs/00_architecture.md#example)) |
+| `examples/02_advanced/input/` | an example compile's inputs: the package (`service/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`, and `platform-dcr.yaml` after it for `dcr` mode), the instance's values (`config.yaml`, given with `-f`) ([example](docs/00_architecture.md#example)) |
 | `examples/02_advanced/output-*/` | what `okdp-compile` writes for it, checked by `go test`: `output-no-dcr/helm-cmd/` with `--emit-dir --mkinstall`, `output-no-dcr/umbrella-chart/` with `--umbrella`, `output-dcr/helm-cmd/` with `--emit-dir --mkinstall` in `dcr` mode |
 | `testdata/` | instance values that must fail on the example, platform values in `testdata/platform/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/cli/` | the binary run as a process (testscript): exit statuses, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |

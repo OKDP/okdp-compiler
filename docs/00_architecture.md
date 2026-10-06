@@ -15,7 +15,7 @@ a directory in git, not a chart: OKDP publishes no chart of the service.
 
 One compile is one instance. It reads the package (`fsio.LoadDefinition`:
 `service.yaml` and `values.cel.yaml`; then each compile, the parameters and
-the base values) and, in `Inputs`, the chart cache (the upstream charts' 
+OKDP's defaults) and, in `Inputs`, the chart cache (the upstream charts' 
 defaults and schemas), the contracts, the values layers (the platform's,
 `Platform`, then the instance's, `Values`), and the release and
 namespace, shared by all the instance's charts
@@ -44,7 +44,7 @@ oidc-dcr template and `service.yaml`.
 ```mermaid
 flowchart TD
   def["service definition<br/>service.yaml, values.cel.yaml"]
-  pkg["package files<br/>config.schema.json, base/"]
+  pkg["package files<br/>config.schema.json, <key>.defaults.yaml"]
   layers["values layers<br/>platform's: global; instance's"]
   contracts["contracts<br/>contract schemas"]
   cache["chart cache<br/>repository/chart-version: values.yaml, values.schema.json"]
@@ -75,7 +75,7 @@ flowchart TD
   s5 -- output --> s9["9: final values<br/>merges, protect, append"]
   s6 -- "client charts" --> s9
   def -. "charts, sources" .-> s9
-  pkg -. base .-> s9
+  pkg -. defaults .-> s9
   cache -- defaults --> s9
   layers -. "upstream.key" .-> s9
   s9 --> s10["10: upstream schemas"]
@@ -204,7 +204,7 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    values of the client's chart. Then, in any mode with a client, `clientCharts`
    checks the reserved chart keys; in `dcr` mode it adds each client chart
    to a copy of the charts of `service.yaml` (`chart.Spec{Source: <oidcDcr>}`:
-   no base values, no instance upstream values), and its values to the
+   no OKDP defaults, no instance upstream values), and its values to the
    mapping's output, which `Result.Computed` shows
    ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
 7. **Descriptor and credentials Secrets** (`descriptor`,
@@ -244,7 +244,7 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    name that chart and version from two repositories (`newChartCache`); a
    chart it does not hold fails with the `mkdir -p` and `helm pull`
    commands that fetch it into its repository's directory. The
-   chart's `values.yaml` (its nulls removed), the `base` file and the
+   chart's `values.yaml` (its nulls removed), the `defaults` file and the
    computed values are merged as `-f` files (`layered`). When the chart
    accepts upstream values, the instance's `upstream.<key>` values go
    through `applyUpstream`: the `{{` check, `protect`, `append`, then the
@@ -361,8 +361,8 @@ template's `if` takes as true.
   `CoalesceValues`
   ([Layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
 - Final values: written so that Helm 3 or 4, coalescing them over the chart
-  defaults, sees what it would see with the base, computed and upstream
-  values as `-f` files
+  defaults, sees what it would see with OKDP's defaults, the computed and
+  upstream values as `-f` files
   ([Equivalence with Helm](specs/01_inputs_outputs.md#equivalence-with-helm)),
   checked with Helm 4.3 and the 4.2 and 3.19 releases the deployers embed;
   Helm 3 reads the first document of a values file only, an upstream
@@ -536,7 +536,7 @@ in-memory maps, the oidc-dcr template is in the binary.
 - A server compiles from a git tree or an `embed.FS`, tests
   from `fstest.MapFS`, the CLI from `os.DirFS`; the contracts from any of
   them, an `embed.FS` of the contract schemas included.
-- The paths written in `service.yaml` (`base`) are cleaned and opened
+- The paths written in `service.yaml` (`defaults`) are cleaned and opened
   inside the package, and an `fs.FS` path cannot contain `..`: a package
   cannot read outside itself. A chart
   cache entry, `<repository>/<chart>-<version>` or `<chart>-<version>`, is
@@ -564,11 +564,11 @@ filled from the pinned references. The compiler enforces:
 | Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`checkContract`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
 | Provider and consumers agree | `descriptor` | an output under the release name equals what internal references resolve to |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
-| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the instance's layers (parameters, `connections`, inline upstream values), of its upstream values files, and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
+| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the instance's layers (parameters, `connections`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
 | Upstream schemas | stage 10 | an upstream chart's rules fail the compile, not the deployment |
 | Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart the compile checks the values against is the chart the deployer renders |
 | Declared charts only | `Compile`, `clientCharts`, `objectsChart` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart or the `okdp` chart with one of its own: their keys are the compiler's, and their charts the platform's |
-| OAuth client charts | `clientCharts` | no base values, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
+| OAuth client charts | `clientCharts` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
 
 What an expression computes is bounded only on request: a caller that
 compiles packages it does not review passes a context (cancelled between
@@ -734,7 +734,7 @@ one chart, `app` (the fictional `hello` chart of `input/charts/`), whose
 `values.cel.yaml` sets three values from the parameters (`replicas`, its
 default in `config.schema.json`) and the release, and the instance's
 usage; `input/platform.yaml` gives only the okdp chart
-(`global.okdp.charts.objects`), `input/instance/config.yaml` the
+(`global.okdp.charts.objects`), `input/config.yaml` the
 instance's values. `output/helm-cmd/` is what `okdp-compile --emit-dir
 --mkinstall` writes for it, `output/umbrella-chart/` what `--umbrella`
 writes, under the release `demo-hello` and the namespace `demo`. Nothing
@@ -743,19 +743,19 @@ references a contract: the compile reads none.
 `examples/02_advanced/input/` is what one compile of a service, `webapp`,
 reads: `service/` (`service.yaml`, `values.cel.yaml` with a database connection
 and an OAuth client, `config.schema.json` with the parameters' defaults,
-`base/app.yaml`),
+`app.defaults.yaml`),
 `charts/` (the chart cache: the `values.yaml` of each chart only, in its
 repository's directory, the platform's okdp-objects and oidc-dcr
 included), `contracts/`, `platform.yaml` (the platform values),
 `platform-dcr.yaml` (a platform layer after it: the OAuth clients in `dcr`
-mode) and `instance/config.yaml`, the instance's values (`-f`), its
+mode) and `config.yaml`, the instance's values (`-f`), its
 upstream values of `app` included.
 The rest of `examples/02_advanced/` is what the compile writes:
 `output-no-dcr/helm-cmd/` as `okdp-compile --emit-dir --mkinstall`,
 `output-no-dcr/umbrella-chart/` as `--umbrella`, and `output-dcr/helm-cmd/`
 as `--emit-dir --mkinstall` with `platform-dcr.yaml`. `TestExample`
 (`internal/fsio/example_test.go`) checks both examples. For `02_advanced`, it
-compiles `instance/config.yaml`, an instance layer, over `platform.yaml`, a
+compiles `config.yaml`, an instance layer, over `platform.yaml`, a
 platform layer, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of
 `fsio.Files` with `fsio.Install`, and of `fsio.Umbrella`, with them byte for
@@ -853,7 +853,7 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   `global.okdp.oidc.dcr.authMethod: anonymous`
   ([OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings)).
 - **A client chart's values are the template's.** A package sets the client
-  keys, the platform the Job settings; a client chart takes no base values
+  keys, the platform the Job settings; a client chart takes no OKDP defaults
   and no instance upstream values. The template writes the values of
   oidc-dcr >= 0.5.0 (camelCase); the version the platform names
   (`global.okdp.charts.oidcDcr`) is not checked against it (its

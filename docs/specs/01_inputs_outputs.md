@@ -47,7 +47,7 @@ files, and no other:
   service.yaml                        the service, its charts and their sources
   values.cel.yaml                     the mapping
   config.schema.json                  schema of the parameters, their defaults, connection references
-  base/<key>.yaml                     base values of the chart <key> (charts.<key>.base)
+  <key>.defaults.yaml                 OKDP's defaults for the chart <key> (charts.<key>.defaults)
 ```
 
 | File | Required | Read as | Used for |
@@ -55,7 +55,7 @@ files, and no other:
 | `service.yaml` | yes | YAML 1.2 | the service: name, versions, catalog metadata, charts ([service.yaml](02_service_definition.md#serviceyaml)) |
 | `values.cel.yaml` | yes | the mapping language | the computed values, objects and outputs ([values.cel.yaml](02_service_definition.md#valuescelyaml)) |
 | `config.schema.json` | yes | JSON | [parameter defaults](#defaults), [parameter check](#schema-check), [connection references](#declaring-a-reference) |
-| base file | when `charts.<key>.base` is set | values file | second layer of the [final values](#merge-precedence) |
+| defaults file | when `charts.<key>.defaults` is set | values file | second layer of the [final values](#merge-precedence) |
 
 `<key>`: a chart key, a key of `charts` in `service.yaml`, the chart of an
 OAuth client ([OAuth client charts](#oauth-client-charts)) or `okdp`
@@ -63,25 +63,25 @@ OAuth client ([OAuth client charts](#oauth-client-charts)) or `okdp`
 compiled chart: one the mapping outputs (`output.<key>`, not left out by
 `$if`, not null), the okdp chart, and in `dcr` mode the chart of each
 OAuth client. Each is rendered by an upstream chart, its source
-([chart index](#chart-index)); several keys may share one. The base file
-may be any path of the package, `base/<key>.yaml` by convention; a path out
-of it (`../app.yaml`) fails. The service's name, versions and catalog
+([chart index](#chart-index)); several keys may share one. The defaults file
+may be any path of the package, `<key>.defaults.yaml` by convention; a
+path out of it (`../app.yaml`) fails. The service's name, versions and catalog
 metadata are fields of `service.yaml` ([Service](02_service_definition.md#service)).
 
 `config.schema.json` is required, even for a service without parameters:
 the defaults, the schema check and the connection walk read it. A missing
 file fails with the error of the file system, prefixed with the chart key
-for a base file:
+for a defaults file:
 
 ```
 open config.schema.json: no such file or directory
-app: open base/app.yaml: no such file or directory
+app: open app.defaults.yaml: no such file or directory
 ```
 
 ### Values files
 
 Every values file is read as Helm 4 reads one (`loader.LoadValues`): the
-upstream charts' `values.yaml` ([chart cache](#chart-cache)), the base
+upstream charts' `values.yaml` ([chart cache](#chart-cache)), the defaults
 files, and the values layers read by `compiler.ParseValues` (the binary's
 `--platform` and `-f` files).
 
@@ -326,7 +326,7 @@ Three top-level keys are not parameters of the service:
 |---|---|---|
 | `global` | the platform values, `global.okdp`: set by the platform's layers, by an instance's only for the keys the schema declares ([Platform values](#platform-values)) | removed: given as `global` and `platform` |
 | `connections` | the external connections, by name ([Connections](#connections)) | removed: the references are resolved in place |
-| `upstream` | the inline upstream values, by chart key ([Upstream values](#upstream-values)) | for a chart that accepts upstream values and has some: its files, then its inline values, merged as they will be applied (`append` lists appended); the other keys as written |
+| `upstream` | the instance's upstream values, by chart key ([Upstream values](#upstream-values)) | as written |
 
 They are checked with the parameters: a schema with `additionalProperties:
 false` declares them, `{"type": "object"}` at least
@@ -828,7 +828,7 @@ for the upstream charts.
 order given, after its `--platform` files:
 
 ```bash
-bin/okdp-compile ... --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml
+bin/okdp-compile ... --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml
 ```
 
 An instance layer sets no `global` but the keys the parameter schema
@@ -877,7 +877,7 @@ upstream:
     env:
       - {name: LOG_LEVEL, value: debug}   # appended: append: [env]
     resources:
-      limits: {memory: 1Gi}               # merged over the base values
+      limits: {memory: 1Gi}               # merged over OKDP's defaults
 ```
 
 They are checked, then merged over the computed values ([Merge
@@ -921,13 +921,13 @@ it fail.
 
 `charts.<key>.append`: dotted paths of lists. A list the upstream values
 give at such a path is appended to the list the values have there
-(upstream defaults, base values, computed values) instead of replacing
+(upstream defaults, OKDP's defaults, computed values) instead of replacing
 it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in
-`examples/02_advanced/input/instance/config.yaml`
+`examples/02_advanced/input/config.yaml`
 (`examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml`).
 
 ### Upstream errors
@@ -948,7 +948,7 @@ each layer over the previous ones:
 | | Layer | From |
 |---|---|---|
 | 1 | upstream defaults | `values.yaml` of the key's source, from the [chart cache](#chart-cache), its `null` values removed |
-| 2 | base values | the file `charts.<key>.base` |
+| 2 | OKDP's defaults | the file `charts.<key>.defaults` |
 | 3 | computed values | `output.<key>` of the mapping |
 | 4 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
@@ -961,7 +961,7 @@ the compiler computes for them: [OAuth client charts](#oauth-client-charts),
 
 Then `global` is replaced by: the `global` of layer 1, under the `global` of
 the parameters (the platform's, [Platform values](#platform-values)), under
-the `global` of layer 3. The `global` of the base values is not kept; layer
+the `global` of layer 3. The `global` of OKDP's defaults is not kept; layer
 4 may not set it (protected). Every chart thus gets the platform
 values.
 
@@ -996,7 +996,7 @@ helm template <release> <source> -f <Result.Values[key]>
 renders what
 
 ```bash
-helm template <release> <source> -f <base> -f <computed> -f <upstream>
+helm template <release> <source> -f <defaults> -f <computed> -f <upstream>
 ```
 
 renders, `global` and the [appended](#append) lists aside. `<source>`:
@@ -1141,7 +1141,7 @@ follow, and two clients may not write one Secret
 ([compile errors](02_service_definition.md#compile-errors)).
 
 A client chart has no `service.yaml` entry, and its key is reserved
-([oidcClients](02_service_definition.md#oidcclients)): it takes no base values
+([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
 and no instance upstream values ([merge precedence](#merge-precedence)).
 
 The computed values are not Go code: `internal/okdp/oidc-dcr.cel.yaml`, a
@@ -1371,7 +1371,7 @@ of `objects` as one YAML document):
   ([merge precedence](#merge-precedence));
 - it is compiled whatever the mapping outputs, also when it outputs no
   chart;
-- the compiler owns it: no base values, no instance upstream values;
+- the compiler owns it: no OKDP defaults, no instance upstream values;
   `service.yaml` may not list it (refused when it is loaded), nor the
   mapping's `output`:
 
@@ -1464,7 +1464,7 @@ same but for `hasKey`, `toYaml` and `range`.
 
 `examples/02_advanced/output-no-dcr/helm-cmd/`, what `--emit-dir
 --mkinstall` writes for the example: release `demo-webapp`, namespace `demo`, the instance
-`examples/02_advanced/input/instance/config.yaml` (`replicas: 2`,
+`examples/02_advanced/input/config.yaml` (`replicas: 2`,
 `database: demo-db`, a memory limit and two `env` entries in
 `upstream.app`), over
 `examples/02_advanced/input/platform.yaml` (`existing` mode: no OAuth client
@@ -1508,11 +1508,11 @@ global:                                   # the parameters' global
     # ... the platform values
 image:
   repository: example/webapp              # upstream default
-  tag: "1.8"                              # base values
+  tag: "1.8"                              # OKDP's defaults
 ingress:
   # ... computed
 replicaCount: 2                           # computed: values.replicas
-resources:                                # base values
+resources:                                # OKDP's defaults
   limits:
     memory: 512Mi                         # upstream.app
   requests:

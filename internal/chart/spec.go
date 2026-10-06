@@ -1,5 +1,5 @@
 // Spec: the charts section of service.yaml: each chart key, the upstream
-// chart that renders its values, its base values, and the instance upstream
+// chart that renders its values, OKDP's defaults for it, and the instance upstream
 // values it accepts, with their protect and append paths.
 package chart
 
@@ -20,7 +20,7 @@ type Specs map[string]Spec
 // renders them.
 type Spec struct {
 	Source   Ref      `yaml:"source"`   // the upstream chart: its defaults and schema (the chart cache), and what renders the values
-	Base     string   `yaml:"base"`     // a values file of the package, base/<key>.yaml by convention (OKDP's fixed values for the chart)
+	Defaults string   `yaml:"defaults"` // a values file of the package, <key>.defaults.yaml by convention: OKDP's defaults for the chart
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
 	Append   []string `yaml:"append"`   // instance upstream values: appended lists (same paths)
 	Upstream Upstream `yaml:"upstream"` // instance upstream values accepted

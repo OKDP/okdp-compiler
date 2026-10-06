@@ -21,7 +21,7 @@ import (
 type Definition struct {
 	Service Service
 	Mapping []byte // values.cel.yaml
-	Files   fs.FS  // the package: config.schema.json, the base files
+	Files   fs.FS  // the package: config.schema.json, the defaults files
 }
 
 // Service: service.yaml, the engine-neutral part of a package.

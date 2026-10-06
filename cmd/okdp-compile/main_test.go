@@ -38,7 +38,7 @@ func example(dir string) options {
 		charts:    filepath.Join(input, "charts"),
 		contracts: filepath.Join(input, "contracts"),
 		platform:  multi{filepath.Join(input, "platform.yaml")},
-		values:    multi{filepath.Join(input, "instance", "config.yaml")},
+		values:    multi{filepath.Join(input, "config.yaml")},
 		release:   "demo-webapp",
 		namespace: "demo",
 		indent:    2,
