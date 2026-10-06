@@ -335,7 +335,9 @@ and Helm drops the nulls of defaults, where a null of the final values
 deletes an upstream default
 ([layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
 
-The example's are `examples/02_advanced/output-no-dcr/umbrella-chart/`:
+The example's are `examples/02_advanced/output-no-dcr/umbrella-chart/`
+(`output-dcr/umbrella-chart/` in `dcr` mode, `oidc-dcr` among its
+dependencies):
 
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/service \

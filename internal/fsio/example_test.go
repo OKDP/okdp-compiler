@@ -19,8 +19,8 @@ var update = flag.Bool("update", false, "rewrite the examples' outputs and testd
 // The examples, each what a compile reads (<example>/input) and writes;
 // input, that of the example the failure cases run on (examples/02_advanced:
 // output-no-dcr/helm-cmd/ as `okdp-compile --emit-dir --mkinstall`,
-// output-no-dcr/umbrella-chart/ as `--umbrella`, output-dcr/helm-cmd/ as
-// `--emit-dir --mkinstall` in dcr mode).
+// output-no-dcr/umbrella-chart/ as `--umbrella`, output-dcr/ likewise in dcr
+// mode).
 var (
 	examples = filepath.Join("..", "..", "examples")
 	input    = filepath.Join(examples, "02_advanced", "input")
@@ -72,7 +72,7 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 // --emit-dir --mkinstall writes, and output/umbrella-chart/, what
 // --umbrella writes; nothing references a contract. 02_advanced:
 // output-no-dcr/helm-cmd/ and output-no-dcr/umbrella-chart/, likewise;
-// output-dcr/helm-cmd/, what --emit-dir --mkinstall writes with
+// output-dcr/helm-cmd/ and output-dcr/umbrella-chart/, what they write with
 // platform-dcr.yaml after platform.yaml.
 func TestExample(t *testing.T) {
 	t.Run("01_minimal", func(t *testing.T) {
@@ -115,7 +115,11 @@ func TestExample(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if umbrella, err = Umbrella(def, res, DefaultIndent); err != nil {
+			t.Fatal(err)
+		}
 		checkDir(t, "02_advanced/output-dcr/helm-cmd", helmCmd(t, res))
+		checkDir(t, "02_advanced/output-dcr/umbrella-chart", umbrella)
 	})
 }
 

@@ -1494,7 +1494,10 @@ connection the instance's `audit` references).
 `examples/02_advanced/output-dcr/helm-cmd/` is the same compile in `dcr`
 mode, with `examples/02_advanced/input/platform-dcr.yaml` after
 `platform.yaml`: the OAuth client's chart, `oidc-dcr`
-([its values](#oauth-client-charts)), installed first.
+([its values](#oauth-client-charts)), installed first;
+`examples/02_advanced/output-dcr/umbrella-chart/` is it as one chart,
+`oidc-dcr` a dependency beside `app` and `okdp`, its Job a pre-install hook
+that runs before the release's other resources.
 
 `app.values.yaml`, annotated:
 

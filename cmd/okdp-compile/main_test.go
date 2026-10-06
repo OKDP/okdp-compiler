@@ -123,7 +123,7 @@ func TestVersionOf(t *testing.T) {
 // previous compile: they hold what the example's outputs hold, a file no
 // longer written removed (okdp.charts.yaml, which v0.1.0 wrote, and
 // okdp.dependencies.yaml, without --mkdag, among them), install.sh
-// executable; output-dcr/helm-cmd/, its --emit-dir in dcr mode. A compile
+// executable; output-dcr/, its --emit-dir and --umbrella in dcr mode. A compile
 // with --mkdag writes okdp.dependencies.yaml; one without --mkinstall
 // removes install.sh.
 func TestRun(t *testing.T) {
@@ -143,7 +143,7 @@ func TestRun(t *testing.T) {
 	}
 	dcr := example(dir)
 	dcr.platform = append(dcr.platform, filepath.Join(input, "platform-dcr.yaml"))
-	dcr.emitDir, dcr.umbrella, dcr.out = filepath.Join(dir, "output-dcr", "helm-cmd"), "", ""
+	dcr.emitDir, dcr.umbrella, dcr.out = filepath.Join(dir, "output-dcr", "helm-cmd"), filepath.Join(dir, "output-dcr", "umbrella-chart"), ""
 	if err := run(dcr); err != nil {
 		t.Fatal(err)
 	}

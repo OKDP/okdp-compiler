@@ -754,15 +754,15 @@ mode) and `config.yaml`, the instance's values (`-f`), its
 upstream values of `app` included.
 The rest of `examples/02_advanced/` is what the compile writes:
 `output-no-dcr/helm-cmd/` as `okdp-compile --emit-dir --mkinstall`,
-`output-no-dcr/umbrella-chart/` as `--umbrella`, and `output-dcr/helm-cmd/`
-as `--emit-dir --mkinstall` with `platform-dcr.yaml`. `TestExample`
+`output-no-dcr/umbrella-chart/` as `--umbrella`, and `output-dcr/`
+likewise with `platform-dcr.yaml`. `TestExample`
 (`internal/fsio/example_test.go`) checks both examples. For `02_advanced`, it
 compiles `config.yaml`, an instance layer, over `platform.yaml`, a
 platform layer, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of
 `fsio.Files` with `fsio.Install`, and of `fsio.Umbrella`, with them byte for
-byte; then the same with `platform-dcr.yaml` after `platform.yaml`, the
-files of `fsio.Files` with `fsio.Install` with `output-dcr/helm-cmd/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks
+byte; then the same with `platform-dcr.yaml` after `platform.yaml`, with
+`output-dcr/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks
 that the command line writes them, `install.sh` executable, removes
 `install.sh` without `--mkinstall` and `okdp.dependencies.yaml` without
 `--mkdag`, and writes the latter with it.

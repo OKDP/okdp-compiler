@@ -1,0 +1,14 @@
+apiVersion: v2
+name: webapp
+version: 1.0.0
+dependencies:
+  - name: app
+    repository: https://charts.example.org
+    version: 1.8.0
+  - name: oidc-dcr
+    repository: oci://quay.io/adaltas
+    version: 0.5.0
+  - name: okdp-objects
+    alias: okdp
+    repository: oci://registry.example.org/okdp
+    version: 1.0.0
