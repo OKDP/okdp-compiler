@@ -746,7 +746,9 @@ and an OAuth client, `config.schema.json` with the parameters' defaults,
 `app.defaults.yaml`),
 `charts/` (the chart cache: the `values.yaml` of each chart only, in its
 repository's directory, the platform's okdp-objects and oidc-dcr
-included), `contracts/`, `platform.yaml` (the platform values),
+included), `contracts/`, `platform.yaml` (the platform values: `global.okdp`,
+and `platform-db`, a connection every instance may reference, the
+instance's audit database),
 `platform-dcr.yaml` (a platform layer after it: the OAuth clients in `dcr`
 mode) and `config.yaml`, the instance's values (`-f`), its
 upstream values of `app` included.

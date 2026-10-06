@@ -663,6 +663,27 @@ its charts to instances this way:
 "global": {"type": "object", "properties": {"imageRegistry": {"type": "string"}}}
 ```
 
+A platform layer is a values layer: it may set more than `global`, for
+every instance of the platform, under the instance's layers. The useful
+case is `connections`: a connection every instance may reference by name,
+as one of its own ([Resolution](#resolution)). An instance layer giving a
+connection of the same name merges with it, key by key.
+
+```yaml
+# examples/02_advanced/input/platform.yaml
+connections:
+  platform-db:
+    contract: database
+    host: db.okdp.example.org
+    dbName: shared
+    secretRef: {name: platform-db-credentials}
+```
+
+The example's instance references both kinds: `database: demo-db`, an
+instance of the namespace, and `audit: platform-db`, the platform's
+connection. Parameters and `upstream` values are the package's: a
+platform file every service shares keeps to `global` and `connections`.
+
 ### Requirements
 
 `require` of `service.yaml`: dotted paths under `global.okdp`, each
@@ -1465,10 +1486,11 @@ same but for `hasKey`, `toYaml` and `range`.
 `examples/02_advanced/output-no-dcr/helm-cmd/`, what `--emit-dir
 --mkinstall` writes for the example: release `demo-webapp`, namespace `demo`, the instance
 `examples/02_advanced/input/config.yaml` (`replicas: 2`,
-`database: demo-db`, a memory limit and two `env` entries in
-`upstream.app`), over
+`database: demo-db`, `audit: platform-db`, a memory limit and two `env`
+entries in `upstream.app`), over
 `examples/02_advanced/input/platform.yaml` (`existing` mode: no OAuth client
-chart, [OAuth client charts](#oauth-client-charts)).
+chart, [OAuth client charts](#oauth-client-charts); `platform-db`, the
+connection the instance's `audit` references).
 `examples/02_advanced/output-dcr/helm-cmd/` is the same compile in `dcr`
 mode, with `examples/02_advanced/input/platform-dcr.yaml` after
 `platform.yaml`: the OAuth client's chart, `oidc-dcr`
@@ -1498,6 +1520,13 @@ env:
       secretKeyRef:
         key: password
         name: demo-db-database-credentials
+  - name: AUDIT_DB_URL                    # the platform's connection, resolved
+    value: jdbc:postgresql://db.okdp.example.org:5432/shared
+  - name: AUDIT_DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        key: password
+        name: platform-db-credentials
   - name: TZ                              # upstream.app, appended
     value: Europe/Paris
   - name: LOG_LEVEL                       # upstream.app, appended

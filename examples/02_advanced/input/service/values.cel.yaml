@@ -6,6 +6,9 @@ let:
   # The database parameter: the resolved connection, or {} when not set.
   db: '${{ type(values.database) == map ? values.database : {} }}'
   dbSecret: ${{ db.?secretRef.name.orValue('') }}
+  # The audit database, likewise.
+  audit: '${{ type(values.audit) == map ? values.audit : {} }}'
+  auditSecret: ${{ audit.?secretRef.name.orValue('') }}
 
 # A rule fails the compile with its message when its condition holds.
 errors:
@@ -13,6 +16,8 @@ errors:
     message: "webapp: replicas > 1 needs a database, sessions are stored there"
   - $if: ${{ db.size() > 0 && dbSecret == '' }}
     message: 'webapp: database connection "${{ db.okdp.ref }}" has no secretRef, the password cannot be read'
+  - $if: ${{ audit.size() > 0 && auditSecret == '' }}
+    message: 'webapp: audit connection "${{ audit.okdp.ref }}" has no secretRef, the password cannot be read'
 
 output:
   app:
@@ -41,6 +46,12 @@ output:
       - $if: ${{ db.size() > 0 }}
         name: DB_PASSWORD
         valueFrom: {secretKeyRef: {name: "${{ dbSecret }}", key: password}}
+      - $if: ${{ audit.size() > 0 }}
+        name: AUDIT_DB_URL
+        value: jdbc:${{ audit.engine }}://${{ audit.host }}:${{ str(audit.port) }}/${{ audit.dbName }}
+      - $if: ${{ audit.size() > 0 }}
+        name: AUDIT_DB_PASSWORD
+        valueFrom: {secretKeyRef: {name: "${{ auditSecret }}", key: password}}
 
 # The service's OAuth client: provisioned by the platform (the default), or
 # registered by an oidc-dcr chart the compiler adds (clientProvisioning: dcr).

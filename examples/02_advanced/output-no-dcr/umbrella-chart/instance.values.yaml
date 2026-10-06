@@ -20,6 +20,13 @@ app:
         secretKeyRef:
           key: password
           name: demo-db-database-credentials
+    - name: AUDIT_DB_URL
+      value: jdbc:postgresql://db.okdp.example.org:5432/shared
+    - name: AUDIT_DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: platform-db-credentials
     - name: TZ
       value: Europe/Paris
     - name: LOG_LEVEL

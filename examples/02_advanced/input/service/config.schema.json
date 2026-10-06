@@ -5,6 +5,8 @@
     "replicas": {"type": "integer", "minimum": 1, "default": 1},
     "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
                  "description": "The database: an instance providing the database contract, or an entry of connections."},
+    "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
+              "description": "The database audit events are written to, a reference as database is: often a connection the platform gives."},
     "connections": {"type": "object", "default": {}, "description": "External connections, by name."},
     "upstream": {"type": "object", "default": {}, "description": "Values passed to the upstream charts as they are, by chart."},
     "global": {"type": "object"}

@@ -1,5 +1,8 @@
-# The platform values (global.okdp), the same for every instance: a
-# platform layer (--platform), which an instance's layers cannot change.
+# The platform values, the same for every instance: a platform layer
+# (--platform), merged before the instance's layers.
+#
+# global.okdp: the platform's settings, which an instance's layers cannot
+# change.
 global:
   okdp:
     ingress:
@@ -13,3 +16,13 @@ global:
       objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
     oidc:
       issuerUri: https://sso.okdp.example.org/realms/okdp
+
+# A platform layer may set more than global. A connection given here is one
+# every instance may reference by name. Here the instance's audit database
+connections:
+  platform-db:
+    contract: database
+    description: the platform's shared database
+    host: db.okdp.example.org
+    dbName: shared
+    secretRef: {name: platform-db-credentials}
