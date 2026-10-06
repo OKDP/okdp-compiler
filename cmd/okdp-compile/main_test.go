@@ -17,11 +17,11 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 )
 
-// The example: what a compile reads (example/input) and writes
-// (example/output).
+// The example: what a compile reads (examples/02_advanced/input) and
+// writes (the rest of examples/02_advanced).
 var (
-	input  = filepath.Join("..", "..", "example", "input")
-	output = filepath.Join("..", "..", "example", "output")
+	exampleDir = filepath.Join("..", "..", "examples", "02_advanced")
+	input      = filepath.Join(exampleDir, "input")
 )
 
 // TestMain: the test binary is also okdp-compile, the command of the
@@ -31,10 +31,10 @@ func TestMain(m *testing.M) {
 }
 
 // example: the options that compile the example instance into dir: files/
-// (--emit-dir), umbrella/ (--umbrella) and out.yaml (--out).
+// (--emit-dir --mkinstall), umbrella/ (--umbrella) and out.yaml (--out).
 func example(dir string) options {
 	return options{
-		pkg:       filepath.Join(input, "package"),
+		pkg:       filepath.Join(input, "service"),
 		charts:    filepath.Join(input, "charts"),
 		contracts: filepath.Join(input, "contracts"),
 		instance:  filepath.Join(input, "instance"),
@@ -44,6 +44,7 @@ func example(dir string) options {
 		namespace: "demo",
 		indent:    2,
 		emitDir:   filepath.Join(dir, "files"),
+		mkinstall: true,
 		umbrella:  filepath.Join(dir, "umbrella"),
 		out:       filepath.Join(dir, "out.yaml"),
 	}
@@ -120,17 +121,20 @@ func TestVersionOf(t *testing.T) {
 }
 
 // TestRun: the example compiled into directories holding the files of a
-// previous compile: they hold what example/output holds, a file no longer
-// written removed (okdp.dependencies.yaml, without --mkdag, among them);
-// dcr/, its --emit-dir in dcr mode. A compile with --mkdag writes
-// okdp.dependencies.yaml.
+// previous compile: they hold what the example's outputs hold, a file no
+// longer written removed (okdp.charts.yaml, which v0.1.0 wrote, and
+// okdp.dependencies.yaml, without --mkdag, among them), install.sh
+// executable; output-dcr/helm-cmd/, its --emit-dir in dcr mode. A compile
+// with --mkdag writes okdp.dependencies.yaml; one without --mkinstall
+// removes install.sh.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	o := example(dir)
+	o.emitDir, o.umbrella = filepath.Join(dir, "output-no-dcr", "helm-cmd"), filepath.Join(dir, "output-no-dcr", "umbrella-chart")
 	if err := os.MkdirAll(o.emitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml", "okdp.dependencies.yaml"} {
+	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml", "okdp.charts.yaml", "okdp.dependencies.yaml", "install.sh"} {
 		if err := os.WriteFile(filepath.Join(o.emitDir, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -140,22 +144,33 @@ func TestRun(t *testing.T) {
 	}
 	dcr := example(dir)
 	dcr.platform = append(dcr.platform, filepath.Join(input, "platform-dcr.yaml"))
-	dcr.emitDir, dcr.umbrella, dcr.out = filepath.Join(dir, "dcr"), "", ""
+	dcr.emitDir, dcr.umbrella, dcr.out = filepath.Join(dir, "output-dcr", "helm-cmd"), "", ""
 	if err := run(dcr); err != nil {
 		t.Fatal(err)
 	}
-	want := tree(t, output)
+	want := tree(t, exampleDir)
+	maps.DeleteFunc(want, func(path string, _ string) bool { return strings.HasPrefix(path, "input"+string(filepath.Separator)) })
 	got := tree(t, dir)
 	if _, ok := got["out.yaml"]; !ok {
 		t.Error("--out: out.yaml not written")
 	}
 	delete(got, "out.yaml")
 	if !maps.Equal(got, want) {
-		t.Errorf("got %v, want example/output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+		t.Errorf("got %v, want the example's outputs: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
-	o.mkdag, o.umbrella, o.out = true, "", ""
+	for _, d := range []string{o.emitDir, dcr.emitDir} {
+		if info, err := os.Stat(filepath.Join(d, "install.sh")); err != nil {
+			t.Error(err)
+		} else if info.Mode().Perm() != 0o755 {
+			t.Errorf("%s/install.sh: mode %v, want 0755", d, info.Mode().Perm())
+		}
+	}
+	o.mkinstall, o.mkdag, o.umbrella, o.out = false, true, "", ""
 	if err := run(o); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(o.emitDir, "install.sh")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("without --mkinstall: got %v, want install.sh removed", err)
 	}
 	const deps = "- instance: demo-db\n  contract: database\n  field: database\n"
 	if b, err := os.ReadFile(filepath.Join(o.emitDir, "okdp.dependencies.yaml")); err != nil || string(b) != deps {
@@ -168,7 +183,7 @@ func TestRunErrors(t *testing.T) {
 	// A package whose version an umbrella chart cannot take: it compiles,
 	// its umbrella fails.
 	pkg := t.TempDir()
-	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(input, "package"))); err != nil {
+	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(input, "service"))); err != nil {
 		t.Fatal(err)
 	}
 	svc, err := os.ReadFile(filepath.Join(pkg, "service.yaml"))
@@ -187,16 +202,17 @@ func TestRunErrors(t *testing.T) {
 		files []string // created first under the output directory; a directory when ending with /
 		want  string
 	}{
-		"no release":     {func(o *options) { o.release = "" }, nil, "--release is required"},
-		"no namespace":   {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
-		"no instance":    {func(o *options) { o.instance = instance }, nil, "--instance: stat " + instance + ": no such file or directory"},
-		"not a dir":      {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
-		"same directory": {func(o *options) { o.umbrella = o.emitDir + "/" }, nil, "--emit-dir and --umbrella name the same directory"},
-		"mkdag alone":    {func(o *options) { o.emitDir, o.mkdag = "", true }, nil, "--mkdag writes okdp.dependencies.yaml beside the values files: give --emit-dir"},
-		"a compile":      {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
-		"an umbrella":    {func(o *options) { o.pkg = pkg }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
-		"another file":   {nil, []string{"umbrella/notes.txt"}, "umbrella: notes.txt is not an output of okdp-compile"},
-		"a directory":    {nil, []string{"files/app.values.yaml/"}, "files: app.values.yaml is not an output of okdp-compile"},
+		"no release":      {func(o *options) { o.release = "" }, nil, "--release is required"},
+		"no namespace":    {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
+		"no instance":     {func(o *options) { o.instance = instance }, nil, "--instance: stat " + instance + ": no such file or directory"},
+		"not a dir":       {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
+		"same directory":  {func(o *options) { o.umbrella = o.emitDir + "/" }, nil, "--emit-dir and --umbrella name the same directory"},
+		"mkinstall alone": {func(o *options) { o.emitDir = "" }, nil, "--mkinstall writes install.sh beside the values files: give --emit-dir"},
+		"mkdag alone":     {func(o *options) { o.emitDir, o.mkinstall, o.mkdag = "", false, true }, nil, "--mkdag writes okdp.dependencies.yaml beside the values files: give --emit-dir"},
+		"a compile":       {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
+		"an umbrella":     {func(o *options) { o.pkg = pkg }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
+		"another file":    {nil, []string{"umbrella/notes.txt"}, "umbrella: notes.txt is not an output of okdp-compile"},
+		"a directory":     {nil, []string{"files/app.values.yaml/"}, "files: app.values.yaml is not an output of okdp-compile"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

@@ -194,7 +194,7 @@ render with them. A UTF-8 byte order mark at the start of either file is
 dropped, as Helm drops it. Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
 it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
-objects chart in every compile. `example/input/charts/` holds the
+objects chart in every compile. `examples/02_advanced/input/charts/` holds the
 example's charts unpacked, their `values.yaml` only: enough to compile, not
 to render (`charts.example.org/app-1.8.0/`,
 `registry.example.org/okdp/okdp-objects-1.0.0/`,
@@ -288,7 +288,7 @@ Three top-level keys are not parameters of the service:
 
 They are checked with the parameters: a schema with `additionalProperties:
 false` declares them, `{"type": "object"}` at least
-(`example/input/package/values.schema.json`).
+(`examples/02_advanced/input/service/values.schema.json`).
 
 ## Connections
 
@@ -383,7 +383,7 @@ the connection reaches the charts' values through the mapping.
 
 The parameter, replaced by a map: the contract fields, `secretRef` when
 there is one, and `okdp`, where the connection comes from. With
-`example/input/contracts/database.schema.json`:
+`examples/02_advanced/input/contracts/database.schema.json`:
 
 ```yaml
 # database: demo-db (internal)
@@ -495,7 +495,7 @@ The other `x-*` keywords (`x-okdp-external`, `x-okdp-required`,
 `x-ui-placeholder`, `x-ui-widget`) are not read, nor checked: an external
 connection is accepted for any contract, `x-okdp-external` or not.
 
-`example/input/contracts/database.schema.json`, trimmed:
+`examples/02_advanced/input/contracts/database.schema.json`, trimmed:
 
 ```json
 {
@@ -580,7 +580,7 @@ violation, without its alternatives.
 `global.okdp`: the settings of the platform (ingress, certificate issuers,
 OIDC, proxy, the platform's charts...), given as the platform's values
 layers, `Inputs.Platform` (the binary's `--platform` files):
-`example/input/platform.yaml`, `platform/platform-values.yaml` in a
+`examples/02_advanced/input/platform.yaml`, `platform/platform-values.yaml` in a
 platform repository. They are merged in order after the package's
 `values.yaml` and before the instance's layers, `Inputs.Values`
 ([parameters](#parameters)); a later platform layer may change or delete
@@ -786,7 +786,7 @@ for the upstream charts.
 order given, after its `--platform` files:
 
 ```bash
-bin/okdp-compile ... --platform example/input/platform.yaml -f example/input/instance/values.yaml
+bin/okdp-compile ... --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml
 ```
 
 An instance layer sets no `global` but the keys the parameter schema
@@ -894,10 +894,11 @@ replacing it. The value given must be a list; a `null` is refused too:
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
 come first, then `TZ`, of `upstream.app.yaml`, then `LOG_LEVEL`, of the
-inline values of `values.yaml`, both in `example/input/instance/`
-(`example/output/files/app.values.yaml`): when `upstream.app.yaml` and the
-inline values both set `env`, the items of the file come before the inline
-ones.
+inline values of `values.yaml`, both in
+`examples/02_advanced/input/instance/`
+(`examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml`): when
+`upstream.app.yaml` and the inline values both set `env`, the items of the
+file come before the inline ones.
 
 ### Upstream errors
 
@@ -1028,8 +1029,8 @@ okdp chart is in all three, and in `dcr` mode the chart of each OAuth
 client. Numbers are float64, as in Helm values.
 The files the binary writes from them:
 [command line](../01_usage.md#command-line), and the
-[umbrella chart](#umbrella-chart); `example/output/` holds those of the
-example ([Example](#example)).
+[umbrella chart](#umbrella-chart); `examples/02_advanced/` holds those of
+the example ([Example](#example)).
 
 The keys of a compile are the chart keys of `service.yaml`, DNS labels
 ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
@@ -1061,7 +1062,7 @@ The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
 ([equivalence with Helm](#equivalence-with-helm)).
 
-The example's in `dcr` mode (`example/output/dcr/okdp.charts.yaml`):
+The example's in `dcr` mode (`charts` of `--out`):
 
 ```yaml
 app:
@@ -1079,9 +1080,10 @@ okdp:
 ```
 
 Everything else is keyed by the key
-([sources](02_service_definition.md#sources)). The binary writes this map to
-`<emit-dir>/okdp.charts.yaml`; rendering with it:
-[rendering with Helm](../01_usage.md#rendering-with-helm).
+([sources](02_service_definition.md#sources)). The binary writes this map
+under `charts` with `--out`, and installs each chart from it with
+`<emit-dir>/install.sh` ([`--mkinstall`](../01_usage.md#--mkinstall));
+rendering with it: [rendering with Helm](../01_usage.md#rendering-with-helm).
 
 ### OAuth client charts
 
@@ -1137,9 +1139,9 @@ The client keys, their types and defaults:
 chart's defaults: its default `mapping.keyMapping` entries stay, so the
 Secret also holds `registration_client_uri` and `registration_access_token`
 of the registration response (oidc-dcr 0.5.0). The example's final values
-in `dcr` mode (`example/output/dcr/`), with the platform's settings above
-(`example/input/platform-dcr.yaml`, after `platform.yaml`) and oidc-dcr
-0.5.0 in the chart cache, trimmed:
+in `dcr` mode (`examples/02_advanced/output-dcr/helm-cmd/`), with the
+platform's settings above (`examples/02_advanced/input/platform-dcr.yaml`,
+after `platform.yaml`) and oidc-dcr 0.5.0 in the chart cache, trimmed:
 
 ```yaml
 # app.values.yaml
@@ -1430,15 +1432,17 @@ same but for `hasKey`, `toYaml` and `range`.
 
 ### Example
 
-`example/output/files/`, what `--emit-dir` writes for the example: release
-`demo-webapp`, namespace `demo`, the instance `example/input/instance/`:
-`values.yaml` (`replicas: 2`, `database: demo-db`, an `env` entry in
-`upstream.app`) and the instance file `upstream.app.yaml` (a memory limit,
-an `env` entry), over `example/input/platform.yaml` (`existing` mode:
-no OAuth client chart, [OAuth client charts](#oauth-client-charts)).
-`example/output/dcr/` is the same compile in `dcr` mode, with
-`example/input/platform-dcr.yaml` after `platform.yaml`: the OAuth client's
-chart, `oidc-dcr` ([its values](#oauth-client-charts)).
+`examples/02_advanced/output-no-dcr/helm-cmd/`, what `--emit-dir
+--mkinstall` writes for the example: release `demo-webapp`, namespace `demo`, the instance
+`examples/02_advanced/input/instance/`: `values.yaml` (`replicas: 2`,
+`database: demo-db`, an `env` entry in `upstream.app`) and the instance file
+`upstream.app.yaml` (a memory limit, an `env` entry), over
+`examples/02_advanced/input/platform.yaml` (`existing` mode: no OAuth client
+chart, [OAuth client charts](#oauth-client-charts)).
+`examples/02_advanced/output-dcr/helm-cmd/` is the same compile in `dcr`
+mode, with `examples/02_advanced/input/platform-dcr.yaml` after
+`platform.yaml`: the OAuth client's chart, `oidc-dcr`
+([its values](#oauth-client-charts)), installed first.
 
 `app.values.yaml`, annotated:
 
@@ -1517,17 +1521,16 @@ objects:
       namespace: demo
 ```
 
-`okdp.charts.yaml`:
+`install.sh`:
 
-```yaml
-app:
-  repository: https://charts.example.org
-  chart: app
-  version: 1.8.0
-okdp:
-  repository: oci://registry.example.org/okdp
-  chart: okdp-objects
-  version: 1.0.0
+```sh
+#!/bin/sh
+# Installs demo-webapp in the namespace demo, one Helm release per chart: its
+# upstream chart with its values file, written by okdp-compile.
+set -eu
+cd "$(dirname "$0")"
+helm upgrade --install demo-webapp-app app --repo https://charts.example.org --version 1.8.0 --namespace demo -f app.values.yaml
+helm upgrade --install demo-webapp-okdp oci://registry.example.org/okdp/okdp-objects --version 1.0.0 --namespace demo -f okdp.values.yaml
 ```
 
 With `--mkdag`, `okdp.dependencies.yaml` ([dependencies](#dependencies)):
@@ -1538,8 +1541,9 @@ With `--mkdag`, `okdp.dependencies.yaml` ([dependencies](#dependencies)):
   field: database
 ```
 
-`example/output/umbrella/`, what `--umbrella` writes: `instance.values.yaml`,
-the same values under their keys (`app:`, `okdp:`), and `Chart.yaml`:
+`examples/02_advanced/output-no-dcr/umbrella-chart/`, what `--umbrella`
+writes: `instance.values.yaml`, the same values under their keys (`app:`,
+`okdp:`), and `Chart.yaml`:
 
 ```yaml
 apiVersion: v2

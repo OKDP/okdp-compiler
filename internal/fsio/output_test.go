@@ -8,9 +8,8 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-// TestFiles: the final values of each chart and the index of the upstream
-// chart rendering each, indented by 2 spaces, or as asked; a key that would
-// name a file out of the directory is refused.
+// TestFiles: the final values of each chart, indented by 2 spaces, or as
+// asked; a key that would name a file out of the directory is refused.
 func TestFiles(t *testing.T) {
 	res := &okdp.Result{
 		Values: map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "console-oidc-dcr": {"b": 2}},
@@ -23,15 +22,6 @@ func TestFiles(t *testing.T) {
 	want := map[string]string{
 		"oidc-dcr.values.yaml":         "a:\n  b:\n    - 1\n",
 		"console-oidc-dcr.values.yaml": "b: 2\n",
-		"okdp.charts.yaml": `console-oidc-dcr:
-  repository: oci://quay.io/adaltas
-  chart: oidc-dcr
-  version: 0.5.0
-oidc-dcr:
-  repository: oci://quay.io/adaltas
-  chart: oidc-dcr
-  version: 0.5.0
-`,
 	}
 	if len(files) != len(want) {
 		t.Errorf("got %d files, want %d", len(files), len(want))

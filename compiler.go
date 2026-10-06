@@ -127,8 +127,8 @@ func WithoutObjectsChart() Option {
 }
 
 // Files: what `okdp-compile --emit-dir` writes, file name -> content: the
-// final values of each chart (<key>.values.yaml) and the chart index
-// (okdp.charts.yaml), indented by indent spaces (2 to 9).
+// final values of each chart (<key>.values.yaml), indented by indent spaces
+// (2 to 9).
 func Files(res *Result, indent int) (map[string][]byte, error) {
 	return fsio.Files(res, indent)
 }
@@ -143,6 +143,19 @@ const DependenciesFile = fsio.DependenciesFile
 // indented by indent spaces (2 to 9).
 func Dependencies(res *Result, indent int) ([]byte, error) {
 	return fsio.Dependencies(res, indent)
+}
+
+// InstallScript: the file name of Install, beside the files of Files.
+const InstallScript = fsio.InstallScript
+
+// Install: what `okdp-compile --mkinstall` adds to the directory of
+// --emit-dir, InstallScript, a shell script to write executable: `helm
+// upgrade --install` of each chart from its upstream chart (Result.Charts)
+// with its values file of Files, in Result.Namespace, the release
+// <Result.Release>-<key> (a namespace holds one release of a name), the
+// OAuth clients' charts first.
+func Install(res *Result) ([]byte, error) {
+	return fsio.Install(res)
 }
 
 // UmbrellaValues: the file of Umbrella holding the instance's values, given

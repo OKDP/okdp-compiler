@@ -26,11 +26,8 @@ func Document(res *okdp.Result, indent int) ([]byte, error) {
 }
 
 // Files: <chart>.values.yaml, the final values of each chart, OKDP's own
-// objects among them (okdp.values.yaml, the values of the okdp chart);
-// okdp.charts.yaml, the index of the upstream chart that renders each
-// (chart: {repository, chart, version}: `helm template <chart> --repo
-// <repository> --version <version> -f <chart>.values.yaml`). Each is
-// indented by indent spaces (2 to 9).
+// objects among them (okdp.values.yaml, the values of the okdp chart). Each
+// is indented by indent spaces (2 to 9).
 func Files(res *okdp.Result, indent int) (map[string][]byte, error) {
 	files := map[string][]byte{}
 	for _, chart := range slices.Sorted(maps.Keys(res.Values)) {
@@ -43,11 +40,6 @@ func Files(res *okdp.Result, indent int) (map[string][]byte, error) {
 		}
 		files[chart+".values.yaml"] = b
 	}
-	b, err := marshal(res.Charts, indent)
-	if err != nil {
-		return nil, err
-	}
-	files["okdp.charts.yaml"] = b
 	return files, nil
 }
 

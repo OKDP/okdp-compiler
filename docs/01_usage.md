@@ -124,7 +124,8 @@ okdp-compile --version
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file, out of the directories below |
-| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`) and the chart index to a directory, one file each; it holds only these files, and that of `--mkdag` |
+| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`) to a directory, one file each; it holds only these files, and those of `--mkinstall` and `--mkdag` |
+| `--mkinstall` | off | also write `install.sh` in the directory of `--emit-dir`, which it requires: a script that installs each chart with Helm, one release per chart |
 | `--mkdag` | off | also write `okdp.dependencies.yaml` in the directory of `--emit-dir`, which it requires: the instances the connection references point to, for a deployer that orders the releases |
 | `--umbrella` | none | write the instance as one chart to a directory: `Chart.yaml`, an umbrella over the upstream charts, and `instance.values.yaml`, its values; a directory other than `--emit-dir`'s, holding only these files |
 | `--indent` | `2` | the indentation of the YAML files `--out`, `--emit-dir` and `--umbrella` write, 2 to 9 spaces |
@@ -151,10 +152,10 @@ values of the [OAuth client charts](specs/01_inputs_outputs.md#oauth-client-char
 The final values are written by `--emit-dir`, not by `--out`.
 
 ```console
-$ export OKDP_CONTRACTS=example/input/contracts OKDP_CHARTS=example/input/charts
-$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+$ export OKDP_CONTRACTS=examples/02_advanced/input/contracts OKDP_CHARTS=examples/02_advanced/input/charts
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance/values.yaml --out /dev/stdout
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml --out /dev/stdout
 charts:
   app:
     repository: https://charts.example.org
@@ -184,9 +185,9 @@ The computed values of a chart hold only what the mapping sets; the image,
 from the base values over the chart's defaults, is in the final values only:
 
 ```console
-$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance/values.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
 null
@@ -202,61 +203,94 @@ The directory is created if needed, and holds these files only:
 | File | Content |
 |---|---|
 | `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart) (OKDP's own objects, `Result.Objects`, under `objects`), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
-| `okdp.charts.yaml` | `Result.Charts`, the [chart index](specs/01_inputs_outputs.md#chart-index): `<key>: {repository, chart, version}`, one entry per values file |
 
-With [`--mkdag`](#--mkdag), also `okdp.dependencies.yaml`.
+With [`--mkinstall`](#--mkinstall), also `install.sh`; with
+[`--mkdag`](#--mkdag), also `okdp.dependencies.yaml`.
 
-The example's, `out/` here, are `example/output/files/`:
+The example's, `out/` here, are `examples/02_advanced/output-no-dcr/helm-cmd/`
+but for its `install.sh`:
 
 ```console
-$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance/values.yaml --emit-dir out
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml --emit-dir out
 $ ls out
 app.values.yaml
-okdp.charts.yaml
 okdp.values.yaml
-$ cat out/okdp.charts.yaml
-app:
-  repository: https://charts.example.org
-  chart: app
-  version: 1.8.0
-okdp:
-  repository: oci://registry.example.org/okdp
-  chart: okdp-objects
-  version: 1.0.0
 ```
 
 In `dcr` mode (`global.okdp.oidc.clientProvisioning: dcr`), the webapp's
 OAuth client adds the chart `oidc-dcr`, which `service.yaml` does not list,
-any more than `okdp`: `oidc-dcr.values.yaml`, and its entry in the index.
+any more than `okdp`: `oidc-dcr.values.yaml`.
 The example's, with `platform-dcr.yaml` after `platform.yaml`, are
-`example/output/dcr/`:
+`examples/02_advanced/output-dcr/helm-cmd/`, its `install.sh` aside:
 
 ```console
-$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml --platform example/input/platform-dcr.yaml \
-    -f example/input/instance/values.yaml --emit-dir out-dcr
+    --platform examples/02_advanced/input/platform.yaml --platform examples/02_advanced/input/platform-dcr.yaml \
+    -f examples/02_advanced/input/instance/values.yaml --emit-dir out-dcr
 $ ls out-dcr
 app.values.yaml
 oidc-dcr.values.yaml
-okdp.charts.yaml
 okdp.values.yaml
 ```
 
-A chart the mapping leaves out (`$if`) has no file and no index entry.
+A chart the mapping leaves out (`$if`) has no file.
 
 Before anything is written, the files of the directory are checked: those
 of a previous compile are overwritten, and removed when this one does not
-write them (a chart no longer compiled, `okdp.dependencies.yaml` without
-`--mkdag`); any other file or directory, or a file of these names that is
-not a regular file (a symbolic link), fails the compile, so that a
-directory given by mistake loses nothing:
+write them (a chart no longer compiled, `install.sh` without
+`--mkinstall`, `okdp.dependencies.yaml` without `--mkdag`); any other file
+or directory, or a
+file of these names that is not a regular file (a symbolic link), fails the
+compile, so that a directory given by mistake loses nothing:
 
 ```
 refusing to write in out: notes.txt is not an output of okdp-compile
 ```
+
+### `--mkinstall`
+
+Adds `install.sh` to the directory of `--emit-dir`, beside the values files
+it reads; without `--emit-dir` the command fails (`--mkinstall writes
+install.sh beside the values files: give --emit-dir`). It is independent of
+`--umbrella`, which the same compile may also write. `install.sh` is a POSIX
+shell script, executable, run from anywhere: `helm upgrade --install` of
+each chart's upstream chart, `Result.Charts[key]` (the
+[chart index](specs/01_inputs_outputs.md#chart-index)), with
+`<key>.values.yaml`, in the namespace of the compile. The
+[OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts) come
+first, their Job writing the Secret the others read, then the others by
+key. A chart the mapping leaves out (`$if`) is not installed.
+
+The example's, `examples/02_advanced/output-no-dcr/helm-cmd/install.sh`:
+
+```console
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+    --release demo-webapp --namespace demo \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml \
+    --emit-dir out --mkinstall
+$ cat out/install.sh
+#!/bin/sh
+# Installs demo-webapp in the namespace demo, one Helm release per chart: its
+# upstream chart with its values file, written by okdp-compile.
+set -eu
+cd "$(dirname "$0")"
+helm upgrade --install demo-webapp-app app --repo https://charts.example.org --version 1.8.0 --namespace demo -f app.values.yaml
+helm upgrade --install demo-webapp-okdp oci://registry.example.org/okdp/okdp-objects --version 1.0.0 --namespace demo -f okdp.values.yaml
+```
+
+In `dcr` mode, `oidc-dcr` is installed first
+(`examples/02_advanced/output-dcr/helm-cmd/install.sh`).
+
+Each chart is its own Helm release, `<release>-<key>` cut to 53 characters
+(Helm's limit) without a trailing `-`: a namespace holds one release of a
+name. The values are compiled for `--release` all the same: a name a chart
+derives from its release name, where the values do not set it
+(`fullnameOverride`, as the example's mapping does), differs from the one
+the compile computed. `--umbrella` installs the instance as one release,
+under its name.
 
 ### `--mkdag`
 
@@ -266,16 +300,16 @@ beside the values files: give --emit-dir`). It holds `Result.Dependencies`,
 a YAML list, `[]` when there is none: one item per connection reference to
 another instance of the namespace, `instance` (its release name),
 `contract` and `field` (the parameter that references it)
-([dependencies](specs/01_inputs_outputs.md#dependencies)). Helm does not
-read it: it is for a deployer that installs the referenced instances first
-([GitOps](#gitops)).
+([dependencies](specs/01_inputs_outputs.md#dependencies)). Neither Helm nor
+`install.sh` reads it: it is for a deployer that installs the referenced
+instances first ([GitOps](#gitops)).
 
 The example's, the instance referencing `demo-db` in `database`:
 
 ```console
-$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance/values.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml \
     --emit-dir out --mkdag
 $ cat out/okdp.dependencies.yaml
 - instance: demo-db
@@ -301,12 +335,12 @@ and Helm drops the nulls of defaults, where a null of the final values
 deletes an upstream default
 ([layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
 
-The example's are `example/output/umbrella/`:
+The example's are `examples/02_advanced/output-no-dcr/umbrella-chart/`:
 
 ```console
-$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance/values.yaml --umbrella umbrella
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
 apiVersion: v2
 name: webapp
@@ -367,9 +401,9 @@ A message is a whole report and may span several lines: every schema
 violation, every message of the mapping's `errors` section.
 
 ```console
-$ bin/okdp-compile --package example/input/package \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f testdata/schema-violation.yaml
+    --platform examples/02_advanced/input/platform.yaml -f testdata/schema-violation.yaml
 error: values don't meet the specifications of the schema(s) in the following chart(s):
 webapp:
 - at '/database': got number, want string
@@ -402,13 +436,13 @@ what Helm gives with them, Helm 4 or 3.19 (Helm 3 reads the first document
 of a values file only: an upstream chart whose `values.yaml` has several
 documents needs Helm 4). A chart the index does not list is not rendered.
 
-The example's chart cache, `example/input/charts/`, holds only the charts'
-`values.yaml`, enough to compile but not to render, and its `app` and
-`okdp-objects` charts are fictional. Every key of the index, from the `out`
-directory above:
+The example's chart cache, `examples/02_advanced/input/charts/`, holds only
+the charts' `values.yaml`, enough to compile but not to render, and its
+`app` and `okdp-objects` charts are fictional. Every key of the index, `charts` of
+`compiled.yaml`, with its values file in the `out` directory above:
 
 ```bash
-yq 'to_entries[] | .key + " " + .value.repository + " " + .value.chart + " " + .value.version' out/okdp.charts.yaml |
+yq '.charts | to_entries[] | .key + " " + .value.repository + " " + .value.chart + " " + .value.version' compiled.yaml |
 while read -r key repository chart version; do
   case $repository in
     oci://*) set -- "${repository%/}/$chart" ;;
@@ -448,14 +482,14 @@ import (
 )
 
 func main() {
-	def, err := compiler.LoadDefinition(os.DirFS("example/input/package")) // the package
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("example/input/charts"),   // the chart cache
-		Instance:  os.DirFS("example/input/instance"), // the instance's upstream values files
-		Contracts: os.DirFS("example/input/contracts"),
+		Charts:    os.DirFS("examples/02_advanced/input/charts"),   // the chart cache
+		Instance:  os.DirFS("examples/02_advanced/input/instance"), // the instance's upstream values files
+		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
@@ -472,8 +506,8 @@ func main() {
 		}
 		return v
 	}
-	in.Platform = []map[string]any{read("example/input/platform.yaml")}
-	in.Values = []map[string]any{read("example/input/instance/values.yaml")}
+	in.Platform = []map[string]any{read("examples/02_advanced/input/platform.yaml")}
+	in.Values = []map[string]any{read("examples/02_advanced/input/instance/values.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -592,10 +626,12 @@ files, likewise), `Release` and `Namespace`; all but `Instance`,
 `Charts` (the index), `Objects` and `Dependencies` what both write
 ([outputs](specs/01_inputs_outputs.md#outputs)):
 `compiler.Files(res, indent)` gives the files of `--emit-dir` (name ->
-content), `compiler.Dependencies(res, indent)` the file `--mkdag` adds to
-them (`compiler.DependenciesFile`), `compiler.Document(res, indent)` the
-file of `--out`, for a caller
-to write where it keeps them. `Result.Values` renders as in [rendering with
+content), `compiler.Install(res)` the script `--mkinstall` adds to them
+(`compiler.InstallScript`, to write executable),
+`compiler.Dependencies(res, indent)` the file `--mkdag` adds
+(`compiler.DependenciesFile`),
+`compiler.Document(res, indent)` the file of `--out`, for a caller to write
+where it keeps them. `Result.Values` renders as in [rendering with
 Helm](#rendering-with-helm), `Result.Charts` being the index.
 
 - `compiler.ParseValues(b)` reads one values file as Helm does (YAML 1.1,
@@ -661,7 +697,7 @@ test -z "$(git status --porcelain compiled/)" || { git status --short compiled/;
 ```
 
 The emitted files can be committed and checked against the commit, as
-`go test ./internal/fsio` checks `example/output/`: `git status
+`go test ./internal/fsio` checks the example's outputs: `git status
 --porcelain` lists the changed, removed and new files, where
 `git diff --exit-code` misses a new, untracked file (a chart now
 compiled).
@@ -680,11 +716,13 @@ come from their own repositories.
   umbrella.
 - **One source per key** (`--emit-dir`), as in
   [rendering with Helm](#rendering-with-helm): one Argo CD Application
-  source per key, whose chart is the key's entry in `okdp.charts.yaml` (the
-  repository, the chart's name in it, the version) and whose values are
-  `<key>.values.yaml`. Argo CD renders each source with `helm template` and
-  creates no Helm release: the sources share the release name. Two Flux
-  HelmReleases cannot.
+  source per key, whose chart is the key's entry in the index (`charts` of
+  `--out`: the repository, the chart's name in it, the version) and whose
+  values are `<key>.values.yaml`. Argo CD renders each source with `helm
+  template` and creates no Helm release: the sources share the release
+  name. Two Flux HelmReleases cannot, nor `helm install`: `install.sh`
+  installs each key as its own release, `<release>-<key>`
+  ([`--mkinstall`](#--mkinstall)).
 
 **The umbrella.** Its directory is committed with the instance's compiled
 files. Flux builds the chart from the deployments repository, and takes the

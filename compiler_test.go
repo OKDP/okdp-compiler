@@ -11,20 +11,20 @@ import (
 	compiler "github.com/okdp/okdp-compiler"
 )
 
-// example: the example package (example/input), and the inputs of its
-// instance over the platform values, these platform files after
-// platform.yaml.
+// example: the example package (examples/02_advanced/input/service), and
+// the inputs of its instance over the platform values, these platform files
+// after platform.yaml.
 func example(platform ...string) (*compiler.Definition, compiler.Inputs) {
-	def, err := compiler.LoadDefinition(os.DirFS("example/input/package"))
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service"))
 	if err != nil {
 		panic(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("example/input/charts"),
-		Instance:  os.DirFS("example/input/instance"),
-		Contracts: os.DirFS("example/input/contracts"),
-		Platform:  []map[string]any{values("example/input/platform.yaml")},
-		Values:    []map[string]any{values("example/input/instance/values.yaml")},
+		Charts:    os.DirFS("examples/02_advanced/input/charts"),
+		Instance:  os.DirFS("examples/02_advanced/input/instance"),
+		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
+		Platform:  []map[string]any{values("examples/02_advanced/input/platform.yaml")},
+		Values:    []map[string]any{values("examples/02_advanced/input/instance/values.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
@@ -55,7 +55,7 @@ func values(file string) map[string]any {
 func TestConcurrentCompile(t *testing.T) {
 	def, in := example()
 	dcr := in
-	dcr.Platform = append(slices.Clip(in.Platform), values("example/input/platform-dcr.yaml"))
+	dcr.Platform = append(slices.Clip(in.Platform), values("examples/02_advanced/input/platform-dcr.yaml"))
 	inputs := []compiler.Inputs{in, dcr}
 	snapshot := func() string {
 		b, err := json.Marshal([]any{def.Service, string(def.Mapping), dcr.Platform, in.Values})

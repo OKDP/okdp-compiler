@@ -42,7 +42,7 @@ type options struct {
 	platform, values   multi
 	out, emitDir       string
 	umbrella           string
-	mkdag              bool
+	mkinstall, mkdag   bool
 	indent             int
 	version            bool
 }
@@ -118,8 +118,9 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	f.Var(&o.values, "f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares")
 	f.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the upstream chart of each chart, objects and dependencies to this file")
 	f.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files --out, --emit-dir and --umbrella write, 2 to 9 spaces")
-	f.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml and the upstream chart that renders each (okdp.charts.yaml); <dir> holds only these files, and that of --mkdag")
+	f.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml; <dir> holds only these files, and those of --mkinstall and --mkdag")
 	f.StringVar(&o.umbrella, "umbrella", "", "write the instance as one chart to <dir>: Chart.yaml, an umbrella over the upstream charts, and "+compiler.UmbrellaValues+", its values (helm -f); <dir> holds only these files")
+	f.BoolVar(&o.mkinstall, "mkinstall", false, "also write "+compiler.InstallScript+" in the --emit-dir directory: a script that installs each chart with Helm, one release per chart")
 	f.BoolVar(&o.mkdag, "mkdag", false, "also write "+compiler.DependenciesFile+" in the --emit-dir directory: the instances the connection references point to, for a deployer that orders the releases")
 	if err := f.Parse(args); err != nil {
 		return o, err
@@ -150,6 +151,8 @@ func run(o options) error {
 		return errors.New("--namespace is required")
 	case o.indent < 2 || o.indent > 9:
 		return fmt.Errorf("--indent %d: 2 to 9 spaces", o.indent)
+	case o.mkinstall && o.emitDir == "":
+		return errors.New("--mkinstall writes " + compiler.InstallScript + " beside the values files: give --emit-dir")
 	case o.mkdag && o.emitDir == "":
 		return errors.New("--mkdag writes " + compiler.DependenciesFile + " beside the values files: give --emit-dir")
 	case o.emitDir != "" && o.umbrella != "" && sameDir(o.emitDir, o.umbrella):
@@ -188,6 +191,11 @@ func run(o options) error {
 		files, err := compiler.Files(res, o.indent)
 		if err != nil {
 			return err
+		}
+		if o.mkinstall {
+			if files[compiler.InstallScript], err = compiler.Install(res); err != nil {
+				return err
+			}
 		}
 		if o.mkdag {
 			if files[compiler.DependenciesFile], err = compiler.Dependencies(res, o.indent); err != nil {
@@ -274,10 +282,11 @@ type outputDir struct {
 	ours  func(name string) bool
 }
 
-// emitted: a file --emit-dir writes (compiler.Files): <key>.values.yaml,
-// okdp.charts.yaml; compiler.DependenciesFile with --mkdag.
+// emitted: a file --emit-dir writes (compiler.Files): <key>.values.yaml;
+// compiler.InstallScript with --mkinstall, compiler.DependenciesFile with
+// --mkdag; and okdp.charts.yaml, which v0.1.0 wrote, removed as stale.
 func emitted(name string) bool {
-	return strings.HasSuffix(name, ".values.yaml") || name == "okdp.charts.yaml" || name == compiler.DependenciesFile
+	return strings.HasSuffix(name, ".values.yaml") || name == compiler.InstallScript || name == compiler.DependenciesFile || name == "okdp.charts.yaml"
 }
 
 // umbrellaFile: a file --umbrella writes (compiler.Umbrella).
@@ -323,7 +332,16 @@ func (d outputDir) write(stale []string) error {
 		}
 	}
 	for name, b := range d.files {
-		if err := os.WriteFile(filepath.Join(d.dir, name), b, 0o644); err != nil {
+		perm := os.FileMode(0o644)
+		if name == compiler.InstallScript {
+			perm = 0o755
+		}
+		path := filepath.Join(d.dir, name)
+		if err := os.WriteFile(path, b, perm); err != nil {
+			return err
+		}
+		// WriteFile sets the mode of a file it creates only.
+		if err := os.Chmod(path, perm); err != nil {
 			return err
 		}
 	}

@@ -3,8 +3,8 @@
 How to package an upstream application for OKDP: a directory of parameters,
 base values and a service definition, compiled by `okdp-compile`. The steps
 follow a `webapp` service, of which the example of this repository is a
-smaller version (`example/input/package/`); the
-recipes and pitfalls come from the services packaged in
+smaller version (`examples/02_advanced/input/service/`); the recipes and
+pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md) and
 [inputs and outputs](specs/01_inputs_outputs.md), the command line
@@ -40,7 +40,8 @@ the package is published as a chart.
 
 `--package` names the package directory, `--charts` the chart cache the
 compiler reads the upstream charts' defaults and schemas from
-(`okdp-compile --package example/input/package --charts example/input/charts`).
+(`okdp-compile --package examples/02_advanced/input/service --charts
+examples/02_advanced/input/charts`).
 
 ## Step by step
 
@@ -372,8 +373,8 @@ instance of the namespace: host `demo-db-db.demo.svc`, Secret
 sync waves). The mapping reads both the same way, credentials through a
 `secretKeyRef` on `secretRef.name`; it fails with a clear message when it
 needs the Secret and the connection has none (the second `errors` entry of
-`example/input/package/mapping.cel.yaml`). `s3` and `database-server` have no internal
-convention: they are always external (cnpg-postgresql publishes one
+`examples/02_advanced/input/service/mapping.cel.yaml`). `s3` and
+`database-server` have no internal convention: they are always external (cnpg-postgresql publishes one
 `database-server` connection per database, which consumers declare as
 connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
 
@@ -424,8 +425,9 @@ okdp-compile --package charts/services/polaris \
   --platform charts/services/polaris/ci/platform.yaml \
   --platform charts/services/polaris/ci/dcr-platform.yaml \
   -f charts/services/polaris/ci/dcr-values.yaml \
-  --release demo-polaris --namespace demo --emit-dir /tmp/demo-polaris
-yq '.polaris' /tmp/demo-polaris/okdp.charts.yaml   # {repository, chart, version}
+  --release demo-polaris --namespace demo --emit-dir /tmp/demo-polaris \
+  --out /tmp/demo-polaris.yaml
+yq '.charts.polaris' /tmp/demo-polaris.yaml   # {repository, chart, version}
 helm template demo-polaris oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -n demo \
   -f /tmp/demo-polaris/console-oidc-dcr.values.yaml
 scripts/compile-charts.sh charts/services/polaris   # every case, compiled and rendered
@@ -433,8 +435,8 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
 
 - Render with the release name and namespace of the compile: the upstream
   charts derive their names from the release.
-- Render each chart with the source the index `<emit-dir>/okdp.charts.yaml`
-  names for its key: `helm template <release> <chart> --repo <repository>
+- Render each chart with the source the index (`charts` of `--out`, as
+  `install.sh` of `--mkinstall` installs it) names for its key: `helm template <release> <chart> --repo <repository>
   --version <version>`, `oci://<repository>/<chart>` for a registry, or the
   `<chart>-<version>.tgz` `helm pull` wrote in the chart cache, in its
   repository's directory. The clients'

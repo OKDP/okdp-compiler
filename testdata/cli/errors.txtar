@@ -1,18 +1,18 @@
 # A compile error: status 1, the whole report on stderr, nothing written.
-env OKDP_CHARTS=example/input/charts OKDP_CONTRACTS=example/input/contracts
-status 1 okdp-compile --package example/input/package --release demo-webapp --namespace demo --platform example/input/platform.yaml -f testdata/schema-violation.yaml --emit-dir $WORK/files
+env OKDP_CHARTS=examples/02_advanced/input/charts OKDP_CONTRACTS=examples/02_advanced/input/contracts
+status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f testdata/schema-violation.yaml --emit-dir $WORK/files
 ! stdout .
 cmp stderr $WORK/schema-violation.txt
 ! exists $WORK/files
 
 # A missing flag: status 1.
-status 1 okdp-compile --package example/input/package --namespace demo
+status 1 okdp-compile --package examples/02_advanced/input/service --namespace demo
 stderr '^error: --release is required$'
 
 # An output directory holding another file: status 1, nothing written.
-status 1 okdp-compile --package example/input/package --release demo-webapp --namespace demo --platform example/input/platform.yaml --emit-dir $WORK/out
+status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml --emit-dir $WORK/out
 stderr '^error: refusing to write in .*out: notes.txt is not an output of okdp-compile$'
-! exists $WORK/out/okdp.charts.yaml
+! exists $WORK/out/app.values.yaml
 
 -- schema-violation.txt --
 error: values don't meet the specifications of the schema(s) in the following chart(s):

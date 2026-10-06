@@ -89,6 +89,9 @@ type Result struct {
 	// Dependencies: the instances the connection references point to, by
 	// parameter path. References to external connections are not listed.
 	Dependencies []Dependency
+	// Release, Namespace: the Helm release the values are compiled for, and
+	// its namespace (Inputs.Release, Inputs.Namespace).
+	Release, Namespace string
 }
 
 // Option: a setting of CompileContext.
@@ -198,7 +201,7 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 	if err := uniqueObjects(own, in.Namespace); err != nil {
 		return nil, err
 	}
-	out := &Result{Computed: res.output, Dependencies: deps}
+	out := &Result{Computed: res.output, Dependencies: deps, Release: in.Release, Namespace: in.Namespace}
 	for _, o := range own {
 		out.Objects = append(out.Objects, o.object)
 	}

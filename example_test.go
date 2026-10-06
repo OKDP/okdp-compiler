@@ -25,12 +25,12 @@ import (
 // The program of README.md, on the example: the package, the chart cache,
 // the instance files and the contracts as fs.FS, the values layers parsed.
 func Example() {
-	packageFS := os.DirFS("example/input/package")
-	chartsFS := os.DirFS("example/input/charts")
-	instanceFS := os.DirFS("example/input/instance")
-	contractsFS := os.DirFS("example/input/contracts")
-	platformValues := values("example/input/platform.yaml")
-	instanceValues := values("example/input/instance/values.yaml")
+	packageFS := os.DirFS("examples/02_advanced/input/service")
+	chartsFS := os.DirFS("examples/02_advanced/input/charts")
+	instanceFS := os.DirFS("examples/02_advanced/input/instance")
+	contractsFS := os.DirFS("examples/02_advanced/input/contracts")
+	platformValues := values("examples/02_advanced/input/platform.yaml")
+	instanceValues := values("examples/02_advanced/input/instance/values.yaml")
 
 	def, err := compiler.LoadDefinition(packageFS) // service.yaml, mapping.cel.yaml; each compile reads values.yaml, values.schema.json, base/
 	if err != nil {
@@ -67,14 +67,14 @@ func Example() {
 
 // The first program of docs/01_usage.md: the example, from a checkout.
 func ExampleCompile() {
-	def, err := compiler.LoadDefinition(os.DirFS("example/input/package")) // the package
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("example/input/charts"),   // the chart cache
-		Instance:  os.DirFS("example/input/instance"), // the instance's upstream values files
-		Contracts: os.DirFS("example/input/contracts"),
+		Charts:    os.DirFS("examples/02_advanced/input/charts"),   // the chart cache
+		Instance:  os.DirFS("examples/02_advanced/input/instance"), // the instance's upstream values files
+		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
@@ -91,8 +91,8 @@ func ExampleCompile() {
 		}
 		return v
 	}
-	in.Platform = []map[string]any{read("example/input/platform.yaml")}
-	in.Values = []map[string]any{read("example/input/instance/values.yaml")}
+	in.Platform = []map[string]any{read("examples/02_advanced/input/platform.yaml")}
+	in.Values = []map[string]any{read("examples/02_advanced/input/instance/values.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation

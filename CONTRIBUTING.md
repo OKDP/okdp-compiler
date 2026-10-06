@@ -22,7 +22,7 @@ Issues and pull requests are welcome.
 | `make lint` | golangci-lint, at the version of `tools/go.mod` |
 | `make fmt` | formats the sources (gofmt) |
 | `make tidy` | `go mod tidy`, for `go.mod` and `tools/go.mod` |
-| `make example` | rewrites `example/output/` from the current compiler |
+| `make example` | rewrites the outputs of `examples/02_advanced/` from the current compiler |
 | `make fixtures` | regenerates `testdata/helm` with `testdata/helm/generate.sh` (`UMBRELLA_HELMS`) |
 | `make fuzz` | each fuzz test in turn, `FUZZTIME` (30s) each ([fuzz tests](docs/00_architecture.md#fuzz-tests)) |
 | `make check` | what CI runs on a pull request: the format check, `go vet`, lint, `go mod tidy -diff`, the race tests |
@@ -45,10 +45,10 @@ regenerates the Helm fixtures and fails on a diff.
   example: the first line is `# error: <message>`, the message the compile
   must report (`TestExampleErrors`,
   [failure cases](docs/00_architecture.md#failure-cases)).
-- `example/output/` is compared byte for byte with a compile of
-  `example/input/` (`TestExample`). A change that changes the output runs
-  `make example` and commits the diff: it is the change's effect, reviewed
-  as such.
+- The outputs of `examples/02_advanced/` (`output-no-dcr/`, `output-dcr/`)
+  are compared byte for byte with a compile of its `input/`
+  (`TestExample`). A change that changes the output runs `make example`
+  and commits the diff: it is the change's effect, reviewed as such.
 
 ## Helm fixtures
 

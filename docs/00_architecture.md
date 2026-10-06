@@ -312,6 +312,7 @@ neither knows OKDP.
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
 | `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `mapping.cel.yaml` | `okdp.Service.Check` |
 | | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content), `Dependencies` (`--mkdag`, `okdp.dependencies.yaml` beside them); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
+| | `install.go` | `Install` (`--mkinstall`), `install.sh` beside the files of `Files`: `helm upgrade --install` of each chart, its release `<release>-<key>` cut to 53 characters, the OAuth clients' charts first; each word shell-quoted unless plain | `okdp.Result`, `okdp.DcrChart` |
 | | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion`, `checkKey` (`output.go`) |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
@@ -331,7 +332,7 @@ engine for the mappings and the oidc-dcr template.
 `os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
 `compiler.Compile`, then the files of `compiler.Files`, `compiler.Umbrella`
 and `compiler.Document`, the chart index (`Result.Charts`) included:
-`okdp.charts.yaml` with [`--emit-dir`](01_usage.md#--emit-dir), the
+the charts `install.sh` installs with [`--mkinstall`](01_usage.md#--mkinstall), the
 dependencies of `Chart.yaml` with [`--umbrella`](01_usage.md#--umbrella),
 `charts` with [`--out`](01_usage.md#--out). Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
@@ -524,7 +525,7 @@ values, oidc-dcr with a default (`DcrSource`)
   (`okdpGeneratedSecret`), never at compile time.
 - Where an order shows, it is sorted: dependencies and connection errors
   by parameter path, schema violations by path and by chart, the keys a
-  check visits before its first error. `example/output` relies on
+  check visits before its first error. The example's outputs rely on
   byte-identical results.
 
 ### Everything through fs.FS
@@ -690,7 +691,8 @@ client charts in a whole compile (`TestDcrCompile`); `context_test.go` the
 oidc-dcr settings and their defaults. The template has no Helm fixture: its
 expected values are in `oidc_test.go`. `internal/fsio/load_test.go` checks
 the loading of a package, `internal/fsio/output_test.go` the files
-`--emit-dir` writes, the chart index included, `internal/fsio/umbrella_test.go`
+`--emit-dir` writes, `internal/fsio/install_test.go` the script of
+`--mkinstall`, `internal/fsio/umbrella_test.go`
 the umbrella's chart and values. `cmd/okdp-compile/main_test.go` runs the
 command line on the example: the refused arguments and options, the stale
 files removed, nothing written when a compile, an output or a directory
@@ -728,8 +730,8 @@ it becomes a case of the unit test, and the file is removed.
 
 ### Example
 
-`example/input/` is what one compile of a service, `webapp`, reads:
-`package/` (`service.yaml`, `mapping.cel.yaml` with a database connection
+`examples/02_advanced/input/` is what one compile of a service, `webapp`,
+reads: `service/` (`service.yaml`, `mapping.cel.yaml` with a database connection
 and an OAuth client, `values.yaml`, `values.schema.json`, `base/app.yaml`),
 `charts/` (the chart cache: the `values.yaml` of each chart only, in its
 repository's directory, the platform's okdp-objects and oidc-dcr
@@ -738,17 +740,20 @@ included), `contracts/`, `platform.yaml` (the platform values),
 mode) and `instance/`, the instance: `values.yaml` (its values, `-f`) and
 its files (`--instance`: `upstream.app.yaml`, its upstream values of `app`,
 read before the inline `upstream.app` of `values.yaml`).
-`example/output/` is what the compile writes: `files/` as `okdp-compile
---emit-dir`, `umbrella/` as `--umbrella`, and `dcr/` as `--emit-dir` with
-`platform-dcr.yaml`. `TestExample` (`internal/fsio/example_test.go`)
+The rest of `examples/02_advanced/` is what the compile writes:
+`output-no-dcr/helm-cmd/` as `okdp-compile --emit-dir --mkinstall`,
+`output-no-dcr/umbrella-chart/` as `--umbrella`, and `output-dcr/helm-cmd/`
+as `--emit-dir --mkinstall` with `platform-dcr.yaml`. `TestExample`
+(`internal/fsio/example_test.go`)
 compiles `instance/values.yaml`, an instance layer, over `platform.yaml`, a
 platform layer, with the instance files of `instance/`, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of
-`fsio.Files` and `fsio.Umbrella` with them byte for byte; then the same with
-`platform-dcr.yaml` after `platform.yaml`, the files of `fsio.Files` with
-`dcr/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks that the
-command line writes `example/output/`, removes `okdp.dependencies.yaml`
-without `--mkdag`, and writes it with it.
+`fsio.Files` with `fsio.Install`, and of `fsio.Umbrella`, with them byte for
+byte; then the same with `platform-dcr.yaml` after `platform.yaml`, the
+files of `fsio.Files` with `fsio.Install` with `output-dcr/helm-cmd/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks
+that the command line writes them, `install.sh` executable, removes
+`install.sh` without `--mkinstall` and `okdp.dependencies.yaml` without
+`--mkdag`, and writes the latter with it.
 After a change, `go test ./internal/fsio -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures; `make example` only them); the diff is the change's effect,
