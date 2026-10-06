@@ -6,8 +6,9 @@ status 0 okdp-compile --package examples/02_advanced/input/service --release dem
 cmp $WORK/files/app.values.yaml examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml
 cmp $WORK/files/install.sh examples/02_advanced/output-no-dcr/helm-cmd/install.sh
 
-# --umbrella: the instance as one chart.
-status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --output $WORK/umbrella --umbrella
+# --umbrella: the instance as one chart, and its install script.
+status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --output $WORK/umbrella --umbrella --mkinstall
 ! stdout .
 ! stderr .
 cmp $WORK/umbrella/Chart.yaml examples/02_advanced/output-no-dcr/umbrella-chart/Chart.yaml
+cmp $WORK/umbrella/install.sh examples/02_advanced/output-no-dcr/umbrella-chart/install.sh

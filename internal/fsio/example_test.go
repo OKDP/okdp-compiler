@@ -19,7 +19,7 @@ var update = flag.Bool("update", false, "rewrite the examples' outputs and testd
 // The examples, each what a compile reads (<example>/input) and writes;
 // input, that of the example the failure cases run on (examples/02_advanced:
 // output-no-dcr/helm-cmd/ as `okdp-compile -o <dir> --mkinstall`,
-// output-no-dcr/umbrella-chart/ as `-o <dir> --umbrella`, output-dcr/ likewise in dcr
+// output-no-dcr/umbrella-chart/ as `-o <dir> --umbrella --mkinstall`, output-dcr/ likewise in dcr
 // mode).
 var (
 	examples = filepath.Join("..", "..", "examples")
@@ -70,7 +70,7 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 // (input/config.yaml) and compares what it writes with the
 // example's outputs, byte for byte. 01_minimal: output/helm-cmd/, what
 // -o <dir> --mkinstall writes, and output/umbrella-chart/, what
-// -o <dir> --umbrella writes; nothing references a contract. 02_advanced:
+// -o <dir> --umbrella --mkinstall writes; nothing references a contract. 02_advanced:
 // output-no-dcr/helm-cmd/ and output-no-dcr/umbrella-chart/, likewise;
 // output-dcr/helm-cmd/ and output-dcr/umbrella-chart/, what they write with
 // platform-dcr.yaml after platform.yaml.
@@ -126,11 +126,15 @@ func helmCmd(t *testing.T, res *okdp.Result) map[string][]byte {
 	return files
 }
 
-// umbrellaFiles: the files of Umbrella, what -o <dir> --umbrella writes.
+// umbrellaFiles: the files of Umbrella and its InstallScript, what -o <dir>
+// --umbrella --mkinstall writes.
 func umbrellaFiles(t *testing.T, def *okdp.Definition, res *okdp.Result) map[string][]byte {
 	t.Helper()
 	files, err := Umbrella(def, res, DefaultIndent)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if files[InstallScript], err = InstallUmbrella(res); err != nil {
 		t.Fatal(err)
 	}
 	return files

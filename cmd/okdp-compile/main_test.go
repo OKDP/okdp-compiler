@@ -125,7 +125,8 @@ func TestVersionOf(t *testing.T) {
 // without --mkdag, among them), install.sh executable. A compile with
 // --mkdag writes okdp.dependencies.yaml, one without --mkinstall removes
 // install.sh, and one with --umbrella in the same directory removes the
-// values files of the other mode, --mkdag writing beside the umbrella too.
+// values files of the other mode, --mkdag and --mkinstall (the umbrella's
+// script) writing beside the umbrella too.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	helmCmd := filepath.Join(dir, "output-no-dcr", "helm-cmd")
@@ -150,7 +151,7 @@ func TestRun(t *testing.T) {
 		if c.dcr {
 			o.platform = append(o.platform, filepath.Join(input, "platform-dcr.yaml"))
 		}
-		o.umbrella, o.mkinstall = c.umbrella, !c.umbrella
+		o.umbrella = c.umbrella
 		if err := run(o); err != nil {
 			t.Fatalf("%s: %v", c.output, err)
 		}
@@ -160,8 +161,8 @@ func TestRun(t *testing.T) {
 	if got := tree(t, dir); !maps.Equal(got, want) {
 		t.Errorf("got %v, want the example's outputs: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
-	for _, d := range []string{"output-no-dcr", "output-dcr"} {
-		path := filepath.Join(dir, d, "helm-cmd", "install.sh")
+	for _, d := range []string{"output-no-dcr/helm-cmd", "output-no-dcr/umbrella-chart", "output-dcr/helm-cmd", "output-dcr/umbrella-chart"} {
+		path := filepath.Join(dir, filepath.FromSlash(d), "install.sh")
 		if info, err := os.Stat(path); err != nil {
 			t.Error(err)
 		} else if info.Mode().Perm() != 0o755 {
@@ -180,12 +181,16 @@ func TestRun(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(helmCmd, "okdp.dependencies.yaml")); err != nil || string(b) != deps {
 		t.Errorf("--mkdag: got %v %q, want %q", err, b, deps)
 	}
-	o.umbrella = true
+	o.umbrella, o.mkinstall = true, true
 	if err := run(o); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := slices.Sorted(maps.Keys(tree(t, helmCmd))), []string{"Chart.yaml", "instance.values.yaml", "okdp.dependencies.yaml"}; !slices.Equal(got, want) {
-		t.Errorf("--umbrella --mkdag in the directory of the values files: got %v, want %v", got, want)
+	got := tree(t, helmCmd)
+	if names, want := slices.Sorted(maps.Keys(got)), []string{"Chart.yaml", "install.sh", "instance.values.yaml", "okdp.dependencies.yaml"}; !slices.Equal(names, want) {
+		t.Errorf("--umbrella --mkinstall --mkdag in the directory of the values files: got %v, want %v", names, want)
+	}
+	if !strings.Contains(got["install.sh"], `helm upgrade --install demo-webapp "$chart"`) {
+		t.Errorf("--umbrella --mkinstall: not the umbrella's script: %s", got["install.sh"])
 	}
 }
 
@@ -218,10 +223,8 @@ func TestRunErrors(t *testing.T) {
 		"no output":    {func(o *options) { o.output = "" }, nil, "--output (-o) is required"},
 		"no contracts": {func(o *options) { o.contracts = missing }, nil, "--contracts: stat " + missing + ": no such file or directory"},
 		"not a dir":    {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
-		"mkinstall and umbrella": {func(o *options) { o.umbrella = true }, nil,
-			"--mkinstall installs one release per chart, from the values files --umbrella does not write: give one or the other"},
 		"a compile":    {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
-		"an umbrella":  {func(o *options) { o.pkg, o.umbrella, o.mkinstall = pkg, true, false }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
+		"an umbrella":  {func(o *options) { o.pkg, o.umbrella = pkg, true }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
 		"another file": {nil, []string{"notes.txt"}, "notes.txt is not an output of okdp-compile"},
 		"a directory":  {nil, []string{"app.values.yaml/"}, "app.values.yaml is not an output of okdp-compile"},
 	} {

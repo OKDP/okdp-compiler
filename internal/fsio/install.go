@@ -70,6 +70,25 @@ func Install(res *okdp.Result) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// InstallUmbrella: InstallScript beside the files of Umbrella, a POSIX shell
+// script, marked generated (its line after #!), that installs res as one
+// Helm release, Result.Release in Result.Namespace: the umbrella chart of
+// the script's directory, wherever it is run from, its dependencies built
+// in a temporary copy (helm dependency build adds Chart.lock and charts/,
+// which the next compile into the directory would refuse), with
+// UmbrellaValues. The OAuth clients' charts need no order: their Job is a
+// pre-install hook.
+func InstallUmbrella(res *okdp.Result) ([]byte, error) {
+	if !dnsLabel.MatchString(res.Release) || !dnsLabel.MatchString(res.Namespace) {
+		return nil, fmt.Errorf("Result.Release %q, Result.Namespace %q: the release and namespace of the compile (Inputs.Release, Inputs.Namespace), where %s installs the chart", res.Release, res.Namespace, InstallScript)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "#!/bin/sh\n%s# Installs %s in the namespace %s, one Helm release: the\n# umbrella chart of this directory, its dependencies built in a copy, with\n# its values. Recompile the instance to change it.\nset -eu\ncd \"$(dirname \"$0\")\"\n", generated, res.Release, res.Namespace)
+	b.WriteString("chart=$(mktemp -d)\ntrap 'rm -rf \"$chart\"' EXIT\ncp Chart.yaml \"$chart\"\nhelm dependency build \"$chart\"\n")
+	fmt.Fprintf(&b, "helm upgrade --install %s \"$chart\" --namespace %s -f %s\n", shellWord(res.Release), shellWord(res.Namespace), UmbrellaValues)
+	return []byte(b.String()), nil
+}
+
 // clientChart: key names the chart of an OAuth client, okdp.DcrChart or
 // <name>-oidc-dcr.
 func clientChart(key string) bool {

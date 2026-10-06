@@ -157,6 +157,15 @@ func Install(res *Result) ([]byte, error) {
 	return fsio.Install(res)
 }
 
+// InstallUmbrella: what `okdp-compile --umbrella --mkinstall` adds to its
+// output directory, InstallScript, a shell script to write executable: the
+// umbrella chart of Umbrella installed as one Helm release,
+// Result.Release in Result.Namespace, its dependencies built in a
+// temporary copy, with UmbrellaValues.
+func InstallUmbrella(res *Result) ([]byte, error) {
+	return fsio.InstallUmbrella(res)
+}
+
 // UmbrellaValues: the file of Umbrella holding the instance's values, given
 // to Helm as user values (helm -f, Argo CD valueFiles, Flux valuesFrom).
 const UmbrellaValues = fsio.UmbrellaValues

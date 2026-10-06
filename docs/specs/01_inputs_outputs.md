@@ -1623,8 +1623,9 @@ With `--mkdag`, `okdp.dependencies.yaml` ([dependencies](#dependencies)):
 ```
 
 `examples/02_advanced/output-no-dcr/umbrella-chart/`, what `-o <dir>
---umbrella` writes: `instance.values.yaml`, the same values under their
-keys (`app:`, `okdp:`), and `Chart.yaml`:
+--umbrella --mkinstall` writes: `instance.values.yaml`, the same values
+under their keys (`app:`, `okdp:`), `install.sh`, which installs them as one
+release ([`--mkinstall`](../01_usage.md#--mkinstall)), and `Chart.yaml`:
 
 ```yaml
 apiVersion: v2

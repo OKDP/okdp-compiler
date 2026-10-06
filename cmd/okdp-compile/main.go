@@ -117,7 +117,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	f.StringVar(&o.output, "output", "", "output directory, required: the final values of each chart, <dir>/<chart>.values.yaml; <dir> holds only the files okdp-compile writes")
 	f.StringVar(&o.output, "o", "", "shorthand for --output")
 	f.BoolVar(&o.umbrella, "umbrella", false, "write the instance as one chart instead: Chart.yaml, an umbrella over the upstream charts, and "+compiler.UmbrellaValues+", its values (helm -f)")
-	f.BoolVar(&o.mkinstall, "mkinstall", false, "also write "+compiler.InstallScript+": a script that installs each chart with Helm, one release per chart (not with --umbrella)")
+	f.BoolVar(&o.mkinstall, "mkinstall", false, "also write "+compiler.InstallScript+": a script that installs the instance with Helm, one release per chart, or one release of the umbrella chart with --umbrella")
 	f.BoolVar(&o.mkdag, "mkdag", false, "also write "+compiler.DependenciesFile+": the instances the connection references point to, for a deployer that orders the releases")
 	f.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files written, 2 to 9 spaces")
 	if err := f.Parse(args); err != nil {
@@ -151,8 +151,6 @@ func run(o options) error {
 		return errors.New("--output (-o) is required")
 	case o.indent < 2 || o.indent > 9:
 		return fmt.Errorf("--indent %d: 2 to 9 spaces", o.indent)
-	case o.mkinstall && o.umbrella:
-		return errors.New("--mkinstall installs one release per chart, from the values files --umbrella does not write: give one or the other")
 	}
 	for _, d := range [][2]string{{"package", o.pkg}, {"charts", o.charts}, {"contracts", o.contracts}} {
 		if err := inputDir(d[0], d[1]); err != nil {
@@ -189,7 +187,11 @@ func run(o options) error {
 		return err
 	}
 	if o.mkinstall {
-		if files[compiler.InstallScript], err = compiler.Install(res); err != nil {
+		install := compiler.Install
+		if o.umbrella {
+			install = compiler.InstallUmbrella
+		}
+		if files[compiler.InstallScript], err = install(res); err != nil {
 			return err
 		}
 	}

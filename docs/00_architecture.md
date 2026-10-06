@@ -281,7 +281,7 @@ neither knows OKDP.
 
 | Package | File | Owns | Relations |
 |---|---|---|---|
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Install`, `Dependencies`, `Umbrella`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Install`, `InstallUmbrella`, `Dependencies`, `Umbrella`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
 | | `normalize.go` | `Normalize`'s reading of Go values of any type, by reflection, and its errors | `valuesLayers` (`okdp`), the mapping's scalars (`compile`) |
 | `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`, `Condition` (a condition outside a document, `true` or `false`); `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
@@ -310,7 +310,7 @@ neither knows OKDP.
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
 | `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `values.cel.yaml` | `okdp.Service.Check` |
 | | `output.go` | what a compile is written as: `Files` (`-o`, file name -> content), `Dependencies` (`--mkdag`, `okdp.dependencies.yaml` beside them); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
-| | `install.go` | `Install` (`--mkinstall`), `install.sh` beside the files of `Files`: `helm upgrade --install` of each chart, its release `<release>-<key>` cut to 53 characters, the OAuth clients' charts first; each word shell-quoted unless plain | `okdp.Result`, `okdp.DcrChart` |
+| | `install.go` | `Install` (`--mkinstall`), `install.sh` beside the files of `Files`: `helm upgrade --install` of each chart, its release `<release>-<key>` cut to 53 characters, the OAuth clients' charts first; each word shell-quoted unless plain. `InstallUmbrella` (`--umbrella --mkinstall`), beside the files of `Umbrella`: the umbrella chart as one release, its dependencies built in a temporary copy | `okdp.Result`, `okdp.DcrChart` |
 | | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion`, `checkKey` (`output.go`) |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
@@ -736,8 +736,8 @@ usage; `input/platform.yaml` gives only the okdp chart
 (`global.okdp.charts.objects`), `input/config.yaml` the
 instance's values. `output/helm-cmd/` is what `okdp-compile -o <dir>
 --mkinstall` writes for it, `output/umbrella-chart/` what `-o <dir>
---umbrella` writes, under the release `demo-hello` and the namespace
-`demo`. Nothing references a contract: the compile reads none.
+--umbrella --mkinstall` writes, under the release `demo-hello` and the
+namespace `demo`. Nothing references a contract: the compile reads none.
 
 `examples/02_advanced/input/` is what one compile of a service, `webapp`,
 reads: `service/` (`service.yaml`, `values.cel.yaml` with a database connection
@@ -753,7 +753,7 @@ mode) and `config.yaml`, the instance's values (`-f`), its
 upstream values of `app` included.
 The rest of `examples/02_advanced/` is what the compile writes:
 `output-no-dcr/helm-cmd/` as `okdp-compile -o <dir> --mkinstall`,
-`output-no-dcr/umbrella-chart/` as `-o <dir> --umbrella`, and `output-dcr/`
+`output-no-dcr/umbrella-chart/` as `-o <dir> --umbrella --mkinstall`, and `output-dcr/`
 likewise with `platform-dcr.yaml`. `TestExample`
 (`internal/fsio/example_test.go`) checks both examples. For `02_advanced`, it
 compiles `config.yaml`, an instance layer, over `platform.yaml`, a
