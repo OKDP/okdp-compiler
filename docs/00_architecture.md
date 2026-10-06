@@ -26,8 +26,7 @@ each, by repository, name and version
 ([Chart index](specs/01_inputs_outputs.md#chart-index));
 `Objects`, OKDP's own objects for the cluster, rendered by the `okdp` chart
 the compiler adds; `Dependencies`, for the deployer (Flux
-`dependsOn`, Argo CD sync waves); `Computed`, the mapping's output before
-the merges, for inspection
+`dependsOn`, Argo CD sync waves)
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
 Callers: a Go program embeds the package at the module's root
@@ -205,7 +204,7 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    checks the reserved chart keys; in `dcr` mode it adds each client chart
    to a copy of the charts of `service.yaml` (`chart.Spec{Source: <oidcDcr>}`:
    no OKDP defaults, no instance upstream values), and its values to the
-   mapping's output, which `Result.Computed` shows
+   mapping's output
    ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
 7. **Descriptor and credentials Secrets** (`descriptor`,
    `internal/okdp/descriptor.go`). Each `provides` entry is checked for its
@@ -282,7 +281,7 @@ neither knows OKDP.
 
 | Package | File | Owns | Relations |
 |---|---|---|---|
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Dependencies`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Install`, `Dependencies`, `Umbrella`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
 | | `normalize.go` | `Normalize`'s reading of Go values of any type, by reflection, and its errors | `valuesLayers` (`okdp`), the mapping's scalars (`compile`) |
 | `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`, `Condition` (a condition outside a document, `true` or `false`); `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
@@ -310,7 +309,7 @@ neither knows OKDP.
 | | `descriptor.go` | stage 7 | `connections.go`, `secrets.go`, `labels.go` |
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
 | `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `values.cel.yaml` | `okdp.Service.Check` |
-| | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content), `Dependencies` (`--mkdag`, `okdp.dependencies.yaml` beside them); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
+| | `output.go` | what a compile is written as: `Files` (`-o`, file name -> content), `Dependencies` (`--mkdag`, `okdp.dependencies.yaml` beside them); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
 | | `install.go` | `Install` (`--mkinstall`), `install.sh` beside the files of `Files`: `helm upgrade --install` of each chart, its release `<release>-<key>` cut to 53 characters, the OAuth clients' charts first; each word shell-quoted unless plain | `okdp.Result`, `okdp.DcrChart` |
 | | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion`, `checkKey` (`output.go`) |
 
@@ -329,16 +328,16 @@ provider check; one OAuth client Secret name (`clientSecret`) for
 engine for the mappings and the oidc-dcr template.
 `cmd/okdp-compile/main.go` is a thin caller of the public package:
 `os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
-`compiler.Compile`, then the files of `compiler.Files`, `compiler.Umbrella`
-and `compiler.Document`, the chart index (`Result.Charts`) included:
-the charts `install.sh` installs with [`--mkinstall`](01_usage.md#--mkinstall), the
-dependencies of `Chart.yaml` with [`--umbrella`](01_usage.md#--umbrella),
-`charts` with [`--out`](01_usage.md#--out). Its own rules are the disk's:
+`compiler.Compile`, then the files of `compiler.Files` and
+`compiler.Umbrella`, the chart index (`Result.Charts`) included: the charts
+`install.sh` installs with [`--mkinstall`](01_usage.md#--mkinstall), the
+dependencies of `Chart.yaml` with [`--umbrella`](01_usage.md#--umbrella).
+Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
 parsing, and is refused), the directory flags name directories, every
-output is built before any is written, and an output directory holds only
-the files its flag writes there: those of a previous compile are removed,
-a directory holding any other is refused
+output is built before any is written, and the output directory (`-o`)
+holds only the files it writes there: those of a previous compile are
+removed, a directory holding any other is refused
 ([command line](01_usage.md#command-line)).
 
 ## Design decisions
@@ -690,7 +689,7 @@ client charts in a whole compile (`TestDcrCompile`); `context_test.go` the
 oidc-dcr settings and their defaults. The template has no Helm fixture: its
 expected values are in `oidc_test.go`. `internal/fsio/load_test.go` checks
 the loading of a package, `internal/fsio/output_test.go` the files
-`--emit-dir` writes, `internal/fsio/install_test.go` the script of
+`-o` writes, `internal/fsio/install_test.go` the script of
 `--mkinstall`, `internal/fsio/umbrella_test.go`
 the umbrella's chart and values. `cmd/okdp-compile/main_test.go` runs the
 command line on the example: the refused arguments and options, the stale
@@ -735,10 +734,10 @@ one chart, `app` (the fictional `hello` chart of `input/charts/`), whose
 default in `config.schema.json`) and the release, and the instance's
 usage; `input/platform.yaml` gives only the okdp chart
 (`global.okdp.charts.objects`), `input/config.yaml` the
-instance's values. `output/helm-cmd/` is what `okdp-compile --emit-dir
---mkinstall` writes for it, `output/umbrella-chart/` what `--umbrella`
-writes, under the release `demo-hello` and the namespace `demo`. Nothing
-references a contract: the compile reads none.
+instance's values. `output/helm-cmd/` is what `okdp-compile -o <dir>
+--mkinstall` writes for it, `output/umbrella-chart/` what `-o <dir>
+--umbrella` writes, under the release `demo-hello` and the namespace
+`demo`. Nothing references a contract: the compile reads none.
 
 `examples/02_advanced/input/` is what one compile of a service, `webapp`,
 reads: `service/` (`service.yaml`, `values.cel.yaml` with a database connection
@@ -753,8 +752,8 @@ instance's audit database),
 mode) and `config.yaml`, the instance's values (`-f`), its
 upstream values of `app` included.
 The rest of `examples/02_advanced/` is what the compile writes:
-`output-no-dcr/helm-cmd/` as `okdp-compile --emit-dir --mkinstall`,
-`output-no-dcr/umbrella-chart/` as `--umbrella`, and `output-dcr/`
+`output-no-dcr/helm-cmd/` as `okdp-compile -o <dir> --mkinstall`,
+`output-no-dcr/umbrella-chart/` as `-o <dir> --umbrella`, and `output-dcr/`
 likewise with `platform-dcr.yaml`. `TestExample`
 (`internal/fsio/example_test.go`) checks both examples. For `02_advanced`, it
 compiles `config.yaml`, an instance layer, over `platform.yaml`, a
@@ -810,7 +809,7 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   aliased key is its `.Chart.Name`, and Helm adds an empty `global` and
   keeps the null defaults nested in its maps
   ([Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart)).
-  `--emit-dir` renders each chart alone. Helm 3 deletes a nested key that
+  Without `--umbrella`, each chart renders alone. Helm 3 deletes a nested key that
   the chart's defaults and the values both set to null, and reads the first
   document of a `values.yaml` only.
 
@@ -895,4 +894,4 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   cache, a new platform chart version a platform value.
 - **Callers.** Anything that provides `fs.FS` inputs and values maps; the
   CLI is one such caller. A caller writes the result where it keeps it,
-  from `compiler.Files`, `compiler.Umbrella` or `compiler.Document`.
+  from `compiler.Files` or `compiler.Umbrella`.

@@ -59,13 +59,8 @@ func Install(res *okdp.Result) ([]byte, error) {
 			return nil, fmt.Errorf("charts %q and %q: one Helm release, %q, once <release>-<key> is cut to %d characters: shorten the release", other, key, release, releaseMax)
 		}
 		releases[release] = key
-		args := []string{"helm", "upgrade", "--install", release}
-		if strings.HasPrefix(ref.Repository, "oci://") {
-			args = append(args, strings.TrimSuffix(ref.Repository, "/")+"/"+ref.Chart)
-		} else {
-			args = append(args, ref.Chart, "--repo", ref.Repository)
-		}
-		args = append(args, "--version", ref.Version, "--namespace", res.Namespace, "-f", key+".values.yaml")
+		args := append([]string{"helm", "upgrade", "--install", release}, chartArgs(ref)...)
+		args = append(args, "--namespace", res.Namespace, "-f", key+".values.yaml")
 		for i, a := range args {
 			args[i] = shellWord(a)
 		}

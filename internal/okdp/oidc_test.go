@@ -376,10 +376,6 @@ oidcClients:
 			if dcr["ttlSeconds"] != float64(30) || value.Dig(dcr, "request.redirect_uris") == nil || value.Dig(dcr, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri" {
 				t.Errorf("oidc-dcr values: %#v", dcr)
 			}
-			// What the template computed, before the chart's defaults.
-			if c := value.AsMap(res.Computed["oidc-dcr"]); c["ttlSeconds"] != float64(30) || value.Dig(c, "mapping.keyMapping.registration_client_uri") != nil {
-				t.Errorf("computed: %#v", c)
-			}
 			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 4 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || value.Dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
 				t.Errorf("console-oidc-dcr values, over oidc-dcr's defaults: %#v", c)
 			}

@@ -411,9 +411,6 @@ objects:
 	if got := names(value.AsList(res.Values["okdp"]["objects"])); !slices.Equal(got, all) {
 		t.Errorf("okdp chart objects: got %v, want %v", got, all)
 	}
-	if got := names(value.AsList(value.AsMap(res.Computed["okdp"])["objects"])); !slices.Equal(got, all) {
-		t.Errorf("computed okdp objects: got %v, want %v", got, all)
-	}
 	// A mapping that outputs no chart: the okdp chart all the same.
 	d.Mapping = []byte("instance: {url: https://x}\n")
 	if res, err = Compile(&d, inputs()); err != nil || !slices.Equal(slices.Sorted(maps.Keys(res.Values)), []string{"okdp"}) {

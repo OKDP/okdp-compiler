@@ -161,8 +161,7 @@ final values, and their schema
 Two keys of the same source are two renders of one upstream chart, each
 with its own values (polaris-admin's bootstrap and principals phases).
 Everything else stays keyed by the key: `output.<key>` of the mapping,
-`Result.Values` and `Result.Computed`, the instance's `upstream.<key>`
-values. `upstream: {from: <key>}` gives the
+`Result.Values`, the instance's `upstream.<key>` values. `upstream: {from: <key>}` gives the
 second render the instance values of the first ([upstream](#upstream)).
 
 A source is checked when `service.yaml` is loaded, and by `Compile` for a

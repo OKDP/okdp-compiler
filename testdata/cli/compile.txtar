@@ -1,13 +1,13 @@
 # A compile: status 0, nothing printed, the example's outputs written.
 env OKDP_CHARTS=examples/02_advanced/input/charts OKDP_CONTRACTS=examples/02_advanced/input/contracts
-status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --emit-dir $WORK/files --mkinstall --umbrella $WORK/umbrella
+status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml -o $WORK/files --mkinstall
 ! stdout .
 ! stderr .
 cmp $WORK/files/app.values.yaml examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml
 cmp $WORK/files/install.sh examples/02_advanced/output-no-dcr/helm-cmd/install.sh
-cmp $WORK/umbrella/Chart.yaml examples/02_advanced/output-no-dcr/umbrella-chart/Chart.yaml
 
-# --out /dev/stdout prints the document.
-[unix] status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml --out /dev/stdout
-[unix] stdout '^charts:$'
-[unix] ! stderr .
+# --umbrella: the instance as one chart.
+status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml --output $WORK/umbrella --umbrella
+! stdout .
+! stderr .
+cmp $WORK/umbrella/Chart.yaml examples/02_advanced/output-no-dcr/umbrella-chart/Chart.yaml

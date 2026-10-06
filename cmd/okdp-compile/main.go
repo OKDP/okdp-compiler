@@ -1,8 +1,8 @@
 // okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
 //	--platform platform.yaml [--platform ...] -f values.yaml [-f ...]
-//	--release <name> --namespace <name>
-//	[--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent 2]
+//	--release <name> --namespace <name> -o <dir>
+//	[--umbrella] [--mkinstall] [--mkdag] [--indent 2]
 
 package main
 
@@ -39,8 +39,8 @@ type options struct {
 	contracts          string
 	release, namespace string
 	platform, values   multi
-	out, emitDir       string
-	umbrella           string
+	output             string
+	umbrella           bool
 	mkinstall, mkdag   bool
 	indent             int
 	version            bool
@@ -114,12 +114,12 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	f.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	f.Var(&o.platform, "platform", "platform values file (global, global.okdp among them), repeatable, before the -f files")
 	f.Var(&o.values, "f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares")
-	f.StringVar(&o.out, "out", "", "write the compiled values (chart -> values), the upstream chart of each chart, objects and dependencies to this file")
-	f.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files --out, --emit-dir and --umbrella write, 2 to 9 spaces")
-	f.StringVar(&o.emitDir, "emit-dir", "", "write the final values of each chart to <dir>/<chart>.values.yaml; <dir> holds only these files, and those of --mkinstall and --mkdag")
-	f.StringVar(&o.umbrella, "umbrella", "", "write the instance as one chart to <dir>: Chart.yaml, an umbrella over the upstream charts, and "+compiler.UmbrellaValues+", its values (helm -f); <dir> holds only these files")
-	f.BoolVar(&o.mkinstall, "mkinstall", false, "also write "+compiler.InstallScript+" in the --emit-dir directory: a script that installs each chart with Helm, one release per chart")
-	f.BoolVar(&o.mkdag, "mkdag", false, "also write "+compiler.DependenciesFile+" in the --emit-dir directory: the instances the connection references point to, for a deployer that orders the releases")
+	f.StringVar(&o.output, "output", "", "output directory, required: the final values of each chart, <dir>/<chart>.values.yaml; <dir> holds only the files okdp-compile writes")
+	f.StringVar(&o.output, "o", "", "shorthand for --output")
+	f.BoolVar(&o.umbrella, "umbrella", false, "write the instance as one chart instead: Chart.yaml, an umbrella over the upstream charts, and "+compiler.UmbrellaValues+", its values (helm -f)")
+	f.BoolVar(&o.mkinstall, "mkinstall", false, "also write "+compiler.InstallScript+": a script that installs each chart with Helm, one release per chart (not with --umbrella)")
+	f.BoolVar(&o.mkdag, "mkdag", false, "also write "+compiler.DependenciesFile+": the instances the connection references point to, for a deployer that orders the releases")
+	f.IntVar(&o.indent, "indent", compiler.DefaultIndent, "indentation of the YAML files written, 2 to 9 spaces")
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
@@ -147,14 +147,12 @@ func run(o options) error {
 		return errors.New("--release is required")
 	case o.namespace == "":
 		return errors.New("--namespace is required")
+	case o.output == "":
+		return errors.New("--output (-o) is required")
 	case o.indent < 2 || o.indent > 9:
 		return fmt.Errorf("--indent %d: 2 to 9 spaces", o.indent)
-	case o.mkinstall && o.emitDir == "":
-		return errors.New("--mkinstall writes " + compiler.InstallScript + " beside the values files: give --emit-dir")
-	case o.mkdag && o.emitDir == "":
-		return errors.New("--mkdag writes " + compiler.DependenciesFile + " beside the values files: give --emit-dir")
-	case o.emitDir != "" && o.umbrella != "" && sameDir(o.emitDir, o.umbrella):
-		return fmt.Errorf("--emit-dir and --umbrella name the same directory, %s: give each its own", o.umbrella)
+	case o.mkinstall && o.umbrella:
+		return errors.New("--mkinstall installs one release per chart, from the values files --umbrella does not write: give one or the other")
 	}
 	for _, d := range [][2]string{{"package", o.pkg}, {"charts", o.charts}, {"contracts", o.contracts}} {
 		if err := inputDir(d[0], d[1]); err != nil {
@@ -181,52 +179,31 @@ func run(o options) error {
 	if err != nil {
 		return err
 	}
-	var dirs []outputDir
-	if o.emitDir != "" {
-		files, err := compiler.Files(res, o.indent)
-		if err != nil {
-			return err
-		}
-		if o.mkinstall {
-			if files[compiler.InstallScript], err = compiler.Install(res); err != nil {
-				return err
-			}
-		}
-		if o.mkdag {
-			if files[compiler.DependenciesFile], err = compiler.Dependencies(res, o.indent); err != nil {
-				return err
-			}
-		}
-		dirs = append(dirs, outputDir{o.emitDir, files, emitted})
+	var files map[string][]byte
+	if o.umbrella {
+		files, err = compiler.Umbrella(def, res, o.indent)
+	} else {
+		files, err = compiler.Files(res, o.indent)
 	}
-	if o.umbrella != "" {
-		files, err := compiler.Umbrella(def, res, o.indent)
-		if err != nil {
-			return err
-		}
-		dirs = append(dirs, outputDir{o.umbrella, files, umbrellaFile})
+	if err != nil {
+		return err
 	}
-	var doc []byte
-	if o.out != "" {
-		if doc, err = compiler.Document(res, o.indent); err != nil {
+	if o.mkinstall {
+		if files[compiler.InstallScript], err = compiler.Install(res); err != nil {
 			return err
 		}
 	}
-	stale := make([][]string, len(dirs))
-	for i, d := range dirs {
-		if stale[i], err = d.stale(); err != nil {
+	if o.mkdag {
+		if files[compiler.DependenciesFile], err = compiler.Dependencies(res, o.indent); err != nil {
 			return err
 		}
 	}
-	for i, d := range dirs {
-		if err := d.write(stale[i]); err != nil {
-			return err
-		}
+	d := outputDir{o.output, files}
+	stale, err := d.stale()
+	if err != nil {
+		return err
 	}
-	if o.out != "" {
-		return os.WriteFile(o.out, doc, 0o644)
-	}
-	return nil
+	return d.write(stale)
 }
 
 // inputDir: an error unless dir, given by --<name>, is a directory.
@@ -239,13 +216,6 @@ func inputDir(name, dir string) error {
 		return fmt.Errorf("--%s %s: not a directory", name, dir)
 	}
 	return nil
-}
-
-// sameDir: whether two paths name the same directory.
-func sameDir(a, b string) bool {
-	a, errA := filepath.Abs(a)
-	b, errB := filepath.Abs(b)
-	return errA == nil && errB == nil && a == b
 }
 
 // readValues: values files, as values layers.
@@ -265,30 +235,31 @@ func readValues(files []string) ([]map[string]any, error) {
 	return layers, nil
 }
 
-// outputDir: a directory okdp-compile writes: its files (name -> content),
-// and ours, whether a file name is one it writes there, in any compile.
+// outputDir: the directory okdp-compile writes (--output), and its files,
+// name -> content.
 type outputDir struct {
 	dir   string
 	files map[string][]byte
-	ours  func(name string) bool
 }
 
-// emitted: a file --emit-dir writes (compiler.Files): <key>.values.yaml;
-// compiler.InstallScript with --mkinstall, compiler.DependenciesFile with
-// --mkdag; and okdp.charts.yaml, which v0.1.0 wrote, removed as stale.
-func emitted(name string) bool {
-	return strings.HasSuffix(name, ".values.yaml") || name == compiler.InstallScript || name == compiler.DependenciesFile || name == "okdp.charts.yaml"
-}
-
-// umbrellaFile: a file --umbrella writes (compiler.Umbrella).
-func umbrellaFile(name string) bool {
-	return name == "Chart.yaml" || name == compiler.UmbrellaValues
+// ours: a file okdp-compile writes in its output directory, in any compile:
+// <key>.values.yaml (compiler.Files), Chart.yaml and
+// compiler.UmbrellaValues (--umbrella), compiler.InstallScript
+// (--mkinstall), compiler.DependenciesFile (--mkdag); and okdp.charts.yaml,
+// which v0.1.0 wrote.
+func ours(name string) bool {
+	switch name {
+	case "Chart.yaml", compiler.UmbrellaValues, compiler.InstallScript, compiler.DependenciesFile, "okdp.charts.yaml":
+		return true
+	}
+	return strings.HasSuffix(name, ".values.yaml")
 }
 
 // stale: the files of d.dir a previous compile wrote that this one does not
-// (a chart no longer compiled). A directory that holds anything else, or a
-// non-regular file of these names, is refused: a directory given by
-// mistake (--emit-dir .) loses nothing.
+// (a chart no longer compiled, the files of the other mode, --umbrella or
+// not). A directory that holds anything else, or a non-regular file of
+// these names, is refused: a directory given by mistake (-o .) loses
+// nothing.
 func (d outputDir) stale() ([]string, error) {
 	entries, err := os.ReadDir(d.dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -301,7 +272,7 @@ func (d outputDir) stale() ([]string, error) {
 	for _, e := range entries {
 		name := e.Name()
 		_, current := d.files[name]
-		if !e.Type().IsRegular() || !current && !d.ours(name) {
+		if !e.Type().IsRegular() || !current && !ours(name) {
 			return nil, fmt.Errorf("refusing to write in %s: %s is not an output of okdp-compile", d.dir, name)
 		}
 		if !current {

@@ -65,7 +65,7 @@ func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]
 	if err != nil {
 		return nil, err
 	}
-	instanceValues, err := valuesFile(values, indent)
+	instanceValues, err := valuesFile(values, "", indent)
 	if err != nil {
 		return nil, err
 	}

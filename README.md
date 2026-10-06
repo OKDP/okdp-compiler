@@ -36,7 +36,6 @@ if err != nil {
 // res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
 //               its service.yaml source, the platform's objects chart for okdp,
 //               the platform's oidc-dcr chart for the OAuth clients (oidcClients)
-// res.Computed: chart -> what the mapping computed, before the merges
 // res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
 //               Secrets of the provided connections, the mapping's objects section
 // res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
@@ -114,18 +113,14 @@ make build    # bin/okdp-compile
 in=examples/02_advanced/input
 export OKDP_CONTRACTS=$in/contracts   # or --contracts
 export OKDP_CHARTS=$in/charts         # or --charts
-bin/okdp-compile --package $in/service \
-  --release demo-webapp --namespace demo \
-  --platform $in/platform.yaml -f $in/config.yaml \
-  --emit-dir out/output-no-dcr/helm-cmd --mkinstall --umbrella out/output-no-dcr/umbrella-chart
-bin/okdp-compile --package $in/service \
-  --release demo-webapp --namespace demo \
-  --platform $in/platform.yaml --platform $in/platform-dcr.yaml \
-  -f $in/config.yaml --emit-dir out/output-dcr/helm-cmd --mkinstall --umbrella out/output-dcr/umbrella-chart
+compile() { bin/okdp-compile --package $in/service --release demo-webapp --namespace demo -f $in/config.yaml "$@"; }
+dcr="--platform $in/platform-dcr.yaml"
+compile --platform $in/platform.yaml -o out/output-no-dcr/helm-cmd --mkinstall
+compile --platform $in/platform.yaml -o out/output-no-dcr/umbrella-chart --umbrella
+compile --platform $in/platform.yaml $dcr -o out/output-dcr/helm-cmd --mkinstall
+compile --platform $in/platform.yaml $dcr -o out/output-dcr/umbrella-chart --umbrella
 # out/ now holds the outputs of examples/02_advanced/, byte for byte
-bin/okdp-compile --package $in/service \
-  --release demo-webapp --namespace demo \
-  --platform $in/platform.yaml -f $in/config.yaml -f testdata/protected-upstream.yaml
+compile --platform $in/platform.yaml -f testdata/protected-upstream.yaml -o out/protected
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
 
@@ -134,9 +129,11 @@ instance's: an instance values file that sets `global` fails, but for the keys t
 package's parameter schema declares under it
 ([platform values](docs/specs/01_inputs_outputs.md#platform-values)).
 
-`--emit-dir <dir>` writes the final values of each chart,
-`<dir>/<chart>.values.yaml` (OKDP's own objects in `okdp.values.yaml`;
-[`--emit-dir`](docs/01_usage.md#--emit-dir),
+`-o <dir>` (`--output`), required, writes the final values of each chart,
+`<dir>/<chart>.values.yaml`, each naming the upstream chart that renders it
+in a comment, `# Chart: app --repo https://charts.example.org --version
+1.8.0` (OKDP's own objects in `okdp.values.yaml`;
+[`--output`](docs/01_usage.md#--output),
 [rendering with Helm](docs/01_usage.md#rendering-with-helm)); with
 `--mkinstall`, also `<dir>/install.sh`, which installs each chart with Helm,
 one release per chart (`helm upgrade --install <release>-<chart>` of the
@@ -145,15 +142,14 @@ upstream chart the index names, with `<chart>.values.yaml`;
 `<dir>/okdp.dependencies.yaml`, the instances the connection references
 point to, for a deployer that orders the releases
 ([`--mkdag`](docs/01_usage.md#--mkdag)).
-`--umbrella <dir>` writes the instance as one chart, for one Helm release
-per instance: `<dir>/Chart.yaml`, an umbrella over the upstream charts of
-the index, and `<dir>/instance.values.yaml`, the final values of each chart
-under its key, given to Helm with `-f`
-([`--umbrella`](docs/01_usage.md#--umbrella)). `--out <file>` writes the
-computed values, the index, the objects and the dependencies
-([command line](docs/01_usage.md#command-line)). Every output is built
-before any is written, and each directory holds only what its flag writes
-there: the files of a previous compile no longer written are removed, a
+With `--umbrella`, it holds the instance as one chart instead, for one
+Helm release per instance: `<dir>/Chart.yaml`, an umbrella over the
+upstream charts of the index, and `<dir>/instance.values.yaml`, the final
+values of each chart under its key, given to Helm with `-f`
+([`--umbrella`](docs/01_usage.md#--umbrella)); `--mkdag` writes beside
+them, `--mkinstall` is refused. Every output is built before any is
+written, and the directory holds only what `okdp-compile` writes there:
+the files of a previous compile no longer written are removed, a
 directory holding any other file is refused. `--release` and
 `--namespace` are required, names Kubernetes and Helm accept (a release of
 53 characters at most): the values are compiled for them.
@@ -167,12 +163,12 @@ directory holding any other file is refused. `--release` and
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, the `charts` section of `service.yaml`, the final values |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients, the `okdp` chart) and `Compile` |
-| `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`--out`, `--emit-dir`, `--umbrella`) |
+| `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`-o`, `--umbrella`) |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
-| `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/` (`helm-cmd/` with `--emit-dir --mkinstall`, `umbrella-chart/` with `--umbrella`), checked by `go test` ([example](docs/00_architecture.md#example)) |
+| `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/` (`helm-cmd/` with `-o <dir> --mkinstall`, `umbrella-chart/` with `-o <dir> --umbrella`), checked by `go test` ([example](docs/00_architecture.md#example)) |
 | `examples/02_advanced/input/` | an example compile's inputs: the package (`service/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`: `global.okdp` and a connection every instance may reference, the instance's audit database; `platform-dcr.yaml` after it for `dcr` mode), the instance's values (`config.yaml`, given with `-f`) ([example](docs/00_architecture.md#example)) |
-| `examples/02_advanced/output-*/` | what `okdp-compile` writes for it, checked by `go test`: `output-no-dcr/helm-cmd/` with `--emit-dir --mkinstall`, `output-no-dcr/umbrella-chart/` with `--umbrella`, `output-dcr/` likewise in `dcr` mode |
+| `examples/02_advanced/output-*/` | what `okdp-compile` writes for it, checked by `go test`: `output-no-dcr/helm-cmd/` with `-o <dir> --mkinstall`, `output-no-dcr/umbrella-chart/` with `-o <dir> --umbrella`, `output-dcr/` likewise in `dcr` mode |
 | `testdata/` | instance values that must fail on the example, platform values in `testdata/platform/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/cli/` | the binary run as a process (testscript): exit statuses, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |

@@ -68,9 +68,6 @@ type Inputs struct {
 
 // Result: what a compile produces.
 type Result struct {
-	// Computed: chart -> the values the mapping computed, before the merge
-	// with the upstream defaults, OKDP's defaults and the instance values.
-	Computed map[string]any
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any
 	// Charts: chart -> the upstream chart that renders its values (`helm
@@ -198,7 +195,7 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 	if err := uniqueObjects(own, in.Namespace); err != nil {
 		return nil, err
 	}
-	out := &Result{Computed: res.output, Dependencies: deps, Release: in.Release, Namespace: in.Namespace}
+	out := &Result{Dependencies: deps, Release: in.Release, Namespace: in.Namespace}
 	for _, o := range own {
 		out.Objects = append(out.Objects, o.object)
 	}

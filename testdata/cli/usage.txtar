@@ -11,8 +11,8 @@ status 2 okdp-compile --nope
 ! stdout .
 stderr '^flag provided but not defined: -nope$'
 stderr '^Usage of okdp-compile:$'
-status 2 okdp-compile --emit-dir
-stderr '^flag needs an argument: -emit-dir$'
+status 2 okdp-compile -o
+stderr '^flag needs an argument: -o$'
 status 2 okdp-compile -f a.yaml b.yaml
 stderr '^unexpected argument "b.yaml": every input is a flag \(-f before each values file\)$'
 stderr '^Usage of okdp-compile:$'

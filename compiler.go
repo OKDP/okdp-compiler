@@ -1,9 +1,8 @@
 // Package compiler compiles an OKDP service instance into the values of its
 // upstream charts: the public API of okdp-compiler. A package (service.yaml,
 // values.cel.yaml, its parameters and OKDP's defaults for its charts) is
-// read from any fs.FS
-// (LoadDefinition), compiled for one instance (Compile), and written as
-// files (Files, Document):
+// read from any fs.FS (LoadDefinition), compiled for one instance
+// (Compile), and written as files (Files, Umbrella):
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("packages/myservice"))
 //	res, err := compiler.Compile(def, compiler.Inputs{
@@ -70,8 +69,8 @@ const (
 	DcrChart     = okdp.DcrChart
 )
 
-// DefaultIndent: the indentation of the YAML files Files and Document write,
-// in spaces.
+// DefaultIndent: the indentation of the YAML files Files and Umbrella
+// write, in spaces.
 const DefaultIndent = fsio.DefaultIndent
 
 // DcrSource: the chart that registers an OAuth client in dcr mode, unless
@@ -126,7 +125,7 @@ func WithoutObjectsChart() Option {
 	return okdp.WithoutObjectsChart()
 }
 
-// Files: what `okdp-compile --emit-dir` writes, file name -> content: the
+// Files: what `okdp-compile -o <dir>` writes, file name -> content: the
 // final values of each chart (<key>.values.yaml), indented by indent spaces
 // (2 to 9).
 func Files(res *Result, indent int) (map[string][]byte, error) {
@@ -137,8 +136,8 @@ func Files(res *Result, indent int) (map[string][]byte, error) {
 // Files.
 const DependenciesFile = fsio.DependenciesFile
 
-// Dependencies: what `okdp-compile --mkdag` adds to the directory of
-// --emit-dir, DependenciesFile: Result.Dependencies as a YAML list, for a
+// Dependencies: what `okdp-compile --mkdag` adds to its output directory,
+// DependenciesFile: Result.Dependencies as a YAML list, for a
 // deployer that orders the releases (Flux dependsOn, Argo CD sync waves),
 // indented by indent spaces (2 to 9).
 func Dependencies(res *Result, indent int) ([]byte, error) {
@@ -148,8 +147,8 @@ func Dependencies(res *Result, indent int) ([]byte, error) {
 // InstallScript: the file name of Install, beside the files of Files.
 const InstallScript = fsio.InstallScript
 
-// Install: what `okdp-compile --mkinstall` adds to the directory of
-// --emit-dir, InstallScript, a shell script to write executable: `helm
+// Install: what `okdp-compile --mkinstall` adds to its output directory,
+// InstallScript, a shell script to write executable: `helm
 // upgrade --install` of each chart from its upstream chart (Result.Charts)
 // with its values file of Files, in Result.Namespace, the release
 // <Result.Release>-<key> (a namespace holds one release of a name), the
@@ -162,18 +161,11 @@ func Install(res *Result) ([]byte, error) {
 // to Helm as user values (helm -f, Argo CD valueFiles, Flux valuesFrom).
 const UmbrellaValues = fsio.UmbrellaValues
 
-// Umbrella: what `okdp-compile --umbrella` writes, file name -> content: the
-// instance as one chart, Chart.yaml, an umbrella over the upstream charts of
-// its keys (aliased to the key when it is not the chart's name), and
-// UmbrellaValues, the final values of each key under the key; indented by
-// indent spaces (2 to 9).
+// Umbrella: what `okdp-compile -o <dir> --umbrella` writes, file name ->
+// content: the instance as one chart, Chart.yaml, an umbrella over the
+// upstream charts of its keys (aliased to the key when it is not the
+// chart's name), and UmbrellaValues, the final values of each key under the
+// key; indented by indent spaces (2 to 9).
 func Umbrella(def *Definition, res *Result, indent int) (map[string][]byte, error) {
 	return fsio.Umbrella(def, res, indent)
-}
-
-// Document: what `okdp-compile --out` writes: the chart index, the
-// dependencies, the objects and the computed values, in one YAML
-// document, indented by indent spaces (2 to 9).
-func Document(res *Result, indent int) ([]byte, error) {
-	return fsio.Document(res, indent)
 }

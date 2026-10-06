@@ -1,6 +1,6 @@
 # A compile error: status 1, the whole report on stderr, nothing written.
 env OKDP_CHARTS=examples/02_advanced/input/charts OKDP_CONTRACTS=examples/02_advanced/input/contracts
-status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f testdata/schema-violation.yaml --emit-dir $WORK/files
+status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f testdata/schema-violation.yaml -o $WORK/files
 ! stdout .
 cmp stderr $WORK/schema-violation.txt
 ! exists $WORK/files
@@ -10,7 +10,7 @@ status 1 okdp-compile --package examples/02_advanced/input/service --namespace d
 stderr '^error: --release is required$'
 
 # An output directory holding another file: status 1, nothing written.
-status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml --emit-dir $WORK/out
+status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -o $WORK/out
 stderr '^error: refusing to write in .*out: notes.txt is not an output of okdp-compile$'
 ! exists $WORK/out/app.values.yaml
 

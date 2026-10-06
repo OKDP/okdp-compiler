@@ -425,9 +425,8 @@ okdp-compile --package charts/services/polaris \
   --platform charts/services/polaris/ci/platform.yaml \
   --platform charts/services/polaris/ci/dcr-platform.yaml \
   -f charts/services/polaris/ci/dcr-values.yaml \
-  --release demo-polaris --namespace demo --emit-dir /tmp/demo-polaris \
-  --out /tmp/demo-polaris.yaml
-yq '.charts.polaris' /tmp/demo-polaris.yaml   # {repository, chart, version}
+  --release demo-polaris --namespace demo -o /tmp/demo-polaris --mkinstall
+grep -- '-f polaris.values.yaml' /tmp/demo-polaris/install.sh   # the source of polaris
 helm template demo-polaris oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -n demo \
   -f /tmp/demo-polaris/console-oidc-dcr.values.yaml
 scripts/compile-charts.sh charts/services/polaris   # every case, compiled and rendered
@@ -435,19 +434,17 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
 
 - Render with the release name and namespace of the compile: the upstream
   charts derive their names from the release.
-- Render each chart with the source the index (`charts` of `--out`, as
-  `install.sh` of `--mkinstall` installs it) names for its key: `helm template <release> <chart> --repo <repository>
-  --version <version>`, `oci://<repository>/<chart>` for a registry, or the
+- Render each chart with the source the index names for its key, as
+  `install.sh` of `--mkinstall` installs it: `helm template <release>
+  <chart> --repo <repository> --version <version>`,
+  `oci://<repository>/<chart>` for a registry, or the
   `<chart>-<version>.tgz` `helm pull` wrote in the chart cache, in its
-  repository's directory. The clients'
-  charts render with the platform's oidc-dcr chart, `polaris-admin-principals`
-  with the source of `polaris-admin`
+  repository's directory. The clients' charts render with the platform's
+  oidc-dcr chart, `polaris-admin-principals` with the source of
+  `polaris-admin`
   ([rendering with Helm](01_usage.md#rendering-with-helm));
   `scripts/compile-charts.sh` reads the index.
-- `--emit-dir` writes the final values, the input of `helm template`;
-  `--out` writes what the mapping computed, the clients' charts included,
-  before the merges: read it when a mapping misbehaves
-  ([`--out`](01_usage.md#--out)).
+- `-o` writes the final values, the input of `helm template`.
 - A case whose first line is `# error: <message>` must fail with that message
   (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
