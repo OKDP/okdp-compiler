@@ -35,7 +35,7 @@ tidy: ## Tidy go.mod and tools/go.mod
 	go mod tidy
 	go -C tools mod tidy
 
-example: ## Rewrite the outputs of examples/02_advanced/ from the current compiler
+example: ## Rewrite the outputs of examples/ from the current compiler
 	go test ./internal/fsio -run '^TestExample$$' -update
 
 fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)

@@ -3,7 +3,8 @@
 How to package an upstream application for OKDP: a directory of parameters,
 base values and a service definition, compiled by `okdp-compile`. The steps
 follow a `webapp` service, of which the example of this repository is a
-smaller version (`examples/02_advanced/input/service/`); the recipes and
+smaller version (`examples/02_advanced/input/service/`;
+`examples/01_minimal/input/service/` is the smallest package); the recipes and
 pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md) and

@@ -1,0 +1,10 @@
+# The package of the hello service: its name, its version, and the upstream
+# chart it deploys. values.cel.yaml computes the chart's values from the
+# instance's parameters (its config.yaml over the defaults of
+# config.schema.json).
+
+name: hello
+version: 1.0.0
+charts:
+  app:
+    source: {repository: https://charts.example.org, chart: hello, version: 1.0.0}

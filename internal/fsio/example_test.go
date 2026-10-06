@@ -8,24 +8,26 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-var update = flag.Bool("update", false, "rewrite the example's outputs and testdata/helm/umbrella/ from the current compiler")
+var update = flag.Bool("update", false, "rewrite the examples' outputs and testdata/helm/umbrella/ from the current compiler")
 
-// The example: what a compile reads (examples/02_advanced/input) and writes
-// (examples/02_advanced: output-no-dcr/helm-cmd/ as `okdp-compile
-// --emit-dir --mkinstall`, output-no-dcr/umbrella-chart/ as `--umbrella`,
-// output-dcr/helm-cmd/ as `--emit-dir --mkinstall` in dcr mode).
+// The examples, each what a compile reads (<example>/input) and writes;
+// input, that of the example the failure cases run on (examples/02_advanced:
+// output-no-dcr/helm-cmd/ as `okdp-compile --emit-dir --mkinstall`,
+// output-no-dcr/umbrella-chart/ as `--umbrella`, output-dcr/helm-cmd/ as
+// `--emit-dir --mkinstall` in dcr mode).
 var (
-	example = filepath.Join("..", "..", "examples", "02_advanced")
-	input   = filepath.Join(example, "input")
+	examples = filepath.Join("..", "..", "examples")
+	input    = filepath.Join(examples, "02_advanced", "input")
 )
 
-// exampleCompile: the example package compiled with its chart cache and
-// contracts, the platform values (platform.yaml, then
+// exampleCompile: the advanced example's package compiled with its chart cache
+// and contracts, the platform values (platform.yaml, then
 // these platform files) and these instance values files, under the
 // example's release and namespace.
 func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition, *okdp.Result, error) {
@@ -64,28 +66,57 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 	return layers
 }
 
-// TestExample compiles the example instance (input/instance/config.yaml)
-// and compares what it writes with the example's outputs, byte for byte: output-no-dcr/helm-cmd/, what --emit-dir
-// --mkinstall writes, and output-no-dcr/umbrella-chart/, what --umbrella
-// writes; output-dcr/helm-cmd/, what --emit-dir --mkinstall writes with
+// TestExample compiles the instance of each example
+// (input/instance/config.yaml) and compares what it writes with the
+// example's outputs, byte for byte. 01_minimal: output/helm-cmd/, what
+// --emit-dir --mkinstall writes, and output/umbrella-chart/, what
+// --umbrella writes; nothing references a contract. 02_advanced:
+// output-no-dcr/helm-cmd/ and output-no-dcr/umbrella-chart/, likewise;
+// output-dcr/helm-cmd/, what --emit-dir --mkinstall writes with
 // platform-dcr.yaml after platform.yaml.
 func TestExample(t *testing.T) {
-	instance := []string{filepath.Join(input, "instance", "config.yaml")}
-	def, res, err := exampleCompile(t, nil, instance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	umbrella, err := Umbrella(def, res, DefaultIndent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkDir(t, "output-no-dcr/helm-cmd", helmCmd(t, res))
-	checkDir(t, "output-no-dcr/umbrella-chart", umbrella)
-	_, res, err = exampleCompile(t, []string{filepath.Join(input, "platform-dcr.yaml")}, instance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkDir(t, "output-dcr/helm-cmd", helmCmd(t, res))
+	t.Run("01_minimal", func(t *testing.T) {
+		in := filepath.Join(examples, "01_minimal", "input")
+		def, err := LoadDefinition(os.DirFS(filepath.Join(in, "service")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := okdp.Compile(def, okdp.Inputs{
+			Charts:    os.DirFS(filepath.Join(in, "charts")),
+			Contracts: fstest.MapFS{},
+			Platform:  readLayers(t, []string{filepath.Join(in, "platform.yaml")}),
+			Values:    readLayers(t, []string{filepath.Join(in, "instance", "config.yaml")}),
+			Release:   "demo-hello",
+			Namespace: "demo",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		umbrella, err := Umbrella(def, res, DefaultIndent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkDir(t, "01_minimal/output/helm-cmd", helmCmd(t, res))
+		checkDir(t, "01_minimal/output/umbrella-chart", umbrella)
+	})
+	t.Run("02_advanced", func(t *testing.T) {
+		instance := []string{filepath.Join(input, "instance", "config.yaml")}
+		def, res, err := exampleCompile(t, nil, instance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		umbrella, err := Umbrella(def, res, DefaultIndent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkDir(t, "02_advanced/output-no-dcr/helm-cmd", helmCmd(t, res))
+		checkDir(t, "02_advanced/output-no-dcr/umbrella-chart", umbrella)
+		_, res, err = exampleCompile(t, []string{filepath.Join(input, "platform-dcr.yaml")}, instance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkDir(t, "02_advanced/output-dcr/helm-cmd", helmCmd(t, res))
+	})
 }
 
 // helmCmd: the files of res and its InstallScript, what --emit-dir
@@ -102,11 +133,11 @@ func helmCmd(t *testing.T, res *okdp.Result) map[string][]byte {
 	return files
 }
 
-// checkDir: <dir> of the example holds these files, and only them, byte for
+// checkDir: examples/<dir> holds these files, and only them, byte for
 // byte, InstallScript executable; -update rewrites it.
 func checkDir(t *testing.T, dir string, files map[string][]byte) {
 	t.Helper()
-	path := filepath.Join(example, dir)
+	path := filepath.Join(examples, dir)
 	if *update {
 		if err := os.RemoveAll(path); err != nil {
 			t.Fatal(err)
@@ -133,12 +164,12 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 		if info, err := e.Info(); err == nil && e.Name() == InstallScript && info.Mode()&0o111 == 0 {
-			t.Errorf("examples/02_advanced/%s/%s: not executable", dir, e.Name())
+			t.Errorf("examples/%s/%s: not executable", dir, e.Name())
 		}
 	}
 	for name := range files {
 		if !slices.Contains(names, name) {
-			t.Errorf("examples/02_advanced/%s/%s: missing, run go test ./internal/fsio -update and review the diff", dir, name)
+			t.Errorf("examples/%s/%s: missing, run go test ./internal/fsio -update and review the diff", dir, name)
 		}
 	}
 	for _, name := range names {
@@ -147,7 +178,7 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 			t.Fatal(err)
 		}
 		if want, ok := files[name]; !ok || !bytes.Equal(b, want) {
-			t.Errorf("examples/02_advanced/%s/%s differs from the compile, run go test ./internal/fsio -update and review the diff", dir, name)
+			t.Errorf("examples/%s/%s differs from the compile, run go test ./internal/fsio -update and review the diff", dir, name)
 		}
 	}
 }

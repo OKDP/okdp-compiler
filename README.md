@@ -170,6 +170,7 @@ directory holding any other file is refused. `--release` and
 | `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`--out`, `--emit-dir`, `--umbrella`) |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
+| `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/` (`helm-cmd/` with `--emit-dir --mkinstall`, `umbrella-chart/` with `--umbrella`), checked by `go test` ([example](docs/00_architecture.md#example)) |
 | `examples/02_advanced/input/` | an example compile's inputs: the package (`service/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`, and `platform-dcr.yaml` after it for `dcr` mode), the instance (`instance/`: its values, `config.yaml`, and its upstream values files) ([example](docs/00_architecture.md#example)) |
 | `examples/02_advanced/output-*/` | what `okdp-compile` writes for it, checked by `go test`: `output-no-dcr/helm-cmd/` with `--emit-dir --mkinstall`, `output-no-dcr/umbrella-chart/` with `--umbrella`, `output-dcr/helm-cmd/` with `--emit-dir --mkinstall` in `dcr` mode |
 | `testdata/` | instance values that must fail on the example, platform values in `testdata/platform/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |

@@ -729,6 +729,17 @@ it becomes a case of the unit test, and the file is removed.
 
 ### Example
 
+`examples/01_minimal/` is the smallest package: `input/service/` deploys
+one chart, `app` (the fictional `hello` chart of `input/charts/`), whose
+`values.cel.yaml` sets three values from the parameters (`replicas`, its
+default in `config.schema.json`) and the release, and the instance's
+usage; `input/platform.yaml` gives only the okdp chart
+(`global.okdp.charts.objects`), `input/instance/config.yaml` the
+instance's values. `output/helm-cmd/` is what `okdp-compile --emit-dir
+--mkinstall` writes for it, `output/umbrella-chart/` what `--umbrella`
+writes, under the release `demo-hello` and the namespace `demo`. Nothing
+references a contract: the compile reads none.
+
 `examples/02_advanced/input/` is what one compile of a service, `webapp`,
 reads: `service/` (`service.yaml`, `values.cel.yaml` with a database connection
 and an OAuth client, `config.schema.json` with the parameters' defaults,
@@ -743,7 +754,7 @@ The rest of `examples/02_advanced/` is what the compile writes:
 `output-no-dcr/helm-cmd/` as `okdp-compile --emit-dir --mkinstall`,
 `output-no-dcr/umbrella-chart/` as `--umbrella`, and `output-dcr/helm-cmd/`
 as `--emit-dir --mkinstall` with `platform-dcr.yaml`. `TestExample`
-(`internal/fsio/example_test.go`)
+(`internal/fsio/example_test.go`) checks both examples. For `02_advanced`, it
 compiles `instance/config.yaml`, an instance layer, over `platform.yaml`, a
 platform layer, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of

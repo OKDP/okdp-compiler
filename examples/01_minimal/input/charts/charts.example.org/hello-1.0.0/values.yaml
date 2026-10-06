@@ -1,0 +1,8 @@
+# The chart cache's copy of the (fictional) hello chart 1.0.0: its defaults,
+# all a compile reads of it.
+fullnameOverride: ""
+replicaCount: 1
+message: Hello
+image:
+  repository: example/hello
+  tag: latest

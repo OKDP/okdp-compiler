@@ -1,0 +1,6 @@
+# The platform values (global.okdp), the same for every instance: here only
+# the chart OKDP's own objects are rendered with, which every compile needs.
+global:
+  okdp:
+    charts:
+      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
