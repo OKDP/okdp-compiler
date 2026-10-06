@@ -23,7 +23,6 @@ type umbrellaChart struct {
 	APIVersion   string               `yaml:"apiVersion"`
 	Name         string               `yaml:"name"`
 	Version      string               `yaml:"version"`
-	AppVersion   string               `yaml:"appVersion,omitempty"`
 	Dependencies []umbrellaDependency `yaml:"dependencies"`
 }
 
@@ -47,7 +46,7 @@ func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]
 	if !chart.IsVersion(svc.Version) {
 		return nil, fmt.Errorf("service.yaml: version %q: the version of the umbrella chart, SemVer (1.2.3)", svc.Version)
 	}
-	c := umbrellaChart{APIVersion: "v2", Name: svc.Name, Version: svc.Version, AppVersion: svc.AppVersion}
+	c := umbrellaChart{APIVersion: "v2", Name: svc.Name, Version: svc.Version}
 	values := map[string]any{}
 	for _, key := range slices.Sorted(maps.Keys(res.Values)) {
 		if err := checkKey(key); err != nil {

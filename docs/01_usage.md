@@ -124,7 +124,8 @@ okdp-compile --version
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
 | `--out` | none | write the computed values, the chart index, the objects and the dependencies to one YAML file, out of the directories below |
-| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`), the chart index and the dependencies to a directory, one file each; it holds only these files |
+| `--emit-dir` | none | write the final values of each chart (OKDP's objects in `okdp.values.yaml`) and the chart index to a directory, one file each; it holds only these files, and that of `--mkdag` |
+| `--mkdag` | off | also write `okdp.dependencies.yaml` in the directory of `--emit-dir`, which it requires: the instances the connection references point to, for a deployer that orders the releases |
 | `--umbrella` | none | write the instance as one chart to a directory: `Chart.yaml`, an umbrella over the upstream charts, and `instance.values.yaml`, its values; a directory other than `--emit-dir`'s, holding only these files |
 | `--indent` | `2` | the indentation of the YAML files `--out`, `--emit-dir` and `--umbrella` write, 2 to 9 spaces |
 | `--version` | | print the version and exit |
@@ -179,7 +180,8 @@ values:
       # ... the descriptor
 ```
 
-The computed values of a chart hold only what the mapping sets:
+The computed values of a chart hold only what the mapping sets; the image,
+from the base values over the chart's defaults, is in the final values only:
 
 ```console
 $ bin/okdp-compile --package example/input/package --instance example/input/instance \
@@ -187,10 +189,10 @@ $ bin/okdp-compile --package example/input/package --instance example/input/inst
     --platform example/input/platform.yaml -f example/input/instance/values.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
-tag: "2.3"
+null
 $ yq '.image' out/app.values.yaml
 repository: example/webapp
-tag: "2.3"
+tag: "1.8"
 ```
 
 ### `--emit-dir`
@@ -201,7 +203,8 @@ The directory is created if needed, and holds these files only:
 |---|---|
 | `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart) (OKDP's own objects, `Result.Objects`, under `objects`), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
 | `okdp.charts.yaml` | `Result.Charts`, the [chart index](specs/01_inputs_outputs.md#chart-index): `<key>: {repository, chart, version}`, one entry per values file |
-| `okdp.dependencies.yaml` | `Result.Dependencies`: a YAML list, `[]` when there is none |
+
+With [`--mkdag`](#--mkdag), also `okdp.dependencies.yaml`.
 
 The example's, `out/` here, are `example/output/files/`:
 
@@ -212,7 +215,6 @@ $ bin/okdp-compile --package example/input/package --instance example/input/inst
 $ ls out
 app.values.yaml
 okdp.charts.yaml
-okdp.dependencies.yaml
 okdp.values.yaml
 $ cat out/okdp.charts.yaml
 app:
@@ -240,7 +242,6 @@ $ ls out-dcr
 app.values.yaml
 oidc-dcr.values.yaml
 okdp.charts.yaml
-okdp.dependencies.yaml
 okdp.values.yaml
 ```
 
@@ -248,12 +249,38 @@ A chart the mapping leaves out (`$if`) has no file and no index entry.
 
 Before anything is written, the files of the directory are checked: those
 of a previous compile are overwritten, and removed when this one does not
-write them (a chart no longer compiled); any other file or directory, or a
-file of these names that is not a regular file (a symbolic link), fails the
-compile, so that a directory given by mistake loses nothing:
+write them (a chart no longer compiled, `okdp.dependencies.yaml` without
+`--mkdag`); any other file or directory, or a file of these names that is
+not a regular file (a symbolic link), fails the compile, so that a
+directory given by mistake loses nothing:
 
 ```
 refusing to write in out: notes.txt is not an output of okdp-compile
+```
+
+### `--mkdag`
+
+Adds `okdp.dependencies.yaml` to the directory of `--emit-dir`; without
+`--emit-dir` the command fails (`--mkdag writes okdp.dependencies.yaml
+beside the values files: give --emit-dir`). It holds `Result.Dependencies`,
+a YAML list, `[]` when there is none: one item per connection reference to
+another instance of the namespace, `instance` (its release name),
+`contract` and `field` (the parameter that references it)
+([dependencies](specs/01_inputs_outputs.md#dependencies)). Helm does not
+read it: it is for a deployer that installs the referenced instances first
+([GitOps](#gitops)).
+
+The example's, the instance referencing `demo-db` in `database`:
+
+```console
+$ bin/okdp-compile --package example/input/package --instance example/input/instance \
+    --release demo-webapp --namespace demo \
+    --platform example/input/platform.yaml -f example/input/instance/values.yaml \
+    --emit-dir out --mkdag
+$ cat out/okdp.dependencies.yaml
+- instance: demo-db
+  contract: database
+  field: database
 ```
 
 ### `--umbrella`
@@ -265,7 +292,7 @@ files only, checked as `--emit-dir`'s are; it cannot be the directory of
 
 | File | Content |
 |---|---|
-| `Chart.yaml` | an umbrella chart, named and versioned after `service.yaml` (`name`, `version`, `appVersion`), with one dependency per key of the index: its upstream chart (repository, name, version), aliased to the key when the key is not the chart's name |
+| `Chart.yaml` | an umbrella chart, named and versioned after `service.yaml` (`name`, `version`), with one dependency per key of the index: its upstream chart (repository, name, version), aliased to the key when the key is not the chart's name |
 | `instance.values.yaml` | `Result.Values`: the final values of each key, under the key |
 
 The chart has no `values.yaml`: its values are given to Helm as user
@@ -284,7 +311,6 @@ $ cat umbrella/Chart.yaml
 apiVersion: v2
 name: webapp
 version: 1.0.0
-appVersion: "2.3"
 dependencies:
   - name: app
     repository: https://charts.example.org
@@ -490,7 +516,6 @@ func main() {
 	def, err := compiler.LoadDefinition(fstest.MapFS{
 		"service.yaml": {Data: []byte(`name: demo
 version: 1.2.3
-appVersion: "4.5"
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.0.0}
@@ -567,7 +592,9 @@ files, likewise), `Release` and `Namespace`; all but `Instance`,
 `Charts` (the index), `Objects` and `Dependencies` what both write
 ([outputs](specs/01_inputs_outputs.md#outputs)):
 `compiler.Files(res, indent)` gives the files of `--emit-dir` (name ->
-content), `compiler.Document(res, indent)` the file of `--out`, for a caller
+content), `compiler.Dependencies(res, indent)` the file `--mkdag` adds to
+them (`compiler.DependenciesFile`), `compiler.Document(res, indent)` the
+file of `--out`, for a caller
 to write where it keeps them. `Result.Values` renders as in [rendering with
 Helm](#rendering-with-helm), `Result.Charts` being the index.
 
@@ -725,9 +752,9 @@ out/okdp.values.yaml` turns them into a multi-document stream.
 
 **Dependencies.** `Result.Dependencies` lists the instances of the
 namespace the connection references point to, one item per parameter
-([dependencies](specs/01_inputs_outputs.md#dependencies)). The
-compiler does not check that an instance exists: the deployment waits for
-it.
+([dependencies](specs/01_inputs_outputs.md#dependencies)), written to
+`okdp.dependencies.yaml` with [`--mkdag`](#--mkdag). The compiler does not
+check that an instance exists: the deployment waits for it.
 
 - Flux: on the instance's HelmRelease objects, one `spec.dependsOn` entry per
   referenced instance. With HelmReleases named after the instances:

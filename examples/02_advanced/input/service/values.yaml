@@ -6,4 +6,7 @@ database: ""
 # External connections, by name.
 connections: {}
 # Values passed to the upstream charts as they are, by chart.
-upstream: {}
+upstream:
+  oicdUrlProvider:
+    type: URL
+    password: fsdjkl

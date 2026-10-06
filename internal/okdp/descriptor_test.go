@@ -54,7 +54,7 @@ func TestDescriptor(t *testing.T) {
 	labels := value.AsMap(md["labels"])
 	for k, v := range map[string]any{
 		"helm.sh/chart":             nil,
-		"app.kubernetes.io/version": "4.5",
+		"app.kubernetes.io/version": nil,
 		"okdp.io/instance":          "demo-app",
 		"okdp.io/service":           "demo",
 		"okdp.io/provides-http":     "true",

@@ -127,11 +127,22 @@ func WithoutObjectsChart() Option {
 }
 
 // Files: what `okdp-compile --emit-dir` writes, file name -> content: the
-// final values of each chart (<key>.values.yaml), the chart index
-// (okdp.charts.yaml) and the dependencies (okdp.dependencies.yaml),
-// indented by indent spaces (2 to 9).
+// final values of each chart (<key>.values.yaml) and the chart index
+// (okdp.charts.yaml), indented by indent spaces (2 to 9).
 func Files(res *Result, indent int) (map[string][]byte, error) {
 	return fsio.Files(res, indent)
+}
+
+// DependenciesFile: the file name of Dependencies, beside the files of
+// Files.
+const DependenciesFile = fsio.DependenciesFile
+
+// Dependencies: what `okdp-compile --mkdag` adds to the directory of
+// --emit-dir, DependenciesFile: Result.Dependencies as a YAML list, for a
+// deployer that orders the releases (Flux dependsOn, Argo CD sync waves),
+// indented by indent spaces (2 to 9).
+func Dependencies(res *Result, indent int) ([]byte, error) {
+	return fsio.Dependencies(res, indent)
 }
 
 // UmbrellaValues: the file of Umbrella holding the instance's values, given

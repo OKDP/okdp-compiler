@@ -24,8 +24,8 @@ instance values) and its outputs are specified in
 ## service.yaml
 
 Decoded by `go.yaml.in/yaml/v3`: YAML 1.2, unlike values files and the
-mapping (`appVersion: 1.10` is `"1.10"`; a plain `upstream: no` is a
-string, refused: [upstream](#upstream)). Strictly: a field the tables below
+mapping (a plain `upstream: no` is a string, refused:
+[upstream](#upstream)). Strictly: a field the tables below
 do not list fails rather than being ignored, where a misspelt `protect`
 would leave its paths unprotected, and so does a key that only holds an
 anchor (write the anchor at its first use, as in [sources](#sources)).
@@ -48,13 +48,11 @@ rather than being ignored. An empty file is a service without a name
 |---|---|---|---|
 | `name` | string | required | The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations. |
 | `version` | string | required | The package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`. |
-| `appVersion` | string | `""` | The application's version: `service.appVersion`, label `app.kubernetes.io/version` (left out when empty). |
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `require` | list of keys and `{key, $if}` | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty, in every case or when its condition holds: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
 | `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key, a DNS label ([chart keys](#chart-keys)): chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
 
-The versions are strings, as written: `appVersion: 1.10` is `"1.10"`.
 Without `name` or `version`, loading fails: `service.yaml: name is required`,
 `service.yaml: version is required`.
 
@@ -242,7 +240,6 @@ when the file is loaded), nor `output` compute it ([output](#output)).
 ```yaml
 name: webapp
 version: 2.3.0-1.0.0                   # <upstream>-<okdp semver>
-appVersion: "2.3"
 roles: [webapp]                        # catalog metadata
 dependsOn: [database-server, ingress]
 require:                               # global.okdp.<path>, each non-empty
@@ -301,8 +298,6 @@ output:
   app:
     fullnameOverride: ${{ release.name }}-app
     replicaCount: ${{ values.replicas }}          # a number: the expression is the whole scalar
-    image:
-      tag: ${{ service.appVersion }}
     ingress:
       annotations: ${{ platform.ingressAnnotations }}
       hosts:
@@ -930,7 +925,7 @@ The variables of every expression:
 | `values` | The parameters: the package's `values.yaml`, the platform's and the instance's values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection, nor in its upstream files (a file with `{{` is left out). Without `global` and `connections`. `upstream.<key>` of a chart that accepts upstream values is its files then its inline values, merged as they will be applied (the `append` lists appended); the other keys of `upstream` stay as written. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
-| `service` | `{name, version, appVersion}` of `service.yaml`, as written ([service](#service)). |
+| `service` | `{name, version}` of `service.yaml`, as written ([service](#service)). |
 | `labels` | the labels of OKDP's objects, below, without component. |
 | `selectorLabels` | their selector labels, below, without component. |
 | `let` bindings | [let](#let), in order |
@@ -964,7 +959,6 @@ the labels of every object OKDP renders itself:
 | `app.kubernetes.io/name` | `service.name` | yes |
 | `app.kubernetes.io/instance` | `release.name` | yes |
 | `app.kubernetes.io/component` | the component, when not empty (functions only) | yes |
-| `app.kubernetes.io/version` | `service.appVersion`, when not empty | no |
 | `app.kubernetes.io/managed-by` | `Helm` (the okdp chart renders them) | no |
 | `app.kubernetes.io/part-of` | `okdp` | no |
 | `okdp.io/instance` | `release.name` | no |

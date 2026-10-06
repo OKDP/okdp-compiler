@@ -41,11 +41,10 @@ global:
 	contracts     = fstest.MapFS{}
 	def           = &Definition{
 		Service: Service{
-			Name:       "demo",
-			Version:    "1.2.3",
-			AppVersion: "4.5",
-			Charts:     chart.Specs{"app": {Source: appSource, Base: "base/app.yaml"}},
-			Require:    Requirements{{Key: "ingress.suffix"}},
+			Name:    "demo",
+			Version: "1.2.3",
+			Charts:  chart.Specs{"app": {Source: appSource, Base: "base/app.yaml"}},
+			Require: Requirements{{Key: "ingress.suffix"}},
 		},
 		Files: pkg,
 		Mapping: []byte(`
@@ -459,7 +458,7 @@ objects:
 	if got := names(objects); !slices.Equal(got, all) {
 		t.Errorf("Result.Objects: got %v, want %v", got, all)
 	}
-	if lbl := value.AsMap(value.Dig(res.Objects[1], "metadata.labels")); lbl["okdp.io/service"] != "demo" || lbl["app.kubernetes.io/version"] != "4.5" || lbl["helm.sh/chart"] != nil {
+	if lbl := value.AsMap(value.Dig(res.Objects[1], "metadata.labels")); lbl["okdp.io/service"] != "demo" || lbl["app.kubernetes.io/version"] != nil || lbl["helm.sh/chart"] != nil {
 		t.Errorf("labels: %#v", lbl)
 	}
 	if res.Charts["okdp"] != objectsSource {

@@ -121,7 +121,6 @@ func ExampleFiles() {
 	def, err := compiler.LoadDefinition(fstest.MapFS{
 		"service.yaml": {Data: []byte(`name: demo
 version: 1.2.3
-appVersion: "4.5"
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.0.0}

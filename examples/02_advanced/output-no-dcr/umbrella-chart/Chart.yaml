@@ -1,7 +1,6 @@
 apiVersion: v2
 name: webapp
 version: 1.0.0
-appVersion: "2.3"
 dependencies:
   - name: app
     repository: https://charts.example.org

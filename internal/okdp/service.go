@@ -26,13 +26,12 @@ type Definition struct {
 
 // Service: service.yaml, the engine-neutral part of a package.
 type Service struct {
-	Name       string       `yaml:"name"`       // the service: labels, descriptor, parameter schema errors
-	Version    string       `yaml:"version"`    // the package's version: descriptor
-	AppVersion string       `yaml:"appVersion"` // the application's version: label app.kubernetes.io/version
-	Roles      []string     `yaml:"roles"`      // catalog: what the service provides (not read by the compiler)
-	DependsOn  []string     `yaml:"dependsOn"`  // catalog: the platform services it needs (not read by the compiler)
-	Charts     chart.Specs  `yaml:"charts"`
-	Require    Requirements `yaml:"require"` // the global.okdp keys the service needs: in every case, or under a condition
+	Name      string       `yaml:"name"`      // the service: labels, descriptor, parameter schema errors
+	Version   string       `yaml:"version"`   // the package's version: descriptor
+	Roles     []string     `yaml:"roles"`     // catalog: what the service provides (not read by the compiler)
+	DependsOn []string     `yaml:"dependsOn"` // catalog: the platform services it needs (not read by the compiler)
+	Charts    chart.Specs  `yaml:"charts"`
+	Require   Requirements `yaml:"require"` // the global.okdp keys the service needs: in every case, or under a condition
 }
 
 // Requirements: the require section of service.yaml, the platform values
@@ -152,7 +151,7 @@ const platformValue = "It is a platform value: set it in the platform's values (
 
 // meta: what the mapping and OKDP's objects see of the package.
 func (s *Service) meta() serviceMeta {
-	return serviceMeta{Name: s.Name, Version: s.Version, AppVersion: s.AppVersion}
+	return serviceMeta{Name: s.Name, Version: s.Version}
 }
 
 // Check: what service.yaml may not hold, refused when it is loaded

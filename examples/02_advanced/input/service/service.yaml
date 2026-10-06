@@ -4,7 +4,6 @@
 
 name: webapp
 version: 1.0.0
-appVersion: "2.3"
 roles: [webapp]
 dependsOn: [database-server, ingress]
 require:                               # platform values the service needs, under global.okdp

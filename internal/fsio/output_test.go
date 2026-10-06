@@ -8,9 +8,9 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-// TestFiles: the final values of each chart, the index of the upstream
-// chart rendering each, and the dependencies, indented by 2 spaces, or as
-// asked; a key that would name a file out of the directory is refused.
+// TestFiles: the final values of each chart and the index of the upstream
+// chart rendering each, indented by 2 spaces, or as asked; a key that would
+// name a file out of the directory is refused.
 func TestFiles(t *testing.T) {
 	res := &okdp.Result{
 		Values: map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "console-oidc-dcr": {"b": 2}},
@@ -32,7 +32,6 @@ oidc-dcr:
   chart: oidc-dcr
   version: 0.5.0
 `,
-		"okdp.dependencies.yaml": "[]\n",
 	}
 	if len(files) != len(want) {
 		t.Errorf("got %d files, want %d", len(files), len(want))
@@ -56,5 +55,21 @@ oidc-dcr:
 	bad := &okdp.Result{Values: map[string]map[string]any{"../app": {}}}
 	if _, err := Files(bad, DefaultIndent); err == nil || !strings.HasPrefix(err.Error(), `chart "../app": a key of the result names a file`) {
 		t.Errorf("../app: got %v", err)
+	}
+}
+
+// TestDependencies: the dependencies as a YAML list, [] when there is none.
+func TestDependencies(t *testing.T) {
+	for name, tc := range map[string]struct {
+		deps []okdp.Dependency
+		want string
+	}{
+		"none": {nil, "[]\n"},
+		"two": {[]okdp.Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[0].database"}, {Instance: "demo-s3", Contract: "s3", Field: "storage"}},
+			"- instance: demo-db\n  contract: database\n  field: backends[0].database\n- instance: demo-s3\n  contract: s3\n  field: storage\n"},
+	} {
+		if got, err := Dependencies(&okdp.Result{Dependencies: tc.deps}, DefaultIndent); err != nil || string(got) != tc.want {
+			t.Errorf("%s: got %v %q, want %q", name, err, got, tc.want)
+		}
 	}
 }

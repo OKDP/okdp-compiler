@@ -74,11 +74,11 @@ output:
 // and $let bindings and $for variables shadow them.
 func TestMappingService(t *testing.T) {
 	ctx := mapCtx()
-	maps.Copy(ctx, serviceContext(serviceMeta{Name: "demo", Version: "1.0.0", AppVersion: "4.5"}, "demo-x"))
+	maps.Copy(ctx, serviceContext(serviceMeta{Name: "demo", Version: "1.0.0"}, "demo-x"))
 	src := `
 output:
   x:
-    tag: ${{ service.appVersion }}
+    version: ${{ service.version }}
     labels: ${{ labels }}
     selector: ${{ okdpSelectorLabels('db') }}
     loop: [{$for: "service in ['a']", $let: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
@@ -91,13 +91,12 @@ output:
 	wantLabels := M{
 		"app.kubernetes.io/name":       "demo",
 		"app.kubernetes.io/instance":   "demo-x",
-		"app.kubernetes.io/version":    "4.5",
 		"app.kubernetes.io/managed-by": "Helm",
 		"app.kubernetes.io/part-of":    "okdp",
 		"okdp.io/instance":             "demo-x",
 		"okdp.io/service":              "demo",
 	}
-	if x["tag"] != "4.5" || !reflect.DeepEqual(x["labels"], wantLabels) {
+	if x["version"] != "1.0.0" || !reflect.DeepEqual(x["labels"], wantLabels) {
 		t.Errorf("service and labels: %#v", x)
 	}
 	if want := (M{"app.kubernetes.io/name": "demo", "app.kubernetes.io/instance": "demo-x", "app.kubernetes.io/component": "db"}); !reflect.DeepEqual(x["selector"], want) {

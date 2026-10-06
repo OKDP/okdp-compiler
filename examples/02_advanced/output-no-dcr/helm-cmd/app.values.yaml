@@ -40,7 +40,7 @@ global:
       issuerUri: https://sso.okdp.example.org/realms/okdp
 image:
   repository: example/webapp
-  tag: "2.3"
+  tag: "1.8"
 ingress:
   annotations:
     cert-manager.io/cluster-issuer: okdp-ca

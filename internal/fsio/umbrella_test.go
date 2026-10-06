@@ -13,7 +13,7 @@ import (
 // keys; a version Helm refuses, a key it refuses as an alias.
 func TestUmbrella(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
-	def := &okdp.Definition{Service: okdp.Service{Name: "demo", Version: "1.2.3", AppVersion: "4.5"}}
+	def := &okdp.Definition{Service: okdp.Service{Name: "demo", Version: "1.2.3"}}
 	res := &okdp.Result{
 		Values: map[string]map[string]any{"app": {"a": 1, "global": map[string]any{"g": 1}}, "canary": {"a": nil}},
 		Charts: map[string]chart.Ref{"app": app, "canary": app},
@@ -26,7 +26,6 @@ func TestUmbrella(t *testing.T) {
 		"Chart.yaml": `apiVersion: v2
 name: demo
 version: 1.2.3
-appVersion: "4.5"
 dependencies:
   - name: app
     repository: https://charts.example.org

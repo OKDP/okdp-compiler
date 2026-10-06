@@ -121,14 +121,16 @@ func TestVersionOf(t *testing.T) {
 
 // TestRun: the example compiled into directories holding the files of a
 // previous compile: they hold what example/output holds, a file no longer
-// written removed; dcr/, its --emit-dir in dcr mode.
+// written removed (okdp.dependencies.yaml, without --mkdag, among them);
+// dcr/, its --emit-dir in dcr mode. A compile with --mkdag writes
+// okdp.dependencies.yaml.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	o := example(dir)
 	if err := os.MkdirAll(o.emitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml"} {
+	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml", "okdp.dependencies.yaml"} {
 		if err := os.WriteFile(filepath.Join(o.emitDir, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -150,6 +152,14 @@ func TestRun(t *testing.T) {
 	delete(got, "out.yaml")
 	if !maps.Equal(got, want) {
 		t.Errorf("got %v, want example/output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	}
+	o.mkdag, o.umbrella, o.out = true, "", ""
+	if err := run(o); err != nil {
+		t.Fatal(err)
+	}
+	const deps = "- instance: demo-db\n  contract: database\n  field: database\n"
+	if b, err := os.ReadFile(filepath.Join(o.emitDir, "okdp.dependencies.yaml")); err != nil || string(b) != deps {
+		t.Errorf("--mkdag: got %v %q, want %q", err, b, deps)
 	}
 }
 
@@ -182,6 +192,7 @@ func TestRunErrors(t *testing.T) {
 		"no instance":    {func(o *options) { o.instance = instance }, nil, "--instance: stat " + instance + ": no such file or directory"},
 		"not a dir":      {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
 		"same directory": {func(o *options) { o.umbrella = o.emitDir + "/" }, nil, "--emit-dir and --umbrella name the same directory"},
+		"mkdag alone":    {func(o *options) { o.emitDir, o.mkdag = "", true }, nil, "--mkdag writes okdp.dependencies.yaml beside the values files: give --emit-dir"},
 		"a compile":      {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
 		"an umbrella":    {func(o *options) { o.pkg = pkg }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
 		"another file":   {nil, []string{"umbrella/notes.txt"}, "umbrella: notes.txt is not an output of okdp-compile"},

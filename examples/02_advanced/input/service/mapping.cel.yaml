@@ -18,8 +18,6 @@ output:
   app:
     fullnameOverride: ${{ release.name }}-app
     replicaCount: ${{ values.replicas }}
-    image:
-      tag: ${{ service.appVersion }}
     ingress:
       enabled: true
       className: ${{ global.okdp.ingress.className }}

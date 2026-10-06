@@ -1196,7 +1196,7 @@ instances reference by name. Built from the mapping's `instance` and
 | `data.outputs.yaml` | the provided connections, a YAML list; `[]` when none |
 
 The labels: the `labels` of the [context](02_service_definition.md#context),
-from `name` and `appVersion` of `service.yaml`.
+from `name` of `service.yaml` and the release.
 
 `outputs.yaml`: one item per `provides` item, keys sorted (Helm's `toYaml`):
 
@@ -1383,11 +1383,11 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 instance as one chart, for one Helm release per instance, under the release
 name the values were compiled for. Two files:
 
-- `Chart.yaml`: `apiVersion: v2`; `name`, `version` and `appVersion` of
-  `service.yaml` (`version` must be SemVer); `dependencies`, one per key of
-  `Values`, sorted by key: the [chart index](#chart-index) entry of the key
-  (`name`, `repository`, `version`), and `alias: <key>` when the key is not
-  the chart's name;
+- `Chart.yaml`: `apiVersion: v2`; `name` and `version` of `service.yaml`
+  (`version` must be SemVer); `dependencies`, one per key of `Values`,
+  sorted by key: the [chart index](#chart-index) entry of the key (`name`,
+  `repository`, `version`), and `alias: <key>` when the key is not the
+  chart's name;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
 
@@ -1473,7 +1473,7 @@ global:                                   # the parameters' global
     # ... the platform values
 image:
   repository: example/webapp              # upstream default
-  tag: "2.3"                              # computed: service.appVersion
+  tag: "1.8"                              # base values
 ingress:
   # ... computed
 replicaCount: 2                           # computed: values.replicas
@@ -1517,7 +1517,7 @@ objects:
       namespace: demo
 ```
 
-`okdp.charts.yaml` and `okdp.dependencies.yaml`:
+`okdp.charts.yaml`:
 
 ```yaml
 app:
@@ -1529,6 +1529,8 @@ okdp:
   chart: okdp-objects
   version: 1.0.0
 ```
+
+With `--mkdag`, `okdp.dependencies.yaml` ([dependencies](#dependencies)):
 
 ```yaml
 - instance: demo-db
@@ -1543,7 +1545,6 @@ the same values under their keys (`app:`, `okdp:`), and `Chart.yaml`:
 apiVersion: v2
 name: webapp
 version: 1.0.0
-appVersion: "2.3"
 dependencies:
   - name: app
     repository: https://charts.example.org

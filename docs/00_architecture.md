@@ -283,7 +283,7 @@ neither knows OKDP.
 
 | Package | File | Owns | Relations |
 |---|---|---|---|
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Dependencies`, `Umbrella`, `Document`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
 | | `normalize.go` | `Normalize`'s reading of Go values of any type, by reflection, and its errors | `valuesLayers` (`okdp`), the mapping's scalars (`compile`) |
 | `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`, `Condition` (a condition outside a document, `true` or `false`); `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
@@ -304,14 +304,14 @@ neither knows OKDP.
 | | `connections.go` | connection references, `complete`, `Dependency`, `readJSON`; the contracts (`readContract`) and the check of values against them (`checkContract`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
 | | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference; `pipeline.go`, for the release and namespace; `oidc.go`, for a client's name |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
-| | `labels.go` | the labels of OKDP's own objects, from the package's `name` and `appVersion` (`serviceMeta`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
+| | `labels.go` | the labels of OKDP's own objects, from the package's `name` (`serviceMeta`) and the release | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `secrets.go` | `okdpGeneratedSecret` and the check of its arguments (`checkSecretArgs`, `password`), credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go`; `checkOutput` checks a secret's `generate` with `password` |
 | | `oidc.go` | stage 6: the `oidcClients` checks, the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts (`clientCharts`), `DcrSource`; the oidc-dcr settings (`dcrSettings`, stage 3) | evaluates `oidc-dcr.cel.yaml` with `compile.EvalTemplate` and `functions`; used by `context.go` and `pipeline.go` |
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `descriptor.go` | stage 7 | `connections.go`, `secrets.go`, `labels.go` |
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
 | `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `mapping.cel.yaml` | `okdp.Service.Check` |
-| | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
+| | `output.go` | what a compile is written as: `Document` (`--out`), `Files` (`--emit-dir`, file name -> content), `Dependencies` (`--mkdag`, `okdp.dependencies.yaml` beside them); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
 | | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion`, `checkKey` (`output.go`) |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
@@ -747,7 +747,8 @@ platform layer, with the instance files of `instance/`, under the release
 `fsio.Files` and `fsio.Umbrella` with them byte for byte; then the same with
 `platform-dcr.yaml` after `platform.yaml`, the files of `fsio.Files` with
 `dcr/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks that the
-command line writes `example/output/`.
+command line writes `example/output/`, removes `okdp.dependencies.yaml`
+without `--mkdag`, and writes it with it.
 After a change, `go test ./internal/fsio -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures; `make example` only them); the diff is the change's effect,

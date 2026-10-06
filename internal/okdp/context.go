@@ -121,8 +121,7 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 		"global":   M{"okdp": value.Copy(okdpG)}, // the platform values, as written
 		"platform": platform,                     // derived from it by the compiler
 	}
-	// The package: service (name, version, appVersion), labels and
-	// selectorLabels.
+	// The package: service (name, version), labels and selectorLabels.
 	maps.Copy(ctx, serviceContext(svc.meta(), in.Release))
 	// By parameter path, in string order, as the errors of the references.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })

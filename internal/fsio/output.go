@@ -29,8 +29,8 @@ func Document(res *okdp.Result, indent int) ([]byte, error) {
 // objects among them (okdp.values.yaml, the values of the okdp chart);
 // okdp.charts.yaml, the index of the upstream chart that renders each
 // (chart: {repository, chart, version}: `helm template <chart> --repo
-// <repository> --version <version> -f <chart>.values.yaml`); and
-// okdp.dependencies.yaml. Each is indented by indent spaces (2 to 9).
+// <repository> --version <version> -f <chart>.values.yaml`). Each is
+// indented by indent spaces (2 to 9).
 func Files(res *okdp.Result, indent int) (map[string][]byte, error) {
 	files := map[string][]byte{}
 	for _, chart := range slices.Sorted(maps.Keys(res.Values)) {
@@ -43,14 +43,24 @@ func Files(res *okdp.Result, indent int) (map[string][]byte, error) {
 		}
 		files[chart+".values.yaml"] = b
 	}
-	for name, v := range map[string]any{"okdp.charts.yaml": res.Charts, "okdp.dependencies.yaml": res.Dependencies} {
-		b, err := marshal(v, indent)
-		if err != nil {
-			return nil, err
-		}
-		files[name] = b
+	b, err := marshal(res.Charts, indent)
+	if err != nil {
+		return nil, err
 	}
+	files["okdp.charts.yaml"] = b
 	return files, nil
+}
+
+// DependenciesFile: the file of Dependencies, written beside the files of
+// Files.
+const DependenciesFile = "okdp.dependencies.yaml"
+
+// Dependencies: DependenciesFile, Result.Dependencies as a YAML list, []
+// when there is none, indented by indent spaces (2 to 9): the instances the
+// connection references point to, for a deployer that orders the releases
+// (Flux dependsOn, Argo CD sync waves).
+func Dependencies(res *okdp.Result, indent int) ([]byte, error) {
+	return marshal(res.Dependencies, indent)
 }
 
 // resultKey: a chart key as the outputs name it: a file

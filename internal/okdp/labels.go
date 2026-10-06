@@ -1,5 +1,5 @@
 // Labels: the labels of the objects OKDP renders itself, from the package
-// (service.yaml's name and appVersion) and the release.
+// (service.yaml's name) and the release.
 package okdp
 
 import (
@@ -12,16 +12,15 @@ import (
 )
 
 // serviceMeta: what the mapping and OKDP's objects see of the package:
-// service.yaml's name, version and appVersion.
+// service.yaml's name and version.
 type serviceMeta struct {
-	Name       string
-	Version    string
-	AppVersion string
+	Name    string
+	Version string
 }
 
 // ctxService: the package of a mapping context.
 func ctxService(ctx M) serviceMeta {
-	return serviceMeta{Name: value.Str(value.Dig(ctx, "service.name")), Version: value.Str(value.Dig(ctx, "service.version")), AppVersion: value.Str(value.Dig(ctx, "service.appVersion"))}
+	return serviceMeta{Name: value.Str(value.Dig(ctx, "service.name")), Version: value.Str(value.Dig(ctx, "service.version"))}
 }
 
 // selectorLabels: the stable subset of the labels, for selectors; with
@@ -38,15 +37,11 @@ func selectorLabels(svc serviceMeta, release, component string) M {
 }
 
 // labels: the labels of every object OKDP renders itself: the selector
-// labels (and component), the application version when service.yaml has
-// one, Helm as manager (the objects chart renders them), part of okdp, and
-// the instance and service OKDP finds the objects by. No helm.sh/chart: the
-// objects belong to no chart of the service.
+// labels (and component), Helm as manager (the objects chart renders them),
+// part of okdp, and the instance and service OKDP finds the objects by. No
+// helm.sh/chart: the objects belong to no chart of the service.
 func labels(svc serviceMeta, release, component string) M {
 	out := selectorLabels(svc, release, component)
-	if svc.AppVersion != "" {
-		out["app.kubernetes.io/version"] = svc.AppVersion
-	}
 	out["app.kubernetes.io/managed-by"] = "Helm"
 	out["app.kubernetes.io/part-of"] = "okdp"
 	out["okdp.io/instance"] = release
@@ -55,10 +50,10 @@ func labels(svc serviceMeta, release, component string) M {
 }
 
 // serviceContext: what the mapping sees of the package: service (name,
-// version, appVersion), labels and selectorLabels (without component).
+// version), labels and selectorLabels (without component).
 func serviceContext(svc serviceMeta, release string) M {
 	return M{
-		"service":        M{"name": svc.Name, "version": svc.Version, "appVersion": svc.AppVersion},
+		"service":        M{"name": svc.Name, "version": svc.Version},
 		"labels":         labels(svc, release, ""),
 		"selectorLabels": selectorLabels(svc, release, ""),
 	}

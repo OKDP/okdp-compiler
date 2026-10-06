@@ -136,11 +136,13 @@ package's parameter schema declares under it
 
 `--emit-dir <dir>` writes the final values of each chart,
 `<dir>/<chart>.values.yaml` (OKDP's own objects in `okdp.values.yaml`),
-their index, `<dir>/okdp.charts.yaml`, and the dependencies,
-`<dir>/okdp.dependencies.yaml`:
+and their index, `<dir>/okdp.charts.yaml`:
 render each with `helm template <release> <chart> --repo <repository>
 --version <version> -f <dir>/<chart>.values.yaml` (`<repository>/<chart>`
-for an `oci://` repository), the chart named by the index ([rendering with Helm](docs/01_usage.md#rendering-with-helm)).
+for an `oci://` repository), the chart named by the index ([rendering with Helm](docs/01_usage.md#rendering-with-helm));
+with `--mkdag`, also `<dir>/okdp.dependencies.yaml`, the instances the
+connection references point to, for a deployer that orders the releases
+([`--mkdag`](docs/01_usage.md#--mkdag)).
 `--umbrella <dir>` writes the instance as one chart, for one Helm release
 per instance: `<dir>/Chart.yaml`, an umbrella over the upstream charts of
 the index, and `<dir>/instance.values.yaml`, the final values of each chart

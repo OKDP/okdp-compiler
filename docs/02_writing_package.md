@@ -28,7 +28,7 @@ the package is published as a chart.
 
 ```
 <name>/
-├── service.yaml            name, version, appVersion, roles, dependsOn; the charts and their sources, base values, required platform values, protect, append
+├── service.yaml            name, version, roles, dependsOn; the charts and their sources, base values, required platform values, protect, append
 ├── mapping.cel.yaml        computed values, OAuth clients, OKDP's own objects, descriptor, provided connections
 ├── values.yaml             the parameters, with their defaults
 ├── values.schema.json      their schema: types, rules, x-ui-* hints, x-okdp-connection-ref
@@ -102,7 +102,6 @@ objects. An upstream feature built on `lookup`, a random function, `genCA` or
 # service.yaml
 name: webapp
 version: 2.3.0-1.0.0      # <upstream>-<okdp semver>
-appVersion: "2.3"
 roles: [webapp]           # what the service provides in the catalog
 dependsOn:                # the platform services it needs
   - database-server
@@ -112,12 +111,11 @@ dependsOn:                # the platform services it needs
 `name` and `version` are required. The upstream half of `version` stays
 SemVer (`480.0.0-1.0.0` for Trino 480): the console compares versions,
 and the umbrella chart (`--umbrella`) takes it as its version;
-release-please owns the OKDP half. `service.yaml` is read as YAML 1.2, the
-versions as written: `appVersion: 1.10` is `"1.10"`. The mapping sees them
-as `service` (`service.appVersion`); the labels of OKDP's objects take
-`app.kubernetes.io/name`, `okdp.io/service` and `app.kubernetes.io/version`
-from them, the descriptor its `service` and `version`. `roles` and
-`dependsOn` are the console's: the compiler does not read them
+release-please owns the OKDP half. The mapping sees `name` and `version`
+as `service` (`service.name`, `service.version`); the labels of OKDP's
+objects take `app.kubernetes.io/name` and `okdp.io/service` from the name,
+the descriptor its `service` and `version`. `roles` and `dependsOn` are the
+console's: the compiler does not read them
 ([service](specs/02_service_definition.md#service)).
 
 ### 3. Design the parameters
@@ -289,8 +287,6 @@ output:                    # chart -> the values computed for it
   app:
     fullnameOverride: ${{ release.name }}-app   # the name the http contract promises
     replicaCount: ${{ values.replicas }}
-    image:
-      tag: ${{ service.appVersion }}
   metrics:
     $if: ${{ values.metrics.enabled }}   # left out: the chart is not rendered
     target: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080/metrics
@@ -805,9 +801,9 @@ as `values.upstream.<key>`.
 - **No credential in values.** Connections and values carry `secretRef`
   names, never passwords: values end up in Git and in readable objects. A
   secret field in a connection or in `provides` fails the compile.
-- **No literal version in the mapping.** Take the image tag from
-  `service.appVersion`, or pin it in the base values next to the chart's
-  default: a literal in the mapping is missed when `service.yaml` is bumped.
+- **No literal version in the mapping.** Pin the image tag in the base
+  values, next to the chart's default: a literal in the mapping is missed
+  when the chart is bumped.
 - **An unset connection is `""`.** `values.database.host` fails on an empty
   reference: test `type(...) == map` first, or report it in `errors`.
 - **Some chart keys are the compiler's.** `okdp` names the chart of OKDP's
@@ -832,7 +828,7 @@ as `values.upstream.<key>`.
   `oidc-dcr`, `<name>-oidc-dcr`); a second render of a chart is a key with
   the same source.
 - [ ] `service.yaml`: `name`, `version` `<upstream>-<okdp semver>`,
-  `appVersion`, `roles` and `dependsOn`.
+  `roles` and `dependsOn`.
 - [ ] `values.schema.json` declares `$schema`, every parameter with its
   rules, `global`, `connections`, and `upstream` for exactly the charts that
   accept instance values; strings pasted into files refuse `{{`, `}}` and

@@ -273,57 +273,6 @@ run bytes functions render demo "$chart" -f "$here/functions/values.yaml"
 cp "$r/functions" "$here/functions/helm.json"
 keep bytes functions "$here/functions/helm.json"
 
-# The chart of the secrets cases (the tests build the same).
-svc='apiVersion: v2\nname: svc\nversion: 1.2.3\nappVersion: "4.5"\n'
-
-# secrets/generated/<case>.yaml: okdp.generatedSecret with the arguments
-# under args, rendered in <case>.helm.yaml (or the first line of the error
-# in <case>.helm.txt).
-#
-# secret <helm> <out> <case>: the objects, or the first line of the error
-# (<out>.failed then exists).
-secret() {
-  local helm=$1 out=$2 f=$3
-  rm -f "$out.failed"
-  if ! "$helm" template demo-secrets "$chart" --namespace demo -f "$f" > "$out" 2> "$tmp/err"; then
-    awk '!/^level=/ { print; exit }' "$tmp/err" > "$out"
-    touch "$out.failed"
-  fi
-}
-newchart secrets
-printf '%b' "$svc" > "$chart/Chart.yaml"
-printf '{{ include "okdp.generatedSecret" (merge (dict "ctx" $) .Values.args) }}\n' > "$chart/templates/secret.yaml"
-for f in "$here"/secrets/generated/*.yaml; do
-  case $f in *.helm.yaml) continue ;; esac
-  label=secrets/generated/${f##*/}
-  run yaml secret secret "$f"
-  alike yaml secret
-  rm -f "${f%.yaml}.helm.yaml" "${f%.yaml}.helm.txt"
-  if [[ -f $r/secret.failed ]]; then
-    cp "$r/secret" "${f%.yaml}.helm.txt"
-  else
-    cp "$r/secret" "${f%.yaml}.helm.yaml"
-  fi
-done
-
-# secrets/descriptor/: okdp.descriptor of a chart with outputs.tpl (outputs
-# with a secret), in helm.yaml.
-descriptor() {
-  "$1" template demo-secrets "$chart" --namespace demo > "$2"
-}
-newchart svc
-d=$here/secrets/descriptor
-printf '%b' "$svc" > "$chart/Chart.yaml"
-sed -e '/define "okdp\.instance\.url"/d' -e '/define "okdp\.instance\.usage"/d' -e '/define "okdp\.instance\.outputs"/d' \
-  "$chart/templates/_descriptor.tpl" > "$tmp/_descriptor.tpl"
-mv "$tmp/_descriptor.tpl" "$chart/templates/_descriptor.tpl"
-cp "$d/outputs.tpl" "$chart/templates/_outputs.tpl"
-printf '{{ include "okdp.descriptor" . }}\n' > "$chart/templates/descriptor.yaml"
-label=secrets/descriptor
-run yaml descriptor descriptor
-alike yaml descriptor
-cp "$r/descriptor" "$d/helm.yaml"
-
 # SOURCE.
 if ((${#versions[@]})); then
   deployers=${versions[*]}

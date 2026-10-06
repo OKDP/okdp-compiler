@@ -41,7 +41,7 @@ app:
         issuerUri: https://sso.okdp.example.org/realms/okdp
   image:
     repository: example/webapp
-    tag: "2.3"
+    tag: "1.8"
   ingress:
     annotations:
       cert-manager.io/cluster-issuer: okdp-ca
@@ -100,7 +100,6 @@ okdp:
           app.kubernetes.io/managed-by: Helm
           app.kubernetes.io/name: webapp
           app.kubernetes.io/part-of: okdp
-          app.kubernetes.io/version: "2.3"
           okdp.io/instance: demo-webapp
           okdp.io/provides-http: "true"
           okdp.io/service: webapp
