@@ -24,6 +24,7 @@ Issues and pull requests are welcome.
 | `make tidy` | `go mod tidy`, for `go.mod` and `tools/go.mod` |
 | `make example` | rewrites `example/output/` from the current compiler |
 | `make fixtures` | regenerates `testdata/helm` with `testdata/helm/generate.sh` (`UMBRELLA_HELMS`) |
+| `make fuzz` | each fuzz test in turn, `FUZZTIME` (30s) each ([fuzz tests](docs/00_architecture.md#fuzz-tests)) |
 | `make check` | what CI runs on a pull request: the format check, `go vet`, lint, `go mod tidy -diff`, the race tests |
 | `make help` | lists the targets |
 

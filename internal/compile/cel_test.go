@@ -230,10 +230,9 @@ func TestLibraryVersions(t *testing.T) {
 	}
 }
 
-// TestMappingYAML11: the mapping's scalars and keys are read as Helm reads
-// values (YAML 1.1), except binding names (let, $let).
-func TestMappingYAML11(t *testing.T) {
-	out, err := runOutput(`
+// yaml11Doc: a document of YAML 1.1 scalars and keys, for TestMappingYAML11
+// and FuzzMappingReader.
+const yaml11Doc = `
 let:
   n: 1.0
   y: 1.0
@@ -241,34 +240,85 @@ let:
   yes: 3.0
 output:
   x:
-    bools: [yes, no, on, off, y, N, "yes", 'no', !!str on, true]
-    numbers: [0777, 0x1F, 1_000, 1.0, 012345678901234567890]
-    strings: [2001-12-14, "0777", 1.2.3]
+    bools: [yes, no, on, off, y, N, "yes", 'no', !!str on, true, !!bool yes, !!bool "Off"]
+    numbers: [0777, 0x1F, 1_000, 1.0, 012345678901234567890, 0o17]
+    strings: [2001-12-14, "0777", 1.2.3, 0o+7, 0o-1_0]
     keys: {on: a, 1.0: b, 0x10: c, "y": d, dup: 1, dup: 2}
+    same: {on: a, true: b, 0x10: c, 16: d}
     lets: [{$for: c in values.items, $let: {y: '${{ c.n + n }}', Y: '${{ y + Y }}'}, $each: '${{ [y, Y, yes] }}'}]
-`)
+`
+
+// TestMappingYAML11: the mapping's scalars and keys are read as Helm reads
+// values (YAML 1.1), except binding names (let, $let); two keys of one YAML
+// value, the last wins; of two values read as the same text, the mapping
+// fails.
+func TestMappingYAML11(t *testing.T) {
+	out, err := runOutput(yaml11Doc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := M{
-		"bools":   []any{true, false, true, false, true, false, "yes", "no", "on", true},
-		"numbers": []any{float64(511), float64(31), float64(1000), float64(1), float64(12345678901234567890)},
-		"strings": []any{"2001-12-14", "0777", "1.2.3"},
+		"bools":   []any{true, false, true, false, true, false, "yes", "no", "on", true, true, false},
+		"numbers": []any{float64(511), float64(31), float64(1000), float64(1), float64(12345678901234567890), float64(15)},
+		"strings": []any{"2001-12-14", "0777", "1.2.3", "0o+7", "0o-1_0"},
 		"keys":    M{"true": "a", "1": "b", "16": "c", "y": "d", "dup": float64(2)},
+		"same":    M{"true": "b", "16": "d"},
 		"lets":    []any{float64(2), float64(4), float64(3), float64(3), float64(5), float64(3)},
 	}
 	if got := value.AsMap(out["x"]); !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %#v\nwant %#v", got, want)
 	}
-	if _, err := runOutput("output: {x: {~: 1}}\n"); err == nil || !strings.Contains(err.Error(), "unsupported map key") {
-		t.Errorf("a null key: got %v", err)
+	// Found by FuzzMappingReader: lines as Helm reads them, a block scalar
+	// ending the file keeps its newline, a "\r" before "\r\n" is dropped.
+	for src, want := range map[string]string{
+		"output:\n  x:\n    v: >\n      text":          "text\n",
+		"output:\r\n  x:\r\n    v: a\r\r\n      b\r\n": "a b",
+	} {
+		if out, err := runOutput(src); err != nil || value.AsMap(out["x"])["v"] != want {
+			t.Errorf("%q: got %#v (%v), want %q", src, out, err, want)
+		}
 	}
+	for src, want := range map[string]string{
+		"output: {x: {~: 1}}\n": `line 1: unsupported map key "~"`,
+		// Found by FuzzMappingReader: Helm's value is either one, at random.
+		"output: {x: {8: a, 08: b}}\n":                  `line 1: the keys 8 (line 1) and 08 are both "8" to Helm, which keeps the value of either, at random: write one`,
+		"output:\n  x:\n    on: a\n    \"true\": b\n":   `line 4: the keys on (line 3) and "true" are both "true" to Helm`,
+		"output: {x: {<<: [{1: a}, {1.0: b}]}}\n":       `line 1: the keys 1 (line 1) and 1.0 are both "1" to Helm`,
+		"output:\n  x: {<<: {1.5: a}, 1.50000001: b}\n": `line 2: the keys 1.5 (line 2) and 1.50000001 are both "1.5" to Helm`,
+		"output:\n  x: {<<: [{.nan: a}], .NaN: b}\n":    `line 2: the keys .nan (line 2) and .NaN are both ".nan" to Helm`,
+	} {
+		if _, err := runOutput(src); err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("%q: got %v, want %q", src, err, want)
+		}
+	}
+}
+
+// aliasesDoc: a document with aliases, for TestAliases and
+// FuzzMappingReader.
+const aliasesDoc = "output: {x: {a: &a {k: [1]}, b: *a, c: [*a, *a]}}\n"
+
+// aliasErrors: the aliases the reader refuses, for TestAliases and
+// FuzzMappingReader.
+var aliasErrors = map[string]struct{ src, want string }{
+	"a list in itself":   {"output: {a: &x [*x]}\n", "line 1: the alias *x is inside the anchor &x it refers to"},
+	"a map in itself":    {"output:\n  a: &x\n    b: {c: *x}\n", "line 3: the alias *x is inside the anchor &x it refers to"},
+	"excessive aliasing": {aliasBomb(), "line 6: excessive aliasing: the aliases expand to more than 100000 nodes"},
+}
+
+// aliasBomb: ten aliases of the level before, five levels: 211,110 nodes at
+// l5.
+func aliasBomb() string {
+	bomb := "l0: &l0 [x]\n"
+	for i := 1; i <= 5; i++ {
+		bomb += fmt.Sprintf("l%d: &l%d [%s*l%d]\n", i, i, strings.Repeat(fmt.Sprintf("*l%d, ", i-1), 9), i-1)
+	}
+	return bomb
 }
 
 // TestAliases: an alias is a copy of its anchor's node; an alias inside its
 // anchor, and aliases expanding to too many nodes, fail.
 func TestAliases(t *testing.T) {
-	out, err := runOutput("output: {x: {a: &a {k: [1]}, b: *a, c: [*a, *a]}}\n")
+	out, err := runOutput(aliasesDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,16 +326,7 @@ func TestAliases(t *testing.T) {
 	if got, want := value.AsMap(out["x"]), (M{"a": a, "b": a, "c": []any{a, a}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %#v\nwant %#v", got, want)
 	}
-	// Ten aliases of the level before, five levels: 211,110 nodes at l5.
-	bomb := "l0: &l0 [x]\n"
-	for i := 1; i <= 5; i++ {
-		bomb += fmt.Sprintf("l%d: &l%d [%s*l%d]\n", i, i, strings.Repeat(fmt.Sprintf("*l%d, ", i-1), 9), i-1)
-	}
-	for name, tc := range map[string]struct{ src, want string }{
-		"a list in itself":   {"output: {a: &x [*x]}\n", "line 1: the alias *x is inside the anchor &x it refers to"},
-		"a map in itself":    {"output:\n  a: &x\n    b: {c: *x}\n", "line 3: the alias *x is inside the anchor &x it refers to"},
-		"excessive aliasing": {bomb, "line 6: excessive aliasing: the aliases expand to more than 100000 nodes"},
-	} {
+	for name, tc := range aliasErrors {
 		if _, err := runOutput(tc.src); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: got %v, want %q", name, err, tc.want)
 		}
@@ -434,11 +475,9 @@ func TestMistakes(t *testing.T) {
 	}
 }
 
-// TestMergeKeys: << merges a map, an alias of one, or a list of them, the
-// first map of the list winning; a key written after << replaces the merged
-// one, a key written before it fails.
-func TestMergeKeys(t *testing.T) {
-	out, err := runOutput(`
+// mergeKeysDoc: a document with merge keys, for TestMergeKeys and
+// FuzzMappingReader.
+const mergeKeysDoc = `
 output:
   x:
     a: &a {k: 1, m: {p: 1}}
@@ -449,7 +488,22 @@ output:
 let:
   <<: {k: 5}
   m: 6
-`)
+`
+
+// mergeKeyErrors: the merge keys the reader refuses, for TestMergeKeys and
+// FuzzMappingReader.
+var mergeKeyErrors = map[string]struct{ src, want string }{
+	"written before":  {"output:\n  x:\n    a: &a {k: 1}\n    b:\n      k: 2\n      <<: *a\n", "line 5: k is written before the merge key << that replaces it: write it after <<"},
+	"not a map":       {"output:\n  x: {a: &a [1], b: {<<: *a}}\n", "line 2: the merge key << takes a map, or a list of maps"},
+	"a list of lists": {"output:\n  x: {<<: [{a: 1}, [b]]}\n", "line 2: the merge key << takes a map, or a list of maps"},
+	"a cycle":         {"output: {x: &x {<<: *x}}\n", "line 1: the alias *x is inside the anchor &x it refers to"},
+}
+
+// TestMergeKeys: << merges a map, an alias of one, or a list of them, the
+// first map of the list winning; a key written after << replaces the merged
+// one, a key written before it fails.
+func TestMergeKeys(t *testing.T) {
+	out, err := runOutput(mergeKeysDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,12 +517,7 @@ let:
 	if got := value.AsMap(out["x"]); !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %#v\nwant %#v", got, want)
 	}
-	for name, tc := range map[string]struct{ src, want string }{
-		"written before":  {"output:\n  x:\n    a: &a {k: 1}\n    b:\n      k: 2\n      <<: *a\n", "line 5: k is written before the merge key << that replaces it: write it after <<"},
-		"not a map":       {"output:\n  x: {a: &a [1], b: {<<: *a}}\n", "line 2: the merge key << takes a map, or a list of maps"},
-		"a list of lists": {"output:\n  x: {<<: [{a: 1}, [b]]}\n", "line 2: the merge key << takes a map, or a list of maps"},
-		"a cycle":         {"output: {x: &x {<<: *x}}\n", "line 1: the alias *x is inside the anchor &x it refers to"},
-	} {
+	for name, tc := range mergeKeyErrors {
 		if _, err := runOutput(tc.src); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: got %v, want %q", name, err, tc.want)
 		}
@@ -483,18 +532,32 @@ func TestTemplateErrors(t *testing.T) {
 	}
 }
 
-// TestScan: expressions, nested braces in strings, and the $${{ escape.
+// scanCases: strings and their pieces, for TestScan and FuzzScan.
+var scanCases = []struct {
+	in   string
+	want []piece
+}{
+	{"plain", []piece{{text: "plain"}}},
+	{"${{ a }}", []piece{{text: " a ", expr: true}}},
+	{`a ${{ {"k": "}}"}.k }} $${{ b`, []piece{{text: "a "}, {text: ` {"k": "}}"}.k `, expr: true}, {text: " ${{ b"}}},
+	{`${{ 'it\'s }}' }}`, []piece{{text: ` 'it\'s }}' `, expr: true}}},
+	{"${{ {'a': {'b': 1}} }}x", []piece{{text: " {'a': {'b': 1}} ", expr: true}, {text: "x"}}},
+	// Found by FuzzScan: raw and triple-quoted strings, a quote in a comment.
+	{`${{ r'\' + R"\" + br'\' + "}}" }}`, []piece{{text: ` r'\' + R"\" + br'\' + "}}" `, expr: true}}},
+	{`${{ '''it's "}}"''' + """a"b""" }}`, []piece{{text: ` '''it's "}}"''' + """a"b""" `, expr: true}}},
+	{"${{\n  // the user's {name}\n  values.name\n}}", []piece{{text: "\n  // the user's {name}\n  values.name\n", expr: true}}},
+	{"${{0//\"}}", []piece{{text: "0//\"", expr: true}}},
+	{"${{ a // a note }}x", []piece{{text: " a // a note ", expr: true}, {text: "x"}}},
+}
+
+// unterminated: strings without the }} closing an expression, for TestScan
+// and FuzzScan.
+var unterminated = []string{"${{ a }", `${{ '\' }}`, `${{ ar'\' }}`, `${{ '''a'' }}`, "${{ a // b\n }"}
+
+// TestScan: expressions, nested braces in strings (raw and triple-quoted
+// ones too) and comments, and the $${{ escape.
 func TestScan(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want []piece
-	}{
-		{"plain", []piece{{text: "plain"}}},
-		{"${{ a }}", []piece{{text: " a ", expr: true}}},
-		{`a ${{ {"k": "}}"}.k }} $${{ b`, []piece{{text: "a "}, {text: ` {"k": "}}"}.k `, expr: true}, {text: " ${{ b"}}},
-		{`${{ 'it\'s }}' }}`, []piece{{text: ` 'it\'s }}' `, expr: true}}},
-		{"${{ {'a': {'b': 1}} }}x", []piece{{text: " {'a': {'b': 1}} ", expr: true}, {text: "x"}}},
-	} {
+	for _, tc := range scanCases {
 		got, err := scan(tc.in)
 		if err != nil {
 			t.Errorf("%q: %v", tc.in, err)
@@ -504,9 +567,59 @@ func TestScan(t *testing.T) {
 			t.Errorf("%q: got %#v, want %#v", tc.in, got, tc.want)
 		}
 	}
-	if _, err := scan("${{ a }"); err == nil {
-		t.Error("an unterminated expression must fail")
+	for _, s := range unterminated {
+		if _, err := scan(s); err == nil {
+			t.Errorf("%q: an unterminated expression must fail", s)
+		}
 	}
+}
+
+// FuzzScan: scan gives a string back whole, its literal text ($${{ written
+// again) and the text between each ${{ and the }} that closes it; an
+// expression CEL parses is one expression, ${{ <it> }}, whatever its
+// strings, braces and comments hold (but a } after a comment: a }} in a
+// comment closes it). Seeds: the strings of TestScan, and its expressions.
+func FuzzScan(f *testing.F) {
+	for _, tc := range scanCases {
+		f.Add(tc.in)
+		for _, p := range tc.want {
+			if p.expr {
+				f.Add(p.text)
+			}
+		}
+	}
+	for _, s := range unterminated {
+		f.Add(s)
+	}
+	env, err := cel.NewEnv()
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if pieces, err := scan(s); err == nil {
+			var b strings.Builder
+			for _, p := range pieces {
+				if p.expr {
+					b.WriteString("${{" + p.text + "}}")
+				} else {
+					b.WriteString(strings.ReplaceAll(p.text, "${{", "$${{"))
+				}
+			}
+			if b.String() != s {
+				t.Errorf("%q: scanned as %#v, which reads %q", s, pieces, b.String())
+			}
+		}
+		if _, iss := env.Parse(s); iss.Err() != nil {
+			return
+		}
+		if i := strings.Index(s, "//"); i >= 0 && strings.Contains(s[i:], "}") {
+			return
+		}
+		got, err := scan("${{" + s + "}}")
+		if want := []piece{{text: s, expr: true}}; err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("${{%s}}: got %#v (%v), want the expression %q", s, got, err, s)
+		}
+	})
 }
 
 // TestBudget: the CEL cost of a compile, shared by its evaluations, and its

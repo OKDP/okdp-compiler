@@ -1,4 +1,4 @@
-.PHONY: build test race cover lint fmt tidy example fixtures check help
+.PHONY: build test race cover lint fmt tidy example fixtures fuzz check help
 
 # Version printed by `okdp-compile --version`, without the leading "v" of the
 # tag; empty outside a checkout, the binary then reads its build info.
@@ -42,6 +42,17 @@ fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
 	go test ./internal/chart -run '^TestHelmValues$$' -update
 	go test ./internal/fsio -run '^TestHelmUmbrella$$' -update
 	UMBRELLA_HELMS="$(UMBRELLA_HELMS)" testdata/helm/generate.sh
+
+# The fuzz tests, <package>:<test>: go test fuzzes one at a time.
+FUZZ := internal/compile:FuzzScan internal/compile:FuzzMappingReader \
+	internal/chart:FuzzParsePath internal/chart:FuzzFormatPath internal/chart:FuzzParseValues
+FUZZTIME ?= 30s
+
+fuzz: ## Run each fuzz test for FUZZTIME (30s)
+	@for f in $(FUZZ); do \
+		echo "go test ./$${f%%:*} -run '^$$' -fuzz '^$${f#*:}$$' -fuzztime $(FUZZTIME)"; \
+		go test "./$${f%%:*}" -run '^$$' -fuzz "^$${f#*:}\$$" -fuzztime $(FUZZTIME) || exit 1; \
+	done
 
 check: ## Run what CI runs: gofmt, vet, lint, tidy, build and race tests
 	@out=$$(gofmt -l $(GOFILES)); test -z "$$out" || { echo "not formatted, run make fmt:" >&2; echo "$$out" >&2; exit 1; }

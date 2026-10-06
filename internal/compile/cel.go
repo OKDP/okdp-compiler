@@ -62,6 +62,7 @@ type M = value.M
 type omap struct {
 	keys    []string
 	vals    map[string]any
+	from    map[string]*yaml.Node // the node each key was read from
 	written []entry
 }
 
@@ -72,15 +73,50 @@ type entry struct {
 }
 
 // newOmap: an empty omap.
-func newOmap() *omap { return &omap{vals: map[string]any{}} }
+func newOmap() *omap { return &omap{vals: map[string]any{}, from: map[string]*yaml.Node{}} }
 
-// put: k bound to v. A key given twice: the last value wins, at the
-// position of the first, as in Helm values.
-func (m *omap) put(k string, v any) {
+// put: k, read from the node kn, bound to v. A key given twice: the last
+// value wins, at the position of the first, as in Helm values.
+func (m *omap) put(k string, kn *yaml.Node, v any) {
 	if _, dup := m.vals[k]; !dup {
 		m.keys = append(m.keys, k)
 	}
 	m.vals[k] = v
+	m.from[k] = kn
+}
+
+// clash: an error when m has the key k, read from a node other than kn
+// that YAML decodes as another value (1 and 1.0, on and "true"): Helm's
+// reader keeps both keys until they are text, then the value of either, at
+// random.
+func (m *omap) clash(k string, kn *yaml.Node) error {
+	prev, ok := m.from[k]
+	if !ok {
+		return nil
+	}
+	a, b := aliased(prev), aliased(kn)
+	x, _ := scalar(a)
+	y, _ := scalar(b)
+	if x == y {
+		return nil
+	}
+	return fmt.Errorf("line %d: the keys %s (line %d) and %s are both %q to Helm, which keeps the value of either, at random: write one", kn.Line, asWritten(a), prev.Line, asWritten(b), k)
+}
+
+// asWritten: a scalar as written: quoted when it is.
+func asWritten(n *yaml.Node) string {
+	if n.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) != 0 {
+		return strconv.Quote(n.Value)
+	}
+	return n.Value
+}
+
+// aliased: the node an alias refers to, or n.
+func aliased(n *yaml.Node) *yaml.Node {
+	if n.Kind == yaml.AliasNode {
+		return n.Alias
+	}
+	return n
 }
 
 // maxAliasNodes: the nodes the aliases of one document may expand to, in
@@ -158,7 +194,8 @@ func (r *reader) fromNode(n *yaml.Node) (any, error) {
 // Helm's reader does: in the order written, so a key written after <<
 // replaces the merged one. A key written before a << that replaces it
 // fails: Helm's reader would take the merged value, where YAML's merge keys
-// keep the written one.
+// keep the written one. So do two keys that are the same text, not the
+// same YAML value (clash).
 func (r *reader) mapping(n *yaml.Node) (*omap, error) {
 	m := newOmap()
 	keys := map[string]*yaml.Node{} // the keys written so far
@@ -173,7 +210,10 @@ func (r *reader) mapping(n *yaml.Node) (*omap, error) {
 				if w, ok := keys[k]; ok {
 					return nil, fmt.Errorf("line %d: %s is written before the merge key << that replaces it: write it after <<", w.Line, w.Value)
 				}
-				m.put(k, merged.vals[k])
+				if err := m.clash(k, merged.from[k]); err != nil {
+					return nil, err
+				}
+				m.put(k, merged.from[k], merged.vals[k])
 			}
 			m.written = append(m.written, merged.written...)
 			continue
@@ -182,11 +222,14 @@ func (r *reader) mapping(n *yaml.Node) (*omap, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := m.clash(k, kn); err != nil {
+			return nil, err
+		}
 		v, err := r.fromNode(vn)
 		if err != nil {
 			return nil, err
 		}
-		m.put(k, v)
+		m.put(k, kn, v)
 		keys[k] = kn
 		name := kn.Value
 		if kn.Kind == yaml.AliasNode {
@@ -219,8 +262,11 @@ func (r *reader) merged(n *yaml.Node) (*omap, error) {
 		}
 		m := v.(*omap)
 		for _, k := range m.keys {
+			if err := out.clash(k, m.from[k]); err != nil {
+				return nil, err
+			}
 			if _, ok := out.vals[k]; !ok {
-				out.put(k, m.vals[k])
+				out.put(k, m.from[k], m.vals[k])
 			}
 		}
 		out.written = append(out.written, m.written...)
@@ -238,9 +284,17 @@ var yaml11Bools = map[string]bool{
 // scalar: a scalar node decoded as Helm decodes values (YAML 1.1). yaml.v3
 // resolves plain scalars as YAML 1.1 does (ints with 0777, 0x, 0b, _...,
 // floats, nulls) except booleans: a plain, untagged y, yes, on, n, no, off
-// (and their case variants) is a boolean. Timestamps stay strings, as in
-// Helm. Quoted scalars and explicit tags (!!str yes) are left as they are.
+// (and their case variants) is a boolean; and a signed YAML 1.2 octal,
+// 0o+7 or 0o-7, which is text. Timestamps stay strings, as in Helm. Quoted
+// scalars and explicit tags (!!str yes) are left as they are, but !!bool,
+// which takes the YAML 1.1 booleans too (!!bool yes).
 func scalar(n *yaml.Node) (any, error) {
+	if b, ok := yaml11Bools[n.Value]; ok && n.ShortTag() == "!!bool" {
+		return b, nil
+	}
+	if t := strings.ReplaceAll(n.Value, "_", ""); n.Style == 0 && n.Tag == "!!int" && (strings.HasPrefix(t, "0o+") || strings.HasPrefix(t, "0o-")) {
+		return n.Value, nil
+	}
 	var v any
 	if err := n.Decode(&v); err != nil {
 		return nil, err
@@ -612,34 +666,66 @@ func scan(s string) ([]piece, error) {
 }
 
 // closing: the index of the }} that closes an expression starting at from,
-// skipping quoted strings and nested braces, or -1.
+// or -1. It skips nested braces, and the text CEL does not read as code:
+// strings (stringEnd), a "}}" in them included, and // comments to the end
+// of the line, their quotes and braces (// it's {x}), but not a }}, which
+// closes the expression in a comment too (${{ x // note }}).
 func closing(s string, from int) int {
 	depth := 0
-	var quote byte
 	for j := from; j < len(s); j++ {
-		c := s[j]
-		if quote != 0 {
-			switch c {
-			case '\\':
-				j++
-			case quote:
-				quote = 0
+		switch c := s[j]; {
+		case c == '\'' || c == '"':
+			if j = stringEnd(s, from, j); j < 0 {
+				return -1
 			}
-			continue
-		}
-		switch c {
-		case '\'', '"':
-			quote = c
-		case '{':
+		case strings.HasPrefix(s[j:], "//"):
+			for j += 2; j < len(s) && s[j] != '\n'; j++ {
+				if depth == 0 && strings.HasPrefix(s[j:], "}}") {
+					return j
+				}
+			}
+		case c == '{':
 			depth++
-		case '}':
-			if depth == 0 && j+1 < len(s) && s[j+1] == '}' {
+		case c == '}':
+			if depth == 0 && strings.HasPrefix(s[j:], "}}") {
 				return j
 			}
 			depth--
 		}
 	}
 	return -1
+}
+
+// stringEnd: the index of the last quote of the CEL string whose first
+// quote is s[q], or -1: quoted '...' or "...", or triple-quoted, between
+// three quotes ("""..."""); a \ escapes the next character, unless the
+// string is raw, its quote after an r or R starting a token (r'\d',
+// br"\x"), at from or after a character no name holds.
+func stringEnd(s string, from, q int) int {
+	quote := s[q : q+1]
+	if strings.HasPrefix(s[q:], quote+quote+quote) {
+		quote += quote + quote
+	}
+	p := q - 1
+	raw := p >= from && (s[p] == 'r' || s[p] == 'R')
+	if raw && p > from && (s[p-1] == 'b' || s[p-1] == 'B') {
+		p--
+	}
+	raw = raw && (p == from || !isNameByte(s[p-1]))
+	for j := q + len(quote); j < len(s); j++ {
+		switch {
+		case s[j] == '\\' && !raw:
+			j++
+		case strings.HasPrefix(s[j:], quote):
+			return j + len(quote) - 1
+		}
+	}
+	return -1
+}
+
+// isNameByte: c may be part of a CEL name: a letter, a digit or _.
+func isNameByte(c byte) bool {
+	return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
 // evalString: a scalar with its ${{ }} expressions evaluated.
@@ -879,9 +965,10 @@ func (e *celEngine) node(n any, scope M) (any, bool, error) {
 // parseDoc: a YAML + CEL document (a mapping, a template), its maps
 // ordered. It is one YAML document: a second one fails rather than being
 // ignored. An empty or null document (comments or --- at most) has no
-// section.
+// section. Its lines are read as Helm reads those of a values file
+// (helmLines).
 func parseDoc(b []byte) (*omap, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec := yaml.NewDecoder(bytes.NewReader(helmLines(b)))
 	var doc, next yaml.Node
 	if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
 		return newOmap(), nil
@@ -906,6 +993,23 @@ func parseDoc(b []byte) (*omap, error) {
 		return nil, fmt.Errorf("the mapping must be a YAML map")
 	}
 	return top, nil
+}
+
+// helmLines: b as Helm reads the lines of a values file (Kubernetes'
+// YAMLReader, chart.splitDocuments): each one ends with "\n", a "\r"
+// before it dropped. So a | or > block scalar ending a file without a final
+// line break keeps its newline, and "\r\r\n" is one line break. UTF-16
+// text, after its byte order mark, is left as it is.
+func helmLines(b []byte) []byte {
+	if len(b) == 0 || bytes.HasPrefix(b, []byte{0xfe, 0xff}) || bytes.HasPrefix(b, []byte{0xff, 0xfe}) {
+		return b
+	}
+	var out bytes.Buffer
+	for line := range bytes.SplitSeq(bytes.TrimSuffix(b, []byte("\n")), []byte("\n")) {
+		out.Write(bytes.TrimSuffix(line, []byte("\r")))
+		out.WriteByte('\n')
+	}
+	return out.Bytes()
 }
 
 // bind: the scope of a document's sections: the context, then its let

@@ -607,9 +607,13 @@ or `>` block scalar (`"1\n"`); `>-` and `|-` keep a lone expression. `$`,
 `${VAR}` and `{{ }}` without `${{` are text: shell variables and Go
 templates pass through.
 
-The `}}` closing an expression is found skipping quoted strings and nested
-braces: `${{ {"k": "}}"}.k }}` is one expression. A scalar without the
-closing `}}` fails with `unterminated ${{ in "<scalar>"`.
+The `}}` closing an expression is found skipping CEL's strings (quoted,
+triple-quoted `'''...'''`, raw `r'\d'`) and nested braces:
+`${{ {"k": "}}"}.k }}` is one expression. The quotes and braces of a `//`
+comment are not counted (`// the user's name`, in a `|-` block scalar),
+but a `}}` in it closes the expression, as in `${{ x // a note }}`. A
+scalar without the closing `}}` fails with
+`unterminated ${{ in "<scalar>"`.
 
 Map keys are never evaluated: `${{ x }}: 1` is the key `${{ x }}`. Computed
 keys come from [`$for`](#for) (`$key`) or [`$merge`](#merge). A key
@@ -667,7 +671,9 @@ the same in the mapping.
 | `y`, `Y`, `yes`, `Yes`, `YES`, `on`, `On`, `ON` | `true` |
 | `n`, `N`, `no`, `No`, `NO`, `off`, `Off`, `OFF` | `false` |
 | `"yes"`, `'no'`, `!!str on` (quoted or tagged) | the string |
-| `0777`, `0x1F`, `0b101`, `1_000` | `511`, `31`, `5`, `1000` |
+| `!!bool yes`, `!!bool off` | `true`, `false` |
+| `0777`, `0x1F`, `0b101`, `0o17`, `1_000` | `511`, `31`, `5`, `15`, `1000` |
+| `0o+7`, `0o-7` (a sign after `0o`) | the string |
 | `2001-12-14` | the string: timestamps are not decoded |
 | `~`, `null`, empty | null |
 | `.nan`, `.inf`, `-.inf` (any case) | refused, Helm cannot read them back from the final values: `line <n>: not a finite number: .inf (quote it for the text)` |
@@ -676,7 +682,16 @@ Keys are decoded the same way, then written as text as sigs.k8s.io/yaml
 writes them: `on:` is the key `"true"`, `1.0:` is `"1"`, `0x10:` is `"16"`.
 A null key fails with `line <n>: unsupported map key "~"`, a key that is
 not a scalar with `line <n>: a map key must be a scalar`. A key given twice:
-the last value wins, at the position of the first.
+the last value wins, at the position of the first. Two keys that are
+different values but the same text (`1:` and `1.0:`, `8:` and `08:`, `on:`
+and `"true":`) fail, where Helm keeps the value of either, at random:
+`line <n>: the keys 1 (line <m>) and 1.0 are both "1" to Helm, which keeps the value of either, at random: write one`.
+
+The lines of the mapping are read as Helm reads those of a values file: a
+`|` or `>` block scalar that ends a file without a final line break keeps
+its newline. One difference remains: YAML's non-specific tag `!` (`! 1`) is
+dropped by the YAML reader, the mapping reads the scalar as if untagged
+(`1`) where Helm reads the text (`"1"`): write `!!str 1` or `"1"`.
 
 Binding names are the exception: the keys directly under `let` and `$let`
 are taken as written, so a binding `y`, `n` or `on` keeps its name, and
@@ -1232,6 +1247,7 @@ Other errors of the mapping:
 | `the mapping must be a YAML map` | the document is not a map |
 | `line <n>: a second YAML document: the mapping is one document` | a `---` followed by a second document ([sections](#evaluation-order)) |
 | `line <n>: a map key must be a scalar`, `line <n>: unsupported map key "<key>"` | a list, map or null key |
+| `line <n>: the keys <key> (line <m>) and <key> are both "<text>" to Helm, which keeps the value of either, at random: write one` | two keys of one text, `1:` and `1.0:` ([YAML reading](#yaml-reading)) |
 | `line <n>: the alias *<name> is inside the anchor &<name> it refers to`, `line <n>: excessive aliasing: the aliases expand to more than 100000 nodes` | an alias cycle, too many nodes from aliases ([YAML reading](#yaml-reading)) |
 | `line <n>: <key> is written before the merge key << that replaces it: write it after <<`, `line <n>: the merge key << takes a map, or a list of maps` | a merge key ([YAML reading](#yaml-reading)) |
 | `line <n>: not a finite number: <scalar> (quote it for the text)` | `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |

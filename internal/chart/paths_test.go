@@ -2,28 +2,60 @@ package chart
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
+// parsePathCases: paths and their keys, for TestParsePath and
+// FuzzParsePath.
+var parsePathCases = map[string][]pathSeg{
+	"fullnameOverride": {{key: "fullnameOverride"}},
+	"controller.extraArgs.enable-ssl-passthrough": {{key: "controller"}, {key: "extraArgs"}, {key: "enable-ssl-passthrough"}},
+	`config["spark.ui.filters"]`:                  {{key: "config"}, {key: "spark.ui.filters"}},
+	`config["spark.history.*"]`:                   {{key: "config"}, {key: "spark.history.", glob: true}},
+	`filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]`: {
+		{key: "filer"}, {key: "ingresses"}, {key: "http"}, {key: "annotations"}, {key: "nginx.ingress.kubernetes.io/auth-", glob: true},
+	},
+	`["a.b"]`:             {{key: "a.b"}},
+	`["a.b"]["c"].d`:      {{key: "a.b"}, {key: "c"}, {key: "d"}},
+	`ingresses["*"].tls`:  {{key: "ingresses"}, {key: "", glob: true}, {key: "tls"}},
+	`a["q\"b\\c\*"]`:      {{key: "a"}, {key: `q"b\c*`}},
+	`a["x\**"]`:           {{key: "a"}, {key: "x*", glob: true}},
+	`env.VITE_OIDC_SCOPE`: {{key: "env"}, {key: "VITE_OIDC_SCOPE"}},
+}
+
+// parsePathErrors: malformed paths and their errors, for TestParsePath and
+// FuzzParsePath.
+var parsePathErrors = map[string]string{
+	"":                   "empty path",
+	"a..b":               "an empty key",
+	".a":                 "an empty key",
+	"a.":                 "an empty key",
+	"a.*":                `a * outside brackets: a glob is a bracketed key`,
+	"annotations.x.io/*": `a * outside brackets: a glob is a bracketed key, the whole key in the brackets, dots included: ["prefix*"]`,
+	"a]":                 `']' outside brackets`,
+	`a"b`:                `'"' outside brackets`,
+	`a\b`:                `'\\' outside brackets`,
+	"a[b]":               `a bracketed key is quoted: ["key"]`,
+	"a['b']":             `a bracketed key is quoted`,
+	`a.["b"]`:            "no dot before a bracketed key",
+	`a["b"`:              `a bracketed key ends with "]`,
+	`a["b`:               `a bracketed key ends with "]`,
+	`a["b"]c`:            `'c' after a bracketed key`,
+	`a[""]`:              "an empty key",
+	`a["x*y"]`:           "a * is a glob at the end of a bracketed key only",
+	`a["**"]`:            "a * is a glob at the end of a bracketed key only",
+	`a["\n"]`:            `escapes ", \ or * only`,
+	`a["b\"]`:            `a bracketed key ends with "]`,
+	`a["b"]["c"]..d`:     "an empty key",
+	`a["nginx.io/x*"]x`:  `'x' after a bracketed key`,
+}
+
 // TestParsePath: plain keys, bracketed literal keys (dots, escapes) and
 // globs, anywhere in the path.
 func TestParsePath(t *testing.T) {
-	for p, want := range map[string][]pathSeg{
-		"fullnameOverride": {{key: "fullnameOverride"}},
-		"controller.extraArgs.enable-ssl-passthrough": {{key: "controller"}, {key: "extraArgs"}, {key: "enable-ssl-passthrough"}},
-		`config["spark.ui.filters"]`:                  {{key: "config"}, {key: "spark.ui.filters"}},
-		`config["spark.history.*"]`:                   {{key: "config"}, {key: "spark.history.", glob: true}},
-		`filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]`: {
-			{key: "filer"}, {key: "ingresses"}, {key: "http"}, {key: "annotations"}, {key: "nginx.ingress.kubernetes.io/auth-", glob: true},
-		},
-		`["a.b"]`:             {{key: "a.b"}},
-		`["a.b"]["c"].d`:      {{key: "a.b"}, {key: "c"}, {key: "d"}},
-		`ingresses["*"].tls`:  {{key: "ingresses"}, {key: "", glob: true}, {key: "tls"}},
-		`a["q\"b\\c\*"]`:      {{key: "a"}, {key: `q"b\c*`}},
-		`a["x\**"]`:           {{key: "a"}, {key: "x*", glob: true}},
-		`env.VITE_OIDC_SCOPE`: {{key: "env"}, {key: "VITE_OIDC_SCOPE"}},
-	} {
+	for p, want := range parsePathCases {
 		got, err := parsePath(p)
 		if err != nil {
 			t.Errorf("%s: %v", p, err)
@@ -31,46 +63,61 @@ func TestParsePath(t *testing.T) {
 			t.Errorf("%s: got %#v, want %#v", p, got, want)
 		}
 	}
-	for p, want := range map[string]string{
-		"":                   "empty path",
-		"a..b":               "an empty key",
-		".a":                 "an empty key",
-		"a.":                 "an empty key",
-		"a.*":                `a * outside brackets: a glob is a bracketed key`,
-		"annotations.x.io/*": `a * outside brackets: a glob is a bracketed key, the whole key in the brackets, dots included: ["prefix*"]`,
-		"a]":                 `']' outside brackets`,
-		`a"b`:                `'"' outside brackets`,
-		`a\b`:                `'\\' outside brackets`,
-		"a[b]":               `a bracketed key is quoted: ["key"]`,
-		"a['b']":             `a bracketed key is quoted`,
-		`a.["b"]`:            "no dot before a bracketed key",
-		`a["b"`:              `a bracketed key ends with "]`,
-		`a["b`:               `a bracketed key ends with "]`,
-		`a["b"]c`:            `'c' after a bracketed key`,
-		`a[""]`:              "an empty key",
-		`a["x*y"]`:           "a * is a glob at the end of a bracketed key only",
-		`a["**"]`:            "a * is a glob at the end of a bracketed key only",
-		`a["\n"]`:            `escapes ", \ or * only`,
-		`a["b\"]`:            `a bracketed key ends with "]`,
-		`a["b"]["c"]..d`:     "an empty key",
-		`a["nginx.io/x*"]x`:  `'x' after a bracketed key`,
-	} {
+	for p, want := range parsePathErrors {
 		if _, err := parsePath(p); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: got %v, want an error containing %q", p, err, want)
 		}
 	}
 }
 
+// FuzzParsePath: what parsePath reads is keys, none empty but a glob's
+// prefix; written back, plain where it can be (formatPath) and a glob as
+// ["<prefix>*"], it reads as the same keys. Seeds: the paths of
+// TestParsePath.
+func FuzzParsePath(f *testing.F) {
+	for p := range parsePathCases {
+		f.Add(p)
+	}
+	for p := range parsePathErrors {
+		f.Add(p)
+	}
+	escape := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `*`, `\*`)
+	f.Fuzz(func(t *testing.T, p string) {
+		segs, err := parsePath(p)
+		if err != nil {
+			return
+		}
+		written := ""
+		for _, s := range segs {
+			switch {
+			case s.glob:
+				written += `["` + escape.Replace(s.key) + `*"]`
+			case s.key == "":
+				t.Fatalf("%q: an empty key, in %#v", p, segs)
+			default:
+				written = keyPath(written, s.key)
+			}
+		}
+		if back, err := parsePath(written); err != nil || !reflect.DeepEqual(back, segs) {
+			t.Errorf("%q: read as %#v, written %s, read back as %#v (%v)", p, segs, written, back, err)
+		}
+	})
+}
+
+// formatPathCases: keys and their path, for TestFormatPath and
+// FuzzFormatPath.
+var formatPathCases = map[string][]string{
+	"ingress.hosts": {"ingress", "hosts"},
+	`filer.annotations["nginx.ingress.kubernetes.io/auth-type"]`: {"filer", "annotations", "nginx.ingress.kubernetes.io/auth-type"},
+	`["spark.ui.filters"]`: {"spark.ui.filters"},
+	`a["q\"b\\c\*"].d`:     {"a", `q"b\c*`, "d"},
+	`a[""]`:                {"a", ""},
+}
+
 // TestFormatPath: the key a value was found at, as the errors show it;
 // parsePath reads it back as the same literal keys.
 func TestFormatPath(t *testing.T) {
-	for want, keys := range map[string][]string{
-		"ingress.hosts": {"ingress", "hosts"},
-		`filer.annotations["nginx.ingress.kubernetes.io/auth-type"]`: {"filer", "annotations", "nginx.ingress.kubernetes.io/auth-type"},
-		`["spark.ui.filters"]`: {"spark.ui.filters"},
-		`a["q\"b\\c\*"].d`:     {"a", `q"b\c*`, "d"},
-		`a[""]`:                {"a", ""},
-	} {
+	for want, keys := range formatPathCases {
 		if got := formatPath(keys); got != want {
 			t.Errorf("%q: got %s, want %s", keys, got, want)
 		}
@@ -93,6 +140,37 @@ func TestFormatPath(t *testing.T) {
 			t.Errorf("%s: read back as %q", want, back)
 		}
 	}
+}
+
+// FuzzFormatPath: parsePath reads what formatPath writes of any keys (the
+// fuzzed text split at \xff, a byte UTF-8 never holds) as the same literal
+// keys; with an empty key, which no path names, it fails. Seeds: the keys
+// of TestFormatPath.
+func FuzzFormatPath(f *testing.F) {
+	for _, keys := range formatPathCases {
+		f.Add(strings.Join(keys, "\xff"))
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		keys := strings.Split(s, "\xff")
+		p := formatPath(keys)
+		segs, err := parsePath(p)
+		if slices.Contains(keys, "") {
+			if err == nil {
+				t.Errorf("%q: written %s, read as %#v, an empty key", keys, p, segs)
+			}
+			return
+		}
+		back := []string{}
+		for _, s := range segs {
+			if s.glob {
+				t.Errorf("%q: written %s, read with a glob", keys, p)
+			}
+			back = append(back, s.key)
+		}
+		if err != nil || !reflect.DeepEqual(back, keys) {
+			t.Errorf("%q: written %s, read back as %q (%v)", keys, p, back, err)
+		}
+	})
 }
 
 // TestUpstreamBrackets: protect and append paths with bracketed literal

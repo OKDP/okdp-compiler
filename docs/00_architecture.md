@@ -414,9 +414,12 @@ sees a copy of the parameters while the merges use them as written.
   binding `n` is `n`, not `"false"`
   ([YAML reading](specs/02_service_definition.md#yaml-reading)). Merge keys
   (`<<`) are resolved as Helm's reader resolves them, in the order written
-  (`TestHelmMergeKeys` compares with `ParseValues`); the one case where it
-  departs from YAML's merge keys, a key written before the `<<` that
-  replaces it, is refused rather than reproduced.
+  (`TestHelmMergeKeys` compares with `ParseValues`, `FuzzMappingReader` on
+  any document); the one case where it departs from YAML's merge keys, a
+  key written before the `<<` that replaces it, is refused rather than
+  reproduced, and so are two keys of one text but different values (`1:`
+  and `1.0:`), of which Helm keeps either value at random (`clash`). The
+  lines are read as Helm reads them (`helmLines`).
 - One YAML document: a second one fails, rather than being ignored as
   `yaml.Unmarshal` ignores it.
 - Directives are checked before evaluation (`check.go`), in the whole
@@ -704,6 +707,24 @@ outputs; `ExampleCompileContext` uses the options; `compiler_test.go`
 compiles the example in the `existing` and `dcr` modes from goroutines
 sharing one `Definition` and the same values layers
 (`TestConcurrentCompile`, meaningful under `go test -race`).
+
+### Fuzz tests
+
+Go fuzz tests, beside the unit tests whose cases seed them, check a
+property on any input; `go test ./...` runs the seeds only:
+
+| Fuzz test | Property |
+|---|---|
+| `compile`: `FuzzScan` | the `${{ }}` scanner gives a string back whole, and an expression CEL parses is one expression, whatever its strings, braces and comments hold |
+| `compile`: `FuzzMappingReader` | the mapping reader returns soon on any document, aliases and merge keys included, with an error rather than a huge document; what it reads is values, those Helm reads (`ParseValues`) when Helm reads it too |
+| `chart`: `FuzzParsePath`, `FuzzFormatPath` | a `protect` or `append` path written back reads as the same keys; any keys written as a path read back as themselves |
+| `chart`: `FuzzParseValues` | what it reads is values, and their YAML as the compiler writes it reads back the same |
+
+One at a time, a package at a time:
+`go test -run='^$' -fuzz=FuzzScan -fuzztime=60s ./internal/compile`;
+`make fuzz` runs each in turn, `FUZZTIME` (30s) each. An
+input that fails is written to the package's `testdata/fuzz/`: once fixed,
+it becomes a case of the unit test, and the file is removed.
 
 ### Example
 
