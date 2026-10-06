@@ -1,6 +1,6 @@
 # A compile: status 0, nothing printed, example/output written.
 env OKDP_CHARTS=example/input/charts OKDP_CONTRACTS=example/input/contracts
-status 0 okdp-compile --package example/input/package --instance example/input/instance --release demo-webapp --namespace demo --platform example/input/platform.yaml -f example/input/instance.yaml --emit-dir $WORK/files --umbrella $WORK/umbrella
+status 0 okdp-compile --package example/input/package --instance example/input/instance --release demo-webapp --namespace demo --platform example/input/platform.yaml -f example/input/instance/values.yaml --emit-dir $WORK/files --umbrella $WORK/umbrella
 ! stdout .
 ! stderr .
 cmp $WORK/files/app.values.yaml example/output/files/app.values.yaml

@@ -153,7 +153,7 @@ The final values are written by `--emit-dir`, not by `--out`.
 $ export OKDP_CONTRACTS=example/input/contracts OKDP_CHARTS=example/input/charts
 $ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance.yaml --out /dev/stdout
+    --platform example/input/platform.yaml -f example/input/instance/values.yaml --out /dev/stdout
 charts:
   app:
     repository: https://charts.example.org
@@ -184,7 +184,7 @@ The computed values of a chart hold only what the mapping sets:
 ```console
 $ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance.yaml \
+    --platform example/input/platform.yaml -f example/input/instance/values.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
 tag: "2.3"
@@ -208,7 +208,7 @@ The example's, `out/` here, are `example/output/files/`:
 ```console
 $ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance.yaml --emit-dir out
+    --platform example/input/platform.yaml -f example/input/instance/values.yaml --emit-dir out
 $ ls out
 app.values.yaml
 okdp.charts.yaml
@@ -235,7 +235,7 @@ The example's, with `platform-dcr.yaml` after `platform.yaml`, are
 $ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
     --platform example/input/platform.yaml --platform example/input/platform-dcr.yaml \
-    -f example/input/instance.yaml --emit-dir out-dcr
+    -f example/input/instance/values.yaml --emit-dir out-dcr
 $ ls out-dcr
 app.values.yaml
 oidc-dcr.values.yaml
@@ -279,7 +279,7 @@ The example's are `example/output/umbrella/`:
 ```console
 $ bin/okdp-compile --package example/input/package --instance example/input/instance \
     --release demo-webapp --namespace demo \
-    --platform example/input/platform.yaml -f example/input/instance.yaml --umbrella umbrella
+    --platform example/input/platform.yaml -f example/input/instance/values.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
 apiVersion: v2
 name: webapp
@@ -447,7 +447,7 @@ func main() {
 		return v
 	}
 	in.Platform = []map[string]any{read("example/input/platform.yaml")}
-	in.Values = []map[string]any{read("example/input/instance.yaml")}
+	in.Values = []map[string]any{read("example/input/instance/values.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation

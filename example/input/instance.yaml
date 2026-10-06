@@ -1,8 +1,0 @@
-# The instance's values: two replicas, the database of the instance demo-db,
-# and one more environment variable for the app chart.
-replicas: 2
-database: demo-db
-upstream:
-  app:
-    env:
-      - {name: LOG_LEVEL, value: debug}

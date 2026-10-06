@@ -64,13 +64,13 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 	return layers
 }
 
-// TestExample compiles the example instance (example/input/instance.yaml,
-// example/input/instance/) and compares what it writes with
+// TestExample compiles the example instance (example/input/instance/: its
+// values.yaml and its files) and compares what it writes with
 // example/output/, byte for byte: files/, what --emit-dir writes, and
 // umbrella/, what --umbrella writes; dcr/, what --emit-dir writes with
 // platform-dcr.yaml after platform.yaml.
 func TestExample(t *testing.T) {
-	instance := []string{filepath.Join(input, "instance.yaml")}
+	instance := []string{filepath.Join(input, "instance", "values.yaml")}
 	def, res, err := exampleCompile(t, nil, instance)
 	if err != nil {
 		t.Fatal(err)

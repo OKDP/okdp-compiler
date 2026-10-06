@@ -24,7 +24,7 @@ func example(platform ...string) (*compiler.Definition, compiler.Inputs) {
 		Instance:  os.DirFS("example/input/instance"),
 		Contracts: os.DirFS("example/input/contracts"),
 		Platform:  []map[string]any{values("example/input/platform.yaml")},
-		Values:    []map[string]any{values("example/input/instance.yaml")},
+		Values:    []map[string]any{values("example/input/instance/values.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}

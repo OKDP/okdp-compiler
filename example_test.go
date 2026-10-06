@@ -30,7 +30,7 @@ func Example() {
 	instanceFS := os.DirFS("example/input/instance")
 	contractsFS := os.DirFS("example/input/contracts")
 	platformValues := values("example/input/platform.yaml")
-	instanceValues := values("example/input/instance.yaml")
+	instanceValues := values("example/input/instance/values.yaml")
 
 	def, err := compiler.LoadDefinition(packageFS) // service.yaml, mapping.cel.yaml; each compile reads values.yaml, values.schema.json, base/
 	if err != nil {
@@ -92,7 +92,7 @@ func ExampleCompile() {
 		return v
 	}
 	in.Platform = []map[string]any{read("example/input/platform.yaml")}
-	in.Values = []map[string]any{read("example/input/instance.yaml")}
+	in.Values = []map[string]any{read("example/input/instance/values.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation

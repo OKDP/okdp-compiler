@@ -786,7 +786,7 @@ for the upstream charts.
 order given, after its `--platform` files:
 
 ```bash
-bin/okdp-compile ... --platform example/input/platform.yaml -f example/input/instance.yaml
+bin/okdp-compile ... --platform example/input/platform.yaml -f example/input/instance/values.yaml
 ```
 
 An instance layer sets no `global` but the keys the parameter schema
@@ -893,8 +893,8 @@ replacing it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
-come first, then `TZ`, of `upstream.app.yaml` (`example/input/instance/`),
-then `LOG_LEVEL`, of the inline values
+come first, then `TZ`, of `upstream.app.yaml`, then `LOG_LEVEL`, of the
+inline values of `values.yaml`, both in `example/input/instance/`
 (`example/output/files/app.values.yaml`): when `upstream.app.yaml` and the
 inline values both set `env`, the items of the file come before the inline
 ones.
@@ -1431,10 +1431,10 @@ same but for `hasKey`, `toYaml` and `range`.
 ### Example
 
 `example/output/files/`, what `--emit-dir` writes for the example: release
-`demo-webapp`, namespace `demo`, `example/input/instance.yaml`
-(`replicas: 2`, `database: demo-db`, an `env` entry in `upstream.app`) and
-the instance file `example/input/instance/upstream.app.yaml` (a memory
-limit, an `env` entry) over `example/input/platform.yaml` (`existing` mode:
+`demo-webapp`, namespace `demo`, the instance `example/input/instance/`:
+`values.yaml` (`replicas: 2`, `database: demo-db`, an `env` entry in
+`upstream.app`) and the instance file `upstream.app.yaml` (a memory limit,
+an `env` entry), over `example/input/platform.yaml` (`existing` mode:
 no OAuth client chart, [OAuth client charts](#oauth-client-charts)).
 `example/output/dcr/` is the same compile in `dcr` mode, with
 `example/input/platform-dcr.yaml` after `platform.yaml`: the OAuth client's

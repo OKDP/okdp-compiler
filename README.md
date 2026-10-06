@@ -116,16 +116,16 @@ export OKDP_CONTRACTS=example/input/contracts   # or --contracts
 export OKDP_CHARTS=example/input/charts         # or --charts
 bin/okdp-compile --package example/input/package --instance example/input/instance \
   --release demo-webapp --namespace demo \
-  --platform example/input/platform.yaml -f example/input/instance.yaml \
+  --platform example/input/platform.yaml -f example/input/instance/values.yaml \
   --emit-dir out/files --umbrella out/umbrella
 bin/okdp-compile --package example/input/package --instance example/input/instance \
   --release demo-webapp --namespace demo \
   --platform example/input/platform.yaml --platform example/input/platform-dcr.yaml \
-  -f example/input/instance.yaml --emit-dir out/dcr
+  -f example/input/instance/values.yaml --emit-dir out/dcr
 # out/ is now example/output/, byte for byte
 bin/okdp-compile --package example/input/package \
   --release demo-webapp --namespace demo \
-  --platform example/input/platform.yaml -f example/input/instance.yaml -f testdata/protected-upstream.yaml
+  --platform example/input/platform.yaml -f example/input/instance/values.yaml -f testdata/protected-upstream.yaml
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
 
@@ -166,7 +166,7 @@ directory holding any other file is refused. `--release` and
 | `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`--out`, `--emit-dir`, `--umbrella`) |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
-| `example/input/` | an example compile's inputs: the package (`package/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`, and `platform-dcr.yaml` after it for `dcr` mode), the instance's values (`instance.yaml`) and files (`instance/`) ([example](docs/00_architecture.md#example)) |
+| `example/input/` | an example compile's inputs: the package (`package/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`, and `platform-dcr.yaml` after it for `dcr` mode), the instance (`instance/`: its values, `values.yaml`, and its upstream values files) ([example](docs/00_architecture.md#example)) |
 | `example/output/` | what `okdp-compile` writes for it, checked by `go test`: `files/` with `--emit-dir`, `umbrella/` with `--umbrella`, `dcr/` with `--emit-dir` in `dcr` mode |
 | `testdata/` | instance values that must fail on the example, platform values in `testdata/platform/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/cli/` | the binary run as a process (testscript): exit statuses, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |

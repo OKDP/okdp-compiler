@@ -735,12 +735,13 @@ and an OAuth client, `values.yaml`, `values.schema.json`, `base/app.yaml`),
 repository's directory, the platform's okdp-objects and oidc-dcr
 included), `contracts/`, `platform.yaml` (the platform values),
 `platform-dcr.yaml` (a platform layer after it: the OAuth clients in `dcr`
-mode), `instance.yaml` (the instance's values) and `instance/` (its files:
-`upstream.app.yaml`, the instance's upstream values of `app`).
+mode) and `instance/`, the instance: `values.yaml` (its values, `-f`) and
+its files (`--instance`: `upstream.app.yaml`, its upstream values of `app`,
+read before the inline `upstream.app` of `values.yaml`).
 `example/output/` is what the compile writes: `files/` as `okdp-compile
 --emit-dir`, `umbrella/` as `--umbrella`, and `dcr/` as `--emit-dir` with
 `platform-dcr.yaml`. `TestExample` (`internal/fsio/example_test.go`)
-compiles `instance.yaml`, an instance layer, over `platform.yaml`, a
+compiles `instance/values.yaml`, an instance layer, over `platform.yaml`, a
 platform layer, with the instance files of `instance/`, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of
 `fsio.Files` and `fsio.Umbrella` with them byte for byte; then the same with
