@@ -1,13 +1,12 @@
 // Package compiler compiles an OKDP service instance into the values of its
 // upstream charts: the public API of okdp-compiler. A package (service.yaml,
-// mapping.cel.yaml, its parameters and base values) is read from any fs.FS
+// values.cel.yaml, its parameters and base values) is read from any fs.FS
 // (LoadDefinition), compiled for one instance (Compile), and written as
 // files (Files, Document):
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("packages/myservice"))
 //	res, err := compiler.Compile(def, compiler.Inputs{
 //		Charts:    os.DirFS("charts"),
-//		Instance:  os.DirFS("instances/demo/myservice"),
 //		Contracts: os.DirFS("contracts"),
 //		Platform:  []map[string]any{platformValues},
 //		Values:    []map[string]any{instanceValues},
@@ -83,7 +82,7 @@ func DcrSource() ChartRef {
 }
 
 // LoadDefinition reads the package at the root of fsys: service.yaml,
-// checked, and mapping.cel.yaml; each compile reads its other files.
+// checked, and values.cel.yaml; each compile reads its other files.
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return fsio.LoadDefinition(fsys)
 }

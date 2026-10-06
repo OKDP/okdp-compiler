@@ -21,10 +21,9 @@ func example(platform ...string) (*compiler.Definition, compiler.Inputs) {
 	}
 	in := compiler.Inputs{
 		Charts:    os.DirFS("examples/02_advanced/input/charts"),
-		Instance:  os.DirFS("examples/02_advanced/input/instance"),
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Platform:  []map[string]any{values("examples/02_advanced/input/platform.yaml")},
-		Values:    []map[string]any{values("examples/02_advanced/input/instance/values.yaml")},
+		Values:    []map[string]any{values("examples/02_advanced/input/instance/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}

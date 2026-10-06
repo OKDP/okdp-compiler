@@ -1,7 +1,7 @@
 # Inputs and outputs
 
 Normative reference of what a compile reads besides the service definition
-(`service.yaml` and `mapping.cel.yaml`: [02_service_definition.md](02_service_definition.md)),
+(`service.yaml` and `values.cel.yaml`: [02_service_definition.md](02_service_definition.md)),
 and of what it produces. The flags that pass these inputs to the binary are in
 [01_usage.md](../01_usage.md); how the compiler works inside, in
 [00_architecture.md](../00_architecture.md).
@@ -13,7 +13,6 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
 | Platform values layers | `Inputs.Platform` (`[]map[string]any`) | no | [Parameters](#parameters), [Platform values](#platform-values), [Values files](#values-files) |
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
-| Instance files | `Inputs.Instance` (`fs.FS`) | no | [Upstream values](#upstream-values) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
 
@@ -37,7 +36,7 @@ Paths in an `fs.FS` are relative to its root.
 
 A package is a directory: the service definition and the parameters of the
 service. `compiler.LoadDefinition(fsys)` reads `service.yaml` and
-`mapping.cel.yaml` at the root of `fsys` ([service
+`values.cel.yaml` at the root of `fsys` ([service
 definition](02_service_definition.md)) and keeps `fsys` as
 `Definition.Files`, from which each compile reads the other files; a
 `Definition` built in memory sets `Files` itself. The compiler reads these
@@ -46,18 +45,16 @@ files, and no other:
 ```
 <package>/
   service.yaml                        the service, its charts and their sources
-  mapping.cel.yaml                    the mapping
-  values.yaml                         defaults of the parameters
-  values.schema.json                  schema of the parameters, connection references
+  values.cel.yaml                     the mapping
+  config.schema.json                  schema of the parameters, their defaults, connection references
   base/<key>.yaml                     base values of the chart <key> (charts.<key>.base)
 ```
 
 | File | Required | Read as | Used for |
 |---|---|---|---|
 | `service.yaml` | yes | YAML 1.2 | the service: name, versions, catalog metadata, charts ([service.yaml](02_service_definition.md#serviceyaml)) |
-| `mapping.cel.yaml` | yes | the mapping language | the computed values, objects and outputs ([mapping.cel.yaml](02_service_definition.md#mappingcelyaml)) |
-| `values.yaml` | yes | [values file](#values-files) | defaults of the [parameters](#parameters) |
-| `values.schema.json` | yes | JSON | [parameter check](#schema-check), [connection references](#declaring-a-reference) |
+| `values.cel.yaml` | yes | the mapping language | the computed values, objects and outputs ([values.cel.yaml](02_service_definition.md#valuescelyaml)) |
+| `config.schema.json` | yes | JSON | [parameter defaults](#defaults), [parameter check](#schema-check), [connection references](#declaring-a-reference) |
 | base file | when `charts.<key>.base` is set | values file | second layer of the [final values](#merge-precedence) |
 
 `<key>`: a chart key, a key of `charts` in `service.yaml`, the chart of an
@@ -71,23 +68,22 @@ may be any path of the package, `base/<key>.yaml` by convention; a path out
 of it (`../app.yaml`) fails. The service's name, versions and catalog
 metadata are fields of `service.yaml` ([Service](02_service_definition.md#service)).
 
-`values.schema.json` is required even for a service without connection
-references: the schema check alone would skip a missing schema, the
-connection walk reads it. A missing file fails with the error of the file
-system, prefixed with the chart key for a base file:
+`config.schema.json` is required, even for a service without parameters:
+the defaults, the schema check and the connection walk read it. A missing
+file fails with the error of the file system, prefixed with the chart key
+for a base file:
 
 ```
-open values.schema.json: no such file or directory
+open config.schema.json: no such file or directory
 app: open base/app.yaml: no such file or directory
 ```
 
 ### Values files
 
-Every values file is read as Helm 4 reads one (`loader.LoadValues`):
-`values.yaml`, the upstream charts' `values.yaml` ([chart
-cache](#chart-cache)), the base files, the
-[instance's upstream files](#upstream-values), and the values layers read by
-`compiler.ParseValues` (the binary's `--platform` and `-f` files).
+Every values file is read as Helm 4 reads one (`loader.LoadValues`): the
+upstream charts' `values.yaml` ([chart cache](#chart-cache)), the base
+files, and the values layers read by `compiler.ParseValues` (the binary's
+`--platform` and `-f` files).
 
 - Documents: the file is split on the lines starting with `---`, as
   Kubernetes' YAMLReader splits it; only a comment may follow the `---`
@@ -138,7 +134,7 @@ platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN
 values layer 1: labels: two keys read as "1"
 ```
 
-JSON files (`values.schema.json` of the package and of the upstream charts,
+JSON files (`config.schema.json` of the package, `values.schema.json` of the upstream charts,
 the contracts) are strict JSON: no comments.
 
 ## Chart cache
@@ -220,21 +216,67 @@ app: charts.example.org/app-1.8.0/values.yaml: chart exceeds maximum decompresse
 
 The parameters of an instance: the values layers, the platform's
 (`Inputs.Platform`) then the instance's (`Inputs.Values`), merged and
-coalesced over the package's `values.yaml`, as Helm computes `.Values` of a
-chart from its defaults and `-f` files. `global` is the platform's
-([Platform values](#platform-values)).
+coalesced over the defaults of the package's `config.schema.json`, as Helm
+computes `.Values` of a chart from its `values.yaml` and `-f` files.
+`global` is the platform's ([Platform values](#platform-values)).
+
+### Defaults
+
+The defaults are the `default` keywords of `config.schema.json`: that of
+each property reached from the root through `properties` alone, at its
+path, read as JSON (every number a float64). They play the part of a
+chart's `values.yaml`:
+
+```json
+{
+  "properties": {
+    "replicas": {"type": "integer", "minimum": 1, "default": 1},
+    "metrics": {"type": "object", "properties": {
+      "enabled": {"type": "boolean", "default": false},
+      "interval": {"type": "string", "default": "30s"}}},
+    "upstream": {"type": "object", "default": {}}
+  }
+}
+```
+
+gives `replicas: 1`, `metrics: {enabled: false, interval: 30s}` and
+`upstream: {}`. A default under `global` (`properties.global.properties`)
+is one of a platform value: the platform's layers override it, and the key
+it declares an instance may set ([Platform values](#platform-values)). The
+`default` of an `x-*` keyword, of `enum`, `const` or `examples` is not
+read, nor `x-ui-condition`: unlike a [contract's](#completion), a
+parameter's default holds whatever the other values.
+
+Each compile fails on a `default` that is not a parameter's, named by its
+JSON pointer:
+
+- at the root, or under any other keyword (`allOf`, `anyOf`, `oneOf`, `if`,
+  `then`, `else`, `not`, `items`, `prefixItems`, `additionalProperties`,
+  `patternProperties`, `$defs`, `definitions`, ...): whether it applies
+  would depend on the values;
+- under a property that has a `default`: the two would compete;
+- one its property's schema rejects, compiled as for the [schema
+  check](#schema-check), its violations printed as the schema check prints
+  them.
+
+```
+config.schema.json#/allOf/0/properties/a/default: a default applies only to a property reached from the root through properties
+config.schema.json#/properties/a/default: a property under it has a default too (#/properties/a/properties/b/default): keep one
+config.schema.json#/properties/replicas/default: the default does not meet its property's schema:
+- at '': minimum: got 0, want 1
+```
 
 ### Layers and nulls
 
 1. The layers are merged in order, as Helm merges `-f` files (`MergeMaps`):
    maps merge key by key, lists and scalars replace, a `null` replaces too
    and stays `null`.
-2. The result is coalesced over `values.yaml` (`CoalesceValues`): a `null`
-   over a default deletes the key; a `null` where there is no default is
-   kept; the `null` defaults of `values.yaml` are dropped; when a value and
-   its default are not both maps, the value wins.
+2. The result is coalesced over the [defaults](#defaults)
+   (`CoalesceValues`): a `null` over a default deletes the key; a `null`
+   where there is no default is kept; the `null` defaults are dropped; when
+   a value and its default are not both maps, the value wins.
 
-| `values.yaml` | Layers | Parameters |
+| Defaults | Layers | Parameters |
 |---|---|---|
 | `metrics: {enabled: false, interval: 30s}` | `metrics: {enabled: true}` | `metrics: {enabled: true, interval: 30s}` |
 | `metrics: {enabled: false, interval: 30s}` | `metrics: null` | no `metrics` key |
@@ -244,12 +286,12 @@ chart from its defaults and `-f` files. `global` is the platform's
 The corner cases (a `null` at the top level or in a nested map, over a
 `null` default) follow Helm 4: `testdata/helm/values/nulls`. Helm 3 keeps
 the `null` defaults the values leave unset, and deletes a key below the
-top level that `values.yaml` and the values both set to `null`
+top level that the defaults and the values both set to `null`
 ([Equivalence with Helm](#equivalence-with-helm)).
 
 ### Schema check
 
-The parameters are checked against `values.schema.json` first, before the
+The parameters are checked against `config.schema.json` first, before the
 [platform requirements](#requirements), the connections and the mapping,
 as Helm 4 checks the values of a chart:
 
@@ -258,7 +300,7 @@ as Helm 4 checks the values of a chart:
 - the draft: the schema's `$schema`, draft 2020-12 without one; `format` is
   asserted for drafts before 2019-09 only;
 - `$ref`: within the schema only. A `urn:` reference accepts anything (as in
-  Helm); a file or a URL fails the compile: `values.schema.json: failing
+  Helm); a file or a URL fails the compile: `config.schema.json: failing
   loading "<url>": $ref <url>: the schema may only reference itself (the
   compile reads no file or URL)`.
 
@@ -288,7 +330,7 @@ Three top-level keys are not parameters of the service:
 
 They are checked with the parameters: a schema with `additionalProperties:
 false` declares them, `{"type": "object"}` at least
-(`examples/02_advanced/input/service/values.schema.json`).
+(`examples/02_advanced/input/service/config.schema.json`).
 
 ## Connections
 
@@ -299,7 +341,7 @@ its [contract](#contracts), before the mapping runs.
 
 ### Declaring a reference
 
-In `values.schema.json`, on a string property:
+In `config.schema.json`, on a string property:
 
 ```json
 "database": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}
@@ -581,8 +623,8 @@ violation, without its alternatives.
 OIDC, proxy, the platform's charts...), given as the platform's values
 layers, `Inputs.Platform` (the binary's `--platform` files):
 `examples/02_advanced/input/platform.yaml`, `platform/platform-values.yaml` in a
-platform repository. They are merged in order after the package's
-`values.yaml` and before the instance's layers, `Inputs.Values`
+platform repository. They are merged in order over the package's
+[defaults](#defaults) and before the instance's layers, `Inputs.Values`
 ([parameters](#parameters)); a later platform layer may change or delete
 (`null`) a value of the previous ones, as
 `testdata/platform/missing-platform-value.yaml` does.
@@ -597,8 +639,8 @@ global:
     oidc: {issuerUri: https://sso.okdp.example.org/realms/okdp}
 ```
 
-`global` is the platform's: it comes from the package's `values.yaml` and
-the platform's layers, `global.okdp` decides the instance's host, where its
+`global` is the platform's: it comes from the package's
+[defaults](#defaults) and the platform's layers, `global.okdp` decides the instance's host, where its
 OAuth clients register and the charts its objects and clients are rendered
 with, and every chart receives `global` ([merge
 precedence](#merge-precedence)). An instance layer that sets `global` fails
@@ -786,7 +828,7 @@ for the upstream charts.
 order given, after its `--platform` files:
 
 ```bash
-bin/okdp-compile ... --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml
+bin/okdp-compile ... --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml
 ```
 
 An instance layer sets no `global` but the keys the parameter schema
@@ -810,29 +852,23 @@ values layer 2: upstream.app.podAnnotations["example.org/{{ x }}"]: the key cont
 
 A layer is normalized before it is checked: a Go value an in-memory layer
 gives that values cannot hold has failed then, with its layer and path
-([values files](#values-files)). The platform's layers and the package's `values.yaml` are not
-checked: they are reviewed with the platform and the package
+([values files](#values-files)). The platform's layers and the package's
+defaults are not checked: they are reviewed with the platform and the package
 ([security boundaries](../00_architecture.md#security-boundaries)). A
 connection resolved from them is ([Resolution](#resolution)).
 
 ### Upstream values
 
 Values given to an upstream chart as they are, over the values the mapping
-computed. Two sources, in this order:
-
-1. files of the instance (`Inputs.Instance`, the binary's `--instance`
-   directory), each a [values file](#values-files);
-2. inline values: `upstream.<key>` of the parameters.
-
-`charts.<key>.upstream` of `service.yaml` selects them: `true` reads
-`upstream.<key>.yaml` when it exists, a path or a list of paths names the
-files, `[]` takes the inline values only
-([upstream](02_service_definition.md#upstream)). Paths are relative to the
-root of the instance files. Upstream values are keyed by the chart key, not
-by its source ([sources](02_service_definition.md#sources)). Inline values
-for a chart that accepts none (an [OAuth client chart](#oauth-client-charts)
-and the [okdp chart](#the-okdp-chart) included: they read no file either),
-or for a name that is not a chart, are ignored without error.
+computed: `upstream.<key>` of the parameters, for a chart whose
+`charts.<key>.upstream` of `service.yaml` is `true`
+([upstream](02_service_definition.md#upstream)). Upstream values are keyed
+by the chart key, not by its source
+([sources](02_service_definition.md#sources)). Values for a chart that
+accepts none (an [OAuth client chart](#oauth-client-charts) and the [okdp
+chart](#the-okdp-chart) included), or for a name that is not a chart, are
+ignored without error. The mapping sees them as written
+(`values.upstream.<key>`).
 
 ```yaml
 # an instance's values
@@ -844,25 +880,22 @@ upstream:
       limits: {memory: 1Gi}               # merged over the base values
 ```
 
-Each source, file or inline, is checked, then merged over the values so far
-([Merge precedence](#merge-precedence)):
+They are checked, then merged over the computed values ([Merge
+precedence](#merge-precedence)):
 
 - templates: no key or string may contain `{{`, the first one found by
   path reported, nor a value of a type values do not hold. The values reach
-  the chart as data, Helm does not render them. The inline values an
-  instance layer gives are refused before, with the layer
-  ([Layers](#layers)); this check covers the files, and the inline values
-  of the package's `values.yaml` and of the platform's layers. A file is
-  checked when it is read, before the mapping runs: one with `{{` is left
-  out of `values.upstream.<key>`, which a mapping could copy into another
-  chart, and fails the compile of its chart;
+  the chart as data, Helm does not render them. The values an instance
+  layer gives are refused before, with the layer ([Layers](#layers)); this
+  check covers those of the package's defaults and of the platform's
+  layers;
 - [protect](#protect): `global` and the protected paths are refused;
 - [append](#append): the listed lists are appended to.
 
 ### protect
 
 `charts.<key>.protect`: dotted paths the platform sets; `global` is always
-protected. A source fails when it sets a protected path (to any value,
+protected. The upstream values fail when they set a protected path (to any value,
 `null` included), or one of its parents to anything but a map (`null`
 included). The keys beside a protected path are free:
 
@@ -872,46 +905,40 @@ included). The keys beside a protected path are free:
 | `ingress: null`, `ingress: off` | refused |
 | `ingress: {className: other}` | accepted |
 
-The error names the source, the path set and the protected path: the first
-one hit, `global` first, then in `protect` order
+The error names the path set and the protected path: the first one hit,
+`global` first, then in `protect` order
 (`testdata/protected-upstream.yaml`):
 
 ```
 app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
-app: bad.yaml: fullnameOverride: fullnameOverride is set by the platform and cannot be changed
 ```
 
 A path listed in both `protect` and `append` is accepted when the
-definition loads; `protect` is checked first, so a source setting it fails.
+definition loads; `protect` is checked first, so upstream values setting
+it fail.
 
 ### append
 
-`charts.<key>.append`: dotted paths of lists. A list a source gives at
-such a path is appended to the list the values have there so far (upstream
-defaults, base values, computed values, previous sources) instead of
-replacing it. The value given must be a list; a `null` is refused too:
+`charts.<key>.append`: dotted paths of lists. A list the upstream values
+give at such a path is appended to the list the values have there
+(upstream defaults, base values, computed values) instead of replacing
+it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
-come first, then `TZ`, of `upstream.app.yaml`, then `LOG_LEVEL`, of the
-inline values of `values.yaml`, both in
-`examples/02_advanced/input/instance/`
-(`examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml`): when
-`upstream.app.yaml` and the inline values both set `env`, the items of the
-file come before the inline ones.
+come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in
+`examples/02_advanced/input/instance/config.yaml`
+(`examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml`).
 
 ### Upstream errors
 
-`<at>`: `upstream.<key>.<path>` for inline values, `<file>: <path>` for a
-file.
+`<at>`: `upstream.<key>.<path>`.
 
 | Case | Error |
 |---|---|
-| a template (in inline values an instance layer gives, the layer fails before: [Layers](#layers)) | `<key>: <at>: the value contains "{{"`, `<key>: <at>: the key contains "{{"`; `<key>: <at>: cannot be checked for "{{": <type> is not a values type` |
+| a template (in values an instance layer gives, the layer fails before: [Layers](#layers)) | `<key>: <at>: the value contains "{{"`, `<key>: <at>: the key contains "{{"`; `<key>: <at>: cannot be checked for "{{": <type> is not a values type` |
 | a protected path | `<key>: <at>: <protected> is set by the platform and cannot be changed` |
 | an appended path, not a list | `<key>: <at> must be a list` |
-| a listed file missing | `<key>: open <file>: ...` |
-| a listed file, no instance files | `<key>: upstream file <file>: no instance files (Inputs.Instance)` |
 
 ## Merge precedence
 
@@ -923,8 +950,7 @@ each layer over the previous ones:
 | 1 | upstream defaults | `values.yaml` of the key's source, from the [chart cache](#chart-cache), its `null` values removed |
 | 2 | base values | the file `charts.<key>.base` |
 | 3 | computed values | `output.<key>` of the mapping |
-| 4 | upstream files | the instance's files, in order ([Upstream values](#upstream-values)) |
-| 5 | inline upstream values | `upstream.<key>` of the parameters |
+| 4 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
 The source: the upstream chart of the key ([Chart index](#chart-index)).
 Keys of one source take layer 1 from it, the other layers from their own
@@ -935,18 +961,18 @@ the compiler computes for them: [OAuth client charts](#oauth-client-charts),
 
 Then `global` is replaced by: the `global` of layer 1, under the `global` of
 the parameters (the platform's, [Platform values](#platform-values)), under
-the `global` of layer 3. The `global` of the base values is not kept; layers
-4 and 5 may not set it (protected). Every chart thus gets the platform
+the `global` of layer 3. The `global` of the base values is not kept; layer
+4 may not set it (protected). Every chart thus gets the platform
 values.
 
-Layers 2 to 5 are merged as Helm merges `-f` files: maps merge key by key,
+Layers 2 to 4 are merged as Helm merges `-f` files: maps merge key by key,
 lists and scalars replace (except at [append](#append) paths), a `null`
 replaces too and stays `null`. The result is a complete values file, the
 upstream defaults included.
 
 ### Nulls
 
-A `null` of layers 2 to 5 stays `null` in `Result.Values`; Helm gives it its
+A `null` of layers 2 to 4 stays `null` in `Result.Values`; Helm gives it its
 meaning when it renders: over a default, the key is deleted; with no
 default, it is kept.
 
@@ -970,7 +996,7 @@ helm template <release> <source> -f <Result.Values[key]>
 renders what
 
 ```bash
-helm template <release> <source> -f <base> -f <computed> -f <upstream files...> -f <inline upstream>
+helm template <release> <source> -f <base> -f <computed> -f <upstream>
 ```
 
 renders, `global` and the [appended](#append) lists aside. `<source>`:
@@ -1392,6 +1418,10 @@ name the values were compiled for. Two files:
   chart's name;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
+  Its first line, as that of each `<key>.values.yaml` of `Files` and the
+  second of `install.sh`, marks it generated: `# Code generated by
+  okdp-compile. DO NOT EDIT.` (the line Go, GitHub, linters and editors
+  recognize).
 
 The chart has no `values.yaml`. Its values are user values (`helm -f`,
 Argo CD `valueFiles`, Flux `valuesFrom`): as the chart's own values they
@@ -1434,9 +1464,9 @@ same but for `hasKey`, `toYaml` and `range`.
 
 `examples/02_advanced/output-no-dcr/helm-cmd/`, what `--emit-dir
 --mkinstall` writes for the example: release `demo-webapp`, namespace `demo`, the instance
-`examples/02_advanced/input/instance/`: `values.yaml` (`replicas: 2`,
-`database: demo-db`, an `env` entry in `upstream.app`) and the instance file
-`upstream.app.yaml` (a memory limit, an `env` entry), over
+`examples/02_advanced/input/instance/config.yaml` (`replicas: 2`,
+`database: demo-db`, a memory limit and two `env` entries in
+`upstream.app`), over
 `examples/02_advanced/input/platform.yaml` (`existing` mode: no OAuth client
 chart, [OAuth client charts](#oauth-client-charts)).
 `examples/02_advanced/output-dcr/helm-cmd/` is the same compile in `dcr`
@@ -1447,6 +1477,7 @@ mode, with `examples/02_advanced/input/platform-dcr.yaml` after
 `app.values.yaml`, annotated:
 
 ```yaml
+# Code generated by okdp-compile. DO NOT EDIT.
 env:
   - name: OIDC_ISSUER                     # computed
     value: https://sso.okdp.example.org/realms/okdp
@@ -1467,7 +1498,7 @@ env:
       secretKeyRef:
         key: password
         name: demo-db-database-credentials
-  - name: TZ                              # upstream.app.yaml, appended
+  - name: TZ                              # upstream.app, appended
     value: Europe/Paris
   - name: LOG_LEVEL                       # upstream.app, appended
     value: debug
@@ -1483,7 +1514,7 @@ ingress:
 replicaCount: 2                           # computed: values.replicas
 resources:                                # base values
   limits:
-    memory: 512Mi                         # upstream.app.yaml
+    memory: 512Mi                         # upstream.app
   requests:
     cpu: 100m
     memory: 128Mi
@@ -1493,6 +1524,7 @@ resources:                                # base values
 descriptor ConfigMap under `objects`:
 
 ```yaml
+# Code generated by okdp-compile. DO NOT EDIT.
 global:
   okdp:
     # ... the platform values
@@ -1525,8 +1557,9 @@ objects:
 
 ```sh
 #!/bin/sh
+# Code generated by okdp-compile. DO NOT EDIT.
 # Installs demo-webapp in the namespace demo, one Helm release per chart: its
-# upstream chart with its values file, written by okdp-compile.
+# upstream chart with its values file. Recompile the instance to change it.
 set -eu
 cd "$(dirname "$0")"
 helm upgrade --install demo-webapp-app app --repo https://charts.example.org --version 1.8.0 --namespace demo -f app.values.yaml

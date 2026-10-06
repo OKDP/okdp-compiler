@@ -6,15 +6,15 @@ a package that `compiler.LoadDefinition(fsys)` reads.
 | File | Content |
 |---|---|
 | [`service.yaml`](#serviceyaml) | the engine-neutral part: the service's name and versions, the upstream charts and their sources, their base values, what an instance may override, the platform values the service needs |
-| [`mapping.cel.yaml`](#mappingcelyaml) | the mapping: YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives; it computes the values of each chart, OKDP's own objects and what the instance publishes, and declares the service's OAuth clients |
+| [`values.cel.yaml`](#valuescelyaml) | the mapping: YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives; it computes the values of each chart, OKDP's own objects and what the instance publishes, and declares the service's OAuth clients |
 
 Both files are required: a missing one fails `LoadDefinition` with the read
 error (`open service.yaml: ...`), and a `service.yaml` that does not decode
 fails with `service.yaml: <error>`. `LoadDefinition` only reads
-`mapping.cel.yaml`: each `Compile` parses and evaluates it, so its errors
+`values.cel.yaml`: each `Compile` parses and evaluates it, so its errors
 are compile errors ([Errors](#errors)). It keeps the package
-(`Definition.Files`): each compile reads its other files, `values.yaml`,
-`values.schema.json` and the base files
+(`Definition.Files`): each compile reads its other files,
+`config.schema.json` and the base files
 ([package files](01_inputs_outputs.md#package-files)).
 
 The other inputs of a compile (the chart cache, contracts, platform and
@@ -106,8 +106,8 @@ service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: mu
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `source` | `{repository, chart, version}` | required | The upstream chart that renders the key's values: [sources](#sources). |
-| `base` | string | none | Path, in the package, of OKDP's default values for this chart (by convention `base/<key>.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
-| `upstream` | `true`, `false`, a path, a list of paths or `{from: <key>}` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
+| `base` | string | none | Path, in the package, of OKDP's fixed values for this chart, over its `values.yaml` and under the computed values (by convention `base/<key>.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
+| `upstream` | `true`, `false` or `{from: <key>}` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
 | `protect` | list of paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
 | `append` | list of paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
 
@@ -120,8 +120,8 @@ be in the chart cache ([chart cache](01_inputs_outputs.md#chart-cache)).
 
 A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
 a letter or a digit at each end, 63 characters at most (`app`,
-`admin-users`). It names files, the emitted `<key>.values.yaml` and the
-instance's `upstream.<key>.yaml`, and the umbrella's dependency alias
+`admin-users`). It names files, the emitted `<key>.values.yaml`, and the
+umbrella's dependency alias
 ([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
 (`""`, `../app`, `my_app`, `App`) fails when `service.yaml` is loaded, and
 by `Compile` for a definition built in memory:
@@ -161,8 +161,8 @@ final values, and their schema
 Two keys of the same source are two renders of one upstream chart, each
 with its own values (polaris-admin's bootstrap and principals phases).
 Everything else stays keyed by the key: `output.<key>` of the mapping,
-`Result.Values` and `Result.Computed`, the instance's `upstream.<key>.yaml`
-and inline `upstream.<key>` values. `upstream: {from: <key>}` gives the
+`Result.Values` and `Result.Computed`, the instance's `upstream.<key>`
+values. `upstream: {from: <key>}` gives the
 second render the instance values of the first ([upstream](#upstream)).
 
 A source is checked when `service.yaml` is loaded, and by `Compile` for a
@@ -179,25 +179,21 @@ definition built in memory:
 
 | Value | Instance upstream values read, in order |
 |---|---|
-| absent, `false`, `null` | none: the chart's files and inline `upstream.<name>` values are ignored |
-| `true` | `upstream.<name>.yaml` of `Inputs.Instance` when it exists (the file, and `Inputs.Instance`, may be missing), then the inline `upstream.<name>` values |
-| a path | that file of `Inputs.Instance`, which must exist, then the inline values |
-| a list of paths | these files in order, each of which must exist, then the inline values |
-| `[]` | the inline values only |
-| `{from: <key>}` | those of the chart `<key>`, as its own entry reads them, with its `protect` and `append` |
+| absent, `false`, `null` | none: the instance's `upstream.<name>` values are ignored |
+| `true` | the instance's `upstream.<name>` values |
+| `{from: <key>}` | those of the chart `<key>`, with its `protect` and `append` |
 
-A value of another form (`""`, a number, a map other than `{from: <key>}`,
-or a list holding `""`) fails with
-`service.yaml: line <n>: upstream must be true, false, a path, a list of paths or {from: <chart>}`.
+A value of another form (a string, a number, a list, a map other than
+`{from: <key>}`) fails with
+`service.yaml: line <n>: upstream must be true, false or {from: <chart>}`.
 A boolean of YAML 1.1 written plain (`y`, `yes`, `n`, `no`, `on`, `off`,
-capitalized or upper case) is a string in YAML 1.2: it is refused, rather
-than taken as a file every compile would require; quoted (`"off"`) or
-tagged (`!!str off`), it is a path:
+capitalized or upper case) is a string in YAML 1.2: it is refused with
+what to write instead:
 
 ```
-service.yaml: line 7: upstream off: write true or false (service.yaml is read as YAML 1.2, where off is not a boolean; quote a path of that name)
+service.yaml: line 7: upstream off: write true or false (service.yaml is read as YAML 1.2, where off is not a boolean)
 ```
-How the instance values are written, and the errors of a missing file:
+How the instance values are written:
 [upstream values](01_inputs_outputs.md#upstream-values).
 
 `{from: <key>}` is for two renders of one upstream chart that an instance
@@ -250,14 +246,14 @@ require:                               # global.okdp.<path>, each non-empty
 charts:
   app:                                 # output.app of the mapping
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    base: base/app.yaml                # OKDP's defaults, over the chart's values.yaml
-    upstream: true                     # upstream.app.yaml when it exists, then inline upstream.app
+    base: base/app.yaml                # OKDP's fixed values, over the chart's values.yaml
+    upstream: true                     # the instance's upstream.app
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, 'ingress.annotations["cert-manager.io/*"]']
     append: [env]                      # instance lists appended to the computed ones
   admin:
     source: &admin {repository: oci://registry.example.org/charts, chart: admin, version: 0.3.1}
     base: base/admin.yaml
-    upstream: []                       # inline upstream.admin only
+    upstream: true                     # the instance's upstream.admin
   admin-users:                         # output.admin-users, a second render of the admin chart
     source: *admin
     base: base/admin-users.yaml
@@ -266,7 +262,7 @@ charts:
     source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
 ```
 
-## mapping.cel.yaml
+## values.cel.yaml
 
 A YAML map: values shaped like the upstream values, where `${{ <CEL> }}`
 computes a value ([Expressions](#expressions)) and `$`-keys shape the
@@ -922,7 +918,7 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
-| `values` | The parameters: the package's `values.yaml`, the platform's and the instance's values layers, merged and checked against `values.schema.json` ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection, nor in its upstream files (a file with `{{` is left out). Without `global` and `connections`. `upstream.<key>` of a chart that accepts upstream values is its files then its inline values, merged as they will be applied (the `append` lists appended); the other keys of `upstream` stay as written. |
+| `values` | The parameters: the defaults of `config.schema.json`, the platform's and the instance's values layers, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `service.yaml`, as written ([service](#service)). |

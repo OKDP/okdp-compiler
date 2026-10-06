@@ -35,7 +35,7 @@ dependencies:
     repository: https://charts.example.org
     version: 1.0.0
 `,
-		UmbrellaValues: "app:\n  a: 1\n  global:\n    g: 1\ncanary:\n  a: null\n",
+		UmbrellaValues: generated + "app:\n  a: 1\n  global:\n    g: 1\ncanary:\n  a: null\n",
 	} {
 		if got := string(files[name]); got != want {
 			t.Errorf("%s:\n got %q\nwant %q", name, got, want)

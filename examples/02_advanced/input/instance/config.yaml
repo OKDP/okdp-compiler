@@ -1,0 +1,14 @@
+# The instance's parameters (-f), over the defaults of the package's
+# config.schema.json: two replicas, the database of the instance demo-db,
+# and values for the app chart as it is (upstream.app), over the base and
+# computed values: a memory limit, and two environment variables appended
+# to the computed ones (append: [env]).
+replicas: 2
+database: demo-db
+upstream:
+  app:
+    resources:
+      limits: {memory: 512Mi}
+    env:
+      - {name: TZ, value: Europe/Paris}
+      - {name: LOG_LEVEL, value: debug}

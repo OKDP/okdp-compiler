@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "replicas": {"type": "integer", "minimum": 1, "default": 1},
+    "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
+                 "description": "The database: an instance providing the database contract, or an entry of connections."},
+    "connections": {"type": "object", "default": {}, "description": "External connections, by name."},
+    "upstream": {"type": "object", "default": {}, "description": "Values passed to the upstream charts as they are, by chart."},
+    "global": {"type": "object"}
+  }
+}

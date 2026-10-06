@@ -37,9 +37,8 @@ func example(dir string) options {
 		pkg:       filepath.Join(input, "service"),
 		charts:    filepath.Join(input, "charts"),
 		contracts: filepath.Join(input, "contracts"),
-		instance:  filepath.Join(input, "instance"),
 		platform:  multi{filepath.Join(input, "platform.yaml")},
-		values:    multi{filepath.Join(input, "instance", "values.yaml")},
+		values:    multi{filepath.Join(input, "instance", "config.yaml")},
 		release:   "demo-webapp",
 		namespace: "demo",
 		indent:    2,
@@ -194,7 +193,7 @@ func TestRunErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pkg, "service.yaml"), svc, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	instance := filepath.Join(input, "instances")
+	missing := filepath.Join(input, "nothing")
 	notDir := filepath.Join(input, "platform.yaml")
 	protected := filepath.Join("..", "..", "testdata", "protected-upstream.yaml")
 	for name, tc := range map[string]struct {
@@ -204,7 +203,7 @@ func TestRunErrors(t *testing.T) {
 	}{
 		"no release":      {func(o *options) { o.release = "" }, nil, "--release is required"},
 		"no namespace":    {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
-		"no instance":     {func(o *options) { o.instance = instance }, nil, "--instance: stat " + instance + ": no such file or directory"},
+		"no contracts":    {func(o *options) { o.contracts = missing }, nil, "--contracts: stat " + missing + ": no such file or directory"},
 		"not a dir":       {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
 		"same directory":  {func(o *options) { o.umbrella = o.emitDir + "/" }, nil, "--emit-dir and --umbrella name the same directory"},
 		"mkinstall alone": {func(o *options) { o.emitDir = "" }, nil, "--mkinstall writes install.sh beside the values files: give --emit-dir"},

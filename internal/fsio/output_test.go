@@ -8,8 +8,9 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-// TestFiles: the final values of each chart, indented by 2 spaces, or as
-// asked; a key that would name a file out of the directory is refused.
+// TestFiles: the final values of each chart, marked generated, indented by
+// 2 spaces, or as asked; a key that would name a file out of the directory
+// is refused.
 func TestFiles(t *testing.T) {
 	res := &okdp.Result{
 		Values: map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "console-oidc-dcr": {"b": 2}},
@@ -20,8 +21,8 @@ func TestFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"oidc-dcr.values.yaml":         "a:\n  b:\n    - 1\n",
-		"console-oidc-dcr.values.yaml": "b: 2\n",
+		"oidc-dcr.values.yaml":         generated + "a:\n  b:\n    - 1\n",
+		"console-oidc-dcr.values.yaml": generated + "b: 2\n",
 	}
 	if len(files) != len(want) {
 		t.Errorf("got %d files, want %d", len(files), len(want))
@@ -32,7 +33,7 @@ func TestFiles(t *testing.T) {
 		}
 	}
 	// --indent 4: every file.
-	if files, err = Files(res, 4); err != nil || string(files["oidc-dcr.values.yaml"]) != "a:\n    b:\n        - 1\n" {
+	if files, err = Files(res, 4); err != nil || string(files["oidc-dcr.values.yaml"]) != generated+"a:\n    b:\n        - 1\n" {
 		t.Errorf("indent 4: %v %q", err, files["oidc-dcr.values.yaml"])
 	}
 	if b, err := Document(res, 4); err != nil || !strings.Contains(string(b), "\n    oidc-dcr:\n        repository:") {

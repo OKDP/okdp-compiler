@@ -231,13 +231,8 @@ func TestUpstreamBrackets(t *testing.T) {
 			}
 		})
 	}
-	// In an instance file, the message names the file.
-	err := applyUpstream(computed(), M{"config": M{"spark.ui.filters": "x"}}, source{file: "upstream.c.yaml"}, protect, nil)
-	if want := `upstream.c.yaml: config["spark.ui.filters"]: config["spark.ui.filters"] is set by the platform`; err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("got %v, want %q", err, want)
-	}
 	// A key in brackets first: no dot after the chart.
-	err = applyUpstream(M{}, M{"a.b": float64(1)}, source{chart: "c"}, []string{`["a.b"]`}, nil)
+	err := applyUpstream(M{}, M{"a.b": float64(1)}, source{chart: "c"}, []string{`["a.b"]`}, nil)
 	if want := `upstream.c["a.b"]: ["a.b"] is set by the platform`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("got %v, want %q", err, want)
 	}

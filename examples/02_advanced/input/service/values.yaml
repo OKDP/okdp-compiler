@@ -1,9 +1,0 @@
-# The parameters of an instance, and their defaults.
-replicas: 1
-# The database: an instance providing the database contract, or an entry of
-# connections.
-database: ""
-# External connections, by name.
-connections: {}
-# Values passed to the upstream charts as they are, by chart.
-upstream: {}

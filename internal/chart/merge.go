@@ -1,16 +1,14 @@
 // Merge: the final values of each upstream chart, the values file Helm
 // renders it with: upstream defaults < base values < computed values <
-// instance upstream values files < inline instance upstream values, global
-// copied down. The layers are merged as Helm merges its -f files.
+// instance upstream values, global copied down. The layers are merged as
+// Helm merges its -f files.
 //
-// The instance's upstream values are read once, before the mapping runs
-// (ReadUpstream): the mapping sees them merged (values.upstream.<chart>,
-// Upstreams.Show), and they are applied with their checks after it
-// (FinalValues).
+// The instance's upstream values are upstream.<chart> of its values: the
+// mapping sees them as written (values.upstream.<chart>), and they are
+// applied with their checks after it (FinalValues).
 package chart
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -31,8 +29,8 @@ import (
 // cache: the chart cache, the upstream charts' defaults and schemas: the
 // sources of the keys of output, together (newChartCache). pkg:
 // the package (its base files). values: the instance's merged values (their
-// global). ups: the instance's upstream values (ReadUpstream).
-func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M, ups Upstreams) (map[string]map[string]any, map[string]Ref, error) {
+// global, and their upstream values).
+func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
 	keys := slices.Sorted(maps.Keys(output))
@@ -51,7 +49,7 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M, ups Upstream
 		if !ok {
 			return nil, nil, fmt.Errorf("mapping output %q: must be a map of the chart's values, got %s", key, value.Short(output[key]))
 		}
-		f, bad, err := keyValues(charts, pkg, specs, key, computed, values, ups)
+		f, bad, err := keyValues(charts, pkg, specs, key, computed, values)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
@@ -71,7 +69,7 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M, ups Upstream
 // maps merge, lists and scalars replace, a null replaces and stays), over
 // the chart's own defaults without their nulls. Rendered by Helm, these
 // values give exactly what `helm template <source> -f base -f computed -f
-// <upstream files> -f <inline upstream>` gives, with Helm 3 or 4: a null
+// <upstream>` gives, with Helm 3 or 4: a null
 // that deletes a default stays null (Helm deletes the key when it renders),
 // a null where there is no default stays (Helm keeps it), and the null
 // defaults are left out (Helm 4 drops them, Helm 3 copies them back).
@@ -80,17 +78,16 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M, ups Upstream
 // values, as Helm sees them when it renders, are returned apart.
 //
 // charts: the chart cache, the chart's defaults and schema. files: the
-// package. ups: the instance's upstream values, by the chart that accepts
-// them (ReadUpstream).
-func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, computed M, values M, ups Upstreams) (M, string, error) {
+// package. values: the instance's merged values.
+func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, computed M, values M) (M, string, error) {
 	spec := specs[key]
 	upstream, err := charts.get(spec.Source)
 	if err != nil {
 		return nil, "", err
 	}
 	defaults := upstream.defaults
-	// Upstream chart defaults first, then OKDP's default values for this
-	// chart, then what the mapping computed.
+	// Upstream chart defaults first, then OKDP's fixed values for this chart
+	// (base), then what the mapping computed.
 	base := M{}
 	if spec.Base != "" {
 		if base, err = readValues(files, path.Clean(spec.Base)); err != nil {
@@ -98,23 +95,18 @@ func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, compute
 		}
 	}
 	out := layered(defaults, base, computed)
-	// Last, the instance's upstream values, when the chart accepts them: its
-	// files, then its inline values, each checked ("{{", protect, append).
-	// The mapping has seen the same values merged; these checks are what the
-	// platform enforces whatever the mapping does with them. A chart with
-	// upstream.from receives the values of the chart it names, with that
-	// chart's protect and append: one set of values for two renders of an
-	// upstream chart, refused or appended the same way in both.
-	if owner, ok := specs.upstreamOf(key); ok && ups[owner] != nil {
-		up := ups[owner]
-		if up.err != nil {
-			return nil, "", up.err
-		}
+	// Last, the instance's upstream values (upstream.<chart>), when the chart
+	// accepts them, checked ("{{", protect, append). The mapping has seen
+	// them; these checks are what the platform enforces whatever the mapping
+	// does with them. A chart with upstream.from receives the values of the
+	// chart it names, with that chart's protect and append: one set of
+	// values for two renders of an upstream chart, refused or appended the
+	// same way in both.
+	if owner, ok := specs.upstreamOf(key); ok {
 		rules := specs[owner]
-		for _, l := range up.layers {
-			if err := applyUpstream(out, l.values, l.src, rules.Protect, rules.Append); err != nil {
-				return nil, "", err
-			}
+		user := value.AsMap(value.AsMap(values["upstream"])[owner])
+		if err := applyUpstream(out, user, source{chart: owner}, rules.Protect, rules.Append); err != nil {
+			return nil, "", err
 		}
 	}
 	// Every chart gets the instance's global, as a subchart would.
@@ -134,144 +126,14 @@ func layered(defaults M, layers ...M) M {
 	return out
 }
 
-// chartUpstream: the instance's upstream values of one chart, in the order
-// they are applied: its files, then its inline upstream.<chart> values.
-//
-// They are read before the mapping runs, not only merged after it, so that
-// the mapping sees all of them: a rule of its errors section on an upstream
-// value (a key no protect path names, a value that depends on the instance)
-// would otherwise check the inline values only, and the same value written
-// in upstream.<chart>.yaml would bypass it.
-type chartUpstream struct {
-	layers []upstreamLayer
-	// err: a file that cannot be read (missing, not YAML) or holds "{{". It
-	// is reported when the chart is compiled, as when the files were read
-	// after the mapping: a chart the mapping leaves out does not need them.
-	err error
-}
-
-// upstreamLayer: one source of a chart's upstream values: an instance file,
-// or the inline values.
-type upstreamLayer struct {
-	src    source
-	values M
-}
-
-// Upstreams: the instance's upstream values, by the chart key that accepts
-// them.
-type Upstreams map[string]*chartUpstream
-
-// ReadUpstream: the upstream values of each chart of service.yaml that
-// accepts them, by chart: the files its upstream entry names
-// (upstream.<chart>.yaml, when it exists, by default) in the instance files,
-// then the inline upstream.<chart> of the merged instance values. Empty
-// sources are left out, as applyUpstream ignores them, and so is a file with
-// "{{" (NoTemplate): the mapping, which sees the values, could otherwise copy
-// template code into another chart.
-func ReadUpstream(instance fs.FS, specs Specs, values M) Upstreams {
-	inline := value.AsMap(values["upstream"])
-	out := Upstreams{}
-	for chart, spec := range specs {
-		if !spec.Upstream.Enabled {
-			continue
-		}
-		up := &chartUpstream{}
-		files, optional := spec.Upstream.Files, spec.Upstream.Files == nil
-		if optional {
-			files = []string{"upstream." + chart + ".yaml"}
-		}
-		for _, f := range files {
-			u, err := readUpstream(instance, path.Clean(f), optional)
-			if err == nil {
-				err = NoTemplate(u, source{file: f}.at)
-			}
-			if err != nil {
-				if up.err == nil {
-					up.err = err
-				}
-				continue
-			}
-			if len(u) > 0 {
-				up.layers = append(up.layers, upstreamLayer{source{file: f}, u})
-			}
-		}
-		if u := value.AsMap(inline[chart]); len(u) > 0 {
-			up.layers = append(up.layers, upstreamLayer{source{chart: chart}, u})
-		}
-		out[chart] = up
-	}
-	return out
-}
-
-// Show: params with the upstream values of each chart that has some, under
-// upstream.<chart>, as the mapping sees them (view): what will be applied to
-// the chart, its upstream.<chart>.yaml files merged with its inline values,
-// not the inline values alone. A rule of the mapping's errors section on
-// upstream values then covers both sources: a value it refuses cannot come
-// back through a file. The other keys of upstream stay as written. A chart
-// with upstream.from has no key of its own: it receives the values of the
-// chart it names.
-func (u Upstreams) Show(params M, specs Specs) {
-	for chart, up := range u {
-		if len(up.layers) == 0 {
-			continue
-		}
-		m, ok := params["upstream"].(M)
-		if !ok {
-			m = M{}
-			params["upstream"] = m
-		}
-		m[chart] = up.view(specs[chart].Append)
-	}
-}
-
-// view: the chart's upstream values as the mapping sees them
-// (values.upstream.<chart>): the sources merged in order as applyUpstream
-// merges them into the chart's values, the lists of appendPaths appended,
-// so that a rule of the mapping checks what will be applied. Unchecked:
-// protect and the "{{" check apply when the chart is compiled; no template
-// code of the instance is there all the same (its files are checked when
-// read, its values layers by the caller).
-func (up *chartUpstream) view(appendPaths []string) M {
-	v := M{}
-	for _, l := range up.layers {
-		if err := mergeUpstream(v, l.values, l.src, appendPaths); err != nil {
-			// A non-list on an append path fails the chart's compile; the
-			// mapping sees it as given.
-			value.Merge(v, l.values)
-		}
-	}
-	return v
-}
-
-// readUpstream: an upstream values file of the instance. An optional file
-// may be missing, as may the instance files altogether.
-func readUpstream(instance fs.FS, name string, optional bool) (M, error) {
-	if instance == nil {
-		if optional {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("upstream file %s: no instance files (Inputs.Instance)", name)
-	}
-	u, err := readValues(instance, name)
-	if optional && errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	return u, err
-}
-
-// source: where instance upstream values come from, for the errors: an
-// instance file, or the inline upstream.<chart> values.
-type source struct{ file, chart string }
+// source: where instance upstream values come from, for the errors: the
+// upstream.<chart> values of the instance.
+type source struct{ chart string }
 
 // at: the path p of the values of s (formatPath: a key in brackets joins
 // without a dot).
 func (s source) at(p string) string {
 	switch {
-	case s.file != "" && p == "":
-		return s.file
-	case s.file != "":
-		return s.file + ": " + p
 	case p == "":
 		return "upstream." + s.chart
 	case p[0] == '[':

@@ -5,7 +5,7 @@
 // objects are rendered with) and what every chart receives as global
 // (chart.FinalValues). An instance sets only the keys of global its
 // package's parameter schema declares, never okdp, and no template code:
-// the platform's layers and the package's values.yaml are reviewed, the
+// the platform's layers and the package's schema defaults are reviewed, the
 // instance's are input.
 package okdp
 
@@ -21,7 +21,7 @@ import (
 
 // valuesLayers: the layers of in, the platform's then the instance's, as
 // values (normalized), for chart.Parameters. An instance layer that sets
-// global fails, but for the keys values.schema.json of files declares under
+// global fails, but for the keys config.schema.json of files declares under
 // it (properties.global.properties), okdp excepted; then one with "{{" in a
 // key or a string, anywhere (chart.NoTemplate).
 func valuesLayers(files fs.FS, in Inputs) ([]map[string]any, error) {
@@ -45,7 +45,7 @@ func valuesLayers(files fs.FS, in Inputs) ([]map[string]any, error) {
 		}
 		for _, k := range slices.Sorted(maps.Keys(keys)) {
 			if declared == nil {
-				schema, err := readJSON(files, "values.schema.json")
+				schema, err := readJSON(files, "config.schema.json")
 				if err != nil {
 					return nil, err
 				}

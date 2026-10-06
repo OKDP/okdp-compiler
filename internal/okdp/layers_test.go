@@ -16,7 +16,7 @@ import (
 // not checked.
 func TestValuesLayers(t *testing.T) {
 	files := maps.Clone(pkg)
-	files["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer"},
+	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
 		"global": {"properties": {"imageRegistry": {"type": "string"}, "okdp": {"type": "object"}}}}}`)}
 	platform := []map[string]any{{"global": M{"imageRegistry": "platform.example.org"}}}
 	for name, tc := range map[string]struct {
@@ -32,7 +32,7 @@ func TestValuesLayers(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := inputs()
-			in.Platform, in.Values = platform, tc.instance
+			in.Platform, in.Values = append(in.Platform, platform...), tc.instance
 			res, err := Compile(withFiles(files), in)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -49,7 +49,7 @@ func TestValuesLayers(t *testing.T) {
 		})
 	}
 	in := inputs()
-	in.Platform = []map[string]any{{"global": M{"imageRegistry": "{{ .Values.registry }}"}}}
+	in.Platform = append(in.Platform, map[string]any{"global": M{"imageRegistry": "{{ .Values.registry }}"}})
 	if _, err := Compile(withFiles(files), in); err != nil {
 		t.Errorf("a template in a platform layer: %v", err)
 	}
@@ -57,11 +57,11 @@ func TestValuesLayers(t *testing.T) {
 
 // TestValuesLayersGoTypes: layers a Go caller builds with other types than
 // M are the same values read from a file: a map[string]string global merges
-// with the defaults of values.yaml rather than replacing them, an int32 is
+// with the global of an earlier layer rather than replacing it, an int32 is
 // a number. What values cannot hold fails, its layer and path named.
 func TestValuesLayersGoTypes(t *testing.T) {
 	in := inputs(map[string]any{"replicas": int32(2)})
-	in.Platform = []map[string]any{{"global": map[string]string{"imageRegistry": "platform.example.org"}}}
+	in.Platform = append(in.Platform, map[string]any{"global": map[string]string{"imageRegistry": "platform.example.org"}})
 	res, err := Compile(def, in)
 	if err != nil {
 		t.Fatal(err)

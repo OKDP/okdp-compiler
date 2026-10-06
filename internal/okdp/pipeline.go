@@ -26,12 +26,10 @@
 // in the mapping language embedded in the compiler (oidc-dcr.cel.yaml).
 //
 // An instance may set any value of a chart whose service.yaml entry accepts
-// it (upstream): in its files (Inputs.Instance, upstream.<chart>.yaml by
-// default), then inline (upstream.<chart> of its values). The compiler reads
-// both before the mapping runs and shows them merged as values.upstream.<chart>,
-// so that a rule of the mapping's errors section covers a value whatever its
-// source; it then merges them over the computed values, refusing the protect
-// paths and appending to the append lists (chart.FinalValues). A path names
+// it (upstream), under upstream.<chart> of its values. The mapping sees them
+// (values.upstream.<chart>), so that a rule of its errors section covers
+// them; the compiler then merges them over the computed values, refusing
+// the protect paths and appending to the append lists (chart.FinalValues). A path names
 // a key that contains dots in brackets, and a family of keys with a final
 // glob: annotations["nginx.ingress.kubernetes.io/auth-*"]. A chart rendered
 // by the same upstream chart as another may receive the upstream values of
@@ -61,7 +59,6 @@ type M = value.M
 // Inputs: what one compile reads besides the package.
 type Inputs struct {
 	Charts    fs.FS            // chart cache: the upstream charts, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/, <repository> the URL without its scheme
-	Instance  fs.FS            // instance files: the upstream values files of service.yaml (optional)
 	Contracts fs.FS            // the contract schemas: <contract>.schema.json
 	Platform  []map[string]any // platform values layers, in order (helm -f): global, global.okdp among them; see chart.ParseValues; Go values of any type, read as Helm values (value.Normalize)
 	Values    []map[string]any // instance values layers, in order, after Platform: no global but the keys the parameter schema declares (valuesLayers)
@@ -160,7 +157,7 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 	}
 	budget := compile.NewBudget(ctx, set.costLimit)
 	// What the mapping sees: values, platform context, resolved connections.
-	mctx, values, ups, deps, err := buildContext(def.Files, in, svc)
+	mctx, values, deps, err := buildContext(def.Files, in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +213,7 @@ func CompileContext(ctx context.Context, def *Definition, in Inputs, opts ...Opt
 	}
 	// The final values of each chart of the output; charts left out by the
 	// mapping ($if) are not rendered.
-	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, svc.Charts, res.output, values, ups); err != nil {
+	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, svc.Charts, res.output, values); err != nil {
 		return nil, err
 	}
 	return out, nil

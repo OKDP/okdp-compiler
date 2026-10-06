@@ -20,17 +20,15 @@ import (
 // server compiling from git) passes.
 var (
 	pkg = fstest.MapFS{
-		"values.yaml": {Data: []byte(`replicas: 1
-global:
-  okdp:
-    ingress:
-      suffix: example.org
-    charts:
-      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
-`)},
-		"values.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
+		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
 		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
 	}
+	// The platform values every compile gets, the first platform layer of
+	// inputs.
+	platformValues = map[string]any{"global": M{"okdp": M{
+		"ingress": M{"suffix": "example.org"},
+		"charts":  M{"objects": M{"repository": "oci://registry.example.org/okdp", "chart": "okdp-objects", "version": "1.0.0"}},
+	}}}
 	// The chart cache: the upstream charts' defaults.
 	charts = fstest.MapFS{
 		"app-1.0.0/values.yaml":          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
@@ -68,7 +66,7 @@ instance:
 // layers: the global of each, a platform layer (Inputs.Platform), the rest,
 // an instance layer (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
-	in := Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "demo"}
+	in := Inputs{Charts: charts, Contracts: contracts, Platform: []map[string]any{platformValues}, Release: "demo-app", Namespace: "demo"}
 	for _, l := range layers {
 		if g, ok := l["global"]; ok {
 			in.Platform = append(in.Platform, map[string]any{"global": g})
@@ -144,14 +142,12 @@ func TestCompileContext(t *testing.T) {
 		t.Errorf("within the cost limit: %v", err)
 	}
 	// Without the okdp chart, global.okdp.charts.objects is not required.
-	files := maps.Clone(pkg)
-	files["values.yaml"] = &fstest.MapFile{Data: []byte("replicas: 1\nglobal: {okdp: {ingress: {suffix: example.org}}}\n")}
-	bare := *def
-	bare.Files = files
-	if _, err := Compile(&bare, inputs(v)); err == nil || !strings.Contains(err.Error(), "global.okdp.charts.objects is required") {
+	bare := inputs(v)
+	bare.Platform = []map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}}}
+	if _, err := Compile(def, bare); err == nil || !strings.Contains(err.Error(), "global.okdp.charts.objects is required") {
 		t.Errorf("with the okdp chart: got %v, want global.okdp.charts.objects required", err)
 	}
-	res, err := CompileContext(context.Background(), &bare, inputs(v), WithoutObjectsChart())
+	res, err := CompileContext(context.Background(), def, bare, WithoutObjectsChart())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,8 +196,8 @@ func TestCompileErrors(t *testing.T) {
 }
 
 // TestServicePaths: Compile refuses a malformed protect path of a
-// definition built in memory; a bracketed path protects an upstream file's
-// values too.
+// definition built in memory; a bracketed path protects the instance's
+// upstream values.
 func TestServicePaths(t *testing.T) {
 	d := *def
 	d.Mapping = []byte("output:\n  app: {}\n")
@@ -210,10 +206,9 @@ func TestServicePaths(t *testing.T) {
 		t.Errorf("in memory: got %v", err)
 	}
 	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: chart.Upstream{Enabled: true}, Protect: []string{`labels["okdp.io/*"]`}}}
-	in := inputs()
-	in.Instance = fstest.MapFS{"upstream.app.yaml": {Data: []byte("labels: {okdp.io/instance: other}\n")}}
-	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), `app: upstream.app.yaml: labels["okdp.io/instance"]: labels["okdp.io/*"] is set by the platform and cannot be changed`) {
-		t.Errorf("upstream file: got %v", err)
+	in := inputs(M{"upstream": M{"app": M{"labels": M{"okdp.io/instance": "other"}}}})
+	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), `app: upstream.app.labels["okdp.io/instance"]: labels["okdp.io/*"] is set by the platform and cannot be changed`) {
+		t.Errorf("a protected key: got %v", err)
 	}
 	in = inputs(M{"upstream": M{"app": M{"labels": M{"team": "a"}}}})
 	res, err := Compile(&d, in)
@@ -225,8 +220,8 @@ func TestServicePaths(t *testing.T) {
 // TestDependencies: internal references only, with their parameter path.
 func TestDependencies(t *testing.T) {
 	ch := maps.Clone(pkg)
-	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"replicas": {"type": "integer"},
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+		"replicas": {"type": "integer", "default": 1},
 		"backends": {"type": "array", "items": {"properties": {
 			"database": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}}}}`)}
 	in := inputs(map[string]any{
@@ -252,36 +247,22 @@ func TestDependencies(t *testing.T) {
 	}
 }
 
-// TestUpstreamFiles: the instance's upstream values files, in order, then
-// its inline upstream values, each checked against protect and append.
-func TestUpstreamFiles(t *testing.T) {
-	instance := fstest.MapFS{
-		"upstream.app.yaml": {Data: []byte("image: {tag: default-file}\nenv: [A]\n")},
-		"a.yaml":            {Data: []byte("image: {tag: a}\nenv: [A]\nextra: a\n")},
-		"b.yaml":            {Data: []byte("image: {tag: b}\nenv: [B]\n")},
-		"protected.yaml":    {Data: []byte("labels: {x: y}\n")},
-	}
-	inline := map[string]any{"upstream": map[string]any{"app": map[string]any{"env": []any{"C"}}}}
+// TestUpstreamValues: the instance's upstream values of a chart that
+// accepts them, over its computed values, checked against protect and
+// append; none for a chart that does not.
+func TestUpstreamValues(t *testing.T) {
+	inline := map[string]any{"upstream": map[string]any{"app": map[string]any{"image": map[string]any{"tag": "inline"}, "env": []any{"C"}}}}
 	for name, tc := range map[string]struct {
 		upstream chart.Upstream
-		instance fstest.MapFS
 		want     map[string]any // the keys of the final values checked
 	}{
-		"disabled":          {chart.Upstream{}, instance, map[string]any{"image": map[string]any{"tag": "4.5"}, "env": nil}},
-		"default file":      {chart.Upstream{Enabled: true}, instance, map[string]any{"image": map[string]any{"tag": "default-file"}, "env": []any{"A", "C"}}},
-		"no default file":   {chart.Upstream{Enabled: true}, fstest.MapFS{}, map[string]any{"image": map[string]any{"tag": "4.5"}, "env": []any{"C"}}},
-		"no instance files": {chart.Upstream{Enabled: true}, nil, map[string]any{"image": map[string]any{"tag": "4.5"}, "env": []any{"C"}}},
-		"one path":          {chart.Upstream{Enabled: true, Files: []string{"b.yaml"}}, instance, map[string]any{"image": map[string]any{"tag": "b"}, "env": []any{"B", "C"}}},
-		"paths in order":    {chart.Upstream{Enabled: true, Files: []string{"a.yaml", "b.yaml"}}, instance, map[string]any{"image": map[string]any{"tag": "b"}, "env": []any{"A", "B", "C"}, "extra": "a"}},
+		"disabled": {chart.Upstream{}, map[string]any{"image": map[string]any{"tag": "4.5"}, "env": nil}},
+		"enabled":  {chart.Upstream{Enabled: true}, map[string]any{"image": map[string]any{"tag": "inline"}, "env": []any{"C"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
 			d.Service.Charts = chart.Specs{"app": {Source: appSource, Base: "base/app.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
-			in := inputs(inline)
-			if tc.instance != nil {
-				in.Instance = tc.instance
-			}
-			res, err := Compile(&d, in)
+			res, err := Compile(&d, inputs(inline))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -292,44 +273,15 @@ func TestUpstreamFiles(t *testing.T) {
 			}
 		})
 	}
-	for name, tc := range map[string]struct {
-		files    []string
-		instance fstest.MapFS
-		want     string
-	}{
-		"missing path":      {[]string{"missing.yaml"}, instance, "app: open missing.yaml"},
-		"no instance files": {[]string{"a.yaml"}, nil, "upstream file a.yaml: no instance files"},
-		"protected path":    {[]string{"protected.yaml"}, instance, "protected.yaml: labels: labels is set by the platform"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := *def
-			d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: chart.Upstream{Enabled: true, Files: tc.files}, Protect: []string{"labels"}}}
-			in := inputs()
-			if tc.instance != nil {
-				in.Instance = tc.instance
-			}
-			if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error containing %q", err, tc.want)
-			}
-		})
-	}
-	// A file that cannot be read fails the compile of its chart only: a
-	// chart the mapping leaves out does not need it.
 	d := *def
-	d.Mapping = []byte("output:\n  app: {$if: '${{ values.replicas > 1 }}'}\n")
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: chart.Upstream{Enabled: true, Files: []string{"missing.yaml"}}}}
-	if _, err := Compile(&d, inputs()); err != nil {
-		t.Errorf("chart left out: %v", err)
-	}
-	if _, err := Compile(&d, inputs(M{"replicas": 2})); err == nil || !strings.Contains(err.Error(), "app: upstream file missing.yaml: no instance files") {
-		t.Errorf("chart compiled: got %v", err)
+	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: chart.Upstream{Enabled: true}, Protect: []string{"labels"}}}
+	if _, err := Compile(&d, inputs(M{"upstream": M{"app": M{"labels": M{"x": "y"}}}})); err == nil || !strings.Contains(err.Error(), "app: upstream.app.labels: labels is set by the platform") {
+		t.Errorf("a protected path: got %v", err)
 	}
 }
 
 // TestUpstreamSeenByMapping: the mapping sees the instance's upstream
-// values, files and inline, as they will be applied, so that a rule of its
-// errors section covers a value written in an upstream file too (the files
-// used to be merged after the mapping, out of its sight).
+// values, so that a rule of its errors section covers them.
 func TestUpstreamSeenByMapping(t *testing.T) {
 	d := *def
 	d.Mapping = []byte(`
@@ -342,22 +294,14 @@ output:
 `)
 	d.Service.Charts = chart.Specs{"app": {Source: appSource, Base: "base/app.yaml", Upstream: chart.Upstream{Enabled: true}}}
 	for name, tc := range map[string]struct {
-		file   string // upstream.app.yaml of the instance, none when empty
 		inline M      // upstream.app
 		want   string // the error, or the image tag applied
 	}{
-		"refused inline":      {"", M{"image": M{"tag": "latest"}}, "upstream.app.image.tag: latest is refused"},
-		"refused in a file":   {"image: {tag: latest}\n", nil, "upstream.app.image.tag: latest is refused"},
-		"inline over a file":  {"image: {tag: latest}\n", M{"image": M{"tag": "5.0"}}, "5.0"},
-		"a file over nothing": {"image: {tag: \"5.1\"}\n", nil, "5.1"},
-		"a file under inline": {"image: {tag: \"5.1\"}\n", M{"image": M{"tag": "latest"}}, "upstream.app.image.tag: latest is refused"},
+		"refused":  {M{"image": M{"tag": "latest"}}, "upstream.app.image.tag: latest is refused"},
+		"accepted": {M{"image": M{"tag": "5.0"}}, "5.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			in := inputs(M{"upstream": M{"app": tc.inline}})
-			if tc.file != "" {
-				in.Instance = fstest.MapFS{"upstream.app.yaml": {Data: []byte(tc.file)}}
-			}
-			res, err := Compile(&d, in)
+			res, err := Compile(&d, inputs(M{"upstream": M{"app": tc.inline}}))
 			if strings.Contains(tc.want, " ") {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Errorf("got %v, want an error containing %q", err, tc.want)
@@ -548,8 +492,8 @@ func TestSharedSource(t *testing.T) {
 }
 
 // TestUpstreamFrom: a chart with upstream.from receives the upstream values
-// of the chart it names, files and inline, with that chart's protect and
-// append: one set of instance values for two renders of an upstream chart.
+// of the chart it names, with that chart's protect and append: one set of
+// instance values for two renders of an upstream chart.
 func TestUpstreamFrom(t *testing.T) {
 	var svc Service
 	if err := yaml.Unmarshal([]byte(`
@@ -572,17 +516,15 @@ output:
   app: {$if: '${{ values.replicas > 1 }}', replicaCount: '${{ values.replicas }}', env: [A]}
   canary: {replicaCount: 1, env: [CANARY]}
 `)
-	instance := fstest.MapFS{"upstream.app.yaml": {Data: []byte("image: {tag: from-file}\nenv: [F]\n")}}
-	in := inputs(M{"replicas": 2, "upstream": M{"app": M{"env": []any{"I"}, "resources": M{"cpu": "1"}}}})
-	in.Instance = instance
+	in := inputs(M{"replicas": 2, "upstream": M{"app": M{"image": M{"tag": "inline"}, "env": []any{"I"}, "resources": M{"cpu": "1"}}}})
 	res, err := Compile(&d, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, env := range map[string][]any{"app": {"A", "F", "I"}, "canary": {"CANARY", "F", "I"}} {
+	for key, env := range map[string][]any{"app": {"A", "I"}, "canary": {"CANARY", "I"}} {
 		v := res.Values[key]
-		if value.Dig(v, "image.tag") != "from-file" || value.Dig(v, "resources.cpu") != "1" || !reflect.DeepEqual(v["env"], env) {
-			t.Errorf("%s: the instance file and inline values of app, env appended: %#v", key, v)
+		if value.Dig(v, "image.tag") != "inline" || value.Dig(v, "resources.cpu") != "1" || !reflect.DeepEqual(v["env"], env) {
+			t.Errorf("%s: the upstream values of app, env appended: %#v", key, v)
 		}
 	}
 	if res.Charts["canary"] != appSource || res.Values["canary"]["replicaCount"] != float64(1) {
@@ -594,23 +536,15 @@ output:
 		replicas int
 		want     string
 	}{
-		"both renders": {2, "app: upstream.app.yaml: labels: labels is set by the platform"},
-		"canary alone": {1, "canary: upstream.app.yaml: labels: labels is set by the platform"},
+		"both renders": {2, "app: upstream.app.labels: labels is set by the platform"},
+		"canary alone": {1, "canary: upstream.app.labels: labels is set by the platform"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			in := inputs(M{"replicas": tc.replicas})
-			in.Instance = fstest.MapFS{"upstream.app.yaml": {Data: []byte("labels: {x: y}\n")}}
+			in := inputs(M{"replicas": tc.replicas, "upstream": M{"app": M{"labels": M{"x": "y"}}}})
 			if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
-	}
-	// The mapping sees app's values once, under upstream.app.
-	in = inputs(M{"replicas": 1})
-	in.Instance = instance
-	d.Mapping = []byte("errors: ['${{ has(values.upstream.canary) || values.upstream.app.image.tag != \"from-file\" ? [\"wrong view\"] : [] }}']\noutput: {canary: {}}\n")
-	if _, err := Compile(&d, in); err != nil {
-		t.Error(err)
 	}
 	// What service.yaml may not hold.
 	for name, tc := range map[string]struct {

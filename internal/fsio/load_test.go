@@ -22,7 +22,7 @@ dependsOn: [ingress]
 require: [a, {key: b, $if: "${{ values.on }}"}]
 charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base: f.yaml, protect: [p]}}
 `)},
-		"mapping.cel.yaml": {Data: []byte("output: {}\n")},
+		"values.cel.yaml": {Data: []byte("output: {}\n")},
 	}
 	d, err := LoadDefinition(ok)
 	if err != nil {
@@ -39,18 +39,18 @@ charts: {app: {source: {repository: https://x, chart: app, version: 1.0.0}, base
 		fsys fstest.MapFS
 		want string
 	}{
-		"no service.yaml":   {fstest.MapFS{"mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml"},
-		"no mapping":        {fstest.MapFS{"service.yaml": ok["service.yaml"]}, "mapping.cel.yaml"},
-		"bad service.yaml":  {fstest.MapFS{"service.yaml": {Data: []byte("charts: [")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: "},
-		"wrong field types": {fstest.MapFS{"service.yaml": {Data: []byte("charts: [a]\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: "},
-		"unknown fields":    {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nchrats: {}\ncharts: {app: {protcet: [p]}}\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: line 2: unknown field chrats (allowed: name, version, roles, dependsOn, charts, require)\nservice.yaml: line 3: unknown field protcet (allowed: source, base, protect, append, upstream)"},
-		"two documents":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\n---\nname: other\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: line 3: a second YAML document: service.yaml is one document"},
-		"an empty file":     {fstest.MapFS{"service.yaml": {Data: []byte("# nothing\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: name is required"},
-		"no name":           {fstest.MapFS{"service.yaml": {Data: []byte("version: 1.0.0\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: name is required"},
-		"no version":        {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: version is required"},
-		"a chart check":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\ncharts: {app: {}}\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: charts.app.source is required"},
-		"a require entry":   {fstest.MapFS{"service.yaml": {Data: []byte("require: [a, {key: b, if: x}]\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: require[1]: unknown field if"},
-		"a require check":   {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\nrequire:\n  - a\n  -\n")}, "mapping.cel.yaml": ok["mapping.cel.yaml"]}, "service.yaml: require[1]: an empty key"},
+		"no service.yaml":   {fstest.MapFS{"values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml"},
+		"no mapping":        {fstest.MapFS{"service.yaml": ok["service.yaml"]}, "values.cel.yaml"},
+		"bad service.yaml":  {fstest.MapFS{"service.yaml": {Data: []byte("charts: [")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: "},
+		"wrong field types": {fstest.MapFS{"service.yaml": {Data: []byte("charts: [a]\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: "},
+		"unknown fields":    {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nchrats: {}\ncharts: {app: {protcet: [p]}}\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: line 2: unknown field chrats (allowed: name, version, roles, dependsOn, charts, require)\nservice.yaml: line 3: unknown field protcet (allowed: source, base, protect, append, upstream)"},
+		"two documents":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\n---\nname: other\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: line 3: a second YAML document: service.yaml is one document"},
+		"an empty file":     {fstest.MapFS{"service.yaml": {Data: []byte("# nothing\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: name is required"},
+		"no name":           {fstest.MapFS{"service.yaml": {Data: []byte("version: 1.0.0\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: name is required"},
+		"no version":        {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: version is required"},
+		"a chart check":     {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\ncharts: {app: {}}\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: charts.app.source is required"},
+		"a require entry":   {fstest.MapFS{"service.yaml": {Data: []byte("require: [a, {key: b, if: x}]\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: require[1]: unknown field if"},
+		"a require check":   {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\nversion: 1.0.0\nrequire:\n  - a\n  -\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "service.yaml: require[1]: an empty key"},
 	} {
 		if _, err := LoadDefinition(tc.fsys); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)

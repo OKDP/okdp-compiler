@@ -1,8 +1,0 @@
-# The instance's upstream values file for the app chart (--instance, read
-# as service.yaml sets charts.app.upstream: true): values for the chart as
-# it is, over the base and computed values, before the inline upstream.app
-# of values.yaml beside this file.
-resources:
-  limits: {memory: 512Mi}
-env:                                   # appended (append: [env]), before the inline items
-  - {name: TZ, value: Europe/Paris}

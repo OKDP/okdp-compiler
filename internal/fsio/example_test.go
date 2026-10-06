@@ -24,8 +24,8 @@ var (
 	input   = filepath.Join(example, "input")
 )
 
-// exampleCompile: the example package compiled with its chart cache,
-// instance files and contracts, the platform values (platform.yaml, then
+// exampleCompile: the example package compiled with its chart cache and
+// contracts, the platform values (platform.yaml, then
 // these platform files) and these instance values files, under the
 // example's release and namespace.
 func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition, *okdp.Result, error) {
@@ -36,7 +36,6 @@ func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition
 	}
 	in := okdp.Inputs{
 		Charts:    os.DirFS(filepath.Join(input, "charts")),
-		Instance:  os.DirFS(filepath.Join(input, "instance")),
 		Contracts: os.DirFS(filepath.Join(input, "contracts")),
 		Platform:  readLayers(t, append([]string{filepath.Join(input, "platform.yaml")}, platform...)),
 		Values:    readLayers(t, instance),
@@ -65,14 +64,13 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 	return layers
 }
 
-// TestExample compiles the example instance (input/instance/: its
-// values.yaml and its files) and compares what it writes with the example's
-// outputs, byte for byte: output-no-dcr/helm-cmd/, what --emit-dir
+// TestExample compiles the example instance (input/instance/config.yaml)
+// and compares what it writes with the example's outputs, byte for byte: output-no-dcr/helm-cmd/, what --emit-dir
 // --mkinstall writes, and output-no-dcr/umbrella-chart/, what --umbrella
 // writes; output-dcr/helm-cmd/, what --emit-dir --mkinstall writes with
 // platform-dcr.yaml after platform.yaml.
 func TestExample(t *testing.T) {
-	instance := []string{filepath.Join(input, "instance", "values.yaml")}
+	instance := []string{filepath.Join(input, "instance", "config.yaml")}
 	def, res, err := exampleCompile(t, nil, instance)
 	if err != nil {
 		t.Fatal(err)

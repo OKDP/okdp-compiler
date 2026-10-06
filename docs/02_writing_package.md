@@ -13,11 +13,11 @@ in [usage](01_usage.md), the internals in [architecture](00_architecture.md).
 ## What a package is
 
 A package is a directory of a git repository, not a chart. It carries the
-parameters an instance sets (`values.yaml`, `values.schema.json`), OKDP's
-default values for each upstream chart (`base/`), and the service
-definition. `service.yaml` names the service, the upstream charts it is
+parameters an instance sets (`config.schema.json`, their defaults
+included), OKDP's fixed values for each upstream chart (`base/`), and the
+service definition. `service.yaml` names the service, the upstream charts it is
 made of, each by its source (repository, chart, pinned version), and what
-an instance may override; `mapping.cel.yaml` says how the values of each
+an instance may override; `values.cel.yaml` says how the values of each
 chart follow from the parameters, the platform values (`global.okdp`) and
 the connections, and declares the service's OAuth clients. `okdp-compile`
 turns the values of one instance into the final values of every chart and
@@ -29,9 +29,8 @@ the package is published as a chart.
 ```
 <name>/
 ├── service.yaml            name, version, roles, dependsOn; the charts and their sources, base values, required platform values, protect, append
-├── mapping.cel.yaml        computed values, OAuth clients, OKDP's own objects, descriptor, provided connections
-├── values.yaml             the parameters, with their defaults
-├── values.schema.json      their schema: types, rules, x-ui-* hints, x-okdp-connection-ref
+├── values.cel.yaml         computed values, OAuth clients, OKDP's own objects, descriptor, provided connections
+├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── base/<key>.yaml         base values of each chart: plain YAML
 ├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --platform
 ├── ci/<case>-values.yaml   test instances, without global
@@ -125,39 +124,31 @@ Keep the surface small: sizing, switches, connection references, and the few
 settings that mean something on the platform. Any other value of an upstream
 chart is reached through `upstream.<chart>`, without a parameter.
 
-```yaml
-# values.yaml
-replicas: 1
-database: ""              # a connection reference (database contract)
-metrics:
-  enabled: false
-  interval: 30s
-global:
-  okdp: {}                # platform values: the platform's layers (--platform), never an instance's
-connections: {}           # external connections, one values layer per connection file
-upstream: {}              # values of the upstream charts, by chart
-```
-
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "global": {"type": "object"},
-    "connections": {"type": "object"},
-    "replicas": {"type": "integer", "minimum": 1, "title": "Replicas", "x-ui-group": "Sizing"},
+    "global": {"type": "object", "description": "Platform values: the platform's layers (--platform), never an instance's."},
+    "connections": {"type": "object", "default": {}, "description": "External connections, one values layer per connection file."},
+    "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
     "database": {
       "type": "string",
+      "default": "",
       "x-okdp-connection-ref": {"contract": "database"},
       "not": {"pattern": "\\{\\{|\\}\\}|[\\r\\n]"}
     },
     "metrics": {
       "type": "object",
-      "properties": {"enabled": {"type": "boolean"}, "interval": {"type": "string"}}
+      "properties": {
+        "enabled": {"type": "boolean", "default": false},
+        "interval": {"type": "string", "default": "30s"}
+      }
     },
     "upstream": {
       "type": "object",
+      "default": {},
       "additionalProperties": false,
       "properties": {"app": {"type": "object", "allOf": [{"$ref": "#/definitions/noTemplate"}]}}
     }
@@ -173,12 +164,19 @@ upstream: {}              # values of the upstream charts, by chart
 }
 ```
 
-- The schema is required: the compiler finds the connection references
-  through it, and checks the values against it before the mapping runs
+- The schema is required: the compiler takes the parameters' defaults from
+  it, finds the connection references through it, and checks the values
+  against it before the mapping runs
   ([schema check](specs/01_inputs_outputs.md#schema-check)): a rule
   on a parameter belongs here, not in the mapping's `errors`. Declare
   `$schema`. With `additionalProperties: false`, declare `global`,
   `connections` and `upstream` too.
+- A `default` gives a parameter its value when no layer sets it, as a
+  chart's `values.yaml` does: on a property reached from the root through
+  `properties` only, never under `allOf`, `items`, `additionalProperties`,
+  `definitions`... (each compile fails on one there), nor on both an object
+  and a property under it. `metrics` above gets its defaults from its
+  properties' ([defaults](specs/01_inputs_outputs.md#defaults)).
 - `global` is the platform's: an instance that sets it fails. A key the
   schema declares under it (`"global": {"properties": {"imageRegistry":
   ...}}`), never `okdp`, is one an instance may set, and every chart
@@ -214,8 +212,8 @@ require:                                 # read by the mapping in every case
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    base: base/app.yaml                  # OKDP's defaults, plain YAML
-    upstream: true                       # upstream.app.yaml, then inline upstream.app
+    base: base/app.yaml                  # OKDP's fixed values, plain YAML
+    upstream: true                       # the instance's upstream.app
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
     append: [env]
   metrics:                               # no base values, no instance values
@@ -264,7 +262,7 @@ charts:
   (airflow's `extraEnv`) cannot be appended to: protect it and point users at
   another list.
 
-### 5. Write mapping.cel.yaml
+### 5. Write values.cel.yaml
 
 The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [expressions](specs/02_service_definition.md#expressions) and
@@ -373,7 +371,7 @@ instance of the namespace: host `demo-db-db.demo.svc`, Secret
 sync waves). The mapping reads both the same way, credentials through a
 `secretKeyRef` on `secretRef.name`; it fails with a clear message when it
 needs the Secret and the connection has none (the second `errors` entry of
-`examples/02_advanced/input/service/mapping.cel.yaml`). `s3` and
+`examples/02_advanced/input/service/values.cel.yaml`). `s3` and
 `database-server` have no internal convention: they are always external (cnpg-postgresql publishes one
 `database-server` connection per database, which consumers declare as
 connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
@@ -408,7 +406,7 @@ it (cnpg-postgresql). Neither: consumers bring their own identity
 ### 7. Compile, render and check
 
 Each `ci/<case>-values.yaml` is an instance: its connections and
-parameters, without `global`, which an instance file may not set. The
+parameters, without `global`, which an instance may not set. The
 platform values (`global.okdp`, `charts.objects` included) are given apart,
 with `--platform`: `ci/platform.yaml` for every case, then, for a case that
 needs others, its own `ci/<case>-platform.yaml`. Write one case per mode:
@@ -552,7 +550,7 @@ charts:
   polaris-admin:
     source: &admin {repository: https://charts.example.org, chart: polaris-admin, version: 1.0.0}
     base: base/polaris-admin-bootstrap.yaml
-    upstream: true                     # upstream.polaris-admin.yaml, then inline upstream.polaris-admin
+    upstream: true                     # the instance's upstream.polaris-admin
     protect: [fullnameOverride, phase, realms]
   polaris-admin-principals:            # the values of a second render
     source: *admin                     # the same chart
@@ -561,7 +559,7 @@ charts:
 ```
 
 ```yaml
-# mapping.cel.yaml
+# values.cel.yaml
 output:
   polaris-admin:
     realms: ${{ adminRealms }}
@@ -746,15 +744,15 @@ charts:
       - 'config["spark.ui.filters"]'                                  # one key, dots included
 ```
 
-The path covers the instance's files and inline values alike:
+An instance setting one of them fails:
 
 ```text
-app: upstream.app.yaml: ingress.annotations["nginx.ingress.kubernetes.io/auth-url"]: ingress.annotations["nginx.ingress.kubernetes.io/auth-*"] is set by the platform and cannot be changed
+app: upstream.app.ingress.annotations["nginx.ingress.kubernetes.io/auth-url"]: ingress.annotations["nginx.ingress.kubernetes.io/auth-*"] is set by the platform and cannot be changed
 ```
 
 A rule no path expresses (a value that depends on a parameter) goes in
-`errors`: the mapping sees the instance's files and inline values merged,
-as `values.upstream.<key>`.
+`errors`: the mapping sees the instance's upstream values, as
+`values.upstream.<key>`.
 
 ## Pitfalls
 
@@ -831,7 +829,7 @@ as `values.upstream.<key>`.
   the same source.
 - [ ] `service.yaml`: `name`, `version` `<upstream>-<okdp semver>`,
   `roles` and `dependsOn`.
-- [ ] `values.schema.json` declares `$schema`, every parameter with its
+- [ ] `config.schema.json` declares `$schema`, every parameter with its
   rules, `global`, `connections`, and `upstream` for exactly the charts that
   accept instance values; strings pasted into files refuse `{{`, `}}` and
   line breaks.

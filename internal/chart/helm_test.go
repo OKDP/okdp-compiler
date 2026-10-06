@@ -229,7 +229,11 @@ func TestHelmSchema(t *testing.T) {
 				}
 				user = value.Merge(user, l)
 			}
-			v, err := schemaViolations(fsys, "values.schema.json", coalesceValues(defaults, user))
+			schema, err := os.ReadFile(filepath.Join(dir, "values.schema.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := checkSchema("values.schema.json", schema, coalesceValues(defaults, user))
 			if err != nil {
 				t.Fatal(err)
 			}

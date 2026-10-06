@@ -1,10 +1,9 @@
 // Context: what a mapping sees. It loads the values layers, the platform's
 // then the instance's (valuesLayers, chart.Parameters), checks the platform
 // requirements, derives the platform context from global.okdp (its settings
-// checked against their types), resolves the connection references
-// (connections.go), and reads the instance's upstream values
-// (chart.ReadUpstream). The requirements under a condition are checked on
-// the context (requireWhen).
+// checked against their types) and resolves the connection references
+// (connections.go). The requirements under a condition are checked on the
+// context (requireWhen).
 package okdp
 
 import (
@@ -21,21 +20,20 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// Context: what a mapping sees, the merged values, the instance's upstream
-// values of each chart that accepts them (applied by chart.FinalValues), and
-// the instances the connection references point to. files: the package.
-func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, []Dependency, error) {
+// Context: what a mapping sees, the merged values (their upstream values
+// applied by chart.FinalValues), and the instances the connection references
+// point to. files: the package.
+func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, []Dependency, error) {
 	// 1. values layers, as Helm: the platform's then the instance's (global
 	// is the platform's: valuesLayers), merged in order as -f files,
-	// coalesced over the package's defaults, checked against the parameter
-	// schema.
+	// coalesced over the parameter schema's defaults, checked against it.
 	layers, err := valuesLayers(files, in)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	values, err := chart.Parameters(files, svc.Name, layers)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	global := value.AsMap(values["global"])
 	okdpG := value.AsMap(global["okdp"])
@@ -46,12 +44,12 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 			continue
 		}
 		if err := required(okdpG, r.Key); err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	// 3. platform context, from the settings checked against their types.
 	if err := checkPlatform(values["global"]); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	// OIDC: defaults, then the client provisioning mode (existing or dcr).
 	oidc := value.AsMap(value.Copy(okdpG["oidc"]))
@@ -66,12 +64,12 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	}
 	mode := value.Str(oidc["clientProvisioning"])
 	if mode != "existing" && mode != "dcr" {
-		return nil, nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
+		return nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
 	}
 	// The settings of the oidc-dcr Jobs, defaults applied (oidc.go).
 	dcr := value.AsMap(value.Copy(oidc["dcr"]))
 	if err := dcrSettings(dcr); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	dcr["enabled"] = value.Truthy(oidc["enabled"]) && mode == "dcr"
 	oidc["dcr"] = dcr
@@ -96,25 +94,20 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	}
 	// 4. connection references, resolved in place (x-okdp-connection-ref);
 	// every reference that does not resolve is reported.
-	schema, err := readJSON(files, "values.schema.json")
+	schema, err := readJSON(files, "config.schema.json")
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	// The mapping gets a copy: the merged values stay as the user wrote them.
 	params := value.AsMap(value.Copy(values))
 	var deps []Dependency
 	r := resolver{in: in, conns: value.AsMap(values["connections"]), suffix: value.Str(value.Dig(okdpG, "ingress.suffix")), deps: &deps}
 	if err := r.resolveAll(schema, params); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	// Not parameters: global is exposed apart, connections are resolved.
 	delete(params, "global")
 	delete(params, "connections")
-	// 5. the instance's upstream values: values.upstream.<chart> is what
-	// will be applied to the chart, its files merged with its inline values
-	// (Upstreams.Show).
-	ups := chart.ReadUpstream(in.Instance, svc.Charts, values)
-	ups.Show(params, svc.Charts)
 	ctx := M{
 		"release":  M{"name": in.Release, "namespace": in.Namespace},
 		"values":   params,
@@ -125,7 +118,7 @@ func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, chart.Upstreams, 
 	maps.Copy(ctx, serviceContext(svc.meta(), in.Release))
 	// By parameter path, in string order, as the errors of the references.
 	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
-	return ctx, values, ups, deps, nil
+	return ctx, values, deps, nil
 }
 
 // requireWhen: the requirements under a condition, in order, each condition

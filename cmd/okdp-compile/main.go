@@ -1,6 +1,6 @@
 // okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
-//	[--instance <dir>] --platform platform.yaml [--platform ...] -f values.yaml [-f ...]
+//	--platform platform.yaml [--platform ...] -f values.yaml [-f ...]
 //	--release <name> --namespace <name>
 //	[--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent 2]
 
@@ -37,7 +37,6 @@ func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 type options struct {
 	pkg, charts        string
 	contracts          string
-	instance           string
 	release, namespace string
 	platform, values   multi
 	out, emitDir       string
@@ -108,10 +107,9 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	f := flag.NewFlagSet("okdp-compile", flag.ContinueOnError)
 	f.SetOutput(stderr)
 	f.BoolVar(&o.version, "version", false, "print the version and exit")
-	f.StringVar(&o.pkg, "package", "", "package directory (service.yaml, mapping.cel.yaml, values.yaml, values.schema.json)")
+	f.StringVar(&o.pkg, "package", "", "package directory (service.yaml, values.cel.yaml, config.schema.json)")
 	f.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts, <repository>/<chart>-<version>.tgz (helm pull -d <dir>/<repository>) or <repository>/<chart>-<version>/, <repository> the URL without its scheme (default $OKDP_CHARTS)")
 	f.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
-	f.StringVar(&o.instance, "instance", "", "instance directory (upstream values files: upstream.<chart>.yaml)")
 	f.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
 	f.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	f.Var(&o.platform, "platform", "platform values file (global, global.okdp among them), repeatable, before the -f files")
@@ -158,7 +156,7 @@ func run(o options) error {
 	case o.emitDir != "" && o.umbrella != "" && sameDir(o.emitDir, o.umbrella):
 		return fmt.Errorf("--emit-dir and --umbrella name the same directory, %s: give each its own", o.umbrella)
 	}
-	for _, d := range [][2]string{{"package", o.pkg}, {"charts", o.charts}, {"contracts", o.contracts}, {"instance", o.instance}} {
+	for _, d := range [][2]string{{"package", o.pkg}, {"charts", o.charts}, {"contracts", o.contracts}} {
 		if err := inputDir(d[0], d[1]); err != nil {
 			return err
 		}
@@ -172,9 +170,6 @@ func run(o options) error {
 		Contracts: os.DirFS(o.contracts),
 		Release:   o.release,
 		Namespace: o.namespace,
-	}
-	if o.instance != "" {
-		in.Instance = os.DirFS(o.instance)
 	}
 	if in.Platform, err = readValues(o.platform); err != nil {
 		return err
@@ -234,12 +229,8 @@ func run(o options) error {
 	return nil
 }
 
-// inputDir: an error unless dir, given by --<name>, is a directory; none is
-// given when dir is empty (--instance).
+// inputDir: an error unless dir, given by --<name>, is a directory.
 func inputDir(name, dir string) error {
-	if dir == "" {
-		return nil
-	}
 	info, err := os.Stat(dir)
 	if err != nil {
 		return fmt.Errorf("--%s: %w", name, err)

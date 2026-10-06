@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -15,7 +14,7 @@ import (
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	ctx, _, _, _, err := buildContext(pkg, inputs(M{"global": M{"okdp": okdp}}), &def.Service)
+	ctx, _, _, err := buildContext(pkg, inputs(M{"global": M{"okdp": okdp}}), &def.Service)
 	if err != nil {
 		return nil, err
 	}
@@ -163,19 +162,17 @@ func TestContextErrors(t *testing.T) {
 		!strings.Contains(err.Error(), `clientProvisioning "manual" is not one of existing, dcr`) {
 		t.Errorf("got %v", err)
 	}
-	for _, missing := range []string{"values.yaml", "values.schema.json"} {
-		ch := maps.Clone(pkg)
-		delete(ch, missing)
-		if _, _, _, _, err := buildContext(ch, inputs(), &def.Service); err == nil {
-			t.Errorf("without %s: must fail", missing)
-		}
+	ch := maps.Clone(pkg)
+	delete(ch, "config.schema.json")
+	if _, _, _, err := buildContext(ch, inputs(), &def.Service); err == nil {
+		t.Error("without config.schema.json: must fail")
 	}
 }
 
 // TestContextValues: the parameters the mapping sees, without global and
 // connections, and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	ctx, values, _, _, err := buildContext(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
+	ctx, values, _, err := buildContext(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,45 +187,19 @@ func TestContextValues(t *testing.T) {
 	}
 }
 
-// TestContextUpstream: values.upstream.<chart> of a chart that accepts
-// upstream values is its files then its inline values, merged as they will
-// be applied (append paths appended); the other keys stay as written, and
-// the merged values keep the inline values only.
+// TestContextUpstream: values.upstream is the instance's upstream values
+// as written, whether the chart accepts them or not.
 func TestContextUpstream(t *testing.T) {
 	svc := &Service{Charts: chart.Specs{
 		"app":   {Upstream: chart.Upstream{Enabled: true}, Append: []string{"env"}},
-		"files": {Upstream: chart.Upstream{Enabled: true, Files: []string{"a.yaml", "b.yaml"}}},
 		"other": {},
 	}}
-	in := inputs(M{"upstream": M{
-		"app":   M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}},
-		"other": M{"y": 2},
-	}})
-	in.Instance = fstest.MapFS{
-		"upstream.app.yaml":   {Data: []byte("env: [A]\nimage: {tag: f}\n")},
-		"upstream.other.yaml": {Data: []byte("x: 1\n")},
-		"a.yaml":              {Data: []byte("a: 1\nb: 1\n")},
-		"b.yaml":              {Data: []byte("b: 2\n")},
-	}
-	ctx, values, ups, _, err := buildContext(pkg, in, svc)
+	up := M{"app": M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}}, "other": M{"y": float64(2)}}
+	ctx, _, _, err := buildContext(pkg, inputs(M{"upstream": up}), svc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := M{
-		"app":   M{"env": []any{"A", "C"}, "image": M{"tag": "f", "pullPolicy": "Always"}},
-		"files": M{"a": float64(1), "b": float64(2)},
-		"other": M{"y": float64(2)},
-	}
-	if got := value.AsMap(ctx["values"])["upstream"]; !reflect.DeepEqual(got, want) {
-		t.Errorf("values.upstream:\n got %#v\nwant %#v", got, want)
-	}
-	if got := value.Dig(values, "upstream.app"); !reflect.DeepEqual(got, M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}}) {
-		t.Errorf("merged values: the inline upstream values as written, got %#v", got)
-	}
-	if _, ok := ups["app"]; !ok {
-		t.Error("app accepts upstream values")
-	}
-	if _, ok := ups["other"]; ok {
-		t.Error("a chart without upstream values has no upstream sources")
+	if got := value.AsMap(ctx["values"])["upstream"]; !reflect.DeepEqual(got, up) {
+		t.Errorf("values.upstream:\n got %#v\nwant %#v", got, up)
 	}
 }

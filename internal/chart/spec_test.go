@@ -64,18 +64,14 @@ func TestSpecKeys(t *testing.T) {
 	}
 }
 
-// TestUpstreamYAML: upstream: in service.yaml, true or false, a path or a
-// list of paths.
+// TestUpstreamYAML: upstream: in service.yaml, true or false, or {from:
+// <chart>}.
 func TestUpstreamYAML(t *testing.T) {
 	for in, want := range map[string]Upstream{
-		"":                           {},
-		"upstream: false":            {},
-		"upstream: true":             {Enabled: true},
-		"upstream: a.yaml":           {Enabled: true, Files: []string{"a.yaml"}},
-		"upstream: [a.yaml, b.yaml]": {Enabled: true, Files: []string{"a.yaml", "b.yaml"}},
-		"upstream: []":               {Enabled: true, Files: []string{}},
-		"upstream: {from: a}":        {From: "a"},
-		`upstream: "off"`:            {Enabled: true, Files: []string{"off"}},
+		"":                    {},
+		"upstream: false":     {},
+		"upstream: true":      {Enabled: true},
+		"upstream: {from: a}": {From: "a"},
 	} {
 		var spec Spec
 		if err := yaml.Unmarshal([]byte(in), &spec); err != nil {
@@ -84,15 +80,15 @@ func TestUpstreamYAML(t *testing.T) {
 			t.Errorf("%q: got %#v, want %#v", in, spec.Upstream, want)
 		}
 	}
-	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: {a: b}", `upstream: [a.yaml, ""]`, "upstream: [[a]]",
+	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: {a: b}", "upstream: a.yaml", `upstream: "off"`, "upstream: [a.yaml]", "upstream: []",
 		"upstream: {}", `upstream: {from: ""}`, "upstream: {from: a, files: [b]}", "upstream: {from: [a]}", "upstream: {from: true}"} {
 		var spec Spec
 		if err := yaml.Unmarshal([]byte(in), &spec); err == nil {
 			t.Errorf("%q: no error", in)
 		}
 	}
-	// A YAML 1.1 boolean, a string in service.yaml (YAML 1.2): refused, not
-	// taken as a file name.
+	// A YAML 1.1 boolean, a string in service.yaml (YAML 1.2): refused with
+	// what to write.
 	for _, in := range []string{"upstream: off", "upstream: no", "upstream: Yes", "upstream: ON", "upstream: y"} {
 		var spec Spec
 		err := yaml.Unmarshal([]byte(in), &spec)

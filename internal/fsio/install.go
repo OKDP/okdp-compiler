@@ -22,14 +22,15 @@ const releaseMax = 53
 // namespace.
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
-// Install: InstallScript, a POSIX shell script that installs each chart of
-// res in its namespace, `helm upgrade --install`, from its upstream chart
-// (Result.Charts) with its values file, <key>.values.yaml of Files, in the
-// script's directory, wherever it is run from. Each chart is its own
-// release, <release>-<key> cut to 53 characters without a trailing "-": a
-// namespace holds one release of a name. The charts of the OAuth clients
-// come first, their Job writing the Secret the others read, then the
-// others by key. A key the outputs cannot name fails (checkKey).
+// Install: InstallScript, a POSIX shell script, marked generated (its line
+// after #!), that installs each chart of res in its namespace, `helm
+// upgrade --install`, from its upstream chart (Result.Charts) with its
+// values file, <key>.values.yaml of Files, in the script's directory,
+// wherever it is run from. Each chart is its own release, <release>-<key>
+// cut to 53 characters without a trailing "-": a namespace holds one
+// release of a name. The charts of the OAuth clients come first, their Job
+// writing the Secret the others read, then the others by key. A key the
+// outputs cannot name fails (checkKey).
 func Install(res *okdp.Result) ([]byte, error) {
 	if !dnsLabel.MatchString(res.Release) || !dnsLabel.MatchString(res.Namespace) {
 		return nil, fmt.Errorf("Result.Release %q, Result.Namespace %q: the release and namespace of the compile (Inputs.Release, Inputs.Namespace), where %s installs the charts", res.Release, res.Namespace, InstallScript)
@@ -43,7 +44,7 @@ func Install(res *okdp.Result) ([]byte, error) {
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "#!/bin/sh\n# Installs %s in the namespace %s, one Helm release per chart: its\n# upstream chart with its values file, written by okdp-compile.\nset -eu\ncd \"$(dirname \"$0\")\"\n", res.Release, res.Namespace)
+	fmt.Fprintf(&b, "#!/bin/sh\n%s# Installs %s in the namespace %s, one Helm release per chart: its\n# upstream chart with its values file. Recompile the instance to change it.\nset -eu\ncd \"$(dirname \"$0\")\"\n", generated, res.Release, res.Namespace)
 	releases := map[string]string{} // release -> key
 	for _, key := range append(clients, others...) {
 		if err := checkKey(key); err != nil {

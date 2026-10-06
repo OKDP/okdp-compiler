@@ -34,7 +34,7 @@ type mapped struct {
 	clients  []any // the OAuth clients (oidcClients), checked by oidc.go
 }
 
-// runMapping: runs a mapping (mapping.cel.yaml) on the context ctx, within
+// runMapping: runs a mapping (values.cel.yaml) on the context ctx, within
 // budget (nil: none), its sections in order, each of its shape: null
 // (absent, $if) is empty, a value of another shape is refused. A null chart
 // of output is left out, as by $if; instance's url and usage are strings

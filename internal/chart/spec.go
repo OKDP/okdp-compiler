@@ -20,27 +20,22 @@ type Specs map[string]Spec
 // renders them.
 type Spec struct {
 	Source   Ref      `yaml:"source"`   // the upstream chart: its defaults and schema (the chart cache), and what renders the values
-	Base     string   `yaml:"base"`     // a values file of the package, base/<key>.yaml by convention (OKDP's default values)
+	Base     string   `yaml:"base"`     // a values file of the package, base/<key>.yaml by convention (OKDP's fixed values for the chart)
 	Protect  []string `yaml:"protect"`  // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
 	Append   []string `yaml:"append"`   // instance upstream values: appended lists (same paths)
-	Upstream Upstream `yaml:"upstream"` // instance upstream values accepted, and their files
+	Upstream Upstream `yaml:"upstream"` // instance upstream values accepted
 }
 
-// Upstream: the user-defined values a chart accepts. true reads
-// upstream.<chart>.yaml of the instance when it exists; a path, or a list of
-// paths, reads these files instead (they must exist), merged in order. The
-// instance's inline upstream.<chart> values come after the files.
+// Upstream: the user-defined values a chart accepts. true: the instance's
+// upstream.<chart> values.
 //
 // {from: <chart>} gives the chart the upstream values of another chart of
 // service.yaml, with that chart's protect and append: for two renders of
 // one upstream chart (two keys of the same source) that an instance sets
-// with one set of values (polaris-admin's bootstrap and principals Jobs). The
-// mapping used to merge them into the second render by hand, which could
-// not see the instance files, so the files had to be refused.
+// with one set of values (polaris-admin's bootstrap and principals Jobs).
 type Upstream struct {
 	Enabled bool
-	Files   []string // nil: upstream.<chart>.yaml, if it exists
-	From    string   // the chart whose upstream values this one receives (Enabled is false)
+	From    string // the chart whose upstream values this one receives (Enabled is false)
 }
 
 // upstreamOf: the chart whose instance upstream values the chart key
@@ -84,7 +79,7 @@ func (s Specs) Check() error {
 			case !ok:
 				return fmt.Errorf("service.yaml: charts.%s.upstream.from %q: not a chart of service.yaml", key, from)
 			case !target.Upstream.Enabled:
-				return fmt.Errorf("service.yaml: charts.%s.upstream.from %q: that chart accepts no upstream values of its own (upstream: true, or files)", key, from)
+				return fmt.Errorf("service.yaml: charts.%s.upstream.from %q: that chart accepts no upstream values of its own (upstream: true)", key, from)
 			// One set of values, one set of rules: what the instance may set
 			// is decided once, on the chart that owns the values.
 			case len(spec.Protect) > 0 || len(spec.Append) > 0:
@@ -109,14 +104,13 @@ func (s Specs) Check() error {
 // as strings, true and false aside.
 var yaml11Bools = []string{"y", "Y", "yes", "Yes", "YES", "n", "N", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"}
 
-// UnmarshalYAML: true or false, a path or a list of paths, or {from:
-// <chart>}. service.yaml is YAML 1.2, where a plain no or off is a string:
-// refused rather than taken as the name of a file every compile would then
-// require; quoted, it is one.
+// UnmarshalYAML: true or false, or {from: <chart>}. service.yaml is YAML
+// 1.2, where a plain no or off is a string: refused with what to write
+// instead.
 func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	switch {
 	case n.Kind == yaml.ScalarNode && n.Tag == "!!str" && n.Style == 0 && slices.Contains(yaml11Bools, n.Value):
-		return fmt.Errorf("line %d: upstream %s: write true or false (service.yaml is read as YAML 1.2, where %s is not a boolean; quote a path of that name)", n.Line, n.Value, n.Value)
+		return fmt.Errorf("line %d: upstream %s: write true or false (service.yaml is read as YAML 1.2, where %s is not a boolean)", n.Line, n.Value, n.Value)
 	case n.Kind == yaml.MappingNode:
 		if len(n.Content) != 2 || n.Content[0].Value != "from" || n.Content[1].Kind != yaml.ScalarNode || n.Content[1].Tag != "!!str" || n.Content[1].Value == "" {
 			break
@@ -127,19 +121,6 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	case n.Kind == yaml.ScalarNode && n.Tag == "!!bool":
 		return n.Decode(&u.Enabled)
-	case n.Kind == yaml.ScalarNode && n.Tag == "!!str" && n.Value != "":
-		u.Enabled, u.Files = true, []string{n.Value}
-		return nil
-	case n.Kind == yaml.SequenceNode:
-		files := []string{}
-		if err := n.Decode(&files); err != nil {
-			return err
-		}
-		if slices.Contains(files, "") {
-			break
-		}
-		u.Enabled, u.Files = true, files
-		return nil
 	}
-	return fmt.Errorf("line %d: upstream must be true, false, a path, a list of paths or {from: <chart>}", n.Line)
+	return fmt.Errorf("line %d: upstream must be true, false or {from: <chart>}", n.Line)
 }

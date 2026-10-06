@@ -95,30 +95,6 @@ func TestNoTemplate(t *testing.T) {
 	}
 }
 
-// TestReadUpstream: the sources of each chart that accepts upstream values,
-// its files then its inline values; none for the others.
-func TestReadUpstream(t *testing.T) {
-	specs := Specs{"app": {Upstream: Upstream{Enabled: true}}, "other": {}}
-	instance := fstest.MapFS{
-		"upstream.app.yaml":   {Data: []byte("env: [A]\n")},
-		"upstream.other.yaml": {Data: []byte("x: 1\n")},
-	}
-	ups := ReadUpstream(instance, specs, M{"upstream": M{"app": M{"env": []any{"C"}}, "other": M{"y": 2}}})
-	if len(ups["app"].layers) != 2 || ups["app"].layers[0].src.file != "upstream.app.yaml" || ups["app"].layers[1].src.chart != "app" {
-		t.Errorf("upstream sources of app: %#v", ups["app"])
-	}
-	if _, ok := ups["other"]; ok {
-		t.Error("a chart without upstream values has no upstream sources")
-	}
-	// A file with "{{" is left out, out of the mapping's sight, and fails
-	// when the chart is compiled.
-	instance["upstream.app.yaml"] = &fstest.MapFile{Data: []byte("env: ['{{ .Release.Name }}']\n")}
-	ups = ReadUpstream(instance, specs, M{})
-	if want := `upstream.app.yaml: env[0]: the value contains "{{"`; len(ups["app"].layers) != 0 || ups["app"].err == nil || ups["app"].err.Error() != want {
-		t.Errorf("a file with a template: got %#v, want the error %q", ups["app"], want)
-	}
-}
-
 // TestFinalValuesNoUpstream: a chart that accepts no upstream values
 // receives none, also beside a chart keyed "" (Specs built in memory,
 // unchecked): no upstream values is not the chart "".
@@ -127,7 +103,7 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 	specs := Specs{"": {Source: src, Upstream: Upstream{Enabled: true}}, "app": {Source: src}}
 	values := M{"upstream": M{"": M{"a": 1.0}}}
 	cache := fstest.MapFS{"app-1.0.0/values.yaml": {Data: []byte("b: 2\n")}}
-	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, values, ReadUpstream(nil, specs, values))
+	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, values)
 	if err != nil || out["app"]["a"] != nil {
 		t.Errorf("app: %v %#v", err, out["app"])
 	}
@@ -137,7 +113,7 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 // whoever builds the output.
 func TestFinalValuesShape(t *testing.T) {
 	for _, v := range []any{nil, "x", []any{}} {
-		_, _, err := FinalValues(fstest.MapFS{}, fstest.MapFS{}, Specs{"app": {}}, M{"app": v}, M{}, nil)
+		_, _, err := FinalValues(fstest.MapFS{}, fstest.MapFS{}, Specs{"app": {}}, M{"app": v}, M{})
 		if err == nil || !strings.HasPrefix(err.Error(), `mapping output "app": must be a map of the chart's values, got `) {
 			t.Errorf("%#v: got %v", v, err)
 		}

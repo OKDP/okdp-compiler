@@ -251,10 +251,10 @@ func TestFinalValuesRepositories(t *testing.T) {
 		"app":  {Source: Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}},
 		"fork": {Source: Ref{Repository: "oci://fork.example.org/charts", Chart: "app", Version: "1.0.0"}},
 	}
-	if _, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, M{}, nil); err != nil {
+	if _, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, M{}); err != nil {
 		t.Errorf("one repository: %v", err)
 	}
-	_, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}, "fork": M{}}, M{}, nil)
+	_, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}, "fork": M{}}, M{})
 	if want := "app: chart app-1.0.0 comes from 2 repositories, "; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("two repositories: got %v, want an error starting with %q", err, want)
 	}

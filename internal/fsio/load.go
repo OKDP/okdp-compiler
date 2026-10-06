@@ -21,7 +21,7 @@ import (
 )
 
 // LoadDefinition reads the package at the root of fsys: service.yaml,
-// checked, and mapping.cel.yaml; each compile reads its other files.
+// checked, and values.cel.yaml; each compile reads its other files.
 func LoadDefinition(fsys fs.FS) (*okdp.Definition, error) {
 	b, err := fs.ReadFile(fsys, "service.yaml")
 	if err != nil {
@@ -34,7 +34,7 @@ func LoadDefinition(fsys fs.FS) (*okdp.Definition, error) {
 	if err := def.Service.Check(); err != nil {
 		return nil, err
 	}
-	if def.Mapping, err = fs.ReadFile(fsys, "mapping.cel.yaml"); err != nil {
+	if def.Mapping, err = fs.ReadFile(fsys, "values.cel.yaml"); err != nil {
 		return nil, err
 	}
 	return def, nil

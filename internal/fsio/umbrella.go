@@ -39,7 +39,8 @@ type umbrellaDependency struct {
 // aliased to the key when the key is not the chart's name (Helm then names
 // the subchart after the key: its .Chart.Name is the key); and
 // UmbrellaValues, the final values of each key under the key, each with its
-// own global. Indented by indent spaces (2 to 9). A key Helm refuses as an
+// own global, marked generated (valuesFile). Indented by indent spaces (2 to
+// 9). A key Helm refuses as an
 // alias fails (checkKey).
 func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]byte, error) {
 	svc := def.Service
@@ -64,9 +65,9 @@ func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]
 	if err != nil {
 		return nil, err
 	}
-	valuesFile, err := marshal(values, indent)
+	instanceValues, err := valuesFile(values, indent)
 	if err != nil {
 		return nil, err
 	}
-	return map[string][]byte{"Chart.yaml": chartFile, UmbrellaValues: valuesFile}, nil
+	return map[string][]byte{"Chart.yaml": chartFile, UmbrellaValues: instanceValues}, nil
 }

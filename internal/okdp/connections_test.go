@@ -41,11 +41,11 @@ const resolveSchema = `{"properties": {
 // instance's values over these platform layers.
 func resolveCtx(values M, platform ...map[string]any) (M, []Dependency, error) {
 	ch := maps.Clone(pkg)
-	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
 	in.Platform = append(in.Platform, platform...)
 	in.Contracts = dbContract
-	ctx, _, _, deps, err := buildContext(ch, in, &def.Service)
+	ctx, _, deps, err := buildContext(ch, in, &def.Service)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -212,8 +212,8 @@ func TestResolveTemplate(t *testing.T) {
 // TestResolveUnknownContract: a schema that references a missing contract.
 func TestResolveUnknownContract(t *testing.T) {
 	ch := maps.Clone(pkg)
-	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
-	if _, _, _, _, err := buildContext(ch, inputs(M{"q": "demo-mq"}), &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
+	if _, _, _, err := buildContext(ch, inputs(M{"q": "demo-mq"}), &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
 		t.Errorf("got %v", err)
 	}
 }
@@ -222,7 +222,7 @@ func TestResolveUnknownContract(t *testing.T) {
 // read, parsed or compiled is reported as such, with its file and the cause.
 func TestResolveUnreadableContract(t *testing.T) {
 	ch := maps.Clone(pkg)
-	ch["values.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
 	for name, tc := range map[string]struct {
 		contracts fstest.MapFS
 		want      string
@@ -238,7 +238,7 @@ func TestResolveUnreadableContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"q": "demo-mq"})
 			in.Contracts = tc.contracts
-			if _, _, _, _, err := buildContext(ch, in, &def.Service); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, _, _, err := buildContext(ch, in, &def.Service); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error starting with %q", err, tc.want)
 			}
 		})

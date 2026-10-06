@@ -106,7 +106,7 @@ binaries'.
 ## Command line
 
 ```text
-okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>] [--instance <dir>]
+okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>]
              [--platform <platform.yaml>]... [-f <values.yaml>]...
              --release <name> --namespace <name>
              [--out <file>] [--emit-dir <dir>] [--umbrella <dir>] [--indent <n>]
@@ -115,10 +115,9 @@ okdp-compile --version
 
 | Flag | Default | |
 |---|---|---|
-| `--package` | required | package directory: `service.yaml`, `mapping.cel.yaml`, `values.yaml`, `values.schema.json` at its root, and the base files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `--package` | required | package directory: `service.yaml`, `values.cel.yaml`, `config.schema.json` at its root, and the base files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart in its repository's directory, the URL without its scheme, as `helm pull -d <dir>/<repository>` writes it, `<repository>/<chart>-<version>.tgz`, or unpacked, `<repository>/<chart>-<version>/` (`quay.io/adaltas/oidc-dcr-0.5.0.tgz`); else `<chart>-<version>` at its root ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
-| `--instance` | none | instance directory: the upstream values files `service.yaml` names (`upstream.<key>.yaml`, by chart key; [instance values](specs/01_inputs_outputs.md#instance-values)) |
 | `--platform` | none | a platform values file: `global`, `global.okdp` among them ([platform values](specs/01_inputs_outputs.md#platform-values)); repeatable, merged in order as `helm -f` files, before the `-f` files |
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--platform` files. It sets no `global` but the keys the parameter schema declares under it ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
@@ -134,7 +133,7 @@ okdp-compile --version
 Flags take one or two dashes, and every input is a flag: an argument that
 is not one is refused, where it would end the flags and those after it be
 ignored (a values file without its `-f`). The directories of `--package`,
-`--charts`, `--contracts` and `--instance` must exist. Without `--out`,
+`--charts` and `--contracts` must exist. Without `--out`,
 `--emit-dir` or `--umbrella`, the command only compiles: exit status 0
 means the instance compiles. Every output is built before any is written:
 a compile or an output that fails writes nothing.
@@ -153,9 +152,9 @@ The final values are written by `--emit-dir`, not by `--out`.
 
 ```console
 $ export OKDP_CONTRACTS=examples/02_advanced/input/contracts OKDP_CHARTS=examples/02_advanced/input/charts
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml --out /dev/stdout
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --out /dev/stdout
 charts:
   app:
     repository: https://charts.example.org
@@ -185,9 +184,9 @@ The computed values of a chart hold only what the mapping sets; the image,
 from the base values over the chart's defaults, is in the final values only:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml \
     --out compiled.yaml --emit-dir out
 $ yq '.values.app.image' compiled.yaml
 null
@@ -202,7 +201,7 @@ The directory is created if needed, and holds these files only:
 
 | File | Content |
 |---|---|
-| `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart) (OKDP's own objects, `Result.Objects`, under `objects`), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode |
+| `<key>.values.yaml` | `Result.Values[key]`: the final values of the chart key, one file per chart the mapping outputs, for the [okdp chart](specs/01_inputs_outputs.md#the-okdp-chart) (OKDP's own objects, `Result.Objects`, under `objects`), and per [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts) in `dcr` mode; its first line marks it generated, `# Code generated by okdp-compile. DO NOT EDIT.` |
 
 With [`--mkinstall`](#--mkinstall), also `install.sh`; with
 [`--mkdag`](#--mkdag), also `okdp.dependencies.yaml`.
@@ -211,9 +210,9 @@ The example's, `out/` here, are `examples/02_advanced/output-no-dcr/helm-cmd/`
 but for its `install.sh`:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml --emit-dir out
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --emit-dir out
 $ ls out
 app.values.yaml
 okdp.values.yaml
@@ -226,10 +225,10 @@ The example's, with `platform-dcr.yaml` after `platform.yaml`, are
 `examples/02_advanced/output-dcr/helm-cmd/`, its `install.sh` aside:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
     --platform examples/02_advanced/input/platform.yaml --platform examples/02_advanced/input/platform-dcr.yaml \
-    -f examples/02_advanced/input/instance/values.yaml --emit-dir out-dcr
+    -f examples/02_advanced/input/instance/config.yaml --emit-dir out-dcr
 $ ls out-dcr
 app.values.yaml
 oidc-dcr.values.yaml
@@ -267,14 +266,15 @@ key. A chart the mapping leaves out (`$if`) is not installed.
 The example's, `examples/02_advanced/output-no-dcr/helm-cmd/install.sh`:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml \
     --emit-dir out --mkinstall
 $ cat out/install.sh
 #!/bin/sh
+# Code generated by okdp-compile. DO NOT EDIT.
 # Installs demo-webapp in the namespace demo, one Helm release per chart: its
-# upstream chart with its values file, written by okdp-compile.
+# upstream chart with its values file. Recompile the instance to change it.
 set -eu
 cd "$(dirname "$0")"
 helm upgrade --install demo-webapp-app app --repo https://charts.example.org --version 1.8.0 --namespace demo -f app.values.yaml
@@ -307,9 +307,9 @@ instances first ([GitOps](#gitops)).
 The example's, the instance referencing `demo-db` in `database`:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml \
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml \
     --emit-dir out --mkdag
 $ cat out/okdp.dependencies.yaml
 - instance: demo-db
@@ -327,7 +327,7 @@ files only, checked as `--emit-dir`'s are; it cannot be the directory of
 | File | Content |
 |---|---|
 | `Chart.yaml` | an umbrella chart, named and versioned after `service.yaml` (`name`, `version`), with one dependency per key of the index: its upstream chart (repository, name, version), aliased to the key when the key is not the chart's name |
-| `instance.values.yaml` | `Result.Values`: the final values of each key, under the key |
+| `instance.values.yaml` | `Result.Values`: the final values of each key, under the key, after the line that marks it generated |
 
 The chart has no `values.yaml`: its values are given to Helm as user
 values, with `-f`. As the chart's `values.yaml` they would be its defaults,
@@ -338,9 +338,9 @@ deletes an upstream default
 The example's are `examples/02_advanced/output-no-dcr/umbrella-chart/`:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service --instance examples/02_advanced/input/instance \
+$ bin/okdp-compile --package examples/02_advanced/input/service \
     --release demo-webapp --namespace demo \
-    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/values.yaml --umbrella umbrella
+    --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/instance/config.yaml --umbrella umbrella
 $ cat umbrella/Chart.yaml
 apiVersion: v2
 name: webapp
@@ -428,8 +428,7 @@ as an archive renders from it too: `helm template <release>
 platform's oidc-dcr chart for an OAuth client chart, the platform's objects
 chart for `okdp` ([platform charts](specs/01_inputs_outputs.md#platform-charts)):
 one upstream chart may render several keys, each with its own values file.
-Do not add the base values, the instance files or the values files of the
-compile: the final values already merge the chart's own defaults, the base
+Do not add the base values or the values files of the compile: the final values already merge the chart's own defaults, the base
 values, the computed values and the instance's upstream values
 ([merge precedence](specs/01_inputs_outputs.md#merge-precedence)), and give
 what Helm gives with them, Helm 4 or 3.19 (Helm 3 reads the first document
@@ -487,8 +486,7 @@ func main() {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/input/charts"),   // the chart cache
-		Instance:  os.DirFS("examples/02_advanced/input/instance"), // the instance's upstream values files
+		Charts:    os.DirFS("examples/02_advanced/input/charts"), // the chart cache
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -507,7 +505,7 @@ func main() {
 		return v
 	}
 	in.Platform = []map[string]any{read("examples/02_advanced/input/platform.yaml")}
-	in.Values = []map[string]any{read("examples/02_advanced/input/instance/values.yaml")}
+	in.Values = []map[string]any{read("examples/02_advanced/input/instance/config.yaml")}
 	res, err := compiler.Compile(def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -555,9 +553,8 @@ charts:
     source: {repository: https://charts.example.org, chart: app, version: 1.0.0}
     base: base/app.yaml
 `)},
-		"mapping.cel.yaml":   {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
-		"values.yaml":        {Data: []byte("replicas: 1\n")},
-		"values.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer"}}}`)},
+		"values.cel.yaml":    {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
+		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
 		"base/app.yaml":      {Data: []byte("image: {tag: \"4.5\"}\n")},
 	})
 	if err != nil {
@@ -589,6 +586,7 @@ charts:
 ```
 
 ```text
+# Code generated by okdp-compile. DO NOT EDIT.
 global:
   okdp:
     charts:
@@ -609,18 +607,16 @@ that they are the programs above and print what they show
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
 `compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`:
-`service.yaml` and `mapping.cel.yaml`, then keeps `fsys` (`Definition.Files`)
-for the files each compile reads, `values.yaml`, `values.schema.json` and the
-base files. A `Definition{Service, Mapping, Files}` can also be built in Go;
+`service.yaml` and `values.cel.yaml`, then keeps `fsys` (`Definition.Files`)
+for the files each compile reads, `config.schema.json` and the base files. A `Definition{Service, Mapping, Files}` can also be built in Go;
 an entry of `Service.Require` is a `compiler.Requirement`, `{Key, If}`,
 `If` empty for a key required in every case.
 
 `compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
-`Instance` (`--instance`, `nil` when there is none), `Contracts`
-(`--contracts`; it may be empty when nothing references a contract),
-`Platform` (the `--platform` files, parsed, in order), `Values` (the `-f`
-files, likewise), `Release` and `Namespace`; all but `Instance`,
-`Platform` and `Values` are required
+`Contracts` (`--contracts`; it may be empty when nothing references a
+contract), `Platform` (the `--platform` files, parsed, in order), `Values`
+(the `-f` files, likewise), `Release` and `Namespace`; all but `Platform`
+and `Values` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
 `--emit-dir` writes, `Result.Computed` what `--out` writes under `values`,
 `Charts` (the index), `Objects` and `Dependencies` what both write
@@ -823,12 +819,13 @@ with status 2.
 |---|---|---|
 | `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
 | `Inputs.Release "Demo_App": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`, `Inputs.Namespace "<name>": a namespace name, ...` | `--release` or `--namespace` is not a name Kubernetes and Helm accept | give one of that form ([inputs](specs/01_inputs_outputs.md)) |
-| `--instance: stat instances/demo: no such file or directory`, `--charts charts.tgz: not a directory` | a directory flag (`--package`, `--charts`, `--contracts`, `--instance`) names no directory | fix the path |
+| `--contracts: stat contracts: no such file or directory`, `--charts charts.tgz: not a directory` | a directory flag (`--package`, `--charts`, `--contracts`) names no directory | fix the path |
 | `unexpected argument "instance.yaml": every input is a flag (-f before each values file)` | an argument that is not a flag, here a second values file after one `-f`; exit status 2, nothing compiled | one `-f` per values file |
 | `refusing to write in out: notes.txt is not an output of okdp-compile` | the `--emit-dir` or `--umbrella` directory holds a file the flag does not write (`Chart.lock` and `charts/` of `helm dependency build` included); nothing is written | another directory, or remove the file |
 | `--emit-dir and --umbrella name the same directory, out: give each its own` | both flags name one directory | give each its own |
-| `open service.yaml: no such file or directory`, `open mapping.cel.yaml: ...` | `--package` is not the package's directory, or the package has no mapping | point it at the directory of `service.yaml` |
-| `open values.yaml: no such file or directory`, `open values.schema.json: ...` | the package has no parameter defaults, or no parameter schema; both are always read (connection references are declared in the schema) | add them ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `open service.yaml: no such file or directory`, `open values.cel.yaml: ...` | `--package` is not the package's directory, or the package has no mapping | point it at the directory of `service.yaml` |
+| `open config.schema.json: no such file or directory` | the package has no parameter schema; it is always read (the parameters' defaults and the connection references are declared in it) | add it ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `config.schema.json#/allOf/0/properties/a/default: a default applies only to a property reached from the root through properties`, `config.schema.json#/properties/a/default: a property under it has a default too (...): keep one`, `config.schema.json#/properties/replicas/default: the default does not meet its property's schema: ...` | a `default` where whether it applies depends on the values, two defaults on one path, or a default its property's schema rejects | move the default to the property it gives a value, keep one of the two, or fix it ([defaults](specs/01_inputs_outputs.md#defaults)) |
 | `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |
 | `service.yaml: line 7: unknown field protcet (allowed: source, base, protect, append, upstream)` | a field `service.yaml` does not define, here a misspelt `protect` in a chart; one line per unknown field | fix the name ([service.yaml](specs/02_service_definition.md#serviceyaml)) |
 | `service.yaml: line 12: a second YAML document: service.yaml is one document` | a `---` followed by a second document | one document |
@@ -850,9 +847,9 @@ with status 2.
 | `global.okdp.ingress.className is required. It is a platform value: set it in the platform's values (--platform, Inputs.Platform)` | `require` in `service.yaml` lists it, in every case or under a condition that holds, and no platform layer sets it (or a later one sets it to `null`) | pass the platform values with `--platform`; set the key ([platform values](specs/01_inputs_outputs.md#platform-values)) |
 | `service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: must be true or false, got null` | the condition of a `require` entry is not a boolean, or its evaluation fails (`no such key: ...`) | write a condition of `true` or `false` (`platform.oidc.enabled == true`), reading optional values with `.?` ([require](specs/02_service_definition.md#require)) |
 | `values layer 1: global.okdp is set by the platform (--platform, Inputs.Platform)`, `values layer 2: global is set by the platform ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--platform`; a package lets instances set a key of `global` by declaring it in `values.schema.json` ([platform values](specs/01_inputs_outputs.md#platform-values)) |
-| `values layer 1: connections.shared-db.host: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, connections, inline upstream values; the platform's files are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
+| `values layer 1: connections.shared-db.host: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, connections, upstream values; the platform's files are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
 | `values layer 2: hooks[0]: a func() cannot be a value`, `platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Platform`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key other than a string, a number or a boolean, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
-| `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `values.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
+| `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, the base values or the mapping |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
@@ -862,21 +859,20 @@ with status 2.
 | `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | the name is not in `connections`, and the contract cannot resolve an instance | add the connection under `connections` |
 | `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
-| `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (an instance's files fail earlier, `values layer <n>: ...`) | fix the platform values or the contract |
+| `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (an instance's values fail earlier, `values layer <n>: ...`) | fix the platform values or the contract |
 | several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, sorted by parameter path, with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
 | `webapp: database connection "shared-db" has no secretRef, the password cannot be read` | not a compiler check: a message of the example mapping's `errors` section | add `secretRef: {name: ...}` to the connection |
-| `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `service.yaml` protects (`protect`, and always `global`); a file name replaces `upstream.<key>` for an instance file | remove the value; set it through the parameters when the package offers one |
-| `app: upstream.app.yaml: podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in an instance's upstream values file (in the inline upstream values of an instance file, that file fails before: `values layer <n>: ...`) | remove it |
+| `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `service.yaml` protects (`protect`, and always `global`) | remove the value; set it through the parameters when the package offers one |
+| `app: upstream.app.podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in upstream values the platform's values or the package's defaults give (in an instance's, its values file fails before: `values layer <n>: ...`) | remove it |
 | `app: upstream.app.env must be a list` | a path of `append` given as a non-list | give a list |
 | `service.yaml: version "1.0": the version of the umbrella chart, SemVer (1.2.3)` | `--umbrella` with a package version Helm does not accept as a chart's | a SemVer `version` in `service.yaml` |
-| `<key>: upstream file <file>: no instance files (Inputs.Instance)` | `service.yaml` names upstream files, and no instance directory is given | pass `--instance` / `Inputs.Instance` |
 | `global.okdp.oidc.clientProvisioning "manual" is not one of existing, dcr` | wrong platform value | `existing` or `dcr` |
 | `global.okdp.oidc must be a map, got false`, `global.okdp.proxy.noProxy must be a string, got []interface {}{".svc"}` | a platform setting the compiler reads, or a map on the way to it, of another type (`oidc: false`, `proxy: <url>`, a list for a string); it would otherwise read as not set | fix the platform values; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
-| `$ref <url>: the schema may only reference itself (the compile reads no file or URL)` | a `values.schema.json` references a file or a URL | inline the referenced schema |
+| `$ref <url>: the schema may only reference itself (the compile reads no file or URL)` | a `config.schema.json`, or an upstream chart's `values.schema.json`, references a file or a URL | inline the referenced schema |
 
 ### Mapping
 
-The errors of `mapping.cel.yaml`, mostly for package authors, are listed
+The errors of `values.cel.yaml`, mostly for package authors, are listed
 with their causes in [service definition](specs/02_service_definition.md#errors):
 the messages of its `errors` section, one per line; CEL errors prefixed with
 the section, key and list position path (`output: app: env[2]: value: ${{ ... }}: no such key: host`);
