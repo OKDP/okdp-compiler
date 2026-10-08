@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "mode": {"enum": ["server", "scheduler"]},
+    "replicaCount": {"type": "integer", "minimum": 0, "maximum": 10},
+    "env": {"type": "array", "items": {"type": "object", "required": ["name"],
+            "properties": {"name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}}}},
+    "config": {"type": "object", "additionalProperties": {"type": "string"}},
+    "schedules": {"type": "array", "items": {"type": "object", "required": ["name", "cron"]}},
+    "persistence": {"type": "object", "properties": {"size": {"type": "string", "pattern": "^[0-9]+(Mi|Gi|Ti)$"}}}
+  }
+}

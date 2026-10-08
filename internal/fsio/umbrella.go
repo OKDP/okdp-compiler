@@ -4,6 +4,7 @@
 package fsio
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -17,6 +18,9 @@ import (
 // values.yaml they would be defaults, and Helm drops the nulls of defaults:
 // a null that deletes an upstream default would be lost.
 const UmbrellaValues = "instance.values.yaml"
+
+// umbrellaChartFile: the umbrella's Chart.yaml.
+const umbrellaChartFile = "Chart.yaml"
 
 // umbrellaChart: the Chart.yaml of an umbrella, in Helm's key order.
 type umbrellaChart struct {
@@ -34,25 +38,23 @@ type umbrellaDependency struct {
 	Version    string `yaml:"version"`
 }
 
-// Umbrella: Chart.yaml, the chart of the instance, named and versioned after
-// service.yaml, with one dependency per compiled key: its upstream chart,
-// aliased to the key when the key is not the chart's name (Helm then names
-// the subchart after the key: its .Chart.Name is the key); and
-// UmbrellaValues, the final values of each key under the key, each with its
-// own global, marked generated (valuesFile). Indented by indent spaces (2 to
-// 9). A key Helm refuses as an
-// alias fails (checkKey).
-func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]byte, error) {
-	svc := def.Service
-	if !chart.IsVersion(svc.Version) {
-		return nil, fmt.Errorf("service.yaml: version %q: the version of the umbrella chart, SemVer (1.2.3)", svc.Version)
+// umbrella: umbrellaChartFile, the chart of the instance, named and
+// versioned after service.yaml (Result.Service, Result.Version), with one
+// dependency per compiled key: its upstream chart, aliased to the key when
+// the key is not the chart's name (Helm then names the subchart after the
+// key: its .Chart.Name is the key); and UmbrellaValues, the final values of
+// each key under the key, each with its own global, marked generated
+// (valuesFile). Indented by indent spaces.
+func umbrella(res *okdp.Result, indent int) (map[string][]byte, error) {
+	switch {
+	case res.Service == "":
+		return nil, errors.New("Result.Service is required: the name of the umbrella chart, service.yaml's")
+	case !chart.IsVersion(res.Version):
+		return nil, fmt.Errorf("service.yaml: version %q: the version of the umbrella chart, SemVer (1.2.3)", res.Version)
 	}
-	c := umbrellaChart{APIVersion: "v2", Name: svc.Name, Version: svc.Version}
+	c := umbrellaChart{APIVersion: "v2", Name: res.Service, Version: res.Version}
 	values := map[string]any{}
 	for _, key := range slices.Sorted(maps.Keys(res.Values)) {
-		if err := checkKey(key); err != nil {
-			return nil, err
-		}
 		ref := res.Charts[key]
 		d := umbrellaDependency{Name: ref.Chart, Repository: ref.Repository, Version: ref.Version}
 		if key != ref.Chart {
@@ -69,5 +71,5 @@ func Umbrella(def *okdp.Definition, res *okdp.Result, indent int) (map[string][]
 	if err != nil {
 		return nil, err
 	}
-	return map[string][]byte{"Chart.yaml": chartFile, UmbrellaValues: instanceValues}, nil
+	return map[string][]byte{umbrellaChartFile: chartFile, UmbrellaValues: instanceValues}, nil
 }

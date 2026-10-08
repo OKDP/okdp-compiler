@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // parsePathCases: paths and their keys, for TestParsePath and
@@ -95,7 +97,7 @@ func FuzzParsePath(f *testing.F) {
 			case s.key == "":
 				t.Fatalf("%q: an empty key, in %#v", p, segs)
 			default:
-				written = keyPath(written, s.key)
+				written = value.Key(written, s.key)
 			}
 		}
 		if back, err := parsePath(written); err != nil || !reflect.DeepEqual(back, segs) {

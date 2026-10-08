@@ -4,7 +4,9 @@ How to package an upstream application for OKDP: a directory of parameters,
 OKDP's defaults and a service definition, compiled by `okdp-compile`. The steps
 follow a `webapp` service, of which the example of this repository is a
 smaller version (`examples/02_advanced/input/service/`;
-`examples/01_minimal/input/service/` is the smallest package); the recipes and
+`examples/01_minimal/input/service/` is the smallest package,
+`examples/03_full/input/service/` one that uses every part of the mapping
+language, each commented); the recipes and
 pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md) and
@@ -132,7 +134,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "global": {"type": "object", "description": "Platform values: the platform's layers (--platform), never an instance's."},
+    "global": {"type": "object", "description": "Platform values: the platform's layers (--platform), added to by the project's (--project), never an instance's."},
     "connections": {"type": "object", "default": {}, "description": "External connections, one values layer per connection file."},
     "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
     "database": {
@@ -772,9 +774,10 @@ A rule no path expresses (a value that depends on a parameter) goes in
   alone is read as YAML 1.2: `upstream: no` is refused, write `false`
   ([YAML reading](specs/02_service_definition.md#yaml-reading),
   [upstream](specs/02_service_definition.md#upstream)).
-- **Untested branches are not compiled.** An expression in a branch no case
-  takes is never evaluated, typos included (the directives around it are
-  checked in every branch)
+- **Untested branches are not evaluated.** Every expression compiles when
+  the mapping is loaded, in every branch (a misspelled name fails every
+  compile), but one in a branch no case takes is never evaluated: a type
+  error (`no such overload`) or a missing key passes until a case takes it
   ([expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
   give every branch a `ci/` case that takes it, and test both OIDC modes:
   the clients' charts are compiled, and the platform's `registrationUrl` and

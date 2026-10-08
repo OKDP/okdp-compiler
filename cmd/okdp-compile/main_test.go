@@ -121,8 +121,7 @@ func TestVersionOf(t *testing.T) {
 // TestRun: the example compiled into directories, one per output, the
 // first holding the files of a previous compile: they hold what the
 // example's outputs hold, a file no longer written removed
-// (okdp.charts.yaml, which v0.1.0 wrote, and okdp.dependencies.yaml,
-// without --mkdag, among them), install.sh executable. A compile with
+// (okdp.dependencies.yaml, without --mkdag, among them), install.sh executable. A compile with
 // --mkdag writes okdp.dependencies.yaml, one without --mkinstall removes
 // install.sh, and one with --umbrella in the same directory removes the
 // values files of the other mode, --mkdag and --mkinstall (the umbrella's
@@ -133,7 +132,7 @@ func TestRun(t *testing.T) {
 	if err := os.MkdirAll(helmCmd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml", "okdp.charts.yaml", "okdp.dependencies.yaml", "install.sh"} {
+	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml", "okdp.dependencies.yaml", "install.sh"} {
 		if err := os.WriteFile(filepath.Join(helmCmd, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}

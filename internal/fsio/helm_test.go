@@ -2,7 +2,6 @@ package fsio
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,25 +9,9 @@ import (
 	"testing"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
-
-// helmdata: testdata/helm, at the repository root.
-var helmdata = filepath.Join("..", "..", "testdata", "helm")
-
-// helmJSON: a JSON file written by generate.sh.
-func helmJSON(t *testing.T, path string) any {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
-	}
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("%s: %v", path, err)
-	}
-	return v
-}
 
 // sameAsAlone: the values Helm gives a subchart (got) are the values the
 // chart sees alone (want), but for what Helm adds to a subchart: a global,
@@ -70,23 +53,6 @@ type missing struct{}
 type umbrellaRender struct {
 	versions string
 	known    map[string]map[string]any
-}
-
-// helmVersions: the Helm versions testdata/helm/SOURCE records: the helm
-// on the PATH (helm) and the deployers' (helms).
-func helmVersions(t *testing.T) []string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(helmdata, "SOURCE"))
-	if err != nil {
-		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
-	}
-	var out []string
-	for line := range strings.Lines(string(b)) {
-		if f := strings.Fields(line); len(f) > 0 && (f[0] == "helm" || f[0] == "helms") {
-			out = append(out, f[1:]...)
-		}
-	}
-	return out
 }
 
 // umbrellaRenders: the renders of testdata/helm/umbrella, by file; each
@@ -141,16 +107,15 @@ func setAt(v any, path []string, x any) {
 // sameAsAlone allows and the known differences of the version, each
 // checked.
 func TestHelmUmbrella(t *testing.T) {
-	dir := filepath.Join(helmdata, "umbrella")
+	dir := filepath.Join(helmtest.Dir, "umbrella")
 	keys := map[string]string{"nulls-alias": "nulls", "globals-alias": "globals"} // key -> case
-	cases, _ := filepath.Glob(filepath.Join(helmdata, "values", "*"))
+	cases, _ := filepath.Glob(filepath.Join(helmtest.Dir, "values", "*"))
 	for _, c := range cases {
 		keys[filepath.Base(c)] = filepath.Base(c)
 	}
-	def := &okdp.Definition{Service: okdp.Service{Name: "umbrella", Version: "1.0.0"}}
-	res := &okdp.Result{Values: map[string]map[string]any{}, Charts: map[string]chart.Ref{}}
+	res := &okdp.Result{Values: map[string]map[string]any{}, Charts: map[string]chart.Ref{}, Service: "umbrella", Version: "1.0.0"}
 	for key, c := range keys {
-		b, err := os.ReadFile(filepath.Join(helmdata, "values", c, "final.yaml"))
+		b, err := os.ReadFile(filepath.Join(helmtest.Dir, "values", c, "final.yaml"))
 		if err != nil {
 			t.Fatalf("%v (run go test ./internal/chart -run TestHelmValues -update)", err)
 		}
@@ -159,7 +124,7 @@ func TestHelmUmbrella(t *testing.T) {
 		}
 		res.Charts[key] = chart.Ref{Repository: "file://../" + c, Chart: c, Version: "1.0.0"}
 	}
-	files, err := Umbrella(def, res, DefaultIndent)
+	files, err := Write(res, Output{Umbrella: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +158,7 @@ func TestHelmUmbrella(t *testing.T) {
 			listed[v] = file
 		}
 	}
-	for _, v := range helmVersions(t) {
+	for _, v := range helmtest.Versions(t) {
 		if _, ok := listed[v]; !ok {
 			t.Errorf("Helm %s (testdata/helm/SOURCE): add it to the versions of the file it renders in umbrellaRenders", v)
 		}
@@ -203,12 +168,12 @@ func TestHelmUmbrella(t *testing.T) {
 		t.Errorf("Helm %s (umbrellaRenders, %s): not in testdata/helm/SOURCE", v, file)
 	}
 	for file, r := range umbrellaRenders {
-		helm, ok := helmJSON(t, filepath.Join(dir, file)).(map[string]any)
+		helm, ok := helmtest.JSON(t, filepath.Join(dir, file)).(map[string]any)
 		if !ok || len(helm) != len(keys) {
 			t.Fatalf("%s: one subchart per key expected, got %v (run generate.sh)", file, helm)
 		}
 		for key, c := range keys {
-			want := helmJSON(t, filepath.Join(helmdata, "values", c, "helm-final.json"))
+			want := helmtest.JSON(t, filepath.Join(helmtest.Dir, "values", c, "helm-final.json"))
 			for p, x := range r.known[key] {
 				path := strings.Split(p, ".")
 				if got, alone := valueAt(helm[key], path), valueAt(want, path); !reflect.DeepEqual(got, x) || reflect.DeepEqual(alone, x) {

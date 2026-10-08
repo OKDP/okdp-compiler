@@ -17,7 +17,7 @@ One compile is one instance. It reads the package (`fsio.LoadDefinition`:
 `service.yaml` and `values.cel.yaml`; then each compile, the parameters and
 OKDP's defaults) and, in `Inputs`, the chart cache (the upstream charts' 
 defaults and schemas), the contracts, the values layers (the platform's,
-`Platform`, then the instance's, `Values`), and the release and
+`Platform`, the project's, `Project`, then the instance's, `Values`), and the release and
 namespace, shared by all the instance's charts
 ([Inputs and outputs](specs/01_inputs_outputs.md)).
 It returns, in `Result`: `Values`, the final values each upstream chart is
@@ -30,9 +30,10 @@ the compiler adds; `Dependencies`, for the deployer (Flux
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
 Callers: a Go program embeds the package at the module's root
-(`compiler`) and compiles from a git tree, an embedded filesystem or memory;
-`okdp-compile` (`cmd/okdp-compile`) runs the same code from directories, in
-CI or scripts.
+(`compiler`), compiles from a git tree, an embedded filesystem or memory,
+and gets the files the binary writes for a compile from one function
+(`Write`); `okdp-compile` (`cmd/okdp-compile`) runs the same code from
+directories, in CI or scripts.
 The library depends on neither Helm nor the Kubernetes client libraries:
 cel-go for expressions, `santhosh-tekuri/jsonschema/v6` for schemas,
 `sigs.k8s.io/yaml` for values, `go.yaml.in/yaml/v3` for the mapping, the
@@ -44,22 +45,20 @@ oidc-dcr template and `service.yaml`.
 flowchart TD
   def["service definition<br/>service.yaml, values.cel.yaml"]
   pkg["package files<br/>config.schema.json, <key>.defaults.yaml"]
-  layers["values layers<br/>platform's: global; instance's"]
+  layers["values layers<br/>platform's: global; project's: added; instance's"]
   contracts["contracts<br/>contract schemas"]
   cache["chart cache<br/>repository/chart-version: values.yaml, values.schema.json"]
   tmpl["oidc-dcr.cel.yaml<br/>embedded template"]
 
   layers --> s1["1: parameters<br/>merged, coalesced, schema-checked"]
   pkg --> s1
-  s1 --> s2["2: platform requirements"]
-  def -. require .-> s2
-  s2 --> s3["3: platform context<br/>OIDC, oidc-dcr settings"]
-  s3 --> s4["4: connections resolved"]
-  contracts --> s4
-  s4 --> deps["Result.Dependencies"]
-  s4 --> rw["platform requirements<br/>under a condition"]
-  def -. "require, $if" .-> rw
-  rw --> pc["platform charts<br/>global.okdp.charts"]
+  s1 --> s2["2: platform context<br/>OIDC, oidc-dcr settings"]
+  s2 --> s3["3: connections resolved"]
+  contracts --> s3
+  s3 --> deps["Result.Dependencies"]
+  s3 --> s4["4: platform requirements<br/>in every case, under a condition"]
+  def -. "require, $if" .-> s4
+  s4 --> pc["platform charts<br/>global.okdp.charts"]
   pc --> s5["5: mapping<br/>let, errors, output, instance, provides, objects, oidcClients"]
   def --> s5
   s5 -- oidcClients --> s6["6: OAuth clients<br/>checked; dcr mode: one chart per client"]
@@ -71,7 +70,7 @@ flowchart TD
   s5 -- objects --> s8
   pc -. objects .-> s8
   s8 -- "okdp chart" --> s9
-  s5 -- output --> s9["9: final values<br/>merges, protect, append"]
+  s5 -- output --> s9["9: final values<br/>the compiler's charts added; merges, protect, append"]
   s6 -- "client charts" --> s9
   def -. "charts, sources" .-> s9
   pkg -. defaults .-> s9
@@ -94,9 +93,9 @@ of the package are read by each compile.
 
 `okdp.Compile` (`internal/okdp/pipeline.go`) checks its required inputs
 (`Definition.Files`, `Charts`, `Contracts`, `Release`, `Namespace`), the
-release, a name Helm accepts (`isRelease`, `internal/okdp/names.go`: a
-DNS-1123 label of 53 characters at most), and the namespace, a DNS-1123
-label (`dnsLabel`), then
+release, a name Helm accepts (`helmfn.IsRelease`,
+`internal/helmfn/names.go`: a DNS-1123 label of 53 characters at most),
+and the namespace, a DNS-1123 label (`helmfn.IsDNSLabel`), then
 `service.yaml` again, for a `Definition` built in memory: a `name` and a
 `version`, each `require` entry a key, its condition one expression, no
 chart `okdp`, each chart key a DNS label (it names files and the
@@ -104,57 +103,80 @@ umbrella's dependency alias), each chart's `source` a repository URL, a
 chart name and a pinned version (`chart.Ref.Check`, `internal/chart/ref.go`;
 [Sources](specs/02_service_definition.md#sources)), the `upstream.from`
 entries and the `protect` and `append` paths (`chart.Specs.Check`,
-`internal/chart/spec.go`). Then it runs:
+`internal/chart/spec.go`). Then it runs the stages, one call each, in
+order. The first three build the compile's `instance`
+(`internal/okdp/context.go`), the typed state the others read: the release
+and namespace, the service's name and version, the merged values,
+`global.okdp`, its `ingress.suffix`, the OIDC settings and their mode, the
+dependencies, and what the mapping sees (its `scope`):
 
-1. **Parameters** (`chart.Parameters`, `internal/chart/parameters.go`, called by
-   `buildContext`, `internal/okdp/context.go`). `global` is the platform's
-   (`valuesLayers`, `internal/okdp/layers.go`): an instance layer that sets
-   it fails, but for the keys `config.schema.json` declares under it,
-   `okdp` excepted. Then an instance layer, normalized, with `{{` in a key
-   or a string, at any depth, fails (`chart.NoTemplate`,
-   `internal/chart/merge.go`); the platform's layers and the package's
-   defaults are not checked. The defaults are the `default` of each property
-   of `config.schema.json` reached from the root through `properties`
-   (`schemaDefaults`): a `default` anywhere else, two on one path, or one
-   its property's schema rejects fails.
-   Each layer, those of `Inputs.Platform` then those of `Inputs.Values`, is
+1. **Parameters** (`parameters`, `internal/okdp/context.go`, on
+   `chart.Parameters`, `internal/chart/parameters.go`). `config.schema.json` is
+   read first, once for the compile, before the layers
+   (`chart.ReadParameterSchema`; a missing schema fails), as any values
+   schema is (`chart.ParseSchema`, a `chart.Schema`): decoded once, the
+   validator keeping its numbers as written, its map view
+   (`Schema.Doc`, `value.Normalize`) reading them as `float64`;
+   compiled once, its root together with the property of each default
+   (`compileSchemas`). The defaults are the `default` of each property
+   reached from the root through `properties`: a `default` anywhere else,
+   two on one path, or one its property's schema rejects fails. The map
+   view gives the keys of `global` below and the connection walk (stage 3).
+   `global` is the platform's
+   (`valuesLayers`, `internal/okdp/layers.go`): a project layer that sets a
+   value the platform's layers set, merged, or gives one of their
+   connections fails (`projectLayers`, `chart.Overlap`); an instance layer
+   that sets `global` fails, but for the keys `config.schema.json` declares
+   under it, `okdp` excepted. Then a project or an instance layer,
+   normalized, with `{{` in a key or a string, at any depth, fails
+   (`chart.NoTemplate`, `internal/chart/merge.go`); the platform's layers
+   and the package's defaults are not checked.
+   Each layer, those of `Inputs.Platform`, `Inputs.Project`, then
+   `Inputs.Values`, is
    normalized by `valuesLayers` (`value.Normalize`: string keys, `[]any`
    lists, `float64` numbers, whatever the Go types; what values cannot hold
    fails, the layer and path named) and merged in order by
    `value.Merge`, Helm's merge of `-f` files; the result is coalesced over the
    defaults by `coalesceValues`. The coalesced values are checked against
-   `config.schema.json` (`checkSchema`; a missing schema fails); every
+   the compiled root (`validate`; both `Schema.Values`); every
    violation is reported at once, under the
    `name` of `service.yaml`. Nothing below runs on invalid parameters.
-2. **Platform requirements**. Each `require` entry of `service.yaml`
-   without a condition is a dotted path under `global.okdp` that must be
-   set and not empty (`required`); an entry with one waits for the context
-   (stage 4).
-3. **Platform context**. The settings of `global.okdp` the compiler reads
-   are checked against their types, and the maps on the way to them
-   (`checkPlatform`, `platformSettings`): a value of another type, `null`
-   excepted, fails rather than reads as not set
-   ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)).
-   `platform` is derived from `global.okdp`: OIDC with its defaults and
-   client provisioning mode (`existing` or `dcr`, anything else fails);
-   the settings of the oidc-dcr Jobs, `global.okdp.oidc.dcr`, their
-   defaults applied and their types checked in every mode,
-   `registrationUrl` and `authMethod` excepted, left to stage 6
-   (`dcrSettings`, `internal/okdp/oidc.go`;
-   [OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings));
-   the name of the main OAuth client's Secret (`clientSecret`); the ingress
-   annotations, the proxy environment. `global.okdp` is also passed as
-   written.
-4. **Connections** (`resolver`, `internal/okdp/connections.go`).
-   `config.schema.json` is read again as JSON (so it must exist) and walked
+2. **Platform context** (`platformContext`). The settings of
+   `global.okdp` the compiler reads are described by a schema it embeds,
+   `internal/okdp/platform.schema.json` (`platformSchema`, parsed once per
+   process by `chart.ParseSchema`): their types, the maps on the way to
+   them, `clientProvisioning`'s values, the oidc-dcr Jobs' whole numbers,
+   the keys of `charts`, the defaults. `platformSettings` checks the
+   merged `global` against it as the parameters are checked
+   (`Schema.Values`), every violation at once under a heading that names
+   the platform values: a value of another type fails rather than reads as
+   not set ([fields the compiler
+   reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)). First
+   `unset` drops, in a copy, what is not set: the `null` of a setting the
+   schema describes, and an empty string where its default is a string, so
+   that the setting takes its default (the coalesce of the parameters
+   would delete it); a `null` the schema does not describe is kept.
+   `global.okdp` stays as written for the mapping (`instance.okdp`); OIDC
+   is derived from the checked copy (`platform.oidc`), a `null` `enabled`
+   kept (it reads as false): the client provisioning mode in effect
+   (`existing`, `dcr`); `registrationUrl` and `authMethod` are left to stage 6
+   ([OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings)).
+3. **Connections** (`connections`; `resolver`, `internal/okdp/connections.go`).
+   The map view of `config.schema.json` (stage 1) is walked
    (`walk`) together with a deep copy of the parameters, through
    `properties` (keys sorted) and `items`. A reference must be a string,
    `null` and `""` being not set. Each is resolved (`resolve`) to an
    external connection or an instance of the namespace, whose name must be
-   a release name (`isRelease`, `internal/okdp/names.go`), and completed
-   against its contract (`readContract`, `complete`); an external
-   connection is then validated against the contract's schema
-   (`checkContract`); last, the connection must hold no `{{`
+   a release name (`helmfn.IsRelease`), and completed
+   against its contract (`contract.complete`). A contract is read once per
+   compile, by the first reference or output that names it, and shared by
+   the others (`contractCache`, created by `CompileContext` for stages 3
+   and 7; `readContract`): decoded once, the validator keeping its numbers
+   as written, the keywords read from its map view (`value.Normalize`), and
+   compiled once; one that cannot be read gives each the same error. An
+   external connection holds fields of its contract only, none of them
+   secret (`contract.fields`), and is validated against the contract's
+   schema (`contract.check`); last, the connection must hold no `{{`
    (`chart.NoTemplate`)
    ([Connections](specs/01_inputs_outputs.md#connections)). The
    references that do not resolve are reported together, one line each,
@@ -163,56 +185,75 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    `global` and `connections` are then removed from the parameters; the
    instance's upstream values stay, `values.upstream.<key>`, so that an
    `errors` rule covers them; they are checked and applied at stage 9. The
-   context is assembled: `release`, `values`, `global`, `platform`,
-   `service`, `labels`, `selectorLabels`
-   ([Context](specs/02_service_definition.md#context)). `Compile` then
-   checks the `require` entries with a condition (`requireWhen`): each
-   `$if`, in order, evaluated on the context with the mapping's host
-   functions, within the compile's budget (`compile.Condition`), its value
-   `true` or `false`; when it holds, the key is checked as at stage 2
-   ([require](specs/02_service_definition.md#require)). It then reads
-   the platform's charts, `global.okdp.charts` (`platformCharts`,
-   `internal/okdp/objects.go`): `objects`, required, the chart of the `okdp`
+   context is assembled (`mappingScope`): `release`, `values`, `global`
+   (`global.okdp` as written), `platform` (OIDC, the name of the main OAuth
+   client's Secret, `clientSecret`; the ingress annotations, the proxy
+   environment), `service`, `labels`, `selectorLabels`
+   ([Context](specs/02_service_definition.md#context)).
+4. **Platform requirements** (`checkRequirements`,
+   `internal/okdp/context.go`, called by `Compile` on the instance).
+   `Compile` first opens the compile's CEL session (`compile.NewSession`):
+   its context, its cost limit, OKDP's host functions for the instance
+   (`functions`, built from the `instance`) and the CEL environments built
+   with them, shared by the
+   conditions, the mapping and the client templates. The
+   `require` entries of `service.yaml`, in order, each a dotted path under
+   `global.okdp` that must be set and not empty (`required`): an entry
+   without a condition in every case, one with `$if` when its condition
+   holds, evaluated on the context in the session
+   (`compile.Session.Condition`), its value `true` or `false`
+   ([require](specs/02_service_definition.md#require)). A missing
+   value is reported after the errors of stages 2 and 3. `Compile` then
+   reads the platform's charts, `global.okdp.charts` (`platformCharts`,
+   `internal/okdp/objects.go`), their form checked at stage 2: `objects`,
+   required unless `WithoutObjectsChart`, the chart of the `okdp`
    chart, and `oidcDcr`, the chart of the OAuth clients, `DcrSource`
    (oidc-dcr 0.5.0) by default; each checked as a source is ([Platform
    charts](specs/01_inputs_outputs.md#platform-charts)).
-5. **Mapping** (`runMapping`, `internal/okdp/mapping.go`, on `compile.Load`,
-   `internal/compile/cel.go`). The mapping is parsed into ordered maps
-   (`parseDoc`), with OKDP's host functions (`functions`) beside the
-   language's. The `let` bindings are evaluated in order, each seeing the
+5. **Mapping** (`runMapping`, `internal/okdp/mapping.go`, on
+   `compile.Session.Load`, `internal/compile/cel.go` and `tree.go`). The
+   mapping is parsed into ordered maps (`parseDoc`), then built into a tree
+   (`builder`), in every branch: its top-level keys `let`, `errors` and
+   the sections OKDP names (another key fails), its directives checked,
+   each string scanned and each expression compiled once, in the CEL
+   environment of the names in scope at its place, with OKDP's host
+   functions (`functions`) beside the language's. The tree is then
+   evaluated in the compile's session, without compiling again. The
+   `let` bindings are evaluated in order, each seeing the
    previous ones; then every `errors` item, a rule (`$if`, `message`) or an
    expression returning messages, all messages collected, any message
-   failing the compile (`bind`); then the sections (`Doc.Section`):
-   `output`, `instance`, `provides`, `objects` and `oidcClients`, in that
-   order, each of its shape (`shaped`): `output` a map of maps, a null
-   chart left out; `instance` a map, its `url` and `usage` strings; the
-   others lists; `null` is empty, another shape fails rather than reads as
-   empty or is printed
+   failing the compile (`bind`); then the sections (`section`, on
+   `Doc.Section`): `output`, `instance`, `provides`, `objects` and
+   `oidcClients`, in that order, each of its shape (`shaped`): `output` a
+   map of maps, a null chart left out; `instance` a map, its `url` and
+   `usage` strings; the others lists; `null` is empty, another shape fails
+   rather than reads as empty or is printed
    ([sections](specs/02_service_definition.md#evaluation-order)). Each
    `objects` item must be a whole manifest, with a `kind` and a
    `metadata.name`.
-6. **OAuth clients** (`oidcClients`, `clientCharts`, `internal/okdp/oidc.go`).
-   The clients are checked in every mode, their names and their objects'
-   names (`fullname`) unique
+6. **OAuth clients** (`oidcClients`, `internal/okdp/oidc.go`).
+   The clients are checked in every mode, each against its table
+   (`checkClient`: its name first, a DNS label, then `fields` with
+   `clientKeys`), their names and their objects' names (`fullname`) unique
    ([oidcClients](specs/02_service_definition.md#oidcclients)). In
    `dcr` mode, OIDC enabled, with at least one client, the platform's
    registration settings are checked, no two clients write one Secret, and
    the embedded template
-   `internal/okdp/oidc-dcr.cel.yaml` is evaluated once per client
-   (`compile.EvalTemplate`) on the context plus `client` and `names`: the
-   values of the client's chart. Then, in any mode with a client, `clientCharts`
-   checks the reserved chart keys; in `dcr` mode it adds each client chart
-   to a copy of the charts of `service.yaml` (`chart.Spec{Source: <oidcDcr>}`:
-   no OKDP defaults, no instance upstream values), and its values to the
-   mapping's output
+   `internal/okdp/oidc-dcr.cel.yaml` is evaluated once per client, in the
+   compile's session (`compile.Session.EvalTemplate`), on the context plus
+   `client` and `names`: the
+   values of the client's chart, which stage 9 adds
    ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)).
 7. **Descriptor and credentials Secrets** (`descriptor`,
    `internal/okdp/descriptor.go`). Each `provides` entry is checked for its
    shape (`checkOutput`: a map, its `values`, `secretRef` and `secret`
-   maps, the secret's `generate` a list of keys checked as
-   `okdpGeneratedSecret`'s, its `stringData` a map of strings), then
-   checked and completed against its contract, and validated
-   against its schema (`checkContract`); published
+   maps, its other keys ignored, `knownFields` with `outputFields`; the
+   secret's `generate` a list of keys checked as `okdpGeneratedSecret`'s,
+   its `stringData` a map of strings), then
+   checked against its contract, read once for stages 3 and 7, as an
+   external connection is: its fields (`contract.fields`), completed
+   (`contract.complete`), validated against its schema
+   (`contract.check`); published
    under the release name, it is compared with what the `resolver`
    computes for an internal reference to this instance
    (`x-okdp-internal`): provider and consumers compute the same names. A
@@ -221,28 +262,34 @@ entries and the `protect` and `append` paths (`chart.Specs.Check`,
    (`credentialsSecret`, `internal/okdp/secrets.go`) ([Descriptor
    ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap), [Credentials
    Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
-8. **Objects** (`Compile`, `objectsChart`, `internal/okdp/objects.go`).
+8. **Objects** (`Compile`, `uniqueObjects`, `internal/okdp/objects.go`).
    `Result.Objects` is the descriptor, the credentials Secrets, then the
    mapping's `objects`, no two of them one object of the cluster: the same
    API group, kind, namespace and name (`uniqueObjects`;
-   [objects section](specs/01_inputs_outputs.md#objects-section)).
-   `objectsChart` adds the `okdp` chart (`ObjectsChart`) to the copy of the
-   charts, rendered by the platform's objects chart, and copies of the
-   objects to the mapping's output as its values, `{objects: [...]}`; the
-   mapping's own `output` may not list `okdp`
-   ([The okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
+   [objects section](specs/01_inputs_outputs.md#objects-section)); copies
+   of them are the values of the `okdp` chart, `{objects: [...]}`
+   (`objectsChart`; [The okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
 9. **Final values** (`chart.FinalValues`, `internal/chart/merge.go`), for
    each chart of `output`, which must be a chart of `service.yaml`, a client
    chart or `okdp`, its values a map; a chart the mapping leaves out (`$if`,
    null) is not compiled.
+   The compiler's own charts are added first, in one place (`ownChart`,
+   `addOwnCharts`, `internal/okdp/objects.go`): the chart of each OAuth
+   client (`clientCharts`, `internal/okdp/oidc.go`), its key reserved in
+   every mode, compiled in `dcr` mode, and the `okdp` chart (`ObjectsChart`),
+   unless `WithoutObjectsChart`. Neither `service.yaml` nor the mapping's
+   `output` may list one of these keys, the first in that order failing
+   with a message naming what adds the chart; their specs
+   (`chart.Spec{Source: <platform chart>}`: no OKDP defaults, no instance
+   upstream values) are added to those of `service.yaml`, which are not
+   changed, their values to the mapping's output. `Result.ClientCharts`
+   lists the client charts, which `install.sh` installs first.
    The upstream chart is the key's `source`: the chart cache
    (`chartCache.get`, `internal/chart/cache.go`) reads it once per compile
    (its own `values.yaml` and `values.schema.json`, not its subcharts'),
-   from `<repository>/<chart>-<version>/` or `.tgz` (`Ref.cacheDir`), else
-   from `<chart>-<version>/` or `.tgz` at the root, unless the compiled keys
-   name that chart and version from two repositories (`newChartCache`); a
-   chart it does not hold fails with the `mkdir -p` and `helm pull`
-   commands that fetch it into its repository's directory. The
+   from `<repository>/<chart>-<version>/` or `.tgz` (`Ref.cacheDir`); a
+   chart its repository's directory does not hold fails with the `mkdir -p`
+   and `helm pull` commands that fetch it there. The
    chart's `values.yaml` (its nulls removed), the `defaults` file and the
    computed values are merged as `-f` files (`layered`). When the chart
    accepts upstream values, the instance's `upstream.<key>` values go
@@ -266,57 +313,67 @@ a check over the keys of a map visits them sorted, a list in its order
 (`provides`, first error by position). A message says where: the chart, the
 parameter path, the mapping path (`output: app: env[2]:
 value: ...`), the `let` or `$let` binding, the OAuth client (`oidcClients[1]
-(console)`).
+(console)`). A path in values (a parameter, a layer's value, an upstream
+value, a contract field) is written one way, as a `protect` path is
+(`value.Key`, `value.Index`): plain keys joined by dots, a key that holds a
+dot in brackets (`annotations["example.org/x"]`), a list item `[i]`.
 
 ## Source map
 
 The module's root is the public package, `compiler`: it gives callers the
 types they name, as aliases, and wraps the functions of `fsio`, `chart` and
-`okdp`. Under `internal/`, five packages each import only those below them:
+`okdp`. Under `internal/`, six packages each import only those below them:
 `cmd/okdp-compile` -> `compiler` -> `fsio` -> `okdp` -> `compile` and `chart`
--> `value`.
+-> `helmfn` -> `value`.
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
-neither knows OKDP.
+neither knows OKDP. `helmfn`, the Helm, sprig and Kubernetes rules the
+compiler reproduces, knows none of them.
 
 | Package | File | Owns | Relations |
 |---|---|---|---|
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Files`, `Install`, `InstallUmbrella`, `Dependencies`, `Umbrella`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
-| `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
-| | `normalize.go` | `Normalize`'s reading of Go values of any type, by reflection, and its errors | `valuesLayers` (`okdp`), the mapping's scalars (`compile`) |
-| `compile` | `cel.go` | the mapping language: documents read as ordered YAML 1.1 data, directives, `let` and `errors` (`Load`), sections (`Doc.Section`), CEL environments; `EvalTemplate`, `Eval`, `Condition` (a condition outside a document, `true` or `false`); `Budget`, a compile's context and CEL cost limit, shared by its documents; `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
-| | `check.go` | the directives of a document, checked before it is evaluated: each of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names; `CheckCondition` | `Load`, `Doc.Section`; `CheckCondition` for `require` (`okdp`) |
-| | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`; `Text`, a CEL value as text, for host functions | |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `ParseValues`, `Compile`, `CompileContext` and its options (`WithCostLimit`, `WithoutObjectsChart`), `DcrSource`, `Write` and `IsOutputFile`; aliases of the types a caller names (`Definition`, `Inputs`, `Result`, `Output`, `ChartRef`...) | wraps `fsio`, `chart`, `okdp` |
+| `value` | `value.go` | the data model (`M`) and its helpers: `Normalize`, `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short`; `YAML11Bools`, the booleans of YAML 1.1 that YAML 1.2 reads as strings | every package; `YAML11Bools` for the mapping's scalars (`compile`) and `upstream` in `service.yaml` (`chart`) |
+| | `normalize.go` | `Normalize`'s reading of Go values of any type, by reflection, and its errors | `valuesLayers` (`okdp`); the mapping's scalars (`compile`), as the default of a type switch over the types yaml.v3 gives |
+| | `path.go` | the path of a value, as messages write it (`Key`, `Index`): plain keys joined by dots, a key that is empty or holds a special character in brackets, the form of the `protect` paths | `Normalize`'s errors; `formatPath` and `NoTemplate` (`chart`); the parameter paths of the connections and `Dependency.Field`, the fields of the contract violations (`okdp`) |
+| `helmfn` | `helmfn.go` | the Go code of the Helm and sprig template functions the compiler reproduces: `Sha256Sum`, `ToJSON`, `ToPrettyJSON`, `ToYAML`, `Quote`, `Default`, `ToString`, `Printed` (a value printed into a template and read back), `Trunc` | the host functions (`internal/compile/functions.go`), the generated Secrets (`internal/okdp/secrets.go`) |
+| | `names.go` | the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`); `TruncName`, a name cut as charts cut it (`trunc n \| trimSuffix "-"`) | the chart keys (`chart`); the release, the namespace, an internal reference and a client's name (`okdp`); `fullname` (`okdp`) and the releases of `install.sh` (`fsio`) |
+| `compile` | `cel.go` | the mapping language: `Session` (`NewSession`), what the evaluations of one compile share: its context, its CEL cost limit, the caller's host functions and the CEL environments built with them; documents read as ordered YAML 1.1 data, loaded with the names of their sections, `let` and `errors` evaluated (`Session.Load`), sections (`Doc.Section`); an expression compiled once to a program (`compile`), run under the session's context and remaining cost (`run`); `Session.EvalTemplate`, `Session.Condition` (a condition outside a document, `true` or `false`); `toData`, a CEL value as data, and `Native`, as a host function takes it | registers `str`, `first`, the functions of `functions.go`, then the caller's |
+| | `tree.go` | a document compiled into a tree of typed nodes (`builder`: text, list, plain map, `$if`, `$for` in a map and in a list item, `$spread`, `let` and `$let` bindings), which is its check: the top-level keys, each directive of its place, `$for` with its keys, `$if`, `$merge`, `$spread` expressions, binding names, every expression compiled in its scope, in every branch; the evaluation, a method per node type; `CheckCondition` | `Session.Load`; `CheckCondition` for `require` (`okdp`) |
+| | `functions.go` | `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`); `Text`, a CEL value as text, for host functions | `helmfn` |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
-| | `schema.go` | JSON Schema validation, reported as Helm reports it; `CompileSchema`, a schema compiled as Helm compiles it | stages 1 and 10; the contracts (`internal/okdp/connections.go`) |
+| | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`) | the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`) |
-| | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`, else at the root; `readArchive`, an archive as Helm's loader reads it; the 100 MiB cap, `maxChartSize`) | `merge.go` |
-| | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` (the chart keys, DNS labels, among its checks) | `paths.go`, `ref.go`; checked by `okdp.Service.Check` |
-| | `paths.go` | the grammar of the `protect` and `append` paths | `spec.go`, `merge.go` |
-| | `parameters.go` | stage 1: `Parameters` | `values.go`, `schema.go` |
+| | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/` or `.tgz`; `readArchive`, an archive as Helm's loader reads it; the 100 MiB cap, `maxChartSize`) | `merge.go` |
+| | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Upstream`, `Specs.Check` (the chart keys, DNS labels, among its checks) | `paths.go`, `ref.go`, `helmfn.IsDNSLabel`; checked by `okdp.Service.Check` |
+| | `paths.go` | the grammar of the `protect` and `append` paths (`parsePath`); `formatPath`, the keys a value was found at, written back | `spec.go`, `merge.go`; `value.Key` |
+| | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults found and checked (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile (`ReadParameterSchema`); `Parameters` | `values.go`, `schema.go`; read by `internal/okdp` (`context.go`: the parameters, the platform schema) |
 | | `merge.go` | stage 9 (`FinalValues`), the instance's upstream values, `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `internal/okdp` (`layers.go`, `connections.go`) |
 | `okdp` | `service.go` | `Definition`, `Service` (`service.yaml`) and its check (`Service.Check`); `require`: `Requirements`, `Requirement`, their decoding and check, `required` (the error of a missing platform value, which names the input, `platformValue`, as `platformCharts` does) | `chart.Specs.Check`, `compile.CheckCondition`; read by `fsio.LoadDefinition` |
-| | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages | calls `buildContext`, `requireWhen`, `platformCharts`, `runMapping`, `oidcClients`, `clientCharts`, `descriptor`, `objectsChart`, `chart.FinalValues` |
-| | `layers.go` | stage 1: the values layers, the platform's then the instance's, normalized (`value.Normalize`); `global` is the platform's, no `{{` in the instance's (`valuesLayers`) | `readJSON` (`connections.go`), `chart.NoTemplate`; called by `context.go` |
-| | `context.go` | stages 1 to 4: parameters (`valuesLayers`, `chart.Parameters`), requirements, platform context, the context; then the requirements under a condition (`requireWhen`) | `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr settings and the main client's Secret; `compile.Condition` and `functions` (`mapping.go`) for the conditions |
-| | `connections.go` | connection references, `complete`, `Dependency`, `readJSON`; the contracts (`readContract`) and the check of values against them (`checkContract`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
-| | `names.go` | the names Kubernetes and Helm accept: `dnsLabel`, `isRelease` | `connections.go`, for an internal reference; `pipeline.go`, for the release and namespace; `oidc.go`, for a client's name |
-| | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`) | `compile.Load`; `fullname` also names the client charts' objects (`oidc.go`) |
+| | `pipeline.go` | `Inputs`, `Result`, `Compile`, `CompileContext` and its options: the order of the stages, one call each, the compile's CEL session | calls `parameters`, `platformContext`, `connections`, `compile.NewSession` (with `functions`), `checkRequirements`, `platformCharts`, `runMapping`, `oidcClients`, `descriptor`, `uniqueObjects`, `clientCharts`, `objectsChart`, `addOwnCharts`, `chart.FinalValues` |
+| | `layers.go` | stage 1: the values layers, the platform's then the instance's, normalized (`value.Normalize`); `global` is the platform's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
+| | `context.go` | stages 1 to 4: `instance`, the typed state of a compile, built by the parameters (`parameters`: `chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`platformContext`: `global.okdp` checked against the embedded `platform.schema.json`, `platformSettings`, `unset`) and the connections (`connections`), which end with what the mapping sees (`mappingScope`); then the requirements, on the instance (`checkRequirements`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the compile's session (`compile.Session.Condition`) for the conditions; the `instance` is read by `mapping.go`, `oidc.go`, `descriptor.go`, `secrets.go` |
+| | `connections.go` | connection references, `Dependency`; the contracts: `contract`, read, decoded and compiled once per compile (`contractCache`, `readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the instance's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match; one `contractCache` per compile, created by `pipeline.go`, for both |
+| | `mapping.go` | stage 5: OKDP's sections (`runMapping`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session | `compile.Session.Load`; `functions` by `pipeline.go`; `fullname` (`helmfn.TruncName`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` (`serviceMeta`) and the release | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
-| | `secrets.go` | `okdpGeneratedSecret` and the check of its arguments (`checkSecretArgs`, `password`), credentials Secrets | `generatedSecret` serves both the CEL function and `descriptor.go`; `checkOutput` checks a secret's `generate` with `password` |
-| | `oidc.go` | stage 6: the `oidcClients` checks, the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts (`clientCharts`), `DcrSource`; the oidc-dcr settings (`dcrSettings`, stage 3) | evaluates `oidc-dcr.cel.yaml` with `compile.EvalTemplate` and `functions`; used by `context.go` and `pipeline.go` |
+| | `fields.go` | the check of the maps of known keys a mapping writes against a table of their keys (`field`, `fields`, `knownFields`, `unknownKeys`), each of a kind (`fieldKind`: a string, true or false, a map, a list, a list of non-empty strings, a map of strings...), a null key being not set | the tables of `secrets.go` (`secretArgs`, `keyFields`), `oidc.go` (`clientKeys`) and `descriptor.go` (`outputFields`), each validator keeping its own rules |
+| | `secrets.go` | `okdpGeneratedSecret` and the check of its arguments (`secretArgs`, `keyFields`; `password`, the numbers and `noUpper` as printed), credentials Secrets | `helmfn`, `fields.go`; `generatedSecret` serves both the CEL function and `descriptor.go`; `checkOutput` checks a secret's `generate` with `password` |
+| | `oidc.go` | stage 6: the `oidcClients` checks (`checkClient`: `clientKeys`, the name a DNS label), the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts as the compiler's own (`clientCharts`), `DcrSource` | evaluates `oidc-dcr.cel.yaml` in the compile's session (`compile.Session.EvalTemplate`); used by `context.go` and `pipeline.go` |
+| | `platform.schema.json` | the settings of `global.okdp` the compiler reads: their types, their defaults, their meaning, embedded (`//go:embed`, `platformSchema`); the platform authors' reference | read by `context.go` (`platformSettings`) |
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
-| | `descriptor.go` | stage 7 | `connections.go`, `secrets.go`, `labels.go` |
-| | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the platform's charts (`platformCharts`) | `chart.Ref`; `DcrSource` (`oidc.go`) |
+| | `descriptor.go` | stage 7; the shape of a `provides` item (`checkOutput`, `outputFields`) | `connections.go` (the compile's contracts, the resolver), `secrets.go`, `labels.go`, `fields.go` |
+| | `objects.go` | stage 8: OKDP's own objects (`uniqueObjects`), the `okdp` chart (`ObjectsChart`, `objectsChart`); the compiler's own charts (`ownChart`), their keys checked once and their charts added to those of `service.yaml` (`addOwnCharts`, stage 9), the `okdp` key refused by `Service.Check` with the same message; the platform's charts, of the form the platform schema checks, the `objects` chart required, each checked as a source (`platformCharts`) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | `fsio` | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `values.cel.yaml` | `okdp.Service.Check` |
-| | `output.go` | what a compile is written as: `Files` (`-o`, file name -> content), `Dependencies` (`--mkdag`, `okdp.dependencies.yaml` beside them); `checkKey`, a chart key the outputs can name (a file, an umbrella alias), for a `Result` built by a caller | `okdp.Result` |
-| | `install.go` | `Install` (`--mkinstall`), `install.sh` beside the files of `Files`: `helm upgrade --install` of each chart, its release `<release>-<key>` cut to 53 characters, the OAuth clients' charts first; each word shell-quoted unless plain. `InstallUmbrella` (`--umbrella --mkinstall`), beside the files of `Umbrella`: the umbrella chart as one release, its dependencies built in a temporary copy | `okdp.Result`, `okdp.DcrChart` |
-| | `umbrella.go` | the instance as one chart: `Umbrella` (`--umbrella`), `Chart.yaml` over the upstream charts of the index and `instance.values.yaml` | `okdp.Result`, the service's name and versions; `chart.IsVersion`, `checkKey` (`output.go`) |
+| | `output.go` | what a compile is written as, file name -> content: `Write`, the one entry point, its files chosen by `Output` as the flags choose them, the indentation checked once; the keys of a `Result` built by a caller checked first (`resultKey`: a file, an umbrella alias; an upstream chart); `valuesFiles` (`-o`), `okdp.dependencies.yaml` (`--mkdag`); `IsOutputFile`, a file `Write` gives in any mode | `okdp.Result` |
+| | `install.go` | `install.sh` (`--mkinstall`): beside the values files (`install`), `helm upgrade --install` of each chart, its release `<release>-<key>` cut to 53 characters, the OAuth clients' charts first (`Result.ClientCharts`); beside the umbrella (`installUmbrella`), the umbrella chart as one release, its dependencies built in a temporary copy; each word shell-quoted unless plain | `okdp.Result`; `helmfn`, the names Compile accepts and the release cut |
+| | `umbrella.go` | the instance as one chart (`umbrella`, `--umbrella`): `Chart.yaml` over the upstream charts of the index, named and versioned after `Result.Service` and `Result.Version`, and `instance.values.yaml` | `okdp.Result`; `chart.IsVersion` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
-reproduce Helm and know nothing of OKDP; `internal/compile/functions.go` and
-`internal/okdp/secrets.go` reproduce Helm, sprig and okdp-lib-chart
-functions; `internal/chart/cache.go` reads the chart cache;
+reproduce Helm and know nothing of OKDP; `helmfn` reproduces Helm's and
+sprig's functions and the names Kubernetes and Helm accept, each in one
+place (`internal/compile/functions.go` binds the functions to CEL,
+`internal/okdp/secrets.go` reproduces okdp-lib-chart's generated Secrets
+with them); `internal/chart/cache.go` reads the chart cache;
 `internal/chart/merge.go` applies the rules of `service.yaml`'s charts;
 `okdp` implements OKDP's rules, `oidc-dcr.cel.yaml` the values of the
 oidc-dcr chart, and `internal/okdp/pipeline.go` orders the stages. Each rule
@@ -325,20 +382,22 @@ is computed in one place and reused: the labels of the context, of
 function and for `provides[].secret`; one resolver for consumers and for the
 provider check; one OAuth client Secret name (`clientSecret`) for
 `platform.oidcClientSecret`, `oidcClientSecret` and the oidc-dcr Job; one
-engine for the mappings and the oidc-dcr template.
+CEL session per compile for the conditions of `require`, the mapping and
+the oidc-dcr template.
 `cmd/okdp-compile/main.go` is a thin caller of the public package:
 `os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
-`compiler.Compile`, then the files of `compiler.Files` and
-`compiler.Umbrella`, the chart index (`Result.Charts`) included: the charts
-`install.sh` installs with [`--mkinstall`](01_usage.md#--mkinstall), the
-dependencies of `Chart.yaml` with [`--umbrella`](01_usage.md#--umbrella).
+`compiler.Compile`, then the files of `compiler.Write`, its flags as a
+`compiler.Output`: the values files or the umbrella chart
+([`--umbrella`](01_usage.md#--umbrella)), `install.sh`
+([`--mkinstall`](01_usage.md#--mkinstall)), `okdp.dependencies.yaml`
+([`--mkdag`](01_usage.md#--mkdag)).
 Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
 parsing, and is refused), the directory flags name directories, every
 output is built before any is written, and the output directory (`-o`)
-holds only the files it writes there: those of a previous compile are
-removed, a directory holding any other is refused
-([command line](01_usage.md#command-line)).
+holds only the files it writes there: those of a previous compile
+(`compiler.IsOutputFile`) are removed, a directory holding any other is
+refused ([command line](01_usage.md#command-line)).
 
 ## Design decisions
 
@@ -371,9 +430,10 @@ template's `if` takes as true.
   (Helm 4.2 and 3.19 report the same),
   sorted by path since Helm's order varies between runs
   ([Schema check](specs/01_inputs_outputs.md#schema-check)).
-- Functions: a host function that reproduces a Helm, sprig or okdp-lib-chart
-  function is that function's Go code. Where Helm prints `""` for a value it
-  cannot encode, the compile fails instead.
+- Functions: a host function that reproduces a Helm or sprig function is
+  that function's Go code, the Helm and sprig ones in one
+  package (`helmfn`). Where Helm prints `""` for a value it cannot encode,
+  the compile fails instead.
 - Reproduced, not imported: the helm module pulls in client-go and requires
   newer Go and Kubernetes versions than the programs that embed this
   package. `coalesceValues`, `coalesceTables`, `cleanNil`, `value.Merge`
@@ -421,13 +481,23 @@ sees a copy of the parameters while the merges use them as written.
   lines are read as Helm reads them (`helmLines`).
 - One YAML document: a second one fails, rather than being ignored as
   `yaml.Unmarshal` ignores it.
-- Directives are checked before evaluation (`check.go`), in the whole
-  section: a misspelled `$` key fails rather than being written to the
-  values, in the branches no case takes too. Expressions stay checked when
-  evaluated ([Limitations](#limitations)).
+- A document is compiled once, when loaded, into a tree of typed nodes
+  (`tree.go`), before any evaluation and in the whole document: a
+  misspelled `$` key or top-level key fails rather than being written to
+  the values or ignored, and an expression that does not compile (a
+  syntax error, an undeclared name, an unknown function) fails, in the
+  branches no case takes too. Building the tree is the check: a misplaced
+  directive has no node to become, so no second walk must classify the
+  maps as the evaluation does. Type errors stay evaluation errors
+  ([Limitations](#limitations)).
 - Expressions are CEL: no I/O, every variable dynamically typed. An
   environment is built per set of variable names in scope, and cached for
-  the compile.
+  the compile; each expression is compiled once, to a program each
+  evaluation runs (once per element in a `$for`). Under a cost limit, the
+  program's cost tracker reads its limit through a pointer the session
+  sets before each evaluation (CEL clones the tracker per evaluation,
+  sharing the pointer), so a compiled program is limited to what the
+  compile has left.
 - `service.yaml` is not a values file: yaml.v3 decodes it into Go types as
   YAML 1.2 ([service.yaml](specs/02_service_definition.md#serviceyaml)).
   Where the two readings differ on a field, the field is checked:
@@ -445,12 +515,12 @@ language embedded in the compiler (`//go:embed`), not by Go code:
   `values.yaml`, read side by side with it. When the chart changes (a new
   value, a renamed key), the change is to data, reviewed as such, not to
   code.
-- One engine: `compile.EvalTemplate` goes through `compile.Load` as a
-  mapping does, with the same host functions (`functions`), so the
-  template is read as a mapping is (YAML 1.1, ordered `let`, `errors`),
-  with the same directives, functions and error paths. A field left out
-  (`$if`) or a registration field the client's `request` overrides
-  (`$merge`) needs no Go of its own.
+- One engine: `compile.Session.EvalTemplate` goes through `Session.Load`
+  as a mapping does, in the compile's session, with the same host
+  functions (`functions`), so the template is read as a mapping is (YAML
+  1.1, ordered `let`, `errors`), with the same directives, functions and
+  error paths. A field left out (`$if`) or a registration field the
+  client's `request` overrides (`$merge`) needs no Go of its own.
 - Embedded, not in the package: the template is versioned with the Go code
   that checks the clients and computes the names it reads, and so is
   `DcrSource`, the oidc-dcr version it writes values for. Every service
@@ -464,8 +534,9 @@ express, or what more than one reader needs:
 
 - the checks ([oidcClients](specs/02_service_definition.md#oidcclients)),
   of each client and across clients, with errors naming the client;
-- the mode (no chart in `existing` mode) and the platform's settings: their
-  defaults and types (`dcrSettings`), and what `dcr` mode requires of them;
+- the mode (no chart in `existing` mode) and what `dcr` mode requires of
+  the platform's settings (their types and defaults are the platform
+  schema's, `internal/okdp/platform.schema.json`);
 - the names: the chart key, the objects' full name (cut to 63 characters,
   as `okdpFullname`; two clients cut to one name are refused), the Secret.
   The Secret name is also what
@@ -473,9 +544,10 @@ express, or what more than one reader needs:
   mapping that reads the Secret and the Job that writes it agree (a client
   that sets its own `secret` names it in the mapping too). The template
   receives them as `names`;
-- the charts (`clientCharts`): the reserved keys, the chart entries added
-  to a copy of the charts of `service.yaml`, rendered by the platform's
-  oidc-dcr chart.
+- the charts (`clientCharts`): the reserved keys and the chart entries,
+  rendered by the platform's oidc-dcr chart, which the compiler adds with
+  its other own chart, `okdp`, in one place (`addOwnCharts`), and lists in
+  `Result.ClientCharts` for the install order.
 
 ### Values for unmodified upstream charts
 
@@ -490,8 +562,8 @@ The compiler stops at values:
 - the result is data: checked against the upstream schema at compile time,
   diffed in a pull request, compared with a previous render;
 - no Helm template code runs in the compiler, and none can come in through
-  instance values: `{{` is refused in the instance's layers and every
-  resolved connection.
+  instance values: `{{` is refused in the project's and the instance's
+  layers and every resolved connection.
 
 The cost: what an upstream chart has no value for cannot be changed, and
 neither can the chart itself ([Limitations](#limitations)). OKDP's own
@@ -505,13 +577,15 @@ values, oidc-dcr with a default (`DcrSource`)
 
 ### Stateless, hermetic, concurrent
 
-- `Compile` keeps no state between calls: each call parses the mapping, and
-  the oidc-dcr template once per client, and builds its own CEL engines.
-  The package-level variables are read-only: tables, a regular expression,
-  the embedded template. A `Definition` can be shared between goroutines,
-  and is not changed: the client charts and the `okdp` chart are added to a
-  copy of its charts (`TestConcurrentCompile` races it under `go test
-  -race`). Each compile reads an upstream chart from the chart
+- `Compile` keeps no state between calls: each call parses and compiles
+  the mapping, and the oidc-dcr template once per client, and opens its own CEL session
+  (`compile.NewSession`), whose host functions and environments serve its
+  conditions, mapping and templates, never another compile's (a session is
+  not safe for concurrent use). The package-level variables are read-only:
+  tables, a regular expression, the embedded template. A `Definition` can
+  be shared between goroutines, and is not changed: the client charts and
+  the `okdp` chart are added to a copy of its charts
+  (`TestConcurrentCompile` races it under `go test -race`). Each compile reads an upstream chart from the chart
   cache once, however many keys it renders. Caching across compiles, if
   any, is the caller's: a chart cache keyed by pinned versions never goes
   stale.
@@ -537,11 +611,11 @@ in-memory maps, the oidc-dcr template is in the binary.
   them, an `embed.FS` of the contract schemas included.
 - The paths written in `service.yaml` (`defaults`) are cleaned and opened
   inside the package, and an `fs.FS` path cannot contain `..`: a package
-  cannot read outside itself. A chart
-  cache entry, `<repository>/<chart>-<version>` or `<chart>-<version>`, is
-  named by a checked source or platform chart (a repository whose host and
-  path are an `fs.ValidPath` without `\`, a chart name without `/`, `.` or
-  `..`, a pinned version), so it stays inside the cache. The CLI uses
+  cannot read outside itself. A chart cache entry,
+  `<repository>/<chart>-<version>`, is named by a checked source or
+  platform chart (a repository whose host and path are an `fs.ValidPath`
+  without `\`, a chart name without `/`, `.` or `..`, a pinned version), so
+  it stays inside the cache. The CLI uses
   `os.DirFS`, which still follows symbolic links.
 - A schema `$ref` to a file or a URL fails the compile instead of being
   fetched (`schemaLoader`); a `urn:` reference accepts anything, as in Helm.
@@ -550,34 +624,38 @@ in-memory maps, the oidc-dcr template is in the binary.
 
 The package, with the upstream charts its sources pin, is reviewed in its
 repository; the contracts, the platform's charts and the platform values
-with the platform. The instance's values layers and files are input, from a
-console user or a GitOps pull request. The chart cache is the caller's,
+with the platform. A project's values layers, from its owners, and the
+instance's layers and files are input, from a console user or a GitOps pull
+request. The chart cache is the caller's,
 filled from the pinned references. The compiler enforces:
 
 | Boundary | Where | Reason |
 |---|---|---|
-| Platform values | `valuesLayers`, stage 1 | `global` comes from the package's defaults and the platform's layers (`Inputs.Platform`): an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the charts OKDP's objects and clients are rendered with (`charts`), and every chart receives `global` (`imageRegistry`) |
+| Platform values | `valuesLayers`, `projectLayers`, stage 1 | `global` comes from the package's defaults and the platform's layers (`Inputs.Platform`): a project layer (`Inputs.Project`) only adds to them, never changing a value they set nor a connection they give; an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the charts OKDP's objects and clients are rendered with (`charts`), and every chart receives `global` (`imageRegistry`) |
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
-| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below. An internal reference is a release name (`isRelease`): it becomes hosts, Secret names and `Dependency.Instance` |
-| Credentials never inlined | `resolve` | an external connection carries contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and descriptors are not secret |
-| Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`checkContract`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
+| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below. An internal reference is a release name (`helmfn.IsRelease`): it becomes hosts, Secret names and `Dependency.Instance` |
+| Credentials never inlined | `contract.fields`, from `resolve` and `descriptor` | an external connection and a provided output carry contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and descriptors are not secret |
+| Contracts | `resolve`, `descriptor` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`contract.check`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
 | Provider and consumers agree | `descriptor` | an output under the release name equals what internal references resolve to |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
-| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the instance's layers (parameters, `connections`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
+| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the project's and the instance's layers (parameters, `global`, `connections`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
 | Upstream schemas | stage 10 | an upstream chart's rules fail the compile, not the deployment |
 | Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart the compile checks the values against is the chart the deployer renders |
-| Declared charts only | `Compile`, `clientCharts`, `objectsChart` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart or the `okdp` chart with one of its own: their keys are the compiler's, and their charts the platform's |
-| OAuth client charts | `clientCharts` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
+| Declared charts only | `addOwnCharts`, `chart.FinalValues` | the mapping cannot output a chart that `service.yaml` does not declare, nor replace a client chart or the `okdp` chart with one of its own: their keys are the compiler's, checked in one place, and their charts the platform's |
+| OAuth client charts | `clientCharts`, `addOwnCharts` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
 
 What an expression computes is bounded only on request: a caller that
 compiles packages it does not review passes a context (cancelled between
 the stages and inside comprehensions) and a total CEL cost
-(`CompileContext`, `WithCostLimit`); the CLI sets none.
+(`CompileContext`, `WithCostLimit`), both held by the compile's session
+(`compile.Session`), the cost counted across the conditions of `require`,
+the mapping and the client templates; the CLI sets none.
 
 Not decided by the compiler: which layers are the platform's. What the
 caller gives as `Inputs.Platform` (`--platform`) is trusted as the platform
-values, and comes from the platform's repository, never from the instance's
-author; the keys of `global` an instance may set are the parameter schema's
+values, and comes from the platform's repository, never from a project's
+owners or the instance's author, whose layers are `Inputs.Project`
+(`--project`) and `Inputs.Values` (`-f`); the keys of `global` an instance may set are the parameter schema's
 decision, reviewed with the package
 ([Platform values](specs/01_inputs_outputs.md#platform-values)).
 
@@ -604,9 +682,10 @@ renders a small chart, and stores its output or its error; the
 | `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`); with each other Helm major version, where it differs (`helm3.json`) | `fsio`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart, and each known difference of a version (`umbrellaRenders`) |
 
 `SOURCE` records what rendered them, written by `generate.sh`: the version
-of the helm on the `PATH` (`helm`), the deployers' versions (`helms`), and
-the okdp-lib-chart repository and commit (`-dirty` when its templates were
-modified).
+of the helm on the `PATH` (`helm`) and the deployers' versions (`helms`).
+The tests read them through `internal/helmtest`, imported by
+tests only: the directory, the JSON renders, the versions of `SOURCE`, and
+the `helm<major>` files beside each reference file.
 
 To regenerate: `go test ./internal/chart -run TestHelmValues -update`
 (writes each `final.yaml`), `go test ./internal/fsio -run TestHelmUmbrella
@@ -651,19 +730,22 @@ all.
 ### Unit tests
 
 Most source files have their `_test.go`, in memory (`fstest.MapFS`, as a
-server passes its inputs); the host functions, schemas and
-generated Secrets are tested against Helm, in `helm_test.go`.
+server passes its inputs); the host functions copied from Helm and the
+schemas are tested against Helm, in `helm_test.go`, `helmfn` through the
+packages that call it.
 `internal/compile/cel_test.go` covers the language: directives, YAML 1.1,
-aliases and merge keys, the values of expressions, error paths and the
-mistakes the checks refuse; and the CEL libraries table of the
+aliases and merge keys, the values of expressions, error paths, the
+mistakes a document is refused for when loaded, in the branches no
+evaluation takes too (`TestMistakes`: directives, unknown sections,
+expressions that do not compile), the cost limit and cancellation of a
+session over compiled programs (`TestSession`); and the CEL libraries table of the
 [service definition](specs/02_service_definition.md#cel-libraries), each
 library at the version `pinnedLibraries` enables (`TestLibraryVersions`):
 a version is raised with the docs. `internal/chart/spec_test.go` covers the
 source checks
 (`TestRefCheck`) and the `charts` section, `internal/chart/cache_test.go`
 the chart cache, unpacked or an archive with subcharts, in its
-repository's directory or at the root, one chart name and version of two
-repositories (`TestChartCache`, `TestFinalValuesRepositories`), an archive
+repository's directory, not at the root (`TestChartCache`), an archive
 written on Windows or by `git archive` and the paths Helm refuses
 (`TestReadArchive`), the 100 MiB cap (`TestChartSize`), and the
 repository's directory (`TestRefCacheDir`),
@@ -673,15 +755,17 @@ runs the whole pipeline on a minimal package and chart cache: schemas,
 upstream values, `protect` and `append`, objects and the `okdp` chart with
 the platform's charts (`TestObjects`), dependencies, one upstream chart for
 two keys (`TestSharedSource`). `internal/okdp/layers_test.go` covers the
-platform's and the instance's layers: what an instance may set of `global`
-(`TestValuesLayers`), layers of Go types that merge as the same values
+platform's, the project's and the instance's layers: what an instance may
+set of `global` (`TestValuesLayers`), what a project may add, and the
+platform values it may not change (`TestProjectLayers`), layers of Go types that merge as the same values
 read from a file, and the layer and path of what values cannot hold
 (`TestValuesLayersGoTypes`); `internal/value/value_test.go` the reading of
-each Go type (`TestNormalize`, `TestNormalizeErrors`).
+each Go type (`TestNormalize`, `TestNormalizeErrors`) and the paths of the
+messages (`TestPath`).
 `internal/okdp/mapping_test.go` covers OKDP's
 sections and functions. `internal/okdp/service_test.go` covers `require`:
 its entries decoded and checked, the conditions evaluated in a whole
-compile (`TestRequireWhen`). `internal/okdp/oidc_test.go` covers the OAuth
+compile, after the context (`TestRequireWhen`). `internal/okdp/oidc_test.go` covers the OAuth
 clients: the values the oidc-dcr template computes (the defaults compared
 whole; the names, client keys, platform settings), the modes and
 `oidcClientSecret`, the errors of the section and of the platform, and the
@@ -754,14 +838,36 @@ upstream values of `app` included.
 The rest of `examples/02_advanced/` is what the compile writes:
 `output-no-dcr/helm-cmd/` as `okdp-compile -o <dir> --mkinstall`,
 `output-no-dcr/umbrella-chart/` as `-o <dir> --umbrella --mkinstall`, and `output-dcr/`
-likewise with `platform-dcr.yaml`. `TestExample`
-(`internal/fsio/example_test.go`) checks both examples. For `02_advanced`, it
+likewise with `platform-dcr.yaml`.
+
+`examples/03_full/` is the reference of the mapping language: its package,
+the `workspace` service, uses every section, directive and host function,
+most of the CEL libraries and of the YAML reading, each commented, over
+five charts (`api` and `scheduler` two renders of one chart, the second
+taking the first's upstream values; `backup` left out by `$if`, its chart
+not in the cache), three OAuth clients in `dcr` mode (one public, one
+computed by `$spread`), and contracts with internal conventions, derived
+and conditional defaults and secret fields. Its values come in three
+layers: `platform.yaml` (`--platform`), `demo.yaml`, the project's
+(`--project`: settings under `global.okdp.project`, which the mapping reads,
+and connections of its own), and `config.yaml` (`-f`), whose references
+reach an instance of the namespace and connections of the platform, the
+project and the instance, in a list of objects and under a nested key.
+`output/helm-cmd/` is what `-o <dir> --mkinstall --mkdag` writes,
+`output/umbrella-chart/` what `-o <dir> --umbrella --mkinstall --mkdag`
+writes, under the release `demo-workspace` and the namespace `demo`.
+
+`TestExample` (`internal/fsio/example_test.go`) checks the three examples.
+For `02_advanced`, it
 compiles `config.yaml`, an instance layer, over `platform.yaml`, a
 platform layer, under the release
 `demo-webapp` and the namespace `demo`, and compares the files of
-`fsio.Files` with `fsio.Install`, and of `fsio.Umbrella`, with them byte for
-byte; then the same with `platform-dcr.yaml` after `platform.yaml`, with
-`output-dcr/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks
+`fsio.Write` with `Install`, and with `Umbrella` and `Install`, with them
+byte for byte, each one `fsio.IsOutputFile` names; then the same with
+`platform-dcr.yaml` after `platform.yaml`, with `output-dcr/`. For
+`03_full`, it compiles `config.yaml` over `demo.yaml`, a project layer,
+over `platform.yaml`, and compares the same files, with `Dependencies`,
+with `output/`. `TestRun` (`cmd/okdp-compile/main_test.go`) checks
 that the command line writes them, `install.sh` executable, removes
 `install.sh` without `--mkinstall` and `okdp.dependencies.yaml` without
 `--mkdag`, and writes the latter with it.
@@ -773,17 +879,21 @@ reviewed as such.
 ### Failure cases
 
 `testdata/<case>.yaml` at the repository root: instance values that must
-fail on the example; `testdata/platform/<case>.yaml`: platform values that
-must fail on it. The first line is `# error: <message>` (`\n` for a line
+fail on the example (`02_advanced`); `testdata/platform/<case>.yaml`:
+platform values that must fail on it; `testdata/project/<case>.yaml`:
+project values. The first line is `# error: <message>` (`\n` for a line
 break). `TestExampleErrors` applies an instance case as an instance layer
 over the platform values, a platform case as a platform layer after
-`platform.yaml`, and expects an error containing the message. The instance
+`platform.yaml`, a project case as a project layer after it, and expects an
+error containing the message. The instance
 cases cover the connection checks (wrong contract, unknown field, secret
 field, the contract's types), the example's `errors` rules (no `secretRef`, replicas without a
 database), the protected upstream paths, a parameter schema violation, and
 an instance that sets `global` (`instance-sets-global.yaml`); the platform
 cases, a missing platform value and the OAuth client in `dcr` mode without
-a registration URL (`dcr-without-registration-url.yaml`).
+a registration URL (`dcr-without-registration-url.yaml`); the project case,
+a project that gives a field of a platform connection
+(`redefines-platform-connection.yaml`).
 
 ### Continuous integration
 
@@ -829,10 +939,8 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   `values.schema.json`; the defaults and schemas of its subcharts apply only
   when Helm renders it.
 - **One chart cache directory per repository URL without its scheme.**
-  `oci://x/charts` and `https://x/charts` share `x/charts/`, and
-  `<chart>-<version>` at the root holds no repository: it serves a compile
-  only when the compiled keys name that chart and version from one
-  repository ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
+  `oci://x/charts` and `https://x/charts` share `x/charts/`
+  ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 - **Schema references** resolve within the schema only (and `urn:`):
   [Everything through fs.FS](#everything-through-fsfs).
 - **Connection references** are found through `properties` and `items` of
@@ -843,12 +951,12 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
 - **Dependencies are reported, not checked.** Whether the referenced
   instance exists and provides the contract is outside one compile; so is
   any check across instances.
-- **Expressions are checked when evaluated.** Variables are dynamic, so an
-  expression is compiled only when evaluated
-  ([Expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
-  a mistake in a branch passes until an instance takes it. Test cases need
-  to cover each branch. The directives, not the expressions, are checked
-  in every branch.
+- **Type errors show when evaluated.** Every expression compiles when the
+  mapping is loaded, in every branch, but variables are dynamic: a type
+  error (`values.replicas + 1`, `no such overload`) or a missing key
+  passes until an instance takes the branch
+  ([Expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)).
+  Test cases need to cover each branch.
 - **OAuth clients are registered anonymously only.** In `dcr` mode, OIDC
   enabled, a mapping that declares a client needs
   `global.okdp.oidc.dcr.authMethod: anonymous`
@@ -869,20 +977,29 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   (`internal/okdp/mapping.go`), as `okdpFullname`, `okdpGeneratedSecret` and
   `oidcClientSecret` (`oidcFunctions`, `internal/okdp/oidc.go`) do. Names
   mappings bind themselves are avoided (`okdpFullname`, since mappings bind
-  `fullname`). A function reproducing a Helm, sprig or okdp-lib-chart one
-  gets a `generate.sh` case and a `TestHelm*` comparison; every function
+  `fullname`). A function reproducing a Helm or sprig one gets a
+  `generate.sh` case and a `TestHelm*` comparison, its Go code in
+  `helmfn`; every function
   gets an entry in [Functions](specs/02_service_definition.md#functions).
-- **Platform context.** A value derived from `global.okdp` is added in
-  `buildContext` (stage 3), and to
-  [Context](specs/02_service_definition.md#context). A new setting of
-  the oidc-dcr Jobs is a key of `global.okdp.oidc.dcr`, typed and defaulted
-  in `dcrSettings`, read by the template as `platform.oidc.dcr`, and a row
-  of [OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings).
+- **Platform context.** A new setting of `global.okdp` the compiler reads
+  is a property of `internal/okdp/platform.schema.json`: its type, its
+  default, its meaning in its `description`, checked and defaulted with the
+  others (`platformSettings`), with a test case in `context_test.go`, and a
+  row of [Fields the compiler
+  reads](specs/01_inputs_outputs.md#fields-the-compiler-reads). A value
+  derived from it is added in `platformContext` (stage 2), checked there
+  when a schema cannot say it, to the mapping's `platform` in
+  `mappingScope`, as a field of `instance` when a later stage reads it, and
+  to [Context](specs/02_service_definition.md#context). A new setting of
+  the oidc-dcr Jobs is a property of `global.okdp.oidc.dcr` in the schema,
+  read by the template as `platform.oidc.dcr`, and a row of [OAuth client
+  settings](specs/01_inputs_outputs.md#oauth-client-settings).
 - **The oidc-dcr values.** A value of the oidc-dcr chart (a new one, a key
   a new version renames) is set in `internal/okdp/oidc-dcr.cel.yaml`, with its
   expectations in `oidc_test.go`, not in Go
   ([The oidc-dcr template](#the-oidc-dcr-template)). A new client key also
-  goes in `clientKeys` and `checkClient` (`internal/okdp/oidc.go`), and in
+  goes in `clientKeys` (`internal/okdp/oidc.go`), with its kind
+  (`internal/okdp/fields.go`), a rule of its own in `checkClient`, and in
   [oidcClients](specs/02_service_definition.md#oidcclients).
 - **Contracts** are data: a new contract, or new `x-okdp-internal`,
   `x-okdp-secret`, `x-okdp-derived` or default fields, needs no compiler
@@ -894,4 +1011,4 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   cache, a new platform chart version a platform value.
 - **Callers.** Anything that provides `fs.FS` inputs and values maps; the
   CLI is one such caller. A caller writes the result where it keeps it,
-  from `compiler.Files` or `compiler.Umbrella`.
+  the files of `compiler.Write`, the CLI's in any of its modes.

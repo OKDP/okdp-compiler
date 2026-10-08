@@ -31,8 +31,8 @@ var (
 	}}}
 	// The chart cache: the upstream charts' defaults.
 	charts = fstest.MapFS{
-		"app-1.0.0/values.yaml":          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
-		"okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
+		"charts.example.org/app-1.0.0/values.yaml":                 {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
+		"registry.example.org/okdp/okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
 	}
 	appSource     = chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
 	objectsSource = chart.Ref{Repository: "oci://registry.example.org/okdp", Chart: "okdp-objects", Version: "1.0.0"}
@@ -333,12 +333,12 @@ func TestCompileSchemas(t *testing.T) {
 			"values don't meet the specifications of the schema(s) in the following chart(s):\ndemo:\n- at '/replicas': got number, want integer",
 		},
 		"final values": {
-			fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(schema)}},
+			fstest.MapFS{"charts.example.org/app-1.0.0/values.schema.json": {Data: []byte(schema)}},
 			M{"replicas": float64(5), "upstream": M{"app": M{"image": M{"tag": "latest"}}}},
 			"compiled values don't meet the specifications of the schema(s) in the following chart(s):\napp (app-1.0.0):\n- at '/image/tag': 'latest' does not match pattern '^[0-9.]+$'\n- at '/replicaCount': maximum: got 5, want 3",
 		},
 		"a $ref to a URL": {
-			fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"$ref": "https://example.org/x.json"}`)}},
+			fstest.MapFS{"charts.example.org/app-1.0.0/values.schema.json": {Data: []byte(`{"$ref": "https://example.org/x.json"}`)}},
 			M{}, "the schema may only reference itself",
 		},
 	} {
@@ -354,7 +354,7 @@ func TestCompileSchemas(t *testing.T) {
 	// A null that deletes a default is checked as Helm checks it: gone.
 	d := *def
 	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: chart.Upstream{Enabled: true}}}
-	in := withCharts(inputs(M{"upstream": M{"app": M{"labels": nil}}}), fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}})
+	in := withCharts(inputs(M{"upstream": M{"app": M{"labels": nil}}}), fstest.MapFS{"charts.example.org/app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}})
 	res, err := Compile(&d, in)
 	if err != nil {
 		t.Fatal(err)
@@ -438,11 +438,8 @@ objects:
 			"{}\n", nil, M{"global": M{"okdp": M{"charts": nil}}},
 			"global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in the platform's values (--platform, Inputs.Platform)",
 		},
-		"not a map":    {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": "okdp-objects"}}}}, `global.okdp.charts.objects must be a map (repository, chart, version), got "okdp-objects"`},
-		"not a string": {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": 1}}}}}, "global.okdp.charts.objects.version must be a string, got 1"},
 		"a range":      {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}, `global.okdp.charts.objects.version "1.x": a pinned chart version`},
 		"oidcDcr":      {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": "quay.io"}}}}}, `global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository`},
-		"unknown key":  {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"oidcDCR": M{}, "dcr": M{}}}}}, "global.okdp.charts: unknown key(s) dcr, oidcDCR (allowed: objects, oidcDcr)"},
 		"not in cache": {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "2.0.0"}}}}}, "okdp: chart okdp-objects-2.0.0 is not in the chart cache"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -482,7 +479,7 @@ func TestSharedSource(t *testing.T) {
 		t.Errorf("canary: app's defaults and OKDP's, then the computed ones: %#v", canary)
 	}
 	// app's schema, reported under each chart's key.
-	in := withCharts(inputs(M{"replicas": 5}), fstest.MapFS{"app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}})
+	in := withCharts(inputs(M{"replicas": 5}), fstest.MapFS{"charts.example.org/app-1.0.0/values.schema.json": {Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}})
 	if _, err := Compile(&d, in); err == nil || !strings.Contains(err.Error(), "canary (app-1.0.0):\n- at '/replicaCount': maximum: got 5, want 3") {
 		t.Errorf("schema: got %v", err)
 	}

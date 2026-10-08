@@ -13,8 +13,7 @@ import (
 )
 
 // dcrCtx: a context whose platform registers OAuth clients anonymously (dcr
-// mode), these DCR settings over the defaults (dcrSettings, as
-// buildContext).
+// mode), these DCR settings over the defaults (platformContext).
 func dcrCtx(settings ...M) M {
 	dcr := M{
 		"authMethod":      "anonymous",
@@ -24,16 +23,13 @@ func dcrCtx(settings ...M) M {
 	for _, s := range settings {
 		dcr = value.Merge(dcr, s)
 	}
-	if err := dcrSettings(dcr); err != nil {
+	inst := &instance{values: M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "scope": "openid profile email", "dcr": dcr}}}}}
+	if err := platformContext(inst); err != nil {
 		panic(err)
 	}
-	dcr["enabled"] = true
 	return M{
-		"release": M{"name": "demo-x", "namespace": "demo"},
-		"platform": M{"oidc": M{
-			"scope": "openid profile email",
-			"dcr":   dcr,
-		}},
+		"release":  M{"name": "demo-x", "namespace": "demo"},
+		"platform": M{"oidc": inst.oidc},
 	}
 }
 
@@ -43,7 +39,7 @@ func dcrValues(ctx M, clients ...M) (map[string]M, error) {
 	for _, c := range clients {
 		section = append(section, value.Copy(c))
 	}
-	_, values, err := oidcClients(nil, ctx, section)
+	_, values, err := oidcClients(newSession(ctx), testInstance(ctx), section)
 	return values, err
 }
 
@@ -186,10 +182,10 @@ func TestDcrArgs(t *testing.T) {
 
 // TestDcrPlatform: the platform's DCR settings (platform.oidc.dcr): the Job
 // TTL and retries, the CA Secret (the client's caSecret wins), the wait for
-// the provider and the image, its snake_case keys renamed.
+// the provider and the image.
 func TestDcrPlatform(t *testing.T) {
 	ctx := dcrCtx(M{"ttlSeconds": float64(300), "backoffLimit": float64(2), "caSecret": "corp-ca", "waitTtlSeconds": float64(120),
-		"image": M{"registry": "mirror.example.org", "pull_policy": "Always"}})
+		"image": M{"registry": "mirror.example.org", "pullPolicy": "Always"}})
 	setIssuer(ctx, "https://idp.example.org/realms/data")
 	grants := []any{"client_credentials"}
 	values, err := dcrValues(ctx, M{"grantTypes": grants})
@@ -226,17 +222,17 @@ func TestDcrPlatform(t *testing.T) {
 func TestDcrModes(t *testing.T) {
 	ctx := dcrCtx()
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = false
-	clients, values, err := oidcClients(nil, ctx, []any{M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}}})
+	clients, values, err := oidcClients(newSession(ctx), testInstance(ctx), []any{M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}}})
 	if err != nil || values != nil || len(clients) != 2 || clients[1].chart != "console-oidc-dcr" {
 		t.Errorf("existing mode: %v %#v %#v", err, values, clients)
 	}
-	if _, _, err := oidcClients(nil, ctx, []any{M{"name": "console"}}); err == nil || !strings.Contains(err.Error(), "grantTypes is required") {
+	if _, _, err := oidcClients(newSession(ctx), testInstance(ctx), []any{M{"name": "console"}}); err == nil || !strings.Contains(err.Error(), "grantTypes is required") {
 		t.Errorf("existing mode, checked: %v", err)
 	}
 	// No client: nothing to check on the platform.
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = true
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["authMethod"] = "bearer"
-	if _, values, err := oidcClients(nil, ctx, nil); err != nil || values != nil {
+	if _, values, err := oidcClients(newSession(ctx), testInstance(ctx), nil); err != nil || values != nil {
 		t.Errorf("no client: %v %#v", err, values)
 	}
 	for _, tc := range []struct {
@@ -253,7 +249,7 @@ func TestDcrModes(t *testing.T) {
 		}
 		ctx := dcrCtx()
 		value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = tc.dcr
-		res, err := runMapping(nil, []byte("output:\n  x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n"), ctx)
+		res, err := runMapping(newSession(ctx), []byte("output:\n  x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n"), ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -276,25 +272,27 @@ func TestDcrErrors(t *testing.T) {
 		"registration url":  {M{"registrationUrl": ""}, []any{M{"grantTypes": grants}}, "global.okdp.oidc.dcr.registrationUrl is required"},
 		"grant types":       {nil, []any{M{}}, "oidcClients[0]: grantTypes is required"},
 		"empty grant types": {nil, []any{M{"grantTypes": []any{}}}, "oidcClients[0]: grantTypes is required"},
-		"grant type":        {nil, []any{M{"grantTypes": []any{float64(1)}}}, "oidcClients[0]: grantTypes is required"},
+		"grant type":        {nil, []any{M{"grantTypes": []any{float64(1)}}}, "oidcClients[0]: grantTypes[0] must be a non-empty string, got 1"},
 		"not a map":         {nil, []any{"client_credentials"}, `oidcClients[0]: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got "client_credentials"`},
 		"unknown key":       {nil, []any{M{"grantTypes": grants, "redirectUri": "x", "ttl": 1}}, "oidcClients[0]: unknown key(s) redirectUri, ttl (allowed: name"},
+		"named client key":  {nil, []any{M{"grantTypes": grants, "name": "c", "ttl": 1}}, "oidcClients[0] (c): unknown key(s) ttl (allowed: name"},
 		"name":              {nil, []any{M{"grantTypes": grants, "name": "Console"}}, `oidcClients[0]: name "Console" must be lowercase letters, digits and "-"`},
 		"name type":         {nil, []any{M{"grantTypes": grants, "name": true}}, "oidcClients[0]: name true must be"},
 		"name length":       {nil, []any{M{"grantTypes": grants, "name": strings.Repeat("a", 55)}}, `", 54 characters at most (it names the chart <name>-oidc-dcr`},
 		"same name":         {nil, []any{M{"grantTypes": grants, "name": "a"}, M{"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
 		"same secret":       {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": "b", "secret": "demo-x-demo-dcr"}}, `oidcClients[1] (b): oidcClients[0] writes the same Secret, "demo-x-demo-dcr": give each client its own secret`},
 		"two main clients":  {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
-		"redirect uris":     {nil, []any{M{"grantTypes": grants, "redirectUris": "https://x/cb"}}, `oidcClients[0]: redirectUris must be a list of URLs, got "https://x/cb"`},
+		"redirect uris":     {nil, []any{M{"grantTypes": grants, "redirectUris": "https://x/cb"}}, `oidcClients[0]: redirectUris must be a list of non-empty strings, got "https://x/cb"`},
+		"redirect uri":      {nil, []any{M{"grantTypes": grants, "redirectUris": []any{"https://x/cb", ""}}}, `oidcClients[0]: redirectUris[1] must be a non-empty string, got ""`},
 		"scope":             {nil, []any{M{"grantTypes": grants, "scope": []any{"a"}}}, "oidcClients[0]: scope must be a string"},
 		"public":            {nil, []any{M{"grantTypes": grants, "public": "yes", "name": "c"}}, `oidcClients[0] (c): public must be true or false, got "yes"`},
-		"request":           {nil, []any{M{"grantTypes": grants, "request": "x"}}, "oidcClients[0]: request must be a map of registration fields"},
+		"request":           {nil, []any{M{"grantTypes": grants, "request": "x"}}, `oidcClients[0]: request must be a map, got "x"`},
 		"secret":            {nil, []any{M{"grantTypes": grants, "secret": float64(1)}}, "oidcClients[0]: secret must be a string"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := dcrCtx()
 			maps.Copy(value.AsMap(value.Dig(ctx, "platform.oidc.dcr")), tc.dcr)
-			_, _, err := oidcClients(nil, ctx, tc.clients)
+			_, _, err := oidcClients(newSession(ctx), testInstance(ctx), tc.clients)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
@@ -313,7 +311,7 @@ func TestDcrErrors(t *testing.T) {
 // list them.
 func TestDcrCompile(t *testing.T) {
 	ch := maps.Clone(charts)
-	ch["oidc-dcr-0.5.0/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
+	ch["quay.io/adaltas/oidc-dcr-0.5.0/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	mapping := `
 let:
@@ -349,10 +347,11 @@ oidcClients:
 		values   M
 		existing bool
 		charts   map[string]chart.Ref // Result.Charts
+		clients  []string             // Result.ClientCharts
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
-		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource}},
-		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource, "okdp": objectsSource}},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}, []string{"console-oidc-dcr", "oidc-dcr"}},
+		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource}, []string{"oidc-dcr"}},
+		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource, "okdp": objectsSource}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, err := compile("", tc.existing, app, ch, tc.values)
@@ -361,6 +360,9 @@ oidcClients:
 			}
 			if !reflect.DeepEqual(res.Charts, tc.charts) || len(res.Values) != len(tc.charts) {
 				t.Errorf("charts: got %v (values of %v), want %v", res.Charts, slices.Sorted(maps.Keys(res.Values)), tc.charts)
+			}
+			if !slices.Equal(res.ClientCharts, tc.clients) {
+				t.Errorf("client charts: got %v, want %v", res.ClientCharts, tc.clients)
 			}
 			wantLabels := M{"main": "demo-app-demo-dcr", "console": "demo-app-demo-console-dcr"}
 			if tc.existing {
@@ -402,7 +404,7 @@ oidcClients:
 	// The platform may name another oidc-dcr chart, a mirror.
 	mirror := chart.Ref{Repository: "oci://mirror.example.org/adaltas", Chart: "oidc-dcr", Version: "0.5.1"}
 	mirrored := maps.Clone(charts)
-	mirrored["oidc-dcr-0.5.1/values.yaml"] = ch["oidc-dcr-0.5.0/values.yaml"]
+	mirrored["mirror.example.org/adaltas/oidc-dcr-0.5.1/values.yaml"] = ch["quay.io/adaltas/oidc-dcr-0.5.0/values.yaml"]
 	res, err := compile("", false, app, mirrored, M{"replicas": 1, "global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": mirror.Repository, "chart": mirror.Chart, "version": mirror.Version}}}}})
 	if err != nil || res.Charts["oidc-dcr"] != mirror {
 		t.Errorf("global.okdp.charts.oidcDcr: %v %#v", err, res)

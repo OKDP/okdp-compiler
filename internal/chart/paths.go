@@ -35,6 +35,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // pathSeg: one key of a path.
@@ -42,10 +44,6 @@ type pathSeg struct {
 	key  string // the key, or the prefix of a glob
 	glob bool   // every key that starts with key
 }
-
-// specialKey: the characters a plain key cannot contain, written in
-// brackets in a path.
-const specialKey = `.[]"\*`
 
 // parsePath: the keys of a protect or append path (see the grammar above).
 // service.yaml is checked with it when it is loaded (Service.check), so a
@@ -138,27 +136,16 @@ func parseBracket(s string) (pathSeg, int, error) {
 }
 
 // formatPath: the path of these keys, as an error message shows the key a
-// value was refused at: plain keys joined by dots, a key with a special
-// character in brackets (annotations["nginx.ingress.kubernetes.io/auth-type"]).
-// parsePath reads it back as these literal keys.
+// value was refused at (value.Key): plain keys joined by dots, a key with a
+// special character in brackets
+// (annotations["nginx.ingress.kubernetes.io/auth-type"]). parsePath reads
+// it back as these literal keys.
 func formatPath(keys []string) string {
 	p := ""
 	for _, k := range keys {
-		p = keyPath(p, k)
+		p = value.Key(p, k)
 	}
 	return p
-}
-
-// keyPath: the path p followed by the key k, as formatPath writes it.
-func keyPath(p, k string) string {
-	if k != "" && !strings.ContainsAny(k, specialKey) {
-		if p == "" {
-			return k
-		}
-		return p + "." + k
-	}
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `*`, `\*`)
-	return p + `["` + r.Replace(k) + `"]`
 }
 
 // matchKeys: the keys of m a segment names, sorted: its key when m has it,

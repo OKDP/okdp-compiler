@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "replicas": {"type": "integer", "minimum": 1, "maximum": 10, "default": 1,
+                 "description": "API servers; more than one needs a database, sessions are stored there."},
+    "size": {"type": "string", "enum": ["small", "medium", "large"], "default": "small",
+             "description": "The resources of the API servers."},
+    "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
+                 "description": "The workspace's database: an instance providing the database contract, or a connection."},
+    "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
+              "description": "The database audit events are written to, a reference as database is."},
+    "storage": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "s3"},
+                "description": "The bucket notebooks and results are stored in: a connection (s3 has no internal naming convention)."},
+    "catalogs": {"type": "array", "default": [],
+                 "description": "The data catalogs of the workspace, each with its references.",
+                 "items": {"type": "object", "required": ["name", "storage"], "additionalProperties": false, "properties": {
+                   "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+                   "database": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}},
+                   "storage": {"type": "string", "minLength": 1, "x-okdp-connection-ref": {"contract": "s3"}},
+                   "properties": {"type": "object", "additionalProperties": {"type": "string"}}}}},
+    "notifications": {"type": "object", "additionalProperties": false, "properties": {
+      "webhook": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "http"},
+                  "description": "The instance alerts are posted to: a reference under a nested key."},
+      "channels": {"type": "array", "items": {"type": "string"}, "default": []}}},
+    "admins": {"type": "array", "items": {"type": "string", "format": "email"}, "default": []},
+    "extraEnv": {"type": "object", "additionalProperties": {"type": "string"}, "default": {},
+                 "description": "Environment variables of the API servers and the scheduler, by name."},
+    "features": {"type": "object", "additionalProperties": false, "properties": {
+      "console": {"type": "boolean", "default": true, "description": "The web console, and its OAuth client."},
+      "metrics": {"type": "object", "additionalProperties": false, "properties": {
+        "enabled": {"type": "boolean", "default": true},
+        "interval": {"type": "string", "pattern": "^[0-9]+[smh]$", "default": "30s"}}},
+      "backup": {"type": "object", "additionalProperties": false, "properties": {
+        "enabled": {"type": "boolean", "default": false},
+        "schedule": {"type": "string", "default": "0 3 * * *"}}}}},
+    "global": {"type": "object", "properties": {
+      "storageClass": {"type": "string", "description": "Declared: an instance may set it, over the platform's and the project's value."}}},
+    "connections": {"type": "object", "default": {}, "description": "The instance's own connections, by name."},
+    "upstream": {"type": "object", "default": {}, "description": "Values passed to the upstream charts as they are, by chart."}
+  }
+}

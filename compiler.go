@@ -2,7 +2,7 @@
 // upstream charts: the public API of okdp-compiler. A package (service.yaml,
 // values.cel.yaml, its parameters and OKDP's defaults for its charts) is
 // read from any fs.FS (LoadDefinition), compiled for one instance
-// (Compile), and written as files (Files, Umbrella):
+// (Compile), and written as the files of okdp-compile (Write):
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("packages/myservice"))
 //	res, err := compiler.Compile(def, compiler.Inputs{
@@ -13,7 +13,7 @@
 //		Release:   "demo-myservice",
 //		Namespace: "demo",
 //	})
-//	files, err := compiler.Files(res, compiler.DefaultIndent)
+//	files, err := compiler.Write(res, compiler.Output{Install: true}) // -o <dir> --mkinstall
 //
 // The implementation is under internal/: the mapping language (compile),
 // what the compiler reproduces of Helm (chart), OKDP's rules and the order
@@ -46,11 +46,11 @@ type (
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// Inputs: what one compile reads besides the package. Its values
-	// layers, Platform and Values, may hold Go values of other types than
-	// map[string]any and []any (map[string]string, []string, int32, a
-	// struct by its json tags): each is read as the values it would be once
-	// written to a values file and read by Helm; what values cannot hold (a
-	// func, a NaN) fails the compile, its layer and path named.
+	// layers, Platform, Project and Values, may hold Go values of other
+	// types than map[string]any and []any (map[string]string, []string,
+	// int32, a struct by its json tags): each is read as the values it would
+	// be once written to a values file and read by Helm; what values cannot
+	// hold (a func, a NaN) fails the compile, its layer and path named.
 	Inputs = okdp.Inputs
 	// Result: what a compile produces.
 	Result = okdp.Result
@@ -60,6 +60,10 @@ type (
 	// Option: a setting of CompileContext (WithCostLimit,
 	// WithoutObjectsChart).
 	Option = okdp.Option
+	// Output: the files Write gives for a result, as the flags of
+	// okdp-compile choose them (--umbrella, --mkinstall, --mkdag,
+	// --indent).
+	Output = fsio.Output
 )
 
 // The chart keys the compiler adds: OKDP's own objects, and the main OAuth
@@ -69,8 +73,8 @@ const (
 	DcrChart     = okdp.DcrChart
 )
 
-// DefaultIndent: the indentation of the YAML files Files and Umbrella
-// write, in spaces.
+// DefaultIndent: the indentation of the YAML files Write gives, in spaces,
+// unless Output.Indent sets another.
 const DefaultIndent = fsio.DefaultIndent
 
 // DcrSource: the chart that registers an OAuth client in dcr mode, unless
@@ -89,7 +93,7 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 
 // ParseValues: a values file as Helm reads it (YAML 1.1, every document of
 // the file merged in order, string keys, every number a float64), for
-// Inputs.Platform and Inputs.Values.
+// Inputs.Platform, Inputs.Project and Inputs.Values.
 func ParseValues(b []byte) (map[string]any, error) {
 	return chart.ParseValues(b)
 }
@@ -125,56 +129,49 @@ func WithoutObjectsChart() Option {
 	return okdp.WithoutObjectsChart()
 }
 
-// Files: what `okdp-compile -o <dir>` writes, file name -> content: the
-// final values of each chart (<key>.values.yaml), indented by indent spaces
-// (2 to 9).
-func Files(res *Result, indent int) (map[string][]byte, error) {
-	return fsio.Files(res, indent)
+// Write: what `okdp-compile -o <dir>` writes for res, file name -> content,
+// with the files o asks for:
+//
+//   - the final values of each chart, <key>.values.yaml, each naming the
+//     upstream chart that renders it; or, with Umbrella (--umbrella), the
+//     instance as one chart: Chart.yaml, named and versioned after
+//     service.yaml (Result.Service, Result.Version), an umbrella over the
+//     upstream charts of its keys (aliased to the key when it is not the
+//     chart's name), and UmbrellaValues, the final values of each key under
+//     the key;
+//   - with Install (--mkinstall), InstallScript, a shell script to write
+//     executable: `helm upgrade --install` of each chart from its upstream
+//     chart (Result.Charts) with its values file, in Result.Namespace, the
+//     release <Result.Release>-<key> (a namespace holds one release of a
+//     name), the OAuth clients' charts first (Result.ClientCharts); with
+//     Umbrella, of the umbrella chart as one Helm release, Result.Release,
+//     its dependencies built in a temporary copy;
+//   - with Dependencies (--mkdag), DependenciesFile.
+//
+// The YAML files are indented by o.Indent spaces, 2 to 9 (0:
+// DefaultIndent). Every file is built before Write returns: one that fails
+// leaves the caller nothing to write.
+func Write(res *Result, o Output) (map[string][]byte, error) {
+	return fsio.Write(res, o)
 }
 
-// DependenciesFile: the file name of Dependencies, beside the files of
-// Files.
+// IsOutputFile: name is a file Write gives, with any Output. A caller that keeps the
+// files of an instance in a directory, as okdp-compile does (-o), removes
+// those of a previous compile that this one does not give, and refuses any
+// other.
+func IsOutputFile(name string) bool {
+	return fsio.IsOutputFile(name)
+}
+
+// DependenciesFile: the file of Output.Dependencies, Result.Dependencies as
+// a YAML list, for a deployer that orders the releases (Flux dependsOn,
+// Argo CD sync waves).
 const DependenciesFile = fsio.DependenciesFile
 
-// Dependencies: what `okdp-compile --mkdag` adds to its output directory,
-// DependenciesFile: Result.Dependencies as a YAML list, for a
-// deployer that orders the releases (Flux dependsOn, Argo CD sync waves),
-// indented by indent spaces (2 to 9).
-func Dependencies(res *Result, indent int) ([]byte, error) {
-	return fsio.Dependencies(res, indent)
-}
-
-// InstallScript: the file name of Install, beside the files of Files.
+// InstallScript: the file of Output.Install, to write executable.
 const InstallScript = fsio.InstallScript
 
-// Install: what `okdp-compile --mkinstall` adds to its output directory,
-// InstallScript, a shell script to write executable: `helm
-// upgrade --install` of each chart from its upstream chart (Result.Charts)
-// with its values file of Files, in Result.Namespace, the release
-// <Result.Release>-<key> (a namespace holds one release of a name), the
-// OAuth clients' charts first.
-func Install(res *Result) ([]byte, error) {
-	return fsio.Install(res)
-}
-
-// InstallUmbrella: what `okdp-compile --umbrella --mkinstall` adds to its
-// output directory, InstallScript, a shell script to write executable: the
-// umbrella chart of Umbrella installed as one Helm release,
-// Result.Release in Result.Namespace, its dependencies built in a
-// temporary copy, with UmbrellaValues.
-func InstallUmbrella(res *Result) ([]byte, error) {
-	return fsio.InstallUmbrella(res)
-}
-
-// UmbrellaValues: the file of Umbrella holding the instance's values, given
-// to Helm as user values (helm -f, Argo CD valueFiles, Flux valuesFrom).
+// UmbrellaValues: the file of Output.Umbrella holding the instance's
+// values, given to Helm as user values (helm -f, Argo CD valueFiles, Flux
+// valuesFrom).
 const UmbrellaValues = fsio.UmbrellaValues
-
-// Umbrella: what `okdp-compile -o <dir> --umbrella` writes, file name ->
-// content: the instance as one chart, Chart.yaml, an umbrella over the
-// upstream charts of its keys (aliased to the key when it is not the
-// chart's name), and UmbrellaValues, the final values of each key under the
-// key; indented by indent spaces (2 to 9).
-func Umbrella(def *Definition, res *Result, indent int) (map[string][]byte, error) {
-	return fsio.Umbrella(def, res, indent)
-}

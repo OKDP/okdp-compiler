@@ -12,3 +12,15 @@ status 0 okdp-compile --package examples/02_advanced/input/service --release dem
 ! stderr .
 cmp $WORK/umbrella/Chart.yaml examples/02_advanced/output-no-dcr/umbrella-chart/Chart.yaml
 cmp $WORK/umbrella/install.sh examples/02_advanced/output-no-dcr/umbrella-chart/install.sh
+
+# --project: a project file between the platform's and the instance's, with
+# --mkdag; one that changes a platform value fails, nothing written.
+status 0 okdp-compile --package examples/03_full/input/service --charts examples/03_full/input/charts --contracts examples/03_full/input/contracts --release demo-workspace --namespace demo --platform examples/03_full/input/platform.yaml --project examples/03_full/input/demo.yaml -f examples/03_full/input/config.yaml -o $WORK/full --mkinstall --mkdag
+! stdout .
+! stderr .
+cmp $WORK/full/api.values.yaml examples/03_full/output/helm-cmd/api.values.yaml
+cmp $WORK/full/okdp.values.yaml examples/03_full/output/helm-cmd/okdp.values.yaml
+cmp $WORK/full/okdp.dependencies.yaml examples/03_full/output/helm-cmd/okdp.dependencies.yaml
+status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml --project testdata/project/redefines-platform-connection.yaml -f examples/02_advanced/input/config.yaml -o $WORK/project
+stderr '^error: project layer 1: connections.platform-db is set by the platform \(--platform, Inputs.Platform\): a project adds values, it does not change the platform.s$'
+! exists $WORK/project

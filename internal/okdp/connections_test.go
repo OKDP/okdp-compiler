@@ -1,6 +1,7 @@
 package okdp
 
 import (
+	"io/fs"
 	"maps"
 	"reflect"
 	"strings"
@@ -45,11 +46,11 @@ func resolveCtx(values M, platform ...map[string]any) (M, []Dependency, error) {
 	in := inputs(values)
 	in.Platform = append(in.Platform, platform...)
 	in.Contracts = dbContract
-	ctx, _, deps, err := buildContext(ch, in, &def.Service)
+	inst, err := newInstance(ch, in, &def.Service)
 	if err != nil {
 		return nil, nil, err
 	}
-	return value.AsMap(ctx["values"]), deps, nil
+	return value.AsMap(inst.scope["values"]), inst.deps, nil
 }
 
 // TestResolve: internal and external references, completed against the contract.
@@ -133,7 +134,7 @@ func TestResolveErrors(t *testing.T) {
 		"required field": {ext(M{"host": ""}), `replicas[0] (connection "ext"): field "host" is required by the database contract`},
 		"wrong contract": {ext(M{"contract": "s3"}), `replicas[0]: connection "ext" has contract "s3", "database" is expected`},
 		"unknown field":  {ext(M{"port": 1}), `field "port" is not part of the database contract`},
-		"secret field":   {ext(M{"password": "p"}), `"password" is a secret field`},
+		"secret field":   {ext(M{"password": "p"}), `replicas[0]: connection "ext": "password" is a secret field, put it in the credentials Secret`},
 		"not a string":   {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
 		"not a release":  {M{"replicas": []any{strings.Repeat("a", 54)}}, `replicas[0]: "` + strings.Repeat("a", 54) + `" is not a connection, nor a release name`},
 		"a template":     {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `values layer 1: replicas[0]: the value contains "{{"`},
@@ -213,7 +214,7 @@ func TestResolveTemplate(t *testing.T) {
 func TestResolveUnknownContract(t *testing.T) {
 	ch := maps.Clone(pkg)
 	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
-	if _, _, _, err := buildContext(ch, inputs(M{"q": "demo-mq"}), &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
+	if _, err := newInstance(ch, inputs(M{"q": "demo-mq"}), &def.Service); err == nil || !strings.Contains(err.Error(), `q: unknown contract "queue"`) {
 		t.Errorf("got %v", err)
 	}
 }
@@ -227,7 +228,7 @@ func TestResolveUnreadableContract(t *testing.T) {
 		contracts fstest.MapFS
 		want      string
 	}{
-		"not JSON":      {fstest.MapFS{"queue.schema.json": {Data: []byte(`{"properties": `)}}, `q: the queue contract cannot be read: queue.schema.json: unexpected end of JSON input`},
+		"not JSON":      {fstest.MapFS{"queue.schema.json": {Data: []byte(`{"properties": `)}}, `q: the queue contract cannot be read: queue.schema.json: unexpected EOF`},
 		"not an object": {fstest.MapFS{"queue.schema.json": {Data: []byte(`[]`)}}, `q: the queue contract cannot be read: queue.schema.json: not a JSON object`},
 		"not a schema": {
 			fstest.MapFS{"queue.schema.json": {Data: []byte(`{"properties": {"port": {"type": 5}}}`)}},
@@ -238,7 +239,7 @@ func TestResolveUnreadableContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"q": "demo-mq"})
 			in.Contracts = tc.contracts
-			if _, _, _, err := buildContext(ch, in, &def.Service); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, err := newInstance(ch, in, &def.Service); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error starting with %q", err, tc.want)
 			}
 		})
@@ -249,17 +250,16 @@ func TestResolveUnreadableContract(t *testing.T) {
 // after it, or is derived, applies: the defaults are applied until nothing
 // changes, whatever the order of the fields.
 func TestCompleteUntilStable(t *testing.T) {
-	schema := M{"properties": M{
-		"auth":   M{"default": "md5", "x-ui-condition": M{"field": "engine", "value": "postgresql"}},
-		"batch":  M{"default": true, "x-ui-condition": M{"field": "driver", "value": "pg"}},
-		"driver": M{"x-okdp-derived": M{"from": "engine", "map": M{"postgresql": "pg", "mysql": "my"}}},
-		"engine": M{"default": "postgresql"},
-	}}
+	c := testContract(t, `{"properties": {
+		"auth":   {"default": "md5", "x-ui-condition": {"field": "engine", "value": "postgresql"}},
+		"batch":  {"default": true, "x-ui-condition": {"field": "driver", "value": "pg"}},
+		"driver": {"x-okdp-derived": {"from": "engine", "map": {"postgresql": "pg", "mysql": "my"}}},
+		"engine": {"default": "postgresql"}}}`)
 	for _, tc := range []struct{ in, want M }{
 		{M{}, M{"auth": "md5", "batch": true, "driver": "pg", "engine": "postgresql"}},
 		{M{"engine": "mysql"}, M{"driver": "my", "engine": "mysql"}},
 	} {
-		if err := complete(schema, tc.in, "x"); err != nil || !reflect.DeepEqual(tc.in, tc.want) {
+		if err := c.complete(tc.in, "x"); err != nil || !reflect.DeepEqual(tc.in, tc.want) {
 			t.Errorf("got %v %v, want %v", tc.in, err, tc.want)
 		}
 	}
@@ -269,13 +269,57 @@ func TestCompleteUntilStable(t *testing.T) {
 // one line each, in alphabetical order, not in the contract's; false is a
 // value, a secret field is never set.
 func TestCompleteRequired(t *testing.T) {
-	schema := M{"x-okdp-contract": "database", "required": []any{"user", "tls", "host", "password"}, "properties": M{
-		"host": M{}, "tls": M{}, "user": M{}, "password": M{"x-okdp-secret": true},
-	}}
+	c := testContract(t, `{"x-okdp-contract": "database", "required": ["user", "tls", "host", "password"], "properties": {
+		"host": {}, "tls": {}, "user": {}, "password": {"x-okdp-secret": true}}}`)
 	want := `x: field "host" is required by the database contract
 x: field "user" is required by the database contract`
-	if err := complete(schema, M{"tls": false, "user": ""}, "x"); err == nil || err.Error() != want {
+	if err := c.complete(M{"tls": false, "user": ""}, "x"); err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
+	}
+}
+
+// testContract: the contract of this schema, read as a compile reads it
+// (readContract).
+func testContract(t *testing.T, schema string) *contract {
+	t.Helper()
+	c, err := readContract(fstest.MapFS{"database.schema.json": {Data: []byte(schema)}}, "database")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// openCounter: a file system that counts the files opened, by name.
+type openCounter struct {
+	fs.FS
+	opened map[string]int
+}
+
+// Open: the file name, counted.
+func (o openCounter) Open(name string) (fs.File, error) {
+	o.opened[name]++
+	return o.FS.Open(name)
+}
+
+// TestContractReadOnce: a compile reads a contract once, however many
+// references and outputs name it (the provider check included), and once
+// when it cannot be read, each reference given its error.
+func TestContractReadOnce(t *testing.T) {
+	files := maps.Clone(pkg)
+	files["config.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
+	d := *def
+	d.Files = files
+	d.Mapping = []byte("output: {app: {}}\ninstance: {url: u, usage: u}\nprovides:\n  - {contract: database, values: {host: demo-app-db.demo.svc, url: https://demo-app.example.org}}\n")
+	in := inputs(M{"main": M{"db": "demo-pg"}, "replicas": []any{"demo-pg", "ext"}, "connections": M{"ext": M{"contract": "database", "host": "h"}}})
+	opened := map[string]int{}
+	in.Contracts = openCounter{dbContract, opened}
+	if _, err := Compile(&d, in); err != nil || opened["database.schema.json"] != 1 {
+		t.Errorf("got %v, database.schema.json opened %d times, want once", err, opened["database.schema.json"])
+	}
+	clear(opened)
+	in.Contracts = openCounter{fstest.MapFS{}, opened}
+	if _, err := Compile(&d, in); err == nil || strings.Count(err.Error(), `unknown contract "database"`) != 3 || opened["database.schema.json"] != 1 {
+		t.Errorf("got %v, database.schema.json opened %d times, want 3 errors, once", err, opened["database.schema.json"])
 	}
 }
 

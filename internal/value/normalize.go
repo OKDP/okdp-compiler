@@ -20,7 +20,6 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -110,7 +109,7 @@ func (o normalizer) value(x any, path string) (any, error) {
 func (o normalizer) list(v reflect.Value, path string) ([]any, error) {
 	out := make([]any, v.Len())
 	for i := range out {
-		x, err := o.value(v.Index(i).Interface(), fmt.Sprintf("%s[%d]", path, i))
+		x, err := o.value(v.Index(i).Interface(), Index(path, i))
 		if err != nil {
 			return nil, err
 		}
@@ -142,7 +141,7 @@ func (o normalizer) mapValue(v reflect.Value, path string) (M, error) {
 	}
 	out := make(M, len(entries))
 	for _, k := range slices.Sorted(maps.Keys(entries)) {
-		x, err := o.value(entries[k].Interface(), child(path, k))
+		x, err := o.value(entries[k].Interface(), Key(path, k))
 		if err != nil {
 			return nil, err
 		}
@@ -206,18 +205,6 @@ func number(f float64, path string) (any, error) {
 		return nil, at(path, "not a finite number: %v", f)
 	}
 	return f, nil
-}
-
-// child: the path of the key k under path: a.b, or a["b.c"] for a key a dot
-// would split.
-func child(path, k string) string {
-	switch {
-	case k == "" || strings.ContainsAny(k, `.[]"`):
-		return fmt.Sprintf("%s[%q]", path, k)
-	case path == "":
-		return k
-	}
-	return path + "." + k
 }
 
 // at: an error at path, of the whole value when path is empty.

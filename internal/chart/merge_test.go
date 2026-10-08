@@ -102,7 +102,7 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	specs := Specs{"": {Source: src, Upstream: Upstream{Enabled: true}}, "app": {Source: src}}
 	values := M{"upstream": M{"": M{"a": 1.0}}}
-	cache := fstest.MapFS{"app-1.0.0/values.yaml": {Data: []byte("b: 2\n")}}
+	cache := fstest.MapFS{"x/app-1.0.0/values.yaml": {Data: []byte("b: 2\n")}}
 	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, values)
 	if err != nil || out["app"]["a"] != nil {
 		t.Errorf("app: %v %#v", err, out["app"])

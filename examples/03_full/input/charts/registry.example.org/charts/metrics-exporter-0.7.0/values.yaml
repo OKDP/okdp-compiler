@@ -1,0 +1,10 @@
+# The chart cache's copy of the (fictional) metrics-exporter chart 0.7.0:
+# its defaults.
+fullnameOverride: ""
+interval: 1m
+scrapeTimeout: 10s
+targets: []
+labels: {}
+serviceMonitor:
+  enabled: false
+  labels: {}

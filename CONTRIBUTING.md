@@ -40,13 +40,14 @@ regenerates the Helm fixtures and fails on a diff.
 - Test data lives at the repository root, in `testdata/`, never under
   `internal/`. Keep a fixture small, the least input that shows the
   behaviour, and add a case only for what no other case covers.
-- `testdata/<case>.yaml` (instance values) and
-  `testdata/platform/<case>.yaml` (platform values) must fail on the
+- `testdata/<case>.yaml` (instance values),
+  `testdata/platform/<case>.yaml` (platform values) and
+  `testdata/project/<case>.yaml` (project values) must fail on the
   example: the first line is `# error: <message>`, the message the compile
   must report (`TestExampleErrors`,
   [failure cases](docs/00_architecture.md#failure-cases)).
 - The outputs of each example of `examples/` (`01_minimal/output/`,
-  `02_advanced/output-no-dcr/` and `output-dcr/`) are compared byte for
+  `02_advanced/output-no-dcr/` and `output-dcr/`, `03_full/output/`) are compared byte for
   byte with a compile of its `input/` (`TestExample`). A change that changes the output runs `make example`
   and commits the diff: it is the change's effect, reviewed as such.
 

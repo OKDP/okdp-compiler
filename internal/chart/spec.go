@@ -6,10 +6,12 @@ package chart
 import (
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/okdp/okdp-compiler/internal/helmfn"
+	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // Specs: the charts of service.yaml, by key.
@@ -51,9 +53,6 @@ func (s Specs) upstreamOf(key string) (string, bool) {
 	return "", false
 }
 
-// chartKey: a chart key, a DNS label (RFC 1123): 63 characters at most.
-var chartKey = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
-
 // Check: what the charts of service.yaml may not hold, refused when it is
 // loaded and before every compile: a key that is not a DNS label (it names
 // files, which ../x would place out of their directory, and the umbrella's
@@ -65,7 +64,7 @@ var chartKey = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 func (s Specs) Check() error {
 	for _, key := range slices.Sorted(maps.Keys(s)) {
 		spec := s[key]
-		if !chartKey.MatchString(key) {
+		if !helmfn.IsDNSLabel(key) {
 			return fmt.Errorf("service.yaml: charts: key %q: a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names files (<key>.values.yaml) and the umbrella's dependency alias", key)
 		}
 		if err := spec.Source.Check("service.yaml: charts." + key + ".source"); err != nil {
@@ -100,16 +99,13 @@ func (s Specs) Check() error {
 	return nil
 }
 
-// yaml11Bools: the plain scalars YAML 1.1 reads as booleans and YAML 1.2
-// as strings, true and false aside.
-var yaml11Bools = []string{"y", "Y", "yes", "Yes", "YES", "n", "N", "no", "No", "NO", "on", "On", "ON", "off", "Off", "OFF"}
-
 // UnmarshalYAML: true or false, or {from: <chart>}. service.yaml is YAML
 // 1.2, where a plain no or off is a string: refused with what to write
 // instead.
 func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
+	_, yaml11 := value.YAML11Bools[n.Value]
 	switch {
-	case n.Kind == yaml.ScalarNode && n.Tag == "!!str" && n.Style == 0 && slices.Contains(yaml11Bools, n.Value):
+	case n.Kind == yaml.ScalarNode && n.Tag == "!!str" && n.Style == 0 && yaml11:
 		return fmt.Errorf("line %d: upstream %s: write true or false (service.yaml is read as YAML 1.2, where %s is not a boolean)", n.Line, n.Value, n.Value)
 	case n.Kind == yaml.MappingNode:
 		if len(n.Content) != 2 || n.Content[0].Value != "from" || n.Content[1].Kind != yaml.ScalarNode || n.Content[1].Tag != "!!str" || n.Content[1].Value == "" {

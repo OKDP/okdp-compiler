@@ -10,6 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -86,7 +87,7 @@ func FuzzParseValues(f *testing.F) {
 	for in := range parseValuesErrors {
 		f.Add([]byte(in))
 	}
-	files, _ := filepath.Glob(filepath.Join(helmdata, "values", "*", "*.yaml"))
+	files, _ := filepath.Glob(filepath.Join(helmtest.Dir, "values", "*", "*.yaml"))
 	for _, name := range files {
 		b, err := os.ReadFile(name)
 		if err != nil {

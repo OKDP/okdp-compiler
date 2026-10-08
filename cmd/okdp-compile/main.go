@@ -1,6 +1,7 @@
 // okdp-compile --package <dir> --charts <dir> --contracts <dir>
 //
-//	--platform platform.yaml [--platform ...] -f values.yaml [-f ...]
+//	--platform platform.yaml [--platform ...] [--project project.yaml ...]
+//	-f values.yaml [-f ...]
 //	--release <name> --namespace <name> -o <dir>
 //	[--umbrella] [--mkinstall] [--mkdag] [--indent 2]
 
@@ -24,7 +25,7 @@ import (
 // the release binaries. Unset, --version prints the module's (versionOf).
 var version string
 
-// multi: a repeatable string flag (--platform, -f).
+// multi: a repeatable string flag (--platform, --project, -f).
 type multi []string
 
 // String: the values, comma separated (flag.Value).
@@ -38,7 +39,8 @@ type options struct {
 	pkg, charts        string
 	contracts          string
 	release, namespace string
-	platform, values   multi
+	platform, project  multi
+	values             multi
 	output             string
 	umbrella           bool
 	mkinstall, mkdag   bool
@@ -112,7 +114,8 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	f.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
 	f.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
 	f.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
-	f.Var(&o.platform, "platform", "platform values file (global, global.okdp among them), repeatable, before the -f files")
+	f.Var(&o.platform, "platform", "platform values file (global, global.okdp among them), repeatable, before the --project and -f files")
+	f.Var(&o.project, "project", "project values file, repeatable, after the --platform files: what the instance's project adds to global and connections; it changes no value the platform sets")
 	f.Var(&o.values, "f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares")
 	f.StringVar(&o.output, "output", "", "output directory, required: the final values of each chart, <dir>/<chart>.values.yaml; <dir> holds only the files okdp-compile writes")
 	f.StringVar(&o.output, "o", "", "shorthand for --output")
@@ -132,9 +135,10 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	return o, nil
 }
 
-// run: checks the options, loads the inputs and compiles, then builds every
-// output before it writes any: a compile or an output that fails writes
-// nothing.
+// run: checks the options (--indent before the compile, and 0 refused,
+// where Output.Indent takes it as the default), loads the inputs and
+// compiles, then builds every output (compiler.Write) before it writes any:
+// a compile or an output that fails writes nothing.
 func run(o options) error {
 	switch {
 	case o.pkg == "":
@@ -170,6 +174,9 @@ func run(o options) error {
 	if in.Platform, err = readValues(o.platform); err != nil {
 		return err
 	}
+	if in.Project, err = readValues(o.project); err != nil {
+		return err
+	}
 	if in.Values, err = readValues(o.values); err != nil {
 		return err
 	}
@@ -177,28 +184,9 @@ func run(o options) error {
 	if err != nil {
 		return err
 	}
-	var files map[string][]byte
-	if o.umbrella {
-		files, err = compiler.Umbrella(def, res, o.indent)
-	} else {
-		files, err = compiler.Files(res, o.indent)
-	}
+	files, err := compiler.Write(res, compiler.Output{Umbrella: o.umbrella, Install: o.mkinstall, Dependencies: o.mkdag, Indent: o.indent})
 	if err != nil {
 		return err
-	}
-	if o.mkinstall {
-		install := compiler.Install
-		if o.umbrella {
-			install = compiler.InstallUmbrella
-		}
-		if files[compiler.InstallScript], err = install(res); err != nil {
-			return err
-		}
-	}
-	if o.mkdag {
-		if files[compiler.DependenciesFile], err = compiler.Dependencies(res, o.indent); err != nil {
-			return err
-		}
 	}
 	d := outputDir{o.output, files}
 	stale, err := d.stale()
@@ -244,24 +232,11 @@ type outputDir struct {
 	files map[string][]byte
 }
 
-// ours: a file okdp-compile writes in its output directory, in any compile:
-// <key>.values.yaml (compiler.Files), Chart.yaml and
-// compiler.UmbrellaValues (--umbrella), compiler.InstallScript
-// (--mkinstall), compiler.DependenciesFile (--mkdag); and okdp.charts.yaml,
-// which v0.1.0 wrote.
-func ours(name string) bool {
-	switch name {
-	case "Chart.yaml", compiler.UmbrellaValues, compiler.InstallScript, compiler.DependenciesFile, "okdp.charts.yaml":
-		return true
-	}
-	return strings.HasSuffix(name, ".values.yaml")
-}
-
 // stale: the files of d.dir a previous compile wrote that this one does not
-// (a chart no longer compiled, the files of the other mode, --umbrella or
-// not). A directory that holds anything else, or a non-regular file of
-// these names, is refused: a directory given by mistake (-o .) loses
-// nothing.
+// (compiler.IsOutputFile: a chart no longer compiled, the files of the
+// other mode, --umbrella or not). A directory that holds anything else, or
+// a non-regular file of these names, is refused: a directory given by
+// mistake (-o .) loses nothing.
 func (d outputDir) stale() ([]string, error) {
 	entries, err := os.ReadDir(d.dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -274,7 +249,7 @@ func (d outputDir) stale() ([]string, error) {
 	for _, e := range entries {
 		name := e.Name()
 		_, current := d.files[name]
-		if !e.Type().IsRegular() || !current && !ours(name) {
+		if !e.Type().IsRegular() || !current && !compiler.IsOutputFile(name) {
 			return nil, fmt.Errorf("refusing to write in %s: %s is not an output of okdp-compile", d.dir, name)
 		}
 		if !current {

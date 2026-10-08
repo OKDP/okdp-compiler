@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 )
 
 // schemaURL: where a schema is compiled, for its $ref to itself.
@@ -123,8 +124,12 @@ func fragment(ptr string) string {
 }
 
 // sortCauses: the causes of e sorted by instance path then message, at
-// every level, for a stable report.
+// every level, and the names of additional properties in one message
+// sorted (the validator lists them in map order), for a stable report.
 func sortCauses(e *jsonschema.ValidationError) {
+	if k, ok := e.ErrorKind.(*kind.AdditionalProperties); ok {
+		slices.Sort(k.Properties)
+	}
 	for _, c := range e.Causes {
 		sortCauses(c)
 	}

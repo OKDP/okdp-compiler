@@ -107,7 +107,7 @@ func TestDescriptorNoOutputs(t *testing.T) {
 func TestDescriptorErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ provides, want string }{
 		"unknown contract": {"  - {contract: ftp, values: {}}\n", `provides "demo-app" (ftp): unknown contract`},
-		"unreadable":       {"  - {contract: broken, values: {}}\n", `provides "demo-app" (broken): the broken contract cannot be read: broken.schema.json: unexpected end of JSON input`},
+		"unreadable":       {"  - {contract: broken, values: {}}\n", `provides "demo-app" (broken): the broken contract cannot be read: broken.schema.json: unexpected EOF`},
 		"type":             {"  - {contract: http, name: other, values: {url: u, port: '443'}}\n", `provides "other" (http): field "port" violates the http contract: got string, want integer`},
 		"unknown field":    {"  - {contract: http, values: {url: u, path: /}}\n", `field "path" is not part of the http contract`},
 		"secret field":     {"  - {contract: http, values: {url: u, token: t}}\n", `"token" is a secret field`},
@@ -119,10 +119,10 @@ func TestDescriptorErrors(t *testing.T) {
 			`url is "https://elsewhere" but internal references to "demo-app" resolve it to "https://demo-app.example.org"`,
 		},
 		"not a map":            {"  - {contract: http, name: other, values: {url: u}}\n  - ~\n", "provides[1]: must be a map (contract, name, values, secretRef, secret), got <nil>"},
-		"values not a map":     {"  - {contract: http, values: [url]}\n", `provides[0]: values: must be a map of contract fields, got []interface {}{"url"}`},
-		"secretRef not a map":  {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", `provides[0]: secretRef: must be a map (name), got "creds"`},
-		"secret not a map":     {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", `provides[0]: secret: must be a map (generate, stringData), got []interface {}{"token"}`},
-		"generate not a list":  {"  - {contract: http, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", `provides[0]: secret: generate must be a list of generated keys, got map[string]interface {}{"token":20}`},
+		"values not a map":     {"  - {contract: http, values: [url]}\n", `provides[0]: values must be a map, got []interface {}{"url"}`},
+		"secretRef not a map":  {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", `provides[0]: secretRef must be a map, got "creds"`},
+		"secret not a map":     {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", `provides[0]: secret must be a map, got []interface {}{"token"}`},
+		"generate not a list":  {"  - {contract: http, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", `provides[0]: secret: generate must be a list, got map[string]interface {}{"token":20}`},
 		"generated key":        {"  - {contract: http, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", `provides[0]: secret: generate[0]: length must be a whole number >= 0, got "long"`},
 		"stringData not a map": {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: [token]}}\n", `provides[0]: secret: stringData must be a map of strings, got []interface {}{"token"}`},
 		"stringData a number":  {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", `provides[0]: secret: stringData "token" must be a string, got 5`},
@@ -191,15 +191,5 @@ func TestDescriptorSecret(t *testing.T) {
 	}
 	if es := res.Objects[len(res.Objects)-1]; value.Dig(es, "spec.target.template.data.port") != "443" {
 		t.Errorf("ExternalSecret: %#v", es)
-	}
-}
-
-// TestTrunc: cut to n bytes, short strings unchanged.
-func TestTrunc(t *testing.T) {
-	if got := trunc("abcdef", 3); got != "abc" {
-		t.Errorf("got %q", got)
-	}
-	if got := trunc("ab", 3); got != "ab" {
-		t.Errorf("got %q", got)
 	}
 }

@@ -1,201 +1,228 @@
-// Context: what a mapping sees. It loads the values layers, the platform's
-// then the instance's (valuesLayers, chart.Parameters), checks the platform
-// requirements, derives the platform context from global.okdp (its settings
-// checked against their types) and resolves the connection references
-// (connections.go). The requirements under a condition are checked on the
-// context (requireWhen).
+// Context: the instance of a compile, built by the first stages, in order:
+// its parameters (the package's parameter schema read once, the values
+// layers loaded: parameters), its platform context (global.okdp checked
+// against the embedded platform.schema.json, the OIDC settings derived
+// from it: platformContext) and its connections (the references resolved,
+// connections.go), which give what the mapping sees (mappingScope). The
+// platform requirements are checked on it (checkRequirements).
 package okdp
 
 import (
+	_ "embed"
 	"fmt"
 	"io/fs"
 	"maps"
 	"sort"
-	"strings"
-
-	"cel.dev/cel-go/cel"
+	"sync"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// Context: what a mapping sees, the merged values (their upstream values
-// applied by chart.FinalValues), and the instances the connection references
-// point to. files: the package.
-func buildContext(files fs.FS, in Inputs, svc *Service) (M, M, []Dependency, error) {
-	// 1. values layers, as Helm: the platform's then the instance's (global
-	// is the platform's: valuesLayers), merged in order as -f files,
-	// coalesced over the parameter schema's defaults, checked against it.
-	layers, err := valuesLayers(files, in)
+// instance: what a compile knows of its instance, built once by the first
+// stages (parameters, platformContext, connections) and read by the
+// others: the typed facts they need, and what the mapping sees (scope).
+type instance struct {
+	release, namespace string       // Inputs.Release, Inputs.Namespace
+	svc                serviceMeta  // service.yaml's name and version
+	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
+	schema             M            // the parameter schema's map view (chart.Schema.Doc): the connection references
+	okdp               M            // global.okdp as written, as the mapping sees it, checked against platform.schema.json (platformSettings)
+	suffix             string       // global.okdp.ingress.suffix: the hosts of internal references
+	oidc               M            // platform.oidc: global.okdp.oidc, its defaults applied, its mode derived
+	dcr                bool         // platform.oidc.dcr.enabled: OIDC enabled, the OAuth clients registered by DCR
+	deps               []Dependency // the instances the connection references point to, by parameter path
+	scope              M            // what the mapping sees (mappingScope)
+}
+
+// parameters: stage 1, the instance of a compile and its parameters. The
+// package's parameter schema is read first, once for the stages that read
+// it (chart.ReadParameterSchema): the keys of global an instance sets, the
+// parameters, the connection references. Then the values layers, as Helm:
+// the platform's, the project's then the instance's (global is the
+// platform's: valuesLayers), merged in order as -f files, coalesced over
+// the schema's defaults, checked against it (chart.Parameters). files: the
+// package.
+func parameters(files fs.FS, in Inputs, svc *Service) (*instance, error) {
+	schema, err := chart.ReadParameterSchema(files)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	values, err := chart.Parameters(files, svc.Name, layers)
+	layers, err := valuesLayers(schema.Doc, in)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	global := value.AsMap(values["global"])
-	okdpG := value.AsMap(global["okdp"])
-	// 2. platform requirements, those of every case; those under a
-	// condition need the context (requireWhen).
-	for _, r := range svc.Require {
-		if r.If != "" {
-			continue
-		}
-		if err := required(okdpG, r.Key); err != nil {
-			return nil, nil, nil, err
-		}
+	values, err := chart.Parameters(schema, svc.Name, layers)
+	if err != nil {
+		return nil, err
 	}
-	// 3. platform context, from the settings checked against their types.
-	if err := checkPlatform(values["global"]); err != nil {
-		return nil, nil, nil, err
+	return &instance{release: in.Release, namespace: in.Namespace, svc: svc.meta(), values: values, schema: schema.Doc}, nil
+}
+
+// platformContext: stage 2, the platform settings of inst (global.okdp),
+// checked against platform.schema.json, defaults applied
+// (platformSettings), and the OIDC settings derived from them: the client
+// provisioning mode in effect (existing or dcr).
+func platformContext(inst *instance) error {
+	settings, err := platformSettings(inst.values["global"])
+	if err != nil {
+		return err
 	}
-	// OIDC: defaults, then the client provisioning mode (existing or dcr).
-	oidc := value.AsMap(value.Copy(okdpG["oidc"]))
-	if _, ok := oidc["enabled"]; !ok {
-		oidc["enabled"] = true
-	}
-	if !value.Truthy(oidc["scope"]) {
-		oidc["scope"] = "openid profile email groups"
-	}
-	if !value.Truthy(oidc["clientProvisioning"]) {
-		oidc["clientProvisioning"] = "existing"
+	inst.okdp = value.AsMap(value.AsMap(inst.values["global"])["okdp"])
+	inst.suffix = value.Str(value.Dig(inst.okdp, "ingress.suffix"))
+	oidc := value.AsMap(settings["oidc"])
+	// A null enabled, unlike another setting's null, is kept: it reads as
+	// false.
+	if e, set := value.AsMap(inst.okdp["oidc"])["enabled"]; set && e == nil {
+		oidc["enabled"] = nil
 	}
 	mode := value.Str(oidc["clientProvisioning"])
-	if mode != "existing" && mode != "dcr" {
-		return nil, nil, nil, fmt.Errorf("global.okdp.oidc.clientProvisioning %q is not one of existing, dcr", mode)
-	}
-	// The settings of the oidc-dcr Jobs, defaults applied (oidc.go).
-	dcr := value.AsMap(value.Copy(oidc["dcr"]))
-	if err := dcrSettings(dcr); err != nil {
-		return nil, nil, nil, err
-	}
-	dcr["enabled"] = value.Truthy(oidc["enabled"]) && mode == "dcr"
-	oidc["dcr"] = dcr
+	dcr := value.AsMap(oidc["dcr"])
+	inst.dcr = value.Truthy(oidc["enabled"]) && mode == "dcr"
+	dcr["enabled"] = inst.dcr
 	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
-	// The Secret that holds the service's main OAuth client: provisioned, or
-	// registered by DCR (oidc.go; oidcClientSecret(name) for the others).
-	mainSecret := clientSecret(in.Release, in.Namespace, dcr["enabled"] == true, "")
+	inst.oidc = oidc
+	return nil
+}
+
+// connections: stage 3, the connection references of the parameters of
+// inst (x-okdp-connection-ref) resolved in place against contracts, the
+// compile's, shared with the descriptor; every reference that does not
+// resolve is reported (resolver.resolveAll). The mapping gets a copy, the
+// merged values stay as the user wrote them: the resolved parameters are
+// its values (mappingScope), the internal references inst.deps, by
+// parameter path, in string order, as the errors of the references.
+func connections(inst *instance, contracts *contractCache) error {
+	params := value.AsMap(value.Copy(inst.values))
+	r := resolver{contracts: contracts, conns: value.AsMap(inst.values["connections"]), namespace: inst.namespace, suffix: inst.suffix}
+	if err := r.resolveAll(inst.schema, params); err != nil {
+		return err
+	}
+	// Not parameters: global is exposed apart, connections are resolved.
+	delete(params, "global")
+	delete(params, "connections")
+	sort.Slice(r.deps, func(i, j int) bool { return r.deps[i].Field < r.deps[j].Field })
+	inst.deps = r.deps
+	inst.scope = mappingScope(inst, params)
+	return nil
+}
+
+// mappingScope: what the mapping of inst sees, params its parameters:
+// release (name, namespace), values, global (global.okdp, as written),
+// platform (what the compiler derives from it: oidc, the Secret of the main
+// OAuth client, the ingress annotations, the proxy environment), and the
+// package: service (name, version), labels and selectorLabels
+// (serviceContext).
+func mappingScope(inst *instance, params M) M {
 	// Proxy settings, as environment variables.
-	proxy := value.AsMap(okdpG["proxy"])
+	proxy := value.AsMap(inst.okdp["proxy"])
 	proxyEnv := M{}
 	for k, env := range map[string]string{"httpProxy": "HTTP_PROXY", "httpsProxy": "HTTPS_PROXY", "noProxy": "NO_PROXY"} {
 		if value.Truthy(proxy[k]) {
 			proxyEnv[env] = proxy[k]
 		}
 	}
-	// What the compiler derives from global.okdp.
-	platform := M{
-		"oidc":               oidc,
-		"oidcClientSecret":   mainSecret,
-		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": value.Str(value.Dig(okdpG, "certificateIssuers.selfSigned.name"))},
-		"proxyEnv":           proxyEnv,
+	scope := M{
+		"release": M{"name": inst.release, "namespace": inst.namespace},
+		"values":  params,
+		"global":  M{"okdp": value.Copy(inst.okdp)}, // the platform values, as written
+		"platform": M{
+			"oidc": inst.oidc,
+			// The Secret that holds the service's main OAuth client:
+			// provisioned, or registered by DCR (oidc.go; oidcClientSecret(name)
+			// for the others).
+			"oidcClientSecret":   clientSecret(inst.release, inst.namespace, inst.dcr, ""),
+			"ingressAnnotations": M{"cert-manager.io/cluster-issuer": value.Str(value.Dig(inst.okdp, "certificateIssuers.selfSigned.name"))},
+			"proxyEnv":           proxyEnv,
+		},
 	}
-	// 4. connection references, resolved in place (x-okdp-connection-ref);
-	// every reference that does not resolve is reported.
-	schema, err := readJSON(files, "config.schema.json")
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	// The mapping gets a copy: the merged values stay as the user wrote them.
-	params := value.AsMap(value.Copy(values))
-	var deps []Dependency
-	r := resolver{in: in, conns: value.AsMap(values["connections"]), suffix: value.Str(value.Dig(okdpG, "ingress.suffix")), deps: &deps}
-	if err := r.resolveAll(schema, params); err != nil {
-		return nil, nil, nil, err
-	}
-	// Not parameters: global is exposed apart, connections are resolved.
-	delete(params, "global")
-	delete(params, "connections")
-	ctx := M{
-		"release":  M{"name": in.Release, "namespace": in.Namespace},
-		"values":   params,
-		"global":   M{"okdp": value.Copy(okdpG)}, // the platform values, as written
-		"platform": platform,                     // derived from it by the compiler
-	}
-	// The package: service (name, version), labels and selectorLabels.
-	maps.Copy(ctx, serviceContext(svc.meta(), in.Release))
-	// By parameter path, in string order, as the errors of the references.
-	sort.Slice(deps, func(i, j int) bool { return deps[i].Field < deps[j].Field })
-	return ctx, values, deps, nil
+	maps.Copy(scope, serviceContext(inst.svc, inst.release))
+	return scope
 }
 
-// requireWhen: the requirements under a condition, in order, each condition
-// evaluated on the context ctx with the mapping's host functions, within
-// budget: when it holds, the key must be set, as a requirement of every
-// case (stage 2).
-func requireWhen(budget *compile.Budget, rs Requirements, ctx M) error {
-	okdpG := value.AsMap(value.Dig(ctx, "global.okdp"))
-	var funcs []cel.EnvOption
+// checkRequirements: stage 4, the requirements rs, in order, on the
+// instance inst: an entry without a condition holds in every case, one with
+// $if when its condition, evaluated on what the mapping sees (inst.scope)
+// in the compile's session (the mapping's host functions, its budget), is
+// true; the key of an entry that holds must be set in global.okdp
+// (required). The first error is reported.
+func checkRequirements(session *compile.Session, rs Requirements, inst *instance) error {
 	for i, r := range rs {
-		if r.If == "" {
+		holds := true
+		if r.If != "" {
+			var err error
+			if holds, err = session.Condition(r.If, inst.scope); err != nil {
+				return fmt.Errorf("service.yaml: %s: $if: %w", entry(i, r.Key), err)
+			}
+		}
+		if !holds {
 			continue
 		}
-		if funcs == nil {
-			funcs = functions(ctx)
-		}
-		holds, err := compile.Condition(r.If, ctx, budget, funcs...)
-		if err != nil {
-			return fmt.Errorf("service.yaml: %s: $if: %w", entry(i, r.Key), err)
-		}
-		if holds {
-			if err := required(okdpG, r.Key); err != nil {
-				return err
-			}
+		if err := required(inst.okdp, r.Key); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// platformSettings: the global.okdp settings the compiler reads, by dotted
-// path, and their type. charts is checked by platformCharts, the keys of
-// oidc.dcr by dcrSettings.
-var platformSettings = []struct {
-	path string
-	want string         // the type, as the error names it
-	is   func(any) bool // whether a value is of that type
-}{
-	{"ingress.suffix", "a string", is[string]},
-	{"certificateIssuers.selfSigned.name", "a string", is[string]},
-	{"oidc.enabled", "true or false", is[bool]},
-	{"oidc.clientProvisioning", "a string", is[string]},
-	{"oidc.scope", "a string", is[string]},
-	{"oidc.dcr", "a map", is[M]},
-	{"oidc.issuerUri", "a string", is[string]},
-	{"proxy.httpProxy", "a string", is[string]},
-	{"proxy.httpsProxy", "a string", is[string]},
-	{"proxy.noProxy", "a string", is[string]},
-}
+// platformSchemaFile: the schema of the platform values the compiler reads
+// (global.okdp): their types and defaults; the reference of platform
+// authors, its descriptions their meaning.
+//
+//go:embed platform.schema.json
+var platformSchemaFile []byte
 
-// is: whether v is a T.
-func is[T any](v any) bool {
-	_, ok := v.(T)
-	return ok
-}
+// platformSchema: platformSchemaFile parsed once, for every compile
+// (chart.ParseSchema).
+var platformSchema = sync.OnceValues(func() (*chart.Schema, error) {
+	return chart.ParseSchema("platform.schema.json", platformSchemaFile)
+})
 
-// checkPlatform: global, the platform values: each setting the compiler
-// reads (platformSettings) of its type, and global, global.okdp and each
-// map on the way to a setting a map, when set (null is not set). A value of
-// another type would read as not set: global.okdp.oidc: false would leave
-// OIDC enabled. The first violation is reported, in the order of
-// platformSettings.
-func checkPlatform(global any) error {
-	for _, s := range platformSettings {
-		v, at := global, "global"
-		for seg := range strings.SplitSeq("okdp."+s.path, ".") {
-			if v == nil {
-				break
-			}
-			m, ok := v.(M)
-			if !ok {
-				return fmt.Errorf("%s must be a map, got %s", at, value.Short(v))
-			}
-			v, at = m[seg], at+"."+seg
-		}
-		if v != nil && !s.is(v) {
-			return fmt.Errorf("%s must be %s, got %s", at, s.want, value.Short(v))
-		}
+// platformSettings: global.okdp of global, the platform values, what is not
+// set dropped (unset), coalesced over the defaults of platformSchema and
+// checked against it (chart.Schema.Values), every violation reported at
+// once, by path, as the parameters' are. A value of another type is refused
+// rather than read as not set: oidc: false would leave OIDC enabled. global
+// is not changed.
+func platformSettings(global any) (M, error) {
+	schema, err := platformSchema()
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	user := M{"global": value.Copy(global)}
+	unset(user, schema.Doc)
+	values, v, err := schema.Values(user)
+	if err != nil {
+		return nil, err
+	}
+	if v != "" {
+		return nil, fmt.Errorf("platform values (--platform, Inputs.Platform) don't meet the specifications of the schema of global.okdp:\n%s", v)
+	}
+	return value.AsMap(value.Dig(values, "global.okdp")), nil
+}
+
+// unset: the values v without the settings the schema s describes
+// (properties, at any depth) that are not set, in place: a null, and an
+// empty string where the default is a string (oidc.scope,
+// oidc.clientProvisioning, oidc.dcr.caSecret). Each then takes its default,
+// where the coalesce of the parameters would delete it, or stays unset. A
+// null under a key s does not describe is a value, kept as written.
+func unset(v any, s M) {
+	m, ok := v.(M)
+	if !ok {
+		return
+	}
+	props := value.AsMap(s["properties"])
+	for k, x := range m {
+		p, described := props[k].(M)
+		if !described {
+			continue
+		}
+		if _, str := p["default"].(string); x == nil || x == "" && str {
+			delete(m, k)
+			continue
+		}
+		unset(x, p)
+	}
 }

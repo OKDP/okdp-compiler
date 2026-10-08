@@ -1,0 +1,43 @@
+# The project demo, the namespace demo: what it adds to the platform values
+# for every instance of the project, a project layer (--project,
+# Inputs.Project), merged after platform.yaml and before the instance's
+# config.yaml.
+#
+# A project adds, it changes nothing the platform sets: a key platform.yaml
+# sets (global.okdp.ingress.suffix, global.imageRegistry), the same value
+# included, or a connection it gives (platform-db, datalake), even by a field
+# platform.yaml leaves out, fails the compile:
+#
+#   global: {okdp: {ingress: {suffix: demo.example.org}}}
+#   connections: {platform-db: {port: 5433}}
+#
+#   project layer 1: global.okdp.ingress.suffix is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
+#   project layer 1: connections.platform-db is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
+
+global:
+  storageClass: fast-ssd               # every chart receives global
+  okdp:
+    # Read by the mapping, which the compiler does not: labels, node pool,
+    # ingress allowlist (global.okdp.?project in values.cel.yaml).
+    project:
+      name: demo
+      costCenter: cc-4217
+      nodePool: analytics
+      allowedSourceRanges: [10.20.0.0/16, 192.168.10.0/24]
+
+# Connections every instance of the project may reference by name, beside
+# the platform's.
+connections:
+  demo-warehouse:                      # MySQL: driver derived, no sslMode (a PostgreSQL default)
+    contract: database
+    engine: mysql
+    host: warehouse.demo.example.org
+    port: 3306
+    dbName: sales
+    secretRef: {name: demo-warehouse-credentials}
+  demo-bucket:                         # MinIO: pathStyle defaults to true
+    contract: s3
+    provider: minio
+    endpoint: https://minio.demo.example.org
+    bucket: demo-sales
+    secretRef: {name: demo-bucket-credentials}

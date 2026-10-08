@@ -16,6 +16,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types/ref"
 
+	"github.com/okdp/okdp-compiler/internal/helmfn"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -34,7 +35,7 @@ func mapCtx() M {
 
 // runOutput: loads a document on mapCtx and returns its output section.
 func runOutput(src string) (M, error) {
-	d, err := Load([]byte(src), mapCtx(), nil)
+	d, err := NewSession(context.Background(), 0).Load([]byte(src), mapCtx(), "output")
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +130,7 @@ func TestMappingDirectives(t *testing.T) {
 // optionals, numbers, bytes, timestamps are; what the values cannot hold
 // fails, at its position in the value.
 func TestExpressionValues(t *testing.T) {
+	s := NewSession(context.Background(), 0)
 	for expr, want := range map[string]any{
 		"{'n': values.?nope, 'o': values.?extra.k, 'l': [1, 2u]}": M{"n": nil, "o": "v", "l": []any{float64(1), float64(2)}},
 		"[optional.of([optional.none()])]":                        []any{[]any{nil}},
@@ -138,7 +140,7 @@ func TestExpressionValues(t *testing.T) {
 		"first([0, {'a': values.?nope}])":                         M{"a": nil},
 		"[str(b'abc'), str({1: 0.0/0.0}), toJson(b'abc')]":        []any{"abc", "map[1:NaN]", `"abc"`},
 	} {
-		if got, err := Eval(expr, mapCtx()); err != nil || !reflect.DeepEqual(got, want) {
+		if got, err := s.eval(expr, mapCtx()); err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: got %#v (%v), want %#v", expr, got, err, want)
 		}
 	}
@@ -151,7 +153,7 @@ func TestExpressionValues(t *testing.T) {
 		"type(1)":                "${{ type(1) }}: a CEL type has no data form",
 		"toJson(0.0/0.0)":        "${{ toJson(0.0/0.0) }}: toJson: json: unsupported value: NaN",
 	} {
-		if _, err := Eval(expr, mapCtx()); err == nil || err.Error() != want {
+		if _, err := s.eval(expr, mapCtx()); err == nil || err.Error() != want {
 			t.Errorf("%s: got %v, want %q", expr, err, want)
 		}
 	}
@@ -164,16 +166,17 @@ func TestExpressionValues(t *testing.T) {
 // json.encode (encoders 1), format's precision at most 100 (strings 5),
 // last (optional types 2).
 func TestLibraries(t *testing.T) {
+	s := NewSession(context.Background(), 0)
 	for expr, want := range map[string]any{
 		"json.encode({'b': [1, 'x'], 'a': 2.5})": `{"a":2.5,"b":[1,"x"]}`,
 		"'%.2f'.format([1.0])":                   "1.00",
 		"[1, 2].last()":                          float64(2),
 	} {
-		if got, err := Eval(expr, mapCtx()); err != nil || !reflect.DeepEqual(got, want) {
+		if got, err := s.eval(expr, mapCtx()); err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: got %#v (%v), want %#v", expr, got, err, want)
 		}
 	}
-	if _, err := Eval("'%.101f'.format([1.0])", mapCtx()); err == nil || !strings.Contains(err.Error(), "precision") {
+	if _, err := s.eval("'%.101f'.format([1.0])", mapCtx()); err == nil || !strings.Contains(err.Error(), "precision") {
 		t.Errorf("a precision over 100: got %v", err)
 	}
 }
@@ -349,7 +352,7 @@ output:
 		t.Fatal(err)
 	}
 	want := M{
-		"checksum": sha256Hex(`{"a":["x"],"b":1}`),
+		"checksum": helmfn.Sha256Sum(`{"a":["x"],"b":1}`),
 		"json":     `{"a":["x"],"b":1}`,
 		"yaml":     "a:\n- x\nb: 1",
 		"quoted":   `"1"`,
@@ -371,7 +374,7 @@ errors:
   - $if: ${{ values.on }}
     message: on is set
   - $if: ${{ values.off }}
-    message: '${{ nope }}, not evaluated'
+    message: '${{ values.nope }}, not evaluated'
   - $for: c in values.items
     $each:
       $if: ${{ c.n > 1.0 }}
@@ -435,11 +438,15 @@ func TestMappingErrors(t *testing.T) {
 	}
 }
 
-// TestMistakes: mistakes in the language fail at their path, in every
+// TestMistakes: mistakes in the language, and expressions that do not
+// compile, fail when the document is loaded, at their path, in every
 // branch, those no evaluation takes included.
 func TestMistakes(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
 		"second document":      {"output: {}\n---\nerrors: ['${{ [\"x\"] }}']\n", "line 2: a second YAML document: the mapping is one document"},
+		"unknown section":      {"outptu: {}\n", "outptu: unknown section (allowed: let, errors, output)"},
+		"untaken branch":       {"output: {x: {m: {$if: '${{ values.off }}', a: '${{ nope }}'}}}\n", "output: x: m: a: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
+		"under $each":          {"output: {x: {l: [{$for: c in values.items, $each: {$iff: 1}}]}}\n", "output: x: l[0]: $each: $iff: unknown directive"},
 		"$for without $each":   {"output: {x: {l: [{$for: c in values.items}]}}\n", "output: x: l[0]: $for: in a list item, needs $each"},
 		"$for without $key":    {"output: {x: {m: {$for: c in values.items, $value: 1}}}\n", "output: x: m: $for: in a map, needs $key and $value"},
 		"unknown directive":    {"output: {x: {m: {$iff: '${{ true }}', a: 1}}}\n", "output: x: m: $iff: unknown directive (the key $iff is written $$iff)"},
@@ -468,7 +475,7 @@ func TestMistakes(t *testing.T) {
 		"-.inf":                {"output:\n  x: {v: [1, -.Inf]}\n", "line 2: not a finite number: -.Inf (quote it for the text)"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := runOutput(tc.src); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, err := NewSession(context.Background(), 0).Load([]byte(tc.src), mapCtx(), "output"); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
 		})
@@ -526,7 +533,7 @@ func TestMergeKeys(t *testing.T) {
 
 // TestTemplateErrors: an error of a template's values names its path.
 func TestTemplateErrors(t *testing.T) {
-	_, err := EvalTemplate([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx(), nil)
+	_, err := NewSession(context.Background(), 0).EvalTemplate([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx())
 	if want := "values: a[1]: ${{ nope }}:"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("got %v, want an error containing %q", err, want)
 	}
@@ -622,32 +629,42 @@ func FuzzScan(f *testing.F) {
 	})
 }
 
-// TestBudget: the CEL cost of a compile, shared by its evaluations, and its
-// cancellation, before and during an evaluation.
-func TestBudget(t *testing.T) {
+// TestSession: the CEL cost of a compile, shared by the evaluations of its
+// documents, and its cancellation, before and during an evaluation.
+func TestSession(t *testing.T) {
 	one := "let:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n"
 	two := one + "  b: ${{ values.items.map(i, i.n * 2.0) }}\n"
 	// The cost of one binding, measured under a limit it cannot reach.
-	b := NewBudget(context.Background(), math.MaxUint64)
-	if _, err := Load([]byte(one), mapCtx(), b); err != nil {
+	s := NewSession(context.Background(), math.MaxUint64)
+	if _, err := s.Load([]byte(one), mapCtx()); err != nil {
 		t.Fatal(err)
 	}
-	cost := b.used
+	cost := s.used
 	if cost == 0 {
 		t.Fatal("no cost counted")
 	}
-	// Enough for one binding, not for two.
-	_, err := Load([]byte(two), mapCtx(), NewBudget(context.Background(), cost))
-	if want := fmt.Sprintf("let b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", cost); err == nil || err.Error() != want {
+	// Enough for one binding, not for two, the second passing the limit
+	// while it runs (its compiled program limited to what remains): in one
+	// document, or in two documents of the session.
+	limit := 2*cost - 1
+	_, err := NewSession(context.Background(), limit).Load([]byte(two), mapCtx())
+	if want := fmt.Sprintf("let b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", limit); err == nil || err.Error() != want {
 		t.Errorf("past the limit: got %v, want %q", err, want)
 	}
-	if _, err := Load([]byte(two), mapCtx(), NewBudget(context.Background(), 2*cost)); err != nil {
+	s = NewSession(context.Background(), limit)
+	if _, err := s.Load([]byte(one), mapCtx()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load([]byte(one), mapCtx()); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
+		t.Errorf("past the limit, in a second document: got %v", err)
+	}
+	if _, err := NewSession(context.Background(), 2*cost).Load([]byte(two), mapCtx()); err != nil {
 		t.Errorf("within the limit: %v", err)
 	}
 	// Cancelled before an evaluation: the context's error.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := Load([]byte(one), mapCtx(), NewBudget(ctx, 0)); !errors.Is(err, context.Canceled) {
+	if _, err := NewSession(ctx, 0).Load([]byte(one), mapCtx()); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled: got %v, want context.Canceled", err)
 	}
 	// Cancelled during one: a comprehension stops at its next check.
@@ -662,21 +679,22 @@ func TestBudget(t *testing.T) {
 	calls := 0
 	stop := cel.Function("stop", cel.Overload("stop_dyn", []*cel.Type{cel.DynType}, cel.DynType,
 		cel.UnaryBinding(func(v ref.Val) ref.Val { calls++; cancel(); return v })))
-	_, err = Load([]byte("let:\n  a: ${{ values.items.map(i, stop(i)) }}\n"), M{"values": M{"items": items}}, NewBudget(ctx, 0), stop)
+	_, err = NewSession(ctx, 0, stop).Load([]byte("let:\n  a: ${{ values.items.map(i, stop(i)) }}\n"), M{"values": M{"items": items}})
 	if !errors.Is(err, context.Canceled) || calls > interruptEvery {
 		t.Errorf("interrupted: got %v after %d of %d items", err, calls, len(items))
 	}
 }
 
 // TestCondition: a condition outside a document, one expression whose value
-// is true or false, within a budget.
+// is true or false, within the session.
 func TestCondition(t *testing.T) {
-	for s, want := range map[string]bool{"${{ values.on }}": true, "${{ values.extra.x > 2.0 }}": false} {
-		if got, err := Condition(s, mapCtx(), nil); err != nil || got != want {
-			t.Errorf("%s: got %v (%v), want %v", s, got, err, want)
+	s := NewSession(context.Background(), 0)
+	for cond, want := range map[string]bool{"${{ values.on }}": true, "${{ values.extra.x > 2.0 }}": false} {
+		if got, err := s.Condition(cond, mapCtx()); err != nil || got != want {
+			t.Errorf("%s: got %v (%v), want %v", cond, got, err, want)
 		}
 	}
-	for s, want := range map[string]string{
+	for cond, want := range map[string]string{
 		"${{ values.extra.k }}":     `${{ values.extra.k }}: must be true or false, got "v"`,
 		"${{ values.?nope }}":       "${{ values.?nope }}: must be true or false, got null",
 		"${{ values.items }}":       "${{ values.items }}: must be true or false, got a list",
@@ -684,17 +702,17 @@ func TestCondition(t *testing.T) {
 		"true":                      `takes one expression, ${{ <condition> }}, got "true"`,
 		"${{ values.on }} and more": `takes one expression, ${{ <condition> }}, got "${{ values.on }} and more"`,
 	} {
-		if _, err := Condition(s, mapCtx(), nil); err == nil || err.Error() != want {
-			t.Errorf("%s: got %v, want %q", s, err, want)
+		if _, err := s.Condition(cond, mapCtx()); err == nil || err.Error() != want {
+			t.Errorf("%s: got %v, want %q", cond, err, want)
 		}
 	}
-	b := NewBudget(context.Background(), math.MaxUint64)
-	if _, err := Condition("${{ values.items.all(i, i.n > 0.0) }}", mapCtx(), b); err != nil || b.used == 0 {
-		t.Errorf("cost: %v, %d counted", err, b.used)
+	s = NewSession(context.Background(), math.MaxUint64)
+	if _, err := s.Condition("${{ values.items.all(i, i.n > 0.0) }}", mapCtx()); err != nil || s.used == 0 {
+		t.Errorf("cost: %v, %d counted", err, s.used)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := Condition("${{ values.on }}", mapCtx(), NewBudget(ctx, 0)); !errors.Is(err, context.Canceled) {
+	if _, err := NewSession(ctx, 0).Condition("${{ values.on }}", mapCtx()); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled: got %v, want context.Canceled", err)
 	}
 }

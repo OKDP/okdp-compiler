@@ -1,7 +1,7 @@
 // Package fsio is the edges of a compile: the package read from a
 // filesystem (LoadDefinition), and the files a compile is written as
-// (Files, Umbrella). Each stage reads the other inputs through the fs.FS
-// the caller gives it (okdp.Inputs).
+// (Write). Each stage reads the other inputs through the fs.FS the caller
+// gives it (okdp.Inputs).
 package fsio
 
 import (

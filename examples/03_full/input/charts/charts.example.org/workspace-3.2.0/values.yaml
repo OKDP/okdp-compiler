@@ -1,0 +1,30 @@
+# The chart cache's copy of the (fictional) workspace chart 3.2.0, an API
+# server or a scheduler (mode): its defaults and values.schema.json, all a
+# compile reads of it.
+fullnameOverride: ""
+mode: server
+replicaCount: 1
+image:
+  registry: docker.io
+  repository: example/workspace
+  tag: ""                              # the chart's appVersion
+  pullPolicy: IfNotPresent
+resources: {}
+podLabels: {}
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+env: []
+config: {}
+catalogs: {}
+schedules: []
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+persistence:
+  enabled: false
+  size: 10Gi
+  storageClass: ""                     # global.storageClass when empty

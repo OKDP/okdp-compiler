@@ -75,7 +75,8 @@ func TestRequirementsCheck(t *testing.T) {
 
 // TestRequireWhen: a requirement under a condition, evaluated on the
 // mapping's context (variables and host functions), within the compile's
-// budget: when it holds, the key is required as in every case; before the
+// budget: when it holds, the key is required as in every case. Every entry
+// is checked once the context is built (its errors first), before the
 // platform charts and the mapping.
 func TestRequireWhen(t *testing.T) {
 	compile := func(cond string, opts []Option, layers ...map[string]any) error {
@@ -100,6 +101,7 @@ func TestRequireWhen(t *testing.T) {
 		"host functions":          {"${{ okdpFullname() == 'demo-app' && service.name == 'demo' }}", nil, missing},
 		"before the mapping":      {"${{ true }}", []map[string]any{{"replicas": 11}}, missing},
 		"before platform charts":  {"${{ true }}", []map[string]any{{"global": M{"okdp": M{"charts": nil}}}}, missing},
+		"after the context":       {"${{ true }}", []map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": nil}, "oidc": M{"enabled": "yes"}}}}}, "platform values (--platform, Inputs.Platform) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/oidc/enabled': got string, want boolean"},
 		"not true or false":       {"${{ values.replicas }}", nil, "service.yaml: require[1] (oidc.issuerUri): $if: ${{ values.replicas }}: must be true or false, got 1"},
 		"null":                    {"${{ platform.oidc.enabled }}", []map[string]any{{"global": M{"okdp": M{"oidc": M{"enabled": nil}}}}}, "service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: must be true or false, got null"},
 		"an evaluation error":     {"${{ values.nope }}", nil, "service.yaml: require[1] (oidc.issuerUri): $if: ${{ values.nope }}: no such key: nope"},

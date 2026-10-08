@@ -2,9 +2,9 @@
 // upstream charts: values read, merged and coalesced as Helm does
 // (values.go), checked against a values.schema.json (schema.go), the chart
 // references and the chart cache (ref.go, cache.go), the charts section of
-// service.yaml (spec.go, paths.go), the parameters of an instance
-// (parameters.go) and the final values of each chart key (merge.go). It
-// knows neither the mapping language nor OKDP.
+// service.yaml (spec.go, paths.go), a values schema, its defaults and the
+// parameters of an instance (parameters.go), the final values of each
+// chart key (merge.go). It knows neither the mapping language nor OKDP.
 //
 // Values: reading YAML as Helm values, and Helm's merge rules.
 //

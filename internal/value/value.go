@@ -13,6 +13,14 @@ import (
 // M: a values map (YAML or JSON object).
 type M = map[string]any
 
+// YAML11Bools: the plain scalars YAML 1.1 (Helm's sigs.k8s.io/yaml) reads
+// as booleans and YAML 1.2 (yaml.v3) as strings, true and false aside, each
+// with the boolean it is.
+var YAML11Bools = map[string]bool{
+	"y": true, "Y": true, "yes": true, "Yes": true, "YES": true, "on": true, "On": true, "ON": true,
+	"n": false, "N": false, "no": false, "No": false, "NO": false, "off": false, "Off": false, "OFF": false,
+}
+
 // Normalize: v, a value a caller built in memory, as Helm values are after
 // their JSON round trip, in a copy (normalize.go). At any depth: a map, of
 // any type, is an M, a number or a boolean key printed as Helm reads a YAML
@@ -21,9 +29,10 @@ type M = map[string]any
 // a nil map or slice is empty. A struct, a json.Marshaler or an
 // encoding.TextMarshaler (time.Time, json.RawMessage), a []byte (base64)
 // and a json.Number are what encoding/json writes. What values cannot hold
-// fails, its path named (env[1], annotations["a.b/c"]): a func, a chan, a
-// complex, a NaN or an infinity, text that is not UTF-8, a key of another
-// type, two keys that read as the same, a value that contains itself.
+// fails, its path named (Key, Index: env[1], annotations["a.b/c"]): a
+// func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a
+// key of another type, two keys that read as the same, a value that
+// contains itself.
 func Normalize(v any) (any, error) {
 	return normalizer{}.value(v, "")
 }

@@ -29,6 +29,7 @@ func Example() {
 	chartsFS := os.DirFS("examples/02_advanced/input/charts")
 	contractsFS := os.DirFS("examples/02_advanced/input/contracts")
 	platformValues := values("examples/02_advanced/input/platform.yaml")
+	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/demo.yaml is one
 	instanceValues := values("examples/02_advanced/input/config.yaml")
 
 	def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
@@ -39,7 +40,8 @@ func Example() {
 		Charts:    chartsFS,                         // chart cache: each upstream chart, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/
 		Contracts: contractsFS,                      // the contract schemas, <contract>.schema.json
 		Platform:  []map[string]any{platformValues}, // the platform's layers, in order (helm -f); compiler.ParseValues reads one
-		Values:    []map[string]any{instanceValues}, // the instance's, after them: no global
+		Project:   []map[string]any{projectValues},  // the project's, after them: they add values, never change the platform's
+		Values:    []map[string]any{instanceValues}, // the instance's, last: no global
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	})
@@ -53,13 +55,22 @@ func Example() {
 	// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
 	//               Secrets of the provided connections, the mapping's objects section
 	// res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
+
+	// What okdp-compile -o <dir> --mkinstall writes, file name -> content
+	// (compiler.Output: --umbrella, --mkinstall, --mkdag, --indent).
+	files, err := compiler.Write(res, compiler.Output{Install: true})
+	if err != nil {
+		log.Fatal(err)
+	}
 	fmt.Println(slices.Sorted(maps.Keys(res.Values)))
 	fmt.Println(res.Values["app"]["resources"])
 	fmt.Println(res.Dependencies)
+	fmt.Println(slices.Sorted(maps.Keys(files)))
 	// Output:
 	// [app okdp]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database}]
+	// [app.values.yaml install.sh okdp.values.yaml]
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.
@@ -112,8 +123,8 @@ func ExampleCompile() {
 }
 
 // The second program of docs/01_usage.md: a package and its inputs in
-// memory.
-func ExampleFiles() {
+// memory, written as okdp-compile -o <dir> writes them.
+func ExampleWrite() {
 	def, err := compiler.LoadDefinition(fstest.MapFS{
 		"service.yaml": {Data: []byte(`name: demo
 version: 1.2.3
@@ -146,7 +157,7 @@ charts:
 	if err != nil {
 		log.Fatal(err)
 	}
-	files, err := compiler.Files(res, compiler.DefaultIndent)
+	files, err := compiler.Write(res, compiler.Output{}) // the values files, indented by compiler.DefaultIndent
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -190,7 +201,7 @@ func ExampleCompileContext() {
 }
 
 // TestDocPrograms: the Go programs of README.md and docs/01_usage.md are
-// examples of example_test.go (Example, ExampleCompile, ExampleFiles):
+// examples of example_test.go (Example, ExampleCompile, ExampleWrite):
 // they compile, and print what the documentation shows. The body of a
 // program's main, or a fragment but its import, is in the body of an
 // example, line by line but for the indentation; a program imports the

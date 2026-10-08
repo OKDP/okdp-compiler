@@ -10,15 +10,15 @@ import (
 
 // TestUmbrella: one dependency per compiled key, aliased when the key is
 // not the chart's name (one chart under two keys), the values under the
-// keys; a version Helm refuses, a key it refuses as an alias.
+// keys; no name, a version Helm refuses, a key it refuses as an alias.
 func TestUmbrella(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
-	def := &okdp.Definition{Service: okdp.Service{Name: "demo", Version: "1.2.3"}}
 	res := &okdp.Result{
-		Values: map[string]map[string]any{"app": {"a": 1, "global": map[string]any{"g": 1}}, "canary": {"a": nil}},
-		Charts: map[string]chart.Ref{"app": app, "canary": app},
+		Values:  map[string]map[string]any{"app": {"a": 1, "global": map[string]any{"g": 1}}, "canary": {"a": nil}},
+		Charts:  map[string]chart.Ref{"app": app, "canary": app},
+		Service: "demo", Version: "1.2.3",
 	}
-	files, err := Umbrella(def, res, DefaultIndent)
+	files, err := Write(res, Output{Umbrella: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,15 +42,14 @@ dependencies:
 		}
 	}
 	for name, tc := range map[string]struct {
-		version, key, want string
+		service, version, key, want string
 	}{
-		"version": {"1.x", "app", `service.yaml: version "1.x": the version of the umbrella chart`},
-		"alias":   {"1.2.3", "my.app", `chart "my.app": a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias`},
+		"name":    {"", "1.2.3", "app", `Result.Service is required: the name of the umbrella chart`},
+		"version": {"demo", "1.x", "app", `service.yaml: version "1.x": the version of the umbrella chart`},
+		"alias":   {"demo", "1.2.3", "my.app", `chart "my.app": a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias`},
 	} {
-		d := *def
-		d.Service.Version = tc.version
-		r := &okdp.Result{Values: map[string]map[string]any{tc.key: {}}, Charts: map[string]chart.Ref{tc.key: app}}
-		if _, err := Umbrella(&d, r, DefaultIndent); err == nil || !strings.Contains(err.Error(), tc.want) {
+		r := &okdp.Result{Values: map[string]map[string]any{tc.key: {}}, Charts: map[string]chart.Ref{tc.key: app}, Service: tc.service, Version: tc.version}
+		if _, err := Write(r, Output{Umbrella: true}); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)
 		}
 	}

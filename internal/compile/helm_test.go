@@ -1,7 +1,7 @@
 package compile
 
 import (
-	"encoding/json"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"cel.dev/cel-go/cel"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/internal/helmfn"
+	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -21,23 +22,6 @@ import (
 // written by `helm template` (testdata/helm/generate.sh: Helm 4 on the PATH,
 // and the deployers' versions where they render differently; the versions
 // in testdata/helm/SOURCE).
-
-// helmdata: testdata/helm, at the repository root.
-var helmdata = filepath.Join("..", "..", "testdata", "helm")
-
-// helmJSON: a JSON file written by generate.sh.
-func helmJSON(t *testing.T, path string) any {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
-	}
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("%s: %v", path, err)
-	}
-	return v
-}
 
 // helmMergeKeys: values with merge keys, for TestHelmMergeKeys and
 // FuzzMappingReader.
@@ -61,7 +45,7 @@ func TestHelmMergeKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := Load([]byte("output:\n  x:\n    "+strings.ReplaceAll(helmMergeKeys, "\n", "\n    ")), M{}, nil)
+	d, err := NewSession(context.Background(), 0).Load([]byte("output:\n  x:\n    "+strings.ReplaceAll(helmMergeKeys, "\n", "\n    ")), M{}, "output")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +115,8 @@ func plain(v any) any {
 	switch t := v.(type) {
 	case *omap:
 		m := M{}
-		for _, k := range t.keys {
-			m[k] = plain(t.vals[k])
+		for _, f := range t.fields() {
+			m[f.key] = plain(f.val)
 		}
 		return m
 	case []any:
@@ -179,7 +163,7 @@ func nodes(n *yaml.Node) int {
 // and helm<major>.json where a deployer's major version renders
 // differently).
 func TestHelmFunctions(t *testing.T) {
-	dir := filepath.Join(helmdata, "functions")
+	dir := filepath.Join(helmtest.Dir, "functions")
 	b, err := os.ReadFile(filepath.Join(dir, "values.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -188,11 +172,9 @@ func TestHelmFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &celEngine{envs: map[string]*cel.Env{}}
-	helmJSON(t, filepath.Join(dir, "helm.json")) // there, at least
-	renders, _ := filepath.Glob(filepath.Join(dir, "helm*.json"))
-	for _, path := range renders {
-		helm := value.AsMap(helmJSON(t, path))
+	s := NewSession(context.Background(), 0)
+	for _, path := range helmtest.Renders(t, dir, "helm.json") {
+		helm := value.AsMap(helmtest.JSON(t, path))
 		for name, x := range value.AsMap(in["inputs"]) {
 			want := value.AsMap(value.AsMap(helm["functions"])[name])
 			for _, f := range []string{"sha256", "toJson", "toPrettyJson", "toYaml", "quote"} {
@@ -200,7 +182,7 @@ func TestHelmFunctions(t *testing.T) {
 				if !ok {
 					continue // sha256sum of a null: Helm's toString gives "<nil>"
 				}
-				got, err := e.eval(f+"(x)", M{"x": x})
+				got, err := s.eval(f+"(x)", M{"x": x})
 				switch {
 				// Helm prints "" when the encoder fails; the compile fails.
 				case err != nil && w == "":
@@ -213,8 +195,8 @@ func TestHelmFunctions(t *testing.T) {
 		}
 	}
 	// What Helm cannot show: a null hashes as "", quotes as nothing.
-	for expr, want := range map[string]string{"sha256(null)": sha256Hex(""), "quote(null)": "", "sha256(b'abc')": sha256Hex("abc")} {
-		if got, err := e.eval(expr, M{}); err != nil || got != want {
+	for expr, want := range map[string]string{"sha256(null)": helmfn.Sha256Sum(""), "quote(null)": "", "sha256(b'abc')": helmfn.Sha256Sum("abc")} {
+		if got, err := s.eval(expr, M{}); err != nil || got != want {
 			t.Errorf("%s: got %q (%v), want %q", expr, got, err, want)
 		}
 	}

@@ -12,6 +12,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Chart cache | `Inputs.Charts` (`fs.FS`) | yes | [Chart cache](#chart-cache) |
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
 | Platform values layers | `Inputs.Platform` (`[]map[string]any`) | no | [Parameters](#parameters), [Platform values](#platform-values), [Values files](#values-files) |
+| Project values layers | `Inputs.Project` (`[]map[string]any`) | no | [Parameters](#parameters), [Project values](#project-values), [Values files](#values-files) |
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
@@ -69,9 +70,11 @@ path out of it (`../app.yaml`) fails. The service's name, versions and catalog
 metadata are fields of `service.yaml` ([Service](02_service_definition.md#service)).
 
 `config.schema.json` is required, even for a service without parameters:
-the defaults, the schema check and the connection walk read it. A missing
-file fails with the error of the file system, prefixed with the chart key
-for a defaults file:
+the defaults, the schema check and the connection walk read it. Each
+compile reads it once, first, before the values layers: a missing or
+invalid schema fails before an error of the layers. A missing file fails
+with the error of the file system, prefixed with the chart key for a
+defaults file:
 
 ```
 open config.schema.json: no such file or directory
@@ -83,7 +86,7 @@ app: open app.defaults.yaml: no such file or directory
 Every values file is read as Helm 4 reads one (`loader.LoadValues`): the
 upstream charts' `values.yaml` ([chart cache](#chart-cache)), the defaults
 files, and the values layers read by `compiler.ParseValues` (the binary's
-`--platform` and `-f` files).
+`--platform`, `--project` and `-f` files).
 
 - Documents: the file is split on the lines starting with `---`, as
   Kubernetes' YAMLReader splits it; only a comment may follow the `---`
@@ -99,8 +102,8 @@ files, and the values layers read by `compiler.ParseValues` (the binary's
   ([Layers and nulls](#layers-and-nulls)).
 
 `testdata/helm/values/documents` and `yaml11` hold what Helm reads
-from such files. Values built in memory and given in `Inputs.Platform` or
-`Inputs.Values` are read as the values they would be once written to a
+from such files. Values built in memory and given in `Inputs.Platform`,
+`Inputs.Project` or `Inputs.Values` are read as the values they would be once written to a
 file and read back, at any depth, whatever their Go types
 (`value.Normalize`):
 
@@ -121,12 +124,14 @@ file and read back, at any depth, whatever their Go types
   by its `json` tags.
 
 What a values file cannot hold fails the compile, before the parameters
-are computed, with the layer (`platform layer <n>`, `values layer <n>`:
-the n-th of `Inputs.Platform`, of `Inputs.Values`) and the path of the
-value: a func, a chan, a complex, a NaN or an infinity, a string or a key
-that is not UTF-8, a key of another type (`null`, a struct), two keys that
-read as the same (`1` and `"1"`), a map, slice or pointer that contains
-itself:
+are computed, with the layer (`platform layer <n>`, `project layer <n>`,
+`values layer <n>`: the n-th of `Inputs.Platform`, of `Inputs.Project`, of
+`Inputs.Values`) and the path of the value, written as in
+[protect](#protect) errors (a key that holds a dot in brackets, a list item
+`[<i>]`): a func, a chan, a complex, a NaN or an infinity, a string or a
+key that is not UTF-8, a key of another type (`null`, a struct), two keys
+that read as the same (`1` and `"1"`), a map, slice or pointer that
+contains itself:
 
 ```
 values layer 2: hooks[0]: a func() cannot be a value
@@ -149,8 +154,6 @@ first), or unpacked. The binary reads a directory: `--charts`,
 <cache>/
   <repository>/<chart>-<version>.tgz  a chart archive (helm pull -d <cache>/<repository>)
   <repository>/<chart>-<version>/     or the chart unpacked
-  <chart>-<version>.tgz               the same, without the repository (helm pull -d <cache>)
-  <chart>-<version>/
 ```
 
 `<repository>` is the source's `repository` without its scheme (`oci://`,
@@ -163,15 +166,14 @@ refused with its source ([sources](02_service_definition.md#sources)). Two
 repositories that differ only by their scheme share a directory.
 
 A chart is found by its source: `<repository>/<chart>-<version>`, the
-directory first, else the archive; else `<chart>-<version>` at the root, a
-cache filled without the repository. When one compile uses one chart name
-and version from two repositories (a fork, a generic name such as `app`),
-a chart of them not in its repository's directory fails even when the root
-holds it: the root entry could be the other repository's. Of a chart, the
-compiler reads `values.yaml` and `values.schema.json` only: at the root of
-the directory, or in the archive's top-level directory, not those of its
-subcharts (`<chart>/charts/<sub>/values.yaml`). A chart without
-`values.yaml` has no defaults, one without `values.schema.json` no
+directory first, else the archive, and nowhere else: a chart at the root of
+the cache (`helm pull -d <cache>`) is not read, and one chart name and
+version from two repositories (a fork, a generic name such as `app`) are
+two entries. Of a chart, the compiler reads `values.yaml` and
+`values.schema.json` only: at the root of the directory, or in the
+archive's top-level directory, not those of its subcharts
+(`<chart>/charts/<sub>/values.yaml`). A chart without `values.yaml` has no
+defaults, one without `values.schema.json` no
 [schema check](#schema-check-of-the-final-values).
 
 An archive is read as Helm's loader reads one (`LoadArchiveFiles`, the
@@ -196,15 +198,13 @@ to render (`charts.example.org/app-1.8.0/`,
 `registry.example.org/okdp/okdp-objects-1.0.0/`,
 `quay.io/adaltas/oidc-dcr-0.5.0/`).
 
-A chart the cache does not hold fails with the commands that download it
-into its repository's directory, prefixed with the chart key; a chart name
-and version of two repositories at the root only, with those of each; a
-file that does not read, with its path:
+A chart its repository's directory does not hold, even when the root of
+the cache does, fails with the commands that download it there, prefixed
+with the chart key; a file that does not read, with its path:
 
 ```
 app: chart app-1.8.0 is not in the chart cache: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org
 oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: mkdir -p <chart cache>/quay.io/adaltas && helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>/quay.io/adaltas
-app: chart app-1.8.0 comes from 2 repositories, and the chart cache holds it only as app-1.8.0, which cannot tell them apart: pull each into its repository's directory: mkdir -p <chart cache>/charts.example.org && helm pull app --repo https://charts.example.org --version 1.8.0 -d <chart cache>/charts.example.org; mkdir -p <chart cache>/fork.example.org && helm pull app --repo https://fork.example.org --version 1.8.0 -d <chart cache>/fork.example.org
 app: charts.example.org/app-1.8.0/values.yaml: cannot unmarshal yaml document: ...
 app: charts.example.org/app-1.8.0.tgz: gzip: invalid header
 app: charts.example.org/app-1.8.0.tgz: chart illegally references parent directory
@@ -215,7 +215,8 @@ app: charts.example.org/app-1.8.0/values.yaml: chart exceeds maximum decompresse
 ## Parameters
 
 The parameters of an instance: the values layers, the platform's
-(`Inputs.Platform`) then the instance's (`Inputs.Values`), merged and
+(`Inputs.Platform`), the project's (`Inputs.Project`), then the instance's
+(`Inputs.Values`), merged and
 coalesced over the defaults of the package's `config.schema.json`, as Helm
 computes `.Values` of a chart from its `values.yaml` and `-f` files.
 `global` is the platform's ([Platform values](#platform-values)).
@@ -241,8 +242,8 @@ chart's `values.yaml`:
 
 gives `replicas: 1`, `metrics: {enabled: false, interval: 30s}` and
 `upstream: {}`. A default under `global` (`properties.global.properties`)
-is one of a platform value: the platform's layers override it, and the key
-it declares an instance may set ([Platform values](#platform-values)). The
+is one of a platform value: the platform's and the project's layers
+override it, and the key it declares an instance may set ([Platform values](#platform-values)). The
 `default` of an `x-*` keyword, of `enum`, `const` or `examples` is not
 read, nor `x-ui-condition`: unlike a [contract's](#completion), a
 parameter's default holds whatever the other values.
@@ -292,7 +293,7 @@ top level that the defaults and the values both set to `null`
 ### Schema check
 
 The parameters are checked against `config.schema.json` first, before the
-[platform requirements](#requirements), the connections and the mapping,
+connections, the [platform requirements](#requirements) and the mapping,
 as Helm 4 checks the values of a chart:
 
 - the values checked: the parameters above, `global`, `connections` and
@@ -304,8 +305,10 @@ as Helm 4 checks the values of a chart:
   loading "<url>": $ref <url>: the schema may only reference itself (the
   compile reads no file or URL)`.
 
-Every violation is reported with its path, sorted by path, under the name of
-the service, `name` of `service.yaml` (`testdata/schema-violation.yaml`):
+Every violation is reported with its path, sorted by path (and the keys of
+`additional properties ... not allowed` sorted: Helm's order varies), under
+the name of the service, `name` of `service.yaml`
+(`testdata/schema-violation.yaml`):
 
 ```
 values don't meet the specifications of the schema(s) in the following chart(s):
@@ -324,7 +327,7 @@ Three top-level keys are not parameters of the service:
 
 | Key | Content | In the mapping's `values` |
 |---|---|---|
-| `global` | the platform values, `global.okdp`: set by the platform's layers, by an instance's only for the keys the schema declares ([Platform values](#platform-values)) | removed: given as `global` and `platform` |
+| `global` | the platform values, `global.okdp`: set by the platform's layers, added to by the project's, by an instance's only for the keys the schema declares ([Platform values](#platform-values), [Project values](#project-values)) | removed: given as `global` and `platform` |
 | `connections` | the external connections, by name ([Connections](#connections)) | removed: the references are resolved in place |
 | `upstream` | the instance's upstream values, by chart key ([Upstream values](#upstream-values)) | as written |
 
@@ -416,8 +419,9 @@ a [dependency](#dependencies).
 
 Both are then [completed](#completion) against the contract. The result,
 `secretRef` and `okdp` included, may not contain `{{` in a key or a string,
-whatever it comes from: the instance's layers refuse it already
-([Layers](#layers)), and a connection of the platform's layers, a
+whatever it comes from: the project's and the instance's layers refuse it
+already ([Project values](#project-values), [Layers](#layers)), and a
+connection of the platform's layers, a
 contract's default or `${namespace}` and `${suffix}` are checked here, as
 the connection reaches the charts' values through the mapping.
 
@@ -455,7 +459,9 @@ Secret `secretRef.name`. How the mapping uses `values`:
 
 ### Connection errors
 
-`<path>`: the parameter path; `<name>`: the reference.
+`<path>`: the parameter path, written as in [protect](#protect) errors
+(`backends[1].database`, a key that holds a dot in brackets:
+`databases["eu.main"]`); `<name>`: the reference.
 
 Every reference that does not resolve, or is not a string, is reported, at
 once, one line each, sorted by parameter path (string order, as the
@@ -486,7 +492,7 @@ replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letter
 | `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` | |
 | external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `wrong-contract.yaml` |
 | external, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `unknown-field.yaml` |
-| external, secret field | `<path>: connection "<name>": "<key>" is a secret field` | `secret-in-connection.yaml` |
+| external, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` | `secret-in-connection.yaml` |
 | internal, no `x-okdp-internal` | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | |
 | internal, not a release name | `<path>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
@@ -510,8 +516,9 @@ consume it.
 `Inputs.Contracts`: a file system with `<contract>.schema.json` at its root;
 the name of the contract is the name of the file. The binary reads a
 directory: `--contracts`, `$OKDP_CONTRACTS` by default
-([01_usage.md](../01_usage.md)). A contract is read when a reference or a
-`provides` item names it. No such file: `unknown contract`; a file that
+([01_usage.md](../01_usage.md)). A contract is read once per compile, when
+a reference or a `provides` item first names it; the others that name it
+share it, or its error. No such file: `unknown contract`; a file that
 cannot be read, is not JSON, not an object or not a valid JSON Schema:
 `the <contract> contract cannot be read: <contract>.schema.json: <cause>`.
 
@@ -603,7 +610,8 @@ validated as a chart's values against its `values.schema.json`
 `x-*` applying (`type`, `enum`, `pattern`, `minimum`, `items`,
 `additionalProperties`...). The secret fields, never in the values, are
 left out of the top-level `required`. Every violation is reported, one line
-each, sorted by field (a path in the values: `port`, `catalogs[1]`) then
+each, sorted by field (a path in the values, as the parameter path of the
+[connection errors](#connection-errors): `port`, `catalogs[1]`) then
 message:
 
 ```
@@ -624,7 +632,8 @@ OIDC, proxy, the platform's charts...), given as the platform's values
 layers, `Inputs.Platform` (the binary's `--platform` files):
 `examples/02_advanced/input/platform.yaml`, `platform/platform-values.yaml` in a
 platform repository. They are merged in order over the package's
-[defaults](#defaults) and before the instance's layers, `Inputs.Values`
+[defaults](#defaults) and before the project's layers, `Inputs.Project`
+([Project values](#project-values)), and the instance's, `Inputs.Values`
 ([parameters](#parameters)); a later platform layer may change or delete
 (`null`) a value of the previous ones, as
 `testdata/platform/missing-platform-value.yaml` does.
@@ -640,7 +649,8 @@ global:
 ```
 
 `global` is the platform's: it comes from the package's
-[defaults](#defaults) and the platform's layers, `global.okdp` decides the instance's host, where its
+[defaults](#defaults) and the platform's layers, which the project's add to
+([Project values](#project-values)); `global.okdp` decides the instance's host, where its
 OAuth clients register and the charts its objects and clients are rendered
 with, and every chart receives `global` ([merge
 precedence](#merge-precedence)). An instance layer that sets `global` fails
@@ -656,7 +666,7 @@ values layer 2: global is set by the platform (--platform, Inputs.Platform)
 
 The exception: a key the parameter schema declares under `global`
 (`properties.global.properties.<key>`), `okdp` excepted, which an instance
-layer may set, over the platform's value. A package opens a global value of
+layer may set, over the platform's and the project's value. A package opens a global value of
 its charts to instances this way:
 
 ```json
@@ -667,7 +677,8 @@ A platform layer is a values layer: it may set more than `global`, for
 every instance of the platform, under the instance's layers. The useful
 case is `connections`: a connection every instance may reference by name,
 as one of its own ([Resolution](#resolution)). An instance layer giving a
-connection of the same name merges with it, key by key.
+connection of the same name merges with it, key by key; a project layer may
+not ([Project values](#project-values)).
 
 ```yaml
 # examples/02_advanced/input/platform.yaml
@@ -684,18 +695,74 @@ instance of the namespace, and `audit: platform-db`, the platform's
 connection. Parameters and `upstream` values are the package's: a
 platform file every service shares keeps to `global` and `connections`.
 
+### Project values
+
+`Inputs.Project`, the binary's `--project` files: what a project, the
+namespace of its instances, adds to the platform values for each of them.
+Its settings under `global` (`global.okdp.project`, which the mapping reads
+and the compiler does not; a key of `global` its charts read,
+`storageClass`), and its connections, which its instances reference by name
+as the platform's. The layers are merged in order after the platform's and
+before the instance's ([parameters](#parameters)); a later project layer
+may change or delete a value of an earlier one.
+
+A project adds values, it changes none of the platform's. A project layer
+fails, before the parameter schema is checked, at the first path (keys
+sorted) at which it sets a value the platform's layers set, merged: a key
+whose value is not a map, to any value, the same one and `null` included; a
+parent of one, to anything but a map; or a connection, `connections.<name>`,
+taken whole: a project may not give a field the platform's connection
+leaves out, a `port` to its contract's default
+(`testdata/project/redefines-platform-connection.yaml`):
+
+```
+project layer 1: global.okdp.ingress.suffix is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
+project layer 1: connections.platform-db is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
+```
+
+Maps merge: a project adds keys beside the platform's (`global.okdp.project`
+beside `global.okdp.ingress`). The package's [defaults](#defaults) are not
+the platform's: a project layer overrides a default under `global` as a
+platform layer does. A project is not reviewed with the platform: as in an
+instance layer, no key or string of a project layer may contain `{{`
+([Layers](#layers)), the first one found by path reported,
+`project layer 2: connections.team-db.host: the value contains "{{"`.
+
+The instance's layers come last: an instance sets no key of `global` but
+those its parameter schema declares, over the platform's and the project's
+values, and a connection it gives of the name of a project's merges with
+it, as with a platform's.
+
+```yaml
+# examples/03_full/input/demo.yaml, after platform.yaml
+global:
+  storageClass: fast-ssd
+  okdp:
+    project: {name: demo, costCenter: cc-4217, nodePool: analytics}
+connections:
+  demo-warehouse:
+    contract: database
+    engine: mysql
+    host: warehouse.demo.example.org
+    port: 3306
+    dbName: sales
+    secretRef: {name: demo-warehouse-credentials}
+```
+
 ### Requirements
 
 `require` of `service.yaml`: dotted paths under `global.okdp`, each
 required in every case, or when its condition holds
 ([require](02_service_definition.md#require)). A required key must be set
 and not empty (missing, `null`, `false`, `""`, `0`, an empty list or map
-fails). The keys of every case are checked after the [parameter
-schema](#schema-check), before the connections and the mapping
-(`testdata/platform/missing-platform-value.yaml`); the conditions, in
-order, once the mapping's context is built (the platform context, the
-connections), before the [platform charts](#platform-charts) and the
-mapping. Both fail with the same message:
+fails). The entries are checked in order, a key of every case as a key
+whose condition holds, once the mapping's context is built: after the
+[parameter schema](#schema-check), the platform schema ([settings the
+compiler reads](#fields-the-compiler-reads)) and the
+[connections](#connections), before the [platform
+charts](#platform-charts) and the mapping
+(`testdata/platform/missing-platform-value.yaml`). The first missing key
+fails:
 
 ```
 global.okdp.ingress.className is required. It is a platform value: set it in the platform's values (--platform, Inputs.Platform)
@@ -703,39 +770,48 @@ global.okdp.ingress.className is required. It is a platform value: set it in the
 
 ### Fields the compiler reads
 
-| `global.okdp` | Type | Used for |
-|---|---|---|
-| `ingress.suffix` | string | `${suffix}` of `x-okdp-internal`: internal references, provided outputs |
-| `certificateIssuers.selfSigned.name` | string | `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`) |
-| `charts.objects`, `charts.oidcDcr` | map | the upstream charts of the [okdp chart](#the-okdp-chart) and of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
-| `oidc.enabled` | `true` or `false` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
-| `oidc.clientProvisioning` | string | the same |
-| `oidc.scope` | string | `platform.oidc.scope`; the scope a client chart registers when its client sets none |
-| `oidc.dcr` | map | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
-| `oidc.issuerUri` | string | the OAuth client charts' wait for the provider (`waitForProvider.discoveryUrl`) |
-| `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | string | `platform.proxyEnv` |
+The settings of `global.okdp` the compiler reads are described by the
+platform schema the compiler embeds,
+[`internal/okdp/platform.schema.json`](../../internal/okdp/platform.schema.json):
+their types, their defaults and, in its `description`s, what each means.
+It is the platform authors' reference; an editor can check a platform
+values file against it.
 
-Every compile checks the type of each of these settings when it is set,
-and that `global`, `global.okdp` and each map on the way to a setting
-(`oidc`, `proxy`, `ingress`, `certificateIssuers.selfSigned`...) are maps
-when set, after the [requirements](#requirements) of every case, in every
-mode. A `null` is not set. A value of another type is refused rather than
-read as not set: `oidc: false` would leave OIDC enabled, `proxy: <url>`
-give no proxy environment. The first violation is reported, in the order of
-the table (`charts` is checked later: [Platform charts](#platform-charts)):
+| `global.okdp` | Used for |
+|---|---|
+| `ingress.suffix` | `${suffix}` of `x-okdp-internal`: internal references, provided outputs |
+| `certificateIssuers.selfSigned.name` | `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`) |
+| `charts.objects`, `charts.oidcDcr` | the upstream charts of the [okdp chart](#the-okdp-chart) and of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
+| `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
+| `oidc.scope` | `platform.oidc.scope`; the scope a client chart registers when its client sets none |
+| `oidc.dcr` | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
+| `oidc.issuerUri` | the OAuth client charts' wait for the provider (`waitForProvider.discoveryUrl`) |
+| `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | `platform.proxyEnv` |
+
+Every compile checks `global` against the schema, in every mode, before
+the [connections](#connections) and the [requirements](#requirements),
+and applies its defaults. A setting of another type is refused, and so is
+a map on the way to one (`global`, `global.okdp`, `oidc`, `proxy`...)
+that is not a map, rather than read as not set: `oidc: false` would leave
+OIDC enabled, `proxy: <url>` give no proxy environment. A `null` is not
+set, and takes the default, as does an empty string where the default is a
+string (`oidc.scope`, `oidc.clientProvisioning`, `oidc.dcr.caSecret`);
+`oidc.enabled` excepted, whose `null` is kept, and reads as false. The other
+keys of `global.okdp` are not checked, but for those of `charts`. Every
+violation is reported at once, sorted by path, in Helm's words, as those
+of the [parameters](#schema-check):
 
 ```
-global.okdp.oidc must be a map, got false
-global.okdp.oidc.enabled must be true or false, got "false"
-global.okdp.proxy.noProxy must be a string, got []interface {}{".svc"}
+platform values (--platform, Inputs.Platform) don't meet the specifications of the schema of global.okdp:
+- at '/global/okdp/oidc': validation failed
+  - at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'
+  - at '/global/okdp/oidc/enabled': got string, want boolean
+- at '/global/okdp/proxy': got string, want object
 ```
 
 The mapping sees `global.okdp` as written and `platform` as derived, with
-the defaults, the check of `clientProvisioning` (`existing` or `dcr`) and
-those of the keys of `oidc.dcr` (below):
-[Context](02_service_definition.md#context). The other values are not
-checked. `global` also reaches every upstream chart
-([Merge precedence](#merge-precedence)).
+the defaults ([Context](02_service_definition.md#context)). `global`
+also reaches every upstream chart ([Merge precedence](#merge-precedence)).
 
 ### Platform charts
 
@@ -744,27 +820,23 @@ compiler adds itself, each a source as in `service.yaml`
 ([sources](02_service_definition.md#sources)): `repository`, `chart`,
 `version`.
 
-| Key | Default | Renders |
-|---|---|---|
-| `objects` | none: required, unless the compile leaves the okdp chart out (`compiler.WithoutObjectsChart`) | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document) |
-| `oidcDcr` | `{repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.5.0}` (`compiler.DcrSource()`) | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes |
+| Key | Renders |
+|---|---|
+| `objects` | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document); required, unless the compile leaves the okdp chart out (`compiler.WithoutObjectsChart`) |
+| `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` when unset (`compiler.DcrSource()`) |
 
-Every compile checks them, after the [requirements](#requirements), the
-types of the [settings the compiler reads](#fields-the-compiler-reads),
-the [OAuth client settings](#oauth-client-settings) and the
-[connections](#connections), before the mapping: `oidcDcr` when set, in
-every mode. `charts` must be a map of these two keys, each chart a map;
-`repository`, `chart` and `version` strings (other keys of a chart are
-ignored), then a source: a repository URL (`https://`, `http://` or
-`oci://`), the name of a chart, a pinned version.
-The first violation is reported, in this order:
+Their form is checked with the other [settings the compiler
+reads](#fields-the-compiler-reads), against the platform schema: `charts`
+a map of these two keys, a misspelled `oidcDcr` refused rather than leave
+the default in place; each chart a map, its `repository`, `chart` and
+`version` strings (its other keys are ignored). Then, after the
+[connections](#connections) and the [requirements](#requirements), before
+the mapping, each is checked as a source, `oidcDcr` when set, in every
+mode: a repository URL (`https://`, `http://` or `oci://`), the name of a
+chart, a pinned version. The first violation is reported, in this order:
 
 ```
-global.okdp.charts must be a map (objects, oidcDcr), got "okdp-objects"
-global.okdp.charts: unknown key(s) oidcDCR (allowed: objects, oidcDcr)
 global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a platform value: set it in the platform's values (--platform, Inputs.Platform)
-global.okdp.charts.objects must be a map (repository, chart, version), got "okdp-objects"
-global.okdp.charts.objects.version must be a string, got 1
 global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range
 global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository (https://... or oci://...)
 ```
@@ -772,8 +844,7 @@ global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository (
 The [chart cache](#chart-cache) holds each when its chart is compiled: the
 objects chart in every compile, the oidc-dcr chart in `dcr` mode with a
 client. Another repository with the same chart and version (a mirror) has
-its own directory there; the root entry `<chart>-<version>` serves both,
-unless one compile uses the two.
+its own directory there.
 
 ### OAuth client settings
 
@@ -794,37 +865,32 @@ global:
         ttlSeconds: 300                # keep the finished Job and its logs 5 minutes
 ```
 
-| Key | Type | Default | Client chart value |
-|---|---|---|---|
-| `registrationUrl` | string | none: required in `dcr` mode, with a client | `registrationUrl`: the registration endpoint |
-| `authMethod` | string | none: `anonymous` required in `dcr` mode, with a client | none: OKDP registers anonymously |
-| `image` | map: `registry`, `repository`, `tag`, `pullPolicy`, `pullSecrets` | the chart's | `image`, merged over the chart's |
-| `caSecret` | string | `certs-bundle` | `tls.certificate`: the Secret holding the CA bundle the Jobs trust; a client's `caSecret` wins |
-| `ttlSeconds` | whole number >= 0 | `30` | `ttlSeconds`: how long a finished Job, and its logs, is kept |
-| `backoffLimit` | whole number >= 0 | `6` | `backoffLimit`: the Job's retries |
-| `waitTtlSeconds` | whole number >= 0 | the chart's, 600 | `waitForProvider.ttlSeconds`: the longest wait for the provider's discovery document; the Jobs wait only when `oidc.issuerUri` is set |
+| Key | Client chart value |
+|---|---|
+| `registrationUrl` | `registrationUrl`: the registration endpoint; required in `dcr` mode, with a client |
+| `authMethod` | none: `anonymous`, required in `dcr` mode, with a client; OKDP registers anonymously |
+| `image` | `image` (`registry`, `repository`, `tag`, `pullPolicy`, `pullSecrets`), merged over the chart's |
+| `caSecret` | `tls.certificate`: the Secret holding the CA bundle the Jobs trust; a client's `caSecret` wins |
+| `ttlSeconds` | `ttlSeconds`: how long a finished Job, and its logs, is kept |
+| `backoffLimit` | `backoffLimit`: the Job's retries |
+| `waitTtlSeconds` | `waitForProvider.ttlSeconds`: the longest wait for the provider's discovery document (the chart's, 600, when unset); the Jobs wait only when `oidc.issuerUri` is set |
 
-A `null` takes the default, and so does a `caSecret` of `""`; `0` is a value.
-`image`: the keys of oidc-dcr < 0.5.0 are renamed, `pull_policy` to
-`pullPolicy` and `pull_secrets` to `pullSecrets`; when both spellings are
-set, the camelCase one wins and the former is dropped. Its other keys are
-passed as written. The other keys of `oidc.dcr` are kept in
-`platform.oidc.dcr` and not used.
-
-`oidc.dcr` itself is a map when set
-([fields the compiler reads](#fields-the-compiler-reads)). Every compile
-checks the types of `image`, `caSecret`, `ttlSeconds`, `backoffLimit` and
-`waitTtlSeconds`, in every mode (`existing`, OIDC disabled, no client),
-after the [requirements](#requirements) of every case; the first violation
-is reported, in that order. The three numbers fail alike, and a
-quoted number (`"600"`) is a string. `registrationUrl` and `authMethod` are
-left as written, and checked only in `dcr` mode with a client (below):
+Their types and defaults are the platform schema's, applied and checked
+with the other [settings the compiler reads](#fields-the-compiler-reads),
+in every mode (`existing`, OIDC disabled, no client): the three numbers
+whole and `>= 0` (`0` is a value), a quoted number (`"600"`) a string:
 
 ```
-global.okdp.oidc.dcr.image must be a map (registry, repository, tag, pullPolicy, pullSecrets), got "quay.io/x:1"
-global.okdp.oidc.dcr.caSecret must be the name of a Secret, got true
-global.okdp.oidc.dcr.ttlSeconds must be a whole number >= 0, got 1.5
+- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer
 ```
+
+`image`: the camelCase keys of oidc-dcr >= 0.5.0 (`pullPolicy`,
+`pullSecrets`); those of an earlier version, `pull_policy` and
+`pull_secrets`, are refused (`- at '/global/okdp/oidc/dcr/image/pull_policy':
+false schema`). Its other keys are passed as written. The other keys of `oidc.dcr` are kept in
+`platform.oidc.dcr` and not used. `registrationUrl` and `authMethod` are
+left as written (the schema gives them no type), and checked only in `dcr`
+mode with a client.
 
 In `dcr` mode ([OAuth client charts](#oauth-client-charts)), when the
 mapping declares at least one OAuth client (after `$if`, once the clients
@@ -845,8 +911,9 @@ for the upstream charts.
 ### Layers
 
 `Inputs.Values`: the instance's layers in order, the last one winning
-(Helm's `-f` order), after the platform's; the binary's `-f` files, in the
-order given, after its `--platform` files:
+(Helm's `-f` order), after the platform's and the project's; the binary's
+`-f` files, in the order given, after its `--platform` and `--project`
+files:
 
 ```bash
 bin/okdp-compile ... --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml
@@ -873,8 +940,10 @@ values layer 2: upstream.app.podAnnotations["example.org/{{ x }}"]: the key cont
 
 A layer is normalized before it is checked: a Go value an in-memory layer
 gives that values cannot hold has failed then, with its layer and path
-([values files](#values-files)). The platform's layers and the package's
-defaults are not checked: they are reviewed with the platform and the package
+([values files](#values-files)). The project's layers are checked the same
+way, before the instance's ([Project values](#project-values)). The
+platform's layers and the package's defaults are not checked: they are
+reviewed with the platform and the package
 ([security boundaries](../00_architecture.md#security-boundaries)). A
 connection resolved from them is ([Resolution](#resolution)).
 
@@ -1066,25 +1135,30 @@ with the chart key (`app: charts.example.org/app-1.8.0/values.schema.json: ...`)
 |---|---|---|
 | `Values` | `map[string]map[string]any` | chart key -> its final values ([Merge precedence](#merge-precedence)) |
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
+| `ClientCharts` | `[]string` | the keys of the [OAuth client charts](#oauth-client-charts) (`dcr` mode), sorted; none in another mode. `install.sh` installs them before the others, their Job writing the Secret the others read ([`--mkinstall`](../01_usage.md#--mkinstall)); for a `Result` built without them, every chart in key order |
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); no two of them one object of the cluster |
 | `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
+| `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those `install.sh` installs under |
+| `Service`, `Version` | `string` | the `name` and `version` of `service.yaml`, those of the [umbrella chart](#umbrella-chart) |
 
 `Values` and `Charts` have one entry per compiled chart: a chart the
 mapping leaves out (`$if`) is in neither, and is not to be rendered; the
 okdp chart is in both, and in `dcr` mode the chart of each OAuth client. Numbers are float64, as in Helm values.
-The files the binary writes from them:
+`compiler.Write(res, o)` gives the files the binary writes from them, file
+name -> content, as its flags choose them in `compiler.Output`:
 [command line](../01_usage.md#command-line), and the
 [umbrella chart](#umbrella-chart); `examples/02_advanced/` holds those of
-the example ([Example](#example)).
+the example ([Example](#example)). `compiler.IsOutputFile(name)` tells
+them, in any mode.
 
 The keys of a compile are the chart keys of `service.yaml`, DNS labels
 ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
-(`okdp`, the OAuth client charts). `Files` and `Umbrella` name files and
-dependency aliases after them: for a `Result` built otherwise, a key Helm
-does not accept as an alias (letters, digits, `-`, `_`) fails,
+(`okdp`, the OAuth client charts). `Write` names files and dependency
+aliases after them: for a `Result` built otherwise, a key Helm does not
+accept as an alias (letters, digits, `-`, `_`) fails, in every mode,
 `chart "<key>": a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias: letters, digits, - and _`.
 
-Each `<key>.values.yaml` of `Files` names, on the line after the one that
+Each `<key>.values.yaml` names, on the line after the one that
 marks it generated, the upstream chart that renders it ([Chart
 index](#chart-index)), as Helm takes it: the words between `helm template
 <release>` and `-f <key>.values.yaml`, shell-quoted unless plain.
@@ -1095,9 +1169,9 @@ index](#chart-index)), as Helm takes it: the words between `helm template
 ```
 
 A key without its entry in `Result.Charts` fails, `chart "<key>": not in
-Result.Charts, the upstream chart that renders its values`, as for
-`install.sh`; so does an entry with a control character, which would end
-the comment.
+Result.Charts, the upstream chart that renders its values`, in every mode;
+without `--umbrella`, so does an entry with a control character, which
+would end the comment.
 
 ### Chart index
 
@@ -1178,6 +1252,8 @@ follow, and two clients may not write one Secret
 A client chart has no `service.yaml` entry, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
 and no instance upstream values ([merge precedence](#merge-precedence)).
+`Result.ClientCharts` lists the client charts' keys: a key of
+`service.yaml` that ends in `-oidc-dcr` is not one.
 
 The computed values are not Go code: `internal/okdp/oidc-dcr.cel.yaml`, a
 template in the mapping language embedded in the compiler, computes them
@@ -1282,8 +1358,8 @@ of that item, all at once, one line each ([Checks](#checks)). `<out>`:
 | Case | Error |
 |---|---|
 | an item that is not a map | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>` |
-| `values`, `secretRef` or `secret` set, not a map | `provides[<i>]: values: must be a map of contract fields, got <value>` ([provides](02_service_definition.md#provides)) |
-| the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `provides[<i>]: secret: generate must be a list of generated keys, got <value>`, `provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` ([secret](02_service_definition.md#secret)) |
+| `values`, `secretRef` or `secret` set, not a map | `provides[<i>]: values must be a map, got <value>` ([provides](02_service_definition.md#provides)) |
+| the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `provides[<i>]: secret: generate must be a list, got <value>`, `provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` ([secret](02_service_definition.md#secret)) |
 | no `<contract>.schema.json` | `<out>: unknown contract` |
 | `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<out>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
@@ -1424,7 +1500,8 @@ and `Values`.
 ### Dependencies
 
 `Dependencies`: one item per internal [connection reference](#resolution),
-sorted by `field` (string order), its `instance` a release name. Two
+sorted by `field` (string order), the parameter path as the [connection
+errors](#connection-errors) write it, its `instance` a release name. Two
 references to one instance give two items; external and empty references
 give none. `nil` when there is none.
 
@@ -1442,18 +1519,19 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 
 ### Umbrella chart
 
-`compiler.Umbrella(def, res, indent)` (`okdp-compile -o <dir> --umbrella`): the
-instance as one chart, for one Helm release per instance, under the release
-name the values were compiled for. Two files:
+`compiler.Write` with `Output.Umbrella` (`okdp-compile -o <dir>
+--umbrella`): the instance as one chart, for one Helm release per instance,
+under the release name the values were compiled for. Two files:
 
 - `Chart.yaml`: `apiVersion: v2`; `name` and `version` of `service.yaml`
-  (`version` must be SemVer); `dependencies`, one per key of `Values`,
+  (`Result.Service`, `Result.Version`; `version` must be SemVer);
+  `dependencies`, one per key of `Values`,
   sorted by key: the [chart index](#chart-index) entry of the key (`name`,
   `repository`, `version`), and `alias: <key>` when the key is not the
   chart's name;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
-  Its first line, as that of each `<key>.values.yaml` of `Files` and the
+  Its first line, as that of each `<key>.values.yaml` and the
   second of `install.sh`, marks it generated: `# Code generated by
   okdp-compile. DO NOT EDIT.` (the line Go, GitHub, linters and editors
   recognize).
@@ -1640,3 +1718,18 @@ dependencies:
     repository: oci://registry.example.org/okdp
     version: 1.0.0
 ```
+
+`examples/03_full/` compiles the workspace service, a package written to use
+every part of the mapping language, with the three kinds of values layers:
+`platform.yaml` (`--platform`: `global.okdp` in `dcr` mode, the oidc-dcr
+chart from a mirror, a proxy, two connections), `demo.yaml` (`--project`:
+the project's settings under `global`, two connections of its own) and
+`config.yaml` (`-f`: references to an instance of the namespace and to
+connections of the platform, the project and the instance itself, in a list
+of catalogs and under a nested key; upstream values). Release
+`demo-workspace`, namespace `demo`: `output/helm-cmd/` is what `-o <dir>
+--mkinstall --mkdag` writes, `output/umbrella-chart/` what `-o <dir>
+--umbrella --mkinstall --mkdag` writes. Its `okdp.dependencies.yaml` lists
+`demo-db` twice, for `catalogs[1].database` and `database`, and
+`demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
+`$if`, has no file, and its chart is not in the chart cache.

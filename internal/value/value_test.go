@@ -73,6 +73,27 @@ func TestNormalizeErrors(t *testing.T) {
 	}
 }
 
+// TestPath: plain keys joined by dots, a key that is empty or holds a
+// special character in brackets, escaped, an item [i]: the form chart's
+// parsePath reads back (FuzzFormatPath).
+func TestPath(t *testing.T) {
+	for _, tc := range []struct{ got, want string }{
+		{Key("", "a"), "a"},
+		{Key("a", "b"), "a.b"},
+		{Key("a", "nginx.io/auth-type"), `a["nginx.io/auth-type"]`},
+		{Key("", "a.b"), `["a.b"]`},
+		{Key("a", ""), `a[""]`},
+		{Key("a", `q"b\c*[]`), `a["q\"b\\c\*[]"]`},
+		{Key("env[1]", "name"), "env[1].name"},
+		{Index("env", 2), "env[2]"},
+		{Index(`["a.b"]`, 0), `["a.b"][0]`},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("got %s, want %s", tc.got, tc.want)
+		}
+	}
+}
+
 // TestTruthyStr: values as Helm conditions and Go templates see them.
 func TestTruthyStr(t *testing.T) {
 	for _, tc := range []struct {

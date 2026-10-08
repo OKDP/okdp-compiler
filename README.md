@@ -25,7 +25,8 @@ res, err := compiler.Compile(def, compiler.Inputs{
 	Charts:    chartsFS,                         // chart cache: each upstream chart, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/
 	Contracts: contractsFS,                      // the contract schemas, <contract>.schema.json
 	Platform:  []map[string]any{platformValues}, // the platform's layers, in order (helm -f); compiler.ParseValues reads one
-	Values:    []map[string]any{instanceValues}, // the instance's, after them: no global
+	Project:   []map[string]any{projectValues},  // the project's, after them: they add values, never change the platform's
+	Values:    []map[string]any{instanceValues}, // the instance's, last: no global
 	Release:   "demo-webapp",
 	Namespace: "demo",
 })
@@ -39,6 +40,13 @@ if err != nil {
 // res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
 //               Secrets of the provided connections, the mapping's objects section
 // res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
+
+// What okdp-compile -o <dir> --mkinstall writes, file name -> content
+// (compiler.Output: --umbrella, --mkinstall, --mkdag, --indent).
+files, err := compiler.Write(res, compiler.Output{Install: true})
+if err != nil {
+	log.Fatal(err)
+}
 ```
 
 `example_test.go` runs this program on the example (`Example`).
@@ -124,10 +132,26 @@ compile --platform $in/platform.yaml -f testdata/protected-upstream.yaml -o out/
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
 
-`--platform` gives the platform values, `global.okdp` among them, `-f` the
-instance's: an instance values file that sets `global` fails, but for the keys the
-package's parameter schema declares under it
+`--platform` gives the platform values, `global.okdp` among them, whose
+settings the compiler reads are described, typed and defaulted by
+[`internal/okdp/platform.schema.json`](internal/okdp/platform.schema.json);
+`-f` the instance's: an instance values file that sets `global` fails, but
+for the keys the package's parameter schema declares under it
 ([platform values](docs/specs/01_inputs_outputs.md#platform-values)).
+`--project`, between them, gives what the instance's project (its
+namespace) adds to them, its settings under `global` and its connections: a
+project file that changes a value of the platform's, or one of its
+connections, fails
+([project values](docs/specs/01_inputs_outputs.md#project-values)):
+
+```bash
+in=examples/03_full/input
+bin/okdp-compile --package $in/service --charts $in/charts --contracts $in/contracts \
+  --release demo-workspace --namespace demo \
+  --platform $in/platform.yaml --project $in/demo.yaml -f $in/config.yaml \
+  -o out/full --mkinstall --mkdag
+# out/full now holds examples/03_full/output/helm-cmd/, byte for byte
+```
 
 `-o <dir>` (`--output`), required, writes the final values of each chart,
 `<dir>/<chart>.values.yaml`, each naming the upstream chart that renders it
@@ -159,18 +183,20 @@ directory holding any other file is refused. `--release` and
 
 | Path | Description |
 |---|---|
-| `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `Files`, `Umbrella`... |
+| `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `Write`... |
 | `example_test.go`, `compiler_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, the `charts` section of `service.yaml`, the final values |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients, the `okdp` chart) and `Compile` |
-| `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`-o`, `--umbrella`) |
+| `internal/fsio/` | the edges: `LoadDefinition`, and the files a compile is written as (`Write`: `-o`, `--umbrella`, `--mkinstall`, `--mkdag`) |
+| `internal/helmfn/` | the Helm, sprig and Kubernetes rules the compiler reproduces: template functions, the names Kubernetes and Helm accept |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
 | `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/` (`helm-cmd/` with `-o <dir> --mkinstall`, `umbrella-chart/` with `-o <dir> --umbrella --mkinstall`), checked by `go test` ([example](docs/00_architecture.md#example)) |
 | `examples/02_advanced/input/` | an example compile's inputs: the package (`service/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`: `global.okdp` and a connection every instance may reference, the instance's audit database; `platform-dcr.yaml` after it for `dcr` mode), the instance's values (`config.yaml`, given with `-f`) ([example](docs/00_architecture.md#example)) |
 | `examples/02_advanced/output-*/` | what `okdp-compile` writes for it, checked by `go test`: `output-no-dcr/helm-cmd/` with `-o <dir> --mkinstall`, `output-no-dcr/umbrella-chart/` with `-o <dir> --umbrella --mkinstall`, `output-dcr/` likewise in `dcr` mode |
-| `testdata/` | instance values that must fail on the example, platform values in `testdata/platform/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
+| `examples/03_full/` | a package that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`), a project's (`demo.yaml`, `--project`) and an instance's (`config.yaml`) with connections of each; its outputs in `output/` (`helm-cmd/` with `-o <dir> --mkinstall --mkdag`, `umbrella-chart/` with `--umbrella` too), checked by `go test` ([example](docs/00_architecture.md#example)) |
+| `testdata/` | instance values that must fail on the example, platform values in `testdata/platform/`, project values in `testdata/project/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/cli/` | the binary run as a process (testscript): exit statuses, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
 | `docs/` | the documentation |

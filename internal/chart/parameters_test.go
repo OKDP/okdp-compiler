@@ -7,6 +7,11 @@ import (
 	"testing/fstest"
 )
 
+// readSchema: the parameter schema s of a package (ReadParameterSchema).
+func readSchema(s string) (*Schema, error) {
+	return ReadParameterSchema(fstest.MapFS{parameterSchema: {Data: []byte(s)}})
+}
+
 // TestSchemaDefaults: the defaults of the properties reached from the root
 // through properties, at their path; a default elsewhere, or in the x-*
 // keywords and the values of enum or examples, is not a parameter's.
@@ -25,13 +30,13 @@ func TestSchemaDefaults(t *testing.T) {
 		"a property named default": {`{"properties": {"default": {"default": true}}}`, M{"default": true}},
 		"not keywords":             {`{"x-ui": {"default": 1}, "properties": {"a": {"enum": [{"default": 1}], "examples": [{"default": 2}], "x-okdp-derived": {"default": 3}}}}`, M{}},
 	} {
-		got, err := schemaDefaults("config.schema.json", []byte(tc.schema))
+		got, err := readSchema(tc.schema)
 		if err != nil {
 			t.Errorf("%s: %v", name, err)
 			continue
 		}
-		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("%s: got %#v, want %#v", name, got, tc.want)
+		if !reflect.DeepEqual(got.defaults, tc.want) {
+			t.Errorf("%s: got %#v, want %#v", name, got.defaults, tc.want)
 		}
 	}
 }
@@ -42,7 +47,7 @@ func TestSchemaDefaults(t *testing.T) {
 func TestSchemaDefaultsErrors(t *testing.T) {
 	const where = ": a default applies only to a property reached from the root through properties"
 	for name, tc := range map[string]struct{ schema, want string }{
-		"not JSON":             {`{`, "config.schema.json: unexpected end of JSON input"},
+		"not JSON":             {`{`, "config.schema.json: unexpected EOF"},
 		"the root":             {`{"default": {}}`, "config.schema.json#/default" + where},
 		"allOf":                {`{"allOf": [{"properties": {"a": {"default": 1}}}]}`, "config.schema.json#/allOf/0/properties/a/default" + where},
 		"then":                 {`{"if": {"properties": {"a": {"const": 1}}}, "then": {"properties": {"b": {"default": 1}}}}`, "config.schema.json#/then/properties/b/default" + where},
@@ -56,7 +61,7 @@ func TestSchemaDefaultsErrors(t *testing.T) {
 		"an escaped name": {`{"properties": {"a/b c~": {"type": "string", "default": 1}}}`,
 			"config.schema.json#/properties/a~1b c~0/default: the default does not meet its property's schema:\n- at '': got number, want string"},
 	} {
-		if _, err := schemaDefaults("config.schema.json", []byte(tc.schema)); err == nil || err.Error() != tc.want {
+		if _, err := readSchema(tc.schema); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: got %v, want %s", name, err, tc.want)
 		}
 	}
@@ -66,20 +71,23 @@ func TestSchemaDefaultsErrors(t *testing.T) {
 // schema's defaults (a null deletes one), then checked against the schema;
 // a package without a schema fails.
 func TestParameters(t *testing.T) {
-	pkg := fstest.MapFS{"config.schema.json": {Data: []byte(`{"properties": {
+	schema, err := readSchema(`{"properties": {
 		"a": {"type": "integer", "default": 1},
-		"b": {"properties": {"c": {"default": "x"}, "d": {"default": "y"}}}}}`)}}
-	got, err := Parameters(pkg, "svc", []map[string]any{{"b": M{"c": "z"}}, {"b": M{"d": nil}}})
+		"b": {"properties": {"c": {"default": "x"}, "d": {"default": "y"}}}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Parameters(schema, "svc", []map[string]any{{"b": M{"c": "z"}}, {"b": M{"d": nil}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := (M{"a": float64(1), "b": M{"c": "z"}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
-	if _, err := Parameters(pkg, "svc", []map[string]any{{"a": "two"}}); err == nil || !strings.Contains(err.Error(), "svc:\n- at '/a': got string, want integer") {
+	if _, err := Parameters(schema, "svc", []map[string]any{{"a": "two"}}); err == nil || !strings.Contains(err.Error(), "svc:\n- at '/a': got string, want integer") {
 		t.Errorf("a violation: got %v", err)
 	}
-	if _, err := Parameters(fstest.MapFS{}, "svc", nil); err == nil || !strings.Contains(err.Error(), "open config.schema.json") {
+	if _, err := ReadParameterSchema(fstest.MapFS{}); err == nil || !strings.Contains(err.Error(), "open config.schema.json") {
 		t.Errorf("without a schema: got %v", err)
 	}
 }

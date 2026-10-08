@@ -1,14 +1,15 @@
 // Objects: the okdp chart, the chart of OKDP's own objects the compiler
-// adds to every compile, and the platform's charts (global.okdp.charts) the
-// compiler's own charts are rendered with; no two of OKDP's own objects are
-// one object of the cluster.
+// adds to every compile; the compiler's own charts, the okdp chart and the
+// OAuth clients' (oidc.go), their keys reserved and their charts added in
+// one place (addOwnCharts), and the platform's charts (global.okdp.charts)
+// they are rendered with; no two of OKDP's own objects are one object of
+// the cluster.
 package okdp
 
 import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strings"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
@@ -24,26 +25,14 @@ import (
 const ObjectsChart = "okdp"
 
 // platformCharts: the charts the platform renders the compiler's own charts
-// with (global.okdp.charts of okdp): objects, the chart of OKDP's own objects
-// (okdp-objects, required unless the compile renders no okdp chart,
-// WithoutObjectsChart), and oidcDcr, the chart of the OAuth clients in dcr
-// mode (DcrSource by default). Another key is refused: a misspelled oidcDcr
-// would otherwise leave the default in place.
+// with (global.okdp.charts of okdp, of the form platform.schema.json gives
+// it: its keys, their types; another key is refused there, a misspelled
+// oidcDcr would otherwise leave the default in place): objects, the chart
+// of OKDP's own objects (okdp-objects, required unless the compile renders
+// no okdp chart, WithoutObjectsChart), and oidcDcr, the chart of the OAuth
+// clients in dcr mode (DcrSource by default). A null is not set.
 func platformCharts(okdp M, needObjects bool) (objects, dcr chart.Ref, err error) {
-	charts, ok := okdp["charts"].(M)
-	if !ok && okdp["charts"] != nil {
-		return objects, dcr, fmt.Errorf("global.okdp.charts must be a map (objects, oidcDcr), got %s", value.Short(okdp["charts"]))
-	}
-	var unknown []string
-	for k := range charts {
-		if k != "objects" && k != "oidcDcr" {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) > 0 {
-		slices.Sort(unknown)
-		return objects, dcr, fmt.Errorf("global.okdp.charts: unknown key(s) %s (allowed: objects, oidcDcr)", strings.Join(unknown, ", "))
-	}
+	charts := value.AsMap(okdp["charts"])
 	if charts["objects"] == nil && needObjects {
 		return objects, dcr, errors.New("global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). " + platformValue)
 	}
@@ -59,48 +48,77 @@ func platformCharts(okdp M, needObjects bool) (objects, dcr chart.Ref, err error
 	return objects, dcr, err
 }
 
-// platformChart: a chart of global.okdp.charts, a map of strings, checked.
+// platformChart: a chart of global.okdp.charts, a map of strings
+// (platform.schema.json), checked as a source is (chart.Ref.Check); where
+// names it in the errors.
 func platformChart(v any, where string) (chart.Ref, error) {
-	var r chart.Ref
-	m, ok := v.(M)
-	if !ok {
-		return r, fmt.Errorf("%s must be a map (repository, chart, version), got %s", where, value.Short(v))
-	}
-	for _, f := range []struct {
-		key string
-		to  *string
-	}{{"repository", &r.Repository}, {"chart", &r.Chart}, {"version", &r.Version}} {
-		if x, set := m[f.key]; set {
-			s, ok := x.(string)
-			if !ok {
-				return r, fmt.Errorf("%s.%s must be a string, got %s", where, f.key, value.Short(x))
-			}
-			*f.to = s
-		}
-	}
+	m := value.AsMap(v)
+	r := chart.Ref{Repository: value.Str(m["repository"]), Chart: value.Str(m["chart"]), Version: value.Str(m["version"])}
 	return r, r.Check(where)
 }
 
-// objectsChart: the charts of svc plus the okdp chart (ObjectsChart),
-// rendered by the platform's objects chart, its values the objects (no OKDP
-// defaults, no instance values), added to the mapping's output, which may not
-// list it. svc is not changed.
-func objectsChart(svc *Service, objects []map[string]any, output M, src chart.Ref) (*Service, error) {
-	if _, ok := output[ObjectsChart]; ok {
-		return nil, fmt.Errorf("mapping output %q: the chart of OKDP's own objects is compiled from the objects section: remove it from output", ObjectsChart)
-	}
+// ownChart: a chart key the compiler owns in a compile: the okdp chart,
+// unless WithoutObjectsChart, and the chart of each OAuth client, in every
+// mode. Neither service.yaml nor the mapping's output may list it
+// (addOwnCharts). The compiler adds it to the compile when it has values,
+// rendered by source: no OKDP defaults, no instance upstream values.
+type ownChart struct {
+	key    string
+	of     string    // what it is the chart of, for the messages: OKDP's own objects, oidcClients[<i>] (<name>)
+	from   string    // what its values are compiled from, for the messages
+	source chart.Ref // the platform's chart that renders it
+	values M         // its values; nil: the key is reserved, no chart is added (a client outside dcr mode)
+}
+
+// okdpChart: the okdp chart (ObjectsChart) as the compiler owns it, before
+// a compile gives its source and values (objectsChart); service.yaml may
+// not list it, refused when it is loaded (Service.Check).
+var okdpChart = ownChart{key: ObjectsChart, of: "OKDP's own objects", from: "the objects section"}
+
+// objectsChart: the okdp chart, rendered by the platform's objects chart
+// src, its values the objects, copied.
+func objectsChart(objects []map[string]any, src chart.Ref) ownChart {
 	list := make([]any, 0, len(objects))
 	for _, o := range objects {
 		list = append(list, value.Copy(o))
 	}
-	output[ObjectsChart] = M{"objects": list}
-	out := *svc
-	out.Charts = maps.Clone(svc.Charts)
-	if out.Charts == nil {
-		out.Charts = chart.Specs{}
+	c := okdpChart
+	c.source, c.values = src, M{"objects": list}
+	return c
+}
+
+// listed: the error of the chart c listed by service.yaml (specs), then by
+// the mapping's output; nil when neither lists it.
+func (c ownChart) listed(specs chart.Specs, output M) error {
+	if _, ok := specs[c.key]; ok {
+		return fmt.Errorf("service.yaml: charts.%s: the chart of %s is added by the compiler: remove it from service.yaml", c.key, c.of)
 	}
-	out.Charts[ObjectsChart] = chart.Spec{Source: src}
-	return &out, nil
+	if _, ok := output[c.key]; ok {
+		return fmt.Errorf("mapping output %q: the chart of %s is compiled from %s: remove it from output", c.key, c.of, c.from)
+	}
+	return nil
+}
+
+// addOwnCharts: the charts of service.yaml, specs, plus those of own that
+// have values, each rendered by its source, their values added to the
+// mapping's output: what chart.FinalValues compiles. A chart of own that
+// service.yaml or the output lists fails (listed), the first in the order
+// of own. specs is not changed.
+func addOwnCharts(specs chart.Specs, output M, own []ownChart) (chart.Specs, error) {
+	for _, c := range own {
+		if err := c.listed(specs, output); err != nil {
+			return nil, err
+		}
+	}
+	all := chart.Specs{}
+	maps.Copy(all, specs)
+	for _, c := range own {
+		if c.values != nil {
+			all[c.key] = chart.Spec{Source: c.source}
+			output[c.key] = c.values
+		}
+	}
+	return all, nil
 }
 
 // ownObject: one of OKDP's own objects, and what gives it, for the errors:

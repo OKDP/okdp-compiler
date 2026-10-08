@@ -1,0 +1,9 @@
+- instance: demo-db
+  contract: database
+  field: catalogs[1].database
+- instance: demo-db
+  contract: database
+  field: database
+- instance: demo-alerts
+  contract: http
+  field: notifications.webhook

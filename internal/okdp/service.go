@@ -39,9 +39,8 @@ type Service struct {
 type Requirements []Requirement
 
 // Requirement: a platform value the service needs, a key under global.okdp
-// that must be set and not empty: in every case (no If), checked before the
-// platform context is derived (buildContext), or when its condition holds,
-// checked on the mapping's context (requireWhen).
+// that must be set and not empty: in every case (no If), or when its
+// condition holds; checked on the mapping's context (checkRequirements).
 type Requirement struct {
 	Key string // dotted, under global.okdp: ingress.suffix
 	If  string // the condition, ${{ <CEL> }} on the mapping's context, true or false; "": in every case
@@ -157,8 +156,9 @@ func (s *Service) meta() serviceMeta {
 // Check: what service.yaml may not hold, refused when it is loaded
 // (fsio.LoadDefinition) and before every compile: no name or version, a
 // require entry without its key or with a condition that is not one
-// expression, the chart of OKDP's own objects (the compiler adds it), then
-// what its charts may not hold (chart.Specs.Check).
+// expression, the chart of OKDP's own objects (the compiler adds it, in
+// every compile: okdpChart), then what its charts may not hold
+// (chart.Specs.Check).
 func (s *Service) Check() error {
 	switch {
 	case s.Name == "":
@@ -169,8 +169,8 @@ func (s *Service) Check() error {
 	if err := s.Require.check(); err != nil {
 		return err
 	}
-	if _, ok := s.Charts[ObjectsChart]; ok {
-		return fmt.Errorf("service.yaml: charts.%s: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml", ObjectsChart)
+	if err := okdpChart.listed(s.Charts, nil); err != nil {
+		return err
 	}
 	return s.Charts.Check()
 }

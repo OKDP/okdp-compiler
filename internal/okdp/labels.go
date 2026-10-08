@@ -8,7 +8,6 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 
 	"github.com/okdp/okdp-compiler/internal/compile"
-	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // serviceMeta: what the mapping and OKDP's objects see of the package:
@@ -16,11 +15,6 @@ import (
 type serviceMeta struct {
 	Name    string
 	Version string
-}
-
-// ctxService: the package of a mapping context.
-func ctxService(ctx M) serviceMeta {
-	return serviceMeta{Name: value.Str(value.Dig(ctx, "service.name")), Version: value.Str(value.Dig(ctx, "service.version"))}
 }
 
 // selectorLabels: the stable subset of the labels, for selectors; with

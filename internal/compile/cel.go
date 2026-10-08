@@ -1,8 +1,10 @@
 // Package compile is the "values.yaml with expressions" language: YAML
 // shaped like the values it computes, where ${{ <CEL> }} computes a value.
-// It knows neither Helm charts nor OKDP: the caller gives a document its
-// context and its own host functions (Load), then evaluates the sections it
-// knows (Doc.Section), or the values of a template (EvalTemplate).
+// It knows neither Helm charts nor OKDP: the caller opens a session with its
+// own host functions (NewSession), loads each document on its context with
+// the names of its sections (Session.Load: the document checked and its
+// expressions compiled, in every branch), then evaluates them (Doc.Section),
+// or the values of a template (Session.EvalTemplate).
 //
 //	key: ${{ expr }}              the whole scalar: the value keeps the expression's type
 //	key: text ${{ expr }} text    interpolation: the value is a string
@@ -23,7 +25,8 @@
 //	errors (rules: {$if: <condition>, message: <text>}, or expressions
 //	returning lists of messages: any message fails the compile)
 //
-// A template (EvalTemplate) has one section, values.
+// Any other top-level key is a section the caller names. A template
+// (Session.EvalTemplate) has one section, values.
 package compile
 
 import (
@@ -34,6 +37,7 @@ import (
 	"io"
 	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,35 +58,77 @@ import (
 // M: a values map (value.M).
 type M = value.M
 
-// omap: an ordered YAML map: its keys as Helm reads them (YAML 1.1), each
-// once, in order; and its entries as written, every one, for the maps whose
-// keys are binding names (let, $let): a binding y or Y keeps its name,
-// YAML 1.1 does not make both the key "true". Bindings are sequential, each
-// seeing the previous ones.
+// omap: an ordered YAML map: its entries as written, every one, and an
+// index of its keys as Helm reads them (YAML 1.1), each naming the entry
+// that holds its value. Helm's view of the map (fields) has each key once,
+// at its first entry. The maps whose keys are binding names (let, $let)
+// are read by entry: a binding y or Y keeps its name, YAML 1.1 does not
+// make both the key "true". Bindings are sequential, each seeing the
+// previous ones.
 type omap struct {
-	keys    []string
-	vals    map[string]any
-	from    map[string]*yaml.Node // the node each key was read from
-	written []entry
+	entries []entry
+	index   map[string]int // key -> the entry holding its value
 }
 
-// entry: a key of a map as written, and its value.
+// entry: a key of a map, as Helm reads it (key) and as written (name, an
+// alias's anchor's), the node it was read from, and its value.
 type entry struct {
-	name string
-	val  any
+	key, name string
+	node      *yaml.Node
+	val       any
 }
 
 // newOmap: an empty omap.
-func newOmap() *omap { return &omap{vals: map[string]any{}, from: map[string]*yaml.Node{}} }
+func newOmap() *omap { return &omap{index: map[string]int{}} }
 
-// put: k, read from the node kn, bound to v. A key given twice: the last
-// value wins, at the position of the first, as in Helm values.
-func (m *omap) put(k string, kn *yaml.Node, v any) {
-	if _, dup := m.vals[k]; !dup {
-		m.keys = append(m.keys, k)
+// put: e added after the entries of m, its value now its key's. A key given
+// twice: the last value wins, at the position of the first, as in Helm
+// values.
+func (m *omap) put(e entry) {
+	m.index[e.key] = len(m.entries)
+	m.entries = append(m.entries, e)
+}
+
+// merge: the entries of o, after those of m, each key of o taking o's
+// value: over m's when over (the map of a merge key), else when m does not
+// have the key (the maps of a merge key's list, the first winning).
+func (m *omap) merge(o *omap, over bool) {
+	n := len(m.entries)
+	m.entries = append(m.entries, o.entries...)
+	for k, i := range o.index {
+		if _, ok := m.index[k]; over || !ok {
+			m.index[k] = n + i
+		}
 	}
-	m.vals[k] = v
-	m.from[k] = kn
+}
+
+// lookup: the value of the key k, and whether m has it.
+func (m *omap) lookup(k string) (any, bool) {
+	i, ok := m.index[k]
+	if !ok {
+		return nil, false
+	}
+	return m.entries[i].val, true
+}
+
+// get: the value of the key k, null when m does not have it.
+func (m *omap) get(k string) any {
+	v, _ := m.lookup(k)
+	return v
+}
+
+// fields: m as Helm reads it: each key once, in the order of its first
+// entry, as the entry holding its value.
+func (m *omap) fields() []entry {
+	out := make([]entry, 0, len(m.index))
+	seen := make(map[string]bool, len(m.index))
+	for _, e := range m.entries {
+		if !seen[e.key] {
+			seen[e.key] = true
+			out = append(out, m.entries[m.index[e.key]])
+		}
+	}
+	return out
 }
 
 // clash: an error when m has the key k, read from a node other than kn
@@ -90,10 +136,11 @@ func (m *omap) put(k string, kn *yaml.Node, v any) {
 // reader keeps both keys until they are text, then the value of either, at
 // random.
 func (m *omap) clash(k string, kn *yaml.Node) error {
-	prev, ok := m.from[k]
+	i, ok := m.index[k]
 	if !ok {
 		return nil
 	}
+	prev := m.entries[i].node
 	a, b := aliased(prev), aliased(kn)
 	x, _ := scalar(a)
 	y, _ := scalar(b)
@@ -163,16 +210,34 @@ func (r *reader) fromNode(n *yaml.Node) (any, error) {
 			out = append(out, v)
 		}
 		return out, nil
-	// A scalar: decoded as YAML 1.1 types (int, bool...), then normalized.
-	// .nan and .inf are refused: Helm cannot read them back from the final
-	// values.
+	// A scalar: decoded as YAML 1.1 types (int, bool...), then as values
+	// hold them (value.Normalize): every number a float64, text UTF-8 (a
+	// !!binary may not be). .nan and .inf are refused: Helm cannot read them
+	// back from the final values.
 	case yaml.ScalarNode:
 		v, err := scalar(n)
 		if err != nil {
 			return nil, err
 		}
-		if f, ok := v.(float64); ok && (math.IsNaN(f) || math.IsInf(f, 0)) {
-			return nil, fmt.Errorf("line %d: not a finite number: %s (quote it for the text)", n.Line, n.Value)
+		switch t := v.(type) {
+		case nil, bool:
+			return t, nil
+		case string:
+			if !utf8.ValidString(t) {
+				return nil, fmt.Errorf("a string that is not UTF-8: %q", t)
+			}
+			return t, nil
+		case int:
+			return float64(t), nil
+		case int64:
+			return float64(t), nil
+		case uint64:
+			return float64(t), nil
+		case float64:
+			if math.IsNaN(t) || math.IsInf(t, 0) {
+				return nil, fmt.Errorf("line %d: not a finite number: %s (quote it for the text)", n.Line, n.Value)
+			}
+			return t, nil
 		}
 		return value.Normalize(v)
 	// An alias: a copy of its anchor's node, unless it is inside it.
@@ -206,16 +271,15 @@ func (r *reader) mapping(n *yaml.Node) (*omap, error) {
 			if err != nil {
 				return nil, err
 			}
-			for _, k := range merged.keys {
-				if w, ok := keys[k]; ok {
+			for _, f := range merged.fields() {
+				if w, ok := keys[f.key]; ok {
 					return nil, fmt.Errorf("line %d: %s is written before the merge key << that replaces it: write it after <<", w.Line, w.Value)
 				}
-				if err := m.clash(k, merged.from[k]); err != nil {
+				if err := m.clash(f.key, f.node); err != nil {
 					return nil, err
 				}
-				m.put(k, merged.from[k], merged.vals[k])
 			}
-			m.written = append(m.written, merged.written...)
+			m.merge(merged, true)
 			continue
 		}
 		k, err := mapKey(kn)
@@ -229,13 +293,12 @@ func (r *reader) mapping(n *yaml.Node) (*omap, error) {
 		if err != nil {
 			return nil, err
 		}
-		m.put(k, kn, v)
-		keys[k] = kn
 		name := kn.Value
 		if kn.Kind == yaml.AliasNode {
 			name = kn.Alias.Value
 		}
-		m.written = append(m.written, entry{name, v})
+		m.put(entry{k, name, kn, v})
+		keys[k] = kn
 	}
 	return m, nil
 }
@@ -261,24 +324,14 @@ func (r *reader) merged(n *yaml.Node) (*omap, error) {
 			return nil, err
 		}
 		m := v.(*omap)
-		for _, k := range m.keys {
-			if err := out.clash(k, m.from[k]); err != nil {
+		for _, f := range m.fields() {
+			if err := out.clash(f.key, f.node); err != nil {
 				return nil, err
 			}
-			if _, ok := out.vals[k]; !ok {
-				out.put(k, m.from[k], m.vals[k])
-			}
 		}
-		out.written = append(out.written, m.written...)
+		out.merge(m, false)
 	}
 	return out, nil
-}
-
-// yaml11Bools: the plain scalars YAML 1.1 (Helm's sigs.k8s.io/yaml) reads
-// as booleans and YAML 1.2 (yaml.v3) as strings.
-var yaml11Bools = map[string]bool{
-	"y": true, "Y": true, "yes": true, "Yes": true, "YES": true, "on": true, "On": true, "ON": true,
-	"n": false, "N": false, "no": false, "No": false, "NO": false, "off": false, "Off": false, "OFF": false,
 }
 
 // scalar: a scalar node decoded as Helm decodes values (YAML 1.1). yaml.v3
@@ -289,7 +342,7 @@ var yaml11Bools = map[string]bool{
 // scalars and explicit tags (!!str yes) are left as they are, but !!bool,
 // which takes the YAML 1.1 booleans too (!!bool yes).
 func scalar(n *yaml.Node) (any, error) {
-	if b, ok := yaml11Bools[n.Value]; ok && n.ShortTag() == "!!bool" {
+	if b, ok := value.YAML11Bools[n.Value]; ok && n.ShortTag() == "!!bool" {
 		return b, nil
 	}
 	if t := strings.ReplaceAll(n.Value, "_", ""); n.Style == 0 && n.Tag == "!!int" && (strings.HasPrefix(t, "0o+") || strings.HasPrefix(t, "0o-")) {
@@ -303,7 +356,7 @@ func scalar(n *yaml.Node) (any, error) {
 		return n.Value, nil
 	}
 	if s, ok := v.(string); ok && n.Style == 0 && n.Tag == "!!str" {
-		if b, ok := yaml11Bools[s]; ok {
+		if b, ok := value.YAML11Bools[s]; ok {
 			return b, nil
 		}
 	}
@@ -348,31 +401,43 @@ func mapKey(n *yaml.Node) (string, error) {
 	return "", fmt.Errorf("line %d: unsupported map key %q", n.Line, n.Value)
 }
 
-// celEngine: evaluates a document. It caches the CEL environments, built
-// with the caller's host functions.
-type celEngine struct {
-	envs   map[string]*cel.Env
-	funcs  []cel.EnvOption
-	budget *Budget // nil: no cancellation, no cost limit
-}
-
-// Budget: what the evaluations of one compile may use, shared by its
-// documents (the mapping, the templates): its context, which cancels them,
-// and a total CEL cost, when limited. Not safe for concurrent use: one per
-// compile.
-type Budget struct {
+// Session: what the evaluations of one compile share, those of its
+// documents (the mapping, the templates) and of its conditions: its
+// context, which cancels them; a total CEL cost, when limited; the caller's
+// host functions; and the CEL environments, one per set of variable names,
+// each built once with those functions, which do not change during the
+// session. Not safe for concurrent use: one per compile.
+type Session struct {
 	ctx   context.Context
 	limit uint64 // 0: no limit
 	used  uint64 // counted under a limit only
+	left  uint64 // under a limit, what the running evaluation may cost: limit - used
+	funcs []cel.EnvOption
+	progs []cel.ProgramOption // how its programs run (NewSession)
+	envs  map[string]*cel.Env // by variable names, sorted (env)
 }
 
-// NewBudget: the budget of a compile: cancelled with ctx (nil: never), its
-// expressions' total CEL cost at most limit (0: no limit).
-func NewBudget(ctx context.Context, limit uint64) *Budget {
+// NewSession: the session of a compile: cancelled with ctx (nil: never), its
+// expressions' total CEL cost at most limit (0: no limit), its documents
+// calling the host functions funcs besides the language's own (str, first,
+// and those of functions.go). Its programs, each built once per expression
+// (compile), check the context every interruptEvery iterations; under a
+// limit, they track their cost against left: CEL's cost tracker of an
+// evaluation is a shallow copy of the program's, its Limit pointer shared,
+// so a compiled program is limited to what remains when it runs (exec).
+func NewSession(ctx context.Context, limit uint64, funcs ...cel.EnvOption) *Session {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &Budget{ctx: ctx, limit: limit}
+	s := &Session{ctx: ctx, limit: limit, funcs: funcs, envs: map[string]*cel.Env{}}
+	s.progs = []cel.ProgramOption{cel.InterruptCheckFrequency(interruptEvery)}
+	if limit > 0 {
+		s.progs = append(s.progs, cel.CostTracking(nil), cel.CostTrackerOptions(func(t *interpreter.CostTracker) error {
+			t.Limit = &s.left
+			return nil
+		}))
+	}
+	return s
 }
 
 // interruptEvery: how many iterations of a comprehension run between two
@@ -414,12 +479,11 @@ func libraries() []cel.EnvOption {
 	return opts
 }
 
-// env: the CEL environment for these variable names, cached.
-func (e *celEngine) env(names []string) (*cel.Env, error) {
-	// One environment per set of variable names, built once.
-	sort.Strings(names)
+// env: the CEL environment for these variable names, sorted, cached: one
+// per set of names, built once per session.
+func (s *Session) env(names []string) (*cel.Env, error) {
 	key := strings.Join(names, ",")
-	if env, ok := e.envs[key]; ok {
+	if env, ok := s.envs[key]; ok {
 		return env, nil
 	}
 	// CEL extensions, then the functions documents may call: the language's,
@@ -442,7 +506,7 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 			}))),
 	)
 	opts = append(opts, hostFunctions()...)
-	opts = append(opts, e.funcs...)
+	opts = append(opts, s.funcs...)
 	// Every variable is dynamic: values are plain YAML data.
 	for _, n := range names {
 		opts = append(opts, cel.Variable(n, cel.DynType))
@@ -451,7 +515,7 @@ func (e *celEngine) env(names []string) (*cel.Env, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.envs[key] = env
+	s.envs[key] = env
 	return env, nil
 }
 
@@ -550,79 +614,90 @@ func mapData(m traits.Mapper, strict bool) (M, error) {
 	return out, nil
 }
 
-// eval: compiles and evaluates one CEL expression in scope.
-func (e *celEngine) eval(expr string, scope M) (any, error) {
-	names := make([]string, 0, len(scope))
-	for k := range scope {
-		names = append(names, k)
-	}
-	env, err := e.env(names)
+// expr: an expression of a document, compiled once, in the environment of
+// the names in scope at its place, to the program its evaluations run.
+type expr struct {
+	src string // as written between ${{ and }}, trimmed, for messages
+	prg cel.Program
+}
+
+// compile: the expression src, as written (CEL's errors give its line and
+// column), compiled in the environment of the variable names, sorted. An
+// error names the expression, as an evaluation error does: ${{ <src> }}:
+// <error>.
+func (s *Session) compile(src string, names []string) (*expr, error) {
+	env, err := s.env(names)
 	if err != nil {
 		return nil, err
 	}
-	ast, iss := env.Compile(expr)
+	e := &expr{src: strings.TrimSpace(src)}
+	ast, iss := env.Compile(src)
 	if iss.Err() != nil {
-		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), iss.Err())
+		return nil, fmt.Errorf("${{ %s }}: %w", e.src, iss.Err())
 	}
-	out, err := e.run(env, ast, scope)
-	if err != nil {
-		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
+	if e.prg, err = env.Program(ast, s.progs...); err != nil {
+		return nil, fmt.Errorf("${{ %s }}: %w", e.src, err)
 	}
-	// The value as data: what the values cannot hold fails the expression.
-	v, err := toData(out, true)
+	return e, nil
+}
+
+// eval: one CEL expression, compiled and evaluated in scope.
+func (s *Session) eval(src string, scope M) (any, error) {
+	e, err := s.compile(src, slices.Sorted(maps.Keys(scope)))
 	if err != nil {
-		return nil, fmt.Errorf("${{ %s }}: %w", strings.TrimSpace(expr), err)
+		return nil, err
+	}
+	return s.run(e, scope)
+}
+
+// run: the value of the expression e in scope, as data, evaluated within
+// the session (exec); an error names the expression.
+func (s *Session) run(e *expr, scope M) (any, error) {
+	out, err := s.exec(e.prg, scope)
+	var v any
+	if err == nil {
+		// The value as data: what the values cannot hold fails the expression.
+		v, err = toData(out, true)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("${{ %s }}: %w", e.src, err)
 	}
 	return v, nil
 }
 
-// run: a compiled expression evaluated in scope, within the budget: the
-// context checked before and during the evaluation, its cost counted
-// against the limit.
-func (e *celEngine) run(env *cel.Env, ast *cel.Ast, scope M) (ref.Val, error) {
-	b := e.budget
-	if b == nil {
-		prg, err := env.Program(ast)
-		if err != nil {
-			return nil, err
-		}
-		out, _, err := prg.Eval(scope)
-		return out, err
-	}
-	if err := b.ctx.Err(); err != nil {
+// exec: the program prg evaluated in scope, within the session: its
+// context checked before and during the evaluation; under a limit, the
+// program may cost what remains (left), and its cost is counted.
+func (s *Session) exec(prg cel.Program, scope M) (ref.Val, error) {
+	if err := s.ctx.Err(); err != nil {
 		return nil, err
 	}
-	opts := []cel.ProgramOption{cel.InterruptCheckFrequency(interruptEvery)}
-	if b.limit > 0 {
-		if b.used >= b.limit {
-			return nil, b.exceeded()
+	if s.limit > 0 {
+		if s.used >= s.limit {
+			return nil, s.exceeded()
 		}
-		opts = append(opts, cel.CostLimit(b.limit-b.used))
+		s.left = s.limit - s.used
 	}
-	prg, err := env.Program(ast, opts...)
-	if err != nil {
-		return nil, err
-	}
-	out, details, err := prg.ContextEval(b.ctx, scope)
+	out, details, err := prg.ContextEval(s.ctx, scope)
 	if details != nil && details.ActualCost() != nil {
-		b.used += *details.ActualCost()
+		s.used += *details.ActualCost()
 	}
 	var cancelled interpreter.EvalCancelledError
 	switch {
 	case err == nil:
 		return out, nil
 	case errors.As(err, &cancelled) && cancelled.Cause == interpreter.CostLimitExceeded:
-		return nil, b.exceeded()
-	case b.ctx.Err() != nil:
+		return nil, s.exceeded()
+	case s.ctx.Err() != nil:
 		// Interrupted (CEL's "operation interrupted"): the context's error.
-		return nil, b.ctx.Err()
+		return nil, s.ctx.Err()
 	}
 	return nil, err
 }
 
 // exceeded: the error of a compile past its cost limit.
-func (b *Budget) exceeded() error {
-	return fmt.Errorf("the expressions of the compile exceed its CEL cost limit (%d)", b.limit)
+func (s *Session) exceeded() error {
+	return fmt.Errorf("the expressions of the compile exceed its CEL cost limit (%d)", s.limit)
 }
 
 // piece: a literal text, or the source of an expression.
@@ -728,73 +803,6 @@ func isNameByte(c byte) bool {
 	return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
-// evalString: a scalar with its ${{ }} expressions evaluated.
-func (e *celEngine) evalString(s string, scope M) (any, error) {
-	pieces, err := scan(s)
-	if err != nil {
-		return nil, err
-	}
-	// A lone expression keeps its type; otherwise the result is text.
-	if len(pieces) == 1 && pieces[0].expr {
-		return e.eval(pieces[0].text, scope)
-	}
-	var b strings.Builder
-	for _, p := range pieces {
-		if !p.expr {
-			b.WriteString(p.text)
-			continue
-		}
-		v, err := e.eval(p.text, scope)
-		if err != nil {
-			return nil, err
-		}
-		b.WriteString(value.Str(v))
-	}
-	return b.String(), nil
-}
-
-// with: a copy of scope with k bound to v.
-func with(scope M, k string, v any) M {
-	out := M{}
-	maps.Copy(out, scope)
-	out[k] = v
-	return out
-}
-
-// iteration: the scope of one $for element: the loop variable, then the
-// $let bindings of the $for, evaluated in order.
-func (e *celEngine) iteration(m *omap, scope M, name string, item any) (M, error) {
-	s := with(scope, name, item)
-	if lets, ok := m.vals["$let"].(*omap); ok {
-		for _, b := range lets.written {
-			v, _, err := e.node(b.val, s)
-			if err != nil {
-				return nil, atKey("$let "+b.name, err)
-			}
-			s = with(s, b.name, v)
-		}
-	}
-	return s, nil
-}
-
-// loop: "c in <expr>" -> variable, items.
-func (e *celEngine) loop(spec any, scope M) (string, []any, error) {
-	s := value.Str(spec)
-	name, expr, ok := strings.Cut(s, " in ")
-	if !ok {
-		return "", nil, fmt.Errorf("$for: %q is not \"<name> in <expression>\"", s)
-	}
-	v, err := e.evalString("${{"+expr+"}}", scope)
-	if err != nil {
-		return "", nil, err
-	}
-	items, ok := v.([]any)
-	if !ok && v != nil {
-		return "", nil, fmt.Errorf("$for %q: not a list", s)
-	}
-	return strings.TrimSpace(name), items, nil
-}
-
 // nodeError: the error of an expression, at its path in the document: the
 // section, binding, map keys and list positions down to the expression
 // (output: app: env[2]: value).
@@ -827,139 +835,6 @@ func within(seg string, index bool, err error) error {
 		return &nodeError{path: seg + ne.path, index: index, err: ne.err}
 	}
 	return &nodeError{path: seg + ": " + ne.path, index: index, err: ne.err}
-}
-
-// items: the values the i-th item of a list gives: none ($if false), one,
-// or several ($for, $spread); its errors at its position.
-func (e *celEngine) items(i int, item any, scope M) ([]any, error) {
-	// Directives that produce several items: $for and $spread.
-	if m, ok := item.(*omap); ok {
-		if spec, ok := m.vals["$for"]; ok {
-			name, items, err := e.loop(spec, scope)
-			if err != nil {
-				return nil, atIndex(i, err)
-			}
-			var out []any
-			for _, it := range items {
-				s, err := e.iteration(m, scope, name, it)
-				if err != nil {
-					return nil, atIndex(i, err)
-				}
-				v, keep, err := e.node(m.vals["$each"], s)
-				if err != nil {
-					return nil, atIndex(i, err)
-				}
-				// $each may give one item or a list of items.
-				if l, ok := v.([]any); ok {
-					out = append(out, l...)
-				} else if keep {
-					out = append(out, v)
-				}
-			}
-			return out, nil
-		}
-		if spec, ok := m.vals["$spread"]; ok {
-			v, err := e.evalString(value.Str(spec), scope)
-			if err != nil {
-				return nil, atIndex(i, err)
-			}
-			return value.AsList(v), nil
-		}
-	}
-	v, keep, err := e.node(item, scope)
-	if err != nil {
-		return nil, atIndex(i, err)
-	}
-	if !keep {
-		return nil, nil
-	}
-	return []any{v}, nil
-}
-
-// node: evaluates a template node. keep=false: the node is left out.
-func (e *celEngine) node(n any, scope M) (any, bool, error) {
-	switch t := n.(type) {
-	case string:
-		v, err := e.evalString(t, scope)
-		return v, true, err
-	case []any:
-		out := []any{}
-		for i, item := range t {
-			vs, err := e.items(i, item, scope)
-			if err != nil {
-				return nil, false, err
-			}
-			out = append(out, vs...)
-		}
-		return out, true, nil
-	case *omap:
-		// $if false: the whole node is left out.
-		if cond, ok := t.vals["$if"]; ok {
-			c, err := e.evalString(value.Str(cond), scope)
-			if err != nil {
-				return nil, false, err
-			}
-			if !value.Truthy(c) {
-				return nil, false, nil
-			}
-		}
-		// $for in a map: one key per element.
-		if spec, ok := t.vals["$for"]; ok {
-			name, items, err := e.loop(spec, scope)
-			if err != nil {
-				return nil, false, err
-			}
-			out := M{}
-			for _, it := range items {
-				s, err := e.iteration(t, scope, name, it)
-				if err != nil {
-					return nil, false, err
-				}
-				k, _, err := e.node(t.vals["$key"], s)
-				if err != nil {
-					return nil, false, err
-				}
-				v, _, err := e.node(t.vals["$value"], s)
-				if err != nil {
-					return nil, false, err
-				}
-				out[value.Str(k)] = v
-			}
-			return out, true, nil
-		}
-		// $value: the node is that value, not a map.
-		if v, ok := t.vals["$value"]; ok {
-			return e.node(v, scope)
-		}
-		// A plain map: each key in order, then $merge on top. A key
-		// starting with $$ is written with one $ less.
-		out := M{}
-		for _, k := range t.keys {
-			if k == "$if" || k == "$merge" {
-				continue
-			}
-			v, keep, err := e.node(t.vals[k], scope)
-			if err != nil {
-				return nil, false, atKey(k, err)
-			}
-			if !keep {
-				continue
-			}
-			if strings.HasPrefix(k, "$$") {
-				k = k[1:]
-			}
-			out[k] = v
-		}
-		if spec, ok := t.vals["$merge"]; ok {
-			v, err := e.evalString(value.Str(spec), scope)
-			if err != nil {
-				return nil, false, err
-			}
-			out = value.Merge(out, value.AsMap(v))
-		}
-		return out, true, nil
-	}
-	return n, true, nil // number, bool, null
 }
 
 // parseDoc: a YAML + CEL document (a mapping, a template), its maps
@@ -1012,41 +887,6 @@ func helmLines(b []byte) []byte {
 	return out.Bytes()
 }
 
-// bind: the scope of a document's sections: the context, then its let
-// bindings, in order (each sees the previous ones); then its errors
-// section, every message collected before failing (messages).
-func (e *celEngine) bind(top *omap, ctx M) (M, error) {
-	scope := M{}
-	maps.Copy(scope, ctx)
-	if lets, ok := top.vals["let"].(*omap); ok {
-		for _, b := range lets.written {
-			v, _, err := e.node(b.val, scope)
-			if err != nil {
-				return nil, atKey("let "+b.name, err)
-			}
-			scope[b.name] = v
-		}
-	}
-	var msgs []string
-	for i, x := range value.AsList(top.vals["errors"]) {
-		vs, err := e.items(i, x, scope)
-		if err != nil {
-			return nil, atKey("errors", err)
-		}
-		for _, v := range vs {
-			m, err := messages(v)
-			if err != nil {
-				return nil, atKey("errors", atIndex(i, err))
-			}
-			msgs = append(msgs, m...)
-		}
-	}
-	if len(msgs) > 0 {
-		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
-	}
-	return scope, nil
-}
-
 // messages: what an evaluated item of an errors section reports: a rule,
 // {message: <text>} (left out by its $if when it holds no error), gives its
 // message; a list gives its messages (an expression returning the messages
@@ -1076,54 +916,86 @@ func messages(v any) ([]string, error) {
 	return nil, fmt.Errorf("a rule is {$if: <condition>, message: <text>}, or an expression returning a list of messages, got %s", value.Short(v))
 }
 
-// Doc: a document (a mapping, a template) bound to its context: its let
-// bindings evaluated and its errors section passed.
+// Doc: a document (a mapping, a template) loaded in a session: its
+// sections built, bound to its context: its let bindings evaluated and its
+// errors section passed.
 type Doc struct {
-	top   *omap
-	e     *celEngine
-	scope M
+	s        *Session
+	sections map[string]node // by name, those the document has
+	scope    M
 }
 
-// Load: the document b on the context ctx, with the host functions funcs
-// besides the language's own (str, first, and those of functions.go),
-// within budget (nil: none): its maps read in order as YAML 1.1, its top
-// level, let and errors checked (checkTop), its let bindings evaluated in
-// order, then its errors section, every message collected before failing.
-func Load(b []byte, ctx M, budget *Budget, funcs ...cel.EnvOption) (*Doc, error) {
+// Load: the document b on the context scope, in the session s, its
+// sections those named: its maps read in order as YAML 1.1, then built
+// into a tree (builder.document: its top level, its directives in every
+// branch, each expression compiled once in its scope), a top-level key
+// other than let, errors and a section failing; then its let bindings
+// evaluated in order, then its errors section, every message collected
+// before failing.
+func (s *Session) Load(b []byte, scope M, sections ...string) (*Doc, error) {
 	top, err := parseDoc(b)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkTop(top); err != nil {
-		return nil, err
-	}
-	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs, budget: budget}
-	scope, err := e.bind(top, ctx)
+	t, err := builder{s}.document(top, slices.Sorted(maps.Keys(scope)), sections)
 	if err != nil {
 		return nil, err
 	}
-	return &Doc{top: top, e: e, scope: scope}, nil
+	bound, err := t.bind(s, scope)
+	if err != nil {
+		return nil, err
+	}
+	return &Doc{s: s, sections: t.sections, scope: bound}, nil
 }
 
-// Section: the top-level key k of the document, its directives checked,
-// evaluated; nil when the document has none. An error is reported at its
-// path under k (output: app: env[2]: ...).
-func (d *Doc) Section(k string) (any, error) {
-	if err := check(d.top.vals[k], false); err != nil {
-		return nil, atKey(k, err)
+// bind: the scope of the sections of t: the context vars, then the let
+// bindings, in order (each sees the previous ones); then the errors
+// section, every message collected before failing (messages).
+func (t *tree) bind(s *Session, vars M) (M, error) {
+	scope := make(M, len(vars)+len(t.let))
+	maps.Copy(scope, vars)
+	if err := t.let.bind(s, scope); err != nil {
+		return nil, err
 	}
-	v, _, err := d.e.node(d.top.vals[k], d.scope)
+	var msgs []string
+	for i, it := range t.errors {
+		vs, err := it.items(s, scope)
+		if err != nil {
+			return nil, atKey("errors", atIndex(i, err))
+		}
+		for _, v := range vs {
+			m, err := messages(v)
+			if err != nil {
+				return nil, atKey("errors", atIndex(i, err))
+			}
+			msgs = append(msgs, m...)
+		}
+	}
+	if len(msgs) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
+	}
+	return scope, nil
+}
+
+// Section: the section k of the document evaluated; nil when the document
+// has none (a key Load was not given as a section, it refuses). An error
+// is reported at its path under k (output: app: env[2]: ...).
+func (d *Doc) Section(k string) (any, error) {
+	n := d.sections[k]
+	if n == nil {
+		return nil, nil
+	}
+	v, _, err := n.eval(d.s, d.scope)
 	if err != nil {
 		return nil, atKey(k, err)
 	}
 	return v, nil
 }
 
-// EvalTemplate: a template (YAML + CEL) on the context ctx, with the host
-// functions funcs, within budget (nil: none): its let bindings and errors,
-// then its values section.
-func EvalTemplate(b []byte, ctx M, budget *Budget, funcs ...cel.EnvOption) (M, error) {
-	d, err := Load(b, ctx, budget, funcs...)
+// EvalTemplate: a template (YAML + CEL) on the context scope, in the session
+// s (Load): its let bindings and errors, then its one section, values.
+func (s *Session) EvalTemplate(b []byte, scope M) (M, error) {
+	d, err := s.Load(b, scope, "values")
 	if err != nil {
 		return nil, err
 	}
@@ -1134,30 +1006,21 @@ func EvalTemplate(b []byte, ctx M, budget *Budget, funcs ...cel.EnvOption) (M, e
 	return value.AsMap(v), nil
 }
 
-// Eval: one CEL expression (without ${{ }}) on the variables of scope, with
-// the host functions funcs.
-func Eval(expr string, scope M, funcs ...cel.EnvOption) (any, error) {
-	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs}
-	return e.eval(expr, scope)
-}
-
-// Condition: the condition s, ${{ <CEL> }} (CheckCondition), evaluated on
-// the context ctx with the host functions funcs, within budget (nil:
-// none). Its value must be true or false: unlike $if, it is not tested as
-// a Helm condition.
-func Condition(s string, ctx M, budget *Budget, funcs ...cel.EnvOption) (bool, error) {
-	if err := CheckCondition(s); err != nil {
+// Condition: the condition cond, ${{ <CEL> }} (CheckCondition), compiled
+// and evaluated on the context scope in the session s. Its value must be
+// true or false: unlike $if, it is not tested as a Helm condition.
+func (s *Session) Condition(cond string, scope M) (bool, error) {
+	src, err := expression(cond, "condition")
+	if err != nil {
 		return false, err
 	}
-	e := &celEngine{envs: map[string]*cel.Env{}, funcs: funcs, budget: budget}
-	v, err := e.evalString(s, ctx)
+	v, err := s.eval(src, scope)
 	if err != nil {
 		return false, err
 	}
 	b, ok := v.(bool)
 	if !ok {
-		p, _ := scan(s)
-		return false, fmt.Errorf("${{ %s }}: must be true or false, got %s", strings.TrimSpace(p[0].text), shape(v))
+		return false, fmt.Errorf("${{ %s }}: must be true or false, got %s", strings.TrimSpace(src), shape(v))
 	}
 	return b, nil
 }

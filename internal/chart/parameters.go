@@ -1,11 +1,12 @@
 // Parameters: the values of an instance, read as Helm reads the values of a
 // chart: the layers merged as -f files, coalesced over the defaults of the
-// package's config.schema.json, checked against it.
+// package's config.schema.json, checked against it. The same machinery
+// serves any values schema (Schema): package okdp reads the platform
+// values with its own.
 package chart
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -22,27 +23,102 @@ import (
 // defaults included.
 const parameterSchema = "config.schema.json"
 
-// Parameters: the values layers, normalized (value.Normalize), merged in
-// order (helm -f), coalesced over the defaults of pkg's parameter schema
-// (config.schema.json, schemaDefaults) as Helm coalesces them over a
-// chart's values.yaml, checked against that schema, as Helm checks a
-// chart's values.schema.json. Every violation is reported at once, under
-// name.
-func Parameters(pkg fs.FS, name string, layers []map[string]any) (M, error) {
+// Schema: a values schema, read, decoded and compiled once (ParseSchema)
+// for every stage that reads it: its values' defaults and check (Values),
+// and its keywords (Doc). A package's parameter schema
+// (ReadParameterSchema, once per compile): the parameters (Parameters), and
+// in package okdp the keys of global an instance may set and the connection
+// references; the schema of the platform values (package okdp): the
+// settings of global.okdp the compiler reads.
+type Schema struct {
+	// Doc: the document as values (value.Normalize: every number a
+	// float64, as a values file reads it); empty for a boolean schema.
+	Doc      M
+	name     string             // the file it is read from, for the errors
+	root     *jsonschema.Schema // the values' validator, compiled as a chart's values.schema.json (CompileSchema)
+	defaults M                  // the values' defaults, as a values file holds them
+}
+
+// ReadParameterSchema: the parameter schema of pkg (config.schema.json),
+// read as ParseSchema reads a schema. A missing schema fails with the error
+// of the file system.
+func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	b, err := fs.ReadFile(pkg, parameterSchema)
 	if err != nil {
 		return nil, err
 	}
-	defaults, err := schemaDefaults(parameterSchema, b)
+	return ParseSchema(parameterSchema, b)
+}
+
+// ParseSchema: the values schema b, read from the file name, decoded once
+// (jsonschema.UnmarshalJSON: the validator keeps the numbers as written,
+// Doc reads them as float64) and compiled once, its root with the schema of
+// the property of each default (compileSchemas). The defaults are as a
+// values file holds them: the default of each property reached from the
+// root through properties alone, at its path (that of
+// properties.a.properties.b at a.b). A default anywhere else fails, named
+// by its JSON pointer: at the root or under another keyword, where whether
+// it applies would depend on the values; under a property that has a
+// default, where the two would compete; or one that does not meet its
+// property's schema.
+func ParseSchema(name string, b []byte) (*Schema, error) {
+	sdoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	doc, err := value.Normalize(sdoc)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	w := defaultsWalk{name: name}
+	defaults, err := w.schema(doc, "", false, true)
 	if err != nil {
 		return nil, err
 	}
+	props := make([]string, len(w.ptrs))
+	for i, p := range w.ptrs {
+		props[i] = strings.TrimSuffix(p, "/default")
+	}
+	schemas, err := compileSchemas(schemaURL, sdoc, props...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	// Each default against the schema of its property.
+	for i, p := range w.ptrs {
+		v, err := validate(name, schemas[i+1], w.values[i])
+		if err != nil {
+			return nil, err
+		}
+		if v != "" {
+			return nil, fmt.Errorf("%s#%s: the default does not meet its property's schema:\n%s", name, p, v)
+		}
+	}
+	return &Schema{Doc: value.AsMap(doc), name: name, root: schemas[0], defaults: defaults}, nil
+}
+
+// Values: user coalesced over the defaults of s, as Helm coalesces values
+// over a chart's values.yaml, then checked against s, as Helm checks a
+// chart's values.schema.json: the values, and their violations, one line
+// each with its path (validate), "" when they hold. user is not changed.
+func (s *Schema) Values(user M) (M, string, error) {
+	values := coalesceValues(s.defaults, user)
+	v, err := validate(s.name, s.root, values)
+	if err != nil {
+		return nil, "", err
+	}
+	return values, v, nil
+}
+
+// Parameters: the values layers, normalized (value.Normalize), merged in
+// order (helm -f), coalesced over the defaults of the parameter schema and
+// checked against it (Schema.Values). Every violation is reported at once,
+// under name, as Helm reports those of a chart's values.
+func Parameters(schema *Schema, name string, layers []map[string]any) (M, error) {
 	user := M{}
 	for _, v := range layers {
 		user = value.Merge(user, v)
 	}
-	values := coalesceValues(defaults, user)
-	v, err := checkSchema(parameterSchema, b, values)
+	values, v, err := schema.Values(user)
 	if err != nil {
 		return nil, err
 	}
@@ -61,52 +137,8 @@ var (
 	schemaMapKeywords = []string{"$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties"}
 )
 
-// schemaDefaults: the defaults of the parameter schema b, read from name,
-// as a values file holds them: the default of each property reached from
-// the root through properties alone, at its path (that of
-// properties.a.properties.b at a.b). A default anywhere else fails, named
-// by its JSON pointer: at the root or under another keyword, where
-// whether it applies would depend on the values; under a property that
-// has a default, where the two would compete; or one that does not meet
-// its property's schema.
-func schemaDefaults(name string, b []byte) (M, error) {
-	var doc any
-	if err := json.Unmarshal(b, &doc); err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
-	}
-	w := defaultsWalk{name: name}
-	defaults, err := w.schema(doc, "", false, true)
-	if err != nil || len(w.ptrs) == 0 {
-		return defaults, err
-	}
-	// Each default against the schema of its property, compiled as the
-	// values' schema is (CompileSchema).
-	sdoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
-	}
-	props := make([]string, len(w.ptrs))
-	for i, p := range w.ptrs {
-		props[i] = strings.TrimSuffix(p, "/default")
-	}
-	schemas, err := compileSchemas(schemaURL, sdoc, props...)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
-	}
-	for i, p := range w.ptrs {
-		v, err := validate(name, schemas[i+1], w.values[i])
-		if err != nil {
-			return nil, err
-		}
-		if v != "" {
-			return nil, fmt.Errorf("%s#%s: the default does not meet its property's schema:\n%s", name, p, v)
-		}
-	}
-	return defaults, nil
-}
-
-// defaultsWalk: the defaults of a schema file (schemaDefaults), and the
-// JSON pointer of each, in the order found.
+// defaultsWalk: the defaults of a schema file (ParseSchema), and
+// the JSON pointer of each, in the order found.
 type defaultsWalk struct {
 	name   string
 	ptrs   []string

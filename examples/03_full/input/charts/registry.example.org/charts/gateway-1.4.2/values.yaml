@@ -1,0 +1,12 @@
+# The chart cache's copy of the (fictional) gateway chart 1.4.2, a reverse
+# proxy in front of the workspace: its defaults.
+fullnameOverride: ""
+replicaCount: 1
+image:
+  repository: example/gateway
+  tag: 1.4.2
+routes: {}
+upstreams: []
+headers: {}
+rateLimit: ""
+config: ""

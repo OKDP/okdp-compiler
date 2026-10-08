@@ -1,7 +1,6 @@
 package chart
 
 import (
-	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -21,45 +21,6 @@ var update = flag.Bool("update", false, "rewrite the final.yaml of testdata/helm
 // written by `helm template` (testdata/helm/generate.sh: Helm 4 on the PATH,
 // and the deployers' versions where they render differently; the versions
 // in testdata/helm/SOURCE).
-
-// helmdata: testdata/helm, at the repository root.
-var helmdata = filepath.Join("..", "..", "testdata", "helm")
-
-// helmJSON: a JSON file written by generate.sh.
-func helmJSON(t *testing.T, path string) any {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
-	}
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("%s: %v", path, err)
-	}
-	return v
-}
-
-// helmMajors: the major versions of the deployers' Helm versions that
-// testdata/helm/SOURCE records (helms), each with its versions: the
-// versions generate.sh renders a helm<major> file with, where they render
-// differently from Helm 4 on the PATH.
-func helmMajors(t *testing.T) map[string][]string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(helmdata, "SOURCE"))
-	if err != nil {
-		t.Fatalf("%v (run testdata/helm/generate.sh)", err)
-	}
-	majors := map[string][]string{}
-	for line := range strings.Lines(string(b)) {
-		if f := strings.Fields(line); len(f) > 0 && f[0] == "helms" {
-			for _, v := range f[1:] {
-				m, _, _ := strings.Cut(v, ".")
-				majors[m] = append(majors[m], v)
-			}
-		}
-	}
-	return majors
-}
 
 // helmFinalKnown: by Helm major version, the values cases whose final
 // values that version renders differently from their layers
@@ -72,18 +33,6 @@ var helmFinalKnown = map[string]map[string]M{
 	"3": {"documents": {"a": 1.0}},
 }
 
-// helmVariant: the render of a deployer's major version in the case
-// directory dir, beside the reference file name (helm.json: helm3.json),
-// nil when it renders as the reference.
-func helmVariant(t *testing.T, dir, name, major string) any {
-	t.Helper()
-	path := filepath.Join(dir, strings.Replace(name, "helm", "helm"+major, 1))
-	if _, err := os.Stat(path); err != nil {
-		return nil
-	}
-	return helmJSON(t, path)
-}
-
 // TestHelmValues: for each testdata/helm/values/<case>, the chart defaults
 // (values.yaml) and the -f layers (layer-*.yaml) read and coalesced as Helm
 // does (helm.json); and the final values the compiler writes for these
@@ -92,13 +41,13 @@ func helmVariant(t *testing.T, dir, name, major string) any {
 // renders the layers (helm<major>.json, or helm.json), but for the known
 // differences (helmFinalKnown).
 func TestHelmValues(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join(helmdata, "values", "*"))
+	cases, _ := filepath.Glob(filepath.Join(helmtest.Dir, "values", "*"))
 	if len(cases) == 0 {
 		t.Fatal("no cases")
 	}
 	var majors map[string][]string
 	if !*update {
-		majors = helmMajors(t)
+		majors = helmtest.Majors(t)
 	}
 	for _, dir := range cases {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
@@ -135,7 +84,7 @@ func TestHelmValues(t *testing.T) {
 				return
 			}
 			// What the chart's templates see.
-			want := helmJSON(t, filepath.Join(dir, "helm.json"))
+			want := helmtest.JSON(t, filepath.Join(dir, "helm.json"))
 			if got := coalesceValues(defaults, user); !reflect.DeepEqual(any(got), want) {
 				t.Errorf("coalesced values:\n got %#v\nwant %#v", got, want)
 			}
@@ -146,7 +95,7 @@ func TestHelmValues(t *testing.T) {
 			if g, err := ParseValues(b); err != nil || !reflect.DeepEqual(g, final) {
 				t.Errorf("%s differs from the final values (%v): run go test ./internal/chart -run TestHelmValues -update, then generate.sh", golden, err)
 			}
-			if got := helmJSON(t, filepath.Join(dir, "helm-final.json")); !reflect.DeepEqual(got, want) {
+			if got := helmtest.JSON(t, filepath.Join(dir, "helm-final.json")); !reflect.DeepEqual(got, want) {
 				t.Errorf("Helm renders the final values differently:\n got %#v\nwant %#v", got, want)
 			}
 			// Coalesced again (as Helm does when it renders them), the final
@@ -168,11 +117,11 @@ func TestHelmValues(t *testing.T) {
 				}
 			}
 			for major, versions := range majors {
-				helmLayers := helmVariant(t, dir, "helm.json", major)
+				helmLayers := helmtest.Variant(t, dir, "helm.json", major)
 				if helmLayers == nil {
 					helmLayers = want
 				}
-				got := helmVariant(t, dir, "helm-final.json", major)
+				got := helmtest.Variant(t, dir, "helm-final.json", major)
 				known, isKnown := helmFinalKnown[major][filepath.Base(dir)]
 				switch {
 				case got == nil && isKnown:
@@ -184,7 +133,7 @@ func TestHelmValues(t *testing.T) {
 					t.Errorf("Helm %s renders the final values differently from the layers:\n got %#v\nwant %#v", strings.Join(versions, ", "), got, helmLayers)
 				default:
 					// What Helm 4 renders, but for the known keys.
-					expect := value.AsMap(helmJSON(t, filepath.Join(dir, "helm-final.json")))
+					expect := value.AsMap(helmtest.JSON(t, filepath.Join(dir, "helm-final.json")))
 					for k, x := range known {
 						if reflect.DeepEqual(expect[k], x) {
 							t.Errorf("Helm %s: %s is %#v with Helm 4 too: not a difference", strings.Join(versions, ", "), k, x)
@@ -205,7 +154,7 @@ func TestHelmValues(t *testing.T) {
 // (helm.txt; Helm's order varies, the lines are compared sorted), with each
 // deployer's version.
 func TestHelmSchema(t *testing.T) {
-	cases, _ := filepath.Glob(filepath.Join(helmdata, "schema", "*"))
+	cases, _ := filepath.Glob(filepath.Join(helmtest.Dir, "schema", "*"))
 	if len(cases) == 0 {
 		t.Fatal("no cases")
 	}
@@ -237,13 +186,9 @@ func TestHelmSchema(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(filepath.Join(dir, "helm.txt")); err != nil {
-				t.Fatalf("%v (run testdata/helm/generate.sh)", err)
-			}
 			// helm.txt, and helm<major>.txt where a deployer's major version
 			// reports differently: each is the compiler's report.
-			reports, _ := filepath.Glob(filepath.Join(dir, "helm*.txt"))
-			for _, path := range reports {
+			for _, path := range helmtest.Renders(t, dir, "helm.txt") {
 				name := filepath.Base(path)
 				b, err := os.ReadFile(path)
 				if err != nil {

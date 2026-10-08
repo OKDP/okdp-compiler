@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "S3 bucket",
+  "description": "Example contract: an S3 bucket. No internal naming convention: a connection of the platform, the project or the instance, or an output read from an instance's descriptor.",
+  "type": "object",
+  "x-okdp-contract": "s3",
+  "properties": {
+    "provider": {"type": "string", "enum": ["aws", "minio", "ceph"], "default": "aws"},
+    "endpoint": {"type": "string", "pattern": "^https?://"},
+    "region": {"type": "string", "default": "us-east-1"},
+    "bucket": {"type": "string"},
+    "pathStyle": {"type": "boolean", "default": true, "x-ui-condition": {"field": "provider", "value": "minio"}},
+    "accessKey": {"type": "string", "x-okdp-secret": true},
+    "secretKey": {"type": "string", "x-okdp-secret": true}
+  },
+  "required": ["endpoint", "bucket"],
+  "additionalProperties": false
+}

@@ -26,22 +26,15 @@ import (
 // upstream value reaches two keys (upstream.from). The schema violations of
 // every key are reported together.
 //
-// cache: the chart cache, the upstream charts' defaults and schemas: the
-// sources of the keys of output, together (newChartCache). pkg:
-// the package (its defaults files). values: the instance's merged values (their
-// global, and their upstream values).
+// cache: the chart cache, the upstream charts' defaults and schemas, each in
+// its repository's directory (newChartCache). pkg: the package (its
+// defaults files). values: the instance's merged values (their global, and
+// their upstream values).
 func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
-	keys := slices.Sorted(maps.Keys(output))
-	var sources []Ref
-	for _, key := range keys {
-		if spec, ok := specs[key]; ok {
-			sources = append(sources, spec.Source)
-		}
-	}
-	charts := newChartCache(cache, sources)
-	for _, key := range keys {
+	charts := newChartCache(cache)
+	for _, key := range slices.Sorted(maps.Keys(output)) {
 		if _, ok := specs[key]; !ok {
 			return nil, nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", key)
 		}
@@ -172,7 +165,7 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 // reach a chart as data, and some charts pass them to tpl, where template
 // code could call lookup and read the cluster's Secrets. The first one
 // found, in path order (keys sorted, items in order), fails, at(p) naming
-// where: p, its path in v (formatPath, [i] for an item). A value of a type
+// where: p, its path in v (value.Key, value.Index). A value of a type
 // values do not hold (package value) fails too: it could not be checked.
 func NoTemplate(v any, at func(p string) string) error {
 	return noTemplate(v, "", at)
@@ -188,7 +181,7 @@ func noTemplate(v any, p string, at func(string) string) error {
 		}
 	case M:
 		for _, k := range slices.Sorted(maps.Keys(t)) {
-			kp := keyPath(p, k)
+			kp := value.Key(p, k)
 			if strings.Contains(k, "{{") {
 				return fmt.Errorf("%s: the key contains \"{{\"", at(kp))
 			}
@@ -198,7 +191,7 @@ func noTemplate(v any, p string, at func(string) string) error {
 		}
 	case []any:
 		for i, x := range t {
-			if err := noTemplate(x, fmt.Sprintf("%s[%d]", p, i), at); err != nil {
+			if err := noTemplate(x, value.Index(p, i), at); err != nil {
 				return err
 			}
 		}
@@ -206,6 +199,35 @@ func noTemplate(v any, p string, at func(string) string) error {
 		return fmt.Errorf("%s: cannot be checked for \"{{\": %T is not a values type", at(p), v)
 	}
 	return nil
+}
+
+// Overlap: the first path, in path order (keys sorted), at which layer sets
+// a value base sets, "" when there is none: a key of both whose values are
+// not both maps (a null, a list, a map over a scalar), or whose path whole
+// names, a map then taken as one value. The path is written as NoTemplate
+// writes it (formatPath).
+func Overlap(base, layer M, whole func(keys []string) bool) string {
+	return overlap(base, layer, nil, whole)
+}
+
+// overlap: Overlap below the keys at.
+func overlap(base, layer M, at []string, whole func([]string) bool) string {
+	for _, k := range slices.Sorted(maps.Keys(layer)) {
+		b, ok := base[k]
+		if !ok {
+			continue
+		}
+		p := append(slices.Clip(at), k)
+		bm, bok := b.(M)
+		lm, lok := layer[k].(M)
+		if !bok || !lok || whole(p) {
+			return formatPath(p)
+		}
+		if s := overlap(bm, lm, p, whole); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // mergeUpstream: user over values, the lists at appendPaths appended to the

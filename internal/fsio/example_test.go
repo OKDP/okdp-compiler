@@ -28,9 +28,9 @@ var (
 
 // exampleCompile: the advanced example's package compiled with its chart cache
 // and contracts, the platform values (platform.yaml, then
-// these platform files) and these instance values files, under the
-// example's release and namespace.
-func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition, *okdp.Result, error) {
+// these platform files), these project values files and these instance
+// values files, under the example's release and namespace.
+func exampleCompile(t *testing.T, platform, project, instance []string) (*okdp.Result, error) {
 	t.Helper()
 	def, err := LoadDefinition(os.DirFS(filepath.Join(input, "service")))
 	if err != nil {
@@ -40,12 +40,12 @@ func exampleCompile(t *testing.T, platform, instance []string) (*okdp.Definition
 		Charts:    os.DirFS(filepath.Join(input, "charts")),
 		Contracts: os.DirFS(filepath.Join(input, "contracts")),
 		Platform:  readLayers(t, append([]string{filepath.Join(input, "platform.yaml")}, platform...)),
+		Project:   readLayers(t, project),
 		Values:    readLayers(t, instance),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
-	res, err := okdp.Compile(def, in)
-	return def, res, err
+	return okdp.Compile(def, in)
 }
 
 // readLayers: values files, as values layers.
@@ -73,7 +73,10 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 // -o <dir> --umbrella --mkinstall writes; nothing references a contract. 02_advanced:
 // output-no-dcr/helm-cmd/ and output-no-dcr/umbrella-chart/, likewise;
 // output-dcr/helm-cmd/ and output-dcr/umbrella-chart/, what they write with
-// platform-dcr.yaml after platform.yaml.
+// platform-dcr.yaml after platform.yaml. 03_full: output/helm-cmd/ and
+// output/umbrella-chart/, what -o <dir> --mkinstall --mkdag and -o <dir>
+// --umbrella --mkinstall --mkdag write, with the project's demo.yaml
+// (--project) between platform.yaml and config.yaml.
 func TestExample(t *testing.T) {
 	t.Run("01_minimal", func(t *testing.T) {
 		in := filepath.Join(examples, "01_minimal", "input")
@@ -92,50 +95,60 @@ func TestExample(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		checkDir(t, "01_minimal/output/helm-cmd", helmCmd(t, res))
-		checkDir(t, "01_minimal/output/umbrella-chart", umbrellaFiles(t, def, res))
+		checkDir(t, "01_minimal/output/helm-cmd", output(t, res, Output{Install: true}))
+		checkDir(t, "01_minimal/output/umbrella-chart", output(t, res, Output{Umbrella: true, Install: true}))
 	})
 	t.Run("02_advanced", func(t *testing.T) {
 		instance := []string{filepath.Join(input, "config.yaml")}
-		def, res, err := exampleCompile(t, nil, instance)
+		res, err := exampleCompile(t, nil, nil, instance)
 		if err != nil {
 			t.Fatal(err)
 		}
-		checkDir(t, "02_advanced/output-no-dcr/helm-cmd", helmCmd(t, res))
-		checkDir(t, "02_advanced/output-no-dcr/umbrella-chart", umbrellaFiles(t, def, res))
-		_, res, err = exampleCompile(t, []string{filepath.Join(input, "platform-dcr.yaml")}, instance)
+		checkDir(t, "02_advanced/output-no-dcr/helm-cmd", output(t, res, Output{Install: true}))
+		checkDir(t, "02_advanced/output-no-dcr/umbrella-chart", output(t, res, Output{Umbrella: true, Install: true}))
+		res, err = exampleCompile(t, []string{filepath.Join(input, "platform-dcr.yaml")}, nil, instance)
 		if err != nil {
 			t.Fatal(err)
 		}
-		checkDir(t, "02_advanced/output-dcr/helm-cmd", helmCmd(t, res))
-		checkDir(t, "02_advanced/output-dcr/umbrella-chart", umbrellaFiles(t, def, res))
+		checkDir(t, "02_advanced/output-dcr/helm-cmd", output(t, res, Output{Install: true}))
+		checkDir(t, "02_advanced/output-dcr/umbrella-chart", output(t, res, Output{Umbrella: true, Install: true}))
+	})
+	t.Run("03_full", func(t *testing.T) {
+		in := filepath.Join(examples, "03_full", "input")
+		def, err := LoadDefinition(os.DirFS(filepath.Join(in, "service")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := okdp.Compile(def, okdp.Inputs{
+			Charts:    os.DirFS(filepath.Join(in, "charts")),
+			Contracts: os.DirFS(filepath.Join(in, "contracts")),
+			Platform:  readLayers(t, []string{filepath.Join(in, "platform.yaml")}),
+			Project:   readLayers(t, []string{filepath.Join(in, "demo.yaml")}),
+			Values:    readLayers(t, []string{filepath.Join(in, "config.yaml")}),
+			Release:   "demo-workspace",
+			Namespace: "demo",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkDir(t, "03_full/output/helm-cmd", output(t, res, Output{Install: true, Dependencies: true}))
+		checkDir(t, "03_full/output/umbrella-chart", output(t, res, Output{Umbrella: true, Install: true, Dependencies: true}))
 	})
 }
 
-// helmCmd: the files of res and its InstallScript, what -o <dir>
-// --mkinstall writes.
-func helmCmd(t *testing.T, res *okdp.Result) map[string][]byte {
+// output: the files Write gives for res with o, each one IsOutputFile
+// names: a directory okdp-compile wrote in one mode takes the files of the
+// other.
+func output(t *testing.T, res *okdp.Result, o Output) map[string][]byte {
 	t.Helper()
-	files, err := Files(res, DefaultIndent)
+	files, err := Write(res, o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if files[InstallScript], err = Install(res); err != nil {
-		t.Fatal(err)
-	}
-	return files
-}
-
-// umbrellaFiles: the files of Umbrella and its InstallScript, what -o <dir>
-// --umbrella --mkinstall writes.
-func umbrellaFiles(t *testing.T, def *okdp.Definition, res *okdp.Result) map[string][]byte {
-	t.Helper()
-	files, err := Umbrella(def, res, DefaultIndent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if files[InstallScript], err = InstallUmbrella(res); err != nil {
-		t.Fatal(err)
+	for name := range files {
+		if !IsOutputFile(name) {
+			t.Errorf("%s: not an output file (IsOutputFile)", name)
+		}
 	}
 	return files
 }
@@ -191,17 +204,19 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 }
 
 // TestExampleErrors: every testdata/<case>.yaml, an instance file over the
-// platform values, and every testdata/platform/<case>.yaml, a platform file
-// after platform.yaml, must fail with the message of its first line
-// (# error: ..., \n for a line break).
+// platform values, every testdata/platform/<case>.yaml, a platform file
+// after platform.yaml, and every testdata/project/<case>.yaml, a project
+// file after it, must fail with the message of its first line (# error:
+// ..., \n for a line break).
 func TestExampleErrors(t *testing.T) {
 	testdata := filepath.Join("..", "..", "testdata")
 	instance, _ := filepath.Glob(filepath.Join(testdata, "*.yaml"))
 	platform, _ := filepath.Glob(filepath.Join(testdata, "platform", "*.yaml"))
-	if len(instance) == 0 || len(platform) == 0 {
+	project, _ := filepath.Glob(filepath.Join(testdata, "project", "*.yaml"))
+	if len(instance) == 0 || len(platform) == 0 || len(project) == 0 {
 		t.Fatal("no testdata")
 	}
-	for _, f := range append(instance, platform...) {
+	for _, f := range slices.Concat(instance, platform, project) {
 		name, _ := filepath.Rel(testdata, f)
 		t.Run(strings.TrimSuffix(name, ".yaml"), func(t *testing.T) {
 			b, err := os.ReadFile(f)
@@ -214,11 +229,16 @@ func TestExampleErrors(t *testing.T) {
 				t.Fatalf("first line must be \"# error: <message>\", got %q", first)
 			}
 			want = strings.ReplaceAll(want, `\n`, "\n")
-			files := [2][]string{nil, {f}} // platform, instance
-			if slices.Contains(platform, f) {
-				files[0], files[1] = files[1], files[0]
+			var files [3][]string // platform, project, instance
+			switch {
+			case slices.Contains(platform, f):
+				files[0] = []string{f}
+			case slices.Contains(project, f):
+				files[1] = []string{f}
+			default:
+				files[2] = []string{f}
 			}
-			if _, _, err := exampleCompile(t, files[0], files[1]); err == nil || !strings.Contains(err.Error(), want) {
+			if _, err := exampleCompile(t, files[0], files[1], files[2]); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("got %v, want an error containing %q", err, want)
 			}
 		})

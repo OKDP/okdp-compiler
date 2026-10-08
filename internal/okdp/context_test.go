@@ -1,6 +1,7 @@
 package okdp
 
 import (
+	"io/fs"
 	"maps"
 	"reflect"
 	"strings"
@@ -10,20 +11,35 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
+// newInstance: the instance of a compile of the package files, its first
+// stages run as CompileContext runs them: parameters, platform context,
+// connections.
+func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
+	inst, err := parameters(files, in, svc)
+	if err != nil {
+		return nil, err
+	}
+	if err := platformContext(inst); err != nil {
+		return nil, err
+	}
+	return inst, connections(inst, newContractCache(in.Contracts))
+}
+
 // platformCtx: the platform context of the in-memory chart, with these
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	ctx, _, _, err := buildContext(pkg, inputs(M{"global": M{"okdp": okdp}}), &def.Service)
+	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": okdp}}), &def.Service)
 	if err != nil {
 		return nil, err
 	}
-	return value.AsMap(ctx["platform"]), nil
+	return value.AsMap(inst.scope["platform"]), nil
 }
 
-// TestPlatformDefaults: OIDC defaults to an existing client, no proxy.
+// TestPlatformDefaults: OIDC defaults to an existing client, no proxy; an
+// empty scope or mode, a null, are not set.
 func TestPlatformDefaults(t *testing.T) {
-	p, err := platformCtx(t, M{"certificateIssuers": M{"selfSigned": M{"name": "ca"}}})
+	p, err := platformCtx(t, M{"certificateIssuers": M{"selfSigned": M{"name": "ca"}}, "oidc": M{"scope": "", "clientProvisioning": nil, "dcr": nil}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,17 +94,15 @@ func TestPlatformDisabled(t *testing.T) {
 }
 
 // TestPlatformDcrSettings: the settings of the oidc-dcr Jobs
-// (global.okdp.oidc.dcr), defaults applied, the image's snake_case keys of
-// oidc-dcr < 0.5.0 renamed (a camelCase key wins over its former spelling).
+// (global.okdp.oidc.dcr), defaults applied (a null is not set, nor is an
+// empty caSecret), the image passed as written.
 func TestPlatformDcrSettings(t *testing.T) {
 	defaults := M{"caSecret": "certs-bundle", "ttlSeconds": float64(30), "backoffLimit": float64(6)}
 	for name, tc := range map[string]struct{ dcr, want M }{
-		"defaults":       {M{"registrationUrl": "u"}, M{"registrationUrl": "u"}},
-		"empty":          {M{"caSecret": "", "ttlSeconds": nil, "image": nil}, M{}},
-		"set":            {M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}},
-		"camelCase":      {M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}},
-		"former keys":    {M{"image": M{"tag": "1", "pull_policy": "Never", "pull_secrets": []any{"s"}}}, M{"image": M{"tag": "1", "pullPolicy": "Never", "pullSecrets": []any{"s"}}}},
-		"camelCase wins": {M{"image": M{"pull_policy": "Never", "pullPolicy": "Always"}}, M{"image": M{"pullPolicy": "Always"}}},
+		"defaults":  {M{"registrationUrl": "u"}, M{"registrationUrl": "u"}},
+		"empty":     {M{"caSecret": "", "ttlSeconds": nil, "waitTtlSeconds": nil, "image": nil}, M{}},
+		"set":       {M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}},
+		"camelCase": {M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p, err := platformCtx(t, M{"oidc": M{"clientProvisioning": "dcr", "dcr": tc.dcr}})
@@ -102,69 +116,56 @@ func TestPlatformDcrSettings(t *testing.T) {
 			}
 		})
 	}
-	for name, tc := range map[string]struct {
-		dcr  M
-		want string
-	}{
-		"image":          {M{"image": "quay.io/x:1"}, `global.okdp.oidc.dcr.image must be a map (registry, repository, tag, pullPolicy, pullSecrets), got "quay.io/x:1"`},
-		"caSecret":       {M{"caSecret": true}, "global.okdp.oidc.dcr.caSecret must be the name of a Secret, got true"},
-		"ttlSeconds":     {M{"ttlSeconds": "30s"}, `global.okdp.oidc.dcr.ttlSeconds must be a whole number >= 0, got "30s"`},
-		"backoffLimit":   {M{"backoffLimit": float64(-1)}, "global.okdp.oidc.dcr.backoffLimit must be a whole number >= 0, got -1"},
-		"waitTtlSeconds": {M{"waitTtlSeconds": 1.5}, "global.okdp.oidc.dcr.waitTtlSeconds must be a whole number >= 0, got 1.5"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := platformCtx(t, M{"oidc": M{"dcr": tc.dcr}}); err == nil || err.Error() != tc.want {
-				t.Errorf("got %v, want %q", err, tc.want)
-			}
-		})
-	}
 }
 
-// TestPlatformTypes: each global.okdp setting the compiler reads, and each
-// map on the way to it, global included, of its type when set; null is not
-// set.
-func TestPlatformTypes(t *testing.T) {
+// TestPlatformSchema: global.okdp checked against platform.schema.json,
+// every violation at once, by path; a null is not set, nor is an empty
+// string where the default is one, and a null enabled reads as false; the
+// other keys are not checked.
+func TestPlatformSchema(t *testing.T) {
 	for name, tc := range map[string]struct {
 		global any
-		want   string
+		want   string // the violations, "" for none
 	}{
-		"global":           {"x", `global must be a map, got "x"`},
-		"global.okdp":      {M{"okdp": []any{}}, "global.okdp must be a map, got []interface {}{}"},
-		"oidc":             {M{"okdp": M{"oidc": false}}, "global.okdp.oidc must be a map, got false"},
-		"oidc.dcr":         {M{"okdp": M{"oidc": M{"dcr": "https://idp/register"}}}, `global.okdp.oidc.dcr must be a map, got "https://idp/register"`},
-		"oidc.enabled":     {M{"okdp": M{"oidc": M{"enabled": "false"}}}, `global.okdp.oidc.enabled must be true or false, got "false"`},
-		"oidc.scope":       {M{"okdp": M{"oidc": M{"scope": []any{"openid"}}}}, `global.okdp.oidc.scope must be a string, got []interface {}{"openid"}`},
-		"proxy":            {M{"okdp": M{"proxy": "http://p:3128"}}, `global.okdp.proxy must be a map, got "http://p:3128"`},
-		"proxy.noProxy":    {M{"okdp": M{"proxy": M{"noProxy": []any{".svc"}}}}, `global.okdp.proxy.noProxy must be a string, got []interface {}{".svc"}`},
-		"ingress":          {M{"okdp": M{"ingress": "example.org"}}, `global.okdp.ingress must be a map, got "example.org"`},
-		"selfSigned":       {M{"okdp": M{"certificateIssuers": M{"selfSigned": "ca"}}}, `global.okdp.certificateIssuers.selfSigned must be a map, got "ca"`},
-		"in order":         {M{"okdp": M{"proxy": "p", "oidc": 1}}, "global.okdp.oidc must be a map, got 1"},
-		"null is not set":  {M{"okdp": M{"oidc": nil, "proxy": M{"noProxy": nil}, "ingress": M{"suffix": nil}}}, ""},
+		"global":      {"x", "- at '/global': got string, want object"},
+		"global.okdp": {M{"okdp": []any{}}, "- at '/global/okdp': got array, want object"},
+		"each map and setting": {M{"okdp": M{"proxy": "p", "oidc": M{"enabled": "false", "clientProvisioning": "manual"}}},
+			"- at '/global/okdp/oidc': validation failed\n  - at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'\n  - at '/global/okdp/oidc/enabled': got string, want boolean\n- at '/global/okdp/proxy': got string, want object"},
+		"dcr": {M{"okdp": M{"oidc": M{"dcr": M{"image": "quay.io/x:1", "caSecret": true, "ttlSeconds": "30s", "backoffLimit": float64(-1), "waitTtlSeconds": 1.5}}}},
+			"- at '/global/okdp/oidc/dcr/backoffLimit': minimum: got -1, want 0\n- at '/global/okdp/oidc/dcr/caSecret': got boolean, want string\n- at '/global/okdp/oidc/dcr/image': got string, want object\n- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer\n- at '/global/okdp/oidc/dcr/waitTtlSeconds': got number, want integer"},
+		"image": {M{"okdp": M{"oidc": M{"dcr": M{"image": M{"tag": "1", "pull_policy": "Never"}}}}},
+			"- at '/global/okdp/oidc/dcr/image/pull_policy': false schema"},
+		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "oidcDCR": M{}, "dcr": nil}}},
+			"- at '/global/okdp/charts': additional properties 'dcr', 'oidcDCR' not allowed\n- at '/global/okdp/charts/objects': got string, want object\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
+		"not set":          {M{"okdp": M{"oidc": M{"scope": "", "clientProvisioning": nil, "dcr": M{"caSecret": "", "ttlSeconds": nil}}, "proxy": M{"noProxy": nil}, "ingress": nil, "charts": M{"objects": nil}}}, ""},
 		"no global":        {nil, ""},
-		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}}, "imageRegistry": 1}, ""},
+		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}, "oidc": M{"dcr": M{"registrationUrl": 1}}}, "imageRegistry": 1}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := checkPlatform(tc.global); (err == nil) != (tc.want == "") || (err != nil && err.Error() != tc.want) {
+			_, err := platformSettings(tc.global)
+			want := "platform values (--platform, Inputs.Platform) don't meet the specifications of the schema of global.okdp:\n" + tc.want
+			if (err == nil) != (tc.want == "") || (err != nil && err.Error() != want) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
 		})
 	}
 	// Checked before the platform context is derived: false no longer leaves
-	// OIDC enabled.
-	if _, err := platformCtx(t, M{"oidc": false}); err == nil || err.Error() != "global.okdp.oidc must be a map, got false" {
+	// OIDC enabled; a null enabled is kept, and reads as false.
+	if _, err := platformCtx(t, M{"oidc": false}); err == nil || !strings.HasSuffix(err.Error(), "- at '/global/okdp/oidc': got boolean, want object") {
 		t.Errorf("compile: got %v", err)
+	}
+	p, err := platformCtx(t, M{"oidc": M{"enabled": nil, "clientProvisioning": "dcr"}})
+	oidc := value.AsMap(p["oidc"])
+	if e, set := oidc["enabled"]; err != nil || !set || e != nil || oidc["existing"] != false || value.Dig(oidc, "dcr.enabled") != false {
+		t.Errorf("enabled: null: %v %#v", err, oidc)
 	}
 }
 
-// TestContextErrors: an unknown provisioning mode, unreadable package files.
+// TestContextErrors: unreadable package files.
 func TestContextErrors(t *testing.T) {
-	if _, err := platformCtx(t, M{"oidc": M{"clientProvisioning": "manual"}}); err == nil ||
-		!strings.Contains(err.Error(), `clientProvisioning "manual" is not one of existing, dcr`) {
-		t.Errorf("got %v", err)
-	}
 	ch := maps.Clone(pkg)
 	delete(ch, "config.schema.json")
-	if _, _, _, err := buildContext(ch, inputs(), &def.Service); err == nil {
+	if _, err := newInstance(ch, inputs(), &def.Service); err == nil {
 		t.Error("without config.schema.json: must fail")
 	}
 }
@@ -172,18 +173,18 @@ func TestContextErrors(t *testing.T) {
 // TestContextValues: the parameters the mapping sees, without global and
 // connections, and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	ctx, values, _, err := buildContext(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
+	inst, err := newInstance(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (M{"replicas": float64(2)}); !reflect.DeepEqual(ctx["values"], want) {
-		t.Errorf("values in the context: %#v", ctx["values"])
+	if want := (M{"replicas": float64(2)}); !reflect.DeepEqual(inst.scope["values"], want) {
+		t.Errorf("values in the context: %#v", inst.scope["values"])
 	}
-	if _, ok := values["global"]; !ok {
+	if _, ok := inst.values["global"]; !ok {
 		t.Error("the merged values keep global")
 	}
-	if want := (M{"name": "demo-app", "namespace": "demo"}); !reflect.DeepEqual(ctx["release"], want) {
-		t.Errorf("release: %#v", ctx["release"])
+	if want := (M{"name": "demo-app", "namespace": "demo"}); !reflect.DeepEqual(inst.scope["release"], want) {
+		t.Errorf("release: %#v", inst.scope["release"])
 	}
 }
 
@@ -195,11 +196,11 @@ func TestContextUpstream(t *testing.T) {
 		"other": {},
 	}}
 	up := M{"app": M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}}, "other": M{"y": float64(2)}}
-	ctx, _, _, err := buildContext(pkg, inputs(M{"upstream": up}), svc)
+	inst, err := newInstance(pkg, inputs(M{"upstream": up}), svc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := value.AsMap(ctx["values"])["upstream"]; !reflect.DeepEqual(got, up) {
+	if got := value.AsMap(inst.scope["values"])["upstream"]; !reflect.DeepEqual(got, up) {
 		t.Errorf("values.upstream:\n got %#v\nwant %#v", got, up)
 	}
 }

@@ -15,10 +15,6 @@ import (
 	_ "embed"
 	"fmt"
 	"maps"
-	"math"
-	"slices"
-	"sort"
-	"strings"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -26,6 +22,7 @@ import (
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/compile"
+	"github.com/okdp/okdp-compiler/internal/helmfn"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -44,8 +41,19 @@ var DcrSource = chart.Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr"
 //go:embed oidc-dcr.cel.yaml
 var dcrTemplate []byte
 
-// clientKeys: the keys of a client of oidcClients.
-var clientKeys = []string{"name", "grantTypes", "redirectUris", "scope", "clientName", "public", "request", "secret", "caSecret"}
+// clientKeys: the keys of a client of oidcClients; its name is a DNS label
+// besides (checkClient).
+var clientKeys = []field{
+	{name: "name", kind: aString},
+	{name: "grantTypes", kind: nonEmptyStrings, required: true},
+	{name: "redirectUris", kind: nonEmptyStrings},
+	{name: "scope", kind: aString},
+	{name: "clientName", kind: aString},
+	{name: "public", kind: aBoolean},
+	{name: "request", kind: aMap},
+	{name: "secret", kind: aString},
+	{name: "caSecret", kind: aString},
+}
 
 // clientNameMax: the longest name of a client, part of its chart, object
 // and Secret names: its chart key <name>-oidc-dcr is a DNS-1123 label (63
@@ -88,10 +96,10 @@ func clientSecret(release, namespace string, dcr bool, name string) string {
 
 // oidcFunctions: oidcClientSecret(name), the Secret of the OAuth client
 // name ("" for the main client, as platform.oidcClientSecret) in the
-// platform's mode; a client's explicit secret is not known to it.
-func oidcFunctions(ctx M) []cel.EnvOption {
-	release, ns := value.Str(value.Dig(ctx, "release.name")), value.Str(value.Dig(ctx, "release.namespace"))
-	dcr := value.Dig(ctx, "platform.oidc.dcr.enabled") == true
+// platform's mode, for the instance inst; a client's explicit secret is
+// not known to it.
+func oidcFunctions(inst *instance) []cel.EnvOption {
+	release, ns, dcr := inst.release, inst.namespace, inst.dcr
 	return []cel.EnvOption{
 		cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(clientSecret(release, ns, dcr, compile.Text(v))) }))),
@@ -99,73 +107,36 @@ func oidcFunctions(ctx M) []cel.EnvOption {
 }
 
 // checkClient: the i-th item of oidcClients, checked: a map of the client
-// keys, grantTypes required, each key of its type.
+// keys (clientKeys), its name first, a DNS label that names the client in
+// the other errors.
 func checkClient(i int, v any) (oidcClient, error) {
 	c := oidcClient{where: fmt.Sprintf("oidcClients[%d]", i)}
-	m, ok := v.(M)
-	if !ok {
-		return c, fmt.Errorf("%s: must be a map (%s), got %s", c.where, strings.Join(clientKeys, ", "), value.Short(v))
+	m, err := fieldMap(c.where, v, clientKeys)
+	if err != nil {
+		return c, err
 	}
-	// A null key is not set ($if, or a null expression).
-	c.spec = M{}
-	var unknown []string
-	for k, x := range m {
-		if x == nil {
-			continue
-		}
-		if !slices.Contains(clientKeys, k) {
-			unknown = append(unknown, k)
-		}
-		c.spec[k] = x
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		return c, fmt.Errorf("%s: unknown key(s) %s (allowed: %s)", c.where, strings.Join(unknown, ", "), strings.Join(clientKeys, ", "))
-	}
-	if n, set := c.spec["name"]; set {
+	if n := m["name"]; n != nil {
 		s, ok := n.(string)
-		if !ok || (s != "" && (len(s) > clientNameMax || !dnsLabel.MatchString(s))) {
+		if !ok || (s != "" && (len(s) > clientNameMax || !helmfn.IsDNSLabel(s))) {
 			return c, fmt.Errorf("%s: name %s must be lowercase letters, digits and \"-\", %d characters at most (it names the chart %s, its objects and its Secret)", c.where, value.Short(n), clientNameMax, clientChart("<name>"))
 		}
 		c.name = s
 	}
-	c.spec["name"] = c.name
 	c.chart = clientChart(c.name)
 	if c.name != "" {
 		c.where += " (" + c.name + ")"
 	}
-	isStrings := func(x any) bool {
-		l, ok := x.([]any)
-		for _, s := range l {
-			if t, ok := s.(string); !ok || t == "" {
-				return false
-			}
-		}
-		return ok
+	if err := fields(c.where, m, clientKeys); err != nil {
+		return c, err
 	}
-	if g, ok := c.spec["grantTypes"].([]any); !ok || len(g) == 0 || !isStrings(g) {
-		return c, fmt.Errorf("%s: grantTypes is required: a list of OAuth grant types (authorization_code, refresh_token, client_credentials...)", c.where)
-	}
-	if r, set := c.spec["redirectUris"]; set && !isStrings(r) {
-		return c, fmt.Errorf("%s: redirectUris must be a list of URLs, got %s", c.where, value.Short(r))
-	}
-	for _, k := range []string{"scope", "clientName", "secret", "caSecret"} {
-		if x, set := c.spec[k]; set {
-			if _, ok := x.(string); !ok {
-				return c, fmt.Errorf("%s: %s must be a string, got %s", c.where, k, value.Short(x))
-			}
+	// A null key is not set ($if, or a null expression).
+	c.spec = M{}
+	for k, x := range m {
+		if x != nil {
+			c.spec[k] = x
 		}
 	}
-	if p, set := c.spec["public"]; set {
-		if _, ok := p.(bool); !ok {
-			return c, fmt.Errorf("%s: public must be true or false, got %s", c.where, value.Short(p))
-		}
-	}
-	if r, set := c.spec["request"]; set {
-		if _, ok := r.(M); !ok {
-			return c, fmt.Errorf("%s: request must be a map of registration fields, got %s", c.where, value.Short(r))
-		}
-	}
+	c.spec["name"] = c.name
 	return c, nil
 }
 
@@ -174,9 +145,9 @@ func checkClient(i int, v any) (oidcClient, error) {
 // once cut), and, in dcr mode, the values of the oidc-dcr chart of each:
 // chart -> values, from dcrTemplate. The platform must then register
 // anonymously, at its registrationUrl, and no two clients write one Secret.
-// The template is evaluated within budget (nil: none).
-func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, map[string]M, error) {
-	release, ns := value.Str(value.Dig(ctx, "release.name")), value.Str(value.Dig(ctx, "release.namespace"))
+// The template is evaluated in the compile's session, on what the mapping
+// of inst sees plus the client and its names.
+func oidcClients(session *compile.Session, inst *instance, section []any) ([]oidcClient, map[string]M, error) {
 	var clients []oidcClient
 	seen, objects := map[string]string{}, map[string]string{}
 	for i, v := range section {
@@ -191,18 +162,17 @@ func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, ma
 		}
 		seen[c.name] = c.where
 		// Two names may give one objects' name once cut to 63 characters.
-		c.fullname = fullname(release, c.chart)
+		c.fullname = fullname(inst.release, c.chart)
 		if other, dup := objects[c.fullname]; dup {
 			return nil, nil, fmt.Errorf("%s: %s has the same objects' name, %q, once cut to 63 characters: shorten the client names", c.where, other, c.fullname)
 		}
 		objects[c.fullname] = c.where
 		clients = append(clients, c)
 	}
-	oidc := value.AsMap(value.Dig(ctx, "platform.oidc"))
-	dcr := value.AsMap(oidc["dcr"])
-	if len(clients) == 0 || dcr["enabled"] != true {
+	if len(clients) == 0 || !inst.dcr {
 		return clients, nil, nil
 	}
+	dcr := value.AsMap(inst.oidc["dcr"])
 	// OKDP only registers anonymously.
 	if value.Str(dcr["authMethod"]) != "anonymous" {
 		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.authMethod %q is not supported: OKDP registers its OAuth clients anonymously", value.Str(dcr["authMethod"]))
@@ -213,7 +183,7 @@ func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, ma
 	values := map[string]M{}
 	secrets := map[string]string{}
 	for _, c := range clients {
-		secret := clientSecret(release, ns, true, c.name)
+		secret := clientSecret(inst.release, inst.namespace, true, c.name)
 		if s := value.Str(c.spec["secret"]); s != "" {
 			secret = s
 		}
@@ -222,10 +192,10 @@ func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, ma
 		}
 		secrets[secret] = c.where
 		names := M{"chart": c.chart, "fullname": c.fullname, "secret": secret}
-		in := maps.Clone(ctx)
-		in["client"] = c.spec
-		in["names"] = names
-		v, err := compile.EvalTemplate(dcrTemplate, in, budget, functions(in)...)
+		scope := maps.Clone(inst.scope)
+		scope["client"] = c.spec
+		scope["names"] = names
+		v, err := session.EvalTemplate(dcrTemplate, scope)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %s values: %w", c.where, DcrChart, err)
 		}
@@ -234,101 +204,13 @@ func oidcClients(budget *compile.Budget, ctx M, section []any) ([]oidcClient, ma
 	return clients, values, nil
 }
 
-// dcrDefaults: the settings of global.okdp.oidc.dcr a platform may leave
-// out, and their defaults. waitTtlSeconds has none: the chart's own
-// waitForProvider.ttlSeconds (600 s) applies.
-var dcrDefaults = []struct {
-	key string
-	def any
-}{
-	{"ttlSeconds", float64(30)},  // TTL of the finished Job (ttlSeconds), its logs kept that long
-	{"backoffLimit", float64(6)}, // retries of the Job (backoffLimit)
-	{"waitTtlSeconds", nil},      // longest wait for the provider (waitForProvider.ttlSeconds)
-}
-
-// dcrSettings: global.okdp.oidc.dcr, checked, with its defaults applied in
-// place: caSecret (the Secret holding the CA bundle the Jobs trust,
-// certs-bundle), ttlSeconds (30), backoffLimit (6), waitTtlSeconds (unset);
-// image, the Jobs' image, a map whose snake_case keys of oidc-dcr < 0.5.0
-// are renamed (dcrImage). registrationUrl and authMethod are left as
-// written: they are checked when a client is registered.
-func dcrSettings(dcr M) error {
-	switch img := dcr["image"].(type) {
-	case nil:
-		delete(dcr, "image")
-	case M:
-		dcr["image"] = dcrImage(img)
-	default:
-		return fmt.Errorf("global.okdp.oidc.dcr.image must be a map (registry, repository, tag, pullPolicy, pullSecrets), got %s", value.Short(img))
-	}
-	switch ca := dcr["caSecret"].(type) {
-	case nil:
-		dcr["caSecret"] = "certs-bundle"
-	case string:
-		if ca == "" {
-			dcr["caSecret"] = "certs-bundle"
-		}
-	default:
-		return fmt.Errorf("global.okdp.oidc.dcr.caSecret must be the name of a Secret, got %s", value.Short(ca))
-	}
-	for _, d := range dcrDefaults {
-		v := dcr[d.key]
-		if v == nil {
-			delete(dcr, d.key)
-			if d.def != nil {
-				dcr[d.key] = d.def
-			}
-			continue
-		}
-		if n, ok := v.(float64); !ok || n < 0 || n != math.Trunc(n) {
-			return fmt.Errorf("global.okdp.oidc.dcr.%s must be a whole number >= 0, got %s", d.key, value.Short(v))
-		}
-	}
-	return nil
-}
-
-// dcrImage: the platform's image of the oidc-dcr Jobs, with the snake_case
-// keys of oidc-dcr < 0.5.0 renamed; a camelCase key wins over its former
-// spelling.
-func dcrImage(img M) M {
-	out := value.AsMap(value.Copy(img))
-	for old, key := range map[string]string{"pull_policy": "pullPolicy", "pull_secrets": "pullSecrets"} {
-		if v, ok := out[old]; ok {
-			if _, set := out[key]; !set {
-				out[key] = v
-			}
-			delete(out, old)
-		}
-	}
-	return out
-}
-
-// clientCharts: the charts of service.yaml, plus the chart of each client
-// compiled in dcr mode (the chart key of the client, rendered by the
-// platform's oidc-dcr chart src, no OKDP defaults, no instance values), its
-// values added to the mapping's output. The compiler owns these charts:
-// neither service.yaml nor the mapping's output may list them, in any mode.
-// svc is not changed.
-func clientCharts(svc *Service, clients []oidcClient, values map[string]M, output M, src chart.Ref) (*Service, error) {
-	if len(clients) == 0 {
-		return svc, nil
-	}
+// clientCharts: the chart of each client, in order, the compiler's in any
+// mode (ownChart): its key reserved, compiled from values, by chart (dcr
+// mode: oidcClients), rendered by the platform's oidc-dcr chart src.
+func clientCharts(clients []oidcClient, values map[string]M, src chart.Ref) []ownChart {
+	own := make([]ownChart, 0, len(clients))
 	for _, c := range clients {
-		if _, ok := svc.Charts[c.chart]; ok {
-			return nil, fmt.Errorf("service.yaml: charts.%s: the chart of %s is added by the compiler: remove it from service.yaml", c.chart, c.where)
-		}
-		if _, ok := output[c.chart]; ok {
-			return nil, fmt.Errorf("mapping output %q: the chart of %s is compiled from oidcClients: remove it from output", c.chart, c.where)
-		}
+		own = append(own, ownChart{key: c.chart, of: c.where, from: "oidcClients", source: src, values: values[c.chart]})
 	}
-	out := *svc
-	out.Charts = maps.Clone(svc.Charts)
-	if out.Charts == nil {
-		out.Charts = chart.Specs{}
-	}
-	for key, v := range values {
-		out.Charts[key] = chart.Spec{Source: src}
-		output[key] = v
-	}
-	return &out, nil
+	return own
 }

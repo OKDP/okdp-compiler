@@ -68,14 +68,15 @@ require:
     $if: ${{ platform.oidc.enabled }}
 ```
 
+Every compile checks the entries in order, once the context is built and
+before the mapping: [requirements](01_inputs_outputs.md#requirements).
 `$if` is one expression, `${{ <condition> }}`, as in the mapping
-([`$if`](#if)). Every compile evaluates it on the [context](#context) of
-the mapping, its variables and host functions (no `let` binding), once the
-context is built and before the mapping, cancelled with the compile and
-counted in its CEL cost limit (`CompileContext`, `WithCostLimit`).
-Its value must be `true` or `false`: unlike the mapping's `$if`, it is not
-tested as a Helm condition. When it holds, the key is checked as a key of
-every case: [requirements](01_inputs_outputs.md#requirements).
+([`$if`](#if)), evaluated on the [context](#context) of the mapping, its
+variables and host functions (no `let` binding), cancelled with the
+compile and counted in its CEL cost limit (`CompileContext`,
+`WithCostLimit`). Its value must be `true` or `false`: unlike the
+mapping's `$if`, it is not tested as a Helm condition. When it holds, the
+key is checked as a key of every case.
 
 An entry of another form fails when `service.yaml` is loaded, and before
 every compile for a `Service` built in memory (`compiler.Requirement`,
@@ -278,8 +279,10 @@ structure ([Directives](#directives)). Its top-level keys are the
 | [`provides`](#provides) | list | the connections the instance publishes |
 | [`oidcClients`](#oidcclients) | list | the OAuth clients of the service |
 
-Every section is optional. Other top-level keys are ignored, not evaluated,
-but a top-level key starting with `$` fails:
+Every section is optional. Any other top-level key fails rather than being
+ignored (`outptu:` would render no chart),
+`<key>: unknown section (allowed: let, errors, output, instance, provides, objects, oidcClients)`,
+and one starting with `$` with
 `<key>: not a directive of the top level: its keys are sections`.
 
 ```yaml
@@ -320,9 +323,21 @@ oidcClients:
     grantTypes: [authorization_code, refresh_token]
 ```
 
+`examples/03_full/input/service/values.cel.yaml` uses every section,
+directive and host function, most of the CEL libraries and of the YAML
+reading (anchors, merge keys, `$$`, `$${{`), each commented; its
+`service.yaml` two renders of one chart, `protect` paths in brackets and
+with a glob, a conditional `require`.
+
 ## Sections
 
 ### Evaluation order
+
+The mapping is loaded first: read ([YAML reading](#yaml-reading)), its
+top-level keys checked, then every [directive](#directives) checked and
+every [expression](#lone-expressions-and-interpolation) compiled, in the
+whole document, the branches no instance takes included. The first
+mistake fails the compile before anything is evaluated. Then:
 
 1. `let`, entry by entry: each sees the [context](#context) and the
    bindings before it.
@@ -477,10 +492,10 @@ position in the evaluated list, `<j>` the key's in `generate`:
 
 ```text
 provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>
-provides[<i>]: values: must be a map of contract fields, got <value>
-provides[<i>]: secretRef: must be a map (name), got <value>
-provides[<i>]: secret: must be a map (generate, stringData), got <value>
-provides[<i>]: secret: generate must be a list of generated keys, got <value>
+provides[<i>]: values must be a map, got <value>
+provides[<i>]: secretRef must be a map, got <value>
+provides[<i>]: secret must be a map, got <value>
+provides[<i>]: secret: generate must be a list, got <value>
 provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>
 provides[<i>]: secret: stringData must be a map of strings, got <value>
 provides[<i>]: secret: stringData "<key>" must be a string, got <value>
@@ -562,11 +577,12 @@ set, and `""` takes the default of a string key. Only `dcr` mode uses the
 keys; how they become the values of the client's chart:
 [OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
 
-Every mode checks the clients, after the mapping: each client is a map of
-these keys only, each of its type, `name` of the form above, `grantTypes`
-given; one client at most has no name, names are unique, and so are the
-names of their objects, `<release>-<chart key>` cut to 63 characters
-([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)). In
+Every mode checks the clients, after the mapping: each client is a map,
+its `name` of the form above (checked first: it names the client in the
+other errors), of these keys only, each of its type, `grantTypes` given
+and not empty; one client at most has no name, names are unique, and so
+are the names of their objects, `<release>-<chart key>` cut to 63
+characters ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)). In
 `dcr` mode, no two clients write one Secret. As soon as the
 mapping declares a client, its chart key belongs to the compiler:
 `service.yaml` may not list it, nor `output` compute it. Only `dcr` mode
@@ -610,10 +626,13 @@ keys come from [`$for`](#for) (`$key`) or [`$merge`](#merge). A key
 starting with `$` is a [directive](#directives); `$$` writes one:
 `$$schema` is the key `$schema`.
 
-An expression is compiled when it is evaluated: one under a false `$if`,
-in a `$for` over no element or in an unknown section is never compiled,
-and its errors go unnoticed. The directives around it are checked anyway
-([Directives](#directives)).
+Every expression is compiled once, when the mapping is loaded, before any
+is evaluated: one under a false `$if` or in a `$for` over no element too.
+A syntax error, an undeclared name or an unknown function fails the
+compile whether an instance takes the branch or not. Variables are
+dynamic ([Context](#context)): a type error (`no such overload`) or a
+missing key (`no such key`) is an evaluation error, found only when the
+expression is evaluated.
 
 The value of an expression is converted to data, as values hold it: maps
 with string keys, lists, numbers, strings, booleans and null, at any depth.
@@ -740,9 +759,9 @@ list item that is a map: `$for` (with `$each`, `$let`); else `$spread`;
 else the item is evaluated as a map. Directives nest: a `$for` in an
 `$each` sees the outer variable.
 
-A key starting with `$` is a directive. The directives of a section (of
-`let` and `errors` with the document) are checked before it is evaluated,
-in every branch, under a false `$if` or in a `$for` over no element too.
+A key starting with `$` is a directive. The directives of the whole
+document are checked when it is loaded, before any evaluation, in every
+branch, under a false `$if` or in a `$for` over no element too.
 Each must be one of its place, the place taking its form from `$for`,
 `$spread` or `$value`:
 
@@ -917,7 +936,7 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
-| `values` | The parameters: the defaults of `config.schema.json`, the platform's and the instance's values layers, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
+| `values` | The parameters: the defaults of `config.schema.json`, the platform's, the project's and the instance's values layers, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `service.yaml`, as written ([service](#service)). |
@@ -928,22 +947,23 @@ The variables of every expression:
 
 A missing key is an evaluation error (`no such key: <key>`): test it with
 `has(values.x)`, or read it with `values.?x.orValue(<default>)`,
-`m[?'k'].orValue(<default>)`. A name that is not in scope fails at compile
-time: `undeclared reference to '<name>'`.
+`m[?'k'].orValue(<default>)`. A name that is not in scope fails when the
+mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 
 `platform`, derived from `global.okdp` by the compiler:
 
 | Variable | Value |
 |---|---|
-| `platform.oidc` | `global.okdp.oidc`, with: `enabled` true when the key is absent; `scope` `"openid profile email groups"` when empty; `clientProvisioning` `"existing"` when empty, else `existing` or `dcr` (any other value fails the compile: `global.okdp.oidc.clientProvisioning "<v>" is not one of existing, dcr`); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
+| `platform.oidc` | `global.okdp.oidc`, the settings of the platform schema that are not set (`null`, an empty `scope` or `clientProvisioning`) left out, its defaults applied: `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
 | `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](#oidcclientsecret). |
 | `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 
-The settings these are derived from are checked against their types first
-(`global.okdp.oidc must be a map, got false`):
+The settings these are derived from are checked against the platform
+schema first (`- at '/global/okdp/oidc': got boolean, want object`):
 [fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads).
-`enabled` is `true` or `false`; a `null` is kept, and reads as false.
+`enabled` is `true` or `false`; a `null`, unlike another setting's, is
+kept, and reads as false.
 
 `labels` and `selectorLabels` (and the functions
 [`okdpLabels`, `okdpSelectorLabels`](#okdplabels-and-okdpselectorlabels)),
@@ -1111,16 +1131,16 @@ Errors (`<arg>`: `name`, `type`, `namespace`, `refreshInterval` or
 
 ```text
 okdp.generatedSecret: must be a map of arguments (name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion), got <value>
-okdp.generatedSecret: unknown argument(s) <names> (allowed: name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion)
+okdp.generatedSecret: unknown key(s) <names> (allowed: name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion)
 okdp.generatedSecret: name is required
 okdp.generatedSecret: <arg> must be a string, got <value>
-okdp.generatedSecret: keys must be a list of generated keys, got <value>
+okdp.generatedSecret: keys must be a list, got <value>
 okdp.generatedSecret: stringData must be a map of strings, numbers or booleans, got <value>
 okdp.generatedSecret: stringData "<key>" must be a string, a number or a boolean, got <value>
 okdp.generatedSecret: <map> must be a map of strings, got <value>
 okdp.generatedSecret: <map> "<key>" must be a string, got <value>
 okdp.generatedSecret: keys[<j>]: must be a map (key, length, digits, symbols, noUpper, transform), got <value>
-okdp.generatedSecret: keys[<j>]: unknown field(s) <names> (allowed: key, length, digits, symbols, noUpper, transform)
+okdp.generatedSecret: keys[<j>]: unknown key(s) <names> (allowed: key, length, digits, symbols, noUpper, transform)
 okdp.generatedSecret: keys[<j>]: key must be a string, got <value>
 okdp.generatedSecret: keys[<j>]: <number> must be a whole number >= 0, got <value>
 okdp.generatedSecret: keys[<j>]: noUpper must be true or false, got <value>
@@ -1216,7 +1236,8 @@ items of the YAML list as written: an item carrying `$for` or `$spread` is
 one position, whatever it produces.
 
 The cause is either a compile-time error of CEL, with its position and the
-source line, or an evaluation error:
+source line, reported when the mapping is loaded whatever branch holds the
+expression, or an evaluation error:
 
 ```text
 output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
@@ -1240,7 +1261,7 @@ Other errors of the mapping:
 | `line <n>: the alias *<name> is inside the anchor &<name> it refers to`, `line <n>: excessive aliasing: the aliases expand to more than 100000 nodes` | an alias cycle, too many nodes from aliases ([YAML reading](#yaml-reading)) |
 | `line <n>: <key> is written before the merge key << that replaces it: write it after <<`, `line <n>: the merge key << takes a map, or a list of maps` | a merge key ([YAML reading](#yaml-reading)) |
 | `line <n>: not a finite number: <scalar> (quote it for the text)` | `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
-| `<key>: not a directive of the top level: its keys are sections`, `let: must be a map of bindings, got <value>`, `errors: must be a list of rules, got <value>` | the top level ([sections](#sections)) |
+| `<key>: unknown section (allowed: let, errors, output, instance, provides, objects, oidcClients)`, `<key>: not a directive of the top level: its keys are sections`, `let: must be a map of bindings, got <value>`, `errors: must be a list of rules, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
 | `let <name>: bound twice`, `let <name>: a binding name cannot start with $` (`$let` likewise) | a [`let`](#let) or [`$let`](#let-1) name |
 | `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>` | a directive ([directives](#directives)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
@@ -1253,14 +1274,14 @@ Other errors of the mapping:
 | `output: <key>: must be a map of the chart's values, got <value>` | a chart of [`output`](#output) whose values are a scalar or a list |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
 | `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
-| `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>`, `provides[<i>]: <key>: must be a map ..., got <value>` | a [`provides`](#provides) item, or its `values`, `secretRef` or `secret`, of another shape |
-| `provides[<i>]: secret: generate must be a list of generated keys, got <value>`, `provides[<i>]: secret: generate[<j>]: <message>`, `provides[<i>]: secret: stringData must be a map of strings, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` | the `generate` or `stringData` of a [`secret`](#secret) of another type; a key of `generate` as one of `okdpGeneratedSecret`'s `keys` |
+| `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>`, `provides[<i>]: <key> must be a map, got <value>` | a [`provides`](#provides) item, or its `values`, `secretRef` or `secret`, of another shape |
+| `provides[<i>]: secret: generate must be a list, got <value>`, `provides[<i>]: secret: generate[<j>]: <message>`, `provides[<i>]: secret: stringData must be a map of strings, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` | the `generate` or `stringData` of a [`secret`](#secret) of another type; a key of `generate` as one of `okdpGeneratedSecret`'s `keys` |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `provides "<name>" (<contract>): secretRef.name must be the name of a Secret, got <value>` | [`provides`](#provides) |
 | `oidcClients: must be a list of OAuth clients, got <value>` | [`oidcClients`](#oidcclients) is not a list |
 | `<client>: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got <value>`, `<client>: unknown key(s) <keys> (allowed: name, grantTypes, ...)` | a client that is not a map, or has another key |
 | `<client>: name <value> must be lowercase letters, digits and "-", 54 characters at most (it names the chart <name>-oidc-dcr, its objects and its Secret)` | a `name` that is not a string of that form |
-| `<client>: grantTypes is required: a list of OAuth grant types (authorization_code, refresh_token, client_credentials...)` | `grantTypes` absent, empty, or holding an item that is not a non-empty string |
-| `<client>: redirectUris must be a list of URLs, got <value>`, `<client>: <key> must be a string, got <value>`, `<client>: public must be true or false, got <value>`, `<client>: request must be a map of registration fields, got <value>` | a key of another type (`<key>`: `scope`, `clientName`, `secret`, `caSecret`) |
+| `<client>: grantTypes is required`, `<client>: grantTypes must be a list of non-empty strings, got <value>`, `<client>: grantTypes[<j>] must be a non-empty string, got <value>` | `grantTypes` absent, null or empty, not a list, or holding an item that is not a non-empty string |
+| `<client>: redirectUris must be a list of non-empty strings, got <value>`, `<client>: redirectUris[<j>] must be a non-empty string, got <value>`, `<client>: <key> must be a string, got <value>`, `<client>: public must be true or false, got <value>`, `<client>: request must be a map, got <value>` | a key of another type (`<key>`: `scope`, `clientName`, `secret`, `caSecret`; `<j>`: the position of the item in the list) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
 | `<client>: <other> has the same objects' name, "<fullname>", once cut to 63 characters: shorten the client names` | two names that differ only past the 63 characters of `<release>-<name>-oidc-dcr` ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](#oidcclientsecret)'s |
@@ -1268,8 +1289,8 @@ Other errors of the mapping:
 | `<client>: oidc-dcr values: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
 `<client>`, `<other>`: `oidcClients[<i>]`, the client's position in the
-evaluated list, followed by ` (<name>)` once its name is checked. `<value>`:
-the value as Go's `%#v` prints it (`"x"`, `true`). The errors of the
+evaluated list, followed by ` (<name>)` once its name is checked, first.
+`<value>`: the value as Go's `%#v` prints it (`"x"`, `true`). The errors of the
 platform's `global.okdp.oidc.dcr` settings:
 [OAuth client settings](01_inputs_outputs.md#oauth-client-settings).
 

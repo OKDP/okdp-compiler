@@ -1,0 +1,7 @@
+# error: project layer 1: connections.platform-db is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
+# A project file (--project) that gives a connection of the platform's, by a
+# field the platform leaves to the contract's default: a project adds
+# connections, the platform's are taken whole.
+connections:
+  platform-db:
+    port: 5433

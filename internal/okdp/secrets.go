@@ -4,30 +4,44 @@
 package okdp
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"maps"
 	"math"
-	"slices"
-	"sort"
 	"strings"
 
-	sigsyaml "sigs.k8s.io/yaml"
-
+	"github.com/okdp/okdp-compiler/internal/helmfn"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// secretArgs: the arguments of okdpGeneratedSecret.
-var secretArgs = []string{"name", "keys", "stringData", "labels", "annotations", "type", "namespace", "refreshInterval", "apiVersion"}
+// secretArgs: the arguments of okdpGeneratedSecret; stringData holds
+// numbers and booleans too, written as text.
+var secretArgs = []field{
+	{name: "name", kind: aString, required: true},
+	{name: "keys", kind: aList},
+	{name: "stringData", kind: scalarMap},
+	{name: "labels", kind: stringMap},
+	{name: "annotations", kind: stringMap},
+	{name: "type", kind: aString},
+	{name: "namespace", kind: aString},
+	{name: "refreshInterval", kind: aString},
+	{name: "apiVersion", kind: aString},
+}
 
 // keyFields: the fields of a generated key, an item of okdpGeneratedSecret's
-// keys or of a provides secret's generate.
-var keyFields = []string{"key", "length", "digits", "symbols", "noUpper", "transform"}
+// keys or of a provides secret's generate. length, digits, symbols and
+// noUpper are checked as printed (password), the transform and a missing
+// key by generatedSecret, with Helm's messages.
+var keyFields = []field{
+	{name: "key", kind: aString},
+	{name: "length", kind: anyValue},
+	{name: "digits", kind: anyValue},
+	{name: "symbols", kind: anyValue},
+	{name: "noUpper", kind: anyValue},
+	{name: "transform", kind: anyValue},
+}
 
-// generatedSecret: okdpGeneratedSecret, the objects okdp.generatedSecret
-// renders: one generators.external-secrets.io/v1alpha1 Password per key,
-// then the ExternalSecret writing the Secret `name`.
+// generatedSecret: okdpGeneratedSecret, the objects of a generated Secret
+// for the instance inst: one generators.external-secrets.io/v1alpha1
+// Password per key, then the ExternalSecret writing the Secret `name`.
 //
 // args: name (required), keys (list of {key (required), length (32),
 // digits (6), symbols (0), noUpper (false), transform (sha256 or b64enc)}),
@@ -36,23 +50,22 @@ var keyFields = []string{"key", "length", "digits", "symbols", "noUpper", "trans
 // Secret), annotations (of every object), type (of the Secret), namespace
 // (the release namespace), refreshInterval ("0": generated once),
 // apiVersion (of the ExternalSecret, external-secrets.io/v1). They are
-// checked first (checkSecretArgs), each key as its Password renders it
-// (password).
+// checked first (secretArgs, a null one being not set), each key as its
+// Password renders it (password).
 //
 // A generator is named <name>-<key> (lowercased, "_" and "." as "-"),
 // longer than 63 characters cut to 54 and suffixed with 8 hex characters of
 // the key's SHA-256; two keys giving the same name fail.
-func generatedSecret(ctx M, args M) ([]any, error) {
-	if err := checkSecretArgs(args); err != nil {
+func generatedSecret(inst *instance, args M) ([]any, error) {
+	if err := fields("okdp.generatedSecret", args, secretArgs); err != nil {
 		return nil, err
 	}
 	name := value.Str(args["name"])
-	rel := value.AsMap(ctx["release"])
-	ns := value.Str(orDefault(args["namespace"], rel["namespace"]))
-	api := value.Str(orDefault(args["apiVersion"], "external-secrets.io/v1"))
+	ns := value.Str(helmfn.Default(args["namespace"], inst.namespace))
+	api := value.Str(helmfn.Default(args["apiVersion"], "external-secrets.io/v1"))
 	extra := value.AsMap(args["labels"])
 	annotations := value.AsMap(args["annotations"])
-	okdpLabels := labels(ctxService(ctx), value.Str(rel["name"]), "")
+	okdpLabels := labels(inst.svc, inst.release, "")
 	meta := func(name string, labels M) M {
 		m := M{"name": name, "namespace": ns, "labels": labels}
 		if len(annotations) > 0 {
@@ -63,7 +76,7 @@ func generatedSecret(ctx M, args M) ([]any, error) {
 	// The Secret's data: the static keys, then the generated ones.
 	template := M{}
 	for k, v := range value.AsMap(args["stringData"]) {
-		s := toString(v)
+		s := helmfn.ToString(v)
 		if strings.Contains(s, "{{") {
 			s = fmt.Sprintf("{{ %q }}", s)
 		}
@@ -83,7 +96,7 @@ func generatedSecret(ctx M, args M) ([]any, error) {
 		}
 		gen := name + "-" + strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(key))
 		if len(gen) > 63 {
-			gen = strings.TrimSuffix(trunc(gen, 54), "-") + "-" + sha256Hex(key)[:8]
+			gen = helmfn.TruncName(gen, 54) + "-" + helmfn.Sha256Sum(key)[:8]
 		}
 		if other, dup := gens[gen]; dup {
 			return nil, fmt.Errorf("okdpGeneratedSecret: %s: keys %q and %q give the same generator name %q", name, other, key, gen)
@@ -99,7 +112,7 @@ func generatedSecret(ctx M, args M) ([]any, error) {
 			"sourceRef": M{"generatorRef": M{"apiVersion": "generators.external-secrets.io/v1alpha1", "kind": "Password", "name": gen}},
 			"rewrite":   []any{M{"regexp": M{"source": "^password$", "target": key}}},
 		})
-		switch t := toString(orDefault(spec["transform"], "")); t {
+		switch t := helmfn.ToString(helmfn.Default(spec["transform"], "")); t {
 		case "sha256":
 			template[key] = fmt.Sprintf("{{ index . %q | sha256sum }}", key)
 		case "b64enc":
@@ -121,14 +134,14 @@ func generatedSecret(ctx M, args M) ([]any, error) {
 		"data":          template,
 	}
 	if t := args["type"]; value.Truthy(t) {
-		tpl["type"] = printed(t)
+		tpl["type"] = helmfn.Printed(t)
 	}
 	out = append(out, M{
 		"apiVersion": api,
 		"kind":       "ExternalSecret",
 		"metadata":   meta(name, esLabels),
 		"spec": M{
-			"refreshInterval": toString(orDefault(args["refreshInterval"], "0")),
+			"refreshInterval": helmfn.ToString(helmfn.Default(args["refreshInterval"], "0")),
 			"target":          M{"name": name, "creationPolicy": "Owner", "template": tpl},
 			"dataFrom":        dataFrom,
 		},
@@ -136,106 +149,29 @@ func generatedSecret(ctx M, args M) ([]any, error) {
 	return out, nil
 }
 
-// checkSecretArgs: the arguments of okdpGeneratedSecret, checked, a null
-// one being not set: no other argument; name required, a string; keys a
-// list; stringData a map of strings, numbers and booleans, written as text;
-// labels and annotations maps of strings; type, namespace, refreshInterval
-// and apiVersion strings.
-func checkSecretArgs(args M) error {
-	const where = "okdp.generatedSecret"
-	var unknown []string
-	for k, x := range args {
-		if x != nil && !slices.Contains(secretArgs, k) {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		return fmt.Errorf("%s: unknown argument(s) %s (allowed: %s)", where, strings.Join(unknown, ", "), strings.Join(secretArgs, ", "))
-	}
-	if n := args["name"]; n == nil || n == "" {
-		return fmt.Errorf("%s: name is required", where)
-	}
-	for _, k := range []string{"name", "type", "namespace", "refreshInterval", "apiVersion"} {
-		if _, ok := args[k].(string); !ok && args[k] != nil {
-			return fmt.Errorf("%s: %s must be a string, got %s", where, k, value.Short(args[k]))
-		}
-	}
-	if _, ok := args["keys"].([]any); !ok && args["keys"] != nil {
-		return fmt.Errorf("%s: keys must be a list of generated keys, got %s", where, value.Short(args["keys"]))
-	}
-	if err := checkTextMap(where, "stringData", args["stringData"], true); err != nil {
-		return err
-	}
-	for _, k := range []string{"labels", "annotations"} {
-		if err := checkTextMap(where, k, args[k], false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// checkTextMap: v, the map key at where, checked: a map (null is none) of
-// strings; of strings, numbers and booleans when scalars (a generated
-// Secret's stringData, written as text).
-func checkTextMap(where, key string, v any, scalars bool) error {
-	want, item := "strings", "a string"
-	if scalars {
-		want, item = "strings, numbers or booleans", "a string, a number or a boolean"
-	}
-	m, ok := v.(M)
-	if !ok && v != nil {
-		return fmt.Errorf("%s: %s must be a map of %s, got %s", where, key, want, value.Short(v))
-	}
-	for _, k := range slices.Sorted(maps.Keys(m)) {
-		switch m[k].(type) {
-		case string:
-			continue
-		case float64, bool:
-			if scalars {
-				continue
-			}
-		}
-		return fmt.Errorf("%s: %s %q must be %s, got %s", where, key, k, item, value.Short(m[k]))
-	}
-	return nil
-}
-
 // password: the spec of the Password generating the key x, at where, as
-// okdp.generatedSecret renders it, checked: x a map of keyFields (another
-// field is refused unless null); key a string when set; length (32),
-// digits (6) and symbols (0), their default applied as Helm's, whole
+// okdp.generatedSecret renders it, checked: x a map of keyFields; length
+// (32), digits (6) and symbols (0), their default applied as Helm's, whole
 // numbers >= 0 as printed into the spec ('32' is 32); noUpper (false) true
-// or false as printed ('true' is true). A missing key and the transform
-// are checked by generatedSecret.
+// or false as printed ('true' is true).
 func password(where string, x any) (M, error) {
-	spec, ok := x.(M)
-	if !ok {
-		return nil, fmt.Errorf("%s: must be a map (%s), got %s", where, strings.Join(keyFields, ", "), value.Short(x))
+	spec, err := fieldMap(where, x, keyFields)
+	if err != nil {
+		return nil, err
 	}
-	var unknown []string
-	for k, v := range spec {
-		if v != nil && !slices.Contains(keyFields, k) {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) > 0 {
-		sort.Strings(unknown)
-		return nil, fmt.Errorf("%s: unknown field(s) %s (allowed: %s)", where, strings.Join(unknown, ", "), strings.Join(keyFields, ", "))
-	}
-	if _, ok := spec["key"].(string); !ok && spec["key"] != nil {
-		return nil, fmt.Errorf("%s: key must be a string, got %s", where, value.Short(spec["key"]))
+	if err := fields(where, spec, keyFields); err != nil {
+		return nil, err
 	}
 	// digits is printed when given, 0 or null included (hasKey, not default).
 	digits := any(float64(6))
 	if d, ok := spec["digits"]; ok {
-		digits = printed(d)
+		digits = helmfn.Printed(d)
 	}
 	pw := M{
-		"length":      printed(orDefault(spec["length"], float64(32))),
+		"length":      helmfn.Printed(helmfn.Default(spec["length"], float64(32))),
 		"digits":      digits,
-		"symbols":     printed(orDefault(spec["symbols"], float64(0))),
-		"noUpper":     printed(orDefault(spec["noUpper"], false)),
+		"symbols":     helmfn.Printed(helmfn.Default(spec["symbols"], float64(0))),
+		"noUpper":     helmfn.Printed(helmfn.Default(spec["noUpper"], false)),
 		"allowRepeat": true,
 	}
 	for _, k := range []string{"length", "digits", "symbols"} {
@@ -252,60 +188,27 @@ func password(where string, x any) (M, error) {
 // credentialsSecret: the credentials Secret of an output published with a
 // `secret`: {generate: [keys], stringData} as a
 // generated Secret, {stringData} as a plain Secret; both labelled
-// okdp.io/credentials-<contract>.
-func credentialsSecret(ctx M, contract, output, name string, secret M) ([]any, error) {
+// okdp.io/credentials-<contract>, in the namespace of the instance inst.
+func credentialsSecret(inst *instance, contract, output, name string, secret M) ([]any, error) {
 	label := "okdp.io/credentials-" + contract
 	if value.Truthy(secret["generate"]) {
-		return generatedSecret(ctx, M{
+		return generatedSecret(inst, M{
 			"name":       name,
 			"keys":       secret["generate"],
-			"stringData": orDefault(secret["stringData"], M{}),
+			"stringData": helmfn.Default(secret["stringData"], M{}),
 			"labels":     M{label: "true"},
 		})
 	}
 	if !value.Truthy(secret["stringData"]) {
-		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", ctxService(ctx).Name, output)
+		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", inst.svc.Name, output)
 	}
-	rel := value.AsMap(ctx["release"])
-	l := labels(ctxService(ctx), value.Str(rel["name"]), "")
+	l := labels(inst.svc, inst.release, "")
 	l[label] = "true"
 	return []any{M{
 		"apiVersion": "v1",
 		"kind":       "Secret",
-		"metadata":   M{"name": name, "namespace": rel["namespace"], "labels": l},
+		"metadata":   M{"name": name, "namespace": inst.namespace, "labels": l},
 		"type":       "Opaque",
 		"stringData": value.Copy(secret["stringData"]),
 	}}, nil
-}
-
-// orDefault: sprig's default: v, or d when v is empty (null, "", 0, false,
-// an empty list or map).
-func orDefault(v, d any) any {
-	if value.Truthy(v) {
-		return v
-	}
-	return d
-}
-
-// toString: sprig's toString (a null is "<nil>").
-func toString(v any) string {
-	if v == nil {
-		return "<nil>"
-	}
-	return value.Str(v)
-}
-
-// printed: v printed into a template ({{ v }}) and read back as YAML.
-func printed(v any) any {
-	var out any
-	if err := sigsyaml.Unmarshal([]byte(value.Str(v)), &out); err != nil {
-		return value.Str(v)
-	}
-	return out
-}
-
-// sha256Hex: Helm's sha256sum, the hex SHA-256 of the text.
-func sha256Hex(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
 }
