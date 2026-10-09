@@ -181,11 +181,11 @@ func TestLibraries(t *testing.T) {
 	}
 }
 
-// TestLibraryVersions: the CEL libraries table of the service definition
-// spec lists the libraries enabled (pinnedLibraries), each at its pinned
+// TestLibraryVersions: the CEL libraries table of the functions spec
+// lists the libraries enabled (pinnedLibraries), each at its pinned
 // version: a version is raised with the docs.
 func TestLibraryVersions(t *testing.T) {
-	const spec = "docs/specs/02_service_definition.md"
+	const spec = "docs/specs/04_functions.md"
 	b, err := os.ReadFile(filepath.Join("..", "..", spec))
 	if err != nil {
 		t.Fatal(err)

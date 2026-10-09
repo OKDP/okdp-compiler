@@ -85,7 +85,9 @@ changes its doc. [docs/README.md](docs/README.md) says which doc is for
 what:
 
 - `service.yaml` and the mapping language:
-  [docs/specs/02_service_definition.md](docs/specs/02_service_definition.md);
+  [docs/specs/02_service_definition.md](docs/specs/02_service_definition.md),
+  its directives in [docs/specs/03_control_flow.md](docs/specs/03_control_flow.md),
+  its functions in [docs/specs/04_functions.md](docs/specs/04_functions.md);
 - the inputs, the outputs, the checks and their messages:
   [docs/specs/01_inputs_outputs.md](docs/specs/01_inputs_outputs.md);
 - the command line, the library, CI and GitOps, the troubleshooting table
@@ -126,7 +128,7 @@ The mapping language enables CEL extensions at pinned versions
 does not change what a mapping may call. A cel-go update keeps them as they
 are; a version is raised on purpose, only together with the "CEL libraries"
 table of
-[docs/specs/02_service_definition.md](docs/specs/02_service_definition.md#cel-libraries)
+[docs/specs/04_functions.md](docs/specs/04_functions.md#cel-libraries)
 (the version, the functions it adds, the cel-go version), which
 `TestLibraryVersions` checks against the code, and with tests of the
 functions it adds.

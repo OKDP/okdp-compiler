@@ -1245,7 +1245,7 @@ trailing `-` (as `okdpFullname`), is set as `fullnameOverride`,
 54 characters, its chart key a DNS-1123 label, and two clients whose
 objects' names are the same once cut are refused, in every mode. In `dcr`
 mode a client's `secret` replaces the Secret name, which
-[`oidcClientSecret`](02_service_definition.md#oidcclientsecret) does not
+[`oidcClientSecret`](04_functions.md#oidcclientsecret) does not
 follow, and two clients may not write one Secret
 ([compile errors](02_service_definition.md#compile-errors)).
 
@@ -1390,7 +1390,7 @@ compile ([objects section](#objects-section)).
 | neither, in a non-empty `secret` | error: `<service>: output "<name>": secret needs stringData or generate` (`<service>`: `name` of `service.yaml`) |
 
 A generated Secret is what `okdpGeneratedSecret` renders
-([Functions](02_service_definition.md#functions): key options, generator
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key options, generator
 names), the credentials label on the `ExternalSecret` and on the Secret it
 writes, not on the `Password` generators. The random values are generated in
 the cluster, once (`refreshInterval: "0"`): every render of the release is

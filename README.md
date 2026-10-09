@@ -92,7 +92,9 @@ Expressions see `release`, `values`, `global.okdp`, `platform`, `service`,
 `labels` and `selectorLabels`, and call host functions, Helm's and OKDP's
 (`str`, `sha256`, `toJson`, `okdpFullname`, `okdpGeneratedSecret`,
 `oidcClientSecret`...):
-[service definition](docs/specs/02_service_definition.md).
+[service definition](docs/specs/02_service_definition.md),
+[control flow](docs/specs/03_control_flow.md),
+[functions](docs/specs/04_functions.md).
 
 The OAuth clients are provisioned by the platform
 (`global.okdp.oidc.clientProvisioning: existing`, the default) or registered

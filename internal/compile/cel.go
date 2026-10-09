@@ -445,8 +445,8 @@ func NewSession(ctx context.Context, limit uint64, funcs ...cel.EnvOption) *Sess
 const interruptEvery = 100
 
 // library: a CEL extension of the language at its pinned version; name is
-// the function enabling it, as the CEL libraries table of the service
-// definition spec names it.
+// the function enabling it, as the CEL libraries table of the functions
+// spec names it.
 type library struct {
 	name    string
 	version uint32

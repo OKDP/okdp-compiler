@@ -9,8 +9,9 @@ smaller version (`examples/02_advanced/input/service/`;
 language, each commented); the recipes and
 pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
-[the service definition](specs/02_service_definition.md) and
-[inputs and outputs](specs/01_inputs_outputs.md), the command line
+[the service definition](specs/02_service_definition.md), its
+[control flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
+and [inputs and outputs](specs/01_inputs_outputs.md), the command line
 in [usage](01_usage.md), the internals in [architecture](00_architecture.md).
 
 ## What a package is
@@ -270,7 +271,7 @@ charts:
 
 The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [expressions](specs/02_service_definition.md#expressions) and
-[directives](specs/02_service_definition.md#directives) (`$if`, `$for`,
+[directives](specs/03_control_flow.md) (`$if`, `$for`,
 `$merge`, `$spread`, `$let`). Its [sections](specs/02_service_definition.md#sections),
 as the webapp writes them (the
 [evaluation order](specs/02_service_definition.md#evaluation-order)
@@ -341,7 +342,7 @@ provides:                  # the connections the instance publishes
 - `instance.url` is what the console opens (none without a UI); `usage` is
   shown with the instance. Both are strings: write a number with `str`.
 
-Besides CEL's own, [host functions](specs/02_service_definition.md#host-functions)
+Besides CEL's own, [host functions](specs/04_functions.md#host-functions)
 (`str`, `sha256`, `toJson`, `okdpFullname`, `okdpLabels`,
 `okdpGeneratedSecret`, `oidcClientSecret`...) reproduce Helm's functions
 and give OKDP's names, labels and Secrets.

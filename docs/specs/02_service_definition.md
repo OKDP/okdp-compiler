@@ -71,7 +71,7 @@ require:
 Every compile checks the entries in order, once the context is built and
 before the mapping: [requirements](01_inputs_outputs.md#requirements).
 `$if` is one expression, `${{ <condition> }}`, as in the mapping
-([`$if`](#if)), evaluated on the [context](#context) of the mapping, its
+([`$if`](03_control_flow.md#if)), evaluated on the [context](#context) of the mapping, its
 variables and host functions (no `let` binding), cancelled with the
 compile and counted in its CEL cost limit (`CompileContext`,
 `WithCostLimit`). Its value must be `true` or `false`: unlike the
@@ -334,7 +334,7 @@ with a glob, a conditional `require`.
 ### Evaluation order
 
 The mapping is loaded first: read ([YAML reading](#yaml-reading)), its
-top-level keys checked, then every [directive](#directives) checked and
+top-level keys checked, then every [directive](03_control_flow.md#loading-and-evaluation) checked and
 every [expression](#lone-expressions-and-interpolation) compiled, in the
 whole document, the branches no instance takes included. The first
 mistake fails the compile before anything is evaluated. Then:
@@ -502,7 +502,7 @@ provides[<i>]: secret: stringData "<key>" must be a string, got <value>
 ```
 
 A key of `generate` fails as one of `okdpGeneratedSecret`'s `keys`
-([`okdpGeneratedSecret`](#okdpgeneratedsecret)), `generate[<j>]` for
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret)), `generate[<j>]` for
 `keys[<j>]`. With a `generate`, `stringData` takes numbers and booleans
 too: `... must be a map of strings, numbers or booleans`,
 `... must be a string, a number or a boolean`. The contract checks then report
@@ -515,7 +515,7 @@ of that item, all at once, one line each
 #### secret
 
 `{generate: [<key>, ...], stringData: {...}}` renders a generated Secret
-([`okdpGeneratedSecret`](#okdpgeneratedsecret), `keys` = `generate`, same
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `keys` = `generate`, same
 key fields, checked the same way; `stringData` optional, strings, numbers
 or booleans, written as text), `{stringData: {...}}` a plain Secret with
 these keys, strings only: a Secret's `stringData` holds strings, the API
@@ -569,7 +569,7 @@ registers its own by OIDC Dynamic Client Registration, per
 | `clientName` | string | `<release>-<namespace>`, then `-<name>` for a named client | Its name at the identity provider. |
 | `public` | boolean | `false` | A public client (a browser application), without a client secret. |
 | `request` | map | `{}` | Fields of the registration request (snake_case, as OIDC Dynamic Client Registration names them): they override the computed ones. |
-| `secret` | string | [`oidcClientSecret(<name>)`](#oidcclientsecret) | The Secret the Job writes the client to. |
+| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to. |
 | `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts. |
 
 A key whose value is null (left out by `$if`, a null expression) is not
@@ -591,7 +591,7 @@ reads the oidc-dcr chart, from the chart cache
 check stops the compile ([compile errors](#compile-errors)).
 
 The mapping reads the name of a client's Secret with
-[`oidcClientSecret(name)`](#oidcclientsecret) (the main client's is also
+[`oidcClientSecret(name)`](04_functions.md#oidcclientsecret) (the main client's is also
 `platform.oidcClientSecret`), in any section; a client that sets `secret`
 references that name itself. The keys the Secret holds:
 [OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
@@ -603,7 +603,7 @@ references that name itself. The keys the Secret holds:
 | Scalar | Value |
 |---|---|
 | `${{ expr }}`, the whole scalar | the expression's value, with its type: number, boolean, string, list, map or null |
-| text and expressions (`https://${{ host }}`, `${{ a }}${{ b }}`) | a string: the text, and each expression's value as text ([`str`](#str-and-first)) |
+| text and expressions (`https://${{ host }}`, `${{ a }}${{ b }}`) | a string: the text, and each expression's value as text ([`str`](04_functions.md#str-and-first)) |
 | `$${{` | a literal `${{` |
 | no `${{` | the scalar as YAML reads it ([YAML reading](#yaml-reading)) |
 
@@ -622,8 +622,8 @@ scalar without the closing `}}` fails with
 `unterminated ${{ in "<scalar>"`.
 
 Map keys are never evaluated: `${{ x }}: 1` is the key `${{ x }}`. Computed
-keys come from [`$for`](#for) (`$key`) or [`$merge`](#merge). A key
-starting with `$` is a [directive](#directives); `$$` writes one:
+keys come from [`$for`](03_control_flow.md#for) (`$key`) or [`$merge`](03_control_flow.md#merge). A key
+starting with `$` is a [directive](03_control_flow.md#places); `$$` writes one:
 `$$schema` is the key `$schema`.
 
 Every expression is compiled once, when the mapping is loaded, before any
@@ -743,191 +743,12 @@ or write a long expression as a `>-` block scalar.
 
 ## Directives
 
-| Directive | In | Value | Result |
-|---|---|---|---|
-| [`$if`](#if) | a map | a condition | the map is left out when the condition is not true |
-| [`$value`](#value) | a map | any node | the map is this value |
-| [`$for`](#for) with `$key`, `$value` | a map | `<name> in <expression>` | a map, one key per element |
-| [`$for`](#for) with `$each` | a list item | `<name> in <expression>` | items per element |
-| [`$let`](#let-1) | next to `$for` | a map of bindings | bindings per element |
-| [`$merge`](#merge) | a map | an expression returning a map | merged over the map's keys |
-| [`$spread`](#spread) | a list item | an expression returning a list | its items, spliced in |
-
-A map is evaluated in this order: `$if`; then `$for` (with `$key`,
-`$value`, `$let`); else `$value`; else each key in order, then `$merge`. A
-list item that is a map: `$for` (with `$each`, `$let`); else `$spread`;
-else the item is evaluated as a map. Directives nest: a `$for` in an
-`$each` sees the outer variable.
-
-A key starting with `$` is a directive. The directives of the whole
-document are checked when it is loaded, before any evaluation, in every
-branch, under a false `$if` or in a `$for` over no element too.
-Each must be one of its place, the place taking its form from `$for`,
-`$spread` or `$value`:
-
-| Place | Holds |
-|---|---|
-| a map | keys, `$if`, `$value`, `$for`, `$merge` |
-| a list item | keys, `$if`, `$value`, `$merge`, `$for`, `$spread` |
-| a map with `$for` | `$if`, `$for`, `$key` and `$value` (required), `$let` |
-| a map with `$value` | `$if`, `$value` |
-| a list item with `$for` | `$for`, `$each` (required), `$let` |
-| a list item with `$spread` | `$spread` |
-
-| Mistake | Error |
-|---|---|
-| an unknown directive (`$iff`, `$Each`) | `<where><key>: unknown directive (the key <key> is written $<key>)` |
-| a key out of its place | `<where><key>: not in <place>, which holds <keys>` |
-| `$for` without its keys | `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` |
-| `$if`, `$merge`, `$spread` not one expression | `<where>$if: takes one expression, ${{ <condition> }}, got <value>` (`<map>`, `<list>`) |
-
-A key starting with `$` is written with one more `$`, as `$${{` writes a
-literal `${{`: `$$schema: x` is the key `$schema`, `$$$x` the key `$$x`.
-
-### `$if`
-
-```yaml
-metrics:
-  $if: ${{ values.metrics.enabled }}      # output.metrics: the chart is not rendered
-  target: http://${{ release.name }}-app:8080/metrics
-env:
-  - $if: ${{ db.size() > 0 }}             # the item is left out
-    name: DB_DRIVER
-    value: ${{ db.driver }}
-labels:
-  tier: {$if: "${{ values.replicas > 1 }}", $value: ha}
-```
-
-The value is one expression, `${{ <condition> }}`, tested as a Helm
-condition: null, `false`, `0`, `""`, `[]` and `{}` are false, anything else
-is true. Anything else fails: a literal (`$if: false`, `no`, `0`, null) or
-text around an expression (`x${{ c }}`, always true), with
-`$if: takes one expression, ${{ <condition> }}, got <value>`.
-
-On a map, `$if` guards everything else (`$for`, `$value`, `$merge`, the
-keys). A map left out is:
-
-| As | Result |
-|---|---|
-| a map value | the key is left out |
-| a list item | the item is left out |
-| an `$each` | no item for this element |
-| a `$value` of a `$for` map | the key, with a null value |
-| a `let` or `$let` value | the binding is null |
-| a section (`output`, ...) | the section is empty |
-
-On a list item carrying `$for` or `$spread`, `$if` fails: put the
-condition in the expression (`$for: "s in (oidcOn ? [platform.oidcClientSecret] : [])"`,
-`$spread: ${{ cond ? list : [] }}`).
-
-### `$value`
-
-The map stands for the value of `$value`, which need not be a map:
-`{$if: cond, $value: x}` is a conditional scalar or list. The map holds
-`$if` and `$value` only: any other key, `$merge` included, fails. In a
-list, a `$value` list is one item, not spliced.
-
-### `$for`
-
-`$for: <name> in <expression>`: the text before the first ` in `, trimmed,
-is the variable; the rest is a CEL expression, written without `${{ }}`
-(`c in ${{ list }}` fails). Quote the scalar when the expression holds
-YAML characters: `$for: "k in ['a', 'b']"`. The expression must return a
-list, or null (no element). Errors:
-`$for: "<spec>" is not "<name> in <expression>"`, `$for "<spec>": not a list`
-(a map is not a list).
-
-For each element, in order, the scope is the enclosing one, the variable
-bound to the element, then the [`$let`](#let-1) bindings. The variable and
-the bindings shadow the context and `let`, and exist only inside the
-`$for`.
-
-In a map, `$key` and `$value` give one entry per element:
-
-```yaml
-dags:
-  gitSync:
-    $for: e in gitSync                    # a let binding: [{k, v}, ...]
-    $key: ${{ e.k }}
-    $value: ${{ e.v }}
-```
-
-`$key` is converted to text ([`str`](#str-and-first)); a later element with
-the same key wins. No element gives `{}`. The map holds `$if`, `$for`,
-`$key`, `$value` and `$let` only: any other key, `$merge` included, fails;
-without `$key` or `$value`: `$for: in a map, needs $key and $value`.
-
-In a list item, `$each` gives the items of each element:
-
-```yaml
-env:
-  - name: FIXED
-    value: "1"
-  - $for: "k in ['HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY'].filter(p, p in platform.proxyEnv)"
-    $each:                                # a list: spliced, two items per element
-      - {name: "${{ k }}", value: "${{ str(platform.proxyEnv[k]) }}"}
-      - {name: "${{ k.lowerAscii() }}", value: "${{ str(platform.proxyEnv[k]) }}"}
-```
-
-A list value of `$each` (a YAML list, or an expression returning a list) is
-spliced: its items are added; any other value is one item; a value left out
-by `$if` adds nothing. A list as one item is nested: `$each: [[a, b]]`.
-The item holds `$for`, `$each` and `$let` only: any other key, `$if`
-included, fails; without `$each`: `$for: in a list item, needs $each`.
-
-### `$let`
-
-```yaml
-pyspark:
-  - $for: name in pysparkNames
-    $let:
-      matches: ${{ sparkConnections.filter(c, c.?name.orValue('') == name) }}
-      c: "${{ matches.size() > 0 ? matches[matches.size() - 1] : {} }}"
-      prefix: ${{ name.replace('-', '_').upperAscii() }}
-    $each:
-      name: ${{ prefix }}
-      value: ${{ str(c.?properties.orValue('')) }}
-```
-
-With `$for` only: a map of bindings, evaluated for each element, in order,
-after the variable; each sees the enclosing scope, the variable and the
-bindings before it. Values are nodes (directives included; left out by
-`$if`, null). Names are taken as written, as in [let](#let): each once
-(`$let <name>: bound twice`), none starting with `$`. A `$let` without
-`$for` fails, and so does one that is neither a map nor null:
-`$let: must be a map of bindings, got <value>`. An error is reported as
-`$let <name>: <error>`.
-
-### `$merge`
-
-```yaml
-ingress:
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 64m
-    $merge: ${{ platform.ingressAnnotations }}  # the platform's annotations win
-spark-defaults:
-  $merge: ${{ values['spark-defaults'] }}
-```
-
-In a map, after its other keys are evaluated, the map the expression
-returns is merged over them, wherever `$merge` is written: maps merge key
-by key at any depth; lists, scalars and nulls replace (Helm's merge of `-f`
-files). `$merge` takes one expression: a literal YAML map fails. A value
-that is not a map (null included) merges nothing.
-
-### `$spread`
-
-```yaml
-objects:
-  - $spread: >-
-      ${{ okdpGeneratedSecret({'name': rootSecret, 'keys': [{'key': 'client_secret'}],
-          'stringData': {'client_id': 'root'}}) }}
-```
-
-A list item replaced by the items of the list the expression returns.
-`$spread` takes one expression: a literal YAML list fails. A value that is
-not a list (null included) adds nothing. The item holds `$spread` only: any
-other key, `$if` included, fails.
+Keys starting with `$` shape the structure: `$if` leaves a map or an item
+out, `$value` makes a map a value of any type, `$for` builds a map
+(`$key`, `$value`) or list items (`$each`) from a list, with `$let`
+bindings per element, `$merge` merges a computed map over a map's keys,
+`$spread` splices a computed list into a list. Their places, scope,
+evaluation and errors: [control flow](03_control_flow.md).
 
 ## Context
 
@@ -943,7 +764,7 @@ The variables of every expression:
 | `labels` | the labels of OKDP's objects, below, without component. |
 | `selectorLabels` | their selector labels, below, without component. |
 | `let` bindings | [let](#let), in order |
-| `$for` variables, `$let` bindings | inside their [`$for`](#for) |
+| `$for` variables, `$let` bindings | inside their [`$for`](03_control_flow.md#for) |
 
 A missing key is an evaluation error (`no such key: <key>`): test it with
 `has(values.x)`, or read it with `values.?x.orValue(<default>)`,
@@ -955,7 +776,7 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 | Variable | Value |
 |---|---|
 | `platform.oidc` | `global.okdp.oidc`, the settings of the platform schema that are not set (`null`, an empty `scope` or `clientProvisioning`) left out, its defaults applied: `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
-| `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](#oidcclientsecret). |
+| `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
 | `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 
@@ -966,7 +787,7 @@ schema first (`- at '/global/okdp/oidc': got boolean, want object`):
 kept, and reads as false.
 
 `labels` and `selectorLabels` (and the functions
-[`okdpLabels`, `okdpSelectorLabels`](#okdplabels-and-okdpselectorlabels)),
+[`okdpLabels`, `okdpSelectorLabels`](04_functions.md#okdplabels-and-okdpselectorlabels)),
 the labels of every object OKDP renders itself:
 
 | Label | Value | `selectorLabels` |
@@ -989,185 +810,11 @@ of the compile context, `oidcClientSecret` its `release` and
 
 ## Functions
 
-### CEL libraries
-
-Besides the CEL standard library (operators, `has`, `size`, `type`,
-`matches`, `contains`, `startsWith`, `endsWith`, conversions `int`,
-`double`, `string`, `bool`, `bytes`, `duration`, `timestamp`, macros `all`,
-`exists`, `exists_one`, `map`, `filter`), the environment enables these
-libraries of cel-go v0.32.0, each at a pinned version: a cel-go upgrade
-does not change what a mapping may call until the compiler raises a
-version.
-
-| Library | Version | Functions |
-|---|---|---|
-| strings (`ext.Strings`) | 5 | `charAt`, `indexOf`, `lastIndexOf`, `lowerAscii`, `upperAscii`, `replace`, `split`, `substring`, `trim`, `join`, `format` (a precision of 100 at most), `reverse`, `strings.quote` |
-| lists (`ext.Lists`) | 3 | `lists.range`, `slice`, `flatten`, `distinct`, `reverse`, `sort`, `sortBy` |
-| bindings (`ext.Bindings`) | 1 | `cel.bind(name, value, expr)` |
-| two-variable comprehensions (`ext.TwoVarComprehensions`) | 0 | `all(k, v, ...)`, `exists(k, v, ...)`, `existsOne`, `transformList`, `transformMap`, `transformMapEntry` |
-| encoders (`ext.Encoders`) | 1 | `base64.encode`, `base64.decode`, `json.encode` (compact, keys sorted; `toJson` is Helm's) |
-| optional types (`cel.OptionalTypes`) | 2 | `x.?field`, `m[?key]`, `l[?index]`, `orValue`, `hasValue`, `value`, `or`, `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `optFlatMap`, `l.first()` and `l.last()` (optionals: not the host function `first(list)`), optional entries `{?'k': opt}` |
-
-The math, sets and regex extensions are not enabled.
-
-### Host functions
-
-| Function | Returns | Helm equivalent |
-|---|---|---|
-| `str(x)` | string | printing `{{ x }}` |
-| `first(list)` | any | `a \| default b` |
-| `sha256(x)` | string | `sha256sum` |
-| `toJson(x)` | string | `toJson` |
-| `toPrettyJson(x)` | string | `toPrettyJson` |
-| `toYaml(x)` | string | `toYaml` |
-| `quote(x)` | string | `quote` |
-| `okdpFullname()`, `okdpFullname(suffix)` | string | `okdp.fullname` |
-| `okdpLabels(component)` | map | `okdp.labels`, without `helm.sh/chart` |
-| `okdpSelectorLabels(component)` | map | `okdp.selectorLabels` |
-| `okdpGeneratedSecret(args)` | list of objects | `okdp.generatedSecret` |
-| `oidcClientSecret(name)` | string | `okdp.oidc.clientSecret` (the main client) |
-
-Each takes one argument (`okdpFullname`: zero or one; `first`: a list) and
-is deterministic. A call matching none of these fails:
-`found no matching overload for '<function>' applied to '(<types>)'`.
-
-### `str` and `first`
-
-- `str(x)`: `x` as text, as Go templates print it: null is `""`, a string
-  itself, bytes their text, a number as a float64 ([Numbers](#numbers)),
-  `true`, a list `[a b]`, a map `map[k:v]`. Interpolation converts every
-  expression's value with it.
-- `first(list)`: the first element that is not empty (null, `false`, `0`,
-  `""`, `[]`, `{}`), else `""`. `first([x, d])` is Helm's `x | default d`.
-  The argument must be a list.
-
-### `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`
-
-| Function | Result |
-|---|---|
-| `sha256(x)` | hex SHA-256 of `str(x)`; bytes are hashed as they are, null as `""` (Helm hashes `<nil>`) |
-| `toJson(x)` | Go's `encoding/json`: compact, keys sorted, `<`, `>`, `&`, U+2028 and U+2029 escaped |
-| `toPrettyJson(x)` | the same, indented by two spaces |
-| `toYaml(x)` | sigs.k8s.io/yaml: keys sorted, YAML 1.1 quoting (`"yes"`, `"1.0"`), no final newline |
-| `quote(x)` | Go's `%q` of `str(x)` (bytes as they are): `"a\"b"`; null gives `""`, nothing rather than two quotes |
-
-An encoding that fails (a string `toYaml` cannot write) fails the compile:
-`toYaml: <error>` (Helm would print `""`).
-
-```yaml
-podAnnotations:
-  checksum/settings: ${{ sha256(toJson(settings)) }}   # restarts the pods on a change
-```
-
-### `okdpFullname`
-
-`okdpFullname(suffix)`: `<release>-<suffix>`, cut to 63 bytes, without a
-trailing `-`. `okdpFullname()` and `okdpFullname('')` give the release name
-alone, cut the same way. The suffix is converted with `str`. Named
-`okdpFullname`, not `fullname`, so that a mapping can bind its own
-`fullname`.
-
-### `okdpLabels` and `okdpSelectorLabels`
-
-`okdpLabels(component)`, `okdpSelectorLabels(component)`: the
-[labels](#context) of the context, with `app.kubernetes.io/component`
-set to `str(component)`, left out when it is `''`.
-
-### `okdpGeneratedSecret`
-
-The objects of a Secret whose random values External Secrets Operator
-generates in the cluster, as `okdp.generatedSecret` renders them, for
-`$spread` in [`objects`](#objects). The `provides[].secret` `generate` form
-uses it too.
-
-| Key of `args` | Type | Default | Meaning |
-|---|---|---|---|
-| `name` | string | required | name of the Secret, and of the ExternalSecret writing it |
-| `keys` | list | `[]` | the generated keys, below |
-| `stringData` | map of strings, numbers or booleans | `{}` | static keys, as text (`str`); a value containing `{{` is written as a template string literal |
-| `labels` | map of strings | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](#context) |
-| `annotations` | map of strings | `{}` | annotations of every object |
-| `type` | string | none | type of the Secret |
-| `namespace` | string | `release.namespace` | namespace of every object |
-| `refreshInterval` | string | `"0"` | refresh interval of the ExternalSecret, a duration (`1h`): `"0"` generates once |
-| `apiVersion` | string | `external-secrets.io/v1` | apiVersion of the ExternalSecret |
-
-| Key of `keys[]` | Type | Default | Meaning |
-|---|---|---|---|
-| `key` | string | required | the Secret's key |
-| `length` | whole number >= 0 | `32` | length of the generated value |
-| `digits` | whole number >= 0 | `6` | number of digits; `0` when given as `0` |
-| `symbols` | whole number >= 0 | `0` | number of symbols |
-| `noUpper` | `true` or `false` | `false` | no upper-case letters |
-| `transform` | string | none | `sha256` (the key holds the value's `sha256sum`) or `b64enc` |
-
-An empty value (null, `""`, `0`, `false`) takes the default, as Helm's
-`default` does, except `digits`. `length`, `digits`, `symbols` and
-`noUpper` are checked as `okdp.generatedSecret` prints them into the
-Password: a string that prints a value of the type is taken
-(`length: '32'` is `32`, `noUpper: 'true'` is `true`), another value
-fails (`length: long`, `symbols: -1`, `noUpper: 1`, `digits: null`, which
-Helm prints as null).
-
-Every argument and key field is checked for its type when set, a null
-argument being not set: a value of another type fails rather than reads
-as empty or is printed (a `stringData` value null, a list or a map, which
-Helm prints as `<nil>` or as Go does), and so does an argument or a key
-field the function does not know, unless null: a typo would otherwise be
-ignored (`lenght`). The arguments are checked first, then each key in
-order; the first error is reported.
-
-It returns one `generators.external-secrets.io/v1alpha1` `Password` per
-key, in order, then the `ExternalSecret`. A Password is named
-`<name>-<key>`, the key lower-cased with `_` and `.` as `-`; a name longer
-than 63 characters is cut to 54, without a trailing `-`, and suffixed with
-`-` and 8 hex characters of the key's SHA-256. Passwords carry
-[`labels`](#context). The Secret's data are the `stringData` keys, then each
-generated key; a generated key replaces a `stringData` key of the same name.
-
-Errors (`<arg>`: `name`, `type`, `namespace`, `refreshInterval` or
-`apiVersion`; `<map>`: `labels` or `annotations`; `<number>`: `length`,
-`digits` or `symbols`; `<j>`: the key's position in `keys`):
-
-```text
-okdp.generatedSecret: must be a map of arguments (name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion), got <value>
-okdp.generatedSecret: unknown key(s) <names> (allowed: name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion)
-okdp.generatedSecret: name is required
-okdp.generatedSecret: <arg> must be a string, got <value>
-okdp.generatedSecret: keys must be a list, got <value>
-okdp.generatedSecret: stringData must be a map of strings, numbers or booleans, got <value>
-okdp.generatedSecret: stringData "<key>" must be a string, a number or a boolean, got <value>
-okdp.generatedSecret: <map> must be a map of strings, got <value>
-okdp.generatedSecret: <map> "<key>" must be a string, got <value>
-okdp.generatedSecret: keys[<j>]: must be a map (key, length, digits, symbols, noUpper, transform), got <value>
-okdp.generatedSecret: keys[<j>]: unknown key(s) <names> (allowed: key, length, digits, symbols, noUpper, transform)
-okdp.generatedSecret: keys[<j>]: key must be a string, got <value>
-okdp.generatedSecret: keys[<j>]: <number> must be a whole number >= 0, got <value>
-okdp.generatedSecret: keys[<j>]: noUpper must be true or false, got <value>
-okdp.generatedSecret: every key needs a name
-okdp.generatedSecret: <name>: keys "<a>" and "<b>" give the same generator name "<n>"
-okdp.generatedSecret: unknown transform "<t>" (supported: sha256, b64enc)
-```
-
-### `oidcClientSecret`
-
-`oidcClientSecret(name)`: the name of the Secret holding the OAuth client
-`name` of [`oidcClients`](#oidcclients), `''` (or null) for the main client;
-`name` is converted with `str`. In `dcr` mode (`platform.oidc.dcr.enabled`),
-the Secret its oidc-dcr Job writes, `<release>-<namespace>[-<name>]-dcr`;
-otherwise, the Secret the platform provides, `creds-<release>-oauth2[-<name>]`
-([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)).
-`oidcClientSecret('')` is `platform.oidcClientSecret`.
-
-```yaml
-env:
-  - name: CONSOLE_CLIENT_ID
-    valueFrom: {secretKeyRef: {name: "${{ oidcClientSecret('console') }}", key: client_id}}
-```
-
-It depends on the mode and the name only: it does not check that `name` is
-a client of `oidcClients`, and does not know a client's `secret`. It is
-available in every expression, `let` and `errors` included.
+Besides CEL's standard library, an expression calls the CEL libraries the
+language enables, each at a pinned version, and the host functions: `str`,
+`first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`,
+`okdpFullname`, `okdpLabels`, `okdpSelectorLabels`, `okdpGeneratedSecret`,
+`oidcClientSecret`: [functions](04_functions.md).
 
 ## Errors
 
@@ -1187,7 +834,7 @@ errors:
 ```
 
 `errors` is a list, evaluated after `let`, before the other sections, as
-any list ([directives](#directives)): `$if` leaves an item out, `$for` and
+any list ([control flow](03_control_flow.md)): `$if` leaves an item out, `$for` and
 `$spread` give several. Each value it gives is:
 
 - a rule, `{message: <text>}`: its message. A rule is written with its
@@ -1262,15 +909,15 @@ Other errors of the mapping:
 | `line <n>: <key> is written before the merge key << that replaces it: write it after <<`, `line <n>: the merge key << takes a map, or a list of maps` | a merge key ([YAML reading](#yaml-reading)) |
 | `line <n>: not a finite number: <scalar> (quote it for the text)` | `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
 | `<key>: unknown section (allowed: let, errors, output, instance, provides, objects, oidcClients)`, `<key>: not a directive of the top level: its keys are sections`, `let: must be a map of bindings, got <value>`, `errors: must be a list of rules, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
-| `let <name>: bound twice`, `let <name>: a binding name cannot start with $` (`$let` likewise) | a [`let`](#let) or [`$let`](#let-1) name |
-| `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>` | a directive ([directives](#directives)) |
+| `let <name>: bound twice`, `let <name>: a binding name cannot start with $` (`$let` likewise) | a [`let`](#let) or [`$let`](03_control_flow.md#let) name |
+| `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>` | a directive ([errors](03_control_flow.md#errors)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
-| `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](#for) |
+| `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](03_control_flow.md#for) |
 | `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |
 | `instance: url: must be a string, got <value>`, `instance: usage: must be a string, got <value>` | an [`instance`](#instance) key that is not a string |
 | `objects: must be a list of objects, got <value>`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
 | `<object>: <other> is the same object, <kind> "<name>" in namespace "<namespace>": give each object its own name` | two of OKDP's own objects, the descriptor, the credentials Secrets and [`objects`](#objects), of one API group, kind, namespace and name ([objects section](01_inputs_outputs.md#objects-section)) |
-| `<where>${{ <expression> }}: okdp.generatedSecret: <message>` | an argument of [`okdpGeneratedSecret`](#okdpgeneratedsecret) missing, unknown or of another type |
+| `<where>${{ <expression> }}: okdp.generatedSecret: <message>` | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
 | `output: <key>: must be a map of the chart's values, got <value>` | a chart of [`output`](#output) whose values are a scalar or a list |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
 | `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
@@ -1284,7 +931,7 @@ Other errors of the mapping:
 | `<client>: redirectUris must be a list of non-empty strings, got <value>`, `<client>: redirectUris[<j>] must be a non-empty string, got <value>`, `<client>: <key> must be a string, got <value>`, `<client>: public must be true or false, got <value>`, `<client>: request must be a map, got <value>` | a key of another type (`<key>`: `scope`, `clientName`, `secret`, `caSecret`; `<j>`: the position of the item in the list) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
 | `<client>: <other> has the same objects' name, "<fullname>", once cut to 63 characters: shorten the client names` | two names that differ only past the 63 characters of `<release>-<name>-oidc-dcr` ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) |
-| `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](#oidcclientsecret)'s |
+| `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
 | `service.yaml: charts.<chart>: the chart of <client> is added by the compiler: remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
 | `<client>: oidc-dcr values: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 

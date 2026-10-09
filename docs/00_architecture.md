@@ -739,7 +739,7 @@ mistakes a document is refused for when loaded, in the branches no
 evaluation takes too (`TestMistakes`: directives, unknown sections,
 expressions that do not compile), the cost limit and cancellation of a
 session over compiled programs (`TestSession`); and the CEL libraries table of the
-[service definition](specs/02_service_definition.md#cel-libraries), each
+[functions spec](specs/04_functions.md#cel-libraries), each
 library at the version `pinnedLibraries` enables (`TestLibraryVersions`):
 a version is raised with the docs. `internal/chart/spec_test.go` covers the
 source checks
@@ -980,7 +980,7 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   `fullname`). A function reproducing a Helm or sprig one gets a
   `generate.sh` case and a `TestHelm*` comparison, its Go code in
   `helmfn`; every function
-  gets an entry in [Functions](specs/02_service_definition.md#functions).
+  gets an entry in [Functions](specs/04_functions.md).
 - **Platform context.** A new setting of `global.okdp` the compiler reads
   is a property of `internal/okdp/platform.schema.json`: its type, its
   default, its meaning in its `description`, checked and defaulted with the

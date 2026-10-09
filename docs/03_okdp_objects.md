@@ -35,7 +35,7 @@ other ([objects section](specs/01_inputs_outputs.md#objects-section)).
 The `objects` section carries real weight: on 2026-10-12, 15 of the 24
 packages of the `okdp-compiler` branches of platform-charts and
 sandbox-dependencies use it. Most of it is Secrets
-([`okdpGeneratedSecret`](specs/02_service_definition.md#okdpgeneratedsecret)
+([`okdpGeneratedSecret`](specs/04_functions.md#okdpgeneratedsecret)
 11 times, plain Secrets 14 times); the rest is ServiceAccounts, Roles, Jobs,
 ConfigMaps, SecretStores, ValidatingAdmissionPolicies, and even Deployments
 and Services.
