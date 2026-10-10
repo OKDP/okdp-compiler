@@ -356,8 +356,8 @@ compiler reproduces, knows none of them.
 | | `descriptor.go` | stage 7 | `connections.go` (the compile's contracts, the resolver), `secrets.go`, `labels.go` |
 | | `objects.go` | stage 8: the `okdp` chart (`ObjectsChart`, `objectsChart`); the compiler's own charts (`ownChart`), their keys checked once and their charts added to those of `service.yaml` (`addOwnCharts`, stage 9), the `okdp` key refused by `Service.Check` with the same message; the platform's charts, of the form the platform schema checks, the `objects` chart required, each checked as a source (`platformCharts`) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | | `load.go` | `LoadDefinition`: `service.yaml`, decoded strictly (`decodeService`) and checked, and `values.cel.yaml` | `Service.Check` |
-| | `output.go` | what a compile is written as, file name -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it, its files chosen by `Output` as the flags choose them; the umbrella (`-o`), `okdp.dependencies.yaml` (`--mkdag`); `IsOutputFile`, a file `Write` gives with any `Output` | `okdp.Result` |
-| | `umbrella.go` | the instance as one chart (`umbrella`, `-o`): `Chart.yaml` over the upstream charts of the index, named and versioned after `Result.Service` and `Result.Version`, and `instance.values.yaml` | `okdp.Result`; `chart.IsVersion` |
+| | `output.go` | what a compile is written as, file name -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it, its files chosen by `Output` as the flags choose them; the umbrella (`-o`), `okdp.dependencies.yaml` (`--mkdag`); `IsOutputFile`, a file `Write` gives with any `Output` | `Result` |
+| | `umbrella.go` | the instance as one chart (`umbrella`, `-o`): `Chart.yaml` over the upstream charts of the index, named and versioned after `Result.Service` and `Result.Version`, and `instance.values.yaml` | `Result`; `chart.IsVersion` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `helmfn` reproduces Helm's and
@@ -366,7 +366,7 @@ place (`internal/compile/functions.go` binds the functions to CEL,
 `secrets.go` reproduces okdp-lib-chart's generated Secrets
 with them); `internal/chart/cache.go` reads the chart cache;
 `internal/chart/merge.go` applies the rules of `service.yaml`'s charts;
-`okdp` implements OKDP's rules, `oidc-dcr.cel.yaml` the values of the
+`compiler` implements OKDP's rules, `oidc-dcr.cel.yaml` the values of the
 oidc-dcr chart, and `pipeline.go` orders the stages. Each rule
 is computed in one place and reused: the labels of the context, of
 `okdpLabels` and of the descriptor; one generated Secret for the CEL
