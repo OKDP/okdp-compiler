@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,7 +30,7 @@ func TestMain(m *testing.M) {
 }
 
 // example: the options that compile the example instance into dir, as its
-// output-no-dcr/helm-cmd/ (-o dir --mkinstall).
+// output-no-dcr/ (-o dir).
 func example(dir string) options {
 	return options{
 		pkg:       filepath.Join(input, "service"),
@@ -41,9 +40,7 @@ func example(dir string) options {
 		values:    multi{filepath.Join(input, "config.yaml")},
 		release:   "demo-webapp",
 		namespace: "demo",
-		indent:    2,
 		output:    dir,
-		mkinstall: true,
 	}
 }
 
@@ -86,71 +83,33 @@ func TestParse(t *testing.T) {
 	}
 }
 
-// TestVersionOf: the version --version prints, by how the binary was built.
-func TestVersionOf(t *testing.T) {
-	const module = "github.com/okdp/okdp-compiler"
-	// built: the build info of okdp-compile, built in module m, with deps.
-	built := func(m debug.Module, deps ...*debug.Module) *debug.BuildInfo {
-		return &debug.BuildInfo{Path: module + "/cmd/okdp-compile", Main: m, Deps: deps}
-	}
-	at := func(v string) debug.Module { return debug.Module{Path: module, Version: v} }
-	// another: a main module whose path is a prefix of the package's.
-	another := debug.Module{Path: "github.com/okdp", Version: "(devel)"}
-	for name, tc := range map[string]struct {
-		set  string
-		info *debug.BuildInfo
-		want string
-	}{
-		"set at build time":      {"1.2.3", built(at("v0.1.0")), "1.2.3"},
-		"go install @v0.1.0":     {"", built(at("v0.1.0")), "0.1.0"},
-		"go build in a checkout": {"", built(at("v0.1.1-0.20261012192101-1872c2523100+dirty")), "0.1.1-0.20261012192101-1872c2523100+dirty"},
-		"no VCS information":     {"", built(at("(devel)")), "dev"},
-		"no build info":          {"", nil, "dev"},
-		"go tool in another module": {"", built(another,
-			&debug.Module{Path: "cel.dev/cel-go", Version: "v0.32.0"},
-			&debug.Module{Path: module, Version: "v0.2.0"}), "0.2.0"},
-		"replaced by a directory": {"", built(another,
-			&debug.Module{Path: module, Version: "v0.2.0", Replace: &debug.Module{Path: "../okdp-compiler"}}), "dev"},
-	} {
-		if got := versionOf(tc.set, tc.info); got != tc.want {
-			t.Errorf("%s: got %q, want %q", name, got, tc.want)
-		}
-	}
-}
-
 // TestRun: the example compiled into directories, one per output, the
 // first holding the files of a previous compile: they hold what the
 // example's outputs hold, a file no longer written removed
-// (okdp.dependencies.yaml, without --mkdag, among them), install.sh executable. A compile with
-// --mkdag writes okdp.dependencies.yaml, one without --mkinstall removes
-// install.sh, and one with --umbrella in the same directory removes the
-// values files of the other mode, --mkdag and --mkinstall (the umbrella's
-// script) writing beside the umbrella too.
+// (okdp.dependencies.yaml, without --mkdag). A compile with --mkdag writes
+// okdp.dependencies.yaml.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
-	helmCmd := filepath.Join(dir, "output-no-dcr", "helm-cmd")
-	if err := os.MkdirAll(helmCmd, 0o755); err != nil {
+	noDcr := filepath.Join(dir, "output-no-dcr")
+	if err := os.MkdirAll(noDcr, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app.values.yaml", "oidc-dcr.values.yaml", "okdp.dependencies.yaml", "install.sh"} {
-		if err := os.WriteFile(filepath.Join(helmCmd, name), []byte("stale: true\n"), 0o644); err != nil {
+	for _, name := range []string{"instance.values.yaml", "okdp.dependencies.yaml"} {
+		if err := os.WriteFile(filepath.Join(noDcr, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, c := range []struct {
-		output        string
-		dcr, umbrella bool
+		output string
+		dcr    bool
 	}{
-		{"output-no-dcr/helm-cmd", false, false},
-		{"output-no-dcr/umbrella-chart", false, true},
-		{"output-dcr/helm-cmd", true, false},
-		{"output-dcr/umbrella-chart", true, true},
+		{"output-no-dcr", false},
+		{"output-dcr", true},
 	} {
-		o := example(filepath.Join(dir, filepath.FromSlash(c.output)))
+		o := example(filepath.Join(dir, c.output))
 		if c.dcr {
 			o.platform = append(o.platform, filepath.Join(input, "platform-dcr.yaml"))
 		}
-		o.umbrella = c.umbrella
 		if err := run(o); err != nil {
 			t.Fatalf("%s: %v", c.output, err)
 		}
@@ -160,36 +119,14 @@ func TestRun(t *testing.T) {
 	if got := tree(t, dir); !maps.Equal(got, want) {
 		t.Errorf("got %v, want the example's outputs: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
-	for _, d := range []string{"output-no-dcr/helm-cmd", "output-no-dcr/umbrella-chart", "output-dcr/helm-cmd", "output-dcr/umbrella-chart"} {
-		path := filepath.Join(dir, filepath.FromSlash(d), "install.sh")
-		if info, err := os.Stat(path); err != nil {
-			t.Error(err)
-		} else if info.Mode().Perm() != 0o755 {
-			t.Errorf("%s: mode %v, want 0755", path, info.Mode().Perm())
-		}
-	}
-	o := example(helmCmd)
-	o.mkinstall, o.mkdag = false, true
+	o := example(noDcr)
+	o.mkdag = true
 	if err := run(o); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(helmCmd, "install.sh")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("without --mkinstall: got %v, want install.sh removed", err)
 	}
 	const deps = "- instance: demo-db\n  contract: database\n  field: database\n"
-	if b, err := os.ReadFile(filepath.Join(helmCmd, "okdp.dependencies.yaml")); err != nil || string(b) != deps {
+	if b, err := os.ReadFile(filepath.Join(noDcr, "okdp.dependencies.yaml")); err != nil || string(b) != deps {
 		t.Errorf("--mkdag: got %v %q, want %q", err, b, deps)
-	}
-	o.umbrella, o.mkinstall = true, true
-	if err := run(o); err != nil {
-		t.Fatal(err)
-	}
-	got := tree(t, helmCmd)
-	if names, want := slices.Sorted(maps.Keys(got)), []string{"Chart.yaml", "install.sh", "instance.values.yaml", "okdp.dependencies.yaml"}; !slices.Equal(names, want) {
-		t.Errorf("--umbrella --mkinstall --mkdag in the directory of the values files: got %v, want %v", names, want)
-	}
-	if !strings.Contains(got["install.sh"], `helm upgrade --install demo-webapp "$chart"`) {
-		t.Errorf("--umbrella --mkinstall: not the umbrella's script: %s", got["install.sh"])
 	}
 }
 
@@ -209,23 +146,21 @@ func TestRunErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pkg, "service.yaml"), svc, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	missing := filepath.Join(input, "nothing")
-	notDir := filepath.Join(input, "platform.yaml")
 	protected := filepath.Join("..", "..", "testdata", "protected-upstream.yaml")
 	for name, tc := range map[string]struct {
 		set   func(o *options)
 		files []string // created first under the output directory; a directory when ending with /
 		want  string
 	}{
-		"no release":   {func(o *options) { o.release = "" }, nil, "--release is required"},
-		"no namespace": {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
-		"no output":    {func(o *options) { o.output = "" }, nil, "--output (-o) is required"},
-		"no contracts": {func(o *options) { o.contracts = missing }, nil, "--contracts: stat " + missing + ": no such file or directory"},
-		"not a dir":    {func(o *options) { o.charts = notDir }, nil, "--charts " + notDir + ": not a directory"},
-		"a compile":    {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
-		"an umbrella":  {func(o *options) { o.pkg, o.umbrella = pkg, true }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
-		"another file": {nil, []string{"notes.txt"}, "notes.txt is not an output of okdp-compile"},
-		"a directory":  {nil, []string{"app.values.yaml/"}, "app.values.yaml is not an output of okdp-compile"},
+		"no release":            {func(o *options) { o.release = "" }, nil, "--release is required"},
+		"no namespace":          {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
+		"no output":             {func(o *options) { o.output = "" }, nil, "--output (-o) is required"},
+		"a compile":             {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
+		"an umbrella":           {func(o *options) { o.pkg = pkg }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
+		"another file":          {nil, []string{"notes.txt"}, "notes.txt is not an output of okdp-compile"},
+		"a chart's values file": {nil, []string{"app.values.yaml"}, "app.values.yaml is not an output of okdp-compile"},
+		"an install script":     {nil, []string{"install.sh"}, "install.sh is not an output of okdp-compile"},
+		"a directory":           {nil, []string{"instance.values.yaml/"}, "instance.values.yaml is not an output of okdp-compile"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

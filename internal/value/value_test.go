@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,7 +15,7 @@ func TestNormalize(t *testing.T) {
 	type labels map[string]string
 	n, three := 7, int8(3)
 	for name, tc := range map[string]struct{ in, want any }{
-		"map[any]any":      {map[any]any{"a": 1, 2: []any{int64(3), uint64(4), float32(0.5)}, true: map[string]any{"b": "x"}, 1.5: nil}, M{"a": 1.0, "2": []any{3.0, 4.0, 0.5}, "true": M{"b": "x"}, "1.5": nil}},
+		"map[any]any":      {map[any]any{"a": 1, 2: []any{int64(3), uint64(4), float32(0.5)}}, M{"a": 1.0, "2": []any{3.0, 4.0, 0.5}}},
 		"typed maps":       {M{"conn": map[string]string{"host": "h"}, "env": map[string][]string{"A": {"x"}}, "labels": labels{"tier": "ha"}}, M{"conn": M{"host": "h"}, "env": M{"A": []any{"x"}}, "labels": M{"tier": "ha"}}},
 		"lists":            {M{"tags": []string{"a", "b"}, "ports": [2]uint16{80, 443}, "deep": [][]int{{1}}}, M{"tags": []any{"a", "b"}, "ports": []any{80.0, 443.0}, "deep": []any{[]any{1.0}}}},
 		"numbers":          {[]any{three, uint32(4), int64(1)<<53 + 1, float32(0.1), json.Number("1e3")}, []any{3.0, 4.0, 9007199254740992.0, 0.1, 1000.0}},
@@ -43,7 +44,8 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-// TestNormalizeErrors: what values cannot hold fails, at its path.
+// TestNormalizeErrors: what values cannot hold fails, at its JSON pointer,
+// in one wording.
 func TestNormalizeErrors(t *testing.T) {
 	cycle := M{}
 	cycle["self"] = []any{cycle}
@@ -51,30 +53,25 @@ func TestNormalizeErrors(t *testing.T) {
 		in   any
 		want string
 	}{
-		{M{"hook": func() {}}, "hook: a func() cannot be a value"},
-		{M{"a.b": []any{1, make(chan int)}}, `["a.b"][1]: a chan int cannot be a value`},
-		{M{"c": complex(1, 2)}, "c: a complex128 cannot be a value"},
-		{M{"x": M{"y": math.NaN()}}, "x.y: not a finite number: NaN"},
-		{M{"x": float32(math.Inf(1))}, "x: not a finite number: +Inf"},
-		{M{"n": json.Number("1e400")}, "n: not a finite number: +Inf"},
-		{M{"n": json.Number("one")}, `n: json.Number "one" is not a number`},
-		{M{"s": "\xff"}, `s: a string that is not UTF-8: "\xff"`},
-		{M{"m": map[string]int{"\xff": 1}}, `m: a map key that is not UTF-8: "\xff"`},
-		{M{"m": map[any]any{nil: 1}}, "m: a map key must be a string, a number or a boolean, got null"},
-		{M{"m": map[[2]int]int{{1, 2}: 1}}, "m: a map key must be a string, a number or a boolean, got [2]int"},
-		{M{"m": map[any]any{1: "a", "1": "b"}}, `m: two keys read as "1"`},
-		{M{"s": struct{ F func() }{}}, "s: json: unsupported type: func()"},
-		{cycle, "self[0]: the value contains itself"},
-		{func() {}, "a func() cannot be a value"},
+		{M{"b": func() {}, "a": make(chan int)}, `json: cannot marshal from Go chan int within "/a"`},
+		{M{"hooks": []any{1, func() {}}}, `json: cannot marshal from Go func() within "/hooks/1"`},
+		{M{"x": M{"y": math.NaN()}}, `json: cannot marshal from Go float64 within "/x/y": unsupported value: NaN`},
+		{M{"n": json.Number("1e400")}, `json: cannot unmarshal JSON number 1e400 into Go float64 within "/n": value out of range`},
+		{M{"s": "\xff"}, `jsontext: invalid UTF-8 within "/s" after offset 5`},
+		{M{"m": map[any]any{true: "a"}}, `json: cannot marshal from Go interface {}: object member name must be a string within "/m" after offset 6`},
+		{M{"m": map[any]any{1: "a", "1": "b"}}, `jsontext: duplicate object member name "1" within "/m"`},
 	} {
 		if _, err := Normalize(tc.in); err == nil || err.Error() != tc.want {
 			t.Errorf("got %v, want %s", err, tc.want)
 		}
 	}
+	if _, err := Normalize(cycle); err == nil || !strings.HasSuffix(err.Error(), "encountered a cycle") {
+		t.Errorf("a cycle: got %v", err)
+	}
 }
 
 // TestPath: plain keys joined by dots, a key that is empty or holds a
-// special character in brackets, escaped, an item [i]: the form chart's
+// special character in brackets, as it is, an item [i]: the form chart's
 // parsePath reads back (FuzzFormatPath).
 func TestPath(t *testing.T) {
 	for _, tc := range []struct{ got, want string }{
@@ -83,7 +80,7 @@ func TestPath(t *testing.T) {
 		{Key("a", "nginx.io/auth-type"), `a["nginx.io/auth-type"]`},
 		{Key("", "a.b"), `["a.b"]`},
 		{Key("a", ""), `a[""]`},
-		{Key("a", `q"b\c*[]`), `a["q\"b\\c\*[]"]`},
+		{Key("a", `q"b\c*[]`), `a["q"b\c*[]"]`},
 		{Key("env[1]", "name"), "env[1].name"},
 		{Index("env", 2), "env[2]"},
 		{Index(`["a.b"]`, 0), `["a.b"][0]`},

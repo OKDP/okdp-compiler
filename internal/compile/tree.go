@@ -148,23 +148,26 @@ func (m plainMap) eval(s *Session, scope M) (any, bool, error) {
 	return out, true, nil
 }
 
-// ifNode: a map with $if: left out when its condition is not true (as Helm
-// tests a condition), else the map in its form (plain, $for or $value).
+// ifNode: a map with $if: the map in its form (plain, $for or $value) when
+// its condition is true (as Helm tests a condition); else its $else (a map
+// with $value), or left out without one.
 type ifNode struct {
-	cond *expr
-	then node
+	cond      *expr
+	then, els node // els nil: no $else
 }
 
-// eval: the condition, then the map.
+// eval: the condition, then the branch it takes.
 func (n ifNode) eval(s *Session, scope M) (any, bool, error) {
 	c, err := s.run(n.cond, scope)
-	if err != nil {
+	switch {
+	case err != nil:
 		return nil, false, err
+	case value.Truthy(c):
+		return n.then.eval(s, scope)
+	case n.els != nil:
+		return n.els.eval(s, scope)
 	}
-	if !value.Truthy(c) {
-		return nil, false, nil
-	}
-	return n.then.eval(s, scope)
+	return nil, false, nil
 }
 
 // loop: a $for: its variable, the list it runs over (the expression after
@@ -459,8 +462,11 @@ func (b builder) compile(src string, names []string) (*expr, error) {
 }
 
 // plainMap: a map of keys at the place p (a map, a list item): its keys
-// built in order, with $if and $merge.
+// built in order, with $if and $merge; an $else, which needs $value, fails.
 func (b builder) plainMap(m *omap, p *place, names []string) (node, error) {
+	if has(m, "$else") {
+		return nil, elseNeeds()
+	}
 	if err := p.check(m); err != nil {
 		return nil, err
 	}
@@ -487,10 +493,14 @@ func (b builder) plainMap(m *omap, p *place, names []string) (node, error) {
 	return guard(cond, out), nil
 }
 
-// valueMap: a map with $value: the node of $value, with $if.
+// valueMap: a map with $value: the node of $value, with $if, and the node
+// of $else, its value when the condition is not true.
 func (b builder) valueMap(m *omap, names []string) (node, error) {
 	if err := inValueMap.check(m); err != nil {
 		return nil, err
+	}
+	if has(m, "$else") && !has(m, "$if") {
+		return nil, elseNeeds()
 	}
 	cond, err := b.cond(m, names)
 	if err != nil {
@@ -500,7 +510,19 @@ func (b builder) valueMap(m *omap, names []string) (node, error) {
 	if err != nil {
 		return nil, under("$value", err)
 	}
-	return guard(cond, n), nil
+	if !has(m, "$else") {
+		return guard(cond, n), nil
+	}
+	els, err := b.node(m.get("$else"), names)
+	if err != nil {
+		return nil, under("$else", err)
+	}
+	return ifNode{cond, n, els}, nil
+}
+
+// elseNeeds: the error of an $else without $if and $value beside it.
+func elseNeeds() error {
+	return atKey("$else", fmt.Errorf("needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}"))
 }
 
 // forMap: a map with $for: its $key and $value built in the scope of an
@@ -596,7 +618,7 @@ func guard(cond *expr, n node) node {
 	if cond == nil {
 		return n
 	}
-	return ifNode{cond, n}
+	return ifNode{cond: cond, then: n}
 }
 
 // directive: the value of the directive d of m ($if, $merge, $spread),
@@ -611,8 +633,9 @@ func (b builder) directive(m *omap, d, what string, names []string) (*expr, erro
 }
 
 // bindings: a let or $let map (kind), built: its names as written, each
-// once, none starting with $; each value built with the names before it in
-// scope. Null has none. The names in scope after them are returned too.
+// once (y and "y" are two keys, one name), none starting with $; each value
+// built with the names before it in scope. Null has none. The names in
+// scope after them are returned too.
 func (b builder) bindings(kind string, v any, names []string) (bindings, []string, error) {
 	if v == nil {
 		return nil, names, nil
@@ -663,16 +686,16 @@ type place struct {
 // The places of a map: a plain map or list item, or one with $for,
 // $value, $spread.
 var (
-	inMap      = &place{"a map", true, []string{"$if", "$merge"}, "keys, $if, $value, $for (with $key, $value, $let) and $merge"}
-	inItem     = &place{"a list item", true, []string{"$if", "$merge"}, "keys, $if, $value, $merge, $for (with $each, $let) and $spread"}
+	inMap      = &place{"a map", true, []string{"$if", "$merge"}, "keys, $if, $value (with $else), $for (with $key, $value, $let) and $merge"}
+	inItem     = &place{"a list item", true, []string{"$if", "$merge"}, "keys, $if, $value (with $else), $merge, $for (with $each, $let) and $spread"}
 	inForMap   = &place{"a map with $for", false, []string{"$if", "$for", "$key", "$value", "$let"}, "$if, $for, $key, $value and $let only"}
-	inValueMap = &place{"a map with $value", false, []string{"$if", "$value"}, "$if and $value only"}
+	inValueMap = &place{"a map with $value", false, []string{"$if", "$value", "$else"}, "$if, $value and $else only"}
 	inForItem  = &place{"a list item with $for", false, []string{"$for", "$each", "$let"}, "$for, $each and $let only"}
 	inSpread   = &place{"a list item with $spread", false, []string{"$spread"}, "$spread only"}
 )
 
 // directives: every directive of the language.
-var directives = []string{"$if", "$value", "$for", "$key", "$let", "$each", "$merge", "$spread"}
+var directives = []string{"$if", "$value", "$else", "$for", "$key", "$let", "$each", "$merge", "$spread"}
 
 // check: every key of m is one p holds: a directive of p, or a key when p
 // holds keys; another key starting with $ fails, named unknown when it is

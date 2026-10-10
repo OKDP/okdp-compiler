@@ -6,6 +6,8 @@
 package value
 
 import (
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -22,19 +24,24 @@ var YAML11Bools = map[string]bool{
 }
 
 // Normalize: v, a value a caller built in memory, as Helm values are after
-// their JSON round trip, in a copy (normalize.go). At any depth: a map, of
-// any type, is an M, a number or a boolean key printed as Helm reads a YAML
-// key (1, true); a slice or an array is a []any; every number is a
-// float64; a pointer or an interface is what it points to (null when nil);
-// a nil map or slice is empty. A struct, a json.Marshaler or an
-// encoding.TextMarshaler (time.Time, json.RawMessage), a []byte (base64)
-// and a json.Number are what encoding/json writes. What values cannot hold
-// fails, its path named (Key, Index: env[1], annotations["a.b/c"]): a
-// func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a
-// key of another type, two keys that read as the same, a value that
-// contains itself.
+// their JSON round trip, in a copy: written by encoding/json/v2, map keys
+// sorted, and read back. At any depth a map is an M, a slice or an array a
+// []any, every number a float64, a nil map or slice empty. What values
+// cannot hold fails, its path named as a JSON pointer: a func, a chan, a
+// complex, a NaN or an infinity, text that is not UTF-8, a key that is not
+// text or a number (a map[any]any's), two keys that read as the same, a
+// value that contains itself.
 func Normalize(v any) (any, error) {
-	return normalizer{}.value(v, "")
+	b, err := json.Marshal(v, json.Deterministic(true))
+	var out any
+	if err == nil {
+		err = json.Unmarshal(b, &out)
+	}
+	if err != nil {
+		// One wording: json/v2 picks "cannot" or "unable to" per process.
+		return nil, errors.New(strings.Replace(err.Error(), "json: unable to ", "json: cannot ", 1))
+	}
+	return out, nil
 }
 
 // Copy: a copy of v that shares no map or list with it.

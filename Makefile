@@ -36,11 +36,11 @@ tidy: ## Tidy go.mod and tools/go.mod
 	go -C tools mod tidy
 
 example: ## Rewrite the outputs of examples/ from the current compiler
-	go test ./internal/fsio -run '^TestExample$$' -update
+	go test . -run '^TestExample$$' -update
 
 fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
 	go test ./internal/chart -run '^TestHelmValues$$' -update
-	go test ./internal/fsio -run '^TestHelmUmbrella$$' -update
+	go test . -run '^TestHelmUmbrella$$' -update
 	UMBRELLA_HELMS="$(UMBRELLA_HELMS)" testdata/helm/generate.sh
 
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.

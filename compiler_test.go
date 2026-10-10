@@ -1,6 +1,7 @@
 package compiler_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"reflect"
@@ -66,7 +67,7 @@ func TestConcurrentCompile(t *testing.T) {
 	before := snapshot()
 	want := make([]*compiler.Result, len(inputs))
 	for i, in := range inputs {
-		res, err := compiler.Compile(def, in)
+		res, err := compiler.Compile(context.Background(), def, in)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +77,7 @@ func TestConcurrentCompile(t *testing.T) {
 	errs := make([]error, len(got))
 	var wg sync.WaitGroup
 	for i := range got {
-		wg.Go(func() { got[i], errs[i] = compiler.Compile(def, inputs[i%len(inputs)]) })
+		wg.Go(func() { got[i], errs[i] = compiler.Compile(context.Background(), def, inputs[i%len(inputs)]) })
 	}
 	wg.Wait()
 	for i, res := range got {

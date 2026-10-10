@@ -10,14 +10,27 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// Dir: testdata/helm, at the repository root, from a package of internal,
-// where its tests run.
-var Dir = filepath.Join("..", "..", "testdata", "helm")
+// Dir: testdata/helm, at the repository root, from the package whose tests
+// run: the root or one of internal.
+var Dir = func() string {
+	_, file, _, _ := runtime.Caller(0)
+	dir, _ := filepath.Rel(must(os.Getwd()), filepath.Join(filepath.Dir(file), "..", "..", "testdata", "helm"))
+	return dir
+}()
+
+// must: v, or a panic on err.
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
 
 // JSON: a JSON file written by generate.sh.
 func JSON(t *testing.T, path string) any {

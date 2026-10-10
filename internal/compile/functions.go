@@ -6,6 +6,8 @@
 package compile
 
 import (
+	"fmt"
+
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
@@ -14,22 +16,32 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// Text: a CEL value as text, as Helm's sprig functions take it: value.Str
-// of its data (Native), bytes as they are.
-func Text(v ref.Val) string {
-	return value.Str(Native(v))
+// Unary: the binding of a host function of one argument: f of the argument
+// as data (toData), its result converted back to CEL. An argument without
+// a data form, or f's error, fails the expression.
+func Unary(f func(any) (any, error)) cel.OverloadOpt {
+	return cel.UnaryBinding(func(v ref.Val) ref.Val {
+		d, err := toData(v)
+		if err == nil {
+			d, err = f(d)
+		}
+		if err != nil {
+			return types.WrapErr(err)
+		}
+		return types.DefaultTypeAdapter.NativeToValue(d)
+	})
 }
 
 // encoder: a CEL function of one value returning the text f computes; f's
 // error fails the expression (Helm would print "").
 func encoder(name string, f func(any) (string, error)) cel.EnvOption {
 	return cel.Function(name, cel.Overload(name+"_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-		cel.UnaryBinding(func(v ref.Val) ref.Val {
-			s, err := f(Native(v))
+		Unary(func(v any) (any, error) {
+			s, err := f(v)
 			if err != nil {
-				return types.NewErr("%s: %s", name, err.Error())
+				return nil, fmt.Errorf("%s: %w", name, err)
 			}
-			return types.String(s)
+			return s, nil
 		})))
 }
 
@@ -38,16 +50,16 @@ func encoder(name string, f func(any) (string, error)) cel.EnvOption {
 func hostFunctions() []cel.EnvOption {
 	return []cel.EnvOption{
 		cel.Function("sha256", cel.Overload("sha256_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(helmfn.Sha256Sum(Text(v))) }))),
+			Unary(func(v any) (any, error) { return helmfn.Sha256Sum(value.Str(v)), nil }))),
 		encoder("toJson", helmfn.ToJSON),
 		encoder("toPrettyJson", helmfn.ToPrettyJSON),
 		encoder("toYaml", helmfn.ToYAML),
 		cel.Function("quote", cel.Overload("quote_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				if _, ok := v.(types.Null); ok {
-					return types.String("")
+			Unary(func(v any) (any, error) {
+				if v == nil {
+					return "", nil
 				}
-				return types.String(helmfn.Quote(Text(v)))
+				return helmfn.Quote(value.Str(v)), nil
 			}))),
 	}
 }

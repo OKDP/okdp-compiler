@@ -102,13 +102,13 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 Each takes one argument (`okdpFullname`: zero or one; `first`: a list).
 `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml` and `quote`
 belong to the language (`internal/compile`); the `okdp` functions and
-`oidcClientSecret` to OKDP (`internal/okdp`), which adds them to the
+`oidcClientSecret` to OKDP (the root package, `compiler`), which adds them to the
 compile's session.
 
 ### `str` and `first`
 
 - `str(x)`: `x` as text, as Go templates print it: null is `""`, a string
-  itself, bytes their text, a number as a float64 ([numbers](02_service_definition.md#numbers)),
+  itself, bytes their base64, a number as a float64 ([numbers](02_service_definition.md#numbers)),
   `true`, a list `[a b]`, a map `map[k:v]`. Interpolation converts every
   expression's value with it. Unlike sprig's `toString`, null is `""`, not
   `<nil>`.
@@ -121,11 +121,11 @@ compile's session.
 
 | Function | Result |
 |---|---|
-| `sha256(x)` | hex SHA-256 of `str(x)`; bytes are hashed as they are, null as `""` (Helm hashes `<nil>`) |
+| `sha256(x)` | hex SHA-256 of `str(x)`; null is hashed as `""` (Helm hashes `<nil>`) |
 | `toJson(x)` | Go's `encoding/json`: compact, keys sorted, `<`, `>`, `&`, U+2028 and U+2029 escaped |
 | `toPrettyJson(x)` | the same, indented by two spaces |
 | `toYaml(x)` | sigs.k8s.io/yaml: keys sorted, YAML 1.1 quoting (`"yes"`, `"1.0"`), no final newline |
-| `quote(x)` | Go's `%q` of `str(x)` (bytes as they are): `"a\"b"`; null gives `""`, nothing rather than two quotes |
+| `quote(x)` | Go's `%q` of `str(x)`: `"a\"b"`; null gives `""`, nothing rather than two quotes |
 
 An encoding that fails (a string `toYaml` cannot write) fails the compile:
 `toYaml: <error>` (Helm would print `""`).
@@ -185,20 +185,17 @@ generates in the cluster, for
 | `transform` | string | none | `sha256` (the key holds the value's `sha256sum`) or `b64enc` |
 
 An empty value (null, `""`, `0`, `false`) takes the default, as Helm's
-`default` does, except `digits`. `length`, `digits`, `symbols` and
-`noUpper` are checked as `okdp.generatedSecret` prints them into the
-Password: a string that prints a value of the type is taken
-(`length: '32'` is `32`, `noUpper: 'true'` is `true`), another value
-fails (`length: long`, `symbols: -1`, `noUpper: 1`, `digits: null`, which
-Helm prints as null).
+`default` does, except a `digits` of `0`.
 
-Every argument and key field is checked for its type when set, a null
-argument being not set: a value of another type fails rather than reads
-as empty or is printed (a `stringData` value null, a list or a map, which
-Helm prints as `<nil>` or as Go does), and so does an argument or a key
-field the function does not know, unless null: a typo would otherwise be
-ignored (`lenght`). The arguments are checked first, then each key in
-order; the first error is reported.
+Every argument and key field is checked for its type when set, against
+the mapping schema (`okdpGeneratedSecret`, and `generatedKey` for a key:
+[sections](02_service_definition.md#evaluation-order)), a null one being not set: a value of
+another type fails rather than reads as empty or is printed (a
+`stringData` value that is a list or a map, which Helm prints as Go does;
+`length: '32'` or `noUpper: 'true'`, text where Helm would print the
+number or the boolean), and so does an argument or a key field the
+function does not know: a typo would otherwise be ignored (`lenght`).
+Every violation is reported at once.
 
 It returns one `generators.external-secrets.io/v1alpha1` `Password` per
 key, in order, then the `ExternalSecret`. A Password is named
@@ -209,28 +206,15 @@ than 63 characters is cut to 54, without a trailing `-`, and suffixed with
 `stringData` keys, then each generated key; a generated key replaces a
 `stringData` key of the same name.
 
-Errors (`<arg>`: `name`, `type`, `namespace`, `refreshInterval` or
-`apiVersion`; `<map>`: `labels` or `annotations`; `<number>`: `length`,
-`digits` or `symbols`; `<j>`: the key's position in `keys`):
+Errors, the schema's then two keys of one generator name:
 
 ```text
-okdp.generatedSecret: must be a map of arguments (name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion), got <value>
-okdp.generatedSecret: unknown key(s) <names> (allowed: name, keys, stringData, labels, annotations, type, namespace, refreshInterval, apiVersion)
-okdp.generatedSecret: name is required
-okdp.generatedSecret: <arg> must be a string, got <value>
-okdp.generatedSecret: keys must be a list, got <value>
-okdp.generatedSecret: stringData must be a map of strings, numbers or booleans, got <value>
-okdp.generatedSecret: stringData "<key>" must be a string, a number or a boolean, got <value>
-okdp.generatedSecret: <map> must be a map of strings, got <value>
-okdp.generatedSecret: <map> "<key>" must be a string, got <value>
-okdp.generatedSecret: keys[<j>]: must be a map (key, length, digits, symbols, noUpper, transform), got <value>
-okdp.generatedSecret: keys[<j>]: unknown key(s) <names> (allowed: key, length, digits, symbols, noUpper, transform)
-okdp.generatedSecret: keys[<j>]: key must be a string, got <value>
-okdp.generatedSecret: keys[<j>]: <number> must be a whole number >= 0, got <value>
-okdp.generatedSecret: keys[<j>]: noUpper must be true or false, got <value>
-okdp.generatedSecret: every key needs a name
+okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
+- at '/okdpGeneratedSecret': missing property 'name'
+- at '/okdpGeneratedSecret/keys': validation failed
+  - at '/okdpGeneratedSecret/keys/0': additional properties 'lenght' not allowed
+  - at '/okdpGeneratedSecret/keys/1/transform': value must be one of '', 'sha256', 'b64enc'
 okdpGeneratedSecret: <name>: keys "<a>" and "<b>" give the same generator name "<n>"
-okdp.generatedSecret: unknown transform "<t>" (supported: sha256, b64enc)
 ```
 
 ### `oidcClientSecret`

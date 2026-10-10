@@ -9,10 +9,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
-	"maps"
-	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -52,15 +48,12 @@ func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 
 // ParseSchema: the values schema b, read from the file name, decoded once
 // (jsonschema.UnmarshalJSON: the validator keeps the numbers as written,
-// Doc reads them as float64) and compiled once, its root with the schema of
-// the property of each default (compileSchemas). The defaults are as a
-// values file holds them: the default of each property reached from the
-// root through properties alone, at its path (that of
-// properties.a.properties.b at a.b). A default anywhere else fails, named
-// by its JSON pointer: at the root or under another keyword, where whether
-// it applies would depend on the values; under a property that has a
-// default, where the two would compete; or one that does not meet its
-// property's schema.
+// Doc reads them as float64) and compiled once (CompileSchema). The
+// defaults are as a values file holds them: the default of each property
+// reached from the root through properties alone, at its path (that of
+// properties.a.properties.b at a.b), the outermost on a path. A default
+// anywhere else is not read; one that does not meet its schema fails the
+// check of the values that keep it (Values).
 func ParseSchema(name string, b []byte) (*Schema, error) {
 	sdoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
 	if err != nil {
@@ -70,39 +63,20 @@ func ParseSchema(name string, b []byte) (*Schema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	w := defaultsWalk{name: name}
-	defaults, err := w.schema(doc, "", false, true)
-	if err != nil {
-		return nil, err
-	}
-	props := make([]string, len(w.ptrs))
-	for i, p := range w.ptrs {
-		props[i] = strings.TrimSuffix(p, "/default")
-	}
-	schemas, err := compileSchemas(schemaURL, sdoc, props...)
+	root, err := CompileSchema(schemaURL, sdoc)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	// Each default against the schema of its property.
-	for i, p := range w.ptrs {
-		v, err := validate(name, schemas[i+1], w.values[i])
-		if err != nil {
-			return nil, err
-		}
-		if v != "" {
-			return nil, fmt.Errorf("%s#%s: the default does not meet its property's schema:\n%s", name, p, v)
-		}
-	}
-	return &Schema{Doc: value.AsMap(doc), name: name, root: schemas[0], defaults: defaults}, nil
+	return &Schema{Doc: value.AsMap(doc), name: name, root: root, defaults: schemaDefaults(doc)}, nil
 }
 
 // Values: user coalesced over the defaults of s, as Helm coalesces values
 // over a chart's values.yaml, then checked against s, as Helm checks a
 // chart's values.schema.json: the values, and their violations, one line
-// each with its path (validate), "" when they hold. user is not changed.
+// each with its path (Validate), "" when they hold. user is not changed.
 func (s *Schema) Values(user M) (M, string, error) {
 	values := coalesceValues(s.defaults, user)
-	v, err := validate(s.name, s.root, values)
+	v, err := Validate(s.name, s.root, values)
 	if err != nil {
 		return nil, "", err
 	}
@@ -128,87 +102,16 @@ func Parameters(schema *Schema, name string, layers []map[string]any) (M, error)
 	return values, nil
 }
 
-// The keywords whose value is a schema or a list of schemas, and those
-// whose value maps names to schemas (drafts 7 to 2020-12), properties
-// apart: what applies under them depends on the values, so no default
-// does.
-var (
-	subschemaKeywords = []string{"additionalItems", "additionalProperties", "allOf", "anyOf", "contains", "contentSchema", "else", "if", "items", "not", "oneOf", "prefixItems", "propertyNames", "then", "unevaluatedItems", "unevaluatedProperties"}
-	schemaMapKeywords = []string{"$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties"}
-)
-
-// defaultsWalk: the defaults of a schema file (ParseSchema), and
-// the JSON pointer of each, in the order found.
-type defaultsWalk struct {
-	name   string
-	ptrs   []string
-	values []any
-}
-
-// schema: the defaults under the schema s, at the JSON pointer ptr: those
-// of its properties when reach (s is the root, or a property reached from
-// it through properties). own: s is such a property, and its parent reads
-// its default.
-func (w *defaultsWalk) schema(s any, ptr string, own, reach bool) (M, error) {
-	m, ok := s.(M)
-	if !ok {
-		return M{}, nil // a boolean schema
-	}
-	if _, ok := m["default"]; ok && !own {
-		return nil, fmt.Errorf("%s#%s/default: a default applies only to a property reached from the root through properties", w.name, ptr)
-	}
+// schemaDefaults: the defaults of the properties of the schema s, at
+// their path (ParseSchema).
+func schemaDefaults(s any) M {
 	out := M{}
-	for _, k := range slices.Sorted(maps.Keys(m)) {
-		at := ptr + "/" + escapeToken(k)
-		switch v := m[k]; {
-		case k == "properties":
-			props := value.AsMap(v)
-			for _, p := range slices.Sorted(maps.Keys(props)) {
-				pat := at + "/" + escapeToken(p)
-				n := len(w.ptrs)
-				sub, err := w.schema(props[p], pat, reach, reach)
-				if err != nil {
-					return nil, err
-				}
-				d, has := value.AsMap(props[p])["default"]
-				switch {
-				case has && len(w.ptrs) > n:
-					return nil, fmt.Errorf("%s#%s/default: a property under it has a default too (#%s): keep one", w.name, pat, w.ptrs[n])
-				case has:
-					w.ptrs = append(w.ptrs, pat+"/default")
-					w.values = append(w.values, d)
-					out[p] = d
-				case len(sub) > 0:
-					out[p] = sub
-				}
-			}
-		case slices.Contains(subschemaKeywords, k):
-			l, isList := v.([]any)
-			if !isList {
-				l = []any{v}
-			}
-			for i, e := range l {
-				eat := at
-				if isList {
-					eat += "/" + strconv.Itoa(i)
-				}
-				if _, err := w.schema(e, eat, false, false); err != nil {
-					return nil, err
-				}
-			}
-		case slices.Contains(schemaMapKeywords, k):
-			named := value.AsMap(v)
-			for _, n := range slices.Sorted(maps.Keys(named)) {
-				if _, err := w.schema(named[n], at+"/"+escapeToken(n), false, false); err != nil {
-					return nil, err
-				}
-			}
+	for k, p := range value.AsMap(value.AsMap(s)["properties"]) {
+		if d, ok := value.AsMap(p)["default"]; ok {
+			out[k] = d
+		} else if sub := schemaDefaults(p); len(sub) > 0 {
+			out[k] = sub
 		}
 	}
-	return out, nil
-}
-
-// escapeToken: k as a token of a JSON pointer (~ as ~0, / as ~1).
-func escapeToken(k string) string {
-	return strings.NewReplacer("~", "~0", "/", "~1").Replace(k)
+	return out
 }

@@ -28,10 +28,6 @@ item of `.Values.objects` as a manifest. Every compile adds the chart key
 - the mapping's [`objects`](specs/02_service_definition.md#objects)
   section.
 
-No two of them may be one object of the cluster (the same API group, kind,
-namespace and name): the compile fails rather than let one replace the
-other ([objects section](specs/01_inputs_outputs.md#objects-section)).
-
 The `objects` section carries real weight: on 2026-10-12, 15 of the 24
 packages of the `okdp-compiler` branches of platform-charts and
 sandbox-dependencies use it. Most of it is Secrets

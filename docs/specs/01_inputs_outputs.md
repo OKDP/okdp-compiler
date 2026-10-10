@@ -105,38 +105,26 @@ files, and the values layers read by `compiler.ParseValues` (the binary's
 from such files. Values built in memory and given in `Inputs.Platform`,
 `Inputs.Project` or `Inputs.Values` are read as the values they would be once written to a
 file and read back, at any depth, whatever their Go types
-(`value.Normalize`):
-
-- A map of any type is a map: `map[string]string`, `map[string][]string`,
-  a named map type, `map[any]any`. Its keys are strings: a number or a
-  boolean is printed as Helm reads a YAML key (`map[any]any{1: x}` and
-  `map[int]string{1: x}` have the key `"1"`), an `encoding.TextMarshaler`
-  is its text.
-- A slice or an array is a list (`[]string`, `[2]int`); a `[]byte` is its
-  base64 text, as `encoding/json` writes it.
-- Every number is a float64, of any integer or float type (a `float32` as
-  its shortest decimal: `float32(0.1)` is `0.1`); an integer past 2^53
-  rounds, as Helm reads it. A `json.Number` is a number.
-- A pointer or an interface is what it points to, `null` when nil; a nil
-  map or slice is empty, not `null`.
-- A struct, a `json.Marshaler` or an `encoding.TextMarshaler`
-  (`time.Time`, `json.RawMessage`) is what `encoding/json` writes: a struct
-  by its `json` tags.
+(`value.Normalize`): written by `encoding/json/v2`, map keys sorted, and
+read back. A map of any type is a map, its keys strings
+(`map[int]string{1: x}` has the key `"1"`); a slice or an array is a list;
+every number is a float64 (an integer past 2^53 rounds, as Helm reads it);
+a nil map or slice is empty, not `null`; a struct, a `[]byte` or a
+`time.Time` is what `encoding/json/v2` writes.
 
 What a values file cannot hold fails the compile, before the parameters
 are computed, with the layer (`platform layer <n>`, `project layer <n>`,
 `values layer <n>`: the n-th of `Inputs.Platform`, of `Inputs.Project`, of
-`Inputs.Values`) and the path of the value, written as in
-[protect](#protect) errors (a key that holds a dot in brackets, a list item
-`[<i>]`): a func, a chan, a complex, a NaN or an infinity, a string or a
-key that is not UTF-8, a key of another type (`null`, a struct), two keys
-that read as the same (`1` and `"1"`), a map, slice or pointer that
-contains itself:
+`Inputs.Values`) and the error of `encoding/json/v2`, the value's path a
+JSON pointer: a func, a chan, a complex, a NaN or an infinity, a string or
+a key that is not UTF-8, a key that is not text or a number (a boolean or
+`null` key of a `map[any]any`), two keys that read as the same (`1` and
+`"1"`), a value that contains itself:
 
 ```
-values layer 2: hooks[0]: a func() cannot be a value
-platform layer 1: global.proxy["no.proxy"]: not a finite number: NaN
-values layer 1: labels: two keys read as "1"
+values layer 2: json: cannot marshal from Go func() within "/hooks/0"
+platform layer 1: json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN
+values layer 1: jsontext: duplicate object member name "1" within "/labels"
 ```
 
 JSON files (`config.schema.json` of the package, `values.schema.json` of the upstream charts,
@@ -176,15 +164,15 @@ archive's top-level directory, not those of its subcharts
 defaults, one without `values.schema.json` no
 [schema check](#schema-check-of-the-final-values).
 
-An archive is read as Helm's loader reads one (`LoadArchiveFiles`, the
-same in Helm 3.19, 4.2 and 4.3): an entry's name is split on `\` when it
-has one (an archive written on Windows), on `/` otherwise, and its first
-segment, the chart's directory, dropped. An entry at the archive's root, an
-absolute path, a path out of the chart (`..`) or a Windows drive (`C:/`)
-fails in Helm's words, in any entry, read or not. A chart is capped at 100
-MiB decompressed: an archive counts every file and fails at the cap, as
-Helm does; an unpacked chart counts the two files read and fails over the
-cap, as Helm 4.3 counts all of its files. Helm 4.2 and 3.19, which the
+An archive is read for these two files, regular files named as Helm's
+loader names them (`LoadArchiveFiles`, the same in Helm 3.19, 4.2 and
+4.3): an entry's name is split on `/` and `\` (an archive written on
+Windows), and its first segment, the chart's directory, dropped. Nothing
+else is checked: an entry Helm refuses (at the archive's root, an absolute
+path, `..`, a Windows drive) is skipped, and the deployer's Helm refuses
+the chart. An archive is capped at 100 MiB, its tar stream decompressed,
+headers included, and fails past the cap; an unpacked chart, a local
+directory, is read without a cap. Helm 4.2 and 3.19, which the
 deployers embed
 ([GitOps](../01_usage.md#gitops)), also refuse a file over 5 MiB; Helm 4.3
 no longer does, nor does the compiler: such a chart compiles, and fails to
@@ -207,9 +195,7 @@ app: chart app-1.8.0 is not in the chart cache: mkdir -p <chart cache>/charts.ex
 oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: mkdir -p <chart cache>/quay.io/adaltas && helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -d <chart cache>/quay.io/adaltas
 app: charts.example.org/app-1.8.0/values.yaml: cannot unmarshal yaml document: ...
 app: charts.example.org/app-1.8.0.tgz: gzip: invalid header
-app: charts.example.org/app-1.8.0.tgz: chart illegally references parent directory
-app: charts.example.org/app-1.8.0.tgz: decompressed chart is larger than the maximum size 104857600
-app: charts.example.org/app-1.8.0/values.yaml: chart exceeds maximum decompressed size of 104857600 bytes
+app: charts.example.org/app-1.8.0.tgz: unexpected EOF (a chart is at most 104857600 bytes decompressed)
 ```
 
 ## Parameters
@@ -248,24 +234,18 @@ override it, and the key it declares an instance may set ([Platform values](#pla
 read, nor `x-ui-condition`: unlike a [contract's](#completion), a
 parameter's default holds whatever the other values.
 
-Each compile fails on a `default` that is not a parameter's, named by its
-JSON pointer:
+A `default` anywhere else is not read:
 
 - at the root, or under any other keyword (`allOf`, `anyOf`, `oneOf`, `if`,
   `then`, `else`, `not`, `items`, `prefixItems`, `additionalProperties`,
   `patternProperties`, `$defs`, `definitions`, ...): whether it applies
   would depend on the values;
-- under a property that has a `default`: the two would compete;
-- one its property's schema rejects, compiled as for the [schema
-  check](#schema-check), its violations printed as the schema check prints
-  them.
+- under a property that has a `default`: the outermost gives the whole
+  value.
 
-```
-config.schema.json#/allOf/0/properties/a/default: a default applies only to a property reached from the root through properties
-config.schema.json#/properties/a/default: a property under it has a default too (#/properties/a/properties/b/default): keep one
-config.schema.json#/properties/replicas/default: the default does not meet its property's schema:
-- at '': minimum: got 0, want 1
-```
+A default is checked with the values it ends up in: one its property's
+schema rejects fails the [schema check](#schema-check) of an instance that
+does not override it.
 
 ### Layers and nulls
 
@@ -472,7 +452,7 @@ internal naming convention, then a name that is not a release name, for an
 internal one), the fields of an external connection in alphabetical order,
 the `required` fields: every field not set, one line each, in alphabetical
 order; then the contract's types for an external connection: every
-violation, one line each, sorted by field then message ([Checks](#checks));
+violation, one line each, sorted by path ([Checks](#checks));
 last, `{{` in the connection, the first one found by path (keys sorted,
 items in order). The same parameters give the same report from one compile
 to the next:
@@ -480,8 +460,9 @@ to the next:
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
 replicas[1]: connection "store" has contract "s3", "database" is expected
-replicas[2] (connection "pg"): field "engine" violates the database contract: value must be one of 'postgresql', 'mysql'
-replicas[2] (connection "pg"): field "port" violates the database contract: got string, want integer
+replicas[2] (connection "pg"): the fields violate the database contract:
+- at '/engine': value must be one of 'postgresql', 'mysql'
+- at '/port': got string, want integer
 replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most
 ```
 
@@ -496,7 +477,7 @@ replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letter
 | internal, no `x-okdp-internal` | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | |
 | internal, not a release name | `<path>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
-| external, a value the contract's schema refuses | `<path> (connection "<name>"): field "<field>" violates the <contract> contract: <violation>`; `... the fields violate the <contract> contract: <violation>` for a keyword on the whole connection | `connection-types.yaml` |
+| external, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `connection-types.yaml` |
 | `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
 
 `testdata/no-secret-ref.yaml` (`database connection "shared-db" has no
@@ -609,21 +590,16 @@ validated as a chart's values against its `values.schema.json`
 ([Schema check](#schema-check): draft, formats, `$ref`), every keyword but
 `x-*` applying (`type`, `enum`, `pattern`, `minimum`, `items`,
 `additionalProperties`...). The secret fields, never in the values, are
-left out of the top-level `required`. Every violation is reported, one line
-each, sorted by field (a path in the values, as the parameter path of the
-[connection errors](#connection-errors): `port`, `catalogs[1]`) then
-message:
+left out of the top-level `required`. Every violation is reported with its
+path in the values, sorted by path, as those of the parameters:
 
 ```
-<where>: field "<field>" violates the <contract> contract: <violation>
-<where>: the fields violate the <contract> contract: <violation>
+<where>: the fields violate the <contract> contract:
+- at '/port': got string, want integer
 ```
 
 `<where>`: `<path> (connection "<name>")` for a connection,
-`provides "<name>" (<contract>)` for an output; the second form for a
-keyword on the values as a whole (`minProperties`). The keywords under a
-`$ref` or an `allOf` are reported each; a failed `anyOf` or `oneOf` is one
-violation, without its alternatives.
+`provides "<name>" (<contract>)` for an output.
 
 ## Platform values
 
@@ -772,7 +748,7 @@ global.okdp.ingress.className is required. It is a platform value: set it in the
 
 The settings of `global.okdp` the compiler reads are described by the
 platform schema the compiler embeds,
-[`internal/okdp/platform.schema.json`](../../internal/okdp/platform.schema.json):
+[`platform.schema.json`](../../platform.schema.json):
 their types, their defaults and, in its `description`s, what each means.
 It is the platform authors' reference; an editor can check a platform
 values file against it.
@@ -822,7 +798,7 @@ compiler adds itself, each a source as in `service.yaml`
 
 | Key | Renders |
 |---|---|
-| `objects` | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document); required, unless the compile leaves the okdp chart out (`compiler.WithoutObjectsChart`) |
+| `objects` | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document); required |
 | `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` when unset (`compiler.DcrSource()`) |
 
 Their form is checked with the other [settings the compiler
@@ -1018,7 +994,7 @@ it. The value given must be a list; a `null` is refused too:
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in
 `examples/02_advanced/input/config.yaml`
-(`examples/02_advanced/output-no-dcr/helm-cmd/app.values.yaml`).
+(`app` of `examples/02_advanced/output-no-dcr/instance.values.yaml`).
 
 ### Upstream errors
 
@@ -1135,10 +1111,9 @@ with the chart key (`app: charts.example.org/app-1.8.0/values.schema.json: ...`)
 |---|---|---|
 | `Values` | `map[string]map[string]any` | chart key -> its final values ([Merge precedence](#merge-precedence)) |
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
-| `ClientCharts` | `[]string` | the keys of the [OAuth client charts](#oauth-client-charts) (`dcr` mode), sorted; none in another mode. `install.sh` installs them before the others, their Job writing the Secret the others read ([`--mkinstall`](../01_usage.md#--mkinstall)); for a `Result` built without them, every chart in key order |
-| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); no two of them one object of the cluster |
+| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section) |
 | `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
-| `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those `install.sh` installs under |
+| `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `service.yaml`, those of the [umbrella chart](#umbrella-chart) |
 
 `Values` and `Charts` have one entry per compiled chart: a chart the
@@ -1149,29 +1124,13 @@ name -> content, as its flags choose them in `compiler.Output`:
 [command line](../01_usage.md#command-line), and the
 [umbrella chart](#umbrella-chart); `examples/02_advanced/` holds those of
 the example ([Example](#example)). `compiler.IsOutputFile(name)` tells
-them, in any mode.
+them, with any `Output`.
 
 The keys of a compile are the chart keys of `service.yaml`, DNS labels
 ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
-(`okdp`, the OAuth client charts). `Write` names files and dependency
-aliases after them: for a `Result` built otherwise, a key Helm does not
-accept as an alias (letters, digits, `-`, `_`) fails, in every mode,
-`chart "<key>": a key of the result names a file (<key>.values.yaml) and an umbrella dependency alias: letters, digits, - and _`.
-
-Each `<key>.values.yaml` names, on the line after the one that
-marks it generated, the upstream chart that renders it ([Chart
-index](#chart-index)), as Helm takes it: the words between `helm template
-<release>` and `-f <key>.values.yaml`, shell-quoted unless plain.
-
-```yaml
-# Code generated by okdp-compile. DO NOT EDIT.
-# Chart: app --repo https://charts.example.org --version 1.8.0
-```
-
-A key without its entry in `Result.Charts` fails, `chart "<key>": not in
-Result.Charts, the upstream chart that renders its values`, in every mode;
-without `--umbrella`, so does an entry with a control character, which
-would end the comment.
+(`okdp`, the OAuth client charts). `Write` names the umbrella's dependency
+aliases after them. It takes a `Result` as `Compile` returns it: its keys,
+charts, release and namespace are not checked again.
 
 ### Chart index
 
@@ -1214,11 +1173,10 @@ okdp:
 ```
 
 Everything else is keyed by the key
-([sources](02_service_definition.md#sources)). The binary installs each
-chart from it with `<output>/install.sh`
-([`--mkinstall`](../01_usage.md#--mkinstall)), and lists them in the
-umbrella's `Chart.yaml` ([umbrella chart](#umbrella-chart)); rendering
-with it: [rendering with Helm](../01_usage.md#rendering-with-helm).
+([sources](02_service_definition.md#sources)). The umbrella's
+`Chart.yaml` lists them as its dependencies ([umbrella
+chart](#umbrella-chart)); rendering with it:
+[rendering with Helm](../01_usage.md#rendering-with-helm).
 
 ### OAuth client charts
 
@@ -1242,8 +1200,7 @@ the clients are checked all the same.
 The objects' name, `<release>-<chart key>` cut to 63 characters without a
 trailing `-` (as `okdpFullname`), is set as `fullnameOverride`,
 `security.serviceAccount` and `security.role`; a client name has at most
-54 characters, its chart key a DNS-1123 label, and two clients whose
-objects' names are the same once cut are refused, in every mode. In `dcr`
+54 characters, its chart key a DNS-1123 label. In `dcr`
 mode a client's `secret` replaces the Secret name, which
 [`oidcClientSecret`](04_functions.md#oidcclientsecret) does not
 follow, and two clients may not write one Secret
@@ -1252,10 +1209,8 @@ follow, and two clients may not write one Secret
 A client chart has no `service.yaml` entry, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
 and no instance upstream values ([merge precedence](#merge-precedence)).
-`Result.ClientCharts` lists the client charts' keys: a key of
-`service.yaml` that ends in `-oidc-dcr` is not one.
 
-The computed values are not Go code: `internal/okdp/oidc-dcr.cel.yaml`, a
+The computed values are not Go code: `oidc-dcr.cel.yaml`, a
 template in the mapping language embedded in the compiler, computes them
 for each client from the client (its keys, checked, `null` keys left out),
 its names (the chart key, the objects' name, the Secret) and the mapping's
@@ -1276,17 +1231,17 @@ The client keys, their types and defaults:
 chart's defaults: its default `mapping.keyMapping` entries stay, so the
 Secret also holds `registration_client_uri` and `registration_access_token`
 of the registration response (oidc-dcr 0.5.0). The example's final values
-in `dcr` mode (`examples/02_advanced/output-dcr/helm-cmd/`), with the
+in `dcr` mode (`examples/02_advanced/output-dcr/instance.values.yaml`), with the
 platform's settings above (`examples/02_advanced/input/platform-dcr.yaml`,
 after `platform.yaml`) and oidc-dcr 0.5.0 in the chart cache, trimmed:
 
 ```yaml
-# app.values.yaml
+# app
 env:
   - name: OIDC_CLIENT_ID
     valueFrom: {secretKeyRef: {key: client_id, name: demo-webapp-demo-dcr}}   # platform.oidcClientSecret
   ...
-# oidc-dcr.values.yaml
+# oidc-dcr
 backoffLimit: 6                        # default of the settings
 commonLabels: {app.kubernetes.io/instance: demo-webapp}
 enabled: true                          # upstream default
@@ -1346,8 +1301,10 @@ from `name` of `service.yaml` and the release.
 | `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
 | `values` | `values` of the item, [completed](#completion) against the contract |
 
-Every item is checked for its shape, then against its contract, in the
-order of `provides`, the fields of its `values` and of the contract's
+Every item is checked for its shape first, with the mapping's other
+sections, every violation at once
+([provides](02_service_definition.md#provides)). Then each is checked
+against its contract, in the order of `provides`, the fields of its `values` and of the contract's
 `x-okdp-internal` convention in alphabetical order. The first error is
 reported, as for an expression of the mapping: `provides` is the package's
 to fix, not the instance's, and the error is the same from one compile to
@@ -1357,17 +1314,14 @@ of that item, all at once, one line each ([Checks](#checks)). `<out>`:
 
 | Case | Error |
 |---|---|
-| an item that is not a map | `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>` |
-| `values`, `secretRef` or `secret` set, not a map | `provides[<i>]: values must be a map, got <value>` ([provides](02_service_definition.md#provides)) |
-| the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `provides[<i>]: secret: generate must be a list, got <value>`, `provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` ([secret](02_service_definition.md#secret)) |
+| an item that is not a map, without a `contract`; its `values`, `secretRef` or `secret` set, not a map; a `secretRef` that is set without a `name`, or whose `name` is not a non-empty string; the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '/provides/<i>/values': got array, want object`, `- at '/provides/<i>/secretRef': missing property 'name'`, one line per violation ([provides](02_service_definition.md#provides)) |
 | no `<contract>.schema.json` | `<out>: unknown contract` |
 | `<contract>.schema.json` that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<out>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
 | a secret field | `<out>: "<key>" is a secret field, put it in the credentials Secret` |
 | required field not set | `<out>: field "<key>" is required by the <contract> contract`, one line per field |
-| a value the contract's schema refuses | `<out>: field "<field>" violates the <contract> contract: <violation>`, one line each; `<out>: the fields violate the <contract> contract: <violation>` for a keyword on the whole `values` |
+| a value the contract's schema refuses | `<out>: the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation |
 | internal convention | `<out>: <field> is "<value>" but internal references to "<name>" resolve it to "<expected>"` |
-| a `secretRef` without a `name`, or whose `name` is not a non-empty string | `<out>: secretRef.name must be the name of a Secret, got <value>` |
 | same contract and name twice | `two <contract> outputs are named "<name>"` |
 
 Internal convention: an output named `<release>` (the default), of a contract
@@ -1380,8 +1334,7 @@ references this one by name gets the values it publishes.
 The Secret of a `provides` item with a `secret`: named after the item's
 `secretRef` (`<name>-<contract>-credentials` by default), labelled
 `okdp.io/credentials-<contract>: "true"`. They follow the descriptor in
-`Objects`, in `provides` order; two items naming one Secret fail the
-compile ([objects section](#objects-section)).
+`Objects`, in `provides` order.
 
 | `secret` | Objects |
 |---|---|
@@ -1453,26 +1406,10 @@ computed: the compiler adds no namespace, label or name. Each is a whole
 manifest, with a `kind` and a `metadata.name`
 ([objects](02_service_definition.md#objects)).
 
-No two items of `Objects`, the descriptor and the credentials Secrets
-included, may be one object of the cluster, which the second would replace
-when they are applied: the same API group (of `apiVersion`, whatever its
-version), `kind`, namespace (`Inputs.Namespace` for an object without one)
-and name. The first such pair fails the compile:
-
-```text
-<object>: <other> is the same object, <kind> "<name>" in namespace "<namespace>": give each object its own name
-```
-
-`<object>`, `<other>`: `the descriptor`, `the credentials Secret of
-provides "<name>" (<contract>)` (any object of it: a `Password` generator,
-the `ExternalSecret`, the `Secret`), or `objects[<i>]`, the position in the
-evaluated list; `<kind>` is followed by `.<group>` for a kind of an API
-group (`ExternalSecret.external-secrets.io`).
-
 ### The okdp chart
 
 `compiler.ObjectsChart` (`"okdp"`): the chart of OKDP's own objects, which
-the compiler adds to every compile (unless `compiler.WithoutObjectsChart`), rendered by the platform's objects
+the compiler adds to every compile, rendered by the platform's objects
 chart (`global.okdp.charts.objects`: [Platform charts](#platform-charts)),
 an okdp-objects chart (values `objects: []`; its template prints each item
 of `objects` as one YAML document):
@@ -1492,10 +1429,7 @@ mapping output "okdp": the chart of OKDP's own objects is compiled from the obje
 ```
 
 The descriptor, the credentials Secrets and the objects section then reach
-the cluster with the upstream charts. `Objects` holds them too, for a
-caller that deploys them otherwise: `compiler.CompileContext` with
-`compiler.WithoutObjectsChart()` then leaves the okdp chart out of `Charts`
-and `Values`.
+the cluster with the upstream charts. `Objects` holds them too.
 
 ### Dependencies
 
@@ -1519,9 +1453,9 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 
 ### Umbrella chart
 
-`compiler.Write` with `Output.Umbrella` (`okdp-compile -o <dir>
---umbrella`): the instance as one chart, for one Helm release per instance,
-under the release name the values were compiled for. Two files:
+`compiler.Write` (`okdp-compile -o <dir>`): the instance as one chart,
+for one Helm release per instance, under the release name the values were
+compiled for. Two files:
 
 - `Chart.yaml`: `apiVersion: v2`; `name` and `version` of `service.yaml`
   (`Result.Service`, `Result.Version`; `version` must be SemVer);
@@ -1531,8 +1465,8 @@ under the release name the values were compiled for. Two files:
   chart's name;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
-  Its first line, as that of each `<key>.values.yaml` and the
-  second of `install.sh`, marks it generated: `# Code generated by
+  Its first line marks it generated:
+  `# Code generated by
   okdp-compile. DO NOT EDIT.` (the line Go, GitHub, linters and editors
   recognize).
 
@@ -1575,135 +1509,21 @@ same but for `hasKey`, `toYaml` and `range`.
 
 ### Example
 
-`examples/02_advanced/output-no-dcr/helm-cmd/`, what `-o <dir>
---mkinstall` writes for the example: release `demo-webapp`, namespace `demo`, the instance
+`examples/02_advanced/output-no-dcr/`, what `-o <dir>` writes
+for the example: release `demo-webapp`, namespace `demo`, the instance
 `examples/02_advanced/input/config.yaml` (`replicas: 2`,
 `database: demo-db`, `audit: platform-db`, a memory limit and two `env`
 entries in `upstream.app`), over
 `examples/02_advanced/input/platform.yaml` (`existing` mode: no OAuth client
 chart, [OAuth client charts](#oauth-client-charts); `platform-db`, the
 connection the instance's `audit` references).
-`examples/02_advanced/output-dcr/helm-cmd/` is the same compile in `dcr`
-mode, with `examples/02_advanced/input/platform-dcr.yaml` after
-`platform.yaml`: the OAuth client's chart, `oidc-dcr`
-([its values](#oauth-client-charts)), installed first;
-`examples/02_advanced/output-dcr/umbrella-chart/` is it as one chart,
-`oidc-dcr` a dependency beside `app` and `okdp`, its Job a pre-install hook
-that runs before the release's other resources.
+`examples/02_advanced/output-dcr/` is the same compile in `dcr` mode, with
+`examples/02_advanced/input/platform-dcr.yaml` after `platform.yaml`: the
+OAuth client's chart, `oidc-dcr` ([its values](#oauth-client-charts)), a
+dependency beside `app` and `okdp`, its Job a pre-install hook that runs
+before the release's other resources.
 
-`app.values.yaml`, annotated:
-
-```yaml
-# Code generated by okdp-compile. DO NOT EDIT.
-# Chart: app --repo https://charts.example.org --version 1.8.0
-env:
-  - name: OIDC_ISSUER                     # computed
-    value: https://sso.okdp.example.org/realms/okdp
-  - name: OIDC_CLIENT_ID                  # platform.oidcClientSecret, existing mode
-    valueFrom:
-      secretKeyRef:
-        key: client_id
-        name: creds-demo-webapp-oauth2
-  - name: OIDC_CLIENT_SECRET
-    valueFrom:
-      secretKeyRef:
-        key: client_secret
-        name: creds-demo-webapp-oauth2
-  - name: DB_URL                          # the database connection, resolved
-    value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
-  - name: DB_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        key: password
-        name: demo-db-database-credentials
-  - name: AUDIT_DB_URL                    # the platform's connection, resolved
-    value: jdbc:postgresql://db.okdp.example.org:5432/shared
-  - name: AUDIT_DB_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        key: password
-        name: platform-db-credentials
-  - name: TZ                              # upstream.app, appended
-    value: Europe/Paris
-  - name: LOG_LEVEL                       # upstream.app, appended
-    value: debug
-fullnameOverride: demo-webapp-app         # computed
-global:                                   # the parameters' global
-  okdp:
-    # ... the platform values
-image:
-  repository: example/webapp              # upstream default
-  tag: "1.8"                              # OKDP's defaults
-ingress:
-  # ... computed
-replicaCount: 2                           # computed: values.replicas
-resources:                                # OKDP's defaults
-  limits:
-    memory: 512Mi                         # upstream.app
-  requests:
-    cpu: 100m
-    memory: 128Mi
-```
-
-`okdp.values.yaml`: the values of the [okdp chart](#the-okdp-chart), the
-descriptor ConfigMap under `objects`:
-
-```yaml
-# Code generated by okdp-compile. DO NOT EDIT.
-# Chart: oci://registry.example.org/okdp/okdp-objects --version 1.0.0
-global:
-  okdp:
-    # ... the platform values
-objects:
-  - apiVersion: v1
-    data:
-      outputs.yaml: |
-        - contract: http
-          name: demo-webapp
-          values:
-            internalUrl: http://demo-webapp-app.demo.svc:8080
-            url: https://demo-webapp.okdp.example.org
-      service: webapp
-      url: https://demo-webapp.okdp.example.org
-      usage: |
-        A web application. Open https://demo-webapp.okdp.example.org
-      version: 1.0.0
-    kind: ConfigMap
-    metadata:
-      labels:
-        app.kubernetes.io/instance: demo-webapp
-        # ...
-        okdp.io/provides-http: "true"
-        okdp.io/service: webapp
-      name: demo-webapp-okdp
-      namespace: demo
-```
-
-`install.sh`:
-
-```sh
-#!/bin/sh
-# Code generated by okdp-compile. DO NOT EDIT.
-# Installs demo-webapp in the namespace demo, one Helm release per chart: its
-# upstream chart with its values file. Recompile the instance to change it.
-set -eu
-cd "$(dirname "$0")"
-helm upgrade --install demo-webapp-app app --repo https://charts.example.org --version 1.8.0 --namespace demo -f app.values.yaml
-helm upgrade --install demo-webapp-okdp oci://registry.example.org/okdp/okdp-objects --version 1.0.0 --namespace demo -f okdp.values.yaml
-```
-
-With `--mkdag`, `okdp.dependencies.yaml` ([dependencies](#dependencies)):
-
-```yaml
-- instance: demo-db
-  contract: database
-  field: database
-```
-
-`examples/02_advanced/output-no-dcr/umbrella-chart/`, what `-o <dir>
---umbrella --mkinstall` writes: `instance.values.yaml`, the same values
-under their keys (`app:`, `okdp:`), `install.sh`, which installs them as one
-release ([`--mkinstall`](../01_usage.md#--mkinstall)), and `Chart.yaml`:
+`Chart.yaml`:
 
 ```yaml
 apiVersion: v2
@@ -1719,6 +1539,96 @@ dependencies:
     version: 1.0.0
 ```
 
+`instance.values.yaml`, annotated: the values of `app`, and those of the
+[okdp chart](#the-okdp-chart), the descriptor ConfigMap under `objects`:
+
+```yaml
+# Code generated by okdp-compile. DO NOT EDIT.
+app:
+  env:
+    - name: OIDC_ISSUER                     # computed
+      value: https://sso.okdp.example.org/realms/okdp
+    - name: OIDC_CLIENT_ID                  # platform.oidcClientSecret, existing mode
+      valueFrom:
+        secretKeyRef:
+          key: client_id
+          name: creds-demo-webapp-oauth2
+    - name: OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          key: client_secret
+          name: creds-demo-webapp-oauth2
+    - name: DB_URL                          # the database connection, resolved
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: demo-db-database-credentials
+    - name: AUDIT_DB_URL                    # the platform's connection, resolved
+      value: jdbc:postgresql://db.okdp.example.org:5432/shared
+    - name: AUDIT_DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: platform-db-credentials
+    - name: TZ                              # upstream.app, appended
+      value: Europe/Paris
+    - name: LOG_LEVEL                       # upstream.app, appended
+      value: debug
+  fullnameOverride: demo-webapp-app         # computed
+  global:                                   # the parameters' global
+    okdp:
+      # ... the platform values
+  image:
+    repository: example/webapp              # upstream default
+    tag: "1.8"                              # OKDP's defaults
+  ingress:
+    # ... computed
+  replicaCount: 2                           # computed: values.replicas
+  resources:                                # OKDP's defaults
+    limits:
+      memory: 512Mi                         # upstream.app
+    requests:
+      cpu: 100m
+      memory: 128Mi
+okdp:
+  global:
+    okdp:
+      # ... the platform values
+  objects:
+    - apiVersion: v1
+      data:
+        outputs.yaml: |
+          - contract: http
+            name: demo-webapp
+            values:
+              internalUrl: http://demo-webapp-app.demo.svc:8080
+              url: https://demo-webapp.okdp.example.org
+        service: webapp
+        url: https://demo-webapp.okdp.example.org
+        usage: |
+          A web application. Open https://demo-webapp.okdp.example.org
+        version: 1.0.0
+      kind: ConfigMap
+      metadata:
+        labels:
+          app.kubernetes.io/instance: demo-webapp
+          # ...
+          okdp.io/provides-http: "true"
+          okdp.io/service: webapp
+        name: demo-webapp-okdp
+        namespace: demo
+```
+
+With `--mkdag`, `okdp.dependencies.yaml` ([dependencies](#dependencies)):
+
+```yaml
+- instance: demo-db
+  contract: database
+  field: database
+```
+
 `examples/03_full/` compiles the workspace service, a package written to use
 every part of the mapping language, with the three kinds of values layers:
 `platform.yaml` (`--platform`: `global.okdp` in `dcr` mode, the oidc-dcr
@@ -1727,9 +1637,8 @@ the project's settings under `global`, two connections of its own) and
 `config.yaml` (`-f`: references to an instance of the namespace and to
 connections of the platform, the project and the instance itself, in a list
 of catalogs and under a nested key; upstream values). Release
-`demo-workspace`, namespace `demo`: `output/helm-cmd/` is what `-o <dir>
---mkinstall --mkdag` writes, `output/umbrella-chart/` what `-o <dir>
---umbrella --mkinstall --mkdag` writes. Its `okdp.dependencies.yaml` lists
+`demo-workspace`, namespace `demo`: `output/` is what `-o <dir>
+--mkdag` writes. Its `okdp.dependencies.yaml` lists
 `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
-`$if`, has no file, and its chart is not in the chart cache.
+`$if`, is no dependency, and its chart is not in the chart cache.

@@ -13,8 +13,9 @@ func readSchema(s string) (*Schema, error) {
 }
 
 // TestSchemaDefaults: the defaults of the properties reached from the root
-// through properties, at their path; a default elsewhere, or in the x-*
-// keywords and the values of enum or examples, is not a parameter's.
+// through properties, at their path, the outermost on a path; a default
+// elsewhere, or in the x-* keywords and the values of enum or examples, is
+// not a parameter's.
 func TestSchemaDefaults(t *testing.T) {
 	for name, tc := range map[string]struct {
 		schema string
@@ -29,6 +30,9 @@ func TestSchemaDefaults(t *testing.T) {
 			"e": {"type": "object", "default": {"f": [1]}}}}`, M{"b": M{"c": "x"}, "e": M{"f": []any{float64(1)}}}},
 		"a property named default": {`{"properties": {"default": {"default": true}}}`, M{"default": true}},
 		"not keywords":             {`{"x-ui": {"default": 1}, "properties": {"a": {"enum": [{"default": 1}], "examples": [{"default": 2}], "x-okdp-derived": {"default": 3}}}}`, M{}},
+		"elsewhere": {`{"default": {}, "allOf": [{"properties": {"a": {"default": 1}}}], "$defs": {"x": {"default": 1}},
+			"properties": {"l": {"items": {"properties": {"a": {"default": 1}}}}}}`, M{}},
+		"the outermost": {`{"properties": {"a": {"default": {}, "properties": {"b": {"default": 1}}}}}`, M{"a": M{}}},
 	} {
 		got, err := readSchema(tc.schema)
 		if err != nil {
@@ -41,35 +45,10 @@ func TestSchemaDefaults(t *testing.T) {
 	}
 }
 
-// TestSchemaDefaultsErrors: a default where whether it applies depends on
-// the values, two defaults for one property, and one its property's schema
-// rejects fail, named by their JSON pointer.
-func TestSchemaDefaultsErrors(t *testing.T) {
-	const where = ": a default applies only to a property reached from the root through properties"
-	for name, tc := range map[string]struct{ schema, want string }{
-		"not JSON":             {`{`, "config.schema.json: unexpected EOF"},
-		"the root":             {`{"default": {}}`, "config.schema.json#/default" + where},
-		"allOf":                {`{"allOf": [{"properties": {"a": {"default": 1}}}]}`, "config.schema.json#/allOf/0/properties/a/default" + where},
-		"then":                 {`{"if": {"properties": {"a": {"const": 1}}}, "then": {"properties": {"b": {"default": 1}}}}`, "config.schema.json#/then/properties/b/default" + where},
-		"items":                {`{"properties": {"l": {"items": {"properties": {"a": {"default": 1}}}}}}`, "config.schema.json#/properties/l/items/properties/a/default" + where},
-		"additionalProperties": {`{"properties": {"m": {"additionalProperties": {"default": 1}}}}`, "config.schema.json#/properties/m/additionalProperties/default" + where},
-		"$defs":                {`{"$defs": {"x": {"default": 1}}, "properties": {"a": {"$ref": "#/$defs/x"}}}`, "config.schema.json#/$defs/x/default" + where},
-		"two defaults": {`{"properties": {"a": {"default": {}, "properties": {"b": {"default": 1}}}}}`,
-			"config.schema.json#/properties/a/default: a property under it has a default too (#/properties/a/properties/b/default): keep one"},
-		"not its schema": {`{"properties": {"r": {"type": "integer", "minimum": 1, "default": 0}}}`,
-			"config.schema.json#/properties/r/default: the default does not meet its property's schema:\n- at '': minimum: got 0, want 1"},
-		"an escaped name": {`{"properties": {"a/b c~": {"type": "string", "default": 1}}}`,
-			"config.schema.json#/properties/a~1b c~0/default: the default does not meet its property's schema:\n- at '': got number, want string"},
-	} {
-		if _, err := readSchema(tc.schema); err == nil || err.Error() != tc.want {
-			t.Errorf("%s: got %v, want %s", name, err, tc.want)
-		}
-	}
-}
-
 // TestParameters: the layers merged in order and coalesced over the
-// schema's defaults (a null deletes one), then checked against the schema;
-// a package without a schema fails.
+// schema's defaults (a null deletes one), then checked against the schema,
+// a default its property's schema rejects included; a package without a
+// schema, or with one that is not JSON, fails.
 func TestParameters(t *testing.T) {
 	schema, err := readSchema(`{"properties": {
 		"a": {"type": "integer", "default": 1},
@@ -89,5 +68,18 @@ func TestParameters(t *testing.T) {
 	}
 	if _, err := ReadParameterSchema(fstest.MapFS{}); err == nil || !strings.Contains(err.Error(), "open config.schema.json") {
 		t.Errorf("without a schema: got %v", err)
+	}
+	if _, err := readSchema(`{`); err == nil || err.Error() != "config.schema.json: unexpected EOF" {
+		t.Errorf("not JSON: got %v", err)
+	}
+	bad, err := readSchema(`{"properties": {"r": {"type": "integer", "minimum": 1, "default": 0}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parameters(bad, "svc", nil); err == nil || !strings.Contains(err.Error(), "svc:\n- at '/r': minimum: got 0, want 1") {
+		t.Errorf("a default its schema rejects: got %v", err)
+	}
+	if _, err := Parameters(bad, "svc", []map[string]any{{"r": 2}}); err != nil {
+		t.Errorf("a default overridden: got %v", err)
 	}
 }

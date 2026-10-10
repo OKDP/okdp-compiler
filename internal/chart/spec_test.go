@@ -2,7 +2,6 @@ package chart
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -49,8 +48,8 @@ func TestRefCheck(t *testing.T) {
 	}
 }
 
-// TestSpecKeys: a chart key is a DNS label: it names files and the
-// umbrella's dependency alias.
+// TestSpecKeys: a chart key is a DNS label: it names the umbrella's
+// dependency alias.
 func TestSpecKeys(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	for key, ok := range map[string]bool{
@@ -64,36 +63,19 @@ func TestSpecKeys(t *testing.T) {
 	}
 }
 
-// TestUpstreamYAML: upstream: in service.yaml, true or false, or {from:
-// <chart>}.
+// TestUpstreamYAML: upstream: in service.yaml, a boolean; a YAML 1.1
+// boolean (off, yes) read as the one it spells.
 func TestUpstreamYAML(t *testing.T) {
-	for in, want := range map[string]Upstream{
-		"":                    {},
-		"upstream: false":     {},
-		"upstream: true":      {Enabled: true},
-		"upstream: {from: a}": {From: "a"},
-	} {
+	for in, want := range map[string]bool{"": false, "upstream: false": false, "upstream: true": true, "upstream: off": false, "upstream: Yes": true} {
 		var spec Spec
-		if err := yaml.Unmarshal([]byte(in), &spec); err != nil {
-			t.Errorf("%q: %v", in, err)
-		} else if !reflect.DeepEqual(spec.Upstream, want) {
-			t.Errorf("%q: got %#v, want %#v", in, spec.Upstream, want)
+		if err := yaml.Unmarshal([]byte(in), &spec); err != nil || spec.Upstream != want {
+			t.Errorf("%q: got %v %v, want %v", in, spec.Upstream, err, want)
 		}
 	}
-	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: {a: b}", "upstream: a.yaml", `upstream: "off"`, "upstream: [a.yaml]", "upstream: []",
-		"upstream: {}", `upstream: {from: ""}`, "upstream: {from: a, files: [b]}", "upstream: {from: [a]}", "upstream: {from: true}"} {
+	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: a.yaml", "upstream: {from: a}"} {
 		var spec Spec
 		if err := yaml.Unmarshal([]byte(in), &spec); err == nil {
 			t.Errorf("%q: no error", in)
-		}
-	}
-	// A YAML 1.1 boolean, a string in service.yaml (YAML 1.2): refused with
-	// what to write.
-	for _, in := range []string{"upstream: off", "upstream: no", "upstream: Yes", "upstream: ON", "upstream: y"} {
-		var spec Spec
-		err := yaml.Unmarshal([]byte(in), &spec)
-		if want := "line 1: upstream " + strings.TrimPrefix(in, "upstream: ") + ": write true or false"; err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: got %v, want an error containing %q", in, err, want)
 		}
 	}
 }
@@ -103,8 +85,8 @@ func TestUpstreamYAML(t *testing.T) {
 func TestSpecPaths(t *testing.T) {
 	const app = "app:\n  source: {repository: https://x, chart: app, version: 1.0.0}\n"
 	for yml, want := range map[string]string{
-		app + "  protect: [a.b, 'a[\"b']\n":    `service.yaml: charts.app.protect[1] "a[\"b": a bracketed key ends with "]`,
-		app + "  append: ['env.*']\n":          `service.yaml: charts.app.append[0] "env.*": a * outside brackets`,
+		app + "  protect: [a.b, 'a[\"b']\n":    `service.yaml: charts.app.protect[1] "a[\"b": not a path: keys joined by dots`,
+		app + "  append: ['env.*']\n":          `service.yaml: charts.app.append[0] "env.*": not a path`,
 		app + "  protect: ['a[\"b.c*\"].d']\n": "",
 	} {
 		err := specsCheck(yml)

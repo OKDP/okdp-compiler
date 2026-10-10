@@ -12,17 +12,16 @@
 //	path    = segment *( "." key / bracket )
 //	segment = key / bracket                  the first key: plain or bracketed
 //	key     = 1*( any character but . [ ] " \ * )
-//	bracket = "[" DQUOTE 1*( char / escape ) [ "*" ] DQUOTE "]"
+//	bracket = "[" DQUOTE 1*char [ "*" ] DQUOTE "]"
 //	        / "[" DQUOTE "*" DQUOTE "]"
 //	char    = any character but " \ *
-//	escape  = "\" ( DQUOTE / "\" / "*" )
 //
 // A plain key is literal and contains no glob. A bracketed key is literal,
-// dots included; \" \\ and \* write a quote, a backslash and a star. A
-// bracketed key ending with an unescaped * is a glob: it names every key
-// that starts with the text before the star (the text itself included;
-// ["*"] names every key). Any bracketed key of a path may be a glob, the
-// last or one on the way. Examples:
+// dots included; no key holds a quote, a backslash or a star but a glob's.
+// A bracketed key ending with * is a glob: it names every key that starts
+// with the text before the star (the text itself included; ["*"] names
+// every key). Any bracketed key of a path may be a glob, the last or one on
+// the way. Examples:
 //
 //	ingress.hosts
 //	filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]
@@ -33,6 +32,7 @@ package chart
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -45,101 +45,42 @@ type pathSeg struct {
 	glob bool   // every key that starts with key
 }
 
+// pathKey: the key at the start of a path: bracketed (its text, its glob)
+// or plain.
+var pathKey = regexp.MustCompile(`^(?:\["([^"\\*]*)(\*?)"\]|([^.\[\]"\\*]+))`)
+
+// errPath: the error of any malformed path.
+var errPath = errors.New(`not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])`)
+
 // parsePath: the keys of a protect or append path (see the grammar above).
 // service.yaml is checked with it when it is loaded (Service.check), so a
 // malformed path fails before any compile, not when an instance first sets
 // a value under it.
 func parsePath(p string) ([]pathSeg, error) {
-	if p == "" {
-		return nil, errors.New("empty path")
-	}
 	var segs []pathSeg
-	i := 0
-	for {
-		if p[i] == '[' {
-			s, n, err := parseBracket(p[i:])
-			if err != nil {
-				return nil, err
-			}
-			segs = append(segs, s)
-			i += n
-		} else {
-			j := i
-			for j < len(p) && p[j] != '.' && p[j] != '[' {
-				switch p[j] {
-				case '*':
-					return nil, errors.New(`a * outside brackets: a glob is a bracketed key, the whole key in the brackets, dots included: ["prefix*"]`)
-				case ']', '"', '\\':
-					return nil, fmt.Errorf("%q outside brackets: write the key as [\"...\"]", p[j])
-				}
-				j++
-			}
-			if j == i {
-				return nil, errors.New("an empty key (two dots, or a dot at an end)")
-			}
-			segs = append(segs, pathSeg{key: p[i:j]})
-			i = j
+	for rest := p; ; {
+		m := pathKey.FindStringSubmatch(rest)
+		if m == nil || m[1]+m[2]+m[3] == "" {
+			return nil, errPath
 		}
-		switch {
-		case i == len(p):
+		segs = append(segs, pathSeg{key: m[1] + m[3], glob: m[2] == "*"})
+		switch rest = rest[len(m[0]):]; {
+		case rest == "":
 			return segs, nil
-		case p[i] == '.':
-			i++
-			if i == len(p) {
-				return nil, errors.New("an empty key (two dots, or a dot at an end)")
-			}
-			if p[i] == '[' {
-				return nil, errors.New("no dot before a bracketed key: a[\"b.c\"], not a.[\"b.c\"]")
-			}
-		case p[i] != '[':
-			// Only after a bracketed key: a plain key ends at "." or "[".
-			return nil, fmt.Errorf("%q after a bracketed key: a dot or a bracket follows it", p[i])
-		}
-		// Next: a plain key after a dot, or a bracketed key.
-	}
-}
-
-// parseBracket: the bracketed key at the start of s, and the length of its
-// text.
-func parseBracket(s string) (pathSeg, int, error) {
-	if len(s) < 2 || s[1] != '"' {
-		return pathSeg{}, 0, errors.New("a bracketed key is quoted: [\"key\"]")
-	}
-	var b strings.Builder
-	glob := false
-	for i := 2; i < len(s); i++ {
-		switch c := s[i]; c {
-		case '\\':
-			if i+1 == len(s) || !strings.ContainsRune(`"\*`, rune(s[i+1])) {
-				return pathSeg{}, 0, errors.New(`in a bracketed key, \ escapes ", \ or * only`)
-			}
-			b.WriteByte(s[i+1])
-			i++
-		case '*':
-			if i+1 == len(s) || s[i+1] != '"' {
-				return pathSeg{}, 0, errors.New(`a * is a glob at the end of a bracketed key only (\* for a literal star)`)
-			}
-			glob = true
-		case '"':
-			if i+1 == len(s) || s[i+1] != ']' {
-				return pathSeg{}, 0, errors.New(`a bracketed key ends with "]`)
-			}
-			if b.Len() == 0 && !glob {
-				return pathSeg{}, 0, errors.New("an empty key")
-			}
-			return pathSeg{key: b.String(), glob: glob}, i + 2, nil
-		default:
-			b.WriteByte(c)
+		case rest[0] == '.' && len(rest) > 1 && rest[1] != '[':
+			rest = rest[1:]
+		case rest[0] != '[':
+			return nil, errPath
 		}
 	}
-	return pathSeg{}, 0, errors.New(`a bracketed key ends with "]`)
 }
 
 // formatPath: the path of these keys, as an error message shows the key a
 // value was refused at (value.Key): plain keys joined by dots, a key with a
 // special character in brackets
 // (annotations["nginx.ingress.kubernetes.io/auth-type"]). parsePath reads
-// it back as these literal keys.
+// it back as these literal keys, unless one holds a quote, a backslash or a
+// star.
 func formatPath(keys []string) string {
 	p := ""
 	for _, k := range keys {

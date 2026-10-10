@@ -1,6 +1,7 @@
 package chart
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -22,40 +23,17 @@ var parsePathCases = map[string][]pathSeg{
 	`["a.b"]`:             {{key: "a.b"}},
 	`["a.b"]["c"].d`:      {{key: "a.b"}, {key: "c"}, {key: "d"}},
 	`ingresses["*"].tls`:  {{key: "ingresses"}, {key: "", glob: true}, {key: "tls"}},
-	`a["q\"b\\c\*"]`:      {{key: "a"}, {key: `q"b\c*`}},
-	`a["x\**"]`:           {{key: "a"}, {key: "x*", glob: true}},
 	`env.VITE_OIDC_SCOPE`: {{key: "env"}, {key: "VITE_OIDC_SCOPE"}},
 }
 
-// parsePathErrors: malformed paths and their errors, for TestParsePath and
-// FuzzParsePath.
-var parsePathErrors = map[string]string{
-	"":                   "empty path",
-	"a..b":               "an empty key",
-	".a":                 "an empty key",
-	"a.":                 "an empty key",
-	"a.*":                `a * outside brackets: a glob is a bracketed key`,
-	"annotations.x.io/*": `a * outside brackets: a glob is a bracketed key, the whole key in the brackets, dots included: ["prefix*"]`,
-	"a]":                 `']' outside brackets`,
-	`a"b`:                `'"' outside brackets`,
-	`a\b`:                `'\\' outside brackets`,
-	"a[b]":               `a bracketed key is quoted: ["key"]`,
-	"a['b']":             `a bracketed key is quoted`,
-	`a.["b"]`:            "no dot before a bracketed key",
-	`a["b"`:              `a bracketed key ends with "]`,
-	`a["b`:               `a bracketed key ends with "]`,
-	`a["b"]c`:            `'c' after a bracketed key`,
-	`a[""]`:              "an empty key",
-	`a["x*y"]`:           "a * is a glob at the end of a bracketed key only",
-	`a["**"]`:            "a * is a glob at the end of a bracketed key only",
-	`a["\n"]`:            `escapes ", \ or * only`,
-	`a["b\"]`:            `a bracketed key ends with "]`,
-	`a["b"]["c"]..d`:     "an empty key",
-	`a["nginx.io/x*"]x`:  `'x' after a bracketed key`,
+// parsePathErrors: malformed paths, for TestParsePath and FuzzParsePath.
+var parsePathErrors = []string{
+	"", "a..b", ".a", "a.", "a.*", "annotations.x.io/*", "a]", `a"b`, `a\b`, "a[b]", "a['b']",
+	`a.["b"]`, `a["b"`, `a["b`, `a["b"]c`, `a[""]`, `a["x*y"]`, `a["**"]`, `a["q\"b"]`, `a["b"]["c"]..d`, `a["nginx.io/x*"]x`,
 }
 
-// TestParsePath: plain keys, bracketed literal keys (dots, escapes) and
-// globs, anywhere in the path.
+// TestParsePath: plain keys, bracketed literal keys (dots) and globs,
+// anywhere in the path; anything else is not a path.
 func TestParsePath(t *testing.T) {
 	for p, want := range parsePathCases {
 		got, err := parsePath(p)
@@ -65,9 +43,9 @@ func TestParsePath(t *testing.T) {
 			t.Errorf("%s: got %#v, want %#v", p, got, want)
 		}
 	}
-	for p, want := range parsePathErrors {
-		if _, err := parsePath(p); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: got %v, want an error containing %q", p, err, want)
+	for _, p := range parsePathErrors {
+		if _, err := parsePath(p); !errors.Is(err, errPath) {
+			t.Errorf("%q: got %v, want %v", p, err, errPath)
 		}
 	}
 }
@@ -80,10 +58,9 @@ func FuzzParsePath(f *testing.F) {
 	for p := range parsePathCases {
 		f.Add(p)
 	}
-	for p := range parsePathErrors {
+	for _, p := range parsePathErrors {
 		f.Add(p)
 	}
-	escape := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `*`, `\*`)
 	f.Fuzz(func(t *testing.T, p string) {
 		segs, err := parsePath(p)
 		if err != nil {
@@ -93,7 +70,7 @@ func FuzzParsePath(f *testing.F) {
 		for _, s := range segs {
 			switch {
 			case s.glob:
-				written += `["` + escape.Replace(s.key) + `*"]`
+				written += `["` + s.key + `*"]`
 			case s.key == "":
 				t.Fatalf("%q: an empty key, in %#v", p, segs)
 			default:
@@ -112,7 +89,6 @@ var formatPathCases = map[string][]string{
 	"ingress.hosts": {"ingress", "hosts"},
 	`filer.annotations["nginx.ingress.kubernetes.io/auth-type"]`: {"filer", "annotations", "nginx.ingress.kubernetes.io/auth-type"},
 	`["spark.ui.filters"]`: {"spark.ui.filters"},
-	`a["q\"b\\c\*"].d`:     {"a", `q"b\c*`, "d"},
 	`a[""]`:                {"a", ""},
 }
 
@@ -144,15 +120,18 @@ func TestFormatPath(t *testing.T) {
 	}
 }
 
-// FuzzFormatPath: parsePath reads what formatPath writes of any keys (the
-// fuzzed text split at \xff, a byte UTF-8 never holds) as the same literal
-// keys; with an empty key, which no path names, it fails. Seeds: the keys
-// of TestFormatPath.
+// FuzzFormatPath: parsePath reads what formatPath writes of any keys without
+// a quote, a backslash or a star (the fuzzed text split at \xff, a byte
+// UTF-8 never holds) as the same literal keys; with an empty key, which no
+// path names, it fails. Seeds: the keys of TestFormatPath.
 func FuzzFormatPath(f *testing.F) {
 	for _, keys := range formatPathCases {
 		f.Add(strings.Join(keys, "\xff"))
 	}
 	f.Fuzz(func(t *testing.T, s string) {
+		if strings.ContainsAny(s, `"\*`) {
+			return
+		}
 		keys := strings.Split(s, "\xff")
 		p := formatPath(keys)
 		segs, err := parsePath(p)

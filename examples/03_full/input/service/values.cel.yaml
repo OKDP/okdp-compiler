@@ -51,17 +51,17 @@ let:
   apiPods: >-
     ${{ lists.range(int(values.replicas)).map(i, '%s-%d.%s.%s.svc'.format([api, i, api, release.namespace])) }}
 
-  # Anchors, aliases and merge keys, read as Helm reads a values file: <<
-  # merges the keys of a map, and a merged value is replaced, not merged.
+  # A value used twice: a binding, read by name (YAML's anchors, aliases
+  # and merge keys are refused).
+  small:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {memory: 1Gi}
   sizes:
-    small: &small
-      requests: {cpu: 250m, memory: 512Mi}
-      limits: {memory: 1Gi}
+    small: ${{ small }}
     medium:
-      <<: *small                         # the requests of small
+      requests: ${{ small.requests }}    # the requests of small
       limits: {memory: 2Gi}
     large:
-      <<: *small
       requests: {cpu: "1", memory: 2Gi}
       limits: {memory: 4Gi}
 
@@ -90,6 +90,10 @@ let:
     - $if: ${{ db.size() > 0 }}
       name: DB_PASSWORD
       valueFrom: {secretKeyRef: {name: "${{ db.?secretRef.name.orValue('') }}", key: password}}
+    # One item either way: $value when the condition is true, $else otherwise.
+    - $if: ${{ db.size() > 0 }}
+      $value: {name: WORKSPACE_SESSIONS, value: database}
+      $else: {name: WORKSPACE_SESSIONS_DIR, value: /var/lib/workspace/sessions}
     - $if: ${{ audit.size() > 0 }}
       name: AUDIT_DB_URL
       value: jdbc:${{ audit.engine }}://${{ audit.host }}:${{ str(audit.port) }}/${{ audit.dbName }}
@@ -153,16 +157,20 @@ errors:
     $each:
       $if: "${{ has(c.properties) && has(c.properties.format) && !(c.properties.format in ['parquet', 'orc', 'csv']) }}"
       message: 'workspace: catalog "${{ c.name }}": format ${{ c.properties.format }} is not parquet, orc or csv'
-  # An expression returning the messages of a check, [] when it passes.
-  - >-
-    ${{ secured.filter(c, !has(c.secretRef)).map(c, 'workspace: ' + c.okdp.contract + ' connection "'
-        + c.okdp.ref + '" has no secretRef, its credentials cannot be read').distinct() }}
-  - >-
-    ${{ values.catalogs.filter(c, !values.catalogs.exists_one(d, d.name == c.name))
-        .map(c, 'workspace: catalog "' + c.name + '" is defined twice').distinct() }}
-  - >-
-    ${{ values.extraEnv.transformList(k, v, k).filter(k, !k.matches('^WORKSPACE_[A-Z0-9_]+$')).sort()
-        .map(k, 'workspace: extraEnv ' + k + ' must start with WORKSPACE_') }}
+  # A rule per distinct element: a connection used twice, a catalog name
+  # written twice, gives one message.
+  - $for: c in secured.distinct()
+    $each:
+      $if: ${{ !has(c.secretRef) }}
+      message: 'workspace: ${{ c.okdp.contract }} connection "${{ c.okdp.ref }}" has no secretRef, its credentials cannot be read'
+  - $for: n in values.catalogs.map(c, c.name).distinct()
+    $each:
+      $if: ${{ !values.catalogs.exists_one(c, c.name == n) }}
+      message: 'workspace: catalog "${{ n }}" is defined twice'
+  - $for: k in values.extraEnv.transformList(k, v, k).sort()
+    $each:
+      $if: ${{ !k.matches('^WORKSPACE_[A-Z0-9_]+$') }}
+      message: 'workspace: extraEnv ${{ k }} must start with WORKSPACE_'
   - $if: ${{ !values.admins.all(a, a.contains('@')) }}
     message: "workspace: admins are e-mail addresses"
   # The mapping sees the instance's upstream values: a rule no protect path

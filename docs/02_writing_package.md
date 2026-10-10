@@ -73,8 +73,8 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_C
 ```
 
 - The key names the chart's values everywhere (`output`, the instance's
-  `upstream.<key>`, the emitted `<key>.values.yaml`); it need not be the
-  chart's name. It is a DNS label: lowercase letters, digits and `-`, 63
+  `upstream.<key>`, the umbrella's dependency alias and its values in
+  `instance.values.yaml`); it need not be the chart's name. It is a DNS label: lowercase letters, digits and `-`, 63
   characters at most ([chart keys](specs/02_service_definition.md#chart-keys)).
 - `service.yaml` is read strictly: a field it does not define, a misspelt
   `protect` among them, fails the load rather than being ignored.
@@ -115,7 +115,7 @@ dependsOn:                # the platform services it needs
 
 `name` and `version` are required. The upstream half of `version` stays
 SemVer (`480.0.0-1.0.0` for Trino 480): the console compares versions,
-and the umbrella chart (`--umbrella`) takes it as its version;
+and the umbrella chart (`-o`) takes it as its version;
 release-please owns the OKDP half. The mapping sees `name` and `version`
 as `service` (`service.name`, `service.version`); the labels of OKDP's
 objects take `app.kubernetes.io/name` and `okdp.io/service` from the name,
@@ -179,9 +179,9 @@ chart is reached through `upstream.<chart>`, without a parameter.
 - A `default` gives a parameter its value when no layer sets it, as a
   chart's `values.yaml` does: on a property reached from the root through
   `properties` only, never under `allOf`, `items`, `additionalProperties`,
-  `definitions`... (each compile fails on one there), nor on both an object
-  and a property under it. `metrics` above gets its defaults from its
-  properties' ([defaults](specs/01_inputs_outputs.md#defaults)).
+  `definitions`... (one there is not read), nor on both an object and a
+  property under it (the object's wins). `metrics` above gets its defaults
+  from its properties' ([defaults](specs/01_inputs_outputs.md#defaults)).
 - `global` is the platform's: an instance that sets it fails. A key the
   schema declares under it (`"global": {"properties": {"imageRegistry":
   ...}}`), never `okdp`, is one an instance may set, and every chart
@@ -271,7 +271,7 @@ charts:
 
 The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [expressions](specs/02_service_definition.md#expressions) and
-[directives](specs/03_control_flow.md) (`$if`, `$for`,
+[directives](specs/03_control_flow.md) (`$if`, `$else`, `$for`,
 `$merge`, `$spread`, `$let`). Its [sections](specs/02_service_definition.md#sections),
 as the webapp writes them (the
 [evaluation order](specs/02_service_definition.md#evaluation-order)
@@ -328,9 +328,7 @@ provides:                  # the connections the instance publishes
   ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
 - `errors` fails the compile with every message at once. A rule is a
   condition, `$if`, and a `message`; `$for` checks every element of a list.
-  An expression returning a list of messages remains for messages computed
-  together. Prefix each message with the service and the parameter, and say
-  what to set.
+  Prefix each message with the service and the parameter, and say what to set.
 - `oidcClients` declares the service's OAuth clients; the mapping reads each
   from its Secret, `platform.oidcClientSecret` for the main client
   ([recipe](#oauth-clients)).
@@ -428,26 +426,24 @@ okdp-compile --package charts/services/polaris \
   --platform charts/services/polaris/ci/platform.yaml \
   --platform charts/services/polaris/ci/dcr-platform.yaml \
   -f charts/services/polaris/ci/dcr-values.yaml \
-  --release demo-polaris --namespace demo -o /tmp/demo-polaris --mkinstall
-grep -- '-f polaris.values.yaml' /tmp/demo-polaris/install.sh   # the source of polaris
-helm template demo-polaris oci://quay.io/adaltas/oidc-dcr --version 0.5.0 -n demo \
-  -f /tmp/demo-polaris/console-oidc-dcr.values.yaml
+  --release demo-polaris --namespace demo -o /tmp/demo-polaris
+yq '.dependencies' /tmp/demo-polaris/Chart.yaml   # the source of each key
+chart=$(mktemp -d) && cp /tmp/demo-polaris/Chart.yaml "$chart" && helm dependency build "$chart"
+helm template demo-polaris "$chart" -n demo -f /tmp/demo-polaris/instance.values.yaml
 scripts/compile-charts.sh charts/services/polaris   # every case, compiled and rendered
 ```
 
 - Render with the release name and namespace of the compile: the upstream
   charts derive their names from the release.
-- Render each chart with the source the index names for its key, as
-  `install.sh` of `--mkinstall` installs it: `helm template <release>
-  <chart> --repo <repository> --version <version>`,
-  `oci://<repository>/<chart>` for a registry, or the
-  `<chart>-<version>.tgz` `helm pull` wrote in the chart cache, in its
-  repository's directory. The clients' charts render with the platform's
-  oidc-dcr chart, `polaris-admin-principals` with the source of
-  `polaris-admin`
-  ([rendering with Helm](01_usage.md#rendering-with-helm));
-  `scripts/compile-charts.sh` reads the index.
-- `-o` writes the final values, the input of `helm template`.
+- Render the umbrella as a deployment installs it: its
+  dependencies are the sources the index names for the keys, the clients'
+  charts the platform's oidc-dcr chart, `polaris-admin-principals` the
+  source of `polaris-admin` under its own alias; `helm dependency build`
+  fetches them, in a copy of `Chart.yaml`, since the next compile into the
+  directory refuses `Chart.lock` and `charts/`
+  ([rendering with Helm](01_usage.md#rendering-with-helm)).
+- `-o` writes the final values, the input of `helm template`, under their
+  keys in `instance.values.yaml`.
 - A case whose first line is `# error: <message>` must fail with that message
   (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
@@ -557,7 +553,6 @@ charts:
   polaris-admin-principals:            # the values of a second render
     source: *admin                     # the same chart
     defaults: polaris-admin-principals.defaults.yaml
-    upstream: {from: polaris-admin}    # the instance values of polaris-admin, its protect
 ```
 
 ```yaml
@@ -575,10 +570,9 @@ Both keys take the chart's defaults and `values.schema.json` and render
 with it, each with its own values file: the index maps both to the same
 source ([rendering with Helm](01_usage.md#rendering-with-helm)). Everything
 else is keyed by the key ([sources](specs/02_service_definition.md#sources)).
-`upstream: {from: polaris-admin}` gives the second render the instance's
-upstream values of the first, with the first key's `protect` and `append`:
-an instance sets both renders at once, refused or appended the same way,
-and the mapping sees the values once, as `values.upstream.polaris-admin`
+The second render accepts no instance upstream values: `upstream: true`
+on it would read the instance's `upstream.polaris-admin-principals`, with
+its own `protect` and `append`
 ([upstream](specs/02_service_definition.md#upstream)).
 
 ### Generated secrets
@@ -796,10 +790,9 @@ A rule no path expresses (a value that depends on a parameter) goes in
   `-<suffix>`. Use `okdpFullname('something')`, cut to 63 characters. A
   name a contract's convention promises (`<release>-app`,
   `<release>-hive-metastore`) is kept as the convention writes it.
-- **One object, one name.** Two objects of one kind and name in one
+- **One object, one name.** Give each object of a kind its own name in its
   namespace (the descriptor `<release>-okdp` and the credentials Secrets
-  included) fail the compile; so do two OAuth client names whose objects'
-  names are the same once cut to 63 characters.
+  included): applied, the second would replace the first.
 - **No credential in values.** Connections and values carry `secretRef`
   names, never passwords: values end up in Git and in readable objects. A
   secret field in a connection or in `provides` fails the compile.

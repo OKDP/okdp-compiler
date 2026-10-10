@@ -12,6 +12,7 @@
 //	$$key: ...                    a key starting with $, $key
 //	key: {$if: ${{ cond }}, ...}  the key is left out when cond is false
 //	key: {$if: ..., $value: x}    same, for a value that is not a map
+//	key: {$if: ..., $value: x, $else: y}   x when cond is true, else y
 //	key: {$for: c in <expr>, $key: ..., $value: ...}   a map built from a list
 //	{$merge: ${{ map }}}          merged into the enclosing map
 //	- {$for: c in <expr>, $each: item or [items]}     list items repeated per element
@@ -22,15 +23,14 @@
 // Top level, before any section:
 //
 //	let (ordered bindings)
-//	errors (rules: {$if: <condition>, message: <text>}, or expressions
-//	returning lists of messages: any message fails the compile)
+//	errors (rules, {$if: <condition>, message: <text>}: any message fails
+//	the compile)
 //
 // Any other top-level key is a section the caller names. A template
 // (Session.EvalTemplate) has one section, values.
 package compile
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -38,7 +38,6 @@ import (
 	"maps"
 	"math"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,10 +46,10 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
-	"cel.dev/cel-go/common/types/traits"
 	"cel.dev/cel-go/ext"
 	"cel.dev/cel-go/interpreter"
 	"go.yaml.in/yaml/v3"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/okdp/okdp-compiler/internal/value"
 )
@@ -58,48 +57,21 @@ import (
 // M: a values map (value.M).
 type M = value.M
 
-// omap: an ordered YAML map: its entries as written, every one, and an
-// index of its keys as Helm reads them (YAML 1.1), each naming the entry
-// that holds its value. Helm's view of the map (fields) has each key once,
-// at its first entry. The maps whose keys are binding names (let, $let)
-// are read by entry: a binding y or Y keeps its name, YAML 1.1 does not
-// make both the key "true". Bindings are sequential, each seeing the
-// previous ones.
+// omap: an ordered YAML map: its entries in the order written, each key
+// once, and an index of its keys as Helm reads them (YAML 1.1). The maps
+// whose keys are binding names (let, $let) are read by entry: a binding y
+// keeps its name, where YAML 1.1 makes it the key "true". Bindings are
+// sequential, each seeing the previous ones.
 type omap struct {
 	entries []entry
-	index   map[string]int // key -> the entry holding its value
+	index   map[string]int // key -> its entry
 }
 
-// entry: a key of a map, as Helm reads it (key) and as written (name, an
-// alias's anchor's), the node it was read from, and its value.
+// entry: a key of a map, as Helm reads it (key) and as written (name), and
+// its value.
 type entry struct {
 	key, name string
-	node      *yaml.Node
 	val       any
-}
-
-// newOmap: an empty omap.
-func newOmap() *omap { return &omap{index: map[string]int{}} }
-
-// put: e added after the entries of m, its value now its key's. A key given
-// twice: the last value wins, at the position of the first, as in Helm
-// values.
-func (m *omap) put(e entry) {
-	m.index[e.key] = len(m.entries)
-	m.entries = append(m.entries, e)
-}
-
-// merge: the entries of o, after those of m, each key of o taking o's
-// value: over m's when over (the map of a merge key), else when m does not
-// have the key (the maps of a merge key's list, the first winning).
-func (m *omap) merge(o *omap, over bool) {
-	n := len(m.entries)
-	m.entries = append(m.entries, o.entries...)
-	for k, i := range o.index {
-		if _, ok := m.index[k]; over || !ok {
-			m.index[k] = n + i
-		}
-	}
 }
 
 // lookup: the value of the key k, and whether m has it.
@@ -117,221 +89,71 @@ func (m *omap) get(k string) any {
 	return v
 }
 
-// fields: m as Helm reads it: each key once, in the order of its first
-// entry, as the entry holding its value.
-func (m *omap) fields() []entry {
-	out := make([]entry, 0, len(m.index))
-	seen := make(map[string]bool, len(m.index))
-	for _, e := range m.entries {
-		if !seen[e.key] {
-			seen[e.key] = true
-			out = append(out, m.entries[m.index[e.key]])
-		}
-	}
-	return out
-}
+// fields: the entries of m, in order.
+func (m *omap) fields() []entry { return m.entries }
 
-// clash: an error when m has the key k, read from a node other than kn
-// that YAML decodes as another value (1 and 1.0, on and "true"): Helm's
-// reader keeps both keys until they are text, then the value of either, at
-// random.
-func (m *omap) clash(k string, kn *yaml.Node) error {
-	i, ok := m.index[k]
-	if !ok {
-		return nil
-	}
-	prev := m.entries[i].node
-	a, b := aliased(prev), aliased(kn)
-	x, _ := scalar(a)
-	y, _ := scalar(b)
-	if x == y {
-		return nil
-	}
-	return fmt.Errorf("line %d: the keys %s (line %d) and %s are both %q to Helm, which keeps the value of either, at random: write one", kn.Line, asWritten(a), prev.Line, asWritten(b), k)
-}
-
-// asWritten: a scalar as written: quoted when it is.
-func asWritten(n *yaml.Node) string {
-	if n.Style&(yaml.DoubleQuotedStyle|yaml.SingleQuotedStyle) != 0 {
-		return strconv.Quote(n.Value)
-	}
-	return n.Value
-}
-
-// aliased: the node an alias refers to, or n.
-func aliased(n *yaml.Node) *yaml.Node {
-	if n.Kind == yaml.AliasNode {
-		return n.Alias
-	}
-	return n
-}
-
-// maxAliasNodes: the nodes the aliases of one document may expand to, in
-// all. A few hundred bytes of aliases of aliases expand to millions of
-// nodes; Helm's reader refuses such excessive aliasing too.
-const maxAliasNodes = 100_000
-
-// reader: reads the nodes of one document, its aliases expanded. An alias
-// inside the anchor it refers to (a cycle) fails, and so do aliases that
-// expand to more than maxAliasNodes nodes in all.
-type reader struct {
-	open     map[*yaml.Node]bool // the anchored nodes being read
-	aliases  int                 // the aliases being expanded
-	line     int                 // the line of the outermost of them
-	expanded int                 // the nodes they have produced
-}
+// unread: the error of an anchor, which an alias follows, or of a merge
+// key (<<): the reader refuses them rather than reproduce Helm's reading.
+const unread = "line %d: anchors, aliases and merge keys are not read: bind the value in let"
 
 // fromNode: a YAML node as data, maps as omap to keep their key order.
 // Scalars and keys are read as Helm reads values (YAML 1.1, see scalar and
 // mapKey): the mapping is YAML shaped like the upstream values, a snippet
-// copied from a values.yaml means the same in both.
-func (r *reader) fromNode(n *yaml.Node) (any, error) {
-	if r.aliases > 0 {
-		if r.expanded++; r.expanded > maxAliasNodes {
-			return nil, fmt.Errorf("line %d: excessive aliasing: the aliases expand to more than %d nodes", r.line, maxAliasNodes)
-		}
-	}
+// copied from a values.yaml means the same in both. A key written twice
+// fails, two keys Helm reads as one (on and "true") included.
+func fromNode(n *yaml.Node) (any, error) {
 	if n.Anchor != "" {
-		r.open[n] = true
-		defer delete(r.open, n)
+		return nil, fmt.Errorf(unread, n.Line)
 	}
 	switch n.Kind {
 	case yaml.DocumentNode:
-		return r.fromNode(n.Content[0])
+		return fromNode(n.Content[0])
 	case yaml.MappingNode:
-		return r.mapping(n)
+		m := &omap{index: map[string]int{}}
+		for i := 0; i < len(n.Content); i += 2 {
+			kn := n.Content[i]
+			k, err := mapKey(kn)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := m.index[k]; ok {
+				return nil, fmt.Errorf("line %d: %s: the key %q is written twice", kn.Line, kn.Value, k)
+			}
+			v, err := fromNode(n.Content[i+1])
+			if err != nil {
+				return nil, err
+			}
+			m.index[k] = len(m.entries)
+			m.entries = append(m.entries, entry{k, kn.Value, v})
+		}
+		return m, nil
 	case yaml.SequenceNode:
 		out := []any{}
 		for _, c := range n.Content {
-			v, err := r.fromNode(c)
+			v, err := fromNode(c)
 			if err != nil {
 				return nil, err
 			}
 			out = append(out, v)
 		}
 		return out, nil
-	// A scalar: decoded as YAML 1.1 types (int, bool...), then as values
-	// hold them (value.Normalize): every number a float64, text UTF-8 (a
-	// !!binary may not be). .nan and .inf are refused: Helm cannot read them
-	// back from the final values.
-	case yaml.ScalarNode:
-		v, err := scalar(n)
-		if err != nil {
-			return nil, err
-		}
-		switch t := v.(type) {
-		case nil, bool:
-			return t, nil
-		case string:
-			if !utf8.ValidString(t) {
-				return nil, fmt.Errorf("a string that is not UTF-8: %q", t)
-			}
-			return t, nil
-		case int:
-			return float64(t), nil
-		case int64:
-			return float64(t), nil
-		case uint64:
-			return float64(t), nil
-		case float64:
-			if math.IsNaN(t) || math.IsInf(t, 0) {
-				return nil, fmt.Errorf("line %d: not a finite number: %s (quote it for the text)", n.Line, n.Value)
-			}
-			return t, nil
-		}
-		return value.Normalize(v)
-	// An alias: a copy of its anchor's node, unless it is inside it.
-	case yaml.AliasNode:
-		if r.open[n.Alias] {
-			return nil, fmt.Errorf("line %d: the alias *%s is inside the anchor &%s it refers to", n.Line, n.Value, n.Value)
-		}
-		if r.aliases == 0 {
-			r.line = n.Line
-		}
-		r.aliases++
-		defer func() { r.aliases-- }()
-		return r.fromNode(n.Alias)
 	}
-	return nil, fmt.Errorf("unsupported YAML node at line %d", n.Line)
-}
-
-// mapping: a map node as an omap. A merge key (<<) merges a map in, as
-// Helm's reader does: in the order written, so a key written after <<
-// replaces the merged one. A key written before a << that replaces it
-// fails: Helm's reader would take the merged value, where YAML's merge keys
-// keep the written one. So do two keys that are the same text, not the
-// same YAML value (clash).
-func (r *reader) mapping(n *yaml.Node) (*omap, error) {
-	m := newOmap()
-	keys := map[string]*yaml.Node{} // the keys written so far
-	for i := 0; i < len(n.Content); i += 2 {
-		kn, vn := n.Content[i], n.Content[i+1]
-		if kn.Kind == yaml.ScalarNode && kn.Value == "<<" && kn.ShortTag() == "!!merge" {
-			merged, err := r.merged(vn)
-			if err != nil {
-				return nil, err
-			}
-			for _, f := range merged.fields() {
-				if w, ok := keys[f.key]; ok {
-					return nil, fmt.Errorf("line %d: %s is written before the merge key << that replaces it: write it after <<", w.Line, w.Value)
-				}
-				if err := m.clash(f.key, f.node); err != nil {
-					return nil, err
-				}
-			}
-			m.merge(merged, true)
-			continue
+	// A scalar: decoded as YAML 1.1 types (int, bool...), then as values hold
+	// them: every number a float64, text UTF-8 (a !!binary may not be).
+	v, err := scalar(n)
+	switch t := v.(type) {
+	case int:
+		return float64(t), err
+	case int64:
+		return float64(t), err
+	case uint64:
+		return float64(t), err
+	case string:
+		if !utf8.ValidString(t) {
+			return nil, fmt.Errorf("a string that is not UTF-8: %q", t)
 		}
-		k, err := mapKey(kn)
-		if err != nil {
-			return nil, err
-		}
-		if err := m.clash(k, kn); err != nil {
-			return nil, err
-		}
-		v, err := r.fromNode(vn)
-		if err != nil {
-			return nil, err
-		}
-		name := kn.Value
-		if kn.Kind == yaml.AliasNode {
-			name = kn.Alias.Value
-		}
-		m.put(entry{k, name, kn, v})
-		keys[k] = kn
 	}
-	return m, nil
-}
-
-// merged: the map a merge key merges: a map, an alias of a map, or a list
-// of them, the first map of the list winning.
-func (r *reader) merged(n *yaml.Node) (*omap, error) {
-	items := []*yaml.Node{n}
-	if n.Kind == yaml.SequenceNode {
-		items = n.Content
-	}
-	out := newOmap()
-	for _, it := range items {
-		target := it
-		if it.Kind == yaml.AliasNode {
-			target = it.Alias
-		}
-		if target.Kind != yaml.MappingNode {
-			return nil, fmt.Errorf("line %d: the merge key << takes a map, or a list of maps", it.Line)
-		}
-		v, err := r.fromNode(it)
-		if err != nil {
-			return nil, err
-		}
-		m := v.(*omap)
-		for _, f := range m.fields() {
-			if err := out.clash(f.key, f.node); err != nil {
-				return nil, err
-			}
-		}
-		out.merge(m, false)
-	}
-	return out, nil
+	return v, err
 }
 
 // scalar: a scalar node decoded as Helm decodes values (YAML 1.1). yaml.v3
@@ -340,7 +162,8 @@ func (r *reader) merged(n *yaml.Node) (*omap, error) {
 // (and their case variants) is a boolean; and a signed YAML 1.2 octal,
 // 0o+7 or 0o-7, which is text. Timestamps stay strings, as in Helm. Quoted
 // scalars and explicit tags (!!str yes) are left as they are, but !!bool,
-// which takes the YAML 1.1 booleans too (!!bool yes).
+// which takes the YAML 1.1 booleans too (!!bool yes). .nan and .inf are
+// refused: Helm cannot read them back from the final values.
 func scalar(n *yaml.Node) (any, error) {
 	if b, ok := value.YAML11Bools[n.Value]; ok && n.ShortTag() == "!!bool" {
 		return b, nil
@@ -352,12 +175,16 @@ func scalar(n *yaml.Node) (any, error) {
 	if err := n.Decode(&v); err != nil {
 		return nil, err
 	}
-	if _, ok := v.(time.Time); ok {
+	switch t := v.(type) {
+	case time.Time:
 		return n.Value, nil
-	}
-	if s, ok := v.(string); ok && n.Style == 0 && n.Tag == "!!str" {
-		if b, ok := value.YAML11Bools[s]; ok {
+	case string:
+		if b, ok := value.YAML11Bools[t]; ok && n.Style == 0 && n.Tag == "!!str" {
 			return b, nil
+		}
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return nil, fmt.Errorf("line %d: not a finite number: %s (quote it for the text)", n.Line, n.Value)
 		}
 	}
 	return v, nil
@@ -367,10 +194,10 @@ func scalar(n *yaml.Node) (any, error) {
 // turned into a string as sigs.k8s.io/yaml does (on: is "true", 1.0: is
 // "1", 0x10: is "16"). A null or a non-scalar key is an error, as in Helm.
 func mapKey(n *yaml.Node) (string, error) {
-	if n.Kind == yaml.AliasNode {
-		return mapKey(n.Alias)
-	}
-	if n.Kind != yaml.ScalarNode {
+	switch {
+	case n.Anchor != "" || n.ShortTag() == "!!merge":
+		return "", fmt.Errorf(unread, n.Line)
+	case n.Kind != yaml.ScalarNode:
 		return "", fmt.Errorf("line %d: a map key must be a scalar", n.Line)
 	}
 	v, err := scalar(n)
@@ -386,17 +213,8 @@ func mapKey(n *yaml.Node) (string, error) {
 		return strconv.Itoa(t), nil
 	case int64:
 		return strconv.FormatInt(t, 10), nil
-	case float64:
-		s := strconv.FormatFloat(t, 'g', -1, 32)
-		switch s {
-		case "+Inf":
-			s = ".inf"
-		case "-Inf":
-			s = "-.inf"
-		case "NaN":
-			s = ".nan"
-		}
-		return s, nil
+	case float64: // at float32 precision, as sigs.k8s.io/yaml: 1e100 is .inf
+		return strings.NewReplacer("+Inf", ".inf", "-Inf", "-.inf").Replace(strconv.FormatFloat(t, 'g', -1, 32)), nil
 	}
 	return "", fmt.Errorf("line %d: unsupported map key %q", n.Line, n.Value)
 }
@@ -490,19 +308,19 @@ func (s *Session) env(names []string) (*cel.Env, error) {
 	// then the caller's.
 	opts := append(libraries(),
 		cel.Function("str", cel.Overload("str_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val { return types.String(Text(v)) }))),
+			Unary(func(v any) (any, error) { return value.Str(v), nil }))),
 		cel.Function("first", cel.Overload("first_list", []*cel.Type{cel.ListType(cel.DynType)}, cel.DynType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				l, ok := Native(v).([]any)
+			Unary(func(v any) (any, error) {
+				l, ok := v.([]any)
 				if !ok {
-					return types.NewErr("first: the argument must be a list, got %s", value.Short(Native(v)))
+					return nil, fmt.Errorf("first: the argument must be a list, got %s", value.Short(v))
 				}
 				for _, x := range l {
 					if value.Truthy(x) {
-						return types.DefaultTypeAdapter.NativeToValue(x)
+						return x, nil
 					}
 				}
-				return types.String("")
+				return "", nil
 			}))),
 	)
 	opts = append(opts, hostFunctions()...)
@@ -519,99 +337,18 @@ func (s *Session) env(names []string) (*cel.Env, error) {
 	return env, nil
 }
 
-// Native: a CEL value as data, as a host function takes it (toData): what
-// the values cannot hold is kept or written as text (str prints NaN, a map
-// key 1 is "1", a type is its name).
-func Native(v ref.Val) any {
-	out, _ := toData(v, false)
-	return out
-}
-
-// toData: a CEL value as data, the values' model: maps with string keys,
-// []any lists, float64 numbers (int, uint and double alike), strings,
-// booleans, null. An optional is its value, or null when it has none; a
-// timestamp or a duration its text (CEL's string()); bytes their text, as
-// the host functions take them. strict refuses what the values cannot
-// hold, at its position in the value: a NaN or infinite number (Helm cannot
-// read it back), a map key that is not a string, bytes that are not UTF-8,
-// a type.
-func toData(v ref.Val, strict bool) (any, error) {
-	switch t := v.(type) {
-	case types.Null:
-		return nil, nil
-	case types.Bool:
-		return bool(t), nil
-	case types.String:
-		return string(t), nil
-	case types.Int:
-		return float64(t), nil
-	case types.Uint:
-		return float64(t), nil
-	case types.Double:
-		f := float64(t)
-		if strict && (math.IsNaN(f) || math.IsInf(f, 0)) {
-			return nil, fmt.Errorf("not a finite number: %v", f)
-		}
-		return f, nil
-	case types.Bytes:
-		if strict && !utf8.Valid(t) {
-			return nil, fmt.Errorf("bytes that are not UTF-8 text (encode them with base64.encode)")
-		}
-		return string(t), nil
-	case types.Timestamp, types.Duration:
-		if s, ok := v.ConvertToType(types.StringType).(types.String); ok {
-			return string(s), nil
-		}
-	case *types.Optional:
-		if !t.HasValue() {
-			return nil, nil
-		}
-		return toData(t.GetValue(), strict)
-	case traits.Lister:
-		out := []any{}
-		for it, i := t.Iterator(), 0; it.HasNext() == types.True; i++ {
-			x, err := toData(it.Next(), strict)
-			if err != nil {
-				return nil, atIndex(i, err)
-			}
-			out = append(out, x)
-		}
-		return out, nil
-	case traits.Mapper:
-		return mapData(t, strict)
+// toData: a CEL value as data, the values' model, as cel-go converts it to
+// JSON (google.protobuf.Value): maps with string keys, []any lists, float64
+// numbers, strings, booleans, null. An integer beyond 2^53 is its digits,
+// a NaN or infinite number "NaN" or "[-]Infinity", bytes their base64, a
+// timestamp or a duration its text (CEL's string()), an optional its value.
+// A map key that is not a string, an optional without a value, a type fail.
+func toData(v ref.Val) (any, error) {
+	pb, err := v.ConvertToNative(types.JSONValueType)
+	if err != nil {
+		return nil, err
 	}
-	if strict {
-		return nil, fmt.Errorf("a CEL %s has no data form", v.Type().TypeName())
-	}
-	return fmt.Sprint(v.Value()), nil
-}
-
-// mapData: a CEL map as data (toData), its keys in order, so that the error
-// reported is stable.
-func mapData(m traits.Mapper, strict bool) (M, error) {
-	type entry struct {
-		key  ref.Val
-		text string
-	}
-	var keys []entry
-	for it := m.Iterator(); it.HasNext() == types.True; {
-		k := it.Next()
-		keys = append(keys, entry{k, fmt.Sprint(k.Value())})
-	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i].text < keys[j].text })
-	out := M{}
-	for _, k := range keys {
-		if _, ok := k.key.(types.String); !ok && strict {
-			return nil, fmt.Errorf("a map key must be a string, got %s %s", k.key.Type().TypeName(), k.text)
-		}
-		v, _ := m.Find(k.key)
-		x, err := toData(v, strict)
-		if err != nil {
-			return nil, atKey(k.text, err)
-		}
-		out[k.text] = x
-	}
-	return out, nil
+	return pb.(*structpb.Value).AsInterface(), nil
 }
 
 // expr: an expression of a document, compiled once, in the environment of
@@ -656,8 +393,8 @@ func (s *Session) run(e *expr, scope M) (any, error) {
 	out, err := s.exec(e.prg, scope)
 	var v any
 	if err == nil {
-		// The value as data: what the values cannot hold fails the expression.
-		v, err = toData(out, true)
+		// The value as data: what has no data form fails the expression.
+		v, err = toData(out)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("${{ %s }}: %w", e.src, err)
@@ -840,13 +577,13 @@ func within(seg string, index bool, err error) error {
 // parseDoc: a YAML + CEL document (a mapping, a template), its maps
 // ordered. It is one YAML document: a second one fails rather than being
 // ignored. An empty or null document (comments or --- at most) has no
-// section. Its lines are read as Helm reads those of a values file
-// (helmLines).
+// section. As in a values file Helm reads, its last line ends with a line
+// break: a | or > block scalar ending the file keeps its newline.
 func parseDoc(b []byte) (*omap, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(helmLines(b)))
+	dec := yaml.NewDecoder(strings.NewReader(strings.TrimSuffix(string(b), "\n") + "\n"))
 	var doc, next yaml.Node
 	if err := dec.Decode(&doc); errors.Is(err, io.EOF) {
-		return newOmap(), nil
+		return &omap{}, nil
 	} else if err != nil {
 		return nil, err
 	}
@@ -855,65 +592,17 @@ func parseDoc(b []byte) (*omap, error) {
 	} else if !errors.Is(err, io.EOF) {
 		return nil, err
 	}
-	r := &reader{open: map[*yaml.Node]bool{}}
-	root, err := r.fromNode(&doc)
+	root, err := fromNode(&doc)
 	if err != nil {
 		return nil, err
 	}
-	if root == nil {
-		return newOmap(), nil
+	switch top := root.(type) {
+	case nil:
+		return &omap{}, nil
+	case *omap:
+		return top, nil
 	}
-	top, ok := root.(*omap)
-	if !ok {
-		return nil, fmt.Errorf("the mapping must be a YAML map")
-	}
-	return top, nil
-}
-
-// helmLines: b as Helm reads the lines of a values file (Kubernetes'
-// YAMLReader, chart.splitDocuments): each one ends with "\n", a "\r"
-// before it dropped. So a | or > block scalar ending a file without a final
-// line break keeps its newline, and "\r\r\n" is one line break. UTF-16
-// text, after its byte order mark, is left as it is.
-func helmLines(b []byte) []byte {
-	if len(b) == 0 || bytes.HasPrefix(b, []byte{0xfe, 0xff}) || bytes.HasPrefix(b, []byte{0xff, 0xfe}) {
-		return b
-	}
-	var out bytes.Buffer
-	for line := range bytes.SplitSeq(bytes.TrimSuffix(b, []byte("\n")), []byte("\n")) {
-		out.Write(bytes.TrimSuffix(line, []byte("\r")))
-		out.WriteByte('\n')
-	}
-	return out.Bytes()
-}
-
-// messages: what an evaluated item of an errors section reports: a rule,
-// {message: <text>} (left out by its $if when it holds no error), gives its
-// message; a list gives its messages (an expression returning the messages
-// of a check, none when it passes).
-func messages(v any) ([]string, error) {
-	switch t := v.(type) {
-	case []any:
-		out := make([]string, 0, len(t))
-		for _, m := range t {
-			out = append(out, value.Str(m))
-		}
-		return out, nil
-	case M:
-		msg, ok := t["message"]
-		if !ok || len(t) != 1 {
-			break
-		}
-		s, ok := msg.(string)
-		switch {
-		case !ok:
-			return nil, fmt.Errorf("message must be text, got %s", value.Short(msg))
-		case s == "":
-			return nil, fmt.Errorf("an empty message")
-		}
-		return []string{s}, nil
-	}
-	return nil, fmt.Errorf("a rule is {$if: <condition>, message: <text>}, or an expression returning a list of messages, got %s", value.Short(v))
+	return nil, fmt.Errorf("the mapping must be a YAML map")
 }
 
 // Doc: a document (a mapping, a template) loaded in a session: its
@@ -950,7 +639,8 @@ func (s *Session) Load(b []byte, scope M, sections ...string) (*Doc, error) {
 
 // bind: the scope of the sections of t: the context vars, then the let
 // bindings, in order (each sees the previous ones); then the errors
-// section, every message collected before failing (messages).
+// section, every message collected before failing: each value it gives is
+// a rule, {message: <text>}, left out by its $if when it holds no error.
 func (t *tree) bind(s *Session, vars M) (M, error) {
 	scope := make(M, len(vars)+len(t.let))
 	maps.Copy(scope, vars)
@@ -964,11 +654,12 @@ func (t *tree) bind(s *Session, vars M) (M, error) {
 			return nil, atKey("errors", atIndex(i, err))
 		}
 		for _, v := range vs {
-			m, err := messages(v)
-			if err != nil {
-				return nil, atKey("errors", atIndex(i, err))
+			m, _ := v.(M)
+			msg, _ := m["message"].(string)
+			if len(m) != 1 || msg == "" {
+				return nil, atKey("errors", atIndex(i, fmt.Errorf("a rule is {$if: <condition>, message: <text>}, got %s", value.Short(v))))
 			}
-			msgs = append(msgs, m...)
+			msgs = append(msgs, msg)
 		}
 	}
 	if len(msgs) > 0 {

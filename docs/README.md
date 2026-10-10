@@ -5,7 +5,7 @@
 | [Usage](01_usage.md) | platform engineers, integrators | install, the `okdp-compile` command line, the Go library, CI and GitOps integration, troubleshooting |
 | [Writing a package](02_writing_package.md) | package authors | a package, its upstream charts and its service definition, step by step; recipes and pitfalls from OKDP's packages; a checklist |
 | [Service definition](specs/02_service_definition.md) | package authors (reference) | `service.yaml` (the package metadata, the charts and their sources) and `values.cel.yaml`: sections, expressions, the CEL context, errors |
-| [Control flow](specs/03_control_flow.md) | package authors (reference) | the directives `$if`, `$value`, `$for`, `$let`, `$merge`, `$spread`: places, scope, evaluation, Helm equivalents, errors |
+| [Control flow](specs/03_control_flow.md) | package authors (reference) | the directives `$if`, `$value`, `$else`, `$for`, `$let`, `$merge`, `$spread`: places, scope, evaluation, Helm equivalents, errors |
 | [Functions](specs/04_functions.md) | package authors (reference) | what an expression calls: CEL's libraries at their pinned versions, the host functions (`str`, `toYaml`, `okdpFullname`, `okdpGeneratedSecret`...), Helm and sprig equivalents |
 | [Inputs and outputs](specs/01_inputs_outputs.md) | everyone (reference) | the package files, the chart cache, parameters, connections, contracts, platform and instance values, the merge precedence, the outputs |
 | [Architecture](00_architecture.md) | contributors | the compile pipeline, the source map, the design decisions, the tests, the limitations |

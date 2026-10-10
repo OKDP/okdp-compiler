@@ -15,20 +15,16 @@ import (
 	"io"
 	"io/fs"
 	"path"
-	"regexp"
 	"strings"
 )
 
-// maxChartSize: the most a chart of the cache holds, decompressed, as Helm
-// caps a chart (MaxDecompressedChartSize, 100 MiB). A variable, for the
-// tests.
+// maxChartSize: the most a chart archive of the cache holds, its tar stream
+// decompressed, as Helm caps a chart (MaxDecompressedChartSize, 100 MiB). A
+// variable, for the tests.
 var maxChartSize int64 = 100 << 20
 
 // utf8BOM: the byte order mark Helm's loader strips from a chart's files.
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
-
-// drivePath: a path in a chart archive that names a Windows drive.
-var drivePath = regexp.MustCompile(`^[a-zA-Z]:/`)
 
 // upstreamChart: what the compiler reads of an upstream chart: its entry in
 // the chart cache (<repository>/<chart>-<version>, for the errors), its
@@ -88,9 +84,8 @@ func (c *chartCache) get(r Ref) (*upstreamChart, error) {
 func readEntry(fsys fs.FS, name string) (map[string][]byte, error) {
 	if fi, err := fs.Stat(fsys, name); err == nil && fi.IsDir() {
 		files := map[string][]byte{}
-		remaining := maxChartSize
 		for _, file := range []string{"values.yaml", "values.schema.json"} {
-			b, err := readFile(fsys, path.Join(name, file), &remaining)
+			b, err := fs.ReadFile(fsys, path.Join(name, file))
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
@@ -113,108 +108,39 @@ func readEntry(fsys fs.FS, name string) (map[string][]byte, error) {
 	return files, nil
 }
 
-// readFile: the file name of an unpacked chart, taken from the bytes
-// remaining of the chart's maxChartSize, as Helm 4.3 reads the files of a
-// chart directory (a file over them fails, whatever its size says).
-func readFile(fsys fs.FS, name string, remaining *int64) ([]byte, error) {
-	f, err := fsys.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }() // read only: nothing to flush
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	tooLarge := fmt.Errorf("%s: chart exceeds maximum decompressed size of %d bytes", name, maxChartSize)
-	if fi.Size() > *remaining {
-		return nil, tooLarge
-	}
-	b, err := io.ReadAll(io.LimitReader(f, *remaining+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) > *remaining {
-		return nil, tooLarge
-	}
-	*remaining -= int64(len(b))
-	return b, nil
-}
-
-// readArchive: values.yaml and values.schema.json of a chart archive, not
-// those of its subcharts (<chart>/charts/<sub>/values.yaml), as Helm's
-// loader reads an archive (LoadArchiveFiles): each entry in the chart's
-// directory (archiveName), every file counted against maxChartSize
-// decompressed, a UTF-8 byte order mark stripped. The errors are Helm 4's.
+// readArchive: values.yaml and values.schema.json of a chart archive, the
+// regular files of those names in the chart's directory (an entry's name
+// without its first segment, split on / or \ as Helm's loader splits it),
+// not those of its subcharts, a UTF-8 byte order mark stripped. Nothing
+// else is kept or checked: the deployer's Helm loads the chart. The tar
+// stream fails past maxChartSize bytes decompressed.
 func readArchive(r io.Reader) (map[string][]byte, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, err
 	}
-	tr := tar.NewReader(gz)
+	// One byte over the cap: past it, a tar block is cut and fails.
+	lr := &io.LimitedReader{R: gz, N: maxChartSize + 1}
+	tr := tar.NewReader(lr)
 	files := map[string][]byte{}
-	remaining := maxChartSize
-	tooLarge := fmt.Errorf("decompressed chart is larger than the maximum size %d", maxChartSize)
 	for {
 		h, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			return files, nil
 		}
+		if err == nil {
+			_, name, _ := strings.Cut(strings.ReplaceAll(h.Name, `\`, "/"), "/")
+			if name = path.Clean(name); h.Typeflag == tar.TypeReg && (name == "values.yaml" || name == "values.schema.json") {
+				var b []byte
+				b, err = io.ReadAll(tr)
+				files[name] = bytes.TrimPrefix(b, utf8BOM)
+			}
+		}
+		if err != nil && lr.N == 0 {
+			return nil, fmt.Errorf("%w (a chart is at most %d bytes decompressed)", err, maxChartSize)
+		}
 		if err != nil {
 			return nil, err
 		}
-		if h.FileInfo().IsDir() || h.Typeflag == tar.TypeXGlobalHeader || h.Typeflag == tar.TypeXHeader {
-			continue
-		}
-		name, err := archiveName(h.Name)
-		if err != nil {
-			return nil, err
-		}
-		if h.Size > remaining {
-			return nil, tooLarge
-		}
-		// The other files are read too, to count them, as Helm does.
-		w := io.Discard
-		var b bytes.Buffer
-		keep := h.FileInfo().Mode().IsRegular() && (name == "values.yaml" || name == "values.schema.json")
-		if keep {
-			w = &b
-		}
-		n, err := io.Copy(w, io.LimitReader(tr, remaining))
-		if err != nil {
-			return nil, err
-		}
-		if remaining -= n; n < h.Size || remaining <= 0 {
-			return nil, tooLarge
-		}
-		if keep {
-			files[name] = bytes.TrimPrefix(b.Bytes(), utf8BOM)
-		}
 	}
-}
-
-// archiveName: the path in its chart of the archive entry name, as Helm's
-// loader reads it: split on `\` if it has one (an archive written on
-// Windows), else on /, and its first segment, the chart's directory,
-// dropped. An absolute path, a path out of the chart or a Windows drive
-// fails.
-func archiveName(name string) (string, error) {
-	sep := "/"
-	if strings.Contains(name, `\`) {
-		sep = `\`
-	}
-	_, n, _ := strings.Cut(name, sep)
-	n = strings.ReplaceAll(n, sep, "/")
-	if path.IsAbs(n) {
-		return "", errors.New("chart illegally contains absolute paths")
-	}
-	switch n = path.Clean(n); {
-	case n == ".":
-		return "", fmt.Errorf("chart illegally contains content outside the base directory: %q", name)
-	case strings.HasPrefix(n, ".."):
-		return "", errors.New("chart illegally references parent directory")
-	case drivePath.MatchString(n):
-		return "", errors.New("chart contains illegally named files")
-	}
-	return n, nil
 }

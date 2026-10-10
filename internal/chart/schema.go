@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	gourl "net/url"
 	"slices"
 	"strings"
 
@@ -19,7 +18,7 @@ const schemaURL = "file:///values.schema.json"
 
 // checkSchema: the values against the JSON schema b, read from name (none
 // when b is nil: the chart has no schema), one line per violation with its
-// path, as Helm prints them (validate). The values are what the chart's
+// path, as Helm prints them (Validate). The values are what the chart's
 // templates see: Helm's coalesced values. The schema is compiled as Helm 4
 // compiles it (CompileSchema).
 func checkSchema(name string, b []byte, values M) (string, error) {
@@ -34,17 +33,17 @@ func checkSchema(name string, b []byte, values M) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
-	return validate(name, sch, values)
+	return Validate(name, sch, values)
 }
 
-// validate: v against sch, a schema of the file name, one line per
+// Validate: v against sch, a schema of the file name, one line per
 // violation with its path, as Helm prints them, "" when v holds:
 //
 //   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
 //
 // The violations are sorted by path: Helm's order varies between runs. A
 // panic of the validator is an error, as in Helm.
-func validate(name string, sch *jsonschema.Schema, v any) (_ string, err error) {
+func Validate(name string, sch *jsonschema.Schema, v any) (_ string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%s: unable to validate schema: %v", name, r)
@@ -76,18 +75,7 @@ func validate(name string, sch *jsonschema.Schema, v any) (_ string, err error) 
 // keywords ignored. Unlike Helm, nothing is fetched: a $ref to a file or a
 // URL fails (a urn: $ref accepts anything, as in Helm). A panic of the
 // compiler is an error, as in Helm.
-func CompileSchema(url string, doc any) (*jsonschema.Schema, error) {
-	s, err := compileSchemas(url, doc)
-	if err != nil {
-		return nil, err
-	}
-	return s[0], nil
-}
-
-// compileSchemas: the schema doc at url compiled as CompileSchema compiles
-// it, then its subschemas at each JSON pointer of ptrs (/properties/a),
-// as they apply within it.
-func compileSchemas(url string, doc any, ptrs ...string) (_ []*jsonschema.Schema, err error) {
+func CompileSchema(url string, doc any) (_ *jsonschema.Schema, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("unable to validate schema: %v", r)
@@ -99,28 +87,7 @@ func compileSchemas(url string, doc any, ptrs ...string) (_ []*jsonschema.Schema
 	if err := c.AddResource(url, doc); err != nil {
 		return nil, err
 	}
-	out := make([]*jsonschema.Schema, 0, 1+len(ptrs))
-	for _, loc := range append([]string{url}, ptrs...) {
-		if len(out) > 0 {
-			loc = url + "#" + fragment(loc)
-		}
-		s, err := c.Compile(loc)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, nil
-}
-
-// fragment: the JSON pointer ptr as a URL fragment, each of its tokens
-// percent-encoded.
-func fragment(ptr string) string {
-	tokens := strings.Split(ptr, "/")
-	for i, t := range tokens {
-		tokens[i] = gourl.PathEscape(t)
-	}
-	return strings.Join(tokens, "/")
+	return c.Compile(url)
 }
 
 // sortCauses: the causes of e sorted by instance path then message, at

@@ -15,8 +15,6 @@ import (
 	"strings"
 
 	sigsyaml "sigs.k8s.io/yaml"
-
-	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // Sha256Sum: Helm's sha256sum, the hex SHA-256 of the text.
@@ -58,32 +56,6 @@ func ToYAML(v any) (string, error) {
 // nothing rather than two quotes, which the caller tests.
 func Quote(text string) string {
 	return fmt.Sprintf("%q", text)
-}
-
-// Default: sprig's default: v, or d when v is empty (null, "", 0, false, an
-// empty list or map).
-func Default(v, d any) any {
-	if value.Truthy(v) {
-		return v
-	}
-	return d
-}
-
-// ToString: sprig's toString (a null is "<nil>").
-func ToString(v any) string {
-	if v == nil {
-		return "<nil>"
-	}
-	return value.Str(v)
-}
-
-// Printed: v printed into a template ({{ v }}) and read back as YAML.
-func Printed(v any) any {
-	var out any
-	if err := sigsyaml.Unmarshal([]byte(value.Str(v)), &out); err != nil {
-		return value.Str(v)
-	}
-	return out
 }
 
 // Trunc: sprig's trunc, s cut to n bytes.

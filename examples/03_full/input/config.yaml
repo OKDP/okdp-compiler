@@ -43,7 +43,7 @@ connections:
 # Values for the upstream charts as they are, over OKDP's defaults and the
 # computed values.
 upstream:
-  api:                                 # and the scheduler's: upstream: {from: api}
+  api:                                 # api's only: the scheduler accepts none
     env:                               # appended to the computed ones (append: [env])
       - {name: TZ, value: Europe/Paris}
     resources:

@@ -29,12 +29,14 @@ mapping (a plain `upstream: no` is a string, refused:
 do not list fails rather than being ignored, where a misspelt `protect`
 would leave its paths unprotected, and so does a key that only holds an
 anchor (write the anchor at its first use, as in [sources](#sources)).
-Each unknown field is reported, one per line, with the fields of its place
-(the top level, a chart, a `source`); a [`require`](#require) entry and
-[`upstream`](#upstream) check their own forms:
+Each unknown field is reported, one per line, as yaml.v3 reports it, with
+the Go type of its place (`compiler.Service` the top level, `chart.Spec` a
+chart, `chart.Ref` a `source`, `compiler.Requirement` a [`require`](#require)
+entry); [`upstream`](#upstream) checks its own form:
 
 ```text
-service.yaml: line 7: unknown field protcet (allowed: source, defaults, protect, append, upstream)
+service.yaml: yaml: unmarshal errors:
+  line 7: field protcet not found in type chart.Spec
 ```
 
 The file is one YAML document: a second one, after `---`, fails
@@ -73,24 +75,25 @@ before the mapping: [requirements](01_inputs_outputs.md#requirements).
 `$if` is one expression, `${{ <condition> }}`, as in the mapping
 ([`$if`](03_control_flow.md#if)), evaluated on the [context](#context) of the mapping, its
 variables and host functions (no `let` binding), cancelled with the
-compile and counted in its CEL cost limit (`CompileContext`,
-`WithCostLimit`). Its value must be `true` or `false`: unlike the
+compile and counted in its CEL cost limit (`Compile`,
+`Inputs.CostLimit`). Its value must be `true` or `false`: unlike the
 mapping's `$if`, it is not tested as a Helm condition. When it holds, the
 key is checked as a key of every case.
 
-An entry of another form fails when `service.yaml` is loaded, and before
-every compile for a `Service` built in memory (`compiler.Requirement`,
-`{Key, If}`, `If` empty in every case). `<entry>` is `require[<i>]`, the
-position of the entry from 0, followed by ` (<key>)` once its key is read:
+A scalar entry is its key (`true` is the key `true`); a map without `$if`,
+or with `$if: ""`, is a key of every case; an empty item is skipped. An
+entry of another form fails when `service.yaml` is loaded, with yaml.v3's
+error; its key and condition are checked then, and before every compile
+for a `Service` built in memory (`compiler.Requirement`, `{Key, If}`, `If`
+empty in every case). `<entry>` is `require[<i>]`, the position of the
+entry from 0, followed by ` (<key>)` once its key is read:
 
 | Case | Error |
 |---|---|
-| `require` is not a list | `service.yaml: require must be a list: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}` |
-| an entry neither a string nor a map | `service.yaml: <entry>: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}, got <value>` |
-| a field other than `key` and `$if` | `service.yaml: <entry>: unknown field <field>: an entry is a key, or {key: <key>, $if: ${{ <condition> }}}` |
-| no `key`, no `$if` | `service.yaml: <entry>: no key: an entry is ...`, `service.yaml: <entry>: no $if: an entry is ... (a key alone is required in every case)` |
-| a `key` that is not a string, an empty key (`""`, an empty item) | `service.yaml: <entry>: key must be a key under global.okdp (ingress.suffix), got <value>`, `service.yaml: <entry>: an empty key: a key under global.okdp (ingress.suffix)` |
-| an `$if` that is not one expression (a literal, `""`, text around it) | `service.yaml: <entry>: $if: takes one expression, ${{ <condition> }}, got <value>` |
+| `require` not a list, an entry a list, a `key` or `$if` not a scalar | `service.yaml: line <n>: cannot unmarshal !!seq into string` |
+| a field other than `key` and `$if` | `service.yaml: yaml: unmarshal errors:` then `line <n>: field <field> not found in type compiler.Requirement` |
+| an empty key (`""`, a map without `key`) | `service.yaml: <entry>: an empty key: a key under global.okdp (ingress.suffix)` |
+| an `$if` that is not one expression (a literal, text around it) | `service.yaml: <entry>: $if: takes one expression, ${{ <condition> }}, got <value>` |
 
 A condition whose evaluation fails, or whose value is not `true` or
 `false`, fails the compile, `null` included (`platform.oidc.enabled` is
@@ -108,7 +111,7 @@ service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: mu
 |---|---|---|---|
 | `source` | `{repository, chart, version}` | required | The upstream chart that renders the key's values: [sources](#sources). |
 | `defaults` | string | none | Path, in the package, of OKDP's defaults for this chart, over its `values.yaml` and under the computed values (by convention `<key>.defaults.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
-| `upstream` | `true`, `false` or `{from: <key>}` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
+| `upstream` | `true` or `false` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
 | `protect` | list of paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
 | `append` | list of paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
 
@@ -121,14 +124,13 @@ be in the chart cache ([chart cache](01_inputs_outputs.md#chart-cache)).
 
 A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
 a letter or a digit at each end, 63 characters at most (`app`,
-`admin-users`). It names files, the emitted `<key>.values.yaml`, and the
-umbrella's dependency alias
+`admin-users`). It names the umbrella's dependency alias
 ([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
 (`""`, `../app`, `my_app`, `App`) fails when `service.yaml` is loaded, and
 by `Compile` for a definition built in memory:
 
 ```text
-service.yaml: charts: key "../app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names files (<key>.values.yaml) and the umbrella's dependency alias
+service.yaml: charts: key "../app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias
 ```
 
 ### Sources
@@ -143,7 +145,6 @@ charts:
   polaris-admin-principals:            # the values of a second render
     source: *admin                     # the same chart
     defaults: polaris-admin-principals.defaults.yaml
-    upstream: {from: polaris-admin}    # the instance values of polaris-admin, with its protect
 ```
 
 `source` names the upstream chart that renders the key's values, as its
@@ -162,8 +163,7 @@ final values, and their schema
 Two keys of the same source are two renders of one upstream chart, each
 with its own values (polaris-admin's bootstrap and principals phases).
 Everything else stays keyed by the key: `output.<key>` of the mapping,
-`Result.Values`, the instance's `upstream.<key>` values. `upstream: {from: <key>}` gives the
-second render the instance values of the first ([upstream](#upstream)).
+`Result.Values`, the instance's `upstream.<key>` values.
 
 A source is checked when `service.yaml` is loaded, and by `Compile` for a
 definition built in memory:
@@ -177,37 +177,21 @@ definition built in memory:
 
 ### upstream
 
-| Value | Instance upstream values read, in order |
+| Value | Instance upstream values read |
 |---|---|
 | absent, `false`, `null` | none: the instance's `upstream.<name>` values are ignored |
 | `true` | the instance's `upstream.<name>` values |
-| `{from: <key>}` | those of the chart `<key>`, with its `protect` and `append` |
 
-A value of another form (a string, a number, a list, a map other than
-`{from: <key>}`) fails with
-`service.yaml: line <n>: upstream must be true, false or {from: <chart>}`.
-A boolean of YAML 1.1 written plain (`y`, `yes`, `n`, `no`, `on`, `off`,
-capitalized or upper case) is a string in YAML 1.2: it is refused with
-what to write instead:
+A boolean of YAML 1.1 (`y`, `yes`, `n`, `no`, `on`, `off`, capitalized or
+upper case) reads as the boolean it spells, as yaml.v3 decodes a boolean
+field. A value of another form (a string, a number, a list, a map) fails
+with yaml.v3's error:
 
 ```
-service.yaml: line 7: upstream off: write true or false (service.yaml is read as YAML 1.2, where off is not a boolean)
+service.yaml: line 7: cannot unmarshal !!map into bool
 ```
 How the instance values are written:
 [upstream values](01_inputs_outputs.md#upstream-values).
-
-`{from: <key>}` is for two renders of one upstream chart that an instance
-sets with one set of values ([sources](#sources)): refused or appended the
-same way in both, also when the mapping leaves `<key>` out. The mapping sees
-them once, as `values.upstream.<key>`. `<key>` must accept upstream values of
-its own, and the chart lists no `protect` or `append` of its own:
-
-| Case | Error |
-|---|---|
-| `<key>` is the chart itself | `service.yaml: charts.<chart>.upstream.from: the chart itself (upstream: true accepts its own values)` |
-| `<key>` is not a chart of `service.yaml` | `service.yaml: charts.<chart>.upstream.from "<key>": not a chart of service.yaml` |
-| `<key>` accepts no upstream values of its own (none, or `from`) | `service.yaml: charts.<chart>.upstream.from "<key>": that chart accepts no upstream values of its own (upstream: true, or files)` |
-| the chart has `protect` or `append` | `service.yaml: charts.<chart>: protect and append come with upstream.from, from charts.<key>: list them there` |
 
 ### protect and append
 
@@ -215,9 +199,9 @@ Paths of keys separated by dots (`ingress.hosts`). A key containing dots is
 written in brackets, as one literal key (`config["spark.ui.filters"]`); a
 bracketed key ending with `*` names every key starting with the text before
 it (`ingress.annotations["cert-manager.io/*"]`; `["*"]` names every key);
-`\"`, `\\` and `\*` write a quote, a backslash and a star in brackets. A
+no key holds a quote, a backslash or a star but a glob's. A
 malformed path fails when `service.yaml` is loaded:
-`service.yaml: charts.<key>.protect[<i>] "<path>": <reason>` (`append[<i>]`
+`service.yaml: charts.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])` (`append[<i>]`
 alike). `global` is always protected. Both apply to each instance upstream
 file, then to the inline values: [protect](01_inputs_outputs.md#protect),
 [append](01_inputs_outputs.md#append).
@@ -257,7 +241,6 @@ charts:
   admin-users:                         # output.admin-users, a second render of the admin chart
     source: *admin
     defaults: admin-users.defaults.yaml
-    upstream: {from: admin}            # the instance values of admin
   metrics:                             # no OKDP defaults, no instance values
     source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
 ```
@@ -272,7 +255,7 @@ structure ([Directives](#directives)). Its top-level keys are the
 | Key | Type | Content |
 |---|---|---|
 | [`let`](#let) | map | named values, evaluated in order |
-| [`errors`](#the-errors-section) | list | rules (`$if`, `message`) and expressions returning lists of messages: any message fails the compile |
+| [`errors`](#the-errors-section) | list | rules (`$if`, `message`): any message fails the compile |
 | [`output`](#output) | map | chart → computed values |
 | [`objects`](#objects) | list | OKDP's own objects, whole manifests |
 | [`instance`](#instance) | map | `url` and `usage` of the instance |
@@ -325,7 +308,7 @@ oidcClients:
 
 `examples/03_full/input/service/values.cel.yaml` uses every section,
 directive and host function, most of the CEL libraries and of the YAML
-reading (anchors, merge keys, `$$`, `$${{`), each commented; its
+reading (YAML 1.1, `$$`, `$${{`), each commented; its
 `service.yaml` two renders of one chart, `protect` paths in brackets and
 with a glob, a conditional `require`.
 
@@ -344,10 +327,10 @@ mistake fails the compile before anything is evaluated. Then:
 2. `errors`, every entry, then the messages fail the compile together
    ([the errors section](#the-errors-section)).
 3. `output`, `instance`, `provides`, `objects`, `oidcClients`, in this
-   order: each sees the context and every `let` binding, and is checked
-   for its shape once evaluated.
-4. The objects are checked (kind and name); then the OAuth clients, whose
-   charts are added in `dcr` mode ([oidcClients](#oidcclients)); then the
+   order: each sees the context and every `let` binding. Then they are
+   checked together for their shapes.
+4. The OAuth clients are checked across clients, their charts added in
+   `dcr` mode ([oidcClients](#oidcclients)); then the
    compile builds the descriptor from `instance` and `provides`, checked
    against the contracts, and the final values of each chart in `output`,
    of each client chart and of the `okdp` chart.
@@ -356,13 +339,24 @@ A section does not see the others: there is no `output` or `instance`
 variable. A value used by several sections is a `let` binding.
 
 Each section has a shape: `output` and `instance` are maps, `provides`,
-`objects` and `oidcClients` lists. Absent or null (left out by `$if`, a
-null expression), a section is empty. A value of another shape fails the
-compile, `<section>: must be <shape>, got <value>`, rather than read as
-empty: `output: [app]` would otherwise render no chart. A chart of
-`output` that is not a map fails too, and an `instance` key, `url` or
-`usage`, that is not a string ([instance](#instance)). `<value>`: the
-value as Go's `%#v` prints it (`"x"`, `false`, `[]interface {}{"app"}`).
+`objects` and `oidcClients` lists. So have the items and keys the compiler
+reads in them, described by the mapping schema the compiler embeds,
+[`mapping.schema.json`](../../mapping.schema.json):
+their types, the keys required, the keys allowed where another is
+refused, what each means in its `description`. It is the package authors'
+reference. Absent or null (left out by `$if`, a null expression), a
+section is empty, and a null key of a map the schema describes is not
+set. A value of another shape fails the compile rather than read as
+empty: `output: [app]` would otherwise render no chart. Every violation
+is reported at once, sorted by path, in Helm's words, as those of the
+[parameters](01_inputs_outputs.md#schema-check):
+
+```text
+the mapping's sections don't meet the specifications of mapping.schema.json:
+- at '/instance/url': got number, want string
+- at '/oidcClients/0': missing property 'grantTypes'
+- at '/output/app': got string, want object
+```
 
 A mapping that is not a YAML map fails with `the mapping must be a YAML map`;
 invalid YAML with the parser's error (`yaml: line <n>: ...`). The mapping
@@ -385,8 +379,9 @@ any other ([Expressions](#expressions), [Directives](#directives)); a value
 left out by `$if` binds null. The binding is named by the key as written
 ([YAML reading](#yaml-reading)); it is referenced by that name, which must
 be a CEL identifier (`my-var` reads as `my - var`). A binding referenced
-before its entry fails: `undeclared reference`. A name given twice fails
-(`let <name>: bound twice`), as does one starting with `$`
+before its entry fails: `undeclared reference`. A name written twice fails,
+as any key ([YAML reading](#yaml-reading)), and so does a name of two keys,
+`y` and `"y"` (`let <name>: bound twice`), or one starting with `$`
 (`let <name>: a binding name cannot start with $`).
 
 A binding with the name of a context variable replaces it for every later
@@ -397,12 +392,10 @@ nor null fails: `let: must be a map of bindings, got <value>`.
 ### output
 
 A map: chart name → the values the mapping computes for that chart.
-Another value fails with
-`output: must be a map of charts to their values, got <value>`.
+Another value fails ([sections](#evaluation-order)).
 
-- The values of a chart are a map:
-  `output: <key>: must be a map of the chart's values, got <value>`. A
-  scalar or a list is refused, not compiled as the chart's defaults alone;
+- The values of a chart are a map (`- at '/output/<key>': got string, want object`):
+  a scalar or a list is refused, not compiled as the chart's defaults alone;
   a null (a null expression, `~`) leaves the chart out, as `$if` does.
 - Every key must be a chart of `service.yaml`:
   `mapping output "<key>": not a chart of service.yaml`. A key may not be
@@ -430,18 +423,11 @@ objects:
 
 A list of OKDP's own objects, whole manifests: the compiler adds nothing to
 them (namespace and labels are the mapping's). After evaluation, every item
-must be a map with a non-empty `kind` and `metadata.name`:
-`objects[<i>]: not an object with a kind and a metadata.name: <object>`.
-A value that is not a list fails with
-`objects: must be a list of objects, got <value>`; absent or null, there
-are none. They follow the descriptor and the
+must be a map with a non-empty `kind` and `metadata.name`
+(`- at '/objects/<i>': missing property 'kind'`). A value that is not a
+list fails; absent or null, there are none. They follow the descriptor and the
 credentials Secrets in `Result.Objects` and in the `okdp` chart:
-[outputs](01_inputs_outputs.md#outputs). No two of these may be one object
-of the cluster (the same API group, `kind`, namespace and name, an object
-without a namespace in the release's): `objects[<i>]: the descriptor is the
-same object, ConfigMap "<release>-okdp" in namespace "<namespace>": give
-each object its own name`
-([objects section](01_inputs_outputs.md#objects-section)).
+[outputs](01_inputs_outputs.md#outputs).
 
 ### instance
 
@@ -451,11 +437,10 @@ each object its own name`
 | `usage` | how to use the instance, a string, trimmed, with one final newline |
 
 Other keys are ignored. Both go to the descriptor ConfigMap:
-[outputs](01_inputs_outputs.md#outputs). A value that is not a map fails
-with `instance: must be a map (url, usage), got <value>`; absent or null,
-both are empty. `url` and `usage` are strings when set (null is not set):
-another value fails rather than is printed as text,
-`instance: url: must be a string, got 8080`.
+[outputs](01_inputs_outputs.md#outputs). A value that is not a map fails;
+absent or null, both are empty. `url` and `usage` are strings when set
+(null is not set): another value fails rather than is printed as text,
+`- at '/instance/url': got number, want string`.
 
 ### provides
 
@@ -480,32 +465,26 @@ A list of outputs, the connections the instance publishes. Each item:
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
 | `name` | string | the release name | The output's name, the one other instances reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
 | `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; under the release name, the values the contract's `x-okdp-internal` convention gives): [contracts](01_inputs_outputs.md#contracts). |
-| `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string, else `provides "<name>" (<contract>): secretRef.name must be the name of a Secret, got <value>`. `{}` is not set. |
+| `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
 
-Other keys are ignored. A value that is not a list fails with
-`provides: must be a list of outputs, got <value>`; absent or null, there
-are none. Each item must be a map, and its `values`, `secretRef` and
-`secret` maps when set (null is not set), the `generate` and `stringData`
-of its `secret` of their types ([secret](#secret)); `<i>` is the item's
-position in the evaluated list, `<j>` the key's in `generate`:
+Other keys are ignored. A value that is not a list fails; absent or
+null, there are none. Each item must be a map with a `contract` string,
+and its `name` a string, its `values`, `secretRef` and `secret` maps when
+set (null is not set), the `generate` and `stringData` of its `secret` of
+their types ([secret](#secret)), as the mapping schema describes them
+([sections](#evaluation-order)):
 
 ```text
-provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>
-provides[<i>]: values must be a map, got <value>
-provides[<i>]: secretRef must be a map, got <value>
-provides[<i>]: secret must be a map, got <value>
-provides[<i>]: secret: generate must be a list, got <value>
-provides[<i>]: secret: generate[<j>]: length must be a whole number >= 0, got <value>
-provides[<i>]: secret: stringData must be a map of strings, got <value>
-provides[<i>]: secret: stringData "<key>" must be a string, got <value>
+- at '/provides/0/values': got array, want object
+- at '/provides/0/secret/generate/0/length': got string, want integer
+- at '/provides/1/secret/stringData/token': got number, want string
+- at '/provides/1/secretRef': missing property 'name'
 ```
 
-A key of `generate` fails as one of `okdpGeneratedSecret`'s `keys`
-([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret)), `generate[<j>]` for
-`keys[<j>]`. With a `generate`, `stringData` takes numbers and booleans
-too: `... must be a map of strings, numbers or booleans`,
-`... must be a string, a number or a boolean`. The contract checks then report
+A key of `generate` is checked as one of `okdpGeneratedSecret`'s `keys`
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret)). With a `generate`,
+`stringData` takes numbers and booleans too. The contract checks then report
 `provides "<name>" (<contract>): <message>`. The items are checked in
 order, their fields in alphabetical order, and the first error is
 reported; the required fields the item lacks, and the schema's violations
@@ -529,8 +508,7 @@ The Secret is named after `secretRef.name` when given, else
 and the output has a `secretRef` only when the mapping gives one. A
 `secret` with neither a non-empty `generate` nor a non-empty `stringData`
 fails with `<service>: output "<name>": secret needs stringData or generate`
-(`<service>`: the `name` of `service.yaml`); two outputs whose Secrets have
-one name fail as [`objects`](#objects) of one name do. The rendered objects
+(`<service>`: the `name` of `service.yaml`). The rendered objects
 and their labels: [credentials Secrets](01_inputs_outputs.md#credentials-secrets).
 
 ### oidcClients
@@ -549,8 +527,7 @@ oidcClients:
 
 A list of the OAuth clients of the service, each a map. Items are
 evaluated as any other: `$if` leaves a client out, `$for` with `$each`, or
-`$spread`, gives several. A value that is not a list fails with
-`oidcClients: must be a list of OAuth clients, got <value>`; absent or
+`$spread`, gives several. A value that is not a list fails; absent or
 null, there are none. The platform provides the clients, or each service
 registers its own by OIDC Dynamic Client Registration, per
 `global.okdp.oidc.clientProvisioning` ([context](#context)):
@@ -578,11 +555,9 @@ keys; how they become the values of the client's chart:
 [OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
 
 Every mode checks the clients, after the mapping: each client is a map,
-its `name` of the form above (checked first: it names the client in the
-other errors), of these keys only, each of its type, `grantTypes` given
-and not empty; one client at most has no name, names are unique, and so
-are the names of their objects, `<release>-<chart key>` cut to 63
-characters ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)). In
+its `name` of the form above, of these keys only, each of its type,
+`grantTypes` given and not empty ([sections](#evaluation-order)); then
+one client at most has no name, and names are unique. In
 `dcr` mode, no two clients write one Secret. As soon as the
 mapping declares a client, its chart key belongs to the compiler:
 `service.yaml` may not list it, nor `output` compute it. Only `dcr` mode
@@ -635,27 +610,27 @@ missing key (`no such key`) is an evaluation error, found only when the
 expression is evaluated.
 
 The value of an expression is converted to data, as values hold it: maps
-with string keys, lists, numbers, strings, booleans and null, at any depth.
+with string keys, lists, numbers, strings, booleans and null, at any depth,
+as cel-go converts it to JSON (`google.protobuf.Value`).
 
 | CEL value | Data |
 |---|---|
-| int, uint, double | a double, written without decimals when integral; an integer beyond 2^53 is rounded (`string(x)` keeps its digits) |
+| int, uint, double | a double, written without decimals when integral; an integer beyond 2^53 is its digits, as text (`"9007199254740993"`) |
+| a NaN or an infinite double (`0.0/0.0`) | the text `"NaN"`, `"Infinity"`, `"-Infinity"` |
 | duration, timestamp | its text, as `string()` writes it: `3600s`, RFC 3339 |
-| bytes | their text, as the host functions take them (`b'abc'` is `"abc"`) |
-| optional | its value, or null when it has none: `{'n': values.?nope}` is `{n: null}` |
+| bytes | their base64 (`b'abc'` is `"YWJj"`) |
+| optional | its value: `{'o': values.?extra.k}` is `{o: v}` |
 
-What values cannot hold fails the expression, at its position in the
-value:
+What has no data form fails the expression:
 
 | Value | Error |
 |---|---|
-| a NaN or an infinite number (`0.0/0.0`): Helm cannot read it back | `not a finite number: NaN` |
-| a map key that is not a string (`[{1: 2}]`) | `[0]: a map key must be a string, got int 1` |
-| bytes that are not UTF-8 text (`base64.decode` of binary data) | `bytes that are not UTF-8 text (encode them with base64.encode)` |
-| a type (`type(x)`) | `a CEL type has no data form` |
+| a map key that is not a string (`[{1: 2}]`) | `unsupported type conversion from 'int' to string` |
+| an optional without a value (`values.?nope`) | `optional.none() dereference` |
+| a type (`type(x)`) | `type conversion not supported for 'type'` |
 
-A host function's argument is converted the same way, but keeps these:
-`str` prints `NaN`, a key `1` as `"1"`, a type as its name.
+A host function's argument is converted the same way, and fails the same
+way: `str(type(x))` fails.
 
 ### Numbers
 
@@ -690,43 +665,29 @@ the same in the mapping.
 Keys are decoded the same way, then written as text as sigs.k8s.io/yaml
 writes them: `on:` is the key `"true"`, `1.0:` is `"1"`, `0x10:` is `"16"`.
 A null key fails with `line <n>: unsupported map key "~"`, a key that is
-not a scalar with `line <n>: a map key must be a scalar`. A key given twice:
-the last value wins, at the position of the first. Two keys that are
-different values but the same text (`1:` and `1.0:`, `8:` and `08:`, `on:`
-and `"true":`) fail, where Helm keeps the value of either, at random:
-`line <n>: the keys 1 (line <m>) and 1.0 are both "1" to Helm, which keeps the value of either, at random: write one`.
+not a scalar with `line <n>: a map key must be a scalar`. A key written
+twice fails, and so do two keys Helm reads as one (`1:` and `1.0:`, `8:` and
+`08:`, `on:` and `"true":`), of which Helm keeps one value:
+`line <n>: 1.0: the key "1" is written twice`.
 
-The lines of the mapping are read as Helm reads those of a values file: a
-`|` or `>` block scalar that ends a file without a final line break keeps
-its newline. One difference remains: YAML's non-specific tag `!` (`! 1`) is
-dropped by the YAML reader, the mapping reads the scalar as if untagged
-(`1`) where Helm reads the text (`"1"`): write `!!str 1` or `"1"`.
+As in a values file Helm reads, a `|` or `>` block scalar that ends the
+file without a final line break keeps its newline. Two differences remain:
+YAML's non-specific tag `!` (`! 1`) is dropped by the YAML reader, the
+mapping reads the scalar as if untagged (`1`) where Helm reads the text
+(`"1"`): write `!!str 1` or `"1"`; and a `\r\r\n` is two line breaks to the
+mapping, one to Helm.
 
 Binding names are the exception: the keys directly under `let` and `$let`
-are taken as written, so a binding `y`, `n` or `on` keeps its name, and
-`y`, `Y` and `yes` are three bindings.
+are taken as written, so a binding `y`, `n` or `on` keeps its name. They
+are keys still: `y` and `Y`, both `"true"` to Helm, cannot both be bound in
+one map.
 
-Merge keys are resolved as Helm's reader resolves them: `<<: *a` merges the
-keys of the map `a` (or of a map written in place), `<<: [*a, *b]` those of
-each map of the list, the first map winning; a merged value is not merged
-deeper, it replaces. The keys apply in the order written: a key written
-after `<<` replaces the merged one. Helm's reader also lets the merge
-replace a key written before it, where YAML's merge keys keep the written
-one: the mapping refuses this case,
-`line <n>: <key> is written before the merge key << that replaces it: write it after <<`.
-Any other merge fails:
-`line <n>: the merge key << takes a map, or a list of maps`. A quoted
-`"<<"` is a key.
-
-Anchors and aliases are resolved: an alias is a copy of its anchor's node.
-As Helm's reader, the mapping refuses a cycle, an alias inside the anchor
-it refers to (`a: &x [*x]`):
-`line <n>: the alias *x is inside the anchor &x it refers to`; and
-excessive aliasing, the aliases of the document expanding to more than
-100,000 nodes in all (a few hundred bytes of aliases of aliases expand to
-millions):
-`line <n>: excessive aliasing: the aliases expand to more than 100000 nodes`,
-`<n>` the line of the alias whose expansion passes the limit.
+Anchors, aliases and merge keys (`<<`) are refused, where Helm resolves
+them:
+`line <n>: anchors, aliases and merge keys are not read: bind the value in let`,
+`<n>` the line of the anchor (an alias follows it) or of the merge key. A
+value used twice is a [`let`](#let) binding, read by name (`${{ small }}`,
+`${{ small.requests }}`). A quoted `"<<"` is a key.
 
 ### Quoting
 
@@ -744,7 +705,8 @@ or write a long expression as a `>-` block scalar.
 ## Directives
 
 Keys starting with `$` shape the structure: `$if` leaves a map or an item
-out, `$value` makes a map a value of any type, `$for` builds a map
+out, `$value` makes a map a value of any type, `$else` another value when
+the condition of its `$if` is not true, `$for` builds a map
 (`$key`, `$value`) or list items (`$each`) from a list, with `$let`
 bindings per element, `$merge` merges a computed map over a map's keys,
 `$spread` splices a computed list into a list. Their places, scope,
@@ -828,27 +790,21 @@ errors:
     $each:
       $if: ${{ first([values[p]]) == '' }}
       message: "okdp-examples: ${{ p }} is required"
-  - >-
-    ${{ realms.filter(r, r.admin == null)
-        .map(r, 'okdp-examples: realm "' + r.name + '" has no catalog_admin') }}
+  - $for: r in realms
+    $each:
+      $if: ${{ r.admin == null }}
+      message: 'okdp-examples: realm "${{ r.name }}" has no catalog_admin'
 ```
 
 `errors` is a list, evaluated after `let`, before the other sections, as
 any list ([control flow](03_control_flow.md)): `$if` leaves an item out, `$for` and
-`$spread` give several. Each value it gives is:
-
-- a rule, `{message: <text>}`: its message. A rule is written with its
-  condition, `$if`: the message is evaluated only when the condition holds,
-  and may read what exists only then (`db.okdp.ref` of a database
-  connection);
-- a list: its messages, each converted with `str`. An expression returning
-  the messages of a check, `[]` when it passes, for messages computed
-  together (`filter` and `map`).
+`$spread` give several. Each value it gives is a rule, `{message: <text>}`,
+its message a text that is not empty. A rule is written with its condition,
+`$if`: the message is evaluated only when the condition holds, and may read
+what exists only then (`db.okdp.ref` of a database connection).
 
 Anything else fails the compile: `errors[<i>]: a rule is {$if: <condition>,
-message: <text>}, or an expression returning a list of messages, got
-<value>`, as does a message that is not text (`message must be text, got
-<value>`) or is empty (`an empty message`). Every item is evaluated; when
+message: <text>}, got <value>`. Every item is evaluated; when
 there is any message, the compile fails with the messages joined by
 newlines, without prefix:
 
@@ -892,8 +848,9 @@ output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclare
  | .^
 let db: ${{ values.databse }}: no such key: databse
 output: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
-objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdp.generatedSecret: name is required
-output: app: config: ${{ {'ratio': a / b} }}: ratio: not a finite number: +Inf
+objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
+- at '/okdpGeneratedSecret': missing property 'name'
+let host: ${{ values.?host }}: optional.none() dereference
 ```
 
 Other errors of the mapping:
@@ -904,39 +861,26 @@ Other errors of the mapping:
 | `the mapping must be a YAML map` | the document is not a map |
 | `line <n>: a second YAML document: the mapping is one document` | a `---` followed by a second document ([sections](#evaluation-order)) |
 | `line <n>: a map key must be a scalar`, `line <n>: unsupported map key "<key>"` | a list, map or null key |
-| `line <n>: the keys <key> (line <m>) and <key> are both "<text>" to Helm, which keeps the value of either, at random: write one` | two keys of one text, `1:` and `1.0:` ([YAML reading](#yaml-reading)) |
-| `line <n>: the alias *<name> is inside the anchor &<name> it refers to`, `line <n>: excessive aliasing: the aliases expand to more than 100000 nodes` | an alias cycle, too many nodes from aliases ([YAML reading](#yaml-reading)) |
-| `line <n>: <key> is written before the merge key << that replaces it: write it after <<`, `line <n>: the merge key << takes a map, or a list of maps` | a merge key ([YAML reading](#yaml-reading)) |
+| `line <n>: <key>: the key "<text>" is written twice` | a key written twice, or two keys of one text, `1:` and `1.0:`, in a map or a [`let`](#let) ([YAML reading](#yaml-reading)) |
+| `line <n>: anchors, aliases and merge keys are not read: bind the value in let` | an anchor, an alias, a merge key `<<` ([YAML reading](#yaml-reading)) |
 | `line <n>: not a finite number: <scalar> (quote it for the text)` | `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
 | `<key>: unknown section (allowed: let, errors, output, instance, provides, objects, oidcClients)`, `<key>: not a directive of the top level: its keys are sections`, `let: must be a map of bindings, got <value>`, `errors: must be a list of rules, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
 | `let <name>: bound twice`, `let <name>: a binding name cannot start with $` (`$let` likewise) | a [`let`](#let) or [`$let`](03_control_flow.md#let) name |
-| `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>` | a directive ([errors](03_control_flow.md#errors)) |
+| `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>`, `<where>$else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}` | a directive ([errors](03_control_flow.md#errors)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](03_control_flow.md#for) |
-| `output: must be a map of charts to their values, got <value>`, `instance: must be a map (url, usage), got <value>`, `provides: must be a list of outputs, got <value>` | a section of another shape ([sections](#evaluation-order)) |
-| `instance: url: must be a string, got <value>`, `instance: usage: must be a string, got <value>` | an [`instance`](#instance) key that is not a string |
-| `objects: must be a list of objects, got <value>`, `objects[<i>]: not an object with a kind and a metadata.name: <object>` | [`objects`](#objects) |
-| `<object>: <other> is the same object, <kind> "<name>" in namespace "<namespace>": give each object its own name` | two of OKDP's own objects, the descriptor, the credentials Secrets and [`objects`](#objects), of one API group, kind, namespace and name ([objects section](01_inputs_outputs.md#objects-section)) |
-| `<where>${{ <expression> }}: okdp.generatedSecret: <message>` | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
-| `output: <key>: must be a map of the chart's values, got <value>` | a chart of [`output`](#output) whose values are a scalar or a list |
+| `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [`output`](#output), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |
+| `<where>${{ <expression> }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:` then `- at '/okdpGeneratedSecret<path>': <violation>`, one line each | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
 | `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
 | `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
-| `provides[<i>]: must be a map (contract, name, values, secretRef, secret), got <value>`, `provides[<i>]: <key> must be a map, got <value>` | a [`provides`](#provides) item, or its `values`, `secretRef` or `secret`, of another shape |
-| `provides[<i>]: secret: generate must be a list, got <value>`, `provides[<i>]: secret: generate[<j>]: <message>`, `provides[<i>]: secret: stringData must be a map of strings, got <value>`, `provides[<i>]: secret: stringData "<key>" must be a string, got <value>` | the `generate` or `stringData` of a [`secret`](#secret) of another type; a key of `generate` as one of `okdpGeneratedSecret`'s `keys` |
-| `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `provides "<name>" (<contract>): secretRef.name must be the name of a Secret, got <value>` | [`provides`](#provides) |
-| `oidcClients: must be a list of OAuth clients, got <value>` | [`oidcClients`](#oidcclients) is not a list |
-| `<client>: must be a map (name, grantTypes, redirectUris, scope, clientName, public, request, secret, caSecret), got <value>`, `<client>: unknown key(s) <keys> (allowed: name, grantTypes, ...)` | a client that is not a map, or has another key |
-| `<client>: name <value> must be lowercase letters, digits and "-", 54 characters at most (it names the chart <name>-oidc-dcr, its objects and its Secret)` | a `name` that is not a string of that form |
-| `<client>: grantTypes is required`, `<client>: grantTypes must be a list of non-empty strings, got <value>`, `<client>: grantTypes[<j>] must be a non-empty string, got <value>` | `grantTypes` absent, null or empty, not a list, or holding an item that is not a non-empty string |
-| `<client>: redirectUris must be a list of non-empty strings, got <value>`, `<client>: redirectUris[<j>] must be a non-empty string, got <value>`, `<client>: <key> must be a string, got <value>`, `<client>: public must be true or false, got <value>`, `<client>: request must be a map, got <value>` | a key of another type (`<key>`: `scope`, `clientName`, `secret`, `caSecret`; `<j>`: the position of the item in the list) |
+| `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
-| `<client>: <other> has the same objects' name, "<fullname>", once cut to 63 characters: shorten the client names` | two names that differ only past the 63 characters of `<release>-<name>-oidc-dcr` ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
 | `service.yaml: charts.<chart>: the chart of <client> is added by the compiler: remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
 | `<client>: oidc-dcr values: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
 `<client>`, `<other>`: `oidcClients[<i>]`, the client's position in the
-evaluated list, followed by ` (<name>)` once its name is checked, first.
+evaluated list, followed by ` (<name>)` for a named client.
 `<value>`: the value as Go's `%#v` prints it (`"x"`, `true`). The errors of the
 platform's `global.okdp.oidc.dcr` settings:
 [OAuth client settings](01_inputs_outputs.md#oauth-client-settings).

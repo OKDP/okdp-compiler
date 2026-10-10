@@ -1,7 +1,7 @@
 # A platform layer after platform.yaml (--platform platform.yaml --platform
 # platform-dcr.yaml): the OAuth clients are registered by each service
 # (dcr), the webapp's by an oidc-dcr chart the compiler adds
-# (../output-dcr/helm-cmd/).
+# (../output-dcr/).
 global:
   okdp:
     oidc:

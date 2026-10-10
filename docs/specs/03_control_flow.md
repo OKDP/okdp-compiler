@@ -14,7 +14,7 @@ Three kinds of document share the directives, the
 | Document | Directives |
 |---|---|
 | the mapping, `values.cel.yaml` ([service definition](02_service_definition.md#valuescelyaml)) | all |
-| the values of an OAuth client's chart, `internal/okdp/oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
+| the values of an OAuth client's chart, `oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
 | a conditional entry of `require` in `service.yaml` ([require](02_service_definition.md#require)) | `$if` alone, whose value must be `true` or `false` |
 
 ## Directives
@@ -23,6 +23,7 @@ Three kinds of document share the directives, the
 |---|---|---|---|
 | [`$if`](#if) | a map | a condition | the map is left out when the condition is not true |
 | [`$value`](#value) | a map | any node | the map is this value |
+| [`$else`](#else) | a map with `$if` and `$value` | any node | the map is this value when the condition is not true |
 | [`$for`](#for) with `$key`, `$value` | a map | `<name> in <expression>` | a map, one key per element |
 | [`$for`](#for) with `$each` | a list item | `<name> in <expression>` | items per element |
 | [`$let`](#let) | next to `$for` | a map of bindings | bindings per element |
@@ -34,7 +35,7 @@ What a Helm template writes, in the mapping:
 | Helm template | Mapping |
 |---|---|
 | `{{- if .Values.x }}` around a key or an item | `$if: ${{ values.x }}` in its map |
-| `{{ if c }}a{{ else }}b{{ end }}` | `"${{ c ? 'a' : 'b' }}"`, or two maps, the second under `$if: ${{ !c }}` ([no `$else`](#no-else)) |
+| `{{ if c }}a{{ else }}b{{ end }}` | `{$if: "${{ c }}", $value: a, $else: b}`, or `"${{ c ? 'a' : 'b' }}"` ([`$else`](#else)) |
 | `{{- with .Values.db }}`, then `{{ .host }}` | a [`let`](02_service_definition.md#let) binding `db`, `$if: ${{ db }}`, then `${{ db.host }}` |
 | `{{- $x := ... }}` | a `let` binding, or a [`$let`](#let) binding in a `$for` |
 | `{{- range .Values.items }}` | `$for: i in values.items` with `$each` |
@@ -61,8 +62,9 @@ anything: a `$for` over 5,000 elements runs its compiled programs 5,000
 times.
 
 Evaluation skips what is left out: the keys of a map whose `$if` is not
-true, the `$each` of a `$for` over no element. An expression there may read
-what exists only when the branch is taken:
+true, the branch of `$value` and `$else` not taken, the `$each` of a `$for`
+over no element. An expression there may read what exists only when the
+branch is taken:
 
 ```yaml
 env:
@@ -78,13 +80,14 @@ of the wrong type (`no such overload`) fails only when the expression is
 evaluated: the variables are dynamic
 ([context](02_service_definition.md#context)).
 
-A map is evaluated in this order: `$if`; then `$for` (with `$key`,
-`$value`, `$let`); else `$value`; else each key in the order written, then
-`$merge`. A list's items are evaluated in order; a list item that is a map:
-`$for` (with `$each`, `$let`); else `$spread`; else the item is evaluated
-as a map. The elements of a `$for` are taken in order. Expressions have no
-side effects: the order decides which error is reported, the first, and
-which of two elements giving one key to a `$for` map wins, the later.
+A map is evaluated in this order: `$if`, and when it is not true, `$else`
+or nothing; then `$for` (with `$key`, `$value`, `$let`); else `$value`;
+else each key in the order written, then `$merge`. A list's items are
+evaluated in order; a list item that is a map: `$for` (with `$each`,
+`$let`); else `$spread`; else the item is evaluated as a map. The elements
+of a `$for` are taken in order. Expressions have no side effects: the
+order decides which error is reported, the first, and which of two
+elements giving one key to a `$for` map wins, the later.
 
 ### Places
 
@@ -96,7 +99,7 @@ place taking its form from `$for`, `$spread` or `$value`:
 | a map | keys, `$if`, `$value`, `$for`, `$merge` |
 | a list item | keys, `$if`, `$value`, `$merge`, `$for`, `$spread` |
 | a map with `$for` | `$if`, `$for`, `$key` and `$value` (required), `$let` |
-| a map with `$value` | `$if`, `$value` |
+| a map with `$value` | `$if`, `$value`, `$else` (with `$if`) |
 | a list item with `$for` | `$for`, `$each` (required), `$let` |
 | a list item with `$spread` | `$spread` |
 
@@ -168,7 +171,8 @@ around an expression (`x${{ c }}`, always true), with
 `$if: takes one expression, ${{ <condition> }}, got <value>`.
 
 On a map, `$if` guards everything else (`$for`, `$value`, `$merge`, the
-keys): none is evaluated when the condition is not true. A map left out is:
+keys): none is evaluated when the condition is not true, and the map is
+left out, or is the value of its [`$else`](#else). A map left out is:
 
 | As | Result |
 |---|---|
@@ -187,29 +191,62 @@ In a `require` entry, the value must be `true` or `false`: a null or a
 list fails rather than tested as a Helm condition
 ([require](02_service_definition.md#require)).
 
-### No `$else`
-
-There is no `$else` (`$else: unknown directive`): choose in one expression,
-or write the other branch under the negated condition.
-
-```yaml
-pullPolicy: "${{ values.image.tag == 'latest' ? 'Always' : 'IfNotPresent' }}"
-resources: "${{ values.small ? smallResources : largeResources }}"   # let bindings
-args:
-  - $if: ${{ values.debug }}
-    $value: --log-level=debug
-  - $if: ${{ !values.debug }}
-    $value: --log-level=info
-```
-
-A `?:` evaluates the branch it takes only, as `$if` does.
-
 ## `$value`
 
 The map stands for the value of `$value`, which need not be a map:
 `{$if: cond, $value: x}` is a conditional scalar or list. The map holds
-`$if` and `$value` only: any other key, `$merge` included, fails. In a
-list, a `$value` list is one item, not spliced.
+`$if`, `$value` and [`$else`](#else) only: any other key, `$merge`
+included, fails. In a list, a `$value` list is one item, not spliced.
+
+## `$else`
+
+```yaml
+secretKeyRef:
+  $if: ${{ platform.oidc.dcr.enabled }}
+  $value: {name: "${{ okdpFullname('hub') }}", key: hub.config.CryptKeeper.keys}
+  $else: {name: "${{ platform.oidcClientSecret }}", key: JUPYTERHUB_CRYPT_KEY}
+```
+
+```yaml
+# output, release demo, dcr mode
+secretKeyRef: {name: demo-hub, key: hub.config.CryptKeeper.keys}
+# otherwise
+secretKeyRef: {name: creds-demo-oauth2, key: JUPYTERHUB_CRYPT_KEY}
+```
+
+In a map with `$if` and `$value`, `$else` is the map's value when the
+condition is not true: the map is then not left out. Its value is any node,
+as `$value`'s: a scalar, a list (one item in a list, not spliced), a map,
+directives included. Both branches are compiled when the document is
+loaded; only the one taken is evaluated, the other may read what exists
+only when it is taken.
+
+`$else` needs `$if` and `$value` beside it:
+`$else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}`.
+On a map of keys, the keys would be the first branch and `$else` the
+second, at one level: write the keys under `$value`. A map with `$for`
+holds no `$else`, as any key out of its place.
+
+There is no `$elif`: an `$else` holding a map with `$if` chains a third
+branch. An `$else` left out by its own `$if` leaves the map out.
+
+```yaml
+size:
+  $if: ${{ values.replicas > 10.0 }}
+  $value: large
+  $else:
+    $if: ${{ values.replicas > 1.0 }}
+    $value: medium
+    $else: small
+```
+
+A choice among several values is clearer as a CEL map:
+`resources: ${{ sizes[values.size] }}`, `sizes` a `let` binding. A choice
+between two scalars computed in expressions is a `?:`, which evaluates the
+branch it takes only, as `$if` does:
+`pullPolicy: "${{ values.image.tag == 'latest' ? 'Always' : 'IfNotPresent' }}"`.
+`$else` is for a branch written as YAML: a map, a list, several
+expressions under one condition.
 
 ## `$for`
 
@@ -455,9 +492,9 @@ The `$each` of a `$for` splices a list the same way, once per element
 
 Every expression the directives evaluate counts in the compile's CEL cost,
 an expression in a `$for` once per element: past
-`compiler.WithCostLimit(n)`, the compile fails with
+`Inputs.CostLimit`, the compile fails with
 `the expressions of the compile exceed its CEL cost limit (<n>)`
-([usage](../01_usage.md)). The context of `CompileContext` is checked
+([usage](../01_usage.md)). The context of `Compile` is checked
 before each expression and every 100 iterations of a comprehension. The
 language has no recursion and no include, and every loop (`$for`, CEL's
 macros) runs over a list or a map it is given: the work is bounded by the
@@ -470,7 +507,8 @@ branch; the first mistake fails:
 
 | Mistake | Error |
 |---|---|
-| an unknown directive (`$iff`, `$Each`, `$else`) | `<where><key>: unknown directive (the key <key> is written $<key>)` |
+| an unknown directive (`$iff`, `$Each`, `$elif`) | `<where><key>: unknown directive (the key <key> is written $<key>)` |
+| `$else` without `$if` and `$value` | `<where>$else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}` |
 | a key out of its place | `<where><key>: not in <place>, which holds <keys>` |
 | `$for` without its keys | `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` |
 | `$if`, `$merge`, `$spread` not one expression | `<where>$if: takes one expression, ${{ <condition> }}, got <value>` (`<map>`, `<list>`) |

@@ -22,8 +22,7 @@ import (
 // FinalValues: the final values of each chart key of the mapping's output
 // (keyValues), which must be a key of specs and hold a map, and the
 // upstream chart that renders them (its source). In key order: the first
-// error is the same from one compile to the next, also when a refused
-// upstream value reaches two keys (upstream.from). The schema violations of
+// error is the same from one compile to the next. The schema violations of
 // every key are reported together.
 //
 // cache: the chart cache, the upstream charts' defaults and schemas, each in
@@ -42,7 +41,7 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]
 		if !ok {
 			return nil, nil, fmt.Errorf("mapping output %q: must be a map of the chart's values, got %s", key, value.Short(output[key]))
 		}
-		f, bad, err := keyValues(charts, pkg, specs, key, computed, values)
+		f, bad, err := keyValues(charts, pkg, key, specs[key], computed, values)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
@@ -72,8 +71,7 @@ func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]
 //
 // charts: the chart cache, the chart's defaults and schema. files: the
 // package. values: the instance's merged values.
-func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, computed M, values M) (M, string, error) {
-	spec := specs[key]
+func keyValues(charts *chartCache, files fs.FS, key string, spec Spec, computed M, values M) (M, string, error) {
 	upstream, err := charts.get(spec.Source)
 	if err != nil {
 		return nil, "", err
@@ -91,14 +89,10 @@ func keyValues(charts *chartCache, files fs.FS, specs Specs, key string, compute
 	// Last, the instance's upstream values (upstream.<chart>), when the chart
 	// accepts them, checked ("{{", protect, append). The mapping has seen
 	// them; these checks are what the platform enforces whatever the mapping
-	// does with them. A chart with upstream.from receives the values of the
-	// chart it names, with that chart's protect and append: one set of
-	// values for two renders of an upstream chart, refused or appended the
-	// same way in both.
-	if owner, ok := specs.upstreamOf(key); ok {
-		rules := specs[owner]
-		user := value.AsMap(value.AsMap(values["upstream"])[owner])
-		if err := applyUpstream(out, user, source{chart: owner}, rules.Protect, rules.Append); err != nil {
+	// does with them.
+	if spec.Upstream {
+		user := value.AsMap(value.AsMap(values["upstream"])[key])
+		if err := applyUpstream(out, user, source{chart: key}, spec.Protect, spec.Append); err != nil {
 			return nil, "", err
 		}
 	}
