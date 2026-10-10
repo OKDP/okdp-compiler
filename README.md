@@ -178,8 +178,6 @@ directory holding any other file is refused. `--release` and
 | `example_test.go`, `compiler_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, the `charts` section of `service.yaml`, the final values |
-| `` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients, the `okdp` chart) and `Compile` |
-| `` | the edges: `LoadDefinition`, and the files a compile is written as (`Write`: `-o`, `--mkdag`) |
 | `internal/helmfn/` | the Helm, sprig and Kubernetes rules the compiler reproduces: template functions, the names Kubernetes and Helm accept |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
