@@ -47,7 +47,7 @@ func main() {
 	flag.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	flag.Func("context", "context values file, [<level>:]<file>, repeatable, before the -f files: global, global.okdp and connections among them; level 0 (the default), the platform's, first, a level's files merged in order; a level adds values, it changes none of a lower level's", func(s string) error { o.contexts = append(o.contexts, s); return nil })
-	flag.Func("f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares", func(s string) error { o.values = append(o.values, s); return nil })
+	flag.Func("f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares, and no connections: an instance's own are a --context file of its level", func(s string) error { o.values = append(o.values, s); return nil })
 	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), and "+compiler.DependenciesFile+", the instances the connection references point to")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Parse()

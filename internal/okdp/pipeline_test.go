@@ -64,14 +64,19 @@ instance:
 
 // inputs: the in-memory chart cache and contracts, with these values
 // layers: the global of each, a context layer at level 0 (Inputs.Context),
-// the rest, an instance layer (Inputs.Values).
+// its connections, one at level 2, the instance's own, the rest, an
+// instance layer (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
 	in := Inputs{Charts: charts, Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
 	for _, l := range layers {
+		l = maps.Clone(l)
 		if g, ok := l["global"]; ok {
 			in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": g}})
-			l = maps.Clone(l)
 			delete(l, "global")
+		}
+		if c, ok := l["connections"]; ok {
+			in.Context = append(in.Context, ContextLayer{Level: 2, Values: map[string]any{"connections": c}})
+			delete(l, "connections")
 		}
 		in.Values = append(in.Values, l)
 	}

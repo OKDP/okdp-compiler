@@ -9,9 +9,10 @@ cmp $WORK/files/instance.values.yaml examples/02_advanced/output-no-dcr/instance
 cmp $WORK/files/okdp.dependencies.yaml examples/02_advanced/output-no-dcr/okdp.dependencies.yaml
 
 # --context 1:<file>: a project's file, level 1, merged after the platform's
-# (level 0, no prefix), whatever the order of the flags; one that changes a
-# value of level 0 fails, nothing written.
-status 0 okdp-compile --package examples/03_full/input/service --charts examples/03_full/input/charts --contracts examples/03_full/input/contracts --release demo-workspace --namespace demo --context 1:examples/03_full/input/demo.yaml --context examples/03_full/input/platform.yaml -f examples/03_full/input/config.yaml -o $WORK/full
+# (level 0, no prefix), whatever the order of the flags, and before the
+# instance's own connections, level 2; one that changes a value of level 0
+# fails, nothing written.
+status 0 okdp-compile --package examples/03_full/input/service --charts examples/03_full/input/charts --contracts examples/03_full/input/contracts --release demo-workspace --namespace demo --context 2:examples/03_full/input/connections.yaml --context 1:examples/03_full/input/demo.yaml --context examples/03_full/input/platform.yaml -f examples/03_full/input/config.yaml -o $WORK/full
 ! stdout .
 ! stderr .
 cmp $WORK/full/instance.values.yaml examples/03_full/output/instance.values.yaml

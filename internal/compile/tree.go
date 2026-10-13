@@ -289,11 +289,24 @@ func (bs bindings) bind(s *Session, scope M) error {
 }
 
 // tree: a document built: its vars bindings, its errors section, and its
-// sections by name, those it has.
+// sections by name, those it has; and the source of each of them, by key
+// (vars, errors, a section), whose errors start with its name (at).
 type tree struct {
 	vars     bindings
 	errors   node
 	sections map[string]node
+	srcs     map[string]Source
+}
+
+// at: err, an error of k (vars, errors, a section): under k, but for vars,
+// whose errors name their binding, and for a source that is the section k;
+// then under the name of its source.
+func (t *tree) at(k string, err error) error {
+	src := t.srcs[k]
+	if k != "vars" && src.Section == "" {
+		err = atKey(k, err)
+	}
+	return fmt.Errorf("%s: %w", src.Name, err)
 }
 
 // exprError: an error of an expression found when the tree is built, where
@@ -322,28 +335,56 @@ func under(d string, err error) error {
 // compile its expressions.
 type builder struct{ s *Session }
 
-// document: the tree of the document top, where the names of its context
-// (sorted) are in scope, its sections those named: every top-level key is
-// vars, errors or one of them. vars, a map of bindings, is built first, its
+// document: the tree of the document of the sources srcs, where the names
+// of its context (sorted) are in scope, its sections those named. A source
+// that is a section gives it whole; the top level of another is a map,
+// each key vars, errors, one of the sections or a key it skips, the later
+// of a key written twice winning. vars, errors and each section are given
+// by one source at most. vars, a map of bindings, is built first, its
 // names then in scope of errors and of the sections, in order.
-func (b builder) document(top *omap, names, sections []string) (*tree, error) {
-	for _, f := range top.fields() {
-		if k := f.key; k != "vars" && k != "errors" && !slices.Contains(sections, k) {
-			return nil, atKey(k, fmt.Errorf("unknown section (allowed: %s)", strings.Join(append([]string{"vars", "errors"}, sections...), ", ")))
+func (b builder) document(srcs []Source, names, sections []string) (*tree, error) {
+	allowed := append([]string{"vars", "errors"}, sections...)
+	t := &tree{sections: map[string]node{}, srcs: map[string]Source{}}
+	read := map[string]any{} // vars, errors, a section: as read
+	from := map[string]int{} // its source, by position
+	for i, src := range srcs {
+		root, err := parseDoc(src.Data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", src.Name, err)
+		}
+		var keys []entry
+		switch top, ok := root.(*omap); {
+		case src.Section != "":
+			keys = []entry{{src.Section, root}}
+		case ok:
+			keys = top.fields()
+		case root != nil:
+			return nil, fmt.Errorf("%s: the mapping must be a YAML map", src.Name)
+		}
+		for _, e := range keys {
+			j, given := from[e.key]
+			switch {
+			case src.Section == "" && slices.Contains(src.Skip, e.key):
+				continue
+			case !slices.Contains(allowed, e.key):
+				return nil, fmt.Errorf("%s: %s: unknown section (allowed: %s)", src.Name, e.key, strings.Join(allowed, ", "))
+			case given && j != i:
+				return nil, fmt.Errorf("%s: %s: %s gives it too: vars, errors and each section are given by one file", src.Name, e.key, srcs[j].Name)
+			}
+			read[e.key], from[e.key], t.srcs[e.key] = e.val, i, src
 		}
 	}
-	t := &tree{sections: map[string]node{}}
 	var err error
-	if t.vars, names, err = b.bindings("vars", top.get("vars"), names); err != nil {
-		return nil, err
+	if t.vars, names, err = b.bindings("vars", read["vars"], names); err != nil {
+		return nil, t.at("vars", err)
 	}
-	if t.errors, err = b.node(top.get("errors"), names); err != nil {
-		return nil, atKey("errors", err)
+	if t.errors, err = b.node(read["errors"], names); err != nil {
+		return nil, t.at("errors", err)
 	}
 	for _, k := range sections {
-		if v, ok := top.lookup(k); ok {
+		if v, ok := read[k]; ok {
 			if t.sections[k], err = b.node(v, names); err != nil {
-				return nil, atKey(k, err)
+				return nil, t.at(k, err)
 			}
 		}
 	}

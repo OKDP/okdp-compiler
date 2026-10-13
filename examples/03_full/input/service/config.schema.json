@@ -37,7 +37,6 @@
         "schedule": {"type": "string", "default": "0 3 * * *"}}}}},
     "global": {"type": "object", "properties": {
       "storageClass": {"type": "string", "description": "Declared: an instance may set it, over the platform's and the project's value."}}},
-    "connections": {"type": "object", "default": {}, "description": "The instance's own connections, by name."},
     "upstream": {"type": "object", "default": {}, "description": "Values passed to the upstream charts as they are, by chart."}
   }
 }

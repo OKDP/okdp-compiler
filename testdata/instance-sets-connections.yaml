@@ -1,0 +1,8 @@
+# error: values layer 1: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level
+# connections are the context's: an instance may not patch a platform
+# connection (a host of its own, the platform's secretRef kept); its own
+# connections are a context layer of its level (--context 2:<file>), which
+# adds to the lower levels' connections and changes none.
+connections:
+  platform-db:
+    host: other.example.org

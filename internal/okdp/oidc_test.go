@@ -256,7 +256,8 @@ func TestDcrModes(t *testing.T) {
 
 // TestDcrErrors: the platform must register anonymously at a registration
 // URL (dcr mode), and the clients must be told apart (every mode); their
-// form is mapping.schema.json's (TestMappingErrors).
+// form is mapping.schema.json's (TestMappingErrors). An error of the
+// template names the client, then the template's file.
 func TestDcrErrors(t *testing.T) {
 	grants := []any{"client_credentials"}
 	for name, tc := range map[string]struct {
@@ -269,6 +270,7 @@ func TestDcrErrors(t *testing.T) {
 		"same name":        {nil, []any{M{"grantTypes": grants, "name": "a"}, M{"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
 		"same secret":      {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": "b", "secret": "demo-x-demo-dcr"}}, `oidcClients[1] (b): oidcClients[0] writes the same Secret, "demo-x-demo-dcr": give each client its own secret`},
 		"two main clients": {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
+		"template error":   {nil, []any{M{"grantTypes": grants, "scope": float64(1)}}, "oidcClients[0]: oidc-dcr.cel.yaml: vars scope: ${{ first("},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := dcrCtx()

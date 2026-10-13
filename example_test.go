@@ -197,7 +197,7 @@ func ExampleCompile_server() {
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
 	// [app okdp] ConfigMap
-	// vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
+	// values.cel.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }
 

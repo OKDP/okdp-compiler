@@ -139,11 +139,11 @@ func oidcClients(session *compile.Session, inst *instance, section []any) ([]oid
 		scope := maps.Clone(inst.scope)
 		scope["client"] = c.spec
 		scope["names"] = names
-		v, err := session.Eval(dcrTemplate, scope, "values")
+		v, err := evalTemplate(session, "oidc-dcr.cel.yaml", dcrTemplate, scope)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %s values: %w", c.where, DcrChart, err)
+			return nil, nil, fmt.Errorf("%s: %w", c.where, err)
 		}
-		values[c.chart] = value.AsMap(v["values"])
+		values[c.chart] = v
 	}
 	return clients, values, nil
 }

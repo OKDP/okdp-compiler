@@ -107,7 +107,8 @@ unknown (`$iff`) or misplaced, fails, `<where><key>: not allowed here
 | a list item with `$spread` | `$spread` |
 
 The top level of a document holds its sections only: a directive there
-fails, `<key>: unknown section (allowed: ...)`.
+fails, `values.cel.yaml: <key>: unknown section (allowed: ...)` in the
+mapping.
 
 A key starting with `$` is written with one more `$`, as `$${{` writes a
 literal `${{`: `$$schema: x` is the key `$schema`, `$$$x` the key `$$x`.
@@ -514,8 +515,9 @@ branch; the first mistake fails:
 
 Evaluation fails on the first error: an expression's
 (`<where>${{ <expression> }}: <cause>`), or a `$for` over a value that is
-not a list, `<where>$for "<spec>": not a list`. `<where>` is the path to
-the map or item holding the directive, `output: app: env[2]: `, where a
-list position counts the items as written: an item carrying `$for` or
-`$spread` is one position, whatever it gives
+not a list, `<where>$for "<spec>": not a list`. `<where>` is the
+document's file, then the path to the map or item holding the directive,
+`values.cel.yaml: output: app: env[2]: `, where a list position counts the
+items as written: an item carrying `$for` or `$spread` is one position,
+whatever it gives
 ([compile errors](02_service_definition.md#compile-errors)).

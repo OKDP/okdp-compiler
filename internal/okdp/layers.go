@@ -6,9 +6,10 @@
 // (chart.FinalValues). Level 0 is the platform's; each level above adds to
 // those below it, it changes none of their values: no value they set, no
 // connection they give. An instance sets only the keys of global its
-// package's parameter schema declares, never okdp. None but level 0 gives
-// template code: the platform's layers and the package's schema defaults
-// are reviewed, the higher levels' and the instance's are input.
+// package's parameter schema declares, never okdp, and no connections: its
+// own are a context layer of its level. None but level 0 gives template
+// code: the platform's layers and the package's schema defaults are
+// reviewed, the higher levels' and the instance's are input.
 
 package okdp
 
@@ -26,8 +27,8 @@ import (
 // instance's, as values (normalized), for chart.Parameters. Each instance
 // layer in turn: one that sets global fails, but for the keys the parameter
 // schema (chart.Schema.Doc) declares under it (properties.global.properties),
-// okdp excepted; then one with "{{" in a key or a string, anywhere
-// (chart.NoTemplate).
+// okdp excepted; then one that sets connections, to any value; then one
+// with "{{" in a key or a string, anywhere (chart.NoTemplate).
 func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 	layers, err := contextLayers(in.Context)
 	if err != nil {
@@ -50,8 +51,11 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 				return nil, fmt.Errorf("%s: global.%s is set by the context (--context, Inputs.Context)", name, k)
 			}
 		}
+		if _, set := layer["connections"]; set {
+			return nil, fmt.Errorf("%s: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level", name)
+		}
 		// No template code in what the instance gives, whatever key it is
-		// under: parameters, connections, upstream values (chart.NoTemplate).
+		// under: parameters, upstream values (chart.NoTemplate).
 		if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
 			return nil, err
 		}

@@ -1,10 +1,10 @@
 // Package compile is the "values.yaml with expressions" language: YAML
 // shaped like the values it computes, where ${{ <CEL> }} computes a value.
 // It knows neither Helm charts nor OKDP: the caller opens a session with its
-// own host functions (NewSession), then evaluates each document on its
-// context with the names of its sections (Session.Eval: the document checked
-// and its expressions compiled, in every branch, then its sections
-// evaluated).
+// own host functions (NewSession), then evaluates each document, read from
+// one file or several (Source), on its context with the names of its
+// sections (Session.Eval: the document checked and its expressions
+// compiled, in every branch, then its sections evaluated).
 //
 //	key: ${{ expr }}              the whole scalar: the value keeps the expression's type
 //	key: text ${{ expr }} text    interpolation: the value is a string
@@ -26,7 +26,9 @@
 //	errors (a list of messages, {$if: <condition>, $value: <text>}: any
 //	message fails the compile)
 //
-// Any other top-level key is a section the caller names (Session.Eval).
+// Any other top-level key is a section the caller names (Session.Eval), or
+// a key another reader reads (Source.Skip). A file may also be one section
+// whole (Source.Section).
 package compile
 
 import (
@@ -341,72 +343,77 @@ func atKey(k string, err error) error {
 // atIndex: err, at the position i of a list.
 func atIndex(i int, err error) error { return atKey(fmt.Sprintf("[%d]", i), err) }
 
-// parseDoc: a YAML + CEL document (a mapping, a template), its maps
-// ordered: its first YAML document. An empty or null document has no
-// section. As in a values file Helm reads, its last line ends with a line
-// break: a | or > block scalar ending the file keeps its newline.
-func parseDoc(b []byte) (*omap, error) {
+// parseDoc: a YAML + CEL file (a mapping, a template, a section), its maps
+// ordered: its first YAML document, null when it is empty. As in a values
+// file Helm reads, its last line ends with a line break: a | or > block
+// scalar ending the file keeps its newline.
+func parseDoc(b []byte) (any, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(strings.TrimSuffix(string(b), "\n")+"\n"), &doc); err != nil || doc.Kind == 0 {
-		return &omap{}, err
-	}
-	root, err := fromNode(&doc)
-	if err != nil {
 		return nil, err
 	}
-	switch top := root.(type) {
-	case nil:
-		return &omap{}, nil
-	case *omap:
-		return top, nil
-	}
-	return nil, fmt.Errorf("the mapping must be a YAML map")
+	return fromNode(&doc)
 }
 
-// Eval: the document b (a mapping, a template) on the context scope, in
-// the session s, its sections those named: its maps read in order as YAML
-// 1.2, then built into a tree (builder.document: its top level, its
-// directives in every branch, each expression compiled once in its scope),
-// a top-level key other than vars, errors and a section failing; then its
-// vars bindings evaluated in order, then its errors section, every message
-// collected before failing; then its sections, in order, by name, those it
-// has, an error at its path under the section (output: app: env[2]: ...).
-func (s *Session) Eval(b []byte, scope M, sections ...string) (M, error) {
-	top, err := parseDoc(b)
-	if err != nil {
-		return nil, err
-	}
-	t, err := builder{s}.document(top, slices.Sorted(maps.Keys(scope)), sections)
+// Source: a file of a document (Session.Eval).
+type Source struct {
+	Name    string   // the file: the first segment of its errors
+	Data    []byte   // its YAML
+	Section string   // "": its top-level keys are vars, errors and sections; else the whole file is this section
+	Skip    []string // top-level keys another reader reads, neither sections nor refused (Section "")
+}
+
+// Doc: a document evaluated (Session.Eval).
+type Doc struct {
+	Sections M // the values of its sections, by name, those its sources give
+}
+
+// Eval: the document of the sources srcs (a mapping, a template) on the
+// context scope, in the session s, its sections those named: each source
+// read as YAML 1.2, its maps in order, then the whole built into one tree
+// (builder.document: the top level of each source, or the section it is;
+// its directives in every branch, each expression compiled once in its
+// scope), a top-level key other than vars, errors, a section and those its
+// source skips failing, as vars, errors or a section two sources give; then
+// its vars bindings evaluated in order, then its errors section, every
+// message collected before failing; then its sections, in order, by name,
+// those it has. The bindings of vars are seen by every source. An error
+// starts with the name of its source, then its path, under the section but
+// in a source that is the section (values.cel.yaml: output: app: env[2]:
+// ...).
+func (s *Session) Eval(scope M, sections []string, srcs ...Source) (*Doc, error) {
+	t, err := builder{s}.document(srcs, slices.Sorted(maps.Keys(scope)), sections)
 	if err != nil {
 		return nil, err
 	}
 	if scope, err = t.bind(s, scope); err != nil {
 		return nil, err
 	}
-	out := M{}
+	d := &Doc{Sections: M{}}
 	for _, k := range sections {
 		if n, ok := t.sections[k]; ok {
-			if out[k], _, err = n.eval(s, scope); err != nil {
-				return nil, atKey(k, err)
+			if d.Sections[k], _, err = n.eval(s, scope); err != nil {
+				return nil, t.at(k, err)
 			}
 		}
 	}
-	return out, nil
+	return d, nil
 }
 
 // bind: the scope of the sections of t: the context (outer), then the vars
 // bindings, in order (each sees the previous ones); then the errors
 // section, a list, every message collected before failing: each item it
-// gives that is not empty, as text (value.Str), a message.
+// gives that is not empty, as text (value.Str), a message, without the
+// name of its file.
 func (t *tree) bind(s *Session, outer M) (M, error) {
 	scope := make(M, len(outer)+len(t.vars))
 	maps.Copy(scope, outer)
 	if err := t.vars.bind(s, scope); err != nil {
-		return nil, err
+		return nil, t.at("vars", err)
 	}
 	rules, _, err := t.errors.eval(s, scope)
 	if err != nil {
-		return nil, atKey("errors", err)
+		return nil, t.at("errors", err)
 	}
 	var msgs []string
 	for _, r := range value.AsList(rules) {

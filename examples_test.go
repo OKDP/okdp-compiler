@@ -81,8 +81,9 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 // writes; nothing references a contract. 02_advanced: output-no-dcr/,
 // likewise; output-dcr/, what it writes with platform-dcr.yaml after
 // platform.yaml. 03_full: output/, what -o <dir> writes, with the
-// project's demo.yaml at level 1 (--context 1:demo.yaml) between
-// platform.yaml and config.yaml.
+// project's demo.yaml at level 1 (--context 1:demo.yaml) and the
+// instance's connections.yaml at level 2 (--context 2:connections.yaml)
+// between platform.yaml and config.yaml.
 func TestExample(t *testing.T) {
 	t.Run("01_minimal", func(t *testing.T) {
 		in := filepath.Join(examples, "01_minimal", "input")
@@ -122,10 +123,15 @@ func TestExample(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		layers := slices.Concat(
+			readContext(t, 0, filepath.Join(in, "platform.yaml")),
+			readContext(t, 1, filepath.Join(in, "demo.yaml")),
+			readContext(t, 2, filepath.Join(in, "connections.yaml")),
+		)
 		res, err := Compile(context.Background(), def, Inputs{
 			Charts:    os.DirFS(filepath.Join(in, "charts")),
 			Contracts: os.DirFS(filepath.Join(in, "contracts")),
-			Context:   append(readContext(t, 0, filepath.Join(in, "platform.yaml")), readContext(t, 1, filepath.Join(in, "demo.yaml"))...),
+			Context:   layers,
 			Values:    readLayers(t, []string{filepath.Join(in, "config.yaml")}),
 			Release:   "demo-workspace",
 			Namespace: "demo",
@@ -193,7 +199,9 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 // TestExampleErrors: every testdata/<case>.yaml, an instance file over the
 // context, and every testdata/context/<level>/<case>.yaml, a context file of
 // that level after platform.yaml, must fail with the message of its first
-// line (# error: ..., \n for a line break).
+// line (# error: ..., \n for a line break). A context file may set
+// parameters too: those of level 2, an instance's own connections,
+// reference the connections they give.
 func TestExampleErrors(t *testing.T) {
 	testdata := "testdata"
 	instance, _ := filepath.Glob(filepath.Join(testdata, "*.yaml"))

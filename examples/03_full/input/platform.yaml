@@ -2,7 +2,7 @@
 # cluster: a context layer of level 0 (--context, Inputs.Context), merged
 # first.
 # Reviewed with the platform: no project (demo.yaml) and no instance
-# (config.yaml) may change a value set here.
+# (connections.yaml, config.yaml) may change a value set here.
 
 global:
   # A key of global outside okdp: every chart receives global, the mapping

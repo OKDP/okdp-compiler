@@ -9,9 +9,9 @@
 // their shapes described by the embedded mapping.schema.json.
 //
 // The compiler's own templates (oidc-dcr.cel.yaml,
-// generated-secret.cel.yaml) are written in the same language, with the
-// same functions: vars, errors, then the values they compute
-// (compile.Session.Eval).
+// generated-secret.cel.yaml, descriptor.cel.yaml) are written in the same
+// language, with the same functions: vars, errors, then the values they
+// compute (compile.Session.Eval), their errors under their file's name.
 
 package okdp
 
@@ -47,20 +47,20 @@ var mappingSchema = sync.OnceValues(func() (*chart.Schema, error) {
 	return chart.ParseSchema("mapping.schema.json", mappingSchemaFile)
 })
 
-// runMapping: runs a mapping (values.cel.yaml) on scope, what it sees
-// (instance.scope), in the compile's session, its sections in order, then
-// checks them against mappingSchema (schemaValues): the sections, by name,
-// a null one (absent, $if) not set. output (chart -> computed values),
-// instance (url, usage), provides ([{contract, name?, values, secretRef?,
-// secret?}]), objects (OKDP's own objects, whole manifests), oidcClients
-// (checked further by oidc.go).
+// runMapping: runs a mapping, b (values.cel.yaml, the first segment of its
+// errors), on scope, what it sees (instance.scope), in the compile's
+// session, its sections in order, then checks them against mappingSchema
+// (schemaValues): the sections, by name, a null one (absent, $if) not set.
+// output (chart -> computed values), instance (url, usage), provides
+// ([{contract, name?, values, secretRef?, secret?}]), objects (OKDP's own
+// objects, whole manifests), oidcClients (checked further by oidc.go).
 func runMapping(session *compile.Session, b []byte, scope M) (M, error) {
-	doc, err := session.Eval(b, scope, sections...)
+	doc, err := session.Eval(scope, sections, compile.Source{Name: "values.cel.yaml", Data: b})
 	if err != nil {
 		return nil, err
 	}
-	maps.DeleteFunc(doc, func(_ string, v any) bool { return v == nil })
-	return schemaValues(mappingSchema, "the mapping's sections don't meet the specifications of mapping.schema.json", doc)
+	maps.DeleteFunc(doc.Sections, func(_ string, v any) bool { return v == nil })
+	return schemaValues(mappingSchema, "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
 }
 
 // functions: the host functions OKDP adds for the instance inst, those of
@@ -103,16 +103,20 @@ var secretTemplate []byte
 // mapping.schema.json (okdpGeneratedSecret), in the compile's session.
 func generatedSecret(session *compile.Session, inst *instance, args M) ([]any, error) {
 	scope := M{"args": args, "release": M{"name": inst.release, "namespace": inst.namespace}, "labels": labels(inst.svc.Name, inst.release, "", false)}
-	v, err := evalTemplate(session, secretTemplate, scope)
+	v, err := evalTemplate(session, "generated-secret.cel.yaml", secretTemplate, scope)
 	return value.AsList(v["objects"]), err
 }
 
-// evalTemplate: b, a template of the compiler (the mapping language: vars,
-// errors, then its one section, values), evaluated on scope in the
-// compile's session: its values.
-func evalTemplate(session *compile.Session, b []byte, scope M) (M, error) {
-	v, err := session.Eval(b, scope, "values")
-	return value.AsMap(v["values"]), err
+// evalTemplate: b, the template of the compiler in the file name (the
+// mapping language: vars, errors, then its one section, values), evaluated
+// on scope in the compile's session: its values; its errors start with
+// name.
+func evalTemplate(session *compile.Session, name string, b []byte, scope M) (M, error) {
+	doc, err := session.Eval(scope, []string{"values"}, compile.Source{Name: name, Data: b})
+	if err != nil {
+		return nil, err
+	}
+	return value.AsMap(doc.Sections["values"]), nil
 }
 
 // fullname: okdpFullname, "<release>-<suffix>" (the release alone without

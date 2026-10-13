@@ -11,10 +11,10 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// TestValuesLayers: global is the context's. An instance layer sets only
-// the keys of global the parameter schema declares, never okdp, over the
-// context's layers, and no "{{" under any key; the platform's level is not
-// checked.
+// TestValuesLayers: global and connections are the context's. An instance
+// layer sets only the keys of global the parameter schema declares, never
+// okdp, over the context's layers, no connections, to any value, and no
+// "{{" under any key; the platform's level is not checked.
 func TestValuesLayers(t *testing.T) {
 	files := maps.Clone(pkg)
 	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
@@ -28,7 +28,9 @@ func TestValuesLayers(t *testing.T) {
 		"okdp":           {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}}}, "values layer 1: global.okdp is set by the context (--context, Inputs.Context)"},
 		"another key":    {[]map[string]any{{"replicas": 2}, {"global": M{"imageRegistry": "r", "proxy": "p"}}}, "values layer 2: global.proxy is set by the context"},
 		"not a map":      {[]map[string]any{{"global": nil}}, "values layer 1: global is set by the context"},
-		"a template":     {[]map[string]any{{"replicas": 2}, {"connections": M{"ext": M{"tags": []any{"{{ .Release.Name }}"}}}}}, `values layer 2: connections.ext.tags[0]: the value contains "{{"`},
+		"connections":    {[]map[string]any{{"replicas": 2}, {"connections": M{}}}, "values layer 2: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level"},
+		"a null":         {[]map[string]any{{"connections": nil}}, "values layer 1: connections are given by the context"},
+		"a template":     {[]map[string]any{{"replicas": 2}, {"upstream": M{"app": M{"tags": []any{"{{ .Release.Name }}"}}}}}, `values layer 2: upstream.app.tags[0]: the value contains "{{"`},
 		"a template key": {[]map[string]any{{"upstream": M{"app": M{"podAnnotations": M{"{{ x }}": "y"}}}}}, `values layer 1: upstream.app.podAnnotations.{{ x }}: the key contains "{{"`},
 	} {
 		t.Run(name, func(t *testing.T) {

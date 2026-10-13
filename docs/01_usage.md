@@ -115,8 +115,8 @@ okdp-compile --version
 | `--package` | required | package directory: `service.yaml`, `values.cel.yaml`, `config.schema.json` (optional) at its root, and the defaults files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
-| `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:`..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
-| `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--context` files. It sets no `global` but the keys the parameter schema declares under it ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
+| `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:` an instance's own connections..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
+| `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--context` files. It sets no `global` but the keys the parameter schema declares under it, and no `connections` ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
 | `--output`, `-o` | required | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, and `okdp.dependencies.yaml`, the instances the connection references point to ([`--output`](#--output)) |
@@ -184,7 +184,9 @@ The example's, with `platform-dcr.yaml` after `platform.yaml`, are
 The full example compiles an instance of a project: `demo.yaml`, a project
 file at level 1 (`--context 1:demo.yaml`), between the platform's file and
 the instance's, adds the project's settings and connections, and may change
-none of the platform's ([levels](specs/01_inputs_outputs.md#levels)).
+none of the platform's; `connections.yaml`, at level 2 (`--context
+2:connections.yaml`), adds the instance's own connection, and may change
+none of theirs ([levels](specs/01_inputs_outputs.md#levels)).
 Its outputs, `examples/03_full/output/`, have one dependency per chart the
 mapping outputs (`backup`, left out, has none), and one per OAuth client in
 `dcr` mode:
@@ -193,8 +195,8 @@ mapping outputs (`backup`, left out, has none), and one per OAuth client in
 $ in=examples/03_full/input
 $ bin/okdp-compile --package $in/service --charts $in/charts --contracts $in/contracts \
     --release demo-workspace --namespace demo \
-    --context $in/platform.yaml --context 1:$in/demo.yaml -f $in/config.yaml \
-    -o out-full
+    --context $in/platform.yaml --context 1:$in/demo.yaml --context 2:$in/connections.yaml \
+    -f $in/config.yaml -o out-full
 $ ls out-full
 Chart.yaml
 instance.values.yaml
@@ -689,7 +691,8 @@ with status 2.
 | `global.okdp.ingress.className is required. It is a context value: set it with --context (Inputs.Context)` | `require` in `service.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | pass the platform values with `--context`; set the key ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context file, the second `--context` flag (`Inputs.Context[1]`), of level 1, sets a value a file of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the file: a level only adds keys and connections; change the value in the lower level's files ([levels](specs/01_inputs_outputs.md#levels)) |
 | `values layer 1: global.okdp is set by the context (--context, Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--context`; a package lets instances set a key of `global` by declaring it in `values.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
-| `values layer 1: connections.shared-db.host: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, connections, upstream values; `context layer <n> (level <l>): ...` in a context file above level 0 (`--context 1:<file>`); the platform's files, level 0, are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
+| `values layer 1: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level` | an instance file (`-f`) sets `connections`, to any value | give the instance's own connections in a context file of its level (`--context 2:<file>`); a connection of a lower level is not changed ([context values](specs/01_inputs_outputs.md#context-values)) |
+| `values layer 1: database: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, upstream values; `context layer <n> (level <l>): ...` in a context file above level 0 (`--context 1:<file>`); the platform's files, level 0, are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
 | `values layer 2: json: cannot marshal from Go func() within "/hooks/0"`, `context layer 1 (level 0): json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Context`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key that is not text or a number, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
@@ -698,10 +701,10 @@ with status 2.
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): the fields violate the database contract:` then `- at '/engine': value must be one of 'postgresql', 'mysql'`, `- at '/port': got string, want integer` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
-| `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | the name is not in `connections`, and the contract cannot resolve an instance | add the connection under `connections` |
-| `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` |
+| `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | the name is not in `connections`, and the contract cannot resolve an instance | add the connection under `connections` of a context file (`--context 2:<file>` for the instance's own) |
+| `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` of a context file |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
-| `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (an instance's values fail earlier, `values layer <n>: ...`) | fix the platform values or the contract |
+| `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (a context file above level 0 fails earlier, `context layer <n> (level <l>): ...`) | fix the platform values or the contract |
 | several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, in parameter path order (keys sorted at each level), with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
 | `webapp: database connection "shared-db" has no secretRef, the password cannot be read` | not a compiler check: a message of the example mapping's `errors` section | add `secretRef: {name: ...}` to the connection |
 | `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `service.yaml` protects (`protect`, and always `global`) | remove the value; set it through the parameters when the package offers one |
@@ -715,15 +718,16 @@ with status 2.
 
 The errors of `values.cel.yaml`, mostly for package authors, are listed
 with their causes in [service definition](specs/02_service_definition.md#errors):
-the messages of its `errors` section, one per line; CEL errors prefixed with
-the section, key and list position path (`output: app: env[2]: value: ${{ ... }}: no such key: host`);
+the messages of its `errors` section, one per line, as written; CEL errors
+prefixed with the file, then the section, key and list position path
+(`values.cel.yaml: output: app: env[2]: value: ${{ ... }}: no such key: host`);
 sections of the wrong shape, against `mapping.schema.json`,
 every violation at once
 (`the mapping's sections don't meet the specifications of mapping.schema.json:`
 then `- at '/output/app': got string, want object`); arguments of
 `okdpGeneratedSecret` unknown or of the wrong type
 (`- at '/okdpGeneratedSecret/keys/0': additional properties 'lenght' not allowed`);
-YAML errors (`yaml: line <n>: ...`), which name no file. The `provides`
+YAML errors (`values.cel.yaml: yaml: line <n>: ...`). The `provides`
 checks are in [descriptor ConfigMap](specs/01_inputs_outputs.md#descriptor-configmap),
 the OAuth client errors [below](#oauth-clients).
 

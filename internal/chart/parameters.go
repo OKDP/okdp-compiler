@@ -91,18 +91,26 @@ func (s *Schema) Values(user M) (M, string, error) {
 // Parameters: the values layers, normalized (value.Normalize), merged in
 // order (helm -f), coalesced over the defaults of the parameter schema and
 // checked against it (Schema.Values). Every violation is reported at once,
-// under name, as Helm reports those of a chart's values.
+// under name, as Helm reports those of a chart's values. connections are
+// not parameters: kept as merged, out of the defaults and the check,
+// whatever the schema declares of them.
 func Parameters(schema *Schema, name string, layers []map[string]any) (M, error) {
 	user := M{}
 	for _, v := range layers {
 		user = value.Merge(user, v)
 	}
+	conns, set := user["connections"]
+	delete(user, "connections")
 	values, v, err := schema.Values(user)
 	if err != nil {
 		return nil, err
 	}
 	if v != "" {
 		return nil, schemaError("values", map[string]string{name: v})
+	}
+	delete(values, "connections")
+	if set {
+		values["connections"] = conns
 	}
 	return values, nil
 }

@@ -39,9 +39,10 @@ type instance struct {
 // 1. Parameters: the package's parameter schema, read once for the stages
 // that read it (chart.ReadParameterSchema): the keys of global an instance
 // sets, the parameters, the connection references. Then the values layers,
-// as Helm: the context's then the instance's (global is the context's:
-// valuesLayers), merged in order as -f files, coalesced over the schema's
-// defaults, checked against it (chart.Parameters).
+// as Helm: the context's then the instance's (global and connections are
+// the context's: valuesLayers), merged in order as -f files, coalesced over
+// the schema's defaults, checked against it, connections apart
+// (chart.Parameters).
 //
 // 2. Platform context: global.okdp checked against platformSchema, its
 // defaults applied (schemaValues): a value of another type is refused

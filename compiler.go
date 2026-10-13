@@ -8,7 +8,7 @@
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 //		Charts:    os.DirFS("charts"),
 //		Contracts: os.DirFS("contracts"),
-//		Context:   []compiler.ContextLayer{{Values: platformValues}},
+//		Context:   []compiler.ContextLayer{{Values: platformValues}, {Level: 2, Values: instanceConnections}},
 //		Values:    []map[string]any{instanceValues},
 //		Release:   "demo-myservice",
 //		Namespace: "demo",

@@ -1,7 +1,7 @@
 # The project demo, the namespace demo: what it adds to the platform values
 # for every instance of the project, a context layer of level 1 (--context
 # 1:demo.yaml), merged after platform.yaml, level 0, and before the
-# instance's config.yaml.
+# instance's connections.yaml, level 2, and config.yaml.
 #
 # A level adds, it changes nothing a lower level sets: a key platform.yaml
 # sets (global.okdp.ingress.suffix, global.imageRegistry), the same value

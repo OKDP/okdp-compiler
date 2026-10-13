@@ -1,7 +1,8 @@
 # The instance demo-workspace of the project demo (-f, Inputs.Values), over
-# the defaults of the package's config.schema.json, then platform.yaml and
-# demo.yaml. A connection reference names a connection (the platform's, the
-# project's or the instance's own) or an instance of the namespace.
+# the defaults of the package's config.schema.json, then platform.yaml,
+# demo.yaml and connections.yaml. A connection reference names a connection
+# (the platform's, the project's or the instance's own) or an instance of
+# the namespace.
 replicas: 2
 size: medium
 database: demo-db                      # an instance of the namespace: a dependency
@@ -16,7 +17,7 @@ catalogs:                              # references in the items of a list
       compression: zstd
   - name: marketing
     database: demo-db                  # the same instance again: a second dependency
-    storage: scratch                   # the instance's own connection, below
+    storage: scratch                   # the instance's own connection (connections.yaml)
   - name: archive                      # no database
     storage: datalake
 notifications:
@@ -29,16 +30,6 @@ extraEnv:
 features:
   metrics: {interval: 15s}             # enabled by default
   # backup is disabled by default: its chart is left out, and not read
-
-# The instance's own connection, as the platform's and the project's are
-# written.
-connections:
-  scratch:
-    contract: s3
-    provider: ceph
-    endpoint: https://rgw.demo.example.org
-    bucket: workspace-scratch
-    secretRef: {name: scratch-credentials}
 
 # Values for the upstream charts as they are, over OKDP's defaults and the
 # computed values.

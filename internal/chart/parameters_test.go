@@ -49,6 +49,29 @@ func TestSchemaDefaults(t *testing.T) {
 	}
 }
 
+// TestParametersConnections: connections are not parameters: kept as
+// merged, whatever the schema declares of them, its default and its
+// additionalProperties included.
+func TestParametersConnections(t *testing.T) {
+	conns := M{"db": M{"contract": "database", "port": float64(5432)}}
+	for name, s := range map[string]string{
+		"not declared": `{"additionalProperties": false}`,
+		"declared":     `{"properties": {"connections": {"type": "string", "default": "none"}}}`,
+	} {
+		schema, err := readSchema(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Parameters(schema, "svc", []map[string]any{{"connections": M{"db": M{"contract": "database"}}}, {"connections": M{"db": M{"port": float64(5432)}}}})
+		if want := (M{"connections": conns}); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %#v %v, want %#v", name, got, err, want)
+		}
+		if got, err := Parameters(schema, "svc", nil); err != nil || len(got) > 0 {
+			t.Errorf("%s, none: got %#v %v, want none", name, got, err)
+		}
+	}
+}
+
 // TestParameters: the layers merged in order and coalesced over the
 // schema's defaults (a null deletes one), then checked against the schema,
 // a default its property's schema rejects included; a schema that is not

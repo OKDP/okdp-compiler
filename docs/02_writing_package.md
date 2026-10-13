@@ -135,7 +135,6 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "additionalProperties": false,
   "properties": {
     "global": {"type": "object", "description": "Platform values: the context's layers (--context), the platform's level then higher ones adding to it, never an instance's."},
-    "connections": {"type": "object", "default": {}, "description": "External connections, one values layer per connection file."},
     "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
     "database": {
       "type": "string",
@@ -173,8 +172,8 @@ chart is reached through `upstream.<chart>`, without a parameter.
   against it before the mapping runs
   ([schema check](specs/01_inputs_outputs.md#schema-check)): a rule
   on a parameter belongs here, not in the mapping's `errors`. Declare
-  `$schema`. With `additionalProperties: false`, declare `global`,
-  `connections` and `upstream` too.
+  `$schema`. With `additionalProperties: false`, declare `global` and
+  `upstream` too.
 - A `default` gives a parameter its value when no layer sets it, as a
   chart's `values.yaml` does: on a property reached from the root through
   `properties` only, never under `allOf`, `items`, `additionalProperties`,
@@ -186,6 +185,10 @@ chart is reached through `upstream.<chart>`, without a parameter.
   ...}}`), never `okdp`, is one an instance may set, and every chart
   receives it
   ([context values](specs/01_inputs_outputs.md#context-values)).
+- `connections` is not a parameter: the context gives the connections, an
+  instance's own in a context file of its level, and the schema does not
+  declare it; a declaration has no effect
+  ([reserved keys](specs/01_inputs_outputs.md#reserved-keys)).
 - A string pasted into a configuration file, a script or a template refuses
   `{{`, `}}` and line breaks (the `not` pattern above, as in trino, airflow,
   superset and polaris). The compiler refuses `{{` in every instance value
@@ -205,7 +208,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
   `x-ui-advanced`, `x-ui-condition`...) build the console form.
 - Without `config.schema.json`, the package has the empty schema, `{}`: no
   parameter has a default, any value passes the check (any parameter,
-  `connections`, `upstream.<key>` of any key), and an instance sets no key
+  `upstream.<key>` of any key), and an instance sets no key
   of `global` ([package files](specs/01_inputs_outputs.md#package-files)).
 
 ### 4. Write service.yaml
@@ -350,16 +353,21 @@ and give OKDP's names, labels and Secrets.
 ### 6. Consume and provide connections
 
 A parameter carrying `x-okdp-connection-ref` names either an entry of
-`connections` (external, from a connection file) or another instance of the
-namespace (internal). Before the mapping runs, the compiler replaces the name
-with the connection, completed against its contract
+`connections` (external, from a context file: the platform's, the
+project's, or the instance's own at a level of its own) or another instance
+of the namespace (internal). Before the mapping runs, the compiler replaces
+the name with the connection, completed against its contract
 ([what the mapping receives](specs/01_inputs_outputs.md#what-the-mapping-receives)).
 A reference left empty stays `""` (or `null`); a name that is not an entry
 of `connections` must be a release name.
 
 ```yaml
-# instance values: an external database
+# instance values (-f): an external database
 database: shared-db
+```
+
+```yaml
+# the instance's own connections, a context file of its level (--context 2:<file>)
 connections:
   shared-db:
     contract: database
@@ -410,11 +418,12 @@ it (cnpg-postgresql). Neither: consumers bring their own identity
 
 ### 7. Compile, render and check
 
-Each `ci/<case>-values.yaml` is an instance: its connections and
-parameters, without `global`, which an instance may not set. The
+Each `ci/<case>-values.yaml` is an instance: its parameters, without
+`global` and `connections`, which an instance may not set. The
 platform values (`global.okdp`, `charts.objects` included) are given apart,
 with `--context`: `ci/platform.yaml` for every case, then, for a case that
-needs others, its own `ci/<case>-platform.yaml`. Write one case per mode:
+needs others, its own `ci/<case>-platform.yaml`, and its connections at
+level 2 (`--context 2:ci/<case>-connections.yaml`). Write one case per mode:
 OIDC `existing`, `dcr` and off, internal and external connections, proxy
 set, each optional chart on, upstream values with appended lists. The `dcr`
 case's platform file gives `oidc.clientProvisioning: dcr`,
@@ -826,9 +835,9 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - [ ] `service.yaml`: `name`, `version` `<upstream>-<okdp semver>`,
   `roles` and `dependsOn`.
 - [ ] `config.schema.json` declares `$schema`, every parameter with its
-  rules, `global`, `connections`, and `upstream` for exactly the charts that
-  accept instance values; strings pasted into files refuse `{{`, `}}` and
-  line breaks.
+  rules, `global`, and `upstream` for exactly the charts that accept
+  instance values, no `connections`; strings pasted into files refuse `{{`,
+  `}}` and line breaks.
 - [ ] `require` lists the platform values read in every mode, `errors`
   checks the others in their mode; `protect` covers names, authentication,
   exposure, Secret wiring and the switches kept off; `append` the lists

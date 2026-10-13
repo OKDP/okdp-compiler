@@ -48,8 +48,8 @@ func newSession(scope M) *compile.Session {
 // eval: the CEL expression expr (without ${{ }}) on the variables of scope,
 // in the session s: the value v of the template {values: {v: ${{ expr }}}}.
 func eval(s *compile.Session, expr string, scope M) (any, error) {
-	v, err := s.Eval([]byte("values:\n  v: |-\n    ${{ "+expr+" }}\n"), scope, "values")
-	return value.AsMap(v["values"])["v"], err
+	v, err := evalTemplate(s, "v.cel.yaml", []byte("values:\n  v: |-\n    ${{ "+expr+" }}\n"), scope)
+	return v["v"], err
 }
 
 // TestMappingSections: vars in order, instance and provides.
@@ -171,8 +171,8 @@ func TestMappingNulls(t *testing.T) {
 // OKDP's, is refused.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
-		"function error":         {"output: {x: {v: '${{ okdpGeneratedSecret({}) }}'}}\n", "output: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
-		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "provides[0]: values: ${{ nope }}:"},
+		"function error":         {"output: {x: {v: '${{ okdpGeneratedSecret({}) }}'}}\n", "values.cel.yaml: output: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
+		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "values.cel.yaml: provides[0]: values: ${{ nope }}:"},
 		"output not a map":       {"output: [x]\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/output': got array, want object"},
 		"chart a scalar":         {"output: {x: {}, web: 'on'}\n", "- at '/output/web': got string, want object"},
 		"instance not a map":     {"instance: [https://x]\n", "- at '/instance': got array, want object"},
@@ -184,7 +184,7 @@ func TestMappingErrors(t *testing.T) {
 		"client name":            {"oidcClients: [{grantTypes: [a], name: Console}]\n", "- at '/oidcClients/0/name': 'Console' does not match pattern"},
 		"client name length":     {"oidcClients: [{grantTypes: [a], name: " + strings.Repeat("a", 55) + "}]\n", "- at '/oidcClients/0/name': maxLength: got 55, want 54"},
 		"client key":             {"oidcClients: [{grantTypes: [a], redirectUri: x}]\n", "- at '/oidcClients/0': additional properties 'redirectUri' not allowed"},
-		"unknown section":        {"outptu: {x: {}}\n", "outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)"},
+		"unknown section":        {"outptu: {x: {}}\n", "values.cel.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := runMapping(newSession(mapCtx()), []byte(tc.src), mapCtx())

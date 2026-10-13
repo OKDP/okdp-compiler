@@ -168,8 +168,10 @@ func TestContextValues(t *testing.T) {
 	if want := (M{"replicas": float64(2)}); !reflect.DeepEqual(inst.scope["values"], want) {
 		t.Errorf("values in the context: %#v", inst.scope["values"])
 	}
-	if _, ok := inst.values["global"]; !ok {
-		t.Error("the merged values keep global")
+	for _, k := range []string{"global", "connections"} {
+		if _, ok := inst.values[k]; !ok {
+			t.Errorf("the merged values keep %s", k)
+		}
 	}
 	if want := (M{"name": "demo-app", "namespace": "demo"}); !reflect.DeepEqual(inst.scope["release"], want) {
 		t.Errorf("release: %#v", inst.scope["release"])

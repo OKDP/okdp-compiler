@@ -69,7 +69,7 @@ metadata are fields of `service.yaml` ([Service](02_service_definition.md#servic
 `config.schema.json` is optional: a package without it has the empty
 schema, `{}`. No parameter then has a [default](#defaults) or is a
 [connection reference](#declaring-a-reference); the [schema
-check](#schema-check) accepts any values: any parameter, `connections`,
+check](#schema-check) accepts any values: any parameter,
 `upstream.<key>` of any key (applied to the charts that accept upstream
 values: [Upstream values](#upstream-values)); and no key of `global` is
 declared, so an instance sets none ([Context values](#context-values)).
@@ -195,7 +195,7 @@ The parameters of an instance: the values layers, the context's
 (`Inputs.Values`), merged and
 coalesced over the defaults of the package's `config.schema.json`, as Helm
 computes `.Values` of a chart from its `values.yaml` and `-f` files.
-`global` is the context's ([Context values](#context-values)).
+`global` and `connections` are the context's ([Context values](#context-values)).
 
 ### Defaults
 
@@ -266,8 +266,9 @@ The parameters are checked against `config.schema.json` first, before the
 connections, the [platform requirements](#requirements) and the mapping,
 as Helm 4 checks the values of a chart:
 
-- the values checked: the parameters above, `global`, `connections` and
-  `upstream` included, every connection reference still the string written;
+- the values checked: the parameters above, `global` and `upstream`
+  included, `connections` left out ([Reserved keys](#reserved-keys)), every
+  connection reference still the string written;
 - the draft: the schema's `$schema`, draft 2020-12 without one; `format` is
   asserted for drafts before 2019-09 only;
 - `$ref`: within the schema only. A file, a URL or a `urn:` (which Helm
@@ -297,12 +298,15 @@ Three top-level keys are not parameters of the service:
 | Key | Content | In the mapping's `values` |
 |---|---|---|
 | `global` | the context values, `global.okdp` among them: set by the context's layers, each level adding to the lower ones', by an instance's only for the keys the schema declares ([Context values](#context-values), [Levels](#levels)) | removed: given as `global` and `platform` |
-| `connections` | the external connections, by name ([Connections](#connections)) | removed: the references are resolved in place |
+| `connections` | the external connections, by name: given by the context's layers only, an instance's own at a level of its own ([Connections](#connections), [Levels](#levels)) | removed: the references are resolved in place |
 | `upstream` | the instance's upstream values, by chart key ([Upstream values](#upstream-values)) | as written |
 
-They are checked with the parameters: a schema with `additionalProperties:
-false` declares them, `{"type": "object"}` at least
-(`examples/02_advanced/input/service/config.schema.json`).
+`global` and `upstream` are checked with the parameters: a schema with
+`additionalProperties: false` declares them, `{"type": "object"}` at least
+(`examples/03_full/input/service/config.schema.json`). `connections` is
+not: a schema does not declare it, and a declaration of `connections` has
+no effect, its `default` included. A connection is checked against its
+contract when a reference resolves to it ([Checks](#checks)).
 
 ## Connections
 
@@ -310,6 +314,23 @@ A connection reference: a parameter that names a connection, either an entry
 of `connections` (external) or an instance of the namespace (internal). The
 compiler replaces it with the fields of the connection, completed against
 its [contract](#contracts), before the mapping runs.
+
+`connections` is given by the context's layers only
+([Context values](#context-values)): the platform's, a project's, and the
+instance's own, a layer of a level of its own, above its project's
+([Levels](#levels)). A level adds connections, it changes none of a lower
+level's: an instance does not redefine the platform's connections.
+
+```yaml
+# examples/03_full/input/connections.yaml, level 2 (--context 2:connections.yaml): the instance's own
+connections:
+  scratch:
+    contract: s3
+    provider: ceph
+    endpoint: https://rgw.demo.example.org
+    bucket: workspace-scratch
+    secretRef: {name: scratch-credentials}
+```
 
 ### Declaring a reference
 
@@ -357,7 +378,7 @@ release name: a DNS-1123 label of 53 characters at most (lowercase letters,
 digits and `-`, a letter or digit at each end), as Helm accepts it. It
 becomes hosts, Secret names and a [dependency](#dependencies).
 
-External: the entry of `connections`, as the layers give it.
+External: the entry of `connections`, as the context's layers give it.
 
 ```yaml
 connections:
@@ -388,8 +409,8 @@ a [dependency](#dependencies).
 
 Both are then [completed](#completion) against the contract. The result,
 `secretRef` and `okdp` included, may not contain `{{` in a key or a string,
-whatever it comes from: the context's layers above level 0 and the
-instance's refuse it already ([Levels](#levels), [Layers](#layers)), and a
+whatever it comes from: the context's layers above level 0 refuse it
+already ([Levels](#levels)), and a
 connection of level 0, the platform's, a
 contract's default or `${namespace}` and `${suffix}` are checked here, as
 the connection reaches the charts' values through the mapping.
@@ -460,20 +481,20 @@ replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letter
 |---|---|---|
 | neither a string nor `null` | `<path>: a connection reference must be a string, got <value>` | |
 | no `<contract>.schema.json`, or one that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` | |
-| external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `wrong-contract.yaml` |
-| external, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `unknown-field.yaml` |
-| external, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` | `secret-in-connection.yaml` |
+| external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `context/2/wrong-contract.yaml` |
+| external, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `context/2/unknown-field.yaml` |
+| external, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` | `context/2/secret-in-connection.yaml` |
 | internal, no `x-okdp-internal` | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | |
 | internal, not a release name | `<path>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
-| external, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `connection-types.yaml` |
+| external, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `context/2/connection-types.yaml` |
 | `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
 
-`testdata/no-secret-ref.yaml` (`database connection "shared-db" has no
-secretRef`) is not a check of the compiler: an external connection without
-`secretRef` resolves without one, and the example mapping refuses it in its
-`errors` section ([Errors](02_service_definition.md#errors)). A mapping that
-reads credentials checks `secretRef` itself.
+`testdata/context/2/no-secret-ref.yaml` (`database connection "shared-db"
+has no secretRef`) is not a check of the compiler: an external connection
+without `secretRef` resolves without one, and the example mapping refuses
+it in its `errors` section ([Errors](02_service_definition.md#errors)). A
+mapping that reads credentials checks `secretRef` itself.
 
 ## Contracts
 
@@ -596,7 +617,8 @@ path in the values, sorted by path, as those of the parameters:
 `Values` at its `Level`; the binary's `--context [<level>:]<file>` files,
 level 0 without a prefix. Among them `global`, `global.okdp`, the settings
 of the platform (ingress, certificate issuers, OIDC, proxy, the platform's
-charts...), and `connections`. Level 0 is the platform's:
+charts...), and `connections`, which only the context gives, an
+instance's own included. Level 0 is the platform's:
 `examples/02_advanced/input/platform.yaml`, `platform/platform-values.yaml` in a
 platform repository; level 1, typically a project's, and each level above
 adds to the lower ones ([Levels](#levels)). The context's layers are merged by level
@@ -645,10 +667,9 @@ its charts to instances this way:
 
 A context layer is a values layer: it may set more than `global`, for
 every instance it is given to, under the instance's layers. The useful
-case is `connections`: a connection every instance may reference by name,
-as one of its own ([Resolution](#resolution)). An instance layer giving a
-connection of the same name merges with it, key by key; a layer of a
-higher level may not ([Levels](#levels)).
+case is `connections`: a connection every instance may reference by name
+([Resolution](#resolution)); a layer of a higher level may not give a
+connection of the same name ([Levels](#levels)).
 
 ```yaml
 # examples/02_advanced/input/platform.yaml
@@ -665,6 +686,16 @@ instance of the namespace, and `audit: platform-db`, the platform's
 connection. Parameters and `upstream` values are the package's: a
 context file every service shares keeps to `global` and `connections`.
 
+`connections` is the context's only: an instance's own connections are a
+context layer of a level of their own ([Levels](#levels)). An instance
+layer that sets `connections`, to any value, fails before the parameter
+schema is checked, after the check of `global`
+(`testdata/instance-sets-connections.yaml`):
+
+```
+values layer 1: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level
+```
+
 ### Levels
 
 `ContextLayer.Level`, the `<level>:` of `--context`: 0, the platform's;
@@ -673,7 +704,11 @@ the platform values for each of them, its settings under `global`
 (`global.okdp.project`, which the mapping reads and the compiler does not;
 a key of `global` its charts read, `storageClass`), and its connections,
 which its instances reference by name as the platform's. More levels may
-follow (a team's...); their numbers may leave gaps (0, 10, 20).
+follow (a team's...); their numbers may leave gaps (0, 10, 20). An
+instance's own connections are a layer of a level of its own, above its
+project's (2 over a project at 1), given to its compile only: the level
+rule below applies to them, so an instance adds connections beside its
+project's and the platform's, and changes none of theirs.
 
 The layers are merged by level, lowest first, whatever their order in
 `Inputs.Context` (the order of the `--context` flags); a level's layers in
@@ -681,7 +716,7 @@ their order (`helm -f`), a later one changing or deleting (`null`) a value
 of an earlier one of the same level:
 
 ```bash
-bin/okdp-compile ... --context platform.yaml --context platform-dcr.yaml --context 1:projects/demo.yaml
+bin/okdp-compile ... --context platform.yaml --context platform-dcr.yaml --context 1:projects/demo.yaml --context 2:projects/demo/workspace/connections.yaml
 ```
 
 A level adds values, it changes none of a lower level's. A layer fails,
@@ -711,9 +746,8 @@ The layers are checked in merge order, each normalized ([values
 files](#values-files)), then against the lower levels, then for `{{`.
 
 The instance's layers come last: an instance sets no key of `global` but
-those its parameter schema declares, over the context's values, and a
-connection it gives of the name of one of the context's merges with it,
-whatever its level.
+those its parameter schema declares, over the context's values, and no
+`connections` ([Context values](#context-values)).
 
 ```yaml
 # examples/03_full/input/demo.yaml, level 1 (--context 1:demo.yaml), after platform.yaml at level 0
@@ -729,6 +763,16 @@ connections:
     port: 3306
     dbName: sales
     secretRef: {name: demo-warehouse-credentials}
+```
+
+Over it, the instance's own connections,
+`examples/03_full/input/connections.yaml` at level 2
+([Connections](#connections)), add `scratch`. Given after `platform.yaml`
+and `demo.yaml`, a file of level 2 that gives `demo-warehouse` again, even
+a field of it, fails:
+
+```
+context layer 3 (level 2): connections.demo-warehouse is set at level 1 (--context, Inputs.Context): a level adds values, it does not change a lower level's
 ```
 
 ### Requirements
@@ -888,8 +932,9 @@ global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the 
 
 ## Instance values
 
-What an instance sets: its parameters, its external connections, and values
-for the upstream charts.
+What an instance sets: its parameters and values for the upstream charts.
+Its own connections are not instance values: a context layer of a level of
+their own ([Levels](#levels)).
 
 ### Layers
 
@@ -902,11 +947,11 @@ bin/okdp-compile ... --context examples/02_advanced/input/platform.yaml -f examp
 ```
 
 An instance layer sets no `global` but the keys the parameter schema
-declares under it ([Context values](#context-values)). Merge, nulls and
-schema: [Parameters](#parameters).
+declares under it, and no `connections` ([Context values](#context-values)).
+Merge, nulls and schema: [Parameters](#parameters).
 
 No key or string of an instance layer, at any depth, may contain `{{`,
-whatever key it is under: parameters, `connections`, `upstream`. A
+whatever key it is under: parameters, `upstream`. A
 parameter reaches the charts' values through the mapping, and some
 upstream charts pass their values to `tpl`, where template code could call
 `lookup` and read the cluster's Secrets. Each layer is checked in order,
@@ -1633,13 +1678,15 @@ And `okdp.dependencies.yaml` ([dependencies](#dependencies)):
 ```
 
 `examples/03_full/` compiles the workspace service, a package written to use
-every part of the mapping language, with the three kinds of values layers:
+every part of the mapping language, with four values layers:
 `platform.yaml` (`--context`, level 0: `global.okdp` in `dcr` mode, the oidc-dcr
 chart from a mirror, a proxy, two connections), `demo.yaml` (`--context
-1:demo.yaml`, level 1: the project's settings under `global`, two connections of its own) and
-`config.yaml` (`-f`: references to an instance of the namespace and to
-connections of the platform, the project and the instance itself, in a list
-of catalogs and under a nested key; upstream values). Release
+1:demo.yaml`, level 1: the project's settings under `global`, two connections of its own),
+`connections.yaml` (`--context 2:connections.yaml`, level 2: the
+instance's own connection) and `config.yaml` (`-f`: references to an
+instance of the namespace and to connections of the platform, the project
+and the instance itself, in a list of catalogs and under a nested key;
+upstream values). Release
 `demo-workspace`, namespace `demo`: `output/` is what `-o <dir>`
 writes. Its `okdp.dependencies.yaml` lists
 `demo-db` twice, for `catalogs[1].database` and `database`, and

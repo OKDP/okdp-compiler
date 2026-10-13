@@ -239,7 +239,7 @@ structure ([Directives](#directives)). Its top-level keys are the
 
 Every section is optional. Any other top-level key, a directive included,
 fails rather than being ignored (`outptu:` would render no chart),
-`<key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`.
+`values.cel.yaml: <key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`.
 
 ```yaml
 vars:
@@ -333,8 +333,9 @@ the mapping's sections don't meet the specifications of mapping.schema.json:
 - at '/output/app': got string, want object
 ```
 
-A mapping that is not a YAML map fails with `the mapping must be a YAML map`;
-invalid YAML with the parser's error (`yaml: line <n>: ...`). The mapping
+A mapping that is not a YAML map fails with
+`values.cel.yaml: the mapping must be a YAML map`; invalid YAML with the
+parser's error (`values.cel.yaml: yaml: line <n>: ...`). The mapping
 is its first YAML document: a second one, after `---`, is ignored. An
 empty or null document (comments, `---` or `~` at most) has no section.
 
@@ -360,7 +361,7 @@ A binding with the name of a context variable replaces it for every later
 expression (a `vars` binding named `labels` wins over the context's
 `labels`), not for the host functions ([Context](#context)). A `vars`
 section that is neither a map nor null fails:
-`vars: must be a map of bindings, got <value>`.
+`values.cel.yaml: vars: must be a map of bindings, got <value>`.
 
 ### output
 
@@ -633,12 +634,12 @@ reads them.
 | `0777`, `0o17`, `0x1F`, `0b101`, `1_000` | `511`, `15`, `31`, `5`, `1000` |
 | `2001-12-14` | the string: timestamps are not decoded |
 | `~`, `null`, empty | null |
-| `.nan`, `.inf`, `-.inf` | refused, values cannot hold them: `line <n>: json: cannot marshal from Go float64: unsupported value: NaN` |
+| `.nan`, `.inf`, `-.inf` | refused, values cannot hold them: `values.cel.yaml: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` |
 
 A tagged scalar is decoded as its tag says (`!!str 1` is the string `"1"`),
 and fails when it cannot be: `!!bool yes` fails with
-``line <n>: yaml: cannot decode !!str `yes` as a !!bool``. Text that is not
-UTF-8 (a `!!binary`) is refused too.
+``values.cel.yaml: line <n>: yaml: cannot decode !!str `yes` as a !!bool``.
+Text that is not UTF-8 (a `!!binary`) is refused too.
 
 Keys are taken as written: `on:` is the key `on`, `1.0:` the key `1.0`,
 binding names included. Of a key written twice, the later value wins. A
@@ -647,10 +648,10 @@ reads, a `|` or `>` block scalar that ends the file without a final line
 break keeps its newline.
 
 Aliases are refused, where Helm resolves them:
-`line <n>: aliases are not read: bind the value in vars`, `<n>` the line of
-the alias. A value used twice is a [`vars`](#vars) binding, read by name
-(`${{ small }}`, `${{ small.requests }}`). An anchor is ignored, and a
-merge key `<<` is a plain key.
+`values.cel.yaml: line <n>: aliases are not read: bind the value in vars`,
+`<n>` the line of the alias. A value used twice is a [`vars`](#vars)
+binding, read by name (`${{ small }}`, `${{ small.requests }}`). An anchor
+is ignored, and a merge key `<<` is a plain key.
 
 ### Quoting
 
@@ -659,9 +660,9 @@ or write a long expression as a `>-` block scalar.
 
 | Pitfall | Fails | Write |
 |---|---|---|
-| `: ` in a plain scalar (a ternary, a map literal) | `v: ${{ on ? 'a' : 'b' }}`: `yaml: line <n>: mapping values are not allowed in this context` | `v: "${{ on ? 'a' : 'b' }}"` |
+| `: ` in a plain scalar (a ternary, a map literal) | `v: ${{ on ? 'a' : 'b' }}`: `values.cel.yaml: yaml: line <n>: mapping values are not allowed in this context` | `v: "${{ on ? 'a' : 'b' }}"` |
 | ` #` starts a comment | `v: ${{ 'a #b' }}`: `unterminated ${{` | `v: "${{ 'a #b' }}"` |
-| `,` `[` `]` `{` `}` inside a flow collection | `{name: ${{ n }}}`: `yaml: line <n>: did not find expected ',' or '}'` | `{name: "${{ n }}"}` |
+| `,` `[` `]` `{` `}` inside a flow collection | `{name: ${{ n }}}`: `values.cel.yaml: yaml: line <n>: did not find expected ',' or '}'` | `{name: "${{ n }}"}` |
 | a final newline (`\|`, `>`) makes text | `v: >` then `${{ 1 }}`: `"1\n"` | `v: >-` |
 | quotes of the scalar's own kind | `'${{ x == 'a' }}'` | `"${{ x == 'a' }}"`, or `'${{ x == ''a'' }}'` |
 
@@ -778,21 +779,24 @@ okdp-examples: realm "data" has no catalog_admin
 A value that is not a list (null included) gives no message, and an item
 of another form is printed as text: a map, `{$if: ..., message: ...}`,
 prints as `map[message:...]`. An item whose evaluation fails stops the
-compile with that error, prefixed with the position of the item as written
-(`errors[1]: `).
+compile with that error, prefixed with the file and the position of the
+item as written (`values.cel.yaml: errors[1]: `).
 
 ### Compile errors
 
 The first error stops the compile (the `errors` section and the schema
-violations excepted). An error of an expression reads
+violations excepted). An error found reading or evaluating the mapping
+starts with the name of its file, `values.cel.yaml: `, the messages of its
+`errors` section excepted; one of a template of the compiler, with the
+template's (`oidc-dcr.cel.yaml: `). An error of an expression reads
 `<where>${{ <expression> }}: <cause>`, `<where>` being:
 
 | Expression in | `<where>` |
 |---|---|
-| a `vars` binding | `vars <name>: ` and the path below it |
-| a `$vars` binding | the path to its `$for`, then `$vars <name>: ` |
-| a section | `<section>: ` and the path to the expression: `output: app: env[2]: value: ` |
-| an `errors` item | `errors[<i>]: ` and the path below it |
+| a `vars` binding | `values.cel.yaml: vars <name>: ` and the path below it |
+| a `$vars` binding | `values.cel.yaml: `, the path to its `$for`, then `$vars <name>: ` |
+| a section | `values.cel.yaml: <section>: ` and the path to the expression: `values.cel.yaml: output: app: env[2]: value: ` |
+| an `errors` item | `values.cel.yaml: errors[<i>]: ` and the path below it |
 
 The path names each map key, followed by `: `, and each list position, as
 `[<i>]` (from 0) right after the key of its list: `hosts[0]: `,
@@ -805,25 +809,25 @@ source line, reported when the mapping is loaded whatever branch holds the
 expression, or an evaluation error:
 
 ```text
-output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
+values.cel.yaml: output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
  |  hots
  | .^
-vars db: ${{ values.databse }}: no such key: databse
-output: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
-objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
+values.cel.yaml: vars db: ${{ values.databse }}: no such key: databse
+values.cel.yaml: output: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
+values.cel.yaml: objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
 - at '/okdpGeneratedSecret': missing property 'name'
-vars host: ${{ values.?host }}: optional.none() dereference
+values.cel.yaml: vars host: ${{ values.?host }}: optional.none() dereference
 ```
 
 Other errors of the mapping:
 
 | Message | Cause |
 |---|---|
-| `yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)); the message names no file |
-| `the mapping must be a YAML map` | the document is not a map |
-| `line <n>: aliases are not read: bind the value in vars` | an alias ([YAML reading](#yaml-reading)) |
-| ``line <n>: yaml: cannot decode !!str `<scalar>` as a !!bool``, `line <n>: json: cannot marshal from Go float64: unsupported value: NaN` | a tagged scalar of another form, `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
-| `<key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`, `vars: must be a map of bindings, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
+| `values.cel.yaml: yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)) |
+| `values.cel.yaml: the mapping must be a YAML map` | the document is not a map |
+| `values.cel.yaml: line <n>: aliases are not read: bind the value in vars` | an alias ([YAML reading](#yaml-reading)) |
+| ``values.cel.yaml: line <n>: yaml: cannot decode !!str `<scalar>` as a !!bool``, `values.cel.yaml: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` | a tagged scalar of another form, `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
+| `values.cel.yaml: <key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`, `values.cel.yaml: vars: must be a map of bindings, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
 | `<where><key>: not allowed here (allowed: <directives>)`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` | a directive ([errors](03_control_flow.md#errors)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](03_control_flow.md#for) |
@@ -835,7 +839,7 @@ Other errors of the mapping:
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
 | `service.yaml: charts.<chart>: the chart of <client> is added by the compiler: remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
-| `<client>: oidc-dcr values: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
+| `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
 `<client>`, `<other>`: `oidcClients[<i>]`, the client's position in the
 evaluated list, followed by ` (<name>)` for a named client.

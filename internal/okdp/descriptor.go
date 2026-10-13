@@ -94,7 +94,7 @@ func descriptor(session *compile.Session, inst *instance, contracts fs.FS, info 
 	}
 	scope := maps.Clone(inst.scope)
 	scope["instance"], scope["outputs"] = info, outputs
-	desc, err := evalTemplate(session, descriptorTemplate, scope)
+	desc, err := evalTemplate(session, "descriptor.cel.yaml", descriptorTemplate, scope)
 	return desc, credentials, err
 }
 
