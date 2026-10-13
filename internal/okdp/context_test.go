@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -151,8 +152,9 @@ func TestPlatformSchema(t *testing.T) {
 func TestContextErrors(t *testing.T) {
 	ch := maps.Clone(pkg)
 	delete(ch, "config.schema.json")
-	if _, err := newInstance(ch, inputs(), &def.Service); err == nil {
-		t.Error("without config.schema.json: must fail")
+	ch["config.schema.json/x"] = &fstest.MapFile{}
+	if _, err := newInstance(ch, inputs(), &def.Service); err == nil || !strings.Contains(err.Error(), "read config.schema.json") {
+		t.Errorf("config.schema.json a directory: got %v", err)
 	}
 }
 

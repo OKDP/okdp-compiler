@@ -111,9 +111,9 @@ dependencies, and what the mapping sees (its `scope`):
 1. **Parameters** (`newInstance`, `internal/okdp/context.go`, on
    `chart.Parameters`, `internal/chart/parameters.go`). `config.schema.json` is
    read first, once for the compile, before the layers
-   (`chart.ReadParameterSchema`; a missing schema fails), as any values
-   schema is (`chart.ParseSchema`, a `chart.Schema`): decoded once, the
-   validator keeping its numbers as written, its map view
+   (`chart.ReadParameterSchema`; a missing one is the empty schema, `{}`),
+   as any values schema is (`chart.ParseSchema`, a `chart.Schema`): decoded
+   once, the validator keeping its numbers as written, its map view
    (`Schema.Doc`, `value.Normalize`) reading them as `float64`;
    compiled once (`chart.CompileSchema`). The defaults are the `default` of
    each property reached from the root through `properties`, the outermost
@@ -333,7 +333,7 @@ neither knows OKDP.
 | | `cache.go` | the chart cache (`chartCache`: `<repository>/<chart>-<version>/<chart>/`, `readEntry`) | `merge.go` |
 | | `spec.go` | the `charts` section of `service.yaml`: `Spec`, `Specs.Check` (the chart keys, DNS labels, among its checks) | `paths.go`, `ref.go` (`IsDNSLabel`); checked by `okdp.Service.Check` |
 | | `paths.go` | the grammar of the `protect` and `append` paths (`parsePath`); `formatPath`, the keys a value was found at, written back | `spec.go`, `merge.go`; `value.Key` |
-| | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults read (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile (`ReadParameterSchema`); `Parameters` | `values.go`, `schema.go`; read by `okdp` (`context.go`: the parameters, the platform schema) |
+| | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults read (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile, `{}` when missing (`ReadParameterSchema`); `Parameters` | `values.go`, `schema.go`; read by `okdp` (`context.go`: the parameters, the platform schema) |
 | | `merge.go` | stage 9 (`FinalValues`), the instance's upstream values, `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `okdp` (`layers.go`, `connections.go`) |
 | `okdp` | `doc.go` | the package doc | |
 | | `service.go` | `Definition`, `Service` (`service.yaml`, `require` a list of keys) and its check (`Service.Check`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Specs.Check`; read by `LoadDefinition`; `platformValue` by `pipeline.go` and `platformCharts` |

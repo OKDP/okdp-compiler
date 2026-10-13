@@ -348,6 +348,35 @@ func TestCompileSchemas(t *testing.T) {
 	}
 }
 
+// TestCompileWithoutSchema: a package without config.schema.json compiles
+// with the empty schema: no defaults, any parameter, connections and the
+// upstream values of any key accepted; an instance sets no key of global.
+func TestCompileWithoutSchema(t *testing.T) {
+	d := *def
+	d.Files = fstest.MapFS{"app.defaults.yaml": pkg["app.defaults.yaml"]}
+	d.Mapping = []byte(`
+output:
+  app:
+    replicaCount: ${{ values.?replicas.orValue('none') }}
+    labels: ${{ values.labels }}
+`)
+	d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true}}
+	in := inputs(M{"labels": M{"tier": "gold"}, "upstream": M{"app": M{"image": M{"tag": "5.0"}}, "other": M{"x": "y"}}})
+	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"connections": M{"ext": M{"contract": "database", "host": "db.example.org"}}}})
+	res, err := Compile(context.Background(), &d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := res.Values["app"]
+	if app["replicaCount"] != "none" || value.Dig(app, "labels.tier") != "gold" || value.Dig(app, "image.tag") != "5.0" {
+		t.Errorf("values: %#v", app)
+	}
+	in.Values = append(in.Values, map[string]any{"global": M{"imageRegistry": "registry.example.org"}})
+	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "values layer 2: global.imageRegistry is set by the context (--context, Inputs.Context)") {
+		t.Errorf("a key of global: got %v", err)
+	}
+}
+
 // TestObjects: the objects section (directives included) after the
 // descriptor, and the okdp chart the compiler adds to every compile:
 // Result.Objects as its values, rendered by the platform's objects chart;

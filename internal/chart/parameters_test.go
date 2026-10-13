@@ -1,10 +1,14 @@
 package chart
 
 import (
+	"errors"
+	"io/fs"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // readSchema: the parameter schema s of a package (ReadParameterSchema).
@@ -47,8 +51,8 @@ func TestSchemaDefaults(t *testing.T) {
 
 // TestParameters: the layers merged in order and coalesced over the
 // schema's defaults (a null deletes one), then checked against the schema,
-// a default its property's schema rejects included; a package without a
-// schema, or with one that is not JSON, fails.
+// a default its property's schema rejects included; a schema that is not
+// JSON fails.
 func TestParameters(t *testing.T) {
 	schema, err := readSchema(`{"properties": {
 		"a": {"type": "integer", "default": 1},
@@ -66,9 +70,6 @@ func TestParameters(t *testing.T) {
 	if _, err := Parameters(schema, "svc", []map[string]any{{"a": "two"}}); err == nil || !strings.Contains(err.Error(), "svc:\n- at '/a': got string, want integer") {
 		t.Errorf("a violation: got %v", err)
 	}
-	if _, err := ReadParameterSchema(fstest.MapFS{}); err == nil || !strings.Contains(err.Error(), "open config.schema.json") {
-		t.Errorf("without a schema: got %v", err)
-	}
 	if _, err := readSchema(`{`); err == nil || err.Error() != "config.schema.json: unexpected EOF" {
 		t.Errorf("not JSON: got %v", err)
 	}
@@ -81,5 +82,36 @@ func TestParameters(t *testing.T) {
 	}
 	if _, err := Parameters(bad, "svc", []map[string]any{{"r": 2}}); err != nil {
 		t.Errorf("a default overridden: got %v", err)
+	}
+}
+
+// TestNoParameterSchema: a package without config.schema.json has the
+// empty schema: no defaults, no key of global declared, any values
+// accepted as written, connections and the upstream values of any key
+// included. A schema that cannot be read for another reason fails.
+func TestNoParameterSchema(t *testing.T) {
+	schema, err := ReadParameterSchema(fstest.MapFS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.defaults) != 0 || len(schema.Doc) != 0 {
+		t.Errorf("defaults %#v, document %#v: want none", schema.defaults, schema.Doc)
+	}
+	got, err := Parameters(schema, "svc", []map[string]any{{
+		"replicas":    "two",
+		"global":      M{"imageRegistry": "registry.example.org"},
+		"connections": M{"ext": M{"contract": "database", "host": "db.example.org"}},
+		"upstream":    M{"app": M{"image": M{"tag": "5.0"}}, "other": M{"x": "y"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]any{"replicas": "two", "global.imageRegistry": "registry.example.org", "upstream.app.image.tag": "5.0", "upstream.other.x": "y"} {
+		if v := value.Dig(got, path); v != want {
+			t.Errorf("%s: got %#v, want %#v", path, v, want)
+		}
+	}
+	if _, err := ReadParameterSchema(fstest.MapFS{parameterSchema + "/x": {}}); err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a directory: got %v", err)
 	}
 }

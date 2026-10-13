@@ -112,7 +112,7 @@ okdp-compile --version
 
 | Flag | Default | |
 |---|---|---|
-| `--package` | required | package directory: `service.yaml`, `values.cel.yaml`, `config.schema.json` at its root, and the defaults files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `--package` | required | package directory: `service.yaml`, `values.cel.yaml`, `config.schema.json` (optional) at its root, and the defaults files `service.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
 | `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:`..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
@@ -671,7 +671,6 @@ with status 2.
 | `unexpected argument "instance.yaml": every input is a flag (-f before each values file)` | an argument that is not a flag, here a second values file after one `-f`; exit status 2, nothing compiled | one `-f` per values file |
 | `--output (-o) is required` | no output directory | give one: the command writes the compile there |
 | `open service.yaml: no such file or directory`, `open values.cel.yaml: ...` | `--package` is not the package's directory, or the package has no mapping | point it at the directory of `service.yaml` |
-| `open config.schema.json: no such file or directory` | the package has no parameter schema; it is always read (the parameters' defaults and the connection references are declared in it) | add it ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `service.yaml: name is required`, `service.yaml: version is required` | the package metadata is incomplete | set them ([service](specs/02_service_definition.md#service)) |
 | `service.yaml: yaml: unmarshal errors:` then `line 7: field protcet not found in type chart.Spec` | a field `service.yaml` does not define, here a misspelt `protect` in a chart; one line per unknown field | fix the name ([service.yaml](specs/02_service_definition.md#serviceyaml)) |
 | `service.yaml: charts: key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` | a chart key that is not a DNS label: `""`, `../app`, an upper case letter, `_` or `.` | rename the key in `service.yaml` and the mapping ([chart keys](specs/02_service_definition.md#chart-keys)) |

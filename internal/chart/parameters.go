@@ -7,6 +7,7 @@ package chart
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 
@@ -36,10 +37,14 @@ type Schema struct {
 }
 
 // ReadParameterSchema: the parameter schema of pkg (config.schema.json),
-// read as ParseSchema reads a schema. A missing schema fails with the error
-// of the file system.
+// read as ParseSchema reads a schema; a missing one is the empty schema
+// ({}): no defaults, any values, no key of global declared. Any other read
+// error fails with the error of the file system.
 func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	b, err := fs.ReadFile(pkg, parameterSchema)
+	if errors.Is(err, fs.ErrNotExist) {
+		b, err = []byte("{}"), nil
+	}
 	if err != nil {
 		return nil, err
 	}

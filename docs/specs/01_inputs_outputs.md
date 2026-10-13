@@ -52,7 +52,7 @@ files, and no other:
 |---|---|---|---|
 | `service.yaml` | yes | YAML 1.2 | the service: name, versions, catalog metadata, charts ([service.yaml](02_service_definition.md#serviceyaml)) |
 | `values.cel.yaml` | yes | the mapping language | the computed values, objects and outputs ([values.cel.yaml](02_service_definition.md#valuescelyaml)) |
-| `config.schema.json` | yes | JSON | [parameter defaults](#defaults), [parameter check](#schema-check), [connection references](#declaring-a-reference) |
+| `config.schema.json` | no: `{}` when absent | JSON | [parameter defaults](#defaults), [parameter check](#schema-check), [connection references](#declaring-a-reference) |
 | defaults file | when `charts.<key>.defaults` is set | values file | second layer of the [final values](#merge-precedence) |
 
 `<key>`: a chart key, a key of `charts` in `service.yaml`, the chart of an
@@ -66,15 +66,20 @@ may be any path of the package, `<key>.defaults.yaml` by convention; a
 path out of it (`../app.yaml`) fails. The service's name, versions and catalog
 metadata are fields of `service.yaml` ([Service](02_service_definition.md#service)).
 
-`config.schema.json` is required, even for a service without parameters:
-the defaults, the schema check and the connection walk read it. Each
-compile reads it once, first, before the values layers: a missing or
-invalid schema fails before an error of the layers. A missing file fails
-with the error of the file system, prefixed with the chart key for a
-defaults file:
+`config.schema.json` is optional: a package without it has the empty
+schema, `{}`. No parameter then has a [default](#defaults) or is a
+[connection reference](#declaring-a-reference); the [schema
+check](#schema-check) accepts any values: any parameter, `connections`,
+`upstream.<key>` of any key (applied to the charts that accept upstream
+values: [Upstream values](#upstream-values)); and no key of `global` is
+declared, so an instance sets none ([Context values](#context-values)).
+Each compile reads the schema once, first, before the values layers: one
+that is not valid, or that cannot be read for another reason than its
+absence (a directory, a file it may not read), fails before an error of
+the layers. A missing defaults file fails with the error of the file
+system, prefixed with the chart key:
 
 ```
-open config.schema.json: no such file or directory
 app: open app.defaults.yaml: no such file or directory
 ```
 
@@ -194,10 +199,10 @@ computes `.Values` of a chart from its `values.yaml` and `-f` files.
 
 ### Defaults
 
-The defaults are the `default` keywords of `config.schema.json`: that of
-each property reached from the root through `properties` alone, at its
-path, read as JSON (every number a float64). They play the part of a
-chart's `values.yaml`:
+The defaults are the `default` keywords of `config.schema.json`, none
+without it: that of each property reached from the root through
+`properties` alone, at its path, read as JSON (every number a float64).
+They play the part of a chart's `values.yaml`:
 
 ```json
 {
@@ -630,7 +635,8 @@ values layer 2: global is set by the context (--context, Inputs.Context)
 
 The exception: a key the parameter schema declares under `global`
 (`properties.global.properties.<key>`), `okdp` excepted, which an instance
-layer may set, over the context's value. A package opens a global value of
+layer may set, over the context's value; a package without
+`config.schema.json` declares none. A package opens a global value of
 its charts to instances this way:
 
 ```json

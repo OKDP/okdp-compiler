@@ -168,7 +168,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
 }
 ```
 
-- The schema is required: the compiler takes the parameters' defaults from
+- The schema is optional, but the compiler takes the parameters' defaults from
   it, finds the connection references through it, and checks the values
   against it before the mapping runs
   ([schema check](specs/01_inputs_outputs.md#schema-check)): a rule
@@ -203,6 +203,10 @@ chart is reached through `upstream.<chart>`, without a parameter.
   it before committing.
 - `title`, `description` and the `x-ui-*` hints (`x-ui-group`, `x-ui-order`,
   `x-ui-advanced`, `x-ui-condition`...) build the console form.
+- Without `config.schema.json`, the package has the empty schema, `{}`: no
+  parameter has a default, any value passes the check (any parameter,
+  `connections`, `upstream.<key>` of any key), and an instance sets no key
+  of `global` ([package files](specs/01_inputs_outputs.md#package-files)).
 
 ### 4. Write service.yaml
 
