@@ -6,9 +6,9 @@ version, and the host functions, the language's own (Helm's and sprig's
 `sha256sum`, `toJson`, `toYaml`, `quote`...) and OKDP's (`okdpFullname`,
 `okdpLabels`, `okdpGeneratedSecret`...).
 
-Every expression may call them: those of the mapping, of a conditional
-`require` entry and of the OAuth client template
-([control flow](03_control_flow.md)). Nothing else is callable: no
+Every expression may call them: those of the mapping and of the
+compiler's templates, the OAuth client's, the generated Secret's and the
+descriptor's ([control flow](03_control_flow.md)). Nothing else is callable: no
 template of a chart (`include`, `tpl`), no Go template function that is not
 below.
 
@@ -36,10 +36,10 @@ The host functions are plain Go, and share these properties:
   number ([numbers](02_service_definition.md#numbers)).
 - **Errors fail.** A function that cannot compute its result fails the
   expression, where Helm would often print `""`:
-  `<where>${{ <expression> }}: <function>: <message>`
+  `<where>${{ <expression> }}: <message>`
   ([compile errors](02_service_definition.md#compile-errors)).
 - **No bindings.** OKDP's functions read the compile's `release`, `service`
-  and OAuth client mode, not the expression's scope: a `let` binding named
+  and OAuth client mode, not the expression's scope: a `vars` binding named
   `release` does not change `okdpFullname`
   ([context](02_service_definition.md#context)).
 - **Helm's output.** A function reproducing a Helm or sprig one is compared
@@ -99,7 +99,7 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 | `okdpGeneratedSecret(args)` | list of objects | none |
 | `oidcClientSecret(name)` | string | none |
 
-Each takes one argument (`okdpFullname`: zero or one; `first`: a list).
+Each takes one argument (`okdpFullname`: zero or one).
 `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml` and `quote`
 belong to the language (`internal/compile`); the `okdp` functions and
 `oidcClientSecret` to OKDP (the root package, `compiler`), which adds them to the
@@ -114,8 +114,8 @@ compile's session.
   `<nil>`.
 - `first(list)`: the first element that is not empty (null, `false`, `0`,
   `""`, `[]`, `{}`), else `""`. `first([x, d])` is Helm's `x | default d`,
-  `first([a, b, c])` sprig's `coalesce a b c`. The argument must be a list:
-  `first: the argument must be a list, got <value>`.
+  `first([a, b, c])` sprig's `coalesce a b c`. A value that is not a list
+  gives `""`.
 
 ### `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`
 
@@ -127,8 +127,8 @@ compile's session.
 | `toYaml(x)` | sigs.k8s.io/yaml: keys sorted, YAML 1.1 quoting (`"yes"`, `"1.0"`), no final newline |
 | `quote(x)` | Go's `%q` of `str(x)`: `"a\"b"`; null gives `""`, nothing rather than two quotes |
 
-An encoding that fails (a string `toYaml` cannot write) fails the compile:
-`toYaml: <error>` (Helm would print `""`).
+An encoding that fails (a string `toYaml` cannot write) fails the compile
+with the encoder's error (Helm would print `""`).
 
 ```yaml
 podAnnotations:
@@ -184,13 +184,13 @@ generates in the cluster, for
 | `noUpper` | `true` or `false` | `false` | no upper-case letters |
 | `transform` | string | none | `sha256` (the key holds the value's `sha256sum`) or `b64enc` |
 
-An empty value (null, `""`, `0`, `false`) takes the default, as Helm's
+An empty value (`""`, `0`, `false`) takes the default, as Helm's
 `default` does, except a `digits` of `0`.
 
 Every argument and key field is checked for its type when set, against
 the mapping schema (`okdpGeneratedSecret`, and `generatedKey` for a key:
-[sections](02_service_definition.md#evaluation-order)), a null one being not set: a value of
-another type fails rather than reads as empty or is printed (a
+[sections](02_service_definition.md#evaluation-order)): a value of
+another type, a null included, fails rather than reads as empty or is printed (a
 `stringData` value that is a list or a map, which Helm prints as Go does;
 `length: '32'` or `noUpper: 'true'`, text where Helm would print the
 number or the boolean), and so does an argument or a key field the
@@ -206,7 +206,8 @@ than 63 characters is cut to 54, without a trailing `-`, and suffixed with
 `stringData` keys, then each generated key; a generated key replaces a
 `stringData` key of the same name.
 
-Errors, the schema's then two keys of one generator name:
+Errors, the schema's, then the keys of one generator name, one line per
+name:
 
 ```text
 okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
@@ -236,7 +237,7 @@ env:
 
 It depends on the mode and the name only: it does not check that `name` is
 a client of `oidcClients`, and does not know a client's `secret`. It is
-available in every expression, `let` and `errors` included.
+available in every expression, `vars` and `errors` included.
 
 ## From Helm
 
@@ -271,7 +272,7 @@ of the values is a double: `int(x)` where an `int` is needed
 | `kindIs "map" x`, `kindIs "slice" x`, `kindIs "string" x` | `type(x) == map`, `type(x) == list`, `type(x) == string` |
 | `int`, `float64`, `atoi` | `int(x)`, `double(x)`, `int(s)` |
 | `merge`, `mergeOverwrite` | the [`$merge`](03_control_flow.md#merge) directive |
-| `include "<chart>.fullname" .`, `include "<chart>.labels" .` | `okdpFullname()`, `okdpLabels(component)`, or a `let` binding |
+| `include "<chart>.fullname" .`, `include "<chart>.labels" .` | `okdpFullname()`, `okdpLabels(component)`, or a `vars` binding |
 | `required`, `fail` | the [errors section](02_service_definition.md#the-errors-section) |
 | `toYaml x \| nindent n`, `indent` | the value itself, `${{ x }}` |
 | `fromJson`, `fromYaml`, `tpl`, `lookup`, `now`, `randAlphaNum`, `uuidv4`, `genCA`, `env`, `semverCompare`, `sha1sum` | none ([properties](#properties)) |

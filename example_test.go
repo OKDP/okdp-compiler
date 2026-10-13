@@ -37,10 +37,12 @@ func Example() {
 		log.Fatal(err)
 	}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-		Charts:    chartsFS,                         // chart cache: each upstream chart, <repository>/<chart>-<version>.tgz (helm pull) or <repository>/<chart>-<version>/
-		Contracts: contractsFS,                      // the contract schemas, <contract>.schema.json
-		Platform:  []map[string]any{platformValues}, // the platform's layers, in order (helm -f); compiler.ParseValues reads one
-		Project:   []map[string]any{projectValues},  // the project's, after them: they add values, never change the platform's
+		Charts:    chartsFS,    // chart cache: each upstream chart unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar)
+		Contracts: contractsFS, // the contract schemas, <contract>.schema.json
+		Context: []compiler.ContextLayer{ // by level, lowest first, a level's layers in order (helm -f); compiler.ParseValues reads one
+			{Level: 0, Values: platformValues}, // the platform's
+			{Level: 1, Values: projectValues},  // a project's: it adds values, never changes a lower level's
+		},
 		Values:    []map[string]any{instanceValues}, // the instance's, last: no global
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -56,9 +58,8 @@ func Example() {
 	//               Secrets of the provided connections, the mapping's objects section
 	// res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
 
-	// What okdp-compile -o <dir> --mkdag writes, file name -> content
-	// (compiler.Output: --mkdag).
-	files, err := compiler.Write(res, compiler.Output{Dependencies: true})
+	// What okdp-compile -o <dir> writes, file name -> content.
+	files, err := compiler.Write(res)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func ExampleCompile() {
 		}
 		return v
 	}
-	in.Platform = []map[string]any{read("examples/02_advanced/input/platform.yaml")}
+	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/platform.yaml")}}
 	in.Values = []map[string]any{read("examples/02_advanced/input/config.yaml")}
 	res, err := compiler.Compile(context.Background(), def, in)
 	if err != nil {
@@ -145,11 +146,11 @@ charts:
 	}}}}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 		Charts: fstest.MapFS{ // the defaults of each upstream chart
-			"charts.example.org/app-1.0.0/values.yaml":                 {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
-			"registry.example.org/okdp/okdp-objects-1.0.0/values.yaml": {Data: []byte("objects: []\n")},
+			"charts.example.org/app-1.0.0/app/values.yaml":                          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
+			"registry.example.org/okdp/okdp-objects-1.0.0/okdp-objects/values.yaml": {Data: []byte("objects: []\n")},
 		},
 		Contracts: fstest.MapFS{}, // no connection, no provides: no contract read
-		Platform:  []map[string]any{platform},
+		Context:   []compiler.ContextLayer{{Values: platform}},
 		Values:    []map[string]any{{"replicas": 3}},
 		Release:   "demo-app",
 		Namespace: "demo",
@@ -157,7 +158,7 @@ charts:
 	if err != nil {
 		log.Fatal(err)
 	}
-	files, err := compiler.Write(res, compiler.Output{}) // the umbrella chart
+	files, err := compiler.Write(res) // the umbrella chart
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -180,7 +181,7 @@ charts:
 // cancelled with a context, bounded in CEL cost.
 func ExampleCompile_server() {
 	def, in := example()
-	in.CostLimit = 100
+	in.CostLimit = 1000
 	ctx, cancel := context.WithCancel(context.Background())
 	res, err := compiler.Compile(ctx, def, in)
 	if err != nil {
@@ -196,7 +197,7 @@ func ExampleCompile_server() {
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
 	// [app okdp] ConfigMap
-	// let db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
+	// vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }
 

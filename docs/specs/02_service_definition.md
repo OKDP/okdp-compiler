@@ -30,19 +30,17 @@ do not list fails rather than being ignored, where a misspelt `protect`
 would leave its paths unprotected, and so does a key that only holds an
 anchor (write the anchor at its first use, as in [sources](#sources)).
 Each unknown field is reported, one per line, as yaml.v3 reports it, with
-the Go type of its place (`compiler.Service` the top level, `chart.Spec` a
-chart, `chart.Ref` a `source`, `compiler.Requirement` a [`require`](#require)
-entry); [`upstream`](#upstream) checks its own form:
+the Go type of its place (`okdp.Service` the top level, `chart.Spec` a
+chart, `chart.Ref` a `source`); [`upstream`](#upstream) checks its own
+form:
 
 ```text
 service.yaml: yaml: unmarshal errors:
   line 7: field protcet not found in type chart.Spec
 ```
 
-The file is one YAML document: a second one, after `---`, fails
-(`service.yaml: line <n>: a second YAML document: service.yaml is one document`),
-rather than being ignored. An empty file is a service without a name
-(`service.yaml: name is required`).
+The file is one YAML document: a second one, after `---`, is ignored. An
+empty file is a service without a name (`service.yaml: name is required`).
 
 ### Service
 
@@ -52,7 +50,7 @@ rather than being ignored. An empty file is a service without a name
 | `version` | string | required | The package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`. |
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
-| `require` | list of keys and `{key, $if}` | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty, in every case or when its condition holds: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
+| `require` | list of keys | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
 | `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key, a DNS label ([chart keys](#chart-keys)): chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
 
 Without `name` or `version`, loading fails: `service.yaml: name is required`,
@@ -60,50 +58,27 @@ Without `name` or `version`, loading fails: `service.yaml: name is required`,
 
 ### require
 
-An entry is a key under `global.okdp`, required in every case, or
-`{key, $if}`, the key required when the condition holds:
+An entry is a key under `global.okdp`, required in every case:
 
 ```yaml
 require:
-  - ingress.suffix                     # in every case
-  - key: oidc.issuerUri                # when OIDC is enabled
-    $if: ${{ platform.oidc.enabled }}
+  - ingress.suffix
+  - oidc.issuerUri
 ```
 
 Every compile checks the entries in order, once the context is built and
-before the mapping: [requirements](01_inputs_outputs.md#requirements).
-`$if` is one expression, `${{ <condition> }}`, as in the mapping
-([`$if`](03_control_flow.md#if)), evaluated on the [context](#context) of the mapping, its
-variables and host functions (no `let` binding), cancelled with the
-compile and counted in its CEL cost limit (`Compile`,
-`Inputs.CostLimit`). Its value must be `true` or `false`: unlike the
-mapping's `$if`, it is not tested as a Helm condition. When it holds, the
-key is checked as a key of every case.
-
-A scalar entry is its key (`true` is the key `true`); a map without `$if`,
-or with `$if: ""`, is a key of every case; an empty item is skipped. An
-entry of another form fails when `service.yaml` is loaded, with yaml.v3's
-error; its key and condition are checked then, and before every compile
-for a `Service` built in memory (`compiler.Requirement`, `{Key, If}`, `If`
-empty in every case). `<entry>` is `require[<i>]`, the position of the
-entry from 0, followed by ` (<key>)` once its key is read:
+before the mapping: [requirements](01_inputs_outputs.md#requirements). A
+scalar entry is its key (`true` is the key `true`); an empty key is the
+whole of `global.okdp`. A value the platform sets in one mode only is read
+by the mapping, which fails in its `errors` section when that mode lacks it
+([recipe](../02_writing_package.md#require-a-platform-value-in-one-mode)).
+`require` of another form, a map or an entry that is a list or a map,
+fails when `service.yaml` is loaded, with yaml.v3's error:
 
 | Case | Error |
 |---|---|
-| `require` not a list, an entry a list, a `key` or `$if` not a scalar | `service.yaml: line <n>: cannot unmarshal !!seq into string` |
-| a field other than `key` and `$if` | `service.yaml: yaml: unmarshal errors:` then `line <n>: field <field> not found in type compiler.Requirement` |
-| an empty key (`""`, a map without `key`) | `service.yaml: <entry>: an empty key: a key under global.okdp (ingress.suffix)` |
-| an `$if` that is not one expression (a literal, text around it) | `service.yaml: <entry>: $if: takes one expression, ${{ <condition> }}, got <value>` |
-
-A condition whose evaluation fails, or whose value is not `true` or
-`false`, fails the compile, `null` included (`platform.oidc.enabled` is
-`null` when a platform layer sets `enabled: null`: compare it,
-`platform.oidc.enabled == true`):
-
-```text
-service.yaml: require[1] (oidc.issuerUri): $if: ${{ values.nope }}: no such key: nope
-service.yaml: require[1] (oidc.issuerUri): $if: ${{ platform.oidc.enabled }}: must be true or false, got null
-```
+| `require` not a list | ``service.yaml: yaml: unmarshal errors:`` then ``line <n>: cannot unmarshal !!str `a` into []string`` |
+| an entry a list or a map | `service.yaml: yaml: unmarshal errors:` then `line <n>: cannot unmarshal !!map into string` |
 
 ### Chart
 
@@ -152,7 +127,7 @@ repository publishes it: `repository`, a chart repository (`https://`) or an
 OCI registry path (`oci://`); `chart`, the chart's name in it; `version`, a
 pinned version. A deployer renders the chart from there. The compiler reads
 only its `values.yaml` and `values.schema.json`, from the chart cache
-(`<repository>/<chart>-<version>.tgz` or unpacked, `<repository>` the URL
+(`<repository>/<chart>-<version>/<chart>/`, `<repository>` the URL
 without its scheme:
 [chart cache](01_inputs_outputs.md#chart-cache)): the first layer of the
 final values, and their schema
@@ -208,7 +183,7 @@ file, then to the inline values: [protect](01_inputs_outputs.md#protect),
 
 ### The okdp chart
 
-`okdp` (`compiler.ObjectsChart`) is the compiler's: it adds the chart to
+`okdp` is the compiler's: it adds the chart to
 every compile, rendered by the platform's objects chart
 (`global.okdp.charts.objects`), its values `Result.Objects`: [the okdp
 chart](01_inputs_outputs.md#the-okdp-chart). `charts` may not declare it
@@ -254,27 +229,25 @@ structure ([Directives](#directives)). Its top-level keys are the
 
 | Key | Type | Content |
 |---|---|---|
-| [`let`](#let) | map | named values, evaluated in order |
-| [`errors`](#the-errors-section) | list | rules (`$if`, `message`): any message fails the compile |
+| [`vars`](#vars) | map | named values, evaluated in order |
+| [`errors`](#the-errors-section) | list | messages, each kept by its `$if`: any message fails the compile |
 | [`output`](#output) | map | chart → computed values |
 | [`objects`](#objects) | list | OKDP's own objects, whole manifests |
 | [`instance`](#instance) | map | `url` and `usage` of the instance |
 | [`provides`](#provides) | list | the connections the instance publishes |
 | [`oidcClients`](#oidcclients) | list | the OAuth clients of the service |
 
-Every section is optional. Any other top-level key fails rather than being
-ignored (`outptu:` would render no chart),
-`<key>: unknown section (allowed: let, errors, output, instance, provides, objects, oidcClients)`,
-and one starting with `$` with
-`<key>: not a directive of the top level: its keys are sections`.
+Every section is optional. Any other top-level key, a directive included,
+fails rather than being ignored (`outptu:` would render no chart),
+`<key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`.
 
 ```yaml
-let:
+vars:
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
-    message: "webapp: replicas > 1 needs a database"
+    $value: "webapp: replicas > 1 needs a database"
 output:
   app:
     fullnameOverride: ${{ release.name }}-app
@@ -308,9 +281,9 @@ oidcClients:
 
 `examples/03_full/input/service/values.cel.yaml` uses every section,
 directive and host function, most of the CEL libraries and of the YAML
-reading (YAML 1.1, `$$`, `$${{`), each commented; its
+reading (`$$`, `$${{`), each commented; its
 `service.yaml` two renders of one chart, `protect` paths in brackets and
-with a glob, a conditional `require`.
+with a glob.
 
 ## Sections
 
@@ -322,12 +295,12 @@ every [expression](#lone-expressions-and-interpolation) compiled, in the
 whole document, the branches no instance takes included. The first
 mistake fails the compile before anything is evaluated. Then:
 
-1. `let`, entry by entry: each sees the [context](#context) and the
+1. `vars`, entry by entry: each sees the [context](#context) and the
    bindings before it.
 2. `errors`, every entry, then the messages fail the compile together
    ([the errors section](#the-errors-section)).
 3. `output`, `instance`, `provides`, `objects`, `oidcClients`, in this
-   order: each sees the context and every `let` binding. Then they are
+   order: each sees the context and every `vars` binding. Then they are
    checked together for their shapes.
 4. The OAuth clients are checked across clients, their charts added in
    `dcr` mode ([oidcClients](#oidcclients)); then the
@@ -336,18 +309,20 @@ mistake fails the compile before anything is evaluated. Then:
    of each client chart and of the `okdp` chart.
 
 A section does not see the others: there is no `output` or `instance`
-variable. A value used by several sections is a `let` binding.
+variable. A value used by several sections is a `vars` binding.
 
 Each section has a shape: `output` and `instance` are maps, `provides`,
 `objects` and `oidcClients` lists. So have the items and keys the compiler
 reads in them, described by the mapping schema the compiler embeds,
-[`mapping.schema.json`](../../mapping.schema.json):
+[`internal/okdp/mapping.schema.json`](../../internal/okdp/mapping.schema.json):
 their types, the keys required, the keys allowed where another is
 refused, what each means in its `description`. It is the package authors'
 reference. Absent or null (left out by `$if`, a null expression), a
-section is empty, and a null key of a map the schema describes is not
-set. A value of another shape fails the compile rather than read as
-empty: `output: [app]` would otherwise render no chart. Every violation
+section is empty. Below it, a null is read as in a chart's values: it
+deletes a default the schema gives, and is refused by the type of a key
+that has none (`- at '/output/app': got null, want object`); leave a key
+out with `$if`. A value of another shape fails the compile rather than
+read as empty: `output: [app]` would otherwise render no chart. Every violation
 is reported at once, sorted by path, in Helm's words, as those of the
 [parameters](01_inputs_outputs.md#schema-check):
 
@@ -360,14 +335,13 @@ the mapping's sections don't meet the specifications of mapping.schema.json:
 
 A mapping that is not a YAML map fails with `the mapping must be a YAML map`;
 invalid YAML with the parser's error (`yaml: line <n>: ...`). The mapping
-is one YAML document: a second one, after `---`, fails rather than being
-ignored, `line <n>: a second YAML document: the mapping is one document`.
-An empty or null document (comments, `---` or `~` at most) has no section.
+is its first YAML document: a second one, after `---`, is ignored. An
+empty or null document (comments, `---` or `~` at most) has no section.
 
-### let
+### vars
 
 ```yaml
-let:
+vars:
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   settingsName: ${{ okdpFullname('settings') }}
   settings:                                   # any node: a map, a list, directives
@@ -379,15 +353,14 @@ any other ([Expressions](#expressions), [Directives](#directives)); a value
 left out by `$if` binds null. The binding is named by the key as written
 ([YAML reading](#yaml-reading)); it is referenced by that name, which must
 be a CEL identifier (`my-var` reads as `my - var`). A binding referenced
-before its entry fails: `undeclared reference`. A name written twice fails,
-as any key ([YAML reading](#yaml-reading)), and so does a name of two keys,
-`y` and `"y"` (`let <name>: bound twice`), or one starting with `$`
-(`let <name>: a binding name cannot start with $`).
+before its entry fails: `undeclared reference`. Of a name written twice,
+the later binding wins, as of any key ([YAML reading](#yaml-reading)).
 
 A binding with the name of a context variable replaces it for every later
-expression (a `let` named `labels` wins over the context's `labels`), not
-for the host functions ([Context](#context)). A `let` that is neither a map
-nor null fails: `let: must be a map of bindings, got <value>`.
+expression (a `vars` binding named `labels` wins over the context's
+`labels`), not for the host functions ([Context](#context)). A `vars`
+section that is neither a map nor null fails:
+`vars: must be a map of bindings, got <value>`.
 
 ### output
 
@@ -395,15 +368,15 @@ A map: chart name → the values the mapping computes for that chart.
 Another value fails ([sections](#evaluation-order)).
 
 - The values of a chart are a map (`- at '/output/<key>': got string, want object`):
-  a scalar or a list is refused, not compiled as the chart's defaults alone;
-  a null (a null expression, `~`) leaves the chart out, as `$if` does.
+  a scalar, a list or a null is refused, not compiled as the chart's
+  defaults alone; `$if` leaves the chart out.
 - Every key must be a chart of `service.yaml`:
   `mapping output "<key>": not a chart of service.yaml`. A key may not be
   the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
   `okdp`: `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output`
   ([the okdp chart](#the-okdp-chart)).
-- A chart the mapping leaves out (absent, dropped by `$if`, or null) is
-  not rendered: no `Result.Values` entry.
+- A chart the mapping leaves out (absent, dropped by `$if`) is not
+  rendered: no `Result.Values` entry.
 - The values are the computed layer of the chart's final values:
   [merge precedence](01_inputs_outputs.md#merge-precedence).
 
@@ -438,8 +411,8 @@ credentials Secrets in `Result.Objects` and in the `okdp` chart:
 
 Other keys are ignored. Both go to the descriptor ConfigMap:
 [outputs](01_inputs_outputs.md#outputs). A value that is not a map fails;
-absent or null, both are empty. `url` and `usage` are strings when set
-(null is not set): another value fails rather than is printed as text,
+absent or null, both are empty. `url` and `usage` are strings when set:
+another value, a null included, fails rather than is printed as text,
 `- at '/instance/url': got number, want string`.
 
 ### provides
@@ -471,7 +444,7 @@ A list of outputs, the connections the instance publishes. Each item:
 Other keys are ignored. A value that is not a list fails; absent or
 null, there are none. Each item must be a map with a `contract` string,
 and its `name` a string, its `values`, `secretRef` and `secret` maps when
-set (null is not set), the `generate` and `stringData` of its `secret` of
+set (a null included), the `generate` and `stringData` of its `secret` of
 their types ([secret](#secret)), as the mapping schema describes them
 ([sections](#evaluation-order)):
 
@@ -500,7 +473,7 @@ or booleans, written as text), `{stringData: {...}}` a plain Secret with
 these keys, strings only: a Secret's `stringData` holds strings, the API
 server refuses a number. A `generate` that is not a list, a `stringData`
 that is not a map, fail rather than render a Secret without these keys,
-before the contract checks; null is not set.
+before the contract checks, a null too.
 
 The Secret is named after `secretRef.name` when given, else
 `<name>-<contract>-credentials`, which then becomes the output's
@@ -549,8 +522,8 @@ registers its own by OIDC Dynamic Client Registration, per
 | `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to. |
 | `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts. |
 
-A key whose value is null (left out by `$if`, a null expression) is not
-set, and `""` takes the default of a string key. Only `dcr` mode uses the
+A key left out by `$if` is not set, a null one is refused by its type,
+and `""` takes the default of a string key. Only `dcr` mode uses the
 keys; how they become the values of the client's chart:
 [OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
 
@@ -588,13 +561,14 @@ or `>` block scalar (`"1\n"`); `>-` and `|-` keep a lone expression. `$`,
 `${VAR}` and `{{ }}` without `${{` are text: shell variables and Go
 templates pass through.
 
-The `}}` closing an expression is found skipping CEL's strings (quoted,
-triple-quoted `'''...'''`, raw `r'\d'`) and nested braces:
-`${{ {"k": "}}"}.k }}` is one expression. The quotes and braces of a `//`
-comment are not counted (`// the user's name`, in a `|-` block scalar),
-but a `}}` in it closes the expression, as in `${{ x // a note }}`. A
-scalar without the closing `}}` fails with
-`unterminated ${{ in "<scalar>"`.
+The `}}` closing an expression is found skipping quoted strings (`'...'`,
+`"..."`, a `\` escaping the next character) and nested braces:
+`${{ {"k": "}}"}.k }}` is one expression. Nothing else of CEL is read: a
+quote or a brace in a `//` comment counts (`// the user's name` leaves the
+expression unterminated), a `}}` in one closes the expression
+(`${{ x // a note }}`), and a raw or triple-quoted string is read as
+quoted strings (`r'\'` and `'''it's'''` are unterminated). A scalar
+without the closing `}}` fails with `unterminated ${{ in "<scalar>"`.
 
 Map keys are never evaluated: `${{ x }}: 1` is the key `${{ x }}`. Computed
 keys come from [`$for`](03_control_flow.md#for) (`$key`) or [`$merge`](03_control_flow.md#merge). A key
@@ -646,48 +620,37 @@ Helm prints a values number: `8080`, `2.5`, `1e+06` (from one million on),
 
 ### YAML reading
 
-The mapping's scalars and keys are read as Helm reads a values file
-(sigs.k8s.io/yaml, YAML 1.1): a snippet copied from a `values.yaml` means
-the same in the mapping.
+The mapping is read as YAML 1.2, as yaml.v3 decodes it, its maps in the
+order written. A snippet copied from a `values.yaml`, which Helm reads as
+YAML 1.1, means the same unless it holds YAML 1.1's booleans or keys Helm
+converts (`on:`, `1.0:`): write `true` and `false`, and the keys as Helm
+reads them.
 
 | Plain scalar | Value |
 |---|---|
-| `y`, `Y`, `yes`, `Yes`, `YES`, `on`, `On`, `ON` | `true` |
-| `n`, `N`, `no`, `No`, `NO`, `off`, `Off`, `OFF` | `false` |
-| `"yes"`, `'no'`, `!!str on` (quoted or tagged) | the string |
-| `!!bool yes`, `!!bool off` | `true`, `false` |
-| `0777`, `0x1F`, `0b101`, `0o17`, `1_000` | `511`, `31`, `5`, `15`, `1000` |
-| `0o+7`, `0o-7` (a sign after `0o`) | the string |
+| `true`, `false`, `True`, `FALSE` | the boolean |
+| `y`, `yes`, `on`, `n`, `no`, `off` (any case) | the string |
+| `0777`, `0o17`, `0x1F`, `0b101`, `1_000` | `511`, `15`, `31`, `5`, `1000` |
 | `2001-12-14` | the string: timestamps are not decoded |
 | `~`, `null`, empty | null |
-| `.nan`, `.inf`, `-.inf` (any case) | refused, Helm cannot read them back from the final values: `line <n>: not a finite number: .inf (quote it for the text)` |
+| `.nan`, `.inf`, `-.inf` | refused, values cannot hold them: `line <n>: json: cannot marshal from Go float64: unsupported value: NaN` |
 
-Keys are decoded the same way, then written as text as sigs.k8s.io/yaml
-writes them: `on:` is the key `"true"`, `1.0:` is `"1"`, `0x10:` is `"16"`.
-A null key fails with `line <n>: unsupported map key "~"`, a key that is
-not a scalar with `line <n>: a map key must be a scalar`. A key written
-twice fails, and so do two keys Helm reads as one (`1:` and `1.0:`, `8:` and
-`08:`, `on:` and `"true":`), of which Helm keeps one value:
-`line <n>: 1.0: the key "1" is written twice`.
+A tagged scalar is decoded as its tag says (`!!str 1` is the string `"1"`),
+and fails when it cannot be: `!!bool yes` fails with
+``line <n>: yaml: cannot decode !!str `yes` as a !!bool``. Text that is not
+UTF-8 (a `!!binary`) is refused too.
 
-As in a values file Helm reads, a `|` or `>` block scalar that ends the
-file without a final line break keeps its newline. Two differences remain:
-YAML's non-specific tag `!` (`! 1`) is dropped by the YAML reader, the
-mapping reads the scalar as if untagged (`1`) where Helm reads the text
-(`"1"`): write `!!str 1` or `"1"`; and a `\r\r\n` is two line breaks to the
-mapping, one to Helm.
+Keys are taken as written: `on:` is the key `on`, `1.0:` the key `1.0`,
+binding names included. Of a key written twice, the later value wins. A
+second YAML document, after `---`, is ignored. As in a values file Helm
+reads, a `|` or `>` block scalar that ends the file without a final line
+break keeps its newline.
 
-Binding names are the exception: the keys directly under `let` and `$let`
-are taken as written, so a binding `y`, `n` or `on` keeps its name. They
-are keys still: `y` and `Y`, both `"true"` to Helm, cannot both be bound in
-one map.
-
-Anchors, aliases and merge keys (`<<`) are refused, where Helm resolves
-them:
-`line <n>: anchors, aliases and merge keys are not read: bind the value in let`,
-`<n>` the line of the anchor (an alias follows it) or of the merge key. A
-value used twice is a [`let`](#let) binding, read by name (`${{ small }}`,
-`${{ small.requests }}`). A quoted `"<<"` is a key.
+Aliases are refused, where Helm resolves them:
+`line <n>: aliases are not read: bind the value in vars`, `<n>` the line of
+the alias. A value used twice is a [`vars`](#vars) binding, read by name
+(`${{ small }}`, `${{ small.requests }}`). An anchor is ignored, and a
+merge key `<<` is a plain key.
 
 ### Quoting
 
@@ -707,7 +670,7 @@ or write a long expression as a `>-` block scalar.
 Keys starting with `$` shape the structure: `$if` leaves a map or an item
 out, `$value` makes a map a value of any type, `$else` another value when
 the condition of its `$if` is not true, `$for` builds a map
-(`$key`, `$value`) or list items (`$each`) from a list, with `$let`
+(`$key`, `$value`) or list items (`$each`) from a list, with `$vars`
 bindings per element, `$merge` merges a computed map over a map's keys,
 `$spread` splices a computed list into a list. Their places, scope,
 evaluation and errors: [control flow](03_control_flow.md).
@@ -719,14 +682,14 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
-| `values` | The parameters: the defaults of `config.schema.json`, the platform's, the project's and the instance's values layers, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
-| `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([platform values](01_inputs_outputs.md#platform-values)). Other keys of `global` are not visible. |
+| `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
+| `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([context values](01_inputs_outputs.md#context-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `service.yaml`, as written ([service](#service)). |
 | `labels` | the labels of OKDP's objects, below, without component. |
 | `selectorLabels` | their selector labels, below, without component. |
-| `let` bindings | [let](#let), in order |
-| `$for` variables, `$let` bindings | inside their [`$for`](03_control_flow.md#for) |
+| `vars` bindings | [vars](#vars), in order |
+| `$for` variables, `$vars` bindings | inside their [`$for`](03_control_flow.md#for) |
 
 A missing key is an evaluation error (`no such key: <key>`): test it with
 `has(values.x)`, or read it with `values.?x.orValue(<default>)`,
@@ -737,7 +700,7 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 
 | Variable | Value |
 |---|---|
-| `platform.oidc` | `global.okdp.oidc`, the settings of the platform schema that are not set (`null`, an empty `scope` or `clientProvisioning`) left out, its defaults applied: `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
+| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
 | `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
 | `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
@@ -785,28 +748,26 @@ language enables, each at a pinned version, and the host functions: `str`,
 ```yaml
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
-    message: "webapp: replicas > 1 needs a database"
+    $value: "webapp: replicas > 1 needs a database"
   - $for: p in ['s3SecretRef', 'trinoOidcSecretRef']
     $each:
       $if: ${{ first([values[p]]) == '' }}
-      message: "okdp-examples: ${{ p }} is required"
+      $value: "okdp-examples: ${{ p }} is required"
   - $for: r in realms
     $each:
       $if: ${{ r.admin == null }}
-      message: 'okdp-examples: realm "${{ r.name }}" has no catalog_admin'
+      $value: 'okdp-examples: realm "${{ r.name }}" has no catalog_admin'
 ```
 
-`errors` is a list, evaluated after `let`, before the other sections, as
-any list ([control flow](03_control_flow.md)): `$if` leaves an item out, `$for` and
-`$spread` give several. Each value it gives is a rule, `{message: <text>}`,
-its message a text that is not empty. A rule is written with its condition,
-`$if`: the message is evaluated only when the condition holds, and may read
-what exists only then (`db.okdp.ref` of a database connection).
-
-Anything else fails the compile: `errors[<i>]: a rule is {$if: <condition>,
-message: <text>}, got <value>`. Every item is evaluated; when
-there is any message, the compile fails with the messages joined by
-newlines, without prefix:
+`errors` is evaluated after `vars`, before the other sections, as any node
+([control flow](03_control_flow.md)): a list, whose items `$if` leaves out
+and `$for` and `$spread` multiply, or one expression giving a list
+(`errors: ${{ ... }}`). Each item it gives that is not empty is a message,
+as text ([`str`](04_functions.md#str-and-first)). A message is the `$value`
+of an item with its condition, `$if`: it is evaluated only when the
+condition holds, and may read what exists only then (`db.okdp.ref` of a
+database connection). Every item is evaluated; when there is any message,
+the compile fails with the messages joined by newlines, without prefix:
 
 ```text
 webapp: replicas > 1 needs a database
@@ -814,10 +775,11 @@ okdp-examples: s3SecretRef is required
 okdp-examples: realm "data" has no catalog_admin
 ```
 
-An `errors` that is neither a list nor null fails:
-`errors: must be a list of rules, got <value>`. An item whose evaluation
-fails stops the compile with that error, prefixed with the position of the
-item as written (`errors[1]: `, `errors[1]: message: `).
+A value that is not a list (null included) gives no message, and an item
+of another form is printed as text: a map, `{$if: ..., message: ...}`,
+prints as `map[message:...]`. An item whose evaluation fails stops the
+compile with that error, prefixed with the position of the item as written
+(`errors[1]: `).
 
 ### Compile errors
 
@@ -827,8 +789,8 @@ violations excepted). An error of an expression reads
 
 | Expression in | `<where>` |
 |---|---|
-| a `let` binding | `let <name>: ` and the path below it |
-| a `$let` binding | the path to its `$for`, then `$let <name>: ` |
+| a `vars` binding | `vars <name>: ` and the path below it |
+| a `$vars` binding | the path to its `$for`, then `$vars <name>: ` |
 | a section | `<section>: ` and the path to the expression: `output: app: env[2]: value: ` |
 | an `errors` item | `errors[<i>]: ` and the path below it |
 
@@ -846,11 +808,11 @@ expression, or an evaluation error:
 output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
  |  hots
  | .^
-let db: ${{ values.databse }}: no such key: databse
+vars db: ${{ values.databse }}: no such key: databse
 output: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
 objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
 - at '/okdpGeneratedSecret': missing property 'name'
-let host: ${{ values.?host }}: optional.none() dereference
+vars host: ${{ values.?host }}: optional.none() dereference
 ```
 
 Other errors of the mapping:
@@ -859,14 +821,10 @@ Other errors of the mapping:
 |---|---|
 | `yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)); the message names no file |
 | `the mapping must be a YAML map` | the document is not a map |
-| `line <n>: a second YAML document: the mapping is one document` | a `---` followed by a second document ([sections](#evaluation-order)) |
-| `line <n>: a map key must be a scalar`, `line <n>: unsupported map key "<key>"` | a list, map or null key |
-| `line <n>: <key>: the key "<text>" is written twice` | a key written twice, or two keys of one text, `1:` and `1.0:`, in a map or a [`let`](#let) ([YAML reading](#yaml-reading)) |
-| `line <n>: anchors, aliases and merge keys are not read: bind the value in let` | an anchor, an alias, a merge key `<<` ([YAML reading](#yaml-reading)) |
-| `line <n>: not a finite number: <scalar> (quote it for the text)` | `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
-| `<key>: unknown section (allowed: let, errors, output, instance, provides, objects, oidcClients)`, `<key>: not a directive of the top level: its keys are sections`, `let: must be a map of bindings, got <value>`, `errors: must be a list of rules, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
-| `let <name>: bound twice`, `let <name>: a binding name cannot start with $` (`$let` likewise) | a [`let`](#let) or [`$let`](03_control_flow.md#let) name |
-| `<where><key>: unknown directive (the key <key> is written $<key>)`, `<where><key>: not in <place>, which holds <keys>`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each`, `<where>$if: takes one expression, ${{ <condition> }}, got <value>`, `<where>$else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}` | a directive ([errors](03_control_flow.md#errors)) |
+| `line <n>: aliases are not read: bind the value in vars` | an alias ([YAML reading](#yaml-reading)) |
+| ``line <n>: yaml: cannot decode !!str `<scalar>` as a !!bool``, `line <n>: json: cannot marshal from Go float64: unsupported value: NaN` | a tagged scalar of another form, `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
+| `<key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`, `vars: must be a map of bindings, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
+| `<where><key>: not allowed here (allowed: <directives>)`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` | a directive ([errors](03_control_flow.md#errors)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](03_control_flow.md#for) |
 | `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [`output`](#output), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |

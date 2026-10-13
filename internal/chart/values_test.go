@@ -18,14 +18,14 @@ import (
 // FuzzParseValues.
 const valuesFile = "a: 1\nb: [x, no, \"no\"]\non: 1.0\n---\nc: ~\n"
 
-// TestParseValues: a values file as Helm reads it (YAML 1.1, numbers as
-// float64, documents merged); invalid YAML fails.
+// TestParseValues: a values file as Helm 3 reads it (YAML 1.1, numbers as
+// float64, the first document only); invalid YAML fails.
 func TestParseValues(t *testing.T) {
 	v, err := ParseValues([]byte(valuesFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (M{"a": float64(1), "b": []any{"x", false, "no"}, "true": float64(1), "c": nil}); !reflect.DeepEqual(v, want) {
+	if want := (M{"a": float64(1), "b": []any{"x", false, "no"}, "true": float64(1)}); !reflect.DeepEqual(v, want) {
 		t.Errorf("got %#v, want %#v", v, want)
 	}
 	if _, err := ParseValues([]byte("a: [")); err == nil {
@@ -62,10 +62,9 @@ func TestLayered(t *testing.T) {
 // parseValuesErrors: what Helm refuses in a values file, for
 // TestParseValuesErrors and FuzzParseValues.
 var parseValuesErrors = map[string]string{
-	"- a\n":            "cannot unmarshal yaml document",
-	"a: 1\n--- b: 2\n": "invalid Yaml document separator: b: 2",
-	"a: [\n":           "cannot unmarshal yaml document",
-	"~: 1\n":           "unsupported map key",
+	"- a\n":  "cannot unmarshal yaml document",
+	"a: [\n": "cannot unmarshal yaml document",
+	"~: 1\n": "unsupported map key",
 }
 
 // TestParseValuesErrors: what Helm refuses in a values file.

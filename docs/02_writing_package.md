@@ -37,7 +37,7 @@ the package is published as a chart.
 ├── values.cel.yaml         computed values, OAuth clients, OKDP's own objects, descriptor, provided connections
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
-├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --platform
+├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --context
 ├── ci/<case>-values.yaml   test instances, without global
 └── README.md               parameters, platform values read, charts, known gaps
 ```
@@ -56,8 +56,8 @@ with its source: the chart repository (`https://`) or OCI registry path
 (`oci://`), the chart's name in it, and a pinned version. The package holds
 no copy of it: a deployer renders the chart from its repository, and the
 compiler reads its `values.yaml` and `values.schema.json` from the chart
-cache, filled with `helm pull`, each chart in its repository's directory,
-the URL without its scheme
+cache, filled with `helm pull --untar`, each chart unpacked under its
+repository's directory, the URL without its scheme
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ```yaml
@@ -68,8 +68,7 @@ charts:
 ```
 
 ```bash
-mkdir -p "$OKDP_CHARTS/airflow.apache.org"   # helm pull does not create it
-helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_CHARTS/airflow.apache.org"
+helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d "$OKDP_CHARTS/airflow.apache.org/airflow-1.22.0"
 ```
 
 - The key names the chart's values everywhere (`output`, the instance's
@@ -78,8 +77,8 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 -d "$OKDP_C
   characters at most ([chart keys](specs/02_service_definition.md#chart-keys)).
 - `service.yaml` is read strictly: a field it does not define, a misspelt
   `protect` among them, fails the load rather than being ignored.
-- A compile that needs a chart the cache lacks fails with the `mkdir -p`
-  and `helm pull` commands that fetch it.
+- A compile that needs a chart the cache lacks fails with the `helm pull
+  --untar` command that fetches it.
 - A chart rendered twice is two keys of one source
   ([recipe](#render-a-chart-twice)).
 - The chart is rendered as published. A bundled subchart the package does
@@ -135,7 +134,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "global": {"type": "object", "description": "Platform values: the platform's layers (--platform), added to by the project's (--project), never an instance's."},
+    "global": {"type": "object", "description": "Platform values: the context's layers (--context), the platform's level then higher ones adding to it, never an instance's."},
     "connections": {"type": "object", "default": {}, "description": "External connections, one values layer per connection file."},
     "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
     "database": {
@@ -186,7 +185,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
   schema declares under it (`"global": {"properties": {"imageRegistry":
   ...}}`), never `okdp`, is one an instance may set, and every chart
   receives it
-  ([platform values](specs/01_inputs_outputs.md#platform-values)).
+  ([context values](specs/01_inputs_outputs.md#context-values)).
 - A string pasted into a configuration file, a script or a template refuses
   `{{`, `}}` and line breaks (the `not` pattern above, as in trino, airflow,
   superset and polaris). The compiler refuses `{{` in every instance value
@@ -212,8 +211,6 @@ require:                                 # read by the mapping in every case
   - ingress.suffix
   - ingress.className
   - certificateIssuers.selfSigned.name
-  - key: oidc.issuerUri                  # read when OIDC is enabled
-    $if: ${{ platform.oidc.enabled }}
 charts:
   app:
     source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
@@ -227,7 +224,7 @@ charts:
 
 - `require` lists the `global.okdp` keys the mapping reads in every case: the
   compile fails, naming the key, when one is missing or empty. A value needed
-  in one mode only takes the condition of that mode, `$if`
+  in one mode only is checked by a rule of the mapping's `errors`
   ([recipe](#require-a-platform-value-in-one-mode)).
 - `source` names the upstream chart that renders the key's values; two keys
   may name one ([recipe](#render-a-chart-twice),
@@ -272,20 +269,20 @@ charts:
 The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [expressions](specs/02_service_definition.md#expressions) and
 [directives](specs/03_control_flow.md) (`$if`, `$else`, `$for`,
-`$merge`, `$spread`, `$let`). Its [sections](specs/02_service_definition.md#sections),
+`$merge`, `$spread`, `$vars`). Its [sections](specs/02_service_definition.md#sections),
 as the webapp writes them (the
 [evaluation order](specs/02_service_definition.md#evaluation-order)
 puts `objects` and `oidcClients` last):
 
 ```yaml
-let:                       # names and hosts computed once, in order
+vars:                      # names and hosts computed once, in order
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
   sessionSecret: ${{ okdpFullname('session') }}
 
-errors:                    # a rule's message fails the compile when $if holds
+errors:                    # a message fails the compile when its $if holds
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
-    message: "webapp: replicas > 1 needs a database, sessions are stored there"
+    $value: "webapp: replicas > 1 needs a database, sessions are stored there"
 
 output:                    # chart -> the values computed for it
   app:
@@ -315,7 +312,7 @@ provides:                  # the connections the instance publishes
       internalUrl: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080
 ```
 
-- `let` computes every name, host and repeated structure once; a binding
+- `vars` computes every name, host and repeated structure once; a binding
   sees the previous ones, and hides a
   [context](specs/02_service_definition.md#context) variable of the
   same name (`labels`).
@@ -326,8 +323,9 @@ provides:                  # the connections the instance publishes
   compiler adds the okdp chart to every compile, so the descriptor always
   reaches the cluster
   ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
-- `errors` fails the compile with every message at once. A rule is a
-  condition, `$if`, and a `message`; `$for` checks every element of a list.
+- `errors` fails the compile with every message at once. A message is the
+  `$value` of an item with its condition, `$if`; `$for` checks every
+  element of a list.
   Prefix each message with the service and the parameter, and say what to set.
 - `oidcClients` declares the service's OAuth clients; the mapping reads each
   from its Secret, `platform.oidcClientSecret` for the main client
@@ -385,7 +383,7 @@ an expression); published under the release name (the default `name`), they must
 also be what an internal reference to this instance resolves to: build the
 hosts and Service names from the contract's convention (trino's host is
 `trino-<namespace>.<suffix>`, hive-metastore's Service
-`<release>-hive-metastore`), once, in `let`, for the ingress and `provides`
+`<release>-hive-metastore`), once, in `vars`, for the ingress and `provides`
 alike. Then say where the credentials come from:
 
 ```yaml
@@ -411,7 +409,7 @@ it (cnpg-postgresql). Neither: consumers bring their own identity
 Each `ci/<case>-values.yaml` is an instance: its connections and
 parameters, without `global`, which an instance may not set. The
 platform values (`global.okdp`, `charts.objects` included) are given apart,
-with `--platform`: `ci/platform.yaml` for every case, then, for a case that
+with `--context`: `ci/platform.yaml` for every case, then, for a case that
 needs others, its own `ci/<case>-platform.yaml`. Write one case per mode:
 OIDC `existing`, `dcr` and off, internal and external connections, proxy
 set, each optional chart on, upstream values with appended lists. The `dcr`
@@ -421,10 +419,10 @@ case's platform file gives `oidc.clientProvisioning: dcr`,
 
 ```bash
 export OKDP_CONTRACTS=~/okdp/contracts     # the contract schemas
-export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache, filled with helm pull
+export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache, filled with helm pull --untar
 okdp-compile --package charts/services/polaris \
-  --platform charts/services/polaris/ci/platform.yaml \
-  --platform charts/services/polaris/ci/dcr-platform.yaml \
+  --context charts/services/polaris/ci/platform.yaml \
+  --context charts/services/polaris/ci/dcr-platform.yaml \
   -f charts/services/polaris/ci/dcr-values.yaml \
   --release demo-polaris --namespace demo -o /tmp/demo-polaris
 yq '.dependencies' /tmp/demo-polaris/Chart.yaml   # the source of each key
@@ -447,7 +445,7 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
 - A case whose first line is `# error: <message>` must fail with that message
   (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
-  the platform`; `testdata/platform/` holds the platform files that must
+  the platform`; `testdata/context/0/` holds the platform files that must
   fail). Add one per `errors` entry, per protected path that matters, per
   schema rule.
 
@@ -486,7 +484,7 @@ client is public. The main client has no name; any other is named
 (polaris's `console`):
 
 ```yaml
-let:
+vars:
   consoleHost: ${{ release.name }}-console.${{ global.okdp.ingress.suffix }}
 oidcClients:
   - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client: no name
@@ -510,7 +508,7 @@ output:
 The same lines serve both provisioning modes of the platform
 (`global.okdp.oidc.clientProvisioning`); only the Secret's name changes, and
 `platform.oidcClientSecret` (the main client) and `oidcClientSecret('<name>')`
-return it, in any section, `let` included:
+return it, in any section, `vars` included:
 
 - `existing`, the default: the platform registers the clients and creates
   their Secrets beforehand. The compiler checks the section and adds
@@ -581,7 +579,7 @@ Nothing random is computed at compile time: passwords and keys come from
 External Secrets Operator generators, generated once in the cluster.
 
 ```yaml
-let:
+vars:
   keep:                     # outlive the release: the database they encrypt does
     helm.sh/resource-policy: keep
     argocd.argoproj.io/sync-options: Delete=false
@@ -603,7 +601,7 @@ it a new name.
 ### Restart the pods when a configuration changes
 
 ```yaml
-let:
+vars:
   settings:
     APP_URL: https://${{ host }}
     METRICS_ENABLED: ${{ str(values.metrics.enabled) }}
@@ -660,7 +658,7 @@ extra labels: set it (polaris-console `podLabels`, airflow `labels`).
 ### Database connection
 
 ```yaml
-let:
+vars:
   db: '${{ type(values.database) == map ? values.database : {} }}'
 output:
   app:
@@ -695,19 +693,16 @@ env:                                            # a list (superset)
 
 ### Require a platform value in one mode
 
-Declare it in `service.yaml`, with the condition of the mode, rather than
-imitating the compiler's message in `errors`:
+`require` in `service.yaml` lists the values of every case
+([require](specs/02_service_definition.md#require)). A value of one mode
+is checked by a rule of the mapping's `errors`, with the condition of the
+mode:
 
 ```yaml
-require:
-  - key: oidc.issuerUri
-    $if: ${{ platform.oidc.enabled }}
+errors:
+  - $if: ${{ platform.oidc.enabled && platform.oidc.?issuerUri.orValue('') == '' }}
+    message: global.okdp.oidc.issuerUri is required when OIDC is enabled. It is a context value
 ```
-
-When the condition holds, a missing or empty value fails the compile with
-the message of a value of every case. The condition sees the mapping's
-context, not its `let` bindings, and must be `true` or `false`
-([require](specs/02_service_definition.md#require)).
 
 Read an optional platform value with `.?` and `orValue`
 (`global.okdp.?storageClass.?data.orValue('')`): a missing key fails the
@@ -763,12 +758,14 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - **Numbers are doubles.** `values.replicas * 2` has no overload, write
   `* 2.0` or `int(values.replicas) * 2`; `str()` prints 1000000 as `1e+06`
   ([numbers](specs/02_service_definition.md#numbers)).
-- **YAML 1.1.** The mapping, OKDP's defaults and the upstream charts'
-  defaults are read as Helm reads values: plain `no`, `off`, `y` are booleans, `0440` is
-  the octal 288. Quote a string that looks like one (`"no"`). `service.yaml`
-  alone is read as YAML 1.2: `upstream: no` is refused, write `false`
-  ([YAML reading](specs/02_service_definition.md#yaml-reading),
-  [upstream](specs/02_service_definition.md#upstream)).
+- **YAML 1.1 and 1.2.** OKDP's defaults and the upstream charts' defaults
+  are read as Helm reads values, YAML 1.1: plain `no`, `off`, `y` are
+  booleans, `0440` is the octal 288; quote a string that looks like one
+  (`"no"`). The mapping is read as YAML 1.2: there `no`, `off`, `y` are
+  strings, write `false` and `true`
+  ([YAML reading](specs/02_service_definition.md#yaml-reading)).
+  `service.yaml` is decoded into typed fields: `upstream: no` is false
+  ([upstream](specs/02_service_definition.md#upstream)).
 - **Untested branches are not evaluated.** Every expression compiles when
   the mapping is loaded, in every branch (a misspelled name fails every
   compile), but one in a branch no case takes is never evaluated: a type
@@ -828,8 +825,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   rules, `global`, `connections`, and `upstream` for exactly the charts that
   accept instance values; strings pasted into files refuse `{{`, `}}` and
   line breaks.
-- [ ] `require` lists the platform values read in every mode, the others
-  with the condition of their mode; `protect` covers names, authentication,
+- [ ] `require` lists the platform values read in every mode, `errors`
+  checks the others in their mode; `protect` covers names, authentication,
   exposure, Secret wiring and the switches kept off; `append` the lists
   carrying the platform's wiring.
 - [ ] The mapping writes no literal image tag, no credential, no name that

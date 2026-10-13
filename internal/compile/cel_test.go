@@ -2,21 +2,18 @@ package compile
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"reflect"
-	"slices"
-	"strconv"
+	"regexp"
 	"strings"
 	"testing"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types/ref"
 
-	"github.com/okdp/okdp-compiler/internal/helmfn"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -33,14 +30,10 @@ func mapCtx() M {
 	}
 }
 
-// runOutput: loads a document on mapCtx and returns its output section.
+// runOutput: evaluates a document on mapCtx and returns its output section.
 func runOutput(src string) (M, error) {
-	d, err := NewSession(context.Background(), 0).Load([]byte(src), mapCtx(), "output")
-	if err != nil {
-		return nil, err
-	}
-	v, err := d.Section("output")
-	return value.AsMap(v), err
+	d, err := NewSession(context.Background(), 0).Eval([]byte(src), mapCtx(), "output")
+	return value.AsMap(d["output"]), err
 }
 
 // TestMappingDirectives: each directive of the mapping language, on one chart x.
@@ -66,8 +59,8 @@ func TestMappingDirectives(t *testing.T) {
 			M{"s": "}}"},
 		},
 		"functions str and first": {
-			`{s: '${{ str(1.5) }}', f: '${{ first(["", "y", "z"]) }}', e: '${{ first(["", ""]) }}'}`,
-			M{"s": "1.5", "f": "y", "e": ""},
+			`{s: '${{ str(1.5) }}', f: '${{ first(["", "y", "z"]) }}', e: '${{ first(["", ""]) }}', l: '${{ first("x") }}'}`,
+			M{"s": "1.5", "f": "y", "e": "", "l": ""},
 		},
 		"$if on a key": {
 			`{dropped: {$if: '${{ values.off }}', a: 1}, kept: {$if: '${{ values.on }}', a: 1}}`,
@@ -88,6 +81,10 @@ func TestMappingDirectives(t *testing.T) {
 		"$else list is one item": {
 			`{l: [0, {$if: '${{ values.off }}', $value: 1, $else: [2, 3]}]}`,
 			M{"l": []any{float64(0), []any{float64(2), float64(3)}}},
+		},
+		"$else without $if is not read": {
+			`{a: {$value: 1, $else: '${{ nope }}'}}`,
+			M{"a": float64(1)},
 		},
 		"$else nested, an else if": {
 			`{a: {$if: '${{ values.off }}', $value: 1, $else: {$if: '${{ values.off }}', $value: 2, $else: 3}}, b: {$if: '${{ values.off }}', $value: 1, $else: {$if: '${{ values.off }}', $value: 2}}}`,
@@ -113,8 +110,8 @@ func TestMappingDirectives(t *testing.T) {
 			`{l: [{$for: c in values.items, $each: ['${{ c.name }}', '${{ c.name }}2']}]}`,
 			M{"l": []any{"a", "a2", "b", "b2"}},
 		},
-		"$let bindings in order": {
-			`{l: [{$for: c in values.items, $let: {d: '${{ c.n * 2.0 }}', e: '${{ d + 1.0 }}'}, $each: '${{ e }}'}]}`,
+		"$vars bindings in order": {
+			`{l: [{$for: c in values.items, $vars: {d: '${{ c.n * 2.0 }}', e: '${{ d + 1.0 }}'}, $each: '${{ e }}'}]}`,
 			M{"l": []any{float64(3), float64(5)}},
 		},
 		"$spread": {
@@ -128,6 +125,10 @@ func TestMappingDirectives(t *testing.T) {
 		"$$ writes a key starting with $": {
 			`{$$name: 1, m: {$$if: a, $$$x: b}}`,
 			M{"$name": float64(1), "m": M{"$if": "a", "$$x": "b"}},
+		},
+		"directives of any node": {
+			`{a: {$if: false, b: 1}, c: {$if: 'x${{ false }}', $value: 1}, m: {x: 1, $merge: {z: 2}}, l: [{$spread: [1, '${{ 2 }}']}]}`,
+			M{"c": float64(1), "m": M{"x": float64(1), "z": float64(2)}, "l": []any{float64(1), float64(2)}},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -174,7 +175,7 @@ func TestExpressionValues(t *testing.T) {
 	}
 }
 
-// TestLibraries: the CEL extensions at their pinned versions (libraries):
+// TestLibraries: the CEL extensions at their pinned versions (Session.env):
 // json.encode (encoders 1), format's precision at most 100 (strings 5),
 // last (optional types 2).
 func TestLibraries(t *testing.T) {
@@ -193,101 +194,45 @@ func TestLibraries(t *testing.T) {
 	}
 }
 
-// TestLibraryVersions: the CEL libraries table of the functions spec
-// lists the libraries enabled (pinnedLibraries), each at its pinned
-// version: a version is raised with the docs.
-func TestLibraryVersions(t *testing.T) {
-	const spec = "docs/specs/04_functions.md"
-	b, err := os.ReadFile(filepath.Join("..", "..", spec))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, section, ok := strings.Cut(string(b), "\n### CEL libraries\n")
-	if !ok {
-		t.Fatalf("%s: no CEL libraries section", spec)
-	}
-	section, _, _ = strings.Cut(section, "\n#")
-	// The table's rows after its header: the Version column, by the
-	// function in the Library column (strings (`ext.Strings`)).
-	docs := map[string]string{}
-	var header []string
-	for line := range strings.Lines(section) {
-		if !strings.HasPrefix(line, "|") || strings.HasPrefix(line, "|---") {
-			continue
-		}
-		cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
-		for i := range cells {
-			cells[i] = strings.TrimSpace(cells[i])
-		}
-		if header == nil {
-			header = cells
-			continue
-		}
-		lib, ver := slices.Index(header, "Library"), slices.Index(header, "Version")
-		if lib < 0 || ver < 0 || len(cells) <= max(lib, ver) {
-			t.Fatalf("%s: a CEL libraries row without a Library and a Version: %q", spec, line)
-		}
-		_, name, _ := strings.Cut(cells[lib], "`")
-		name, _, _ = strings.Cut(name, "`")
-		docs[name] = cells[ver]
-	}
-	for _, l := range pinnedLibraries {
-		want := strconv.FormatUint(uint64(l.version), 10)
-		if got, ok := docs[l.name]; !ok {
-			t.Errorf("%s: %s is not in the CEL libraries table", spec, l.name)
-		} else if got != want {
-			t.Errorf("%s: %s at version %s, pinned at %s (pinnedLibraries)", spec, l.name, got, want)
-		}
-		delete(docs, l.name)
-	}
-	for name := range docs {
-		t.Errorf("%s: %s in the CEL libraries table is not enabled (pinnedLibraries)", spec, name)
-	}
-}
-
-// yaml11Doc: a document of YAML 1.1 scalars and keys, for TestMappingYAML11
+// yamlDoc: a document of YAML 1.2 scalars and keys, for TestMappingYAML12
 // and FuzzMappingReader.
-const yaml11Doc = `
-let:
+const yamlDoc = `
+vars:
   n: 1.0
   y: 2.0
+  y: 3.0
 output:
   x:
-    bools: [yes, no, on, off, y, N, "yes", 'no', !!str on, true, !!bool yes, !!bool "Off"]
-    numbers: [0777, 0x1F, 1_000, 1.0, 012345678901234567890, 0o17]
-    strings: [2001-12-14, "0777", 1.2.3, 0o+7, 0o-1_0]
-    keys: {on: a, 1.0: b, 0x10: c, "y": d, "<<": e, -1e100: f}
-    lets: [{$for: c in values.items, $let: {Y: '${{ c.n + n }}'}, $each: '${{ [y, Y] }}'}]
+    bools: [yes, no, on, off, y, N, "yes", true, False]
+    numbers: [0777, 0o17, 0x1F, 1_000, 1.0, 012345678901234567890]
+    strings: [2001-12-14, "0777", 1.2.3, !!str 1]
+    keys: {on: a, 1.0: b, 0x10: c, "y": d, <<: e, ~: f, dup: 1, dup: 2}
+    vars: [{$for: c in values.items, $vars: {Y: '${{ c.n + n }}'}, $each: '${{ [y, Y] }}'}]
 `
 
 // readerErrors: the documents the reader refuses, and their errors, for
-// TestMappingYAML11 and FuzzMappingReader.
+// TestMappingYAML12 and FuzzMappingReader.
 var readerErrors = map[string]string{
-	"output: {x: {~: 1}}\n":                        `line 1: unsupported map key "~"`,
-	"output: {x: {.inf: 1}}\n":                     "line 1: not a finite number: .inf (quote it for the text)",
-	"output: {x: {dup: 1, dup: 2}}\n":              `line 1: dup: the key "dup" is written twice`,
-	"output: {x: {8: a, 08: b}}\n":                 `line 1: 08: the key "8" is written twice`,
-	"output:\n  x:\n    on: a\n    \"true\": b\n":  `line 4: true: the key "true" is written twice`,
-	"let: {y: 1, Y: 2}\n":                          `line 1: Y: the key "true" is written twice`,
-	"output:\n  x:\n    a: &a {k: 1}\n    b: *a\n": "line 3: anchors, aliases and merge keys are not read: bind the value in let",
-	"output: {x: {<<: {k: 1}}}\n":                  "line 1: anchors, aliases and merge keys are not read: bind the value in let",
+	"output:\n  x:\n    a: &a {k: 1}\n    b: *a\n": "line 4: aliases are not read: bind the value in vars",
+	"output: {x: {v: !!bool yes}}\n":               "line 1: yaml: cannot decode !!str `yes` as a !!bool",
+	"output: {x: {v: !!binary gIA=}}\n":            "line 1: jsontext: invalid UTF-8",
 }
 
-// TestMappingYAML11: the mapping's scalars and keys are read as Helm reads
-// values (YAML 1.1), except binding names (let, $let); a key written twice
-// fails, two keys Helm reads as one included, and so do anchors, aliases
-// and merge keys.
-func TestMappingYAML11(t *testing.T) {
-	out, err := runOutput(yaml11Doc)
+// TestMappingYAML12: the mapping's scalars are read as yaml.v3 decodes
+// them (YAML 1.2: yes and on are text), its keys as written, the later of
+// a key written twice winning; a second document is ignored; aliases are
+// refused.
+func TestMappingYAML12(t *testing.T) {
+	out, err := runOutput(yamlDoc)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := M{
-		"bools":   []any{true, false, true, false, true, false, "yes", "no", "on", true, true, false},
-		"numbers": []any{float64(511), float64(31), float64(1000), float64(1), float64(12345678901234567890), float64(15)},
-		"strings": []any{"2001-12-14", "0777", "1.2.3", "0o+7", "0o-1_0"},
-		"keys":    M{"true": "a", "1": "b", "16": "c", "y": "d", "<<": "e", "-.inf": "f"},
-		"lets":    []any{float64(2), float64(2), float64(2), float64(3)},
+		"bools":   []any{"yes", "no", "on", "off", "y", "N", "yes", true, false},
+		"numbers": []any{float64(511), float64(15), float64(31), float64(1000), float64(1), float64(12345678901234567890)},
+		"strings": []any{"2001-12-14", "0777", "1.2.3", "1"},
+		"keys":    M{"on": "a", "1.0": "b", "0x10": "c", "y": "d", "<<": "e", "~": "f", "dup": float64(2)},
+		"vars":    []any{float64(3), float64(2), float64(3), float64(3)},
 	}
 	if got := value.AsMap(out["x"]); !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %#v\nwant %#v", got, want)
@@ -297,6 +242,9 @@ func TestMappingYAML11(t *testing.T) {
 	if out, err := runOutput("output:\n  x:\n    v: >\n      text"); err != nil || value.AsMap(out["x"])["v"] != "text\n" {
 		t.Errorf("a block scalar ending the file: got %#v (%v)", out, err)
 	}
+	if out, err := runOutput("output: {x: 1}\n---\noutput: {x: 2}\n"); err != nil || out["x"] != float64(1) {
+		t.Errorf("a second document: got %#v (%v)", out, err)
+	}
 	for src, want := range readerErrors {
 		if _, err := runOutput(src); err == nil || err.Error() != want {
 			t.Errorf("%q: got %v, want %q", src, err, want)
@@ -304,10 +252,49 @@ func TestMappingYAML11(t *testing.T) {
 	}
 }
 
+// FuzzMappingReader: the mapping reader (parseDoc) returns on any document,
+// with values as values hold them (value.Normalize keeps them as they are).
+// Seeds: the documents of TestMappingYAML12.
+func FuzzMappingReader(f *testing.F) {
+	f.Add([]byte(yamlDoc))
+	for src := range readerErrors {
+		f.Add([]byte(src))
+	}
+	f.Fuzz(func(t *testing.T, b []byte) {
+		top, err := parseDoc(b)
+		if err != nil {
+			return
+		}
+		v := plain(top)
+		if n, err := value.Normalize(v); err != nil || !reflect.DeepEqual(n, v) {
+			t.Fatalf("%q: read as %#v, which values do not hold (%v)", b, v, err)
+		}
+	})
+}
+
+// plain: a value parseDoc read, its maps as values maps.
+func plain(v any) any {
+	switch t := v.(type) {
+	case *omap:
+		m := M{}
+		for _, f := range t.fields() {
+			m[f.key] = plain(f.val)
+		}
+		return m
+	case []any:
+		l := make([]any, len(t))
+		for i, x := range t {
+			l[i] = plain(x)
+		}
+		return l
+	}
+	return v
+}
+
 // TestMappingFunctions: the host functions in a document.
 func TestMappingFunctions(t *testing.T) {
 	out, err := runOutput(`
-let:
+vars:
   config: {b: 1, a: [x]}
 output:
   x:
@@ -320,7 +307,7 @@ output:
 		t.Fatal(err)
 	}
 	want := M{
-		"checksum": helmfn.Sha256Sum(`{"a":["x"],"b":1}`),
+		"checksum": fmt.Sprintf("%x", sha256.Sum256([]byte(`{"a":["x"],"b":1}`))),
 		"json":     `{"a":["x"],"b":1}`,
 		"yaml":     "a:\n- x\nb: 1",
 		"quoted":   `"1"`,
@@ -328,39 +315,41 @@ output:
 	if got := value.AsMap(out["x"]); !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %#v\nwant %#v", got, want)
 	}
-	if _, err := runOutput(`output: {x: {v: '${{ toYaml("\x01 \x7f") }}'}}`); err == nil || !strings.Contains(err.Error(), "toYaml: ") {
+	if _, err := runOutput(`output: {x: {v: '${{ toYaml("\x01 \x7f") }}'}}`); err == nil || !strings.Contains(err.Error(), `${{ toYaml("\x01 \x7f") }}: yaml: `) {
 		t.Errorf("an encoding error: got %v", err)
 	}
 }
 
-// TestErrorRules: rules ($if and message), per element ($for); the message
-// of a rule that holds no error is not evaluated; what an item may not be.
+// TestErrorRules: the errors section, a list: each item it gives that is
+// not empty a message ($if and $value, per element with $for, a list
+// spliced with $spread), or the list an expression gives; the message of
+// an item left out is not evaluated; an error at the item's position.
 func TestErrorRules(t *testing.T) {
 	_, err := runOutput(`
 errors:
   - $if: ${{ values.on }}
-    message: on is set
+    $value: on is set
   - $if: ${{ values.off }}
-    message: '${{ values.nope }}, not evaluated'
+    $value: '${{ values.nope }}, not evaluated'
   - $for: c in values.items
     $each:
       $if: ${{ c.n > 1.0 }}
-      message: item ${{ c.name }} is too large
+      $value: item ${{ c.name }} is too large
+  - ''
+  - $spread: ${{ values.items.map(i, i.name) }}
 `)
-	if want := "on is set\nitem b is too large"; err == nil || err.Error() != want {
+	if want := "on is set\nitem b is too large\na\nb"; err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
-	const notRule = "a rule is {$if: <condition>, message: <text>}, got "
+	if _, err := runOutput("errors: ${{ values.items.filter(i, i.n > 1.0).map(i, 'no ' + i.name) }}\n"); err == nil || err.Error() != "no b" {
+		t.Errorf("an expression: got %v, want %q", err, "no b")
+	}
 	for name, tc := range map[string]struct{ src, want string }{
-		"not a rule":     {"errors:\n  - {$if: '${{ true }}', msg: x}\n", "errors[0]: " + notRule + `map[string]interface {}{"msg":"x"}`},
-		"a list":         {"errors:\n  - '${{ [\"x\"] }}'\n", "errors[0]: " + notRule + `[]interface {}{"x"}`},
-		"not text":       {"errors:\n  - {message: '${{ 1 }}'}\n", "errors[0]: " + notRule + `map[string]interface {}{"message":1}`},
-		"empty":          {"errors:\n  - {message: ''}\n", "errors[0]: " + notRule + `map[string]interface {}{"message":""}`},
-		"message error":  {"errors:\n  - {$if: '${{ false }}', message: x}\n  - {$if: '${{ true }}', message: '${{ nope }}'}\n", "errors[1]: message: ${{ nope }}:"},
-		"$each position": {"errors:\n  - {$if: '${{ false }}', message: x}\n  - {$for: c in values.items, $each: {message: '${{ nope }}'}}\n", "errors[1]: message: ${{ nope }}:"},
+		"message error":  {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$if: '${{ true }}', $value: '${{ values.nope }}'}\n", "errors[1]: ${{ values.nope }}: no such key: nope"},
+		"$each position": {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$for: c in values.items, $each: '${{ values.nope }}'}\n", "errors[1]: ${{ values.nope }}: no such key: nope"},
 	} {
-		if _, err := runOutput(tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)
+		if _, err := runOutput(tc.src); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
 		}
 	}
 }
@@ -378,7 +367,7 @@ func TestEmptyDocument(t *testing.T) {
 // TestMappingErrors: invalid mappings, and where their errors point.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
-		"errors position":       {"errors:\n  - {$if: '${{ false }}', message: x}\n  - {$if: '${{ nope }}', message: x}\n", "errors[1]: ${{ nope }}:"},
+		"errors position":       {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$if: '${{ nope }}', $value: x}\n", "errors[1]: ${{ nope }}:"},
 		"not a map":             {"- a\n", "must be a YAML map"},
 		"invalid YAML":          {"output: [\n", "yaml"},
 		"unterminated":          {"output: {x: {v: '${{ 1 + '}}\n", "unterminated ${{"},
@@ -389,9 +378,9 @@ func TestMappingErrors(t *testing.T) {
 		"list in a list":        {"output: {x: {l: [[1, '${{ nope }}']]}}\n", "output: x: l[0][1]: ${{ nope }}:"},
 		"$for position":         {"output: {x: {l: [0, {$for: c in values.items, $each: '${{ nope }}'}]}}\n", "output: x: l[1]: ${{ nope }}:"},
 		"$spread position":      {"output: {x: {l: [0, {$spread: '${{ nope }}'}]}}\n", "output: x: l[1]: ${{ nope }}:"},
-		"let name":              {"let: {a: '${{ nope }}'}\n", "let a:"},
-		"let list position":     {"let: {a: [1, '${{ nope }}']}\n", "let a[1]: ${{ nope }}:"},
-		"$let name":             {"output: {x: {l: [{$for: c in values.items, $let: {d: '${{ nope }}'}, $each: 1}]}}\n", "output: x: l[0]: $let d: ${{ nope }}:"},
+		"vars name":             {"vars: {a: '${{ nope }}'}\n", "vars a:"},
+		"vars list position":    {"vars: {a: [1, '${{ nope }}']}\n", "vars a[1]: ${{ nope }}:"},
+		"$vars name":            {"output: {x: {l: [{$for: c in values.items, $vars: {d: '${{ nope }}'}, $each: 1}]}}\n", "output: x: l[0]: $vars d: ${{ nope }}:"},
 		"$for syntax":           {"output: {x: {m: {$for: c values.items, $key: a, $value: 1}}}\n", `is not "<name> in <expression>"`},
 		"$for not a list":       {"output: {x: {m: {$for: c in values.extra, $key: a, $value: 1}}}\n", "not a list"},
 		"$else path":            {"output: {x: {m: {$if: '${{ values.off }}', $value: 1, $else: {b: '${{ values.nope }}'}}}}\n", "output: x: m: b: ${{ values.nope }}: no such key: nope"},
@@ -410,43 +399,35 @@ func TestMappingErrors(t *testing.T) {
 // branch, those no evaluation takes included.
 func TestMistakes(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
-		"second document":      {"output: {}\n---\nerrors: ['${{ [\"x\"] }}']\n", "line 2: a second YAML document: the mapping is one document"},
-		"unknown section":      {"outptu: {}\n", "outptu: unknown section (allowed: let, errors, output)"},
+		"unknown section":      {"outptu: {}\n", "outptu: unknown section (allowed: vars, errors, output)"},
 		"untaken branch":       {"output: {x: {m: {$if: '${{ values.off }}', a: '${{ nope }}'}}}\n", "output: x: m: a: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
-		"under $each":          {"output: {x: {l: [{$for: c in values.items, $each: {$iff: 1}}]}}\n", "output: x: l[0]: $each: $iff: unknown directive"},
+		"under $each":          {"output: {x: {l: [{$for: c in values.items, $each: {$iff: 1}}]}}\n", "output: x: l[0]: $each: $iff: not allowed here (allowed: $if, $merge)"},
 		"$for without $each":   {"output: {x: {l: [{$for: c in values.items}]}}\n", "output: x: l[0]: $for: in a list item, needs $each"},
 		"$for without $key":    {"output: {x: {m: {$for: c in values.items, $value: 1}}}\n", "output: x: m: $for: in a map, needs $key and $value"},
-		"unknown directive":    {"output: {x: {m: {$iff: '${{ true }}', a: 1}}}\n", "output: x: m: $iff: unknown directive (the key $iff is written $$iff)"},
-		"unknown in a $for":    {"output: {x: {l: [{$for: c in values.items, $Each: 1}]}}\n", "output: x: l[0]: $Each: unknown directive (the key $Each is written $$Each)"},
-		"$each in a map":       {"output: {x: {m: {$each: 1}}}\n", "output: x: m: $each: not in a map, which holds keys, $if, $value (with $else), $for (with $key, $value, $let) and $merge"},
-		"$key in a list item":  {"output: {x: {l: [{$key: 1}]}}\n", "output: x: l[0]: $key: not in a list item, which holds keys, $if, $value (with $else), $merge, $for (with $each, $let) and $spread"},
-		"$if beside $for":      {"output: {x: {l: [{$if: '${{ true }}', $for: c in values.items, $each: 1}]}}\n", "output: x: l[0]: $if: not in a list item with $for, which holds $for, $each and $let only"},
-		"a key beside $spread": {"output: {x: {l: [{$spread: '${{ [] }}', a: 1}]}}\n", "output: x: l[0]: a: not in a list item with $spread, which holds $spread only"},
-		"a key beside $value":  {"output: {x: {m: {$value: 1, $merge: '${{ {} }}'}}}\n", "output: x: m: $merge: not in a map with $value, which holds $if, $value and $else only"},
-		"$else without $if":    {"output: {x: {m: {$value: 1, $else: 2}}}\n", "output: x: m: $else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}"},
-		"$else without $value": {"output: {x: {l: [{$if: '${{ true }}', a: 1, $else: 2}]}}\n", "output: x: l[0]: $else: needs $if and $value"},
-		"$else beside $for":    {"output: {x: {m: {$if: '${{ true }}', $for: c in values.items, $key: a, $value: 1, $else: 2}}}\n", "output: x: m: $else: not in a map with $for, which holds $if, $for, $key, $value and $let only"},
-		"under $else":          {"output: {x: {m: {$if: '${{ true }}', $value: 1, $else: {$iff: 1}}}}\n", "output: x: m: $else: $iff: unknown directive"},
+		"unknown directive":    {"output: {x: {m: {$iff: '${{ true }}', a: 1}}}\n", "output: x: m: $iff: not allowed here (allowed: $if, $merge)"},
+		"unknown in a $for":    {"output: {x: {l: [{$for: c in values.items, $Each: 1}]}}\n", "output: x: l[0]: $Each: not allowed here (allowed: $for, $each, $vars)"},
+		"$each in a map":       {"output: {x: {m: {$each: 1}}}\n", "output: x: m: $each: not allowed here (allowed: $if, $merge)"},
+		"$key in a list item":  {"output: {x: {l: [{$key: 1}]}}\n", "output: x: l[0]: $key: not allowed here (allowed: $if, $merge)"},
+		"$if beside $for":      {"output: {x: {l: [{$if: '${{ true }}', $for: c in values.items, $each: 1}]}}\n", "output: x: l[0]: $if: not allowed here (allowed: $for, $each, $vars)"},
+		"a key beside $spread": {"output: {x: {l: [{$spread: '${{ [] }}', a: 1}]}}\n", "output: x: l[0]: a: not allowed here (allowed: $spread)"},
+		"a key beside $value":  {"output: {x: {m: {$value: 1, $merge: '${{ {} }}'}}}\n", "output: x: m: $merge: not allowed here (allowed: $if, $value, $else)"},
+		"$else without $value": {"output: {x: {l: [{$if: '${{ true }}', a: 1, $else: 2}]}}\n", "output: x: l[0]: $else: not allowed here (allowed: $if, $merge)"},
+		"$else beside $for":    {"output: {x: {m: {$if: '${{ true }}', $for: c in values.items, $key: a, $value: 1, $else: 2}}}\n", "output: x: m: $else: not allowed here (allowed: $if, $for, $key, $value, $vars)"},
+		"under $else":          {"output: {x: {m: {$if: '${{ true }}', $value: 1, $else: {$iff: 1}}}}\n", "output: x: m: $else: $iff: not allowed here (allowed: $if, $merge)"},
 		"untaken $else":        {"output: {x: {m: {$if: '${{ true }}', $value: 1, $else: '${{ nope }}'}}}\n", "output: x: m: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
-		"a key beside $for":    {"output: {x: {m: {$for: c in values.items, $key: a, $value: 1, b: 2}}}\n", "output: x: m: b: not in a map with $for, which holds $if, $for, $key, $value and $let only"},
-		"literal $if":          {"output: {x: {m: {$if: false, a: 1}}}\n", "output: x: m: $if: takes one expression, ${{ <condition> }}, got false"},
-		"interpolated $if":     {"output: {x: {m: {$if: 'x${{ true }}', a: 1}}}\n", `output: x: m: $if: takes one expression, ${{ <condition> }}, got "x${{ true }}"`},
-		"literal $merge":       {"output: {x: {m: {$merge: {a: 1}}}}\n", "output: x: m: $merge: takes one expression, ${{ <map> }}, got a map"},
-		"literal $spread":      {"output: {x: {l: [{$spread: [1]}]}}\n", "output: x: l[0]: $spread: takes one expression, ${{ <list> }}, got a list"},
-		"not evaluated":        {"output: {x: {m: {$if: '${{ false }}', w: [{$iff: 1}]}}}\n", "output: x: m: w[0]: $iff: unknown directive"},
-		"$let not a map":       {"output: {x: {l: [{$for: c in values.items, $let: [a], $each: 1}]}}\n", "output: x: l[0]: $let: must be a map of bindings, got a list"},
-		"let bound twice":      {"let: {y: 1, \"y\": 2}\n", "let y: bound twice"},
-		"let named $":          {"let: {$a: 1}\n", "let $a: a binding name cannot start with $"},
-		"let not a map":        {"let: [a]\n", "let: must be a map of bindings, got a list"},
-		"let value":            {"let: {a: {$iff: 1}}\n", "let a: $iff: unknown directive"},
-		"errors not a list":    {"errors: '${{ [] }}'\n", `errors: must be a list of rules, got "${{ [] }}"`},
-		"errors item":          {"errors: [{$iff: '${{ true }}', message: x}]\n", "errors[0]: $iff: unknown directive"},
-		"top-level directive":  {"$if: '${{ false }}'\noutput: {}\n", "$if: not a directive of the top level: its keys are sections"},
-		".nan":                 {"output: {x: {v: .nan}}\n", "line 1: not a finite number: .nan (quote it for the text)"},
-		"-.inf":                {"output:\n  x: {v: [1, -.Inf]}\n", "line 2: not a finite number: -.Inf (quote it for the text)"},
+		"a key beside $for":    {"output: {x: {m: {$for: c in values.items, $key: a, $value: 1, b: 2}}}\n", "output: x: m: b: not allowed here (allowed: $if, $for, $key, $value, $vars)"},
+		"under $merge":         {"output: {x: {m: {$merge: {$iff: 1}}}}\n", "output: x: m: $merge: $iff: not allowed here (allowed: $if, $merge)"},
+		"not evaluated":        {"output: {x: {m: {$if: '${{ false }}', w: [{$iff: 1}]}}}\n", "output: x: m: w[0]: $iff: not allowed here (allowed: $if, $merge)"},
+		"$vars not a map":      {"output: {x: {l: [{$for: c in values.items, $vars: [a], $each: 1}]}}\n", "output: x: l[0]: $vars: must be a map of bindings, got a list"},
+		"vars not a map":       {"vars: [a]\n", "vars: must be a map of bindings, got a list"},
+		"vars value":           {"vars: {a: {$iff: 1}}\n", "vars a: $iff: not allowed here (allowed: $if, $merge)"},
+		"errors item":          {"errors: [{$iff: '${{ true }}', $value: x}]\n", "errors[0]: $iff: not allowed here (allowed: $if, $value, $else)"},
+		"top-level directive":  {"$if: '${{ false }}'\noutput: {}\n", "$if: unknown section (allowed: vars, errors, output)"},
+		".nan":                 {"output: {x: {v: .nan}}\n", "line 1: json: cannot marshal from Go float64: unsupported value: NaN"},
+		"-.inf":                {"output:\n  x: {v: [1, -.Inf]}\n", "line 2: json: cannot marshal from Go float64: unsupported value: -Inf"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := NewSession(context.Background(), 0).Load([]byte(tc.src), mapCtx(), "output"); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, err := NewSession(context.Background(), 0).Eval([]byte(tc.src), mapCtx(), "output"); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
 		})
@@ -455,7 +436,7 @@ func TestMistakes(t *testing.T) {
 
 // TestTemplateErrors: an error of a template's values names its path.
 func TestTemplateErrors(t *testing.T) {
-	_, err := NewSession(context.Background(), 0).EvalTemplate([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx())
+	_, err := NewSession(context.Background(), 0).Eval([]byte("values: {a: [1, '${{ nope }}']}\n"), mapCtx(), "values")
 	if want := "values: a[1]: ${{ nope }}:"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("got %v, want an error containing %q", err, want)
 	}
@@ -471,20 +452,14 @@ var scanCases = []struct {
 	{`a ${{ {"k": "}}"}.k }} $${{ b`, []piece{{text: "a "}, {text: ` {"k": "}}"}.k `, expr: true}, {text: " ${{ b"}}},
 	{`${{ 'it\'s }}' }}`, []piece{{text: ` 'it\'s }}' `, expr: true}}},
 	{"${{ {'a': {'b': 1}} }}x", []piece{{text: " {'a': {'b': 1}} ", expr: true}, {text: "x"}}},
-	// Found by FuzzScan: raw and triple-quoted strings, a quote in a comment.
-	{`${{ r'\' + R"\" + br'\' + "}}" }}`, []piece{{text: ` r'\' + R"\" + br'\' + "}}" `, expr: true}}},
-	{`${{ '''it's "}}"''' + """a"b""" }}`, []piece{{text: ` '''it's "}}"''' + """a"b""" `, expr: true}}},
-	{"${{\n  // the user's {name}\n  values.name\n}}", []piece{{text: "\n  // the user's {name}\n  values.name\n", expr: true}}},
-	{"${{0//\"}}", []piece{{text: "0//\"", expr: true}}},
 	{"${{ a // a note }}x", []piece{{text: " a // a note ", expr: true}, {text: "x"}}},
 }
 
 // unterminated: strings without the }} closing an expression, for TestScan
 // and FuzzScan.
-var unterminated = []string{"${{ a }", `${{ '\' }}`, `${{ ar'\' }}`, `${{ '''a'' }}`, "${{ a // b\n }"}
+var unterminated = []string{"${{ a }", `${{ '\' }}`, "${{ a // b\n }"}
 
-// TestScan: expressions, nested braces in strings (raw and triple-quoted
-// ones too) and comments, and the $${{ escape.
+// TestScan: expressions, nested braces, strings, and the $${{ escape.
 func TestScan(t *testing.T) {
 	for _, tc := range scanCases {
 		got, err := scan(tc.in)
@@ -503,11 +478,15 @@ func TestScan(t *testing.T) {
 	}
 }
 
+// unscanned: what the scanner does not read as CEL does: a raw or
+// triple-quoted string, a comment.
+var unscanned = regexp.MustCompile(`[rR]['"]|'''|"""|//`)
+
 // FuzzScan: scan gives a string back whole, its literal text ($${{ written
 // again) and the text between each ${{ and the }} that closes it; an
-// expression CEL parses is one expression, ${{ <it> }}, whatever its
-// strings, braces and comments hold (but a } after a comment: a }} in a
-// comment closes it). Seeds: the strings of TestScan, and its expressions.
+// expression CEL parses is one expression, ${{ <it> }}, whatever its quoted
+// strings and braces hold (but with a raw or triple-quoted string, or a
+// comment: unscanned). Seeds: the strings of TestScan, and its expressions.
 func FuzzScan(f *testing.F) {
 	for _, tc := range scanCases {
 		f.Add(tc.in)
@@ -538,10 +517,7 @@ func FuzzScan(f *testing.F) {
 				t.Errorf("%q: scanned as %#v, which reads %q", s, pieces, b.String())
 			}
 		}
-		if _, iss := env.Parse(s); iss.Err() != nil {
-			return
-		}
-		if i := strings.Index(s, "//"); i >= 0 && strings.Contains(s[i:], "}") {
+		if _, iss := env.Parse(s); iss.Err() != nil || unscanned.MatchString(s) {
 			return
 		}
 		got, err := scan("${{" + s + "}}")
@@ -554,39 +530,43 @@ func FuzzScan(f *testing.F) {
 // TestSession: the CEL cost of a compile, shared by the evaluations of its
 // documents, and its cancellation, before and during an evaluation.
 func TestSession(t *testing.T) {
-	one := "let:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n"
+	one := "vars:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n"
 	two := one + "  b: ${{ values.items.map(i, i.n * 2.0) }}\n"
 	// The cost of one binding, measured under a limit it cannot reach.
 	s := NewSession(context.Background(), math.MaxUint64)
-	if _, err := s.Load([]byte(one), mapCtx()); err != nil {
+	if _, err := s.Eval([]byte(one), mapCtx()); err != nil {
 		t.Fatal(err)
 	}
 	cost := s.used
 	if cost == 0 {
 		t.Fatal("no cost counted")
 	}
-	// Enough for one binding, not for two, the second passing the limit
-	// while it runs (its compiled program limited to what remains): in one
-	// document, or in two documents of the session.
+	// Enough for one binding, not for two, the second passing the limit (the
+	// total checked after each evaluation): in one document, or in two
+	// documents of the session.
 	limit := 2*cost - 1
-	_, err := NewSession(context.Background(), limit).Load([]byte(two), mapCtx())
-	if want := fmt.Sprintf("let b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", limit); err == nil || err.Error() != want {
+	_, err := NewSession(context.Background(), limit).Eval([]byte(two), mapCtx())
+	if want := fmt.Sprintf("vars b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", limit); err == nil || err.Error() != want {
 		t.Errorf("past the limit: got %v, want %q", err, want)
 	}
 	s = NewSession(context.Background(), limit)
-	if _, err := s.Load([]byte(one), mapCtx()); err != nil {
+	if _, err := s.Eval([]byte(one), mapCtx()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Load([]byte(one), mapCtx()); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
+	if _, err := s.Eval([]byte(one), mapCtx()); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
 		t.Errorf("past the limit, in a second document: got %v", err)
 	}
-	if _, err := NewSession(context.Background(), 2*cost).Load([]byte(two), mapCtx()); err != nil {
+	if _, err := NewSession(context.Background(), 2*cost).Eval([]byte(two), mapCtx()); err != nil {
 		t.Errorf("within the limit: %v", err)
+	}
+	// One evaluation past the limit alone: CEL stops it there.
+	if _, err := NewSession(context.Background(), cost/2).Eval([]byte(one), mapCtx()); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", cost/2)) {
+		t.Errorf("past the limit in one evaluation: got %v", err)
 	}
 	// Cancelled before an evaluation: the context's error.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := NewSession(ctx, 0).Load([]byte(one), mapCtx()); !errors.Is(err, context.Canceled) {
+	if _, err := NewSession(ctx, 0).Eval([]byte(one), mapCtx()); !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled: got %v, want context.Canceled", err)
 	}
 	// Cancelled during one: a comprehension stops at its next check.
@@ -601,40 +581,8 @@ func TestSession(t *testing.T) {
 	calls := 0
 	stop := cel.Function("stop", cel.Overload("stop_dyn", []*cel.Type{cel.DynType}, cel.DynType,
 		cel.UnaryBinding(func(v ref.Val) ref.Val { calls++; cancel(); return v })))
-	_, err = NewSession(ctx, 0, stop).Load([]byte("let:\n  a: ${{ values.items.map(i, stop(i)) }}\n"), M{"values": M{"items": items}})
+	_, err = NewSession(ctx, 0, stop).Eval([]byte("vars:\n  a: ${{ values.items.map(i, stop(i)) }}\n"), M{"values": M{"items": items}})
 	if !errors.Is(err, context.Canceled) || calls > interruptEvery {
 		t.Errorf("interrupted: got %v after %d of %d items", err, calls, len(items))
-	}
-}
-
-// TestCondition: a condition outside a document, one expression whose value
-// is true or false, within the session.
-func TestCondition(t *testing.T) {
-	s := NewSession(context.Background(), 0)
-	for cond, want := range map[string]bool{"${{ values.on }}": true, "${{ values.extra.x > 2.0 }}": false} {
-		if got, err := s.Condition(cond, mapCtx()); err != nil || got != want {
-			t.Errorf("%s: got %v (%v), want %v", cond, got, err, want)
-		}
-	}
-	for cond, want := range map[string]string{
-		"${{ values.extra.k }}":     `${{ values.extra.k }}: must be true or false, got "v"`,
-		"${{ null }}":               "${{ null }}: must be true or false, got null",
-		"${{ values.items }}":       "${{ values.items }}: must be true or false, got a list",
-		"${{ values.nope }}":        "${{ values.nope }}: no such key: nope",
-		"true":                      `takes one expression, ${{ <condition> }}, got "true"`,
-		"${{ values.on }} and more": `takes one expression, ${{ <condition> }}, got "${{ values.on }} and more"`,
-	} {
-		if _, err := s.Condition(cond, mapCtx()); err == nil || err.Error() != want {
-			t.Errorf("%s: got %v, want %q", cond, err, want)
-		}
-	}
-	s = NewSession(context.Background(), math.MaxUint64)
-	if _, err := s.Condition("${{ values.items.all(i, i.n > 0.0) }}", mapCtx()); err != nil || s.used == 0 {
-		t.Errorf("cost: %v, %d counted", err, s.used)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := NewSession(ctx, 0).Condition("${{ values.on }}", mapCtx()); !errors.Is(err, context.Canceled) {
-		t.Errorf("cancelled: got %v, want context.Canceled", err)
 	}
 }

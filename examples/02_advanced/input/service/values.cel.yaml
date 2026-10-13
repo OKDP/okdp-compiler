@@ -1,7 +1,7 @@
 # The values of the app chart, from the instance's parameters (values), the
 # platform values (global.okdp, and platform, derived from them) and the
 # release. ${{ ... }} is a CEL expression.
-let:
+vars:
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   # The database parameter: the resolved connection, or {} when not set.
   db: '${{ type(values.database) == map ? values.database : {} }}'
@@ -10,14 +10,14 @@ let:
   audit: '${{ type(values.audit) == map ? values.audit : {} }}'
   auditSecret: ${{ audit.?secretRef.name.orValue('') }}
 
-# A rule fails the compile with its message when its condition holds.
+# A message fails the compile when its condition holds.
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
-    message: "webapp: replicas > 1 needs a database, sessions are stored there"
+    $value: "webapp: replicas > 1 needs a database, sessions are stored there"
   - $if: ${{ db.size() > 0 && dbSecret == '' }}
-    message: 'webapp: database connection "${{ db.okdp.ref }}" has no secretRef, the password cannot be read'
+    $value: 'webapp: database connection "${{ db.okdp.ref }}" has no secretRef, the password cannot be read'
   - $if: ${{ audit.size() > 0 && auditSecret == '' }}
-    message: 'webapp: audit connection "${{ audit.okdp.ref }}" has no secretRef, the password cannot be read'
+    $value: 'webapp: audit connection "${{ audit.okdp.ref }}" has no secretRef, the password cannot be read'
 
 output:
   app:

@@ -15,14 +15,6 @@ import (
 // M: a values map (YAML or JSON object).
 type M = map[string]any
 
-// YAML11Bools: the plain scalars YAML 1.1 (Helm's sigs.k8s.io/yaml) reads
-// as booleans and YAML 1.2 (yaml.v3) as strings, true and false aside, each
-// with the boolean it is.
-var YAML11Bools = map[string]bool{
-	"y": true, "Y": true, "yes": true, "Yes": true, "YES": true, "on": true, "On": true, "ON": true,
-	"n": false, "N": false, "no": false, "No": false, "NO": false, "off": false, "Off": false, "OFF": false,
-}
-
 // Normalize: v, a value a caller built in memory, as Helm values are after
 // their JSON round trip, in a copy: written by encoding/json/v2, map keys
 // sorted, and read back. At any depth a map is an M, a slice or an array a

@@ -3,8 +3,8 @@
 # reads: deps (in the changelog, a patch release) for the library's go.mod;
 # ci (hidden) for golangci-lint (tools/go.mod) and the workflows' actions.
 # A cel-go update leaves the CEL extensions at their pinned versions
-# (pinnedLibraries in internal/compile/cel.go): a version is raised by hand,
-# with the docs' CEL libraries table (TestLibraryVersions).
+# (Session.env in internal/compile/cel.go): a version is raised by hand,
+# with the docs' CEL libraries table.
 version: 2
 updates:
   - package-ecosystem: gomod

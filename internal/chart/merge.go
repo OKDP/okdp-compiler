@@ -20,28 +20,25 @@ import (
 )
 
 // FinalValues: the final values of each chart key of the mapping's output
-// (keyValues), which must be a key of specs and hold a map, and the
+// (keyValues), which must be a key of specs (its values a map:
+// mapping.schema.json says so), and the
 // upstream chart that renders them (its source). In key order: the first
 // error is the same from one compile to the next. The schema violations of
 // every key are reported together.
 //
 // cache: the chart cache, the upstream charts' defaults and schemas, each in
-// its repository's directory (newChartCache). pkg: the package (its
+// its repository's directory (chartCache). pkg: the package (its
 // defaults files). values: the instance's merged values (their global, and
 // their upstream values).
 func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
-	charts := newChartCache(cache)
+	charts := &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
 	for _, key := range slices.Sorted(maps.Keys(output)) {
 		if _, ok := specs[key]; !ok {
 			return nil, nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", key)
 		}
-		computed, ok := output[key].(M)
-		if !ok {
-			return nil, nil, fmt.Errorf("mapping output %q: must be a map of the chart's values, got %s", key, value.Short(output[key]))
-		}
-		f, bad, err := keyValues(charts, pkg, key, specs[key], computed, values)
+		f, bad, err := keyValues(charts, pkg, key, specs[key], value.AsMap(output[key]), values)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
@@ -106,7 +103,7 @@ func keyValues(charts *chartCache, files fs.FS, key string, spec Spec, computed 
 // defaults without their nulls: what Helm renders the chart with is the same
 // as with the layers given as -f files. No argument is changed.
 func layered(defaults M, layers ...M) M {
-	out := cleanNil(value.AsMap(value.Copy(defaults)))
+	out := coalesceValues(defaults, nil)
 	for _, l := range layers {
 		out = value.Merge(out, l)
 	}

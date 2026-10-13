@@ -102,20 +102,9 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	specs := Specs{"": {Source: src, Upstream: true}, "app": {Source: src}}
 	values := M{"upstream": M{"": M{"a": 1.0}}}
-	cache := fstest.MapFS{"x/app-1.0.0/values.yaml": {Data: []byte("b: 2\n")}}
+	cache := fstest.MapFS{"x/app-1.0.0/app/values.yaml": {Data: []byte("b: 2\n")}}
 	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, values)
 	if err != nil || out["app"]["a"] != nil {
 		t.Errorf("app: %v %#v", err, out["app"])
-	}
-}
-
-// TestFinalValuesShape: the values of a chart of the output must be a map,
-// whoever builds the output.
-func TestFinalValuesShape(t *testing.T) {
-	for _, v := range []any{nil, "x", []any{}} {
-		_, _, err := FinalValues(fstest.MapFS{}, fstest.MapFS{}, Specs{"app": {}}, M{"app": v}, M{})
-		if err == nil || !strings.HasPrefix(err.Error(), `mapping output "app": must be a map of the chart's values, got `) {
-			t.Errorf("%#v: got %v", v, err)
-		}
 	}
 }

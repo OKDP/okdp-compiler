@@ -1,17 +1,4 @@
 {
-  "documents": {
-    "a": 1,
-    "b": [
-      2
-    ],
-    "c": 1,
-    "global": {},
-    "m": {
-      "true": 2,
-      "x": 1,
-      "z": 3
-    }
-  },
   "globals": {
     "global": {
       "image": {

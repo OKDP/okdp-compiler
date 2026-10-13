@@ -8,24 +8,22 @@
 //
 // Values: reading YAML as Helm values, and Helm's merge rules.
 //
-// Values files are read as Helm 4 reads them (loader.LoadValues): each YAML
-// document of the file decoded by sigs.k8s.io/yaml (YAML 1.1: y, yes, on...
-// are booleans; through JSON: string keys, every number a float64), the
-// documents merged in order. The layers are merged as Helm merges its -f
-// files (MergeMaps), and coalesced over the chart defaults as Helm does
-// (CoalesceValues): a null deletes a default, and is kept where there is no
-// default. Helm's own functions are not imported: helm.sh/helm/v4 pulls in
-// client-go and a newer Go and Kubernetes than the programs that embed
-// this package, for about a hundred lines. They are reproduced from
-// helm v4.3.0 (pkg/chart/common/util/coalesce.go, pkg/chart/v2/loader), and
-// testdata/helm holds what `helm template` computes on each case.
+// Values files are read as Helm 3 reads them: the first YAML document of the
+// file decoded by sigs.k8s.io/yaml (YAML 1.1: y, yes, on... are booleans;
+// through JSON: string keys, every number a float64); Helm 4 merges the
+// later documents, which are ignored. The layers are merged as Helm merges
+// its -f files (MergeMaps), and coalesced over the chart defaults as Helm
+// does (CoalesceValues): a null deletes a default, and is kept where there
+// is no default. Helm's own functions are not imported: helm.sh/helm/v4
+// pulls in client-go and a newer Go and Kubernetes than the programs that
+// embed this package, for about a hundred lines. They are reproduced from
+// helm v4.3.0 (pkg/chart/common/util/coalesce.go), and testdata/helm holds
+// what `helm template` computes on each case.
 package chart
 
 import (
-	"bytes"
 	"fmt"
 	"io/fs"
-	"strings"
 
 	sigsyaml "sigs.k8s.io/yaml"
 
@@ -41,65 +39,22 @@ func readValues(fsys fs.FS, name string) (M, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := loadValues(b)
+	v, err := ParseValues(b)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return v, nil
 }
 
-// ParseValues: a values file as Helm reads it (YAML 1.1, every document of
-// the file merged in order, string keys, every number a float64), for
-// Inputs.Values.
-func ParseValues(b []byte) (map[string]any, error) {
-	return loadValues(b)
-}
-
-// loadValues: Helm's loader.LoadValues. The file is split into documents
-// as Kubernetes' YAMLReader does (a line starting with "---", followed by
-// nothing but a comment), each document is decoded by sigs.k8s.io/yaml into
-// a map, and the documents are merged with MergeMaps.
-func loadValues(b []byte) (M, error) {
-	docs, err := splitDocuments(b)
-	if err != nil {
-		return nil, fmt.Errorf("error reading yaml document: %w", err)
+// ParseValues: a values file as Helm 3 reads it: its first YAML document,
+// decoded by sigs.k8s.io/yaml (YAML 1.1, string keys, every number a
+// float64), for Inputs.Values.
+func ParseValues(b []byte) (M, error) {
+	v := M{}
+	if err := sigsyaml.Unmarshal(b, &v); err != nil {
+		return nil, fmt.Errorf("cannot unmarshal yaml document: %w", err)
 	}
-	values := M{}
-	for _, doc := range docs {
-		current := M{}
-		if err := sigsyaml.Unmarshal(doc, &current); err != nil {
-			return nil, fmt.Errorf("cannot unmarshal yaml document: %w", err)
-		}
-		values = value.Merge(values, current)
-	}
-	return values, nil
-}
-
-// splitDocuments: the documents of a YAML stream, as Kubernetes'
-// YAMLReader reads them (lines end with "\n", a "\r\n" is read as "\n").
-func splitDocuments(b []byte) ([][]byte, error) {
-	var docs [][]byte
-	var buf bytes.Buffer
-	text := strings.TrimSuffix(string(b), "\n")
-	for line := range strings.SplitSeq(text, "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		if rest, ok := strings.CutPrefix(line, "---"); ok {
-			if t := strings.TrimSpace(rest); t != "" && t[0] != '#' {
-				return nil, fmt.Errorf("invalid Yaml document separator: %s", t)
-			}
-			if buf.Len() > 0 {
-				docs = append(docs, bytes.Clone(buf.Bytes()))
-				buf.Reset()
-			}
-			continue
-		}
-		buf.WriteString(line)
-		buf.WriteByte('\n')
-	}
-	if buf.Len() > 0 {
-		docs = append(docs, buf.Bytes())
-	}
-	return docs, nil
+	return v, nil
 }
 
 // coalesceValues: Helm's CoalesceValues for a chart without dependencies,
@@ -109,72 +64,25 @@ func splitDocuments(b []byte) ([][]byte, error) {
 // When a value and its default are not both maps, the value wins. Neither
 // argument is changed.
 func coalesceValues(defaults, user M) M {
-	v := value.AsMap(value.Copy(user))
-	for key, val := range value.AsMap(value.Copy(defaults)) {
-		uv, ok := v[key]
-		switch {
-		case ok && uv == nil:
-			delete(v, key)
-		case ok:
-			dest, isMap := uv.(M)
-			src, srcMap := val.(M)
-			if isMap && srcMap {
-				cleanNil(src)
-				coalesceTables(dest, src)
-			}
-		case val == nil:
-		default:
-			if sub, isMap := val.(M); isMap {
-				cleanNil(sub)
-			}
-			v[key] = val
-		}
-	}
-	return v
+	return coalesce(defaults, user, true)
 }
 
-// coalesceTables: Helm's coalesceTablesFullKey (merge false): dst (the
-// user's) wins over src (the defaults); a null in dst deletes a non-null
-// default and is kept otherwise.
-func coalesceTables(dst, src M) M {
-	nonNil := map[string]bool{}
-	for k, v := range src {
-		if v != nil {
-			nonNil[k] = true
+// coalesce: coalesceValues at any depth, Helm's coalesceTablesFullKey and
+// cleanNilValues below the top level (top false), where a user null over a
+// null default stays.
+func coalesce(defaults, user M, top bool) M {
+	out := value.AsMap(value.Copy(user))
+	for k, d := range defaults {
+		u, ok := out[k]
+		um, uMap := u.(M)
+		switch dm, dMap := d.(M); {
+		case dMap && (!ok || uMap):
+			out[k] = coalesce(dm, um, false)
+		case !ok && d != nil:
+			out[k] = value.Copy(d)
+		case ok && u == nil && (d != nil || top):
+			delete(out, k)
 		}
 	}
-	for k, v := range dst {
-		if v == nil {
-			src[k] = nil
-		}
-	}
-	for k, val := range src {
-		dv, ok := dst[k]
-		switch {
-		case ok && dv == nil && nonNil[k]:
-			delete(dst, k)
-		case !ok:
-			dst[k] = val
-		default:
-			sm, srcMap := val.(M)
-			dm, dstMap := dv.(M)
-			if srcMap && dstMap {
-				coalesceTables(dm, sm)
-			}
-		}
-	}
-	return dst
-}
-
-// cleanNil: Helm's cleanNilValues, every null of m removed, at any depth of
-// maps (not in lists).
-func cleanNil(m M) M {
-	for k, v := range m {
-		if v == nil {
-			delete(m, k)
-		} else if sub, ok := v.(M); ok {
-			cleanNil(sub)
-		}
-	}
-	return m
+	return out
 }

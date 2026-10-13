@@ -1,0 +1,92 @@
+# The values of the oidc-dcr chart (oci://quay.io/adaltas/oidc-dcr,
+# >= 0.5.0, camelCase values) for one OAuth client of a mapping's
+# oidcClients section, in dcr mode (global.okdp.oidc.clientProvisioning:
+# dcr): the chart's Job, a pre-install/pre-upgrade hook, registers the client
+# by anonymous dynamic client registration and writes it to a Secret.
+#
+# Embedded in the compiler and evaluated once per client (oidc.go) by the
+# mapping engine: ${{ CEL }} expressions, the same directives and
+# functions.
+#
+# Inputs, besides the mapping's context (release, platform, global, values,
+# service, labels, selectorLabels):
+#   client  the client as the mapping wrote it, checked by the compiler:
+#           grantTypes, and the optional redirectUris, scope, clientName,
+#           public, request, secret, caSecret; name is
+#           "" for the service's main client
+#   names   what the compiler names: chart (the chart key: oidc-dcr, or
+#           <name>-oidc-dcr), fullname (the objects, the service account and
+#           the role: <release>-oidc-dcr or <release>-<name>-oidc-dcr, cut to
+#           63 characters), secret (the Secret the Job writes:
+#           client.secret, or oidcClientSecret(name))
+# The platform's settings come from platform.oidc.dcr, defaults applied
+# (registrationUrl, ttlSeconds, backoffLimit, caSecret, waitTtlSeconds, image).
+vars:
+  dcr: ${{ platform.oidc.dcr }}
+  # A public client (a browser application) has no secret.
+  public: ${{ client.?public.orValue(false) }}
+  # The requested scope: the client's, or the platform's. openid is left out:
+  # it is not a Keycloak client scope, Keycloak refuses it.
+  scope: >-
+    ${{ first([client.?scope.orValue(''), platform.oidc.scope]).split(' ').filter(s, s != 'openid').join(' ') }}
+  issuer: ${{ str(platform.oidc.?issuerUri.orValue('')) }}
+
+values:
+  registrationUrl: ${{ dcr.registrationUrl }}
+  # The registration request: the snake_case fields of the OIDC Dynamic
+  # Client Registration standard. The client's request overrides any field.
+  request:
+    $merge: ${{ client.?request.orValue({}) }}
+    application_type: web
+    # <release>-<namespace>, and -<name> for a named client.
+    client_name: >-
+      ${{ first([client.?clientName.orValue(''),
+                 release.name + '-' + release.namespace + (client.name == '' ? '' : '-' + client.name)]) }}
+    grant_types: ${{ client.grantTypes }}
+    scope: ${{ scope }}
+    redirect_uris:
+      $if: ${{ client.?redirectUris.orValue([]).size() > 0 }}
+      $value: ${{ client.redirectUris }}
+    token_endpoint_auth_method:
+      $if: ${{ public }}
+      $value: none
+  # The CA bundle the Job trusts: the client's, or the platform's.
+  tls:
+    insecure: false
+    certificate: ${{ first([client.?caSecret.orValue(''), dcr.caSecret]) }}
+  # The Secret the Job writes: the client id, and its secret unless public.
+  secret: ${{ names.secret }}
+  mapping:
+    useDefault: false
+    keyMapping:
+      client_id: .client_id
+      client_secret:
+        $if: ${{ !public }}
+        $value: .client_secret
+  # The objects are named after the release, one set per client, and carry
+  # the instance label.
+  fullnameOverride: ${{ names.fullname }}
+  security:
+    serviceAccount: ${{ names.fullname }}
+    role: ${{ names.fullname }}
+  commonLabels:
+    app.kubernetes.io/instance: ${{ release.name }}
+  # The finished Job is kept ttlSeconds (its logs), and retried backoffLimit
+  # times.
+  ttlSeconds: ${{ dcr.ttlSeconds }}
+  backoffLimit: ${{ dcr.backoffLimit }}
+  # With an issuer, the Job waits for the provider's discovery document (one
+  # trailing "/" of issuerUri dropped), for up to waitTtlSeconds when the
+  # platform sets it (the chart's 600 s otherwise).
+  waitForProvider:
+    $if: ${{ issuer != '' }}
+    discoveryUrl: >-
+      ${{ (issuer.endsWith('/') ? issuer.substring(0, issuer.size() - 1) : issuer) + '/.well-known/openid-configuration' }}
+    ttlSeconds:
+      $if: ${{ has(dcr.waitTtlSeconds) }}
+      $value: ${{ dcr.waitTtlSeconds }}
+  # The platform's image of the Jobs (registry, repository, tag, pullPolicy,
+  # pullSecrets), when it sets one.
+  image:
+    $if: ${{ has(dcr.image) }}
+    $value: ${{ dcr.image }}

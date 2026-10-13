@@ -1,4 +1,4 @@
-// Tree: a document compiled once, when it is loaded (Session.Load), into a
+// Tree: a document compiled once, when it is loaded (Session.Eval), into a
 // tree of typed nodes: each map by the directives that give its form, each
 // string scanned, each expression compiled in the environment of the names
 // in scope at its place. Building the tree is the check of the language: a
@@ -98,13 +98,13 @@ func (o one) items(s *Session, scope M) ([]any, error) {
 	return []any{v}, nil
 }
 
-// spread: a list item {$spread: ${{ <list> }}}: the items of the list,
-// none when the value is not a list.
-type spread struct{ e *expr }
+// spread: a list item {$spread: <list>}: the items of the list, none when
+// the value is not a list.
+type spread struct{ n node }
 
 // items: the list's items.
 func (sp spread) items(s *Session, scope M) ([]any, error) {
-	v, err := s.run(sp.e, scope)
+	v, _, err := sp.n.eval(s, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (sp spread) items(s *Session, scope M) ([]any, error) {
 // $merge, when it has one, merged over them.
 type plainMap struct {
 	fields []field
-	merge  *expr // nil: no $merge
+	merge  node // nil: no $merge
 }
 
 // field: a key of a plain map: as read (key, which errors name) and as
@@ -139,7 +139,7 @@ func (m plainMap) eval(s *Session, scope M) (any, bool, error) {
 		}
 	}
 	if m.merge != nil {
-		v, err := s.run(m.merge, scope)
+		v, _, err := m.merge.eval(s, scope)
 		if err != nil {
 			return nil, false, err
 		}
@@ -152,13 +152,13 @@ func (m plainMap) eval(s *Session, scope M) (any, bool, error) {
 // its condition is true (as Helm tests a condition); else its $else (a map
 // with $value), or left out without one.
 type ifNode struct {
-	cond      *expr
+	cond      node
 	then, els node // els nil: no $else
 }
 
 // eval: the condition, then the branch it takes.
 func (n ifNode) eval(s *Session, scope M) (any, bool, error) {
-	c, err := s.run(n.cond, scope)
+	c, _, err := n.cond.eval(s, scope)
 	switch {
 	case err != nil:
 		return nil, false, err
@@ -171,16 +171,16 @@ func (n ifNode) eval(s *Session, scope M) (any, bool, error) {
 }
 
 // loop: a $for: its variable, the list it runs over (the expression after
-// " in "), the spec as written (for messages), and the $let bindings of
+// " in "), the spec as written (for messages), and the $vars bindings of
 // each element.
 type loop struct {
 	name, spec string
 	list       node
-	lets       bindings
+	vars       bindings
 }
 
 // run: f on the scope of each element of the list, in order: scope, the
-// variable bound to the element, then the $let bindings. A null list has
+// variable bound to the element, then the $vars bindings. A null list has
 // no element; a value that is not a list fails.
 func (l *loop) run(s *Session, scope M, f func(local M) error) error {
 	v, _, err := l.list.eval(s, scope)
@@ -193,7 +193,7 @@ func (l *loop) run(s *Session, scope M, f func(local M) error) error {
 	}
 	for _, x := range elems {
 		local := with(scope, l.name, x)
-		if err := l.lets.bind(s, local); err != nil {
+		if err := l.vars.bind(s, local); err != nil {
 			return err
 		}
 		if err := f(local); err != nil {
@@ -264,12 +264,12 @@ func (it *forItem) items(s *Session, scope M) ([]any, error) {
 	return out, err
 }
 
-// bindings: let or $let: named nodes, each built with the names before it
+// bindings: vars or $vars: named nodes, each built with the names before it
 // in scope.
 type bindings []binding
 
 // binding: a name, as written, and its node; at, its path in errors
-// ("let <name>", "$let <name>").
+// ("vars <name>", "$vars <name>").
 type binding struct {
 	name, at string
 	n        node
@@ -288,11 +288,11 @@ func (bs bindings) bind(s *Session, scope M) error {
 	return nil
 }
 
-// tree: a document built: its let bindings, its errors section, and its
+// tree: a document built: its vars bindings, its errors section, and its
 // sections by name, those it has.
 type tree struct {
-	let      bindings
-	errors   list
+	vars     bindings
+	errors   node
 	sections map[string]node
 }
 
@@ -324,30 +324,21 @@ type builder struct{ s *Session }
 
 // document: the tree of the document top, where the names of its context
 // (sorted) are in scope, its sections those named: every top-level key is
-// let, errors or one of them. let, a map of bindings, is built first, its
-// names then in scope of errors, a list, and of the sections, in order.
+// vars, errors or one of them. vars, a map of bindings, is built first, its
+// names then in scope of errors and of the sections, in order.
 func (b builder) document(top *omap, names, sections []string) (*tree, error) {
 	for _, f := range top.fields() {
-		switch k := f.key; {
-		case !literal(k):
-			return nil, atKey(k, fmt.Errorf("not a directive of the top level: its keys are sections"))
-		case k != "let" && k != "errors" && !slices.Contains(sections, k):
-			return nil, atKey(k, fmt.Errorf("unknown section (allowed: %s)", strings.Join(append([]string{"let", "errors"}, sections...), ", ")))
+		if k := f.key; k != "vars" && k != "errors" && !slices.Contains(sections, k) {
+			return nil, atKey(k, fmt.Errorf("unknown section (allowed: %s)", strings.Join(append([]string{"vars", "errors"}, sections...), ", ")))
 		}
 	}
 	t := &tree{sections: map[string]node{}}
 	var err error
-	if t.let, names, err = b.bindings("let", top.get("let"), names); err != nil {
+	if t.vars, names, err = b.bindings("vars", top.get("vars"), names); err != nil {
 		return nil, err
 	}
-	switch v := top.get("errors").(type) {
-	case nil:
-	case []any:
-		if t.errors, err = b.list(v, names); err != nil {
-			return nil, atKey("errors", err)
-		}
-	default:
-		return nil, atKey("errors", fmt.Errorf("must be a list of rules, got %s", shape(v)))
+	if t.errors, err = b.node(top.get("errors"), names); err != nil {
+		return nil, atKey("errors", err)
 	}
 	for _, k := range sections {
 		if v, ok := top.lookup(k); ok {
@@ -369,21 +360,21 @@ func (b builder) node(n any, names []string) (node, error) {
 	case []any:
 		return b.list(t, names)
 	case *omap:
-		return b.mapNode(t, inMap, names)
+		return b.mapNode(t, names)
 	}
 	return constant{n}, nil
 }
 
 // mapNode: the node of a map, in the form its directives give it: $for,
-// else $value, else plain, at the place p (a map, a list item).
-func (b builder) mapNode(m *omap, p *place, names []string) (node, error) {
+// else $value, else plain.
+func (b builder) mapNode(m *omap, names []string) (node, error) {
 	switch {
 	case has(m, "$for"):
 		return b.forMap(m, names)
 	case has(m, "$value"):
 		return b.valueMap(m, names)
 	}
-	return b.plainMap(m, p, names)
+	return b.plainMap(m, names)
 }
 
 // list: the node of a list, its items built in order; an error at the
@@ -401,20 +392,15 @@ func (b builder) list(l []any, names []string) (list, error) {
 }
 
 // item: a list item: a map with $for, or $spread, gives items; any other
-// node is one, a map in the form its directives give it in a list.
+// node is one.
 func (b builder) item(x any, names []string) (item, error) {
-	var n node
-	var err error
 	switch m, ok := x.(*omap); {
 	case ok && has(m, "$for"):
 		return b.forItem(m, names)
 	case ok && has(m, "$spread"):
 		return b.spread(m, names)
-	case ok:
-		n, err = b.mapNode(m, inItem, names)
-	default:
-		n, err = b.node(x, names)
 	}
+	n, err := b.node(x, names)
 	if err != nil {
 		return nil, err
 	}
@@ -461,13 +447,10 @@ func (b builder) compile(src string, names []string) (*expr, error) {
 	return e, nil
 }
 
-// plainMap: a map of keys at the place p (a map, a list item): its keys
-// built in order, with $if and $merge; an $else, which needs $value, fails.
-func (b builder) plainMap(m *omap, p *place, names []string) (node, error) {
-	if has(m, "$else") {
-		return nil, elseNeeds()
-	}
-	if err := p.check(m); err != nil {
+// plainMap: a map of keys, a map value or a list item: its keys built in
+// order, with $if and $merge.
+func (b builder) plainMap(m *omap, names []string) (node, error) {
+	if err := check(m, true, "$if", "$merge"); err != nil {
 		return nil, err
 	}
 	cond, err := b.cond(m, names)
@@ -476,8 +459,8 @@ func (b builder) plainMap(m *omap, p *place, names []string) (node, error) {
 	}
 	var out plainMap
 	if has(m, "$merge") {
-		if out.merge, err = b.directive(m, "$merge", "map", names); err != nil {
-			return nil, err
+		if out.merge, err = b.node(m.get("$merge"), names); err != nil {
+			return nil, under("$merge", err)
 		}
 	}
 	for _, f := range m.fields() {
@@ -494,13 +477,11 @@ func (b builder) plainMap(m *omap, p *place, names []string) (node, error) {
 }
 
 // valueMap: a map with $value: the node of $value, with $if, and the node
-// of $else, its value when the condition is not true.
+// of $else, its value when the condition is not true (without $if, $else
+// is not read).
 func (b builder) valueMap(m *omap, names []string) (node, error) {
-	if err := inValueMap.check(m); err != nil {
+	if err := check(m, false, "$if", "$value", "$else"); err != nil {
 		return nil, err
-	}
-	if has(m, "$else") && !has(m, "$if") {
-		return nil, elseNeeds()
 	}
 	cond, err := b.cond(m, names)
 	if err != nil {
@@ -510,7 +491,7 @@ func (b builder) valueMap(m *omap, names []string) (node, error) {
 	if err != nil {
 		return nil, under("$value", err)
 	}
-	if !has(m, "$else") {
+	if cond == nil || !has(m, "$else") {
 		return guard(cond, n), nil
 	}
 	els, err := b.node(m.get("$else"), names)
@@ -520,15 +501,10 @@ func (b builder) valueMap(m *omap, names []string) (node, error) {
 	return ifNode{cond, n, els}, nil
 }
 
-// elseNeeds: the error of an $else without $if and $value beside it.
-func elseNeeds() error {
-	return atKey("$else", fmt.Errorf("needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}"))
-}
-
 // forMap: a map with $for: its $key and $value built in the scope of an
 // element, with $if.
 func (b builder) forMap(m *omap, names []string) (node, error) {
-	if err := inForMap.check(m); err != nil {
+	if err := check(m, false, "$if", "$for", "$key", "$value", "$vars"); err != nil {
 		return nil, err
 	}
 	if !has(m, "$key") || !has(m, "$value") {
@@ -555,7 +531,7 @@ func (b builder) forMap(m *omap, names []string) (node, error) {
 // forItem: a list item with $for: its $each built in the scope of an
 // element.
 func (b builder) forItem(m *omap, names []string) (item, error) {
-	if err := inForItem.check(m); err != nil {
+	if err := check(m, false, "$for", "$each", "$vars"); err != nil {
 		return nil, err
 	}
 	if !has(m, "$each") {
@@ -574,18 +550,18 @@ func (b builder) forItem(m *omap, names []string) (item, error) {
 
 // spread: a list item with $spread.
 func (b builder) spread(m *omap, names []string) (item, error) {
-	if err := inSpread.check(m); err != nil {
+	if err := check(m, false, "$spread"); err != nil {
 		return nil, err
 	}
-	e, err := b.directive(m, "$spread", "list", names)
+	n, err := b.node(m.get("$spread"), names)
 	if err != nil {
-		return nil, err
+		return nil, under("$spread", err)
 	}
-	return spread{e}, nil
+	return spread{n}, nil
 }
 
 // loop: the $for of m, "<name> in <expression>": the expression built
-// where names are in scope, the $let bindings after the variable; and the
+// where names are in scope, the $vars bindings after the variable; and the
 // names in scope of an element.
 func (b builder) loop(m *omap, names []string) (loop, []string, error) {
 	spec := value.Str(m.get("$for"))
@@ -599,43 +575,33 @@ func (b builder) loop(m *omap, names []string) (loop, []string, error) {
 		return loop{}, nil, err
 	}
 	local := withName(names, l.name)
-	if l.lets, local, err = b.bindings("$let", m.get("$let"), local); err != nil {
+	if l.vars, local, err = b.bindings("$vars", m.get("$vars"), local); err != nil {
 		return loop{}, nil, err
 	}
 	return l, local, nil
 }
 
 // cond: the condition of m's $if, nil without one.
-func (b builder) cond(m *omap, names []string) (*expr, error) {
+func (b builder) cond(m *omap, names []string) (node, error) {
 	if !has(m, "$if") {
 		return nil, nil
 	}
-	return b.directive(m, "$if", "condition", names)
+	n, err := b.node(m.get("$if"), names)
+	return n, under("$if", err)
 }
 
 // guard: n, left out when cond is not true; n itself without a condition.
-func guard(cond *expr, n node) node {
+func guard(cond, n node) node {
 	if cond == nil {
 		return n
 	}
 	return ifNode{cond: cond, then: n}
 }
 
-// directive: the value of the directive d of m ($if, $merge, $spread),
-// one expression, ${{ <what> }}, compiled: a value of another form fails
-// at d, an expression that does not compile where it is evaluated, at m.
-func (b builder) directive(m *omap, d, what string, names []string) (*expr, error) {
-	src, err := expression(m.get(d), what)
-	if err != nil {
-		return nil, atKey(d, err)
-	}
-	return b.compile(src, names)
-}
-
-// bindings: a let or $let map (kind), built: its names as written, each
-// once (y and "y" are two keys, one name), none starting with $; each value
-// built with the names before it in scope. Null has none. The names in
-// scope after them are returned too.
+// bindings: a vars or $vars map (kind), built: its names as written (a name
+// bound twice, y and "y", the later wins), each value built with the names
+// before it in scope. Null has none. The names in scope after them are
+// returned too.
 func (b builder) bindings(kind string, v any, names []string) (bindings, []string, error) {
 	if v == nil {
 		return nil, names, nil
@@ -645,22 +611,14 @@ func (b builder) bindings(kind string, v any, names []string) (bindings, []strin
 		return nil, nil, atKey(kind, fmt.Errorf("must be a map of bindings, got %s", shape(v)))
 	}
 	out := make(bindings, 0, len(m.entries))
-	seen := map[string]bool{}
 	for _, e := range m.entries {
-		at := kind + " " + e.name
-		switch {
-		case strings.HasPrefix(e.name, "$"):
-			return nil, nil, atKey(at, fmt.Errorf("a binding name cannot start with $"))
-		case seen[e.name]:
-			return nil, nil, atKey(at, fmt.Errorf("bound twice"))
-		}
-		seen[e.name] = true
+		at := kind + " " + e.key
 		n, err := b.node(e.val, names)
 		if err != nil {
 			return nil, nil, atKey(at, err)
 		}
-		out = append(out, binding{e.name, at, n})
-		names = withName(names, e.name)
+		out = append(out, binding{e.key, at, n})
+		names = withName(names, e.key)
 	}
 	return out, names, nil
 }
@@ -674,40 +632,12 @@ func withName(names []string, n string) []string {
 	return slices.Insert(slices.Clip(names), i, n)
 }
 
-// place: where a map stands, in the form a directive gives it ($for,
-// $value, $spread), or plain: the keys it holds there.
-type place struct {
-	name  string   // for messages
-	keys  bool     // it holds keys
-	dirs  []string // its directives
-	holds string   // what it holds, for messages
-}
-
-// The places of a map: a plain map or list item, or one with $for,
-// $value, $spread.
-var (
-	inMap      = &place{"a map", true, []string{"$if", "$merge"}, "keys, $if, $value (with $else), $for (with $key, $value, $let) and $merge"}
-	inItem     = &place{"a list item", true, []string{"$if", "$merge"}, "keys, $if, $value (with $else), $merge, $for (with $each, $let) and $spread"}
-	inForMap   = &place{"a map with $for", false, []string{"$if", "$for", "$key", "$value", "$let"}, "$if, $for, $key, $value and $let only"}
-	inValueMap = &place{"a map with $value", false, []string{"$if", "$value", "$else"}, "$if, $value and $else only"}
-	inForItem  = &place{"a list item with $for", false, []string{"$for", "$each", "$let"}, "$for, $each and $let only"}
-	inSpread   = &place{"a list item with $spread", false, []string{"$spread"}, "$spread only"}
-)
-
-// directives: every directive of the language.
-var directives = []string{"$if", "$value", "$else", "$for", "$key", "$let", "$each", "$merge", "$spread"}
-
-// check: every key of m is one p holds: a directive of p, or a key when p
-// holds keys; another key starting with $ fails, named unknown when it is
-// no directive of the language.
-func (p *place) check(m *omap) error {
+// check: every key of m is one of the directives dirs of its form, or a
+// key when keys is set.
+func check(m *omap, keys bool, dirs ...string) error {
 	for _, f := range m.fields() {
-		switch k := f.key; {
-		case slices.Contains(p.dirs, k), p.keys && literal(k):
-		case !literal(k) && !slices.Contains(directives, k):
-			return atKey(k, fmt.Errorf("unknown directive (the key %s is written $%s)", k, k))
-		default:
-			return atKey(k, fmt.Errorf("not in %s, which holds %s", p.name, p.holds))
+		if k := f.key; (!keys || !literal(k)) && !slices.Contains(dirs, k) {
+			return atKey(k, fmt.Errorf("not allowed here (allowed: %s)", strings.Join(dirs, ", ")))
 		}
 	}
 	return nil
@@ -721,29 +651,6 @@ func literal(k string) bool { return !strings.HasPrefix(k, "$") || strings.HasPr
 func has(m *omap, k string) bool {
 	_, ok := m.index[k]
 	return ok
-}
-
-// expression: the source of v, one expression, ${{ ... }}, with nothing
-// around it (what: what it computes, for messages).
-func expression(v any, what string) (string, error) {
-	if s, ok := v.(string); ok {
-		p, err := scan(s)
-		if err != nil {
-			return "", err
-		}
-		if len(p) == 1 && p[0].expr {
-			return p[0].text, nil
-		}
-	}
-	return "", fmt.Errorf("takes one expression, ${{ <%s> }}, got %s", what, shape(v))
-}
-
-// CheckCondition: v is a condition as $if takes it, one expression,
-// ${{ <condition> }}, with nothing around it; for a condition written
-// outside a document (Session.Condition).
-func CheckCondition(v any) error {
-	_, err := expression(v, "condition")
-	return err
 }
 
 // shape: a node for a message: a map or a list by its kind, null, else the

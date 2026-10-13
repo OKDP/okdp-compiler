@@ -1,19 +1,21 @@
 # A compile: status 0, nothing printed, the example's outputs written: the
-# instance as one chart.
+# instance as one chart, and the instances it depends on.
 env OKDP_CHARTS=examples/02_advanced/input/charts OKDP_CONTRACTS=examples/02_advanced/input/contracts
-status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml -o $WORK/files
+status 0 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --context examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml -o $WORK/files
 ! stdout .
 ! stderr .
 cmp $WORK/files/Chart.yaml examples/02_advanced/output-no-dcr/Chart.yaml
 cmp $WORK/files/instance.values.yaml examples/02_advanced/output-no-dcr/instance.values.yaml
+cmp $WORK/files/okdp.dependencies.yaml examples/02_advanced/output-no-dcr/okdp.dependencies.yaml
 
-# --project: a project file between the platform's and the instance's, with
-# --mkdag; one that changes a platform value fails, nothing written.
-status 0 okdp-compile --package examples/03_full/input/service --charts examples/03_full/input/charts --contracts examples/03_full/input/contracts --release demo-workspace --namespace demo --platform examples/03_full/input/platform.yaml --project examples/03_full/input/demo.yaml -f examples/03_full/input/config.yaml -o $WORK/full --mkdag
+# --context 1:<file>: a project's file, level 1, merged after the platform's
+# (level 0, no prefix), whatever the order of the flags; one that changes a
+# value of level 0 fails, nothing written.
+status 0 okdp-compile --package examples/03_full/input/service --charts examples/03_full/input/charts --contracts examples/03_full/input/contracts --release demo-workspace --namespace demo --context 1:examples/03_full/input/demo.yaml --context examples/03_full/input/platform.yaml -f examples/03_full/input/config.yaml -o $WORK/full
 ! stdout .
 ! stderr .
 cmp $WORK/full/instance.values.yaml examples/03_full/output/instance.values.yaml
 cmp $WORK/full/okdp.dependencies.yaml examples/03_full/output/okdp.dependencies.yaml
-status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --platform examples/02_advanced/input/platform.yaml --project testdata/project/redefines-platform-connection.yaml -f examples/02_advanced/input/config.yaml -o $WORK/project
-stderr '^error: project layer 1: connections.platform-db is set by the platform \(--platform, Inputs.Platform\): a project adds values, it does not change the platform.s$'
+status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --context examples/02_advanced/input/platform.yaml --context 1:testdata/context/1/redefines-platform-connection.yaml -f examples/02_advanced/input/config.yaml -o $WORK/project
+stderr '^error: context layer 2 \(level 1\): connections.platform-db is set at level 0 \(--context, Inputs.Context\): a level adds values, it does not change a lower level.s$'
 ! exists $WORK/project

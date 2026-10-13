@@ -13,8 +13,8 @@ import (
 )
 
 // example: the example package (examples/02_advanced/input/service), and
-// the inputs of its instance over the platform values, these platform files
-// after platform.yaml.
+// the inputs of its instance over the context, these files after
+// platform.yaml, at level 0.
 func example(platform ...string) (*compiler.Definition, compiler.Inputs) {
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service"))
 	if err != nil {
@@ -23,13 +23,13 @@ func example(platform ...string) (*compiler.Definition, compiler.Inputs) {
 	in := compiler.Inputs{
 		Charts:    os.DirFS("examples/02_advanced/input/charts"),
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
-		Platform:  []map[string]any{values("examples/02_advanced/input/platform.yaml")},
+		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/platform.yaml")}},
 		Values:    []map[string]any{values("examples/02_advanced/input/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
 	for _, f := range platform {
-		in.Platform = append(in.Platform, values(f))
+		in.Context = append(in.Context, compiler.ContextLayer{Values: values(f)})
 	}
 	return def, in
 }
@@ -55,10 +55,10 @@ func values(file string) map[string]any {
 func TestConcurrentCompile(t *testing.T) {
 	def, in := example()
 	dcr := in
-	dcr.Platform = append(slices.Clip(in.Platform), values("examples/02_advanced/input/platform-dcr.yaml"))
+	dcr.Context = append(slices.Clip(in.Context), compiler.ContextLayer{Values: values("examples/02_advanced/input/platform-dcr.yaml")})
 	inputs := []compiler.Inputs{in, dcr}
 	snapshot := func() string {
-		b, err := json.Marshal([]any{def.Service, string(def.Mapping), dcr.Platform, in.Values})
+		b, err := json.Marshal([]any{def.Service, string(def.Mapping), dcr.Context, in.Values})
 		if err != nil {
 			t.Fatal(err)
 		}

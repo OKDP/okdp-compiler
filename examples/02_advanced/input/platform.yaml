@@ -1,5 +1,5 @@
-# The platform values, the same for every instance: a platform layer
-# (--platform), merged before the instance's layers.
+# The platform values, the same for every instance: a context layer of
+# level 0 (--context platform.yaml), merged before the instance's layers.
 #
 # global.okdp: the platform's settings, which an instance's layers cannot
 # change.
@@ -17,7 +17,7 @@ global:
     oidc:
       issuerUri: https://sso.okdp.example.org/realms/okdp
 
-# A platform layer may set more than global. A connection given here is one
+# A context layer may set more than global. A connection given here is one
 # every instance may reference by name. Here the instance's audit database
 connections:
   platform-db:

@@ -1,9 +1,9 @@
 # The project demo, the namespace demo: what it adds to the platform values
-# for every instance of the project, a project layer (--project,
-# Inputs.Project), merged after platform.yaml and before the instance's
-# config.yaml.
+# for every instance of the project, a context layer of level 1 (--context
+# 1:demo.yaml), merged after platform.yaml, level 0, and before the
+# instance's config.yaml.
 #
-# A project adds, it changes nothing the platform sets: a key platform.yaml
+# A level adds, it changes nothing a lower level sets: a key platform.yaml
 # sets (global.okdp.ingress.suffix, global.imageRegistry), the same value
 # included, or a connection it gives (platform-db, datalake), even by a field
 # platform.yaml leaves out, fails the compile:
@@ -11,8 +11,8 @@
 #   global: {okdp: {ingress: {suffix: demo.example.org}}}
 #   connections: {platform-db: {port: 5433}}
 #
-#   project layer 1: global.okdp.ingress.suffix is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
-#   project layer 1: connections.platform-db is set by the platform (--platform, Inputs.Platform): a project adds values, it does not change the platform's
+#   context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's
+#   context layer 2 (level 1): connections.platform-db is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's
 
 global:
   storageClass: fast-ssd               # every chart receives global

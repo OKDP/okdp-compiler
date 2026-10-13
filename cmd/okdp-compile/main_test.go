@@ -36,8 +36,8 @@ func example(dir string) options {
 		pkg:       filepath.Join(input, "service"),
 		charts:    filepath.Join(input, "charts"),
 		contracts: filepath.Join(input, "contracts"),
-		platform:  multi{filepath.Join(input, "platform.yaml")},
-		values:    multi{filepath.Join(input, "config.yaml")},
+		contexts:  []string{filepath.Join(input, "platform.yaml")},
+		values:    []string{filepath.Join(input, "config.yaml")},
 		release:   "demo-webapp",
 		namespace: "demo",
 		output:    dir,
@@ -63,31 +63,9 @@ func tree(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// TestParse: an argument that is not a flag is refused, where it would end
-// the flags and leave those after it unread.
-func TestParse(t *testing.T) {
-	for args, want := range map[string]string{
-		"-f a.yaml -f b.yaml -o out":       "",
-		"-f a.yaml -f b.yaml --output out": "",
-		"-f a.yaml b.yaml -o out":          `unexpected argument "b.yaml": every input is a flag`,
-		"-o":                               "flag needs an argument: -o",
-	} {
-		var stderr bytes.Buffer
-		o, err := parse(strings.Fields(args), &stderr)
-		switch {
-		case want == "" && (err != nil || o.output != "out" || !slices.Equal(o.values, multi{"a.yaml", "b.yaml"})):
-			t.Errorf("%s: %v %#v", args, err, o)
-		case want != "" && (err == nil || !strings.Contains(stderr.String(), want) || !strings.Contains(stderr.String(), "Usage of okdp-compile")):
-			t.Errorf("%s: got %v, want %q and the usage on stderr, got %q", args, err, want, stderr.String())
-		}
-	}
-}
-
 // TestRun: the example compiled into directories, one per output, the
 // first holding the files of a previous compile: they hold what the
-// example's outputs hold, a file no longer written removed
-// (okdp.dependencies.yaml, without --mkdag). A compile with --mkdag writes
-// okdp.dependencies.yaml.
+// example's outputs hold, the files of the previous compile overwritten.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	noDcr := filepath.Join(dir, "output-no-dcr")
@@ -108,7 +86,7 @@ func TestRun(t *testing.T) {
 	} {
 		o := example(filepath.Join(dir, c.output))
 		if c.dcr {
-			o.platform = append(o.platform, filepath.Join(input, "platform-dcr.yaml"))
+			o.contexts = append(o.contexts, filepath.Join(input, "platform-dcr.yaml"))
 		}
 		if err := run(o); err != nil {
 			t.Fatalf("%s: %v", c.output, err)
@@ -118,15 +96,6 @@ func TestRun(t *testing.T) {
 	maps.DeleteFunc(want, func(path string, _ string) bool { return strings.HasPrefix(path, "input"+string(filepath.Separator)) })
 	if got := tree(t, dir); !maps.Equal(got, want) {
 		t.Errorf("got %v, want the example's outputs: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
-	}
-	o := example(noDcr)
-	o.mkdag = true
-	if err := run(o); err != nil {
-		t.Fatal(err)
-	}
-	const deps = "- instance: demo-db\n  contract: database\n  field: database\n"
-	if b, err := os.ReadFile(filepath.Join(noDcr, "okdp.dependencies.yaml")); err != nil || string(b) != deps {
-		t.Errorf("--mkdag: got %v %q, want %q", err, b, deps)
 	}
 }
 
@@ -147,47 +116,27 @@ func TestRunErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	protected := filepath.Join("..", "..", "testdata", "protected-upstream.yaml")
+	redefines := filepath.Join("..", "..", "testdata", "context", "1", "redefines-platform-connection.yaml")
 	for name, tc := range map[string]struct {
-		set   func(o *options)
-		files []string // created first under the output directory; a directory when ending with /
-		want  string
+		set  func(o *options)
+		want string
 	}{
-		"no release":            {func(o *options) { o.release = "" }, nil, "--release is required"},
-		"no namespace":          {func(o *options) { o.namespace = "" }, nil, "--namespace is required"},
-		"no output":             {func(o *options) { o.output = "" }, nil, "--output (-o) is required"},
-		"a compile":             {func(o *options) { o.values = append(o.values, protected) }, nil, "ingress.hosts is set by the platform"},
-		"an umbrella":           {func(o *options) { o.pkg = pkg }, nil, `service.yaml: version "1.0": the version of the umbrella chart`},
-		"another file":          {nil, []string{"notes.txt"}, "notes.txt is not an output of okdp-compile"},
-		"a chart's values file": {nil, []string{"app.values.yaml"}, "app.values.yaml is not an output of okdp-compile"},
-		"an install script":     {nil, []string{"install.sh"}, "install.sh is not an output of okdp-compile"},
-		"a directory":           {nil, []string{"instance.values.yaml/"}, "instance.values.yaml is not an output of okdp-compile"},
+		"no release":   {func(o *options) { o.release = "" }, "--release is required"},
+		"no namespace": {func(o *options) { o.namespace = "" }, "--namespace is required"},
+		"no output":    {func(o *options) { o.output = "" }, "--output (-o) is required"},
+		"a compile":    {func(o *options) { o.values = append(o.values, protected) }, "ingress.hosts is set by the platform"},
+		"an umbrella":  {func(o *options) { o.pkg = pkg }, `service.yaml: version "1.0": the version of the umbrella chart`},
+		"a level":      {func(o *options) { o.contexts = append(o.contexts, "1:"+redefines) }, "context layer 2 (level 1): connections.platform-db is set at level 0"},
+		"no level":     {func(o *options) { o.contexts = append(o.contexts, "dev:x.yaml") }, "open dev:x.yaml: no such file or directory"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			o := example(dir)
-			if tc.set != nil {
-				tc.set(&o)
-			}
-			for _, f := range tc.files {
-				p := filepath.Join(dir, f)
-				if strings.HasSuffix(f, "/") {
-					if err := os.MkdirAll(p, 0o755); err != nil {
-						t.Fatal(err)
-					}
-					continue
-				}
-				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(p, nil, 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			before := tree(t, dir)
+			tc.set(&o)
 			if err := run(o); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
-			if after := tree(t, dir); !maps.Equal(after, before) {
+			if after := tree(t, dir); len(after) > 0 {
 				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
 			}
 		})

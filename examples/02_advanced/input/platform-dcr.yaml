@@ -1,5 +1,5 @@
-# A platform layer after platform.yaml (--platform platform.yaml --platform
-# platform-dcr.yaml): the OAuth clients are registered by each service
+# A context layer of level 0 after platform.yaml (--context platform.yaml
+# --context platform-dcr.yaml): the OAuth clients are registered by each service
 # (dcr), the webapp's by an oidc-dcr chart the compiler adds
 # (../output-dcr/).
 global:

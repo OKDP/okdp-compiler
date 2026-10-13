@@ -7,15 +7,16 @@ template writes `{{ if }}`, `{{ range }}`, `{{ with }}`, `merge` and
 the document at its place, never lines to indent (`toYaml | nindent` has no
 equivalent, and no use).
 
-Three kinds of document share the directives, the
+Four kinds of document share the directives, the
 [expressions](02_service_definition.md#expressions) and the
 [functions](04_functions.md):
 
 | Document | Directives |
 |---|---|
 | the mapping, `values.cel.yaml` ([service definition](02_service_definition.md#valuescelyaml)) | all |
-| the values of an OAuth client's chart, `oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
-| a conditional entry of `require` in `service.yaml` ([require](02_service_definition.md#require)) | `$if` alone, whose value must be `true` or `false` |
+| the values of an OAuth client's chart, `internal/okdp/oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
+| the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `internal/okdp/generated-secret.cel.yaml`, embedded in the compiler | all |
+| the [descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap), `internal/okdp/descriptor.cel.yaml`, embedded in the compiler | all |
 
 ## Directives
 
@@ -26,7 +27,7 @@ Three kinds of document share the directives, the
 | [`$else`](#else) | a map with `$if` and `$value` | any node | the map is this value when the condition is not true |
 | [`$for`](#for) with `$key`, `$value` | a map | `<name> in <expression>` | a map, one key per element |
 | [`$for`](#for) with `$each` | a list item | `<name> in <expression>` | items per element |
-| [`$let`](#let) | next to `$for` | a map of bindings | bindings per element |
+| [`$vars`](#vars) | next to `$for` | a map of bindings | bindings per element |
 | [`$merge`](#merge) | a map | an expression returning a map | merged over the map's keys |
 | [`$spread`](#spread) | a list item | an expression returning a list | its items, spliced in |
 
@@ -36,15 +37,15 @@ What a Helm template writes, in the mapping:
 |---|---|
 | `{{- if .Values.x }}` around a key or an item | `$if: ${{ values.x }}` in its map |
 | `{{ if c }}a{{ else }}b{{ end }}` | `{$if: "${{ c }}", $value: a, $else: b}`, or `"${{ c ? 'a' : 'b' }}"` ([`$else`](#else)) |
-| `{{- with .Values.db }}`, then `{{ .host }}` | a [`let`](02_service_definition.md#let) binding `db`, `$if: ${{ db }}`, then `${{ db.host }}` |
-| `{{- $x := ... }}` | a `let` binding, or a [`$let`](#let) binding in a `$for` |
+| `{{- with .Values.db }}`, then `{{ .host }}` | a [`vars`](02_service_definition.md#vars) binding `db`, `$if: ${{ db }}`, then `${{ db.host }}` |
+| `{{- $x := ... }}` | a `vars` binding, or a [`$vars`](#vars) binding in a `$for` |
 | `{{- range .Values.items }}` | `$for: i in values.items` with `$each` |
 | `{{- range $k, $v := .Values.env }}` | `$for` over the sorted keys, `values.env[k]` ([iterating a map](#iterating-a-map)) |
 | `{{- range $i, $e := .Values.l }}`, `until` | `$for: "i in lists.range(values.l.size())"` ([positions](#positions)) |
 | `merge`, `mergeOverwrite` | `$merge` |
 | `concat`, `append` | `${{ a + b }}`, or `$spread` |
 | `{{- toYaml .Values.x \| nindent 4 }}` | `${{ values.x }}`: a lone expression keeps its value's type |
-| `{{ include "chart.fullname" . }}` | a `let` binding, or a [host function](04_functions.md#host-functions) (`okdpFullname`) |
+| `{{ include "chart.fullname" . }}` | a `vars` binding, or a [host function](04_functions.md#host-functions) (`okdpFullname`) |
 | `{{ required "msg" .Values.x }}`, `{{ fail "msg" }}` | a rule of the [errors section](02_service_definition.md#the-errors-section) |
 | `tpl` | none: a value holding `{{` is text |
 
@@ -81,10 +82,10 @@ evaluated: the variables are dynamic
 ([context](02_service_definition.md#context)).
 
 A map is evaluated in this order: `$if`, and when it is not true, `$else`
-or nothing; then `$for` (with `$key`, `$value`, `$let`); else `$value`;
+or nothing; then `$for` (with `$key`, `$value`, `$vars`); else `$value`;
 else each key in the order written, then `$merge`. A list's items are
 evaluated in order; a list item that is a map: `$for` (with `$each`,
-`$let`); else `$spread`; else the item is evaluated as a map. The elements
+`$vars`); else `$spread`; else the item is evaluated as a map. The elements
 of a `$for` are taken in order. Expressions have no side effects: the
 order decides which error is reported, the first, and which of two
 elements giving one key to a `$for` map wins, the later.
@@ -92,19 +93,21 @@ elements giving one key to a `$for` map wins, the later.
 ### Places
 
 A key starting with `$` is a directive. Each must be one of its place, the
-place taking its form from `$for`, `$spread` or `$value`:
+place taking its form from `$for`, `$spread` or `$value`; any other,
+unknown (`$iff`) or misplaced, fails, `<where><key>: not allowed here
+(allowed: <directives of the place>)`:
 
 | Place | Holds |
 |---|---|
 | a map | keys, `$if`, `$value`, `$for`, `$merge` |
 | a list item | keys, `$if`, `$value`, `$merge`, `$for`, `$spread` |
-| a map with `$for` | `$if`, `$for`, `$key` and `$value` (required), `$let` |
-| a map with `$value` | `$if`, `$value`, `$else` (with `$if`) |
-| a list item with `$for` | `$for`, `$each` (required), `$let` |
+| a map with `$for` | `$if`, `$for`, `$key` and `$value` (required), `$vars` |
+| a map with `$value` | `$if`, `$value`, `$else` (read with `$if` only) |
+| a list item with `$for` | `$for`, `$each` (required), `$vars` |
 | a list item with `$spread` | `$spread` |
 
 The top level of a document holds its sections only: a directive there
-fails, `<key>: not a directive of the top level: its keys are sections`.
+fails, `<key>: unknown section (allowed: ...)`.
 
 A key starting with `$` is written with one more `$`, as `$${{` writes a
 literal `${{`: `$$schema: x` is the key `$schema`, `$$$x` the key `$$x`.
@@ -116,30 +119,31 @@ The names an expression may read, from the outermost:
 
 1. The context variables of the document: those of the mapping
    ([context](02_service_definition.md#context)); a client template adds
-   `client` and `names`; a `require` condition has the mapping's context
-   alone.
-2. The `let` bindings, in order, each seeing those before it.
-3. In a `$for`, its variable, then its `$let` bindings, in order. A `$for`
+   `client` and `names`, the descriptor template `instance` and
+   `outputs`; the generated Secret template has `args`, `release` and
+   `labels` alone.
+2. The `vars` bindings, in order, each seeing those before it.
+3. In a `$for`, its variable, then its `$vars` bindings, in order. A `$for`
    in its `$each`, `$key` or `$value` adds its own.
 
-A name shadows an outer one of the same name (a `let` binding a context
-variable, a `$for` variable a `let` binding) and exists only inside: past
+A name shadows an outer one of the same name (a `vars` binding a context
+variable, a `$for` variable a `vars` binding) and exists only inside: past
 the `$for`, the outer name is back. A binding is a value, computed once (a
-`let` once per compile, a `$let` once per element): nothing assigns or
+`vars` once per compile, a `$vars` once per element): nothing assigns or
 changes it. The names are known when the document is loaded: an expression
-reading a name out of its scope, a `$let` binding outside its `$for`
+reading a name out of its scope, a `$vars` binding outside its `$for`
 included, fails the load, `undeclared reference to '<name>'`.
 
 ```yaml
-let:
+vars:
   suffix: ${{ global.okdp.ingress.suffix }}
 output:
   app:
     ingress:
       hosts:
         - $for: h in values.hosts
-          $let:
-            fqdn: ${{ h }}.${{ suffix }}    # h, and the let bindings
+          $vars:
+            fqdn: ${{ h }}.${{ suffix }}    # h, and the vars bindings
           $each: {host: "${{ fqdn }}"}
       tls: ${{ fqdn }}                       # fails: undeclared reference to 'fqdn'
 ```
@@ -163,12 +167,11 @@ labels:
   tier: {$if: "${{ values.replicas > 1 }}", $value: ha}
 ```
 
-The value is one expression, `${{ <condition> }}`, tested as a Helm
-condition: null, `false`, `0`, `""`, `[]` and `{}` are false, anything else
-is true. `$if: ${{ values.extraEnv }}` holds when the map is not empty.
-Anything else fails: a literal (`$if: false`, `no`, `0`, null) or text
-around an expression (`x${{ c }}`, always true), with
-`$if: takes one expression, ${{ <condition> }}, got <value>`.
+The value, usually one expression, `${{ <condition> }}`, is evaluated as
+any node, then tested as a Helm condition: null, `false`, `0`, `""`, `[]`
+and `{}` are false, anything else is true. `$if: ${{ values.extraEnv }}`
+holds when the map is not empty. A literal is taken as it is (`$if: false`,
+`no`); text around an expression is text, always true (`x${{ c }}`).
 
 On a map, `$if` guards everything else (`$for`, `$value`, `$merge`, the
 keys): none is evaluated when the condition is not true, and the map is
@@ -180,16 +183,12 @@ left out, or is the value of its [`$else`](#else). A map left out is:
 | a list item | the item is left out |
 | an `$each` | no item for this element |
 | a `$value` of a `$for` map | the key, with a null value |
-| a `let` or `$let` value | the binding is null |
+| a `vars` or `$vars` value | the binding is null |
 | a section (`output`, ...) | the section is empty |
 
 On a list item carrying `$for` or `$spread`, `$if` fails: put the
 condition in the expression (`$for: "s in (oidcOn ? [platform.oidcClientSecret] : [])"`,
 `$spread: ${{ cond ? list : [] }}`).
-
-In a `require` entry, the value must be `true` or `false`: a null or a
-list fails rather than tested as a Helm condition
-([require](02_service_definition.md#require)).
 
 ## `$value`
 
@@ -221,11 +220,11 @@ directives included. Both branches are compiled when the document is
 loaded; only the one taken is evaluated, the other may read what exists
 only when it is taken.
 
-`$else` needs `$if` and `$value` beside it:
-`$else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}`.
-On a map of keys, the keys would be the first branch and `$else` the
-second, at one level: write the keys under `$value`. A map with `$for`
-holds no `$else`, as any key out of its place.
+`$else` needs `$if` and `$value` beside it: without `$if`, it is not read
+(`{$value: 1, $else: 2}` is 1). On a map of keys, the keys would be the
+first branch and `$else` the second, at one level: an `$else` there fails,
+as any key out of its place: write the keys under `$value`. A map with
+`$for` holds no `$else` either.
 
 There is no `$elif`: an `$else` holding a map with `$if` chains a third
 branch. An `$else` left out by its own `$if` leaves the map out.
@@ -241,7 +240,7 @@ size:
 ```
 
 A choice among several values is clearer as a CEL map:
-`resources: ${{ sizes[values.size] }}`, `sizes` a `let` binding. A choice
+`resources: ${{ sizes[values.size] }}`, `sizes` a `vars` binding. A choice
 between two scalars computed in expressions is a `?:`, which evaluates the
 branch it takes only, as `$if` does:
 `pullPolicy: "${{ values.image.tag == 'latest' ? 'Always' : 'IfNotPresent' }}"`.
@@ -259,8 +258,8 @@ list, or null (no element). Errors:
 (a map is not a list: [iterating a map](#iterating-a-map)).
 
 For each element, in order, the scope is the enclosing one, the variable
-bound to the element, then the [`$let`](#let) bindings. The variable and
-the bindings shadow the context and `let`, and exist only inside the
+bound to the element, then the [`$vars`](#vars) bindings. The variable and
+the bindings shadow the context and `vars`, and exist only inside the
 `$for` ([scope](#scope)).
 
 In a map, `$key` and `$value` give one entry per element:
@@ -268,14 +267,14 @@ In a map, `$key` and `$value` give one entry per element:
 ```yaml
 dags:
   gitSync:
-    $for: e in gitSync                    # a let binding: [{k, v}, ...]
+    $for: e in gitSync                    # a vars binding: [{k, v}, ...]
     $key: ${{ e.k }}
     $value: ${{ e.v }}
 ```
 
 `$key` is converted to text ([`str`](04_functions.md#str-and-first)); a
 later element with the same key wins. No element gives `{}`. The map holds
-`$if`, `$for`, `$key`, `$value` and `$let` only: any other key, `$merge`
+`$if`, `$for`, `$key`, `$value` and `$vars` only: any other key, `$merge`
 included, fails; without `$key` or `$value`:
 `$for: in a map, needs $key and $value`.
 
@@ -294,7 +293,7 @@ env:
 A list value of `$each` (a YAML list, or an expression returning a list) is
 spliced: its items are added; any other value is one item; a value left out
 by `$if` adds nothing. A list as one item is nested: `$each: [[a, b]]`.
-The item holds `$for`, `$each` and `$let` only: any other key, `$if`
+The item holds `$for`, `$each` and `$vars` only: any other key, `$if`
 included, fails; without `$each`: `$for: in a list item, needs $each`.
 
 A `$for` over a list of zero or one element gives a group of items on one
@@ -348,12 +347,12 @@ grants:
         $each: {user: "${{ u }}", database: "${{ db }}"}   # every user, every database
 ```
 
-## `$let`
+## `$vars`
 
 ```yaml
 pyspark:
   - $for: name in pysparkNames
-    $let:
+    $vars:
       matches: ${{ sparkConnections.filter(c, c.?name.orValue('') == name) }}
       c: "${{ matches.size() > 0 ? matches[matches.size() - 1] : {} }}"
       prefix: ${{ name.replace('-', '_').upperAscii() }}
@@ -366,10 +365,10 @@ With `$for` only: a map of bindings, evaluated for each element, in order,
 after the variable; each sees the enclosing scope, the variable and the
 bindings before it. Values are nodes (directives included; left out by
 `$if`, null). Names are taken as written, as in
-[let](02_service_definition.md#let): each once (`$let <name>: bound twice`),
-none starting with `$`. A `$let` without `$for` fails, and so does one that
-is neither a map nor null: `$let: must be a map of bindings, got <value>`.
-An error is reported as `$let <name>: <error>`.
+[vars](02_service_definition.md#vars): of a name bound twice, the later
+binding wins. A `$vars` without `$for` fails, and so does one that
+is neither a map nor null: `$vars: must be a map of bindings, got <value>`.
+An error is reported as `$vars <name>: <error>`.
 
 ## `$merge`
 
@@ -387,8 +386,8 @@ returns is merged over them, wherever `$merge` is written, first or last:
 maps merge key by key at any depth; lists, scalars and nulls replace
 (Helm's merge of `-f` files). A null merged over a key sets it to null,
 which Helm then gives its meaning ([nulls](01_inputs_outputs.md#nulls)).
-`$merge` takes one expression: a literal YAML map fails. A value that is
-not a map (null included) merges nothing.
+`$merge` takes any node, usually one expression; a literal YAML map merges
+as it is. A value that is not a map (null included) merges nothing.
 
 ```yaml
 # values.config: {a: {b: 2, l: [2]}}
@@ -401,7 +400,7 @@ Defaults under a user's map: write the defaults as keys and `$merge` the
 user's map, as above. A map has one `$merge` (a second `$merge` key
 replaces the first, as any key given twice): two computed maps are not
 merged in one place. A map with `$for` or `$value` holds no `$merge`:
-compute that map in `let`, and `$merge` it into a map of keys.
+compute that map in `vars`, and `$merge` it into a map of keys.
 
 ## `$spread`
 
@@ -447,9 +446,9 @@ What the expression returns, and the items it adds:
 A value that is not a list adds nothing rather than failing: null is the
 usual "nothing to add", but a string or a map is likely a mistake
 (`$spread: ${{ values.extraEnv }}` of a map adds no item; spread its
-entries: [iterating a map](#iterating-a-map)). `$spread` takes one
-expression: a literal YAML list fails, write its items in the list. The
-item holds `$spread` only: any other key, `$if` included, fails; the
+entries: [iterating a map](#iterating-a-map)). `$spread` takes any node,
+usually one expression; a literal YAML list is spliced as it is (rather
+write its items in the list). The item holds `$spread` only: any other key, `$if` included, fails; the
 condition goes in the expression:
 
 ```yaml
@@ -491,8 +490,8 @@ The `$each` of a `$for` splices a list the same way, once per element
 ## Cost and cancellation
 
 Every expression the directives evaluate counts in the compile's CEL cost,
-an expression in a `$for` once per element: past
-`Inputs.CostLimit`, the compile fails with
+an expression in a `$for` once per element: once the total passes
+`Inputs.CostLimit` (checked after each expression), the compile fails with
 `the expressions of the compile exceed its CEL cost limit (<n>)`
 ([usage](../01_usage.md)). The context of `Compile` is checked
 before each expression and every 100 iterations of a comprehension. The
@@ -507,13 +506,10 @@ branch; the first mistake fails:
 
 | Mistake | Error |
 |---|---|
-| an unknown directive (`$iff`, `$Each`, `$elif`) | `<where><key>: unknown directive (the key <key> is written $<key>)` |
-| `$else` without `$if` and `$value` | `<where>$else: needs $if and $value: {$if: ${{ <condition> }}, $value: <value>, $else: <value>}` |
-| a key out of its place | `<where><key>: not in <place>, which holds <keys>` |
+| an unknown directive (`$iff`, `$Each`, `$elif`), a key out of its place, `$else` without `$value` | `<where><key>: not allowed here (allowed: <directives>)` |
 | `$for` without its keys | `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` |
-| `$if`, `$merge`, `$spread` not one expression | `<where>$if: takes one expression, ${{ <condition> }}, got <value>` (`<map>`, `<list>`) |
 | `$for` not `<name> in <expression>` | `<where>$for: "<spec>" is not "<name> in <expression>"` |
-| a `$let` that is not a map, a name bound twice, a name starting with `$` | `<where>$let: must be a map of bindings, got <value>`, `<where>$let <name>: bound twice`, `<where>$let <name>: a binding name cannot start with $` |
+| a `$vars` that is not a map | `<where>$vars: must be a map of bindings, got <value>` |
 | an expression that does not compile, or reads a name out of scope | `<where>${{ <expression> }}: ERROR: <input>:<line>:<column>: <message>` |
 
 Evaluation fails on the first error: an expression's

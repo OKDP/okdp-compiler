@@ -26,12 +26,7 @@ var update = flag.Bool("update", false, "rewrite the final.yaml of testdata/helm
 // values that version renders differently from their layers
 // (helm<major>-final.json), and what it renders instead of what Helm 4
 // renders (helm-final.json): by top-level key, the value.
-var helmFinalKnown = map[string]map[string]M{
-	// Helm 3 reads the first document of a values file only: the a of the
-	// first document of documents/values.yaml, which a later document
-	// deletes, is back.
-	"3": {"documents": {"a": 1.0}},
-}
+var helmFinalKnown = map[string]map[string]M{}
 
 // TestHelmValues: for each testdata/helm/values/<case>, the chart defaults
 // (values.yaml) and the -f layers (layer-*.yaml) read and coalesced as Helm

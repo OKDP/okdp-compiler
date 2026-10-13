@@ -14,8 +14,7 @@ require:                               # global.okdp.<path>, each set and not em
   - ingress.suffix
   - ingress.className
   - certificateIssuers.selfSigned.name
-  - key: oidc.issuerUri                # only when OIDC is enabled: a condition on the context
-    $if: ${{ platform.oidc.enabled }}
+  - oidc.issuerUri
 charts:
   api:
     source: &workspace {repository: https://charts.example.org, chart: workspace, version: 3.2.0}

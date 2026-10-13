@@ -13,7 +13,7 @@ import (
 // Ref: an upstream chart as its repository publishes it: what renders
 // the values of a chart key (a Flux HelmRelease, an Argo CD source), and
 // what the chart cache holds its defaults and schema under
-// (<repository>/<chart>-<version>, cacheDir).
+// (<repository>/<chart>-<version>/<chart>, cacheDir).
 type Ref struct {
 	Repository string `yaml:"repository" json:"repository"` // https://... or oci://...
 	Chart      string `yaml:"chart" json:"chart"`           // the chart's name in the repository
@@ -70,13 +70,35 @@ func (r Ref) cacheDir() string {
 	return ""
 }
 
-// pull: the commands that download the chart into its repository's
-// directory of the chart cache, created first: helm pull -d does not create
-// it.
+// pull: the command that downloads the chart and unpacks it into its entry
+// of the chart cache, <repository>/<chart>-<version>/<chart> (helm pull
+// --untar creates the directory).
 func (r Ref) pull() string {
-	to := path.Join("<chart cache>", r.cacheDir())
+	to := path.Join("<chart cache>", r.cacheDir(), r.id())
 	if strings.HasPrefix(r.Repository, "oci://") {
-		return fmt.Sprintf("mkdir -p %s && helm pull %s/%s --version %s -d %s", to, strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version, to)
+		return fmt.Sprintf("helm pull %s/%s --version %s --untar -d %s", strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version, to)
 	}
-	return fmt.Sprintf("mkdir -p %s && helm pull %s --repo %s --version %s -d %s", to, r.Chart, r.Repository, r.Version, to)
+	return fmt.Sprintf("helm pull %s --repo %s --version %s --untar -d %s", r.Chart, r.Repository, r.Version, to)
+}
+
+// dnsLabel: the characters of a DNS-1123 label: lowercase letters, digits
+// and "-", a letter or digit at each end.
+var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+
+// IsDNSLabel: s is a DNS-1123 label, as Kubernetes names a namespace:
+// lowercase letters, digits and "-", a letter or digit at each end, 63
+// characters at most.
+func IsDNSLabel(s string) bool {
+	return len(s) <= 63 && dnsLabel.MatchString(s)
+}
+
+// ReleaseMax: the longest release name Helm accepts, leaving room for the
+// suffixes of the names derived from it.
+const ReleaseMax = 53
+
+// IsRelease: name is a release name, as Helm accepts it and OKDP derives
+// object names from it (<release>-okdp, Secrets): a DNS-1123 label of
+// ReleaseMax characters at most.
+func IsRelease(name string) bool {
+	return len(name) <= ReleaseMax && dnsLabel.MatchString(name)
 }

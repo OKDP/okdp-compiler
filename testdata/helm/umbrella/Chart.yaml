@@ -2,9 +2,6 @@ apiVersion: v2
 name: umbrella
 version: 1.0.0
 dependencies:
-  - name: documents
-    repository: file://../documents
-    version: 1.0.0
   - name: globals
     repository: file://../globals
     version: 1.0.0

@@ -1,0 +1,6 @@
+# error: global.okdp.ingress.className is required. It is a context value: set it with --context (Inputs.Context)
+# A context layer of level 0, the platform's, deletes a value service.yaml requires (require).
+global:
+  okdp:
+    ingress:
+      className: null

@@ -1,7 +1,7 @@
 .PHONY: build test race cover lint fmt tidy example fixtures fuzz check help
 
 # Version printed by `okdp-compile --version`, without the leading "v" of the
-# tag; empty outside a checkout, the binary then reads its build info.
+# tag; empty outside a checkout, the binary then prints dev.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 LDFLAGS := -X main.version=$(VERSION)
 
@@ -40,7 +40,7 @@ example: ## Rewrite the outputs of examples/ from the current compiler
 
 fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
 	go test ./internal/chart -run '^TestHelmValues$$' -update
-	go test . -run '^TestHelmUmbrella$$' -update
+	go test ./internal/umbrella -run '^TestHelmUmbrella$$' -update
 	UMBRELLA_HELMS="$(UMBRELLA_HELMS)" testdata/helm/generate.sh
 
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.

@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-
-	"github.com/okdp/okdp-compiler/internal/helmfn"
 )
 
 // Specs: the charts of service.yaml, by key.
@@ -35,7 +33,7 @@ type Spec struct {
 func (s Specs) Check() error {
 	for _, key := range slices.Sorted(maps.Keys(s)) {
 		spec := s[key]
-		if !helmfn.IsDNSLabel(key) {
+		if !IsDNSLabel(key) {
 			return fmt.Errorf("service.yaml: charts: key %q: a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias", key)
 		}
 		if err := spec.Source.Check("service.yaml: charts." + key + ".source"); err != nil {

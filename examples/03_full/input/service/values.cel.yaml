@@ -5,11 +5,11 @@
 # (global.okdp, and platform, derived from them by the compiler), the release
 # and the service.
 #
-# Sections, in the order they are evaluated: let, errors, then output,
-# instance, provides, objects, oidcClients. Each sees the context and the let
+# Sections, in the order they are evaluated: vars, errors, then output,
+# instance, provides, objects, oidcClients. Each sees the context and the vars
 # bindings, none sees another section.
 
-let:
+vars:
   # Text and expressions: a string.
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   # okdpFullname(suffix): <release>-<suffix>, cut to 63 characters.
@@ -41,7 +41,7 @@ let:
   storage: '${{ type(values.storage) == map ? values.storage : {} }}'
   webhook: '${{ type(values.notifications.webhook) == map ? values.notifications.webhook : {} }}'
   catalogNames: ${{ values.catalogs.map(c, c.name).sort() }}
-  # The connections whose credentials the pods read, checked in errors: let
+  # The connections whose credentials the pods read, checked in errors: vars
   # is evaluated before errors, so the bindings read their secretRef with .?
   secured: >-
     ${{ [db, audit, storage].filter(c, c.size() > 0) + values.catalogs.map(c, c.storage)
@@ -51,8 +51,8 @@ let:
   apiPods: >-
     ${{ lists.range(int(values.replicas)).map(i, '%s-%d.%s.%s.svc'.format([api, i, api, release.namespace])) }}
 
-  # A value used twice: a binding, read by name (YAML's anchors, aliases
-  # and merge keys are refused).
+  # A value used twice: a binding, read by name (YAML's aliases are
+  # refused).
   small:
     requests: {cpu: 250m, memory: 512Mi}
     limits: {memory: 1Gi}
@@ -100,9 +100,9 @@ let:
     - $if: ${{ audit.size() > 0 }}
       name: AUDIT_DB_PASSWORD
       valueFrom: {secretKeyRef: {name: "${{ audit.?secretRef.name.orValue('') }}", key: password}}
-    # Items per element, with bindings per element ($let).
+    # Items per element, with bindings per element ($vars).
     - $for: c in values.catalogs
-      $let:
+      $vars:
         prefix: CATALOG_${{ c.name.upperAscii() }}
       $each:
         - name: ${{ prefix }}_BUCKET
@@ -150,33 +150,33 @@ let:
 errors:
   # A rule: its message when its condition holds.
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
-    message: "workspace: replicas > 1 needs a database, sessions are stored there"
+    $value: "workspace: replicas > 1 needs a database, sessions are stored there"
   # A rule per element; its message is evaluated only when the condition
   # holds, and may read what exists only then (c.properties.format).
   - $for: c in values.catalogs
     $each:
       $if: "${{ has(c.properties) && has(c.properties.format) && !(c.properties.format in ['parquet', 'orc', 'csv']) }}"
-      message: 'workspace: catalog "${{ c.name }}": format ${{ c.properties.format }} is not parquet, orc or csv'
+      $value: 'workspace: catalog "${{ c.name }}": format ${{ c.properties.format }} is not parquet, orc or csv'
   # A rule per distinct element: a connection used twice, a catalog name
   # written twice, gives one message.
   - $for: c in secured.distinct()
     $each:
       $if: ${{ !has(c.secretRef) }}
-      message: 'workspace: ${{ c.okdp.contract }} connection "${{ c.okdp.ref }}" has no secretRef, its credentials cannot be read'
+      $value: 'workspace: ${{ c.okdp.contract }} connection "${{ c.okdp.ref }}" has no secretRef, its credentials cannot be read'
   - $for: n in values.catalogs.map(c, c.name).distinct()
     $each:
       $if: ${{ !values.catalogs.exists_one(c, c.name == n) }}
-      message: 'workspace: catalog "${{ n }}" is defined twice'
+      $value: 'workspace: catalog "${{ n }}" is defined twice'
   - $for: k in values.extraEnv.transformList(k, v, k).sort()
     $each:
       $if: ${{ !k.matches('^WORKSPACE_[A-Z0-9_]+$') }}
-      message: 'workspace: extraEnv ${{ k }} must start with WORKSPACE_'
+      $value: 'workspace: extraEnv ${{ k }} must start with WORKSPACE_'
   - $if: ${{ !values.admins.all(a, a.contains('@')) }}
-    message: "workspace: admins are e-mail addresses"
+    $value: "workspace: admins are e-mail addresses"
   # The mapping sees the instance's upstream values: a rule no protect path
   # expresses.
   - $if: ${{ values.upstream.?api.?replicaCount.hasValue() }}
-    message: "workspace: set replicas, not upstream.api.replicaCount"
+    $value: "workspace: set replicas, not upstream.api.replicaCount"
 
 # The values of each chart of service.yaml; a chart left out is not rendered.
 output:
@@ -196,7 +196,7 @@ output:
         $each: {key: okdp.io/node-pool, operator: Equal, value: "${{ pool }}", effect: NoSchedule}
     env: ${{ env }}
     ingress:
-      enabled: yes                                 # YAML 1.1, as in a values.yaml: true
+      enabled: true
       className: ${{ global.okdp.ingress.className }}
       annotations:
         nginx.ingress.kubernetes.io/proxy-body-size: 64m
@@ -224,7 +224,7 @@ output:
     # A map, one key per element: $for with $key and $value.
     catalogs:
       $for: c in values.catalogs
-      $let:
+      $vars:
         cdb: '${{ type(c.?database.orValue("")) == map ? c.database : {} }}'
       $key: ${{ c.name }}
       $value:
@@ -260,7 +260,7 @@ output:
       workspace.pipeline.template: ${{ pipelineTemplate }}
     schedules:
       - $for: c in values.catalogs
-        $let:
+        $vars:
           slug: ${{ c.name.replace('_', '-') }}
         $each:
           - name: sync-${{ slug }}

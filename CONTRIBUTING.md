@@ -40,16 +40,17 @@ regenerates the Helm fixtures and fails on a diff.
 - Test data lives at the repository root, in `testdata/`, never under
   `internal/`. Keep a fixture small, the least input that shows the
   behaviour, and add a case only for what no other case covers.
-- `testdata/<case>.yaml` (instance values),
-  `testdata/platform/<case>.yaml` (platform values) and
-  `testdata/project/<case>.yaml` (project values) must fail on the
+- `testdata/<case>.yaml` (instance values) and
+  `testdata/context/<level>/<case>.yaml` (context values of that level, 0
+  the platform's) must fail on the
   example: the first line is `# error: <message>`, the message the compile
   must report (`TestExampleErrors`,
   [failure cases](docs/00_architecture.md#failure-cases)).
 - The outputs of each example of `examples/` (`01_minimal/output/`,
-  `02_advanced/output-no-dcr/` and `output-dcr/`, `03_full/output/`) are compared byte for
-  byte with a compile of its `input/` (`TestExample`). A change that changes the output runs `make example`
-  and commits the diff: it is the change's effect, reviewed as such.
+  `02_advanced/output-no-dcr/` and `output-dcr/`, `03_full/output/`) are
+  compared byte for byte with a compile of its `input/` (`TestExample`).
+  A change that changes the output runs `make example` and commits the diff:
+  it is the change's effect, reviewed as such.
 
 ## Helm fixtures
 
@@ -73,7 +74,7 @@ Helm versions): commit it with them. Review the diff of a regeneration as a
 change of Helm's behaviour; a new
 difference between Helm versions goes in `helmFinalKnown`
 (`internal/chart/helm_test.go`) for the values cases, or `umbrellaRenders`
-(`helm_umbrella_test.go`) for the umbrella, and in the spec
+(`internal/umbrella/helm_test.go`) for the umbrella, and in the spec
 ([equivalence with Helm](docs/specs/01_inputs_outputs.md#equivalence-with-helm),
 [umbrella chart](docs/specs/01_inputs_outputs.md#umbrella-chart)).
 
@@ -124,11 +125,10 @@ version before 1.0, a major one after.
 ## CEL libraries
 
 The mapping language enables CEL extensions at pinned versions
-(`pinnedLibraries` in `internal/compile/cel.go`), so that a cel-go update
+(`Session.env` in `internal/compile/cel.go`), so that a cel-go update
 does not change what a mapping may call. A cel-go update keeps them as they
 are; a version is raised on purpose, only together with the "CEL libraries"
 table of
 [docs/specs/04_functions.md](docs/specs/04_functions.md#cel-libraries)
-(the version, the functions it adds, the cel-go version), which
-`TestLibraryVersions` checks against the code, and with tests of the
-functions it adds.
+(the version, the functions it adds, the cel-go version) and with tests of
+the functions it adds.
