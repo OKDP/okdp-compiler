@@ -4,8 +4,10 @@ How to package an upstream application for OKDP: a directory of parameters,
 OKDP's defaults and a service definition, compiled by `okdp-compile`. The steps
 follow a `webapp` service, of which the example of this repository is a
 smaller version (`examples/02_advanced/input/db/catalog/webapp/1.0.0/`;
-`examples/01_minimal/input/db/catalog/hello/1.0.0/` is the smallest
-package, `examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/` one
+`examples/00_passthrough/input/db/catalog/echo/1.2.0/` is the smallest
+package, a chart and its values,
+`examples/01_minimal/input/db/catalog/hello/1.0.0/` the smallest with a
+mapping, `examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/` one
 that uses every part of the mapping language, each commented); the
 recipes and pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
@@ -60,7 +62,8 @@ examples, a package is a version directory of the catalog,
 
 Start from `Chart.yaml`, the chart as a dependency, and a plain
 `values.yaml`: the chart's values the platform sets, under the
-dependency's key, as an umbrella chart's `values.yaml` holds them. Every
+dependency's key, as an umbrella chart's `values.yaml` holds them
+(`examples/00_passthrough/input/db/catalog/echo/1.2.0/`). Every
 dependency is rendered, with its chart's defaults when the file does not
 write its key: `Chart.yaml` alone is a package
 ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).

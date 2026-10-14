@@ -122,7 +122,8 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 
 // TestExample compiles every instance of each example's tree (loadInstance)
 // and compares what it writes with the instance's outputs, byte for byte;
-// an output directory of no instance fails. 01_minimal: one chart, no
+// an output directory of no instance fails. 00_passthrough: Chart.yaml
+// and a plain values.yaml, no instance values. 01_minimal: one chart, no
 // contract. 02_advanced: dcr mode, the OAuth client's chart added.
 // 03_full: the project's project.yaml at level 1 and the instance's
 // connections.yaml at level 2, between platform.yaml and config.yaml.

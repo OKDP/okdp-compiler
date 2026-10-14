@@ -841,7 +841,15 @@ its repository's directory, the platform's oidc-dcr included); and what `okdp-co
 `output/projects/demo/instances/<instance>/`, under the release
 `<instance>` and the namespace `demo`.
 
-`examples/01_minimal/` is the smallest package: `catalog/hello/1.0.0/`
+`examples/00_passthrough/` is a package that computes nothing:
+`catalog/echo/1.2.0/` is a `Chart.yaml`, one chart, `echo` (the fictional
+`echo` chart, without an alias), and a plain `values.yaml`, the chart's
+values the platform sets, under its key. It has no `okdp.yaml` and no
+`config.schema.json`, its instance `demo-echo` no `config.yaml`: every
+instance has the chart's defaults under those of `values.yaml`, and
+publishes neither URL nor usage. No `platform.yaml`, no `contracts/`.
+
+`examples/01_minimal/` is the smallest package with a mapping: `catalog/hello/1.0.0/`
 deploys one chart, `app` (the fictional `hello` chart, aliased
 in `Chart.yaml`), whose `values.cel.yaml` sets three values from the
 parameters (`replicas`, its default in `config.schema.json`) and the

@@ -1,0 +1,5 @@
+# The instance's package: catalog/echo/1.2.0/. No config.yaml: the package
+# has no parameter to set. The directory names the release (--release
+# demo-echo), the project's directory the namespace (--namespace demo).
+service: echo
+version: 1.2.0
