@@ -114,7 +114,7 @@ okdp-compile --version
 |---|---|---|
 | `--package` | required | package directory: `Chart.yaml`, `okdp.yaml` (optional), `values.cel.yaml` or `values.yaml` (optional, one of them), `config.schema.json` (optional) at its root, and the defaults files `okdp.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
-| `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
+| `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); needed, by flag or variable, when a connection reference or a provided connection names a contract: without it, a compile that reads one fails |
 | `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:` an instance's own connections..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--context` files. It sets no `global` but the keys the parameter schema declares under it, and no `connections` ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
@@ -125,7 +125,7 @@ okdp-compile --version
 Flags take one or two dashes, and every input is a flag: an argument that
 is not one is refused, where it would end the flags and those after it be
 ignored (a values file without its `-f`). The directories of `--package`,
-`--charts` and `--contracts` must exist. Every output is built before any
+`--charts` and `--contracts`, when given, must exist. Every output is built before any
 is written: a compile or an output that fails writes nothing; an error
 while writing may leave some of the files written.
 
@@ -773,7 +773,7 @@ usage error with status 2.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--contracts (or $OKDP_CONTRACTS) is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
+| `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
 | `Inputs.Release "Demo_App": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`, `Inputs.Namespace "<name>": a namespace name, ...` | `--release` or `--namespace` is not a name Kubernetes and Helm accept | give one of that form ([inputs](specs/01_inputs_outputs.md)) |
 | `database: the database contract cannot be read: database.schema.json: no such file or directory`, `app: stat charts.example.org/app-1.8.0/app: not a directory` | a directory flag names no directory (here `--contracts`) or a file (here `--charts`): it fails at the first file read from it | fix the path |
 | `unexpected argument "instance.yaml": every input is a flag (-f before each values file)` | an argument that is not a flag, here a second values file after one `-f`; exit status 2, nothing compiled | one `-f` per values file |
@@ -798,6 +798,7 @@ usage error with status 2.
 | `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0` | a chart the compile renders (a dependency the values file leaves out, by `$if` or null, is not read) is not unpacked in its directory (`charts.example.org/app-1.8.0/app/`), even when the chart cache holds its archive (`helm pull -d` without `--untar`) or the chart elsewhere; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version> --untar -d <chart cache>/<repository>/<chart>-<version>` | run the command, `<chart cache>` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
 | `global.okdp.charts.oidcDcr.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart checked as a source is (its repository, chart and version, the same messages); its form is checked by the platform schema (below) | fix the platform values ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `database: the database contract cannot be read: database.schema.json: no such file or directory` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
+| `database: the database contract cannot be read: database.schema.json: no contracts directory: give --contracts (or $OKDP_CONTRACTS)` | a connection reference or a provided connection names a contract, and the command has no contracts directory | give `--contracts` or `$OKDP_CONTRACTS` |
 | `database: the database contract cannot be read: database.schema.json: unexpected EOF` | the contract file cannot be read, is not JSON, not an object or not a valid JSON Schema; also `provides "<name>" (<contract>): the <contract> contract cannot be read: ...` | fix the contract, or point `--contracts` at the contract schemas ([contracts](specs/01_inputs_outputs.md#location)) |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
 | `global.okdp.ingress.className is required. It is a context value: set it with --context (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | pass the platform values with `--context`; set the key ([context values](specs/01_inputs_outputs.md#context-values)) |

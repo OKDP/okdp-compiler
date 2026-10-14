@@ -1,4 +1,4 @@
-// okdp-compile --package <dir> --charts <dir> --contracts <dir>
+// okdp-compile --package <dir> --charts <dir> [--contracts <dir>]
 //
 //	--context [<level>:]context.yaml [--context ...]
 //	-f values.yaml [-f ...]
@@ -45,7 +45,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.StringVar(&o.pkg, "package", "", "package directory (Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml, config.schema.json)")
 	flag.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme (default $OKDP_CHARTS)")
-	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
+	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS), needed when a connection reference or a provided connection names a contract")
 	flag.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	flag.Func("context", "context values file, [<level>:]<file>, repeatable, before the -f files: global, global.okdp and connections among them; level 0 (the default), the platform's, first, a level's files merged in order; a level adds values, it changes none of a lower level's", func(s string) error { o.contexts = append(o.contexts, s); return nil })
@@ -75,7 +75,7 @@ func main() {
 // there when this one has no objects: Helm would render them. A compile
 // that fails writes nothing.
 func run(o options) error {
-	for _, f := range [][2]string{{"--package", o.pkg}, {"--charts (or $OKDP_CHARTS)", o.charts}, {"--contracts (or $OKDP_CONTRACTS)", o.contracts}, {"--release", o.release}, {"--namespace", o.namespace}, {"--output (-o)", o.output}} {
+	for _, f := range [][2]string{{"--package", o.pkg}, {"--charts (or $OKDP_CHARTS)", o.charts}, {"--release", o.release}, {"--namespace", o.namespace}, {"--output (-o)", o.output}} {
 		if f[1] == "" {
 			return fmt.Errorf("%s is required", f[0])
 		}
@@ -86,9 +86,12 @@ func run(o options) error {
 	}
 	in := compiler.Inputs{
 		Charts:    os.DirFS(o.charts),
-		Contracts: os.DirFS(o.contracts),
+		Contracts: noContracts{},
 		Release:   o.release,
 		Namespace: o.namespace,
+	}
+	if o.contracts != "" {
+		in.Contracts = os.DirFS(o.contracts)
 	}
 	for _, c := range o.contexts {
 		// [<level>:]<file>: a file without a level is the platform's, 0.
@@ -143,6 +146,15 @@ func run(o options) error {
 		}
 	}
 	return nil
+}
+
+// noContracts: the contracts without --contracts, none: a compile reads a
+// contract only for a connection reference or a provided connection that
+// names it, which then fails, the flag named.
+type noContracts struct{}
+
+func (noContracts) Open(name string) (fs.File, error) {
+	return nil, &fs.PathError{Op: "open", Path: name, Err: errors.New("no contracts directory: give --contracts (or $OKDP_CONTRACTS)")}
 }
 
 // readValues: a values file, as a values layer.

@@ -518,11 +518,15 @@ consume it.
 `Inputs.Contracts`: a file system with `<contract>.schema.json` at its root;
 the name of the contract is the name of the file. The binary reads a
 directory: `--contracts`, `$OKDP_CONTRACTS` by default
-([01_usage.md](../01_usage.md)). A contract is read by each reference and
-each `provides` item that names it. A file that is missing, cannot be
-read, is not JSON, not an object or not a valid JSON Schema:
+([01_usage.md](../01_usage.md)). A contract is read by each reference
+and each `provides` item that names it: a compile that reads none needs
+no contracts, an empty file system (the binary without `--contracts`).
+A file that is missing, cannot be read, is not JSON, not an object or
+not a valid JSON Schema:
 `the <contract> contract cannot be read: <contract>.schema.json: <cause>`,
-`<cause>` `no such file or directory` for a missing file.
+`<cause>` `no such file or directory` for a missing file, `no contracts
+directory: give --contracts (or $OKDP_CONTRACTS)` for the binary without
+one.
 
 ### Format
 

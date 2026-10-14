@@ -26,3 +26,13 @@ cmp $WORK/full/templates/okdp.yaml examples/03_full/output/projects/demo/instanc
 status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml --context 1:testdata/context/1/redefines-platform-connection.yaml -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o $WORK/project
 stderr '^error: context layer 2 \(level 1\): connections.platform-db is set at level 0 \(--context, Inputs.Context\): a level adds values, it does not change a lower level.s$'
 ! exists $WORK/project
+
+# A package that reads no contract: no --contracts.
+env OKDP_CONTRACTS=
+status 0 okdp-compile --package examples/00_passthrough/input/db/catalog/echo/1.2.0 --charts examples/00_passthrough/.charts --release demo-echo --namespace demo -o $WORK/passthrough
+! stdout .
+! stderr .
+cmp $WORK/passthrough/Chart.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/Chart.yaml
+cmp $WORK/passthrough/instance.values.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/instance.values.yaml
+cmp $WORK/passthrough/okdp.dependencies.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/okdp.dependencies.yaml
+cmp $WORK/passthrough/okdp.instance.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/okdp.instance.yaml
