@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKDP mapping sections",
-  "description": "The sections of a mapping (okdp.yaml, values.cel.yaml) the OKDP compiler reads, once evaluated: every compile checks them after the mapping and reports every violation at once. okdpGeneratedSecret is not a section: it is the argument of the host function, checked at each call. vars and errors are the mapping language's. A null section is not set; elsewhere, as in a chart's values, a null deletes a default and is refused where there is none.",
+  "description": "The sections of a mapping (okdp.yaml, values.cel.yaml) the OKDP compiler reads, once evaluated: every compile checks them after the mapping and reports every violation at once. okdpGeneratedSecret is not a section: it is the argument of the host function, checked at each call. vars and errors are the mapping language's. A null section is not set, a null chart of output not rendered; elsewhere, as in a chart's values, a null deletes a default and is refused where there is none.",
   "type": "object",
   "properties": {
     "output": {
       "type": "object",
-      "description": "Chart key -> the values the mapping computes for the chart, a map; a chart left out by $if is not compiled. Each key must be a dependency of Chart.yaml, checked with the final values. A package writes it as values.cel.yaml.",
-      "additionalProperties": {"type": "object"}
+      "description": "Chart key -> the values the mapping computes for the chart, a map. Every dependency of Chart.yaml is rendered, {} when the values file does not write its key, but one whose key it writes that is left out ($if) or null. Each key must be a dependency of Chart.yaml, checked with the final values. A package writes it as values.cel.yaml.",
+      "additionalProperties": {"type": ["object", "null"]}
     },
     "instance": {
       "type": "object",

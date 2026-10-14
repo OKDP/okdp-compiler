@@ -289,12 +289,14 @@ func (bs bindings) bind(s *Session, scope M) error {
 }
 
 // tree: a document built: its vars bindings, its errors section, and its
-// sections by name, those it has; and the source of each of them, by key
-// (vars, errors, a section), whose errors start with its name (at).
+// sections by name, those it has, with the keys each writes (literals);
+// and the source of each of them, by key (vars, errors, a section), whose
+// errors start with its name (at).
 type tree struct {
 	vars     bindings
 	errors   node
 	sections map[string]node
+	written  map[string][]string
 	srcs     map[string]Source
 }
 
@@ -341,10 +343,11 @@ type builder struct{ s *Session }
 // each key vars, errors, one of the sections or a key it skips, the later
 // of a key written twice winning. vars, errors and each section are given
 // by one source at most. vars, a map of bindings, is built first, its
-// names then in scope of errors and of the sections, in order.
+// names then in scope of errors and of the sections, in order, each with
+// the keys it writes (literals).
 func (b builder) document(srcs []Source, names, sections []string) (*tree, error) {
 	allowed := append([]string{"vars", "errors"}, sections...)
-	t := &tree{sections: map[string]node{}, srcs: map[string]Source{}}
+	t := &tree{sections: map[string]node{}, written: map[string][]string{}, srcs: map[string]Source{}}
 	read := map[string]any{} // vars, errors, a section: as read
 	from := map[string]int{} // its source, by position
 	for i, src := range srcs {
@@ -386,9 +389,27 @@ func (b builder) document(srcs []Source, names, sections []string) (*tree, error
 			if t.sections[k], err = b.node(v, names); err != nil {
 				return nil, t.at(k, err)
 			}
+			t.written[k] = literals(v)
 		}
 	}
 	return t, nil
+}
+
+// literals: the keys a map of the document writes as written, in order,
+// each once, $$key as $key: those of a plain map, with or without $if;
+// none for a map with $for or $value, or another value.
+func literals(v any) []string {
+	m, ok := v.(*omap)
+	if !ok || has(m, "$for") || has(m, "$value") {
+		return nil
+	}
+	var keys []string
+	for _, f := range m.fields() {
+		if k := strings.TrimPrefix(f.key, "$"); literal(f.key) && !slices.Contains(keys, k) {
+			keys = append(keys, k)
+		}
+	}
+	return keys
 }
 
 // node: the node of n, a value of the document, where names are in scope:

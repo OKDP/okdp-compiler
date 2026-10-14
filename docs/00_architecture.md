@@ -239,11 +239,13 @@ dependencies, and what the mapping sees (its `scope`):
    failing the compile (`bind`); then the
    sections:
    `output` (the values file), `instance`, `provides`, `objects` and
-   `oidcClients`, in that order. They are checked together against a
+   `oidcClients`, in that order, with the keys each writes at its top
+   level, kept or not (`Doc.Written`: those of its map as written, not
+   those its `$merge` or a `$for` gives). They are checked together against a
    schema the compiler embeds, `internal/okdp/mapping.schema.json` (`mappingSchema`, parsed once per
    process by `chart.ParseSchema`), as `global.okdp` is (`schemaValues`;
    a null section is not set, another null refused where no default
-   exists), every violation at once: the values a map of maps; `instance` a
+   exists), every violation at once: the values a map of maps or nulls; `instance` a
    map, its `url` and `usage` strings; the others
    lists, an `objects` item a whole manifest, with a `kind` and a
    `metadata.name`, a `provides` item and an OAuth client of their keys
@@ -287,10 +289,14 @@ dependencies, and what the mapping sees (its `scope`):
    of them are the values of the `okdp` chart, `{objects: [...]}`
    (`objectsChart`; [The okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
 9. **Final values** (`chart.FinalValues`, `internal/chart/merge.go`), for
-   each key of the values file, which must be a dependency of `Chart.yaml`,
-   a client chart or `okdp`, its values a map; a dependency the values file
-   leaves out (`$if`, null) is not compiled.
-   The compiler's own charts are added first, in one place (`ownChart`,
+   each dependency of `Chart.yaml` the values file does not leave out
+   (`rendered`, `internal/okdp/pipeline.go`, Helm's rule: every one, but a
+   key it writes, `Doc.Written` or a key of its values, left out by `$if`
+   or null), its computed values `{}` when the file does not write its key,
+   and for the compiler's own charts. A key of the values file must be a
+   dependency of `Chart.yaml`, null or not
+   ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
+   The compiler's own charts are then added, in one place (`ownChart`,
    `addOwnCharts`, `internal/okdp/objects.go`): the chart of each OAuth
    client (`clientCharts`, `internal/okdp/oidc.go`), its key reserved in
    every mode, compiled in `dcr` mode, and the `okdp` chart (`ObjectsChart`).
@@ -350,8 +356,8 @@ neither knows OKDP.
 |---|---|---|---|
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize` (a round trip through `encoding/json/v2`), `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
 | | `path.go` | the path of a value, as messages write it (`Key`, `Index`): plain keys joined by dots, a key that is empty or holds a special character in brackets, the form of the `protect` paths | `formatPath` and `NoTemplate` (`chart`); the parameter paths of the connections and `Dependency.Field`, the fields of the contract violations (`okdp`) |
-| `compile` | `cel.go` | the mapping language: `Session` (`NewSession`), what the evaluations of one compile share: its context, its CEL cost limit, the caller's host functions and the CEL environments built with them; documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) as ordered YAML 1.2 data, evaluated with the names of their sections: loaded, `vars` and `errors` evaluated, then the sections (`Session.Eval`, a `Doc`); an expression compiled once to a program in the CEL environment of its names, built once per set of names (`compile`), run under the session's context, its cost counted (`run`, `exec`); `toData`, a CEL value as data, as cel-go converts it to JSON | registers the functions of `functions.go`, then the caller's |
-| | `tree.go` | a document compiled into a tree of typed nodes (`builder`: text, list, plain map, `$if` with its `$else`, `$for` in a map and in a list item, `$spread`, `vars` and `$vars` bindings), which is its check: the top-level keys of each file, `vars`, `errors` and each section given by one file, each directive of its place (`check`), `$for` with its keys, every expression compiled in its scope, in every branch; the evaluation, a method per node type | `Session.Eval` |
+| `compile` | `cel.go` | the mapping language: `Session` (`NewSession`), what the evaluations of one compile share: its context, its CEL cost limit, the caller's host functions and the CEL environments built with them; documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) as ordered YAML 1.2 data, evaluated with the names of their sections: loaded, `vars` and `errors` evaluated, then the sections (`Session.Eval`, a `Doc`: their values, and the keys each writes, `Written`); an expression compiled once to a program in the CEL environment of its names, built once per set of names (`compile`), run under the session's context, its cost counted (`run`, `exec`); `toData`, a CEL value as data, as cel-go converts it to JSON | registers the functions of `functions.go`, then the caller's |
+| | `tree.go` | a document compiled into a tree of typed nodes (`builder`: text, list, plain map, `$if` with its `$else`, `$for` in a map and in a list item, `$spread`, `vars` and `$vars` bindings), which is its check: the top-level keys of each file, `vars`, `errors` and each section given by one file, the keys each section writes at its top level (`literals`), each directive of its place (`check`), `$for` with its keys, every expression compiled in its scope, in every branch; the evaluation, a method per node type | `Session.Eval` |
 | | `functions.go` | `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`), each the Go code of the Helm or sprig function; `Unary`, the binding of a host function, its argument as data (`toData`), and `Func`, a host function of one argument bound with it | `encoding/json`, `sigs.k8s.io/yaml` |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
@@ -365,7 +371,7 @@ neither knows OKDP.
 | `okdp` | `doc.go` | the package doc | |
 | | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the package's files); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` and `platformCharts` |
 | | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; `values.cel.yaml`; the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
-| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result`, `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `descriptor`, `clientCharts`, `objectsChart`, `addOwnCharts`, `chart.FinalValues` |
+| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result`, `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `descriptor`, `clientCharts`, `objectsChart`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `{{` above level 0) then the instance's, normalized (`value.Normalize`); `global` and `connections` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `descriptor.go` |
 | | `connections.go` | connection references, `Dependency`; the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |

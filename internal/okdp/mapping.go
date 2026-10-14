@@ -69,17 +69,19 @@ var mappingSchema = sync.OnceValues(func() (*chart.Schema, error) {
 // name of each the first segment of its errors), on scope, what it sees
 // (instance.scope), in the compile's session, its sections in order, then
 // checks them against mappingSchema (schemaValues): the sections, by name,
-// a null one (absent, $if) not set. output (chart -> computed values),
-// instance (url, usage), provides ([{contract, name?, values, secretRef?,
-// secret?}]), objects (OKDP's own objects, whole manifests), oidcClients
-// (checked further by oidc.go).
-func runMapping(session *compile.Session, scope M, srcs ...compile.Source) (M, error) {
+// a null one (absent, $if) not set. output (chart -> computed values, or
+// null), instance (url, usage), provides ([{contract, name?, values,
+// secretRef?, secret?}]), objects (OKDP's own objects, whole manifests),
+// oidcClients (checked further by oidc.go). written: the keys output
+// writes at its top level (compile.Doc.Written), kept or not.
+func runMapping(session *compile.Session, scope M, srcs ...compile.Source) (res M, written []string, err error) {
 	doc, err := session.Eval(scope, sections, srcs...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	maps.DeleteFunc(doc.Sections, func(_ string, v any) bool { return v == nil })
-	return schemaValues(mappingSchema, "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
+	res, err = schemaValues(mappingSchema, "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
+	return res, doc.Written["output"], err
 }
 
 // functions: the host functions OKDP adds for the instance inst, those of

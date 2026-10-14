@@ -365,7 +365,8 @@ type Source struct {
 
 // Doc: a document evaluated (Session.Eval).
 type Doc struct {
-	Sections M // the values of its sections, by name, those its sources give
+	Sections M                   // the values of its sections, by name, those its sources give
+	Written  map[string][]string // the keys each of its sections writes at its top level, by name, whether the section is kept or not ($if): those of its map as written, $$key as $key, not those its $merge or a $for gives
 }
 
 // Eval: the document of the sources srcs (a mapping, a template) on the
@@ -377,10 +378,10 @@ type Doc struct {
 // source skips failing, as vars, errors or a section two sources give; then
 // its vars bindings evaluated in order, then its errors section, every
 // message collected before failing; then its sections, in order, by name,
-// those it has. The bindings of vars are seen by every source. An error
-// starts with the name of its source, then its path, under the section
-// (okdp.yaml: objects[1]: ...) but in a source that is the section
-// (values.cel.yaml: app: env[2]: ...).
+// those it has, with the keys each writes (Doc.Written). The bindings of
+// vars are seen by every source. An error starts with the name of its
+// source, then its path, under the section (okdp.yaml: objects[1]: ...)
+// but in a source that is the section (values.cel.yaml: app: env[2]: ...).
 func (s *Session) Eval(scope M, sections []string, srcs ...Source) (*Doc, error) {
 	t, err := builder{s}.document(srcs, slices.Sorted(maps.Keys(scope)), sections)
 	if err != nil {
@@ -389,7 +390,7 @@ func (s *Session) Eval(scope M, sections []string, srcs ...Source) (*Doc, error)
 	if scope, err = t.bind(s, scope); err != nil {
 		return nil, err
 	}
-	d := &Doc{Sections: M{}}
+	d := &Doc{Sections: M{}, Written: t.written}
 	for _, k := range sections {
 		if n, ok := t.sections[k]; ok {
 			if d.Sections[k], _, err = n.eval(s, scope); err != nil {

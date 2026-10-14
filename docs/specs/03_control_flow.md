@@ -191,7 +191,7 @@ left out, or is the value of its [`$else`](#else). A map left out is:
 | an `$each` | no item for this element |
 | a `$value` of a `$for` map | the key, with a null value |
 | a `vars` or `$vars` value | the binding is null |
-| a section (`instance`, ..., the values file) | the section is empty |
+| a section (`instance`, ..., the values file) | the section is empty; the dependencies the values file writes are left out ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
 
 On a list item carrying `$for` or `$spread`, `$if` fails: put the
 condition in the expression (`$for: "s in (oidcOn ? [platform.oidcClientSecret] : [])"`,

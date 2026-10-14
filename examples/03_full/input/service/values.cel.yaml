@@ -1,6 +1,6 @@
 # The values of each dependency of Chart.yaml, by key, the charts' values
-# the mapping computes: they see the bindings of okdp.yaml (vars). A
-# dependency left out is not rendered.
+# the mapping computes: they see the bindings of okdp.yaml (vars). Every
+# dependency is rendered, but one whose key is left out ($if) or null.
 api:
   fullnameOverride: ${{ api }}
   mode: server

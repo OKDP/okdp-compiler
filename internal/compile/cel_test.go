@@ -480,6 +480,41 @@ func TestSources(t *testing.T) {
 	}
 }
 
+// TestWritten: the keys a section writes at its top level, as written,
+// whether it is kept or not: neither its directives nor the keys its
+// $merge or a $for gives.
+func TestWritten(t *testing.T) {
+	values := func(src string) Source { return Source{Name: "values.cel.yaml", Section: "output", Data: []byte(src)} }
+	for name, tc := range map[string]struct {
+		src  Source
+		want []string
+	}{
+		"keys":          {values("a: 1\n$$b: 2\nc: {$if: '${{ false }}'}\na: 3\n"), []string{"a", "$b", "c"}},
+		"left out":      {values("$if: ${{ false }}\na: 1\n$merge: \"${{ {'m': 1} }}\"\n"), []string{"a"}},
+		"$for":          {values("{$for: i in values.items, $key: '${{ i.name }}', $value: 1}\n"), nil},
+		"$value":        {values("{$value: {a: 1}}\n"), nil},
+		"an expression": {values("\"${{ {'a': 1} }}\"\n"), nil},
+		"in a mapping":  {mapping("output: {a: 1}\n"), []string{"a"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d, err := NewSession(context.Background(), 0).Eval(mapCtx(), []string{"output"}, tc.src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := d.Written["output"]; !ok || !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+	d, err := NewSession(context.Background(), 0).Eval(mapCtx(), []string{"output"}, mapping("vars: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.Written["output"]; ok {
+		t.Errorf("a section no source gives: got %#v", d.Written)
+	}
+}
+
 // TestSourceErrors: an error of a document read from several files starts
 // with the name of the file, parse errors included, then its path, without
 // the section in a file that is the section; vars, errors and each section

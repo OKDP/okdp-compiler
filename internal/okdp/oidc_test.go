@@ -244,7 +244,7 @@ func TestDcrModes(t *testing.T) {
 		}
 		ctx := dcrCtx()
 		value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = tc.dcr
-		res, err := runMapping(newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
+		res, _, err := runMapping(newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
 		if err != nil {
 			t.Fatal(err)
 		}

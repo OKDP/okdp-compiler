@@ -362,6 +362,83 @@ func TestCompileSchemas(t *testing.T) {
 	}
 }
 
+// TestRendered: every dependency of Chart.yaml is rendered, with {} as
+// computed values when the values file does not write its key, but one
+// whose key it writes that is left out ($if, a section left out whole) or
+// null; a key of a top-level $merge or $for is written when it gives it.
+func TestRendered(t *testing.T) {
+	d := *def
+	d.Chart.Dependencies = []chart.Dependency{appDep, {Name: "app", Alias: "canary", Repository: appSource.Repository, Version: appSource.Version}}
+	d.Package.Upstream = chart.Upstream{All: true}
+	in := inputs(M{"replicas": 2, "upstream": M{"app": M{"labels": M{"team": "a"}}}})
+	for name, tc := range map[string]struct {
+		values string   // values.cel.yaml, none when ""
+		want   []string // the charts rendered
+	}{
+		"not written":      {"canary: {replicaCount: 3}\n", []string{"app", "canary", "okdp"}},
+		"no values file":   {"", []string{"app", "canary", "okdp"}},
+		"$if false":        {"app: {$if: '${{ values.replicas > 5 }}'}\n", []string{"canary", "okdp"}},
+		"null":             {"app: ~\n", []string{"canary", "okdp"}},
+		"null expression":  {"app: '${{ null }}'\ncanary: {}\n", []string{"canary", "okdp"}},
+		"section left out": {"$if: ${{ values.replicas > 5 }}\napp: {}\n", []string{"canary", "okdp"}},
+		"$merge":           {"$merge: \"${{ {'app': null} }}\"\n", []string{"canary", "okdp"}},
+		"$for":             {"{$for: \"k in ['canary']\", $key: '${{ k }}', $value: '${{ null }}'}\n", []string{"app", "okdp"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := d
+			d.Values = nil
+			if tc.values != "" {
+				d.Values = []byte(tc.values)
+			}
+			res, err := Compile(context.Background(), &d, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Sorted(maps.Keys(res.Values)); !slices.Equal(got, tc.want) {
+				t.Errorf("rendered: got %v, want %v", got, tc.want)
+			}
+			if app, ok := res.Values["app"]; ok && (app["replicaCount"] != float64(1) || value.Dig(app, "image.tag") != "4.5" || value.Dig(app, "labels.team") != "a") {
+				t.Errorf("app: its chart's defaults, OKDP's and its upstream values: %#v", app)
+			}
+		})
+	}
+	// A key that is not a dependency fails, null or not.
+	for _, src := range []string{"x: {}\n", "x: ~\n"} {
+		d.Values = []byte(src)
+		if _, err := Compile(context.Background(), &d, in); err == nil || err.Error() != "values.cel.yaml: x: not a dependency of Chart.yaml" {
+			t.Errorf("%q: got %v", src, err)
+		}
+	}
+}
+
+// TestChartAlone: a package that is Chart.yaml alone compiles, every
+// dependency rendered with its chart's defaults.
+func TestChartAlone(t *testing.T) {
+	d, err := LoadDefinition(fstest.MapFS{"Chart.yaml": {Data: []byte(`
+apiVersion: v2
+name: demo
+version: 1.0.0
+dependencies:
+  - {name: app, repository: https://charts.example.org, version: 1.0.0}
+  - {name: app, alias: canary, repository: https://charts.example.org, version: 1.0.0}
+`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Compile(context.Background(), d, inputs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := slices.Sorted(maps.Keys(res.Values)); !slices.Equal(got, []string{"app", "canary", "okdp"}) {
+		t.Errorf("rendered: got %v", got)
+	}
+	for _, k := range []string{"app", "canary"} {
+		if v := res.Values[k]; v["replicaCount"] != float64(1) || value.Dig(v, "image.tag") != "latest" || !reflect.DeepEqual(v["labels"], M{}) {
+			t.Errorf("%s: its chart's defaults: %#v", k, v)
+		}
+	}
+}
+
 // TestCompileWithoutSchema: a package without config.schema.json compiles
 // with the empty schema: no defaults, any parameter, connections and the
 // upstream values of any key accepted; an instance sets no key of global.
@@ -437,8 +514,8 @@ objects:
 	if got := names(value.AsList(res.Values["okdp"]["objects"])); !slices.Equal(got, all) {
 		t.Errorf("okdp chart objects: got %v, want %v", got, all)
 	}
-	// A mapping that outputs no chart: the okdp chart all the same.
-	d.Okdp, d.Values = []byte("instance: {url: https://x}\n"), nil
+	// A mapping that renders no dependency: the okdp chart all the same.
+	d.Okdp, d.Values = []byte("instance: {url: https://x}\n"), []byte("app: ~\n")
 	if res, err = Compile(context.Background(), &d, inputs()); err != nil || !slices.Equal(slices.Sorted(maps.Keys(res.Values)), []string{"okdp"}) {
 		t.Errorf("no output: %v %v", err, res)
 	}
@@ -451,6 +528,7 @@ objects:
 	}{
 		"not an object": {"objects: [{metadata: {name: x}}]\n", "", nil, nil, "- at '/objects/0': missing property 'kind'"},
 		"in values":     {"", "okdp: {}\n", nil, nil, "values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it"},
+		"okdp null":     {"", "okdp: ~\n", nil, nil, "values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it"},
 		"in Chart.yaml": {"", "", []chart.Dependency{appDep, okdpDep}, nil, "Chart.yaml: dependencies[1] (okdp): the chart of OKDP's own objects is added by the compiler: remove it"},
 		"null charts":   {"", "", nil, M{"global": M{"okdp": M{"charts": nil}}}, "- at '/global/okdp/charts': got null, want object"},
 		"a range":       {"", "", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}, `global.okdp.charts.objects.version "1.x": a pinned chart version`},

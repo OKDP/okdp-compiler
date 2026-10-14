@@ -68,7 +68,7 @@ func eval(s *compile.Session, expr string, scope M) (any, error) {
 // TestMappingSections: vars in order, output, instance and provides, read
 // from okdp.yaml, its package keys skipped, and values.cel.yaml.
 func TestMappingSections(t *testing.T) {
-	res, err := runMapping(newSession(mapCtx()), mapCtx(), mapping(`
+	res, _, err := runMapping(newSession(mapCtx()), mapCtx(), mapping(`
 roles: [web]
 require: [a.b]
 upstream: {x: {protect: [a]}}
@@ -99,7 +99,7 @@ provides:
 // TestMappingFunctions: OKDP's host functions beside the language's, next
 // to a vars binding named fullname (the function is okdpFullname).
 func TestMappingFunctions(t *testing.T) {
-	res, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
+	res, _, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
 x:
   name: ${{ fullname }}
   okdp: ${{ okdpFullname('app') }}
@@ -126,7 +126,7 @@ x:
   selector: ${{ okdpSelectorLabels('db') }}
   loop: [{$for: "service in ['a']", $vars: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
 `
-	res, err := runMapping(newSession(ctx), ctx, mapping("", src)...)
+	res, _, err := runMapping(newSession(ctx), ctx, mapping("", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ x:
 		t.Errorf("$for and $vars shadow service and selectorLabels: %#v", x["loop"])
 	}
 	// A mapping's own labels binding wins over the context's.
-	res, err = runMapping(newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
+	res, _, err = runMapping(newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,21 +158,25 @@ x:
 	}
 }
 
-// TestMappingNulls: a null section is empty; a null chart of output, a null
-// key of a client, are refused by their types.
+// TestMappingNulls: a null section is empty; a null chart of output is
+// kept, which Compile leaves out, with the keys output writes; a null key of
+// a client is refused by its type.
 func TestMappingNulls(t *testing.T) {
-	res, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "z: {}\n")...)
+	res, written, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "{x: '${{ null }}', web: ~, z: {}}\n")...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (M{"z": M{}}); !reflect.DeepEqual(res["output"], want) {
+	if want := (M{"x": nil, "web": nil, "z": M{}}); !reflect.DeepEqual(res["output"], want) {
 		t.Errorf("output: got %#v, want %#v", res["output"], want)
+	}
+	if want := []string{"x", "web", "z"}; !reflect.DeepEqual(written, want) {
+		t.Errorf("written: got %#v, want %#v", written, want)
 	}
 	if res["instance"] != nil || res["provides"] != nil || res["objects"] != nil {
 		t.Errorf("sections: %#v", res)
 	}
-	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/oidcClients/0/scope': got null, want string\n- at '/output': validation failed\n  - at '/output/web': got null, want object\n  - at '/output/x': got null, want object"
-	if _, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("oidcClients: [{grantTypes: [a], scope: ~}]\n", "{x: '${{ null }}', web: ~, z: {}}\n")...); err == nil || err.Error() != want {
+	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/oidcClients/0/scope': got null, want string"
+	if _, _, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("oidcClients: [{grantTypes: [a], scope: ~}]\n", "")...); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
@@ -185,7 +189,7 @@ func TestMappingErrors(t *testing.T) {
 		"function error":         {"", "x: {v: '${{ okdpGeneratedSecret({}) }}'}\n", "values.cel.yaml: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
 		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "", "okdp.yaml: provides[0]: values: ${{ nope }}:"},
 		"output not a map":       {"", "[x]\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/output': got array, want object"},
-		"chart a scalar":         {"", "{x: {}, web: 'on'}\n", "- at '/output/web': got string, want object"},
+		"chart a scalar":         {"", "{x: {}, web: 'on'}\n", "- at '/output/web': got string, want null or object"},
 		"instance not a map":     {"instance: [https://x]\n", "", "- at '/instance': got array, want object"},
 		"url not a string":       {"instance: {url: 8080, usage: ~}\n", "", "- at '/instance/url': got number, want string"},
 		"provides not a list":    {"provides: {contract: http}\n", "", "- at '/provides': got object, want array"},
@@ -199,7 +203,7 @@ func TestMappingErrors(t *testing.T) {
 		"output in okdp.yaml":    {"output: {}\n", "{}\n", "values.cel.yaml: output: okdp.yaml gives it too"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := runMapping(newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
+			_, _, err := runMapping(newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}

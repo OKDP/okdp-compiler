@@ -119,9 +119,11 @@ dependency's `name` as `Chart`
 
 Two dependencies of one chart, each with its alias, are two renders of
 it, each with its own values (polaris-admin's bootstrap and principals
-phases). A dependency is rendered when the values file gives its key
-values: one it leaves out (absent, `$if`) is not rendered, and the chart
-cache need not hold its chart ([values.cel.yaml](#valuescelyaml)).
+phases). Every dependency is rendered, as Helm renders a chart's
+dependencies, unless the values file leaves it out: a key it writes that
+is left out by `$if` or null. A dependency left out is not rendered, and
+the chart cache need not hold its chart
+([rendered dependencies](#rendered-dependencies)).
 
 `condition`, `tags`, `enabled` and `import-values`, Helm's means of
 choosing what renders and of passing values between charts, fail: the
@@ -339,23 +341,49 @@ It is a section of the mapping, the whole file: evaluated after `vars` and
 ([evaluation order](#evaluation-order)). Its top level is the values, not
 sections: `vars` or `errors` there is a dependency key.
 
-- The file is a map, and the values of a dependency a map too, checked as
-  the mapping's sections are, under `/output`
-  (`- at '/output/<key>': got string, want object`): a scalar, a list or a
-  null is refused, not compiled as the chart's defaults alone; `$if`
-  leaves the dependency out.
-- Every key must be a dependency's key:
+- The file is a map, and the values of a dependency a map or null, checked
+  as the mapping's sections are, under `/output`
+  (`- at '/output/<key>': got string, want null or object`): a scalar or a
+  list is refused, not compiled as the chart's defaults alone.
+- Every key must be a dependency's key, null or not:
   `values.cel.yaml: <key>: not a dependency of Chart.yaml`. A key may not be
   the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
   `okdp`: `values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it`
   ([the okdp chart](#the-okdp-chart)).
-- A dependency the file leaves out (absent, dropped by `$if`) is not
-  rendered: no `Result.Values` entry, no dependency of the umbrella. Without
-  the file, or empty, no dependency is rendered; the compiler's own charts
-  are.
 - An error of the file starts with `values.cel.yaml: `, then the path from
   the dependency's key (`values.cel.yaml: app: env[2]: value: `:
   [compile errors](#compile-errors)).
+
+### Rendered dependencies
+
+Helm's rule: every dependency of `Chart.yaml` is rendered, unless the
+values file leaves it out. A dependency is left out when the file writes
+its key at its top level and the key is left out by `$if`
+(`{$if: false, ...}`, or the whole file under a top-level `$if` false) or
+null (`backup: ~`, `backup: ${{ null }}`). It has no `Result.Values`
+entry and no dependency of the umbrella, and the chart cache need not
+hold its chart.
+
+- A dependency the file does not write is rendered with `{}` as its
+  computed values: its chart's defaults, its OKDP defaults (`defaults`)
+  and the instance's upstream values still apply
+  ([merge precedence](01_inputs_outputs.md#merge-precedence)).
+- A key a top-level `$merge` or `$for` gives is written only when it is
+  in the result: a null one there leaves its dependency out, and a
+  dependency it does not give is rendered. To leave a dependency out,
+  write its key.
+- Without the file, or empty, every dependency is rendered.
+- The compiler's own charts, the OAuth clients' in `dcr` mode and `okdp`,
+  are added after ([the okdp chart](#the-okdp-chart),
+  [oidcClients](#oidcclients)).
+
+```yaml
+gateway: {}                                     # rendered: its defaults, OKDP's, the upstream values
+metrics:
+  $if: ${{ values.metrics.enabled }}            # left out when false
+backup: ~                                       # left out
+# api, not written: rendered, with {} as its computed values
+```
 
 ## Example
 
@@ -508,18 +536,20 @@ refused, what each means in its `description`. It is the package authors'
 reference. Absent or null (left out by `$if`, a null expression), a
 section is empty. Below it, a null is read as in a chart's values: it
 deletes a default the schema gives, and is refused by the type of a key
-that has none (`- at '/output/app': got null, want object`); leave a key
-out with `$if`. A value of another shape fails the compile rather than
-read as empty: a values file that is a list, `[app]`, would otherwise
-render no chart. Every violation
-is reported at once, sorted by path, in Helm's words, as those of the
+that has none (`- at '/instance/url': got null, want string`); leave a
+key out with `$if`. A dependency null in the values file is left out
+([rendered dependencies](#rendered-dependencies)). A value of another
+shape fails the compile rather than read as empty: a values file that is
+a list, `[app]`, would otherwise render every dependency with its
+defaults alone. Every violation is reported at once, sorted by path, in
+Helm's words, as those of the
 [parameters](01_inputs_outputs.md#schema-check):
 
 ```text
 the mapping's sections don't meet the specifications of mapping.schema.json:
 - at '/instance/url': got number, want string
 - at '/oidcClients/0': missing property 'grantTypes'
-- at '/output/app': got string, want object
+- at '/output/app': got string, want null or object
 ```
 
 Invalid YAML fails with the parser's error, after the file's name

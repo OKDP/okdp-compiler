@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"slices"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/compile"
@@ -109,7 +110,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	// 5. Mapping.
-	res, err := runMapping(session, inst.scope, def.sources()...)
+	res, written, err := runMapping(session, inst.scope, def.sources()...)
 	if err != nil {
 		return nil, err
 	}
@@ -131,13 +132,15 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}
-	// 9. Final values, first the compiler's own charts: the chart of each
-	// OAuth client, compiled in dcr mode, and the okdp chart, which renders
-	// the objects unless the caller deploys them otherwise; neither
-	// Chart.yaml nor values.cel.yaml may list them. Added to the
-	// dependencies of Chart.yaml, without changing them.
+	// 9. Final values, first the dependencies of Chart.yaml the umbrella
+	// renders (rendered): all but those the values file leaves out. Then
+	// the compiler's own charts: the chart of each OAuth client, compiled in
+	// dcr mode, and the okdp chart, which renders the objects unless the
+	// caller deploys them otherwise; neither Chart.yaml nor values.cel.yaml
+	// may list them. Added to the dependencies of Chart.yaml, without
+	// changing them.
+	output := rendered(svc.Charts, written, value.AsMap(res["output"]))
 	ownCharts := append(clientCharts(clients, dcrValues, dcrSource), objectsChart(out.Objects, objectsSource))
-	output := value.AsMap(res["output"])
 	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, output, ownCharts)
 	if err != nil {
 		return nil, err
@@ -145,11 +148,33 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Then the final values of each chart of the output, checked against
-	// its upstream chart's schema (10. Upstream schemas); charts left out by
-	// the mapping ($if) are not rendered.
+	// Then the final values of each chart rendered, checked against its
+	// upstream chart's schema (10. Upstream schemas).
 	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, specs, valuesFile, output, inst.values); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// rendered: the computed values of the dependencies the umbrella renders,
+// by key, Helm's rule: every dependency of Chart.yaml (specs), but one
+// whose key the values file writes (written, its literal keys, or a key of
+// output, as a top-level $merge or $for gives it) that is absent from
+// output ($if) or null; one it does not write computed {}: its chart's
+// defaults, OKDP's defaults and its upstream values still apply. A key of
+// output that is not a dependency is kept, null or not, for addOwnCharts
+// and chart.FinalValues to refuse. output is not changed.
+func rendered(specs chart.Specs, written []string, output M) M {
+	out := M{}
+	for k, v := range output {
+		if _, dep := specs[k]; v != nil || !dep {
+			out[k] = v
+		}
+	}
+	for k := range specs {
+		if _, ok := output[k]; !ok && !slices.Contains(written, k) {
+			out[k] = M{}
+		}
+	}
+	return out
 }

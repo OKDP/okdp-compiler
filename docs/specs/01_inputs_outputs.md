@@ -62,9 +62,11 @@ files, and no other:
 else its `name`), the chart of an
 OAuth client ([OAuth client charts](#oauth-client-charts)) or `okdp`
 ([the okdp chart](#the-okdp-chart)); it names the chart's values. A
-compiled chart: a dependency the values file gives values (its key, not
-left out by `$if`, not null), the okdp chart, and in `dcr` mode the chart
-of each OAuth client. Each is rendered by an upstream chart, its source
+compiled chart: a dependency the values file does not leave out (every
+one, but a key it writes that is left out by `$if` or null:
+[rendered dependencies](02_service_definition.md#rendered-dependencies)),
+the okdp chart, and in `dcr` mode the chart of each OAuth client. Each is
+rendered by an upstream chart, its source
 ([chart index](#chart-index)); several keys may share one. The defaults file
 may be any path of the package, `<key>.defaults.yaml` by convention; a
 path out of it (`../app.yaml`) fails. The service's name and version are
@@ -1074,7 +1076,7 @@ each layer over the previous ones:
 |---|---|---|
 | 1 | upstream defaults | `values.yaml` of the key's source, from the [chart cache](#chart-cache), its `null` values removed |
 | 2 | OKDP's defaults | the file `defaults.<key>` of `okdp.yaml` |
-| 3 | computed values | `<key>` of the values file, `values.cel.yaml` |
+| 3 | computed values | `<key>` of the values file, `values.cel.yaml`; `{}` when the file does not write the key ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
 | 4 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
 The source: the upstream chart of the key ([Chart index](#chart-index)).
@@ -1173,9 +1175,13 @@ chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
 
-`Values` and `Charts` have one entry per compiled chart: a dependency the
-values file leaves out (`$if`) is in neither, and is not to be rendered; the
-okdp chart is in both, and in `dcr` mode the chart of each OAuth client. Numbers are float64, as in Helm values.
+`Values` and `Charts` have one entry per compiled chart: every dependency
+of `Chart.yaml`, its computed values `{}` when the values file does not
+write its key; a dependency the values file leaves out (its key left out
+by `$if`, or null) is in neither, and is not to be rendered
+([rendered dependencies](02_service_definition.md#rendered-dependencies));
+the okdp chart is in both, and in `dcr` mode the chart of each OAuth
+client. Numbers are float64, as in Helm values.
 `compiler.Write(res)` gives the files the binary writes from them, file
 name -> content ([command line](../01_usage.md#command-line)): the
 [umbrella chart](#umbrella-chart); `examples/02_advanced/` holds those of
@@ -1474,8 +1480,8 @@ of `objects` as one YAML document):
 - its computed values are `objects`, a copy of `Objects`; its final values,
   those over the chart's defaults, and `global`
   ([merge precedence](#merge-precedence));
-- it is compiled whatever the values file gives, also when it gives no
-  chart;
+- it is compiled whatever the values file gives, also when it leaves
+  out every dependency;
 - the compiler owns it: no OKDP defaults, no instance upstream values;
   `Chart.yaml` may not list it (refused when it is loaded), nor the
   values file:
@@ -1521,8 +1527,11 @@ ignores:
   `description`, `type`, `keywords`, `home`, `sources`, `dependencies`,
   `maintainers`, `icon`, `appVersion`, `deprecated`, `annotations`), its
   `dependencies` replaced by one per key of `Values`, in this order:
-  1. the rendered dependencies of the package, in `Chart.yaml` order, each
-     as written (`name`, `alias` when written, `repository`, `version`);
+  1. the rendered dependencies of the package, every one the values file
+     does not leave out
+     ([rendered dependencies](02_service_definition.md#rendered-dependencies)),
+     in `Chart.yaml` order, each as written (`name`, `alias` when written,
+     `repository`, `version`);
   2. the OAuth client charts, by key: the
      [chart index](#chart-index) entry of the key (`name`, `repository`,
      `version`), and `alias: <key>` when the key is not the chart's name;

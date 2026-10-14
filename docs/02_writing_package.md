@@ -349,13 +349,18 @@ provides:                  # the connections the instance publishes
   sees the previous ones, and hides a
   [context](specs/02_service_definition.md#context) variable of the
   same name (`labels`). The values file reads the bindings too (`host`).
-- The values file holds only what is computed, by key. A `$if` on a chart,
-  or a null value, leaves it out: it is neither compiled nor rendered (the
-  webapp's `metrics`, trino's `opa-kube-mgmt` and `opal`); so is a
-  dependency the file does not write. Any other value that is not a map
-  fails the compile. `okdp` is not a key of the values file: the
-  compiler adds the okdp chart to every compile, so the descriptor always
-  reaches the cluster
+- The values file holds only what is computed, by key. Every dependency
+  is rendered, as Helm renders a chart's dependencies: one the file does
+  not write gets `{}` as its computed values, its chart's defaults, OKDP's
+  defaults and the instance's upstream values still applied. A `$if` on a
+  chart, or a null value (`backup: ~`), leaves it out: it is neither
+  compiled nor rendered (the webapp's `metrics`, trino's `opa-kube-mgmt`
+  and `opal`). A key a top-level `$merge` or `$for` gives counts only when
+  it gives it: to leave a dependency out, write its key
+  ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
+  Any other value that is not a map fails the compile. `okdp` is not a key
+  of the values file: the compiler adds the okdp chart to every compile, so
+  the descriptor always reaches the cluster
   ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
 - `errors` fails the compile with every message at once. A message is the
   `$value` of an item with its condition, `$if`; `$for` checks every
@@ -876,9 +881,6 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - **A dependency is pinned.** `version` is one version, not a range
   (`^1.2`, `1.x` fail): bump it in `Chart.yaml`, then pull the new version
   into the chart cache.
-- **A dependency left out of the values file is not rendered.** Give each
-  dependency a key in the values file, `{}` when nothing is computed for
-  it; leave one out on purpose with `$if`.
 
 ## Checklist
 
@@ -890,8 +892,6 @@ A rule no path expresses (a value that depends on a parameter) goes in
   dependency of the same chart with its alias.
 - [ ] `Chart.yaml`: `apiVersion: v2`, `name`, `version`
   `<upstream>-<okdp semver>`; `okdp.yaml`: `roles` and `dependsOn`.
-- [ ] The values file writes every dependency's key, those rendered on a
-  condition under `$if`.
 - [ ] `config.schema.json` declares `$schema`, every parameter with its
   rules, `global`, and `upstream` for exactly the charts that accept
   instance values, no `connections`; strings pasted into files refuse `{{`,
