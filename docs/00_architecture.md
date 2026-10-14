@@ -14,7 +14,7 @@ unchanged, by Helm, from the chart's own repository. A service is a package,
 a directory in git, not a chart: OKDP publishes no chart of the service.
 
 One compile is one instance. It reads the package (`LoadDefinition`:
-`Chart.yaml`, `okdp.yaml` and `values.cel.yaml`; then each compile, the
+`Chart.yaml`, `okdp.yaml` and the values file; then each compile, the
 parameters and OKDP's defaults) and, in `Inputs`, the chart cache (the
 upstream charts' defaults and schemas), the contracts, the values layers (the context's,
 `Context`, by level: the platform's at 0, a project's above; then the
@@ -27,7 +27,8 @@ each, by repository, name and version
 ([Chart index](specs/01_inputs_outputs.md#chart-index));
 `Objects`, OKDP's own objects for the cluster, rendered by the `okdp` chart
 the compiler adds; `Dependencies`, for the deployer (Flux
-`dependsOn`, Argo CD sync waves)
+`dependsOn`, Argo CD sync waves); `Warnings`, what does not fail the
+compile (a `values.yaml` that holds expressions)
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
 Callers: a Go program embeds the package at the module's root
@@ -44,7 +45,7 @@ compiler's templates, `Chart.yaml` and the package keys of `okdp.yaml`.
 
 ```mermaid
 flowchart TD
-  def["service definition<br/>Chart.yaml, okdp.yaml, values.cel.yaml"]
+  def["service definition<br/>Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml"]
   pkg["package files<br/>config.schema.json, <key>.defaults.yaml"]
   layers["values layers<br/>context by level: global; instance's"]
   contracts["contracts<br/>contract schemas"]
@@ -224,8 +225,9 @@ dependencies, and what the mapping sees (its `scope`):
    `compile.Session.Eval`, `internal/compile/cel.go` and `tree.go`). The
    mapping, two sources (`compile.Source`, its name the first segment of
    its errors), each when present: `okdp.yaml`, its package keys skipped,
-   and `values.cel.yaml`, the section `output` whole. They are parsed into
-   ordered maps (`parseDoc`), then built into one tree (`builder`), in
+   and the values file, `values.cel.yaml` or `values.yaml` (its name
+   `Definition.ValuesFile`), the section `output` whole. They are parsed
+   into ordered maps (`parseDoc`), then built into one tree (`builder`), in
    every branch: the top-level keys of `okdp.yaml`, `vars`, `errors` and
    the sections OKDP names (another key fails), its
    directives checked, each string scanned and each expression compiled
@@ -369,13 +371,13 @@ neither knows OKDP.
 | | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults read (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile, `{}` when missing (`ReadParameterSchema`); `Parameters` | `values.go`, `schema.go`; read by `okdp` (`context.go`: the parameters, the platform schema) |
 | | `merge.go` | stage 9 (`FinalValues`), the instance's upstream values, `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `okdp` (`layers.go`, `connections.go`) |
 | `okdp` | `doc.go` | the package doc | |
-| | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the package's files); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` and `platformCharts` |
-| | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; `values.cel.yaml`; the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
-| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result`, `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `descriptor`, `clientCharts`, `objectsChart`, `addOwnCharts`, `chart.FinalValues` |
+| | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the values file's name, the package's files, the warnings of its load); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` and `platformCharts` |
+| | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; the values file, `values.cel.yaml` or `values.yaml` (both refused), a `values.yaml` checked for expressions and `$`-keys, a warning (`holdsExpressions`); the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
+| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `descriptor`, `clientCharts`, `objectsChart`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `{{` above level 0) then the instance's, normalized (`value.Normalize`); `global` and `connections` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `descriptor.go` |
 | | `connections.go` | connection references, `Dependency`; the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `descriptor.go` without them, to compute the convention a provider must match |
-| | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and `values.cel.yaml`, the section `output`), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
+| | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
 | | `generated-secret.cel.yaml` | the objects of `okdpGeneratedSecret`, on arguments the mapping schema checked: a template in the mapping language, embedded (`//go:embed`, `secretTemplate`): the Password generators and the ExternalSecret, their names, the defaults applied as Helm's `default` does, the `{{` of static keys escaped, the keys of one generator name refused | evaluated by `generatedSecret` (`mapping.go`), for the CEL function and `descriptor.go` |
@@ -406,8 +408,9 @@ provider check; one OAuth client Secret name (`clientSecret`) for
 CEL session per compile for the mapping and the compiler's templates.
 `cmd/okdp-compile/main.go` is a thin caller of the public package:
 `os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
-`compiler.Compile`, then the files of `compiler.Write`: the umbrella chart
-and `okdp.dependencies.yaml` ([`--output`](01_usage.md#--output)).
+`compiler.Compile`, its warnings printed on stderr, then the files of
+`compiler.Write`: the umbrella chart and `okdp.dependencies.yaml`
+([`--output`](01_usage.md#--output)).
 Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
 parsing, and is refused), and every output is built before any is
@@ -799,7 +802,8 @@ output fails; and, with `testscript`, the scripts of
 `testdata/cli/` (`TestScript`), which run the binary as
 a process from the repository root: its exit statuses (0, 1 for an error, 2
 for a usage error), `$OKDP_CHARTS` and `$OKDP_CONTRACTS` and the flags that
-override them, what it prints on stdout and stderr, one script per concern.
+override them, what it prints on stdout and stderr, its warnings included
+(`warnings.txtar`, a package of its own), one script per concern.
 The public package is tested through the example in the root package:
 `example_test.go` holds the Go programs of README.md and
 [usage](01_usage.md#go-library) as examples, with their output, and

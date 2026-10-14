@@ -10,6 +10,7 @@ own files.
 | [`Chart.yaml`](#chartyaml) | yes | Helm's chart metadata: the service's name and version, and its upstream charts, the `dependencies`, each by its name, repository and pinned version |
 | [`okdp.yaml`](#okdpyaml) | no | OKDP's part: the platform values the service needs, catalog metadata, OKDP's defaults for each dependency, the instance upstream values each accepts; then the sections of the mapping that are not chart values: `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` |
 | [`values.cel.yaml`](#valuescelyaml) | no | the values file: the values of each dependency, by key, YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives |
+| [`values.yaml`](#valuesyaml) | no | the values file under the name of an umbrella chart's values, conventionally without expressions: a package has one of them |
 
 The mapping is the sections of `okdp.yaml` and the values file
 ([sections](#sections)): it computes the values of each chart, OKDP's own
@@ -19,11 +20,12 @@ clients.
 `LoadDefinition` reads `Chart.yaml` and checks it: a missing one fails with
 the read error (`open Chart.yaml: ...`). It then decodes the package keys of
 `okdp.yaml` and checks them against `Chart.yaml`, and reads the values
-file; either file may be absent. It does not evaluate the mapping: each
-`Compile` parses and evaluates the sections of `okdp.yaml` and the values
-file, so their errors are compile errors ([Errors](#errors)). It keeps the
-package (`Definition.Files`): each compile reads its other files,
-`config.schema.json` and the defaults files
+file, `values.cel.yaml` or `values.yaml`, not both
+([values.yaml](#valuesyaml)); either file may be absent. It does not
+evaluate the mapping: each `Compile` parses and evaluates the sections of
+`okdp.yaml` and the values file, so their errors are compile errors
+([Errors](#errors)). It keeps the package (`Definition.Files`): each
+compile reads its other files, `config.schema.json` and the defaults files
 ([package files](01_inputs_outputs.md#package-files)). `Compile` checks a
 `Definition` built in memory again: its name and version, its chart keys,
 their upstream charts and their `protect` and `append` paths.
@@ -208,7 +210,7 @@ Two keys of the former package format get a message of their own:
 
 | Key | Error |
 |---|---|
-| `output` | `okdp.yaml: output: the charts' values are in values.cel.yaml` |
+| `output` | `okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)` |
 | `name`, `version`, `charts` | `okdp.yaml: name: the name, version and charts are Chart.yaml's` (`version`, `charts` alike) |
 
 Every key of `defaults` and of `upstream` is the key of a `Chart.yaml`
@@ -384,6 +386,33 @@ metrics:
 backup: ~                                       # left out
 # api, not written: rendered, with {} as its computed values
 ```
+### values.yaml
+
+The values file may be named `values.yaml` instead, as an umbrella
+chart's values are, by dependency key: plain YAML, for a package whose
+values compute nothing. It is read exactly as `values.cel.yaml` is, by the
+same reader, in the same language, and its messages name it:
+`values.yaml: ` where this page writes `values.cel.yaml: `
+(`values.yaml: <key>: not a dependency of Chart.yaml`). A package has one
+of them: both fail when it is loaded,
+`values.yaml and values.cel.yaml: a package has one of them`.
+
+- A `values.yaml` that holds what Helm would not read as the same values,
+  an expression, a directive or an escape, compiles all the same, with a
+  warning: `LoadDefinition` gives it once (`Definition.Warnings`), each
+  compile with its result (`Result.Warnings`:
+  [outputs](01_inputs_outputs.md#outputs)), and the binary prints it on
+  stderr, `warning: <message>`, still exiting with status 0:
+  `values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml`.
+  The check reads the YAML only: a string holding `${{` (`$${{` included),
+  a key starting with `$` (`$if`, `$$key`), at any depth.
+- It is read as the mapping is, not as Helm reads a values file
+  ([YAML reading](#yaml-reading)): YAML 1.2, and an alias refused, as in
+  `values.cel.yaml`:
+  `values.yaml: line <n>: aliases are not read: bind the value in vars`.
+  Values copied from a chart that uses aliases are written out in full.
+- A `Definition` built in memory names its values file in `ValuesFile`;
+  empty, it is `values.cel.yaml`.
 
 ## Example
 
@@ -465,7 +494,7 @@ values file, a section whole.
 |---|---|---|---|
 | [`vars`](#vars) | `okdp.yaml` | map | named values, evaluated in order |
 | [`errors`](#the-errors-section) | `okdp.yaml` | list | messages, each kept by its `$if`: any message fails the compile |
-| [the values](#valuescelyaml) | `values.cel.yaml`, the whole file | map | dependency key → computed values |
+| [the values](#valuescelyaml) | `values.cel.yaml` (or [`values.yaml`](#valuesyaml)), the whole file | map | dependency key → computed values |
 | [`objects`](#objects) | `okdp.yaml` | list | OKDP's own objects, whole manifests |
 | [`instance`](#instance) | `okdp.yaml` | map | `url` and `usage` of the instance |
 | [`provides`](#provides) | `okdp.yaml` | list | the connections the instance publishes |
@@ -844,7 +873,7 @@ A tagged scalar is decoded as its tag says (`!!str 1` is the string `"1"`),
 and fails when it cannot be: `!!bool yes` fails with
 ``<file>: line <n>: yaml: cannot decode !!str `yes` as a !!bool``.
 Text that is not UTF-8 (a `!!binary`) is refused too. `<file>`: `okdp.yaml`
-or `values.cel.yaml`.
+or the values file, `values.cel.yaml` or `values.yaml`.
 
 Keys are taken as written: `on:` is the key `on`, `1.0:` the key `1.0`,
 binding names included. Of a key written twice, the later value wins. A
@@ -992,12 +1021,13 @@ item as written (`okdp.yaml: errors[1]: `).
 
 The first error stops the compile (the `errors` section and the schema
 violations excepted). An error found reading or evaluating the mapping
-starts with the name of its file, `okdp.yaml: ` or `values.cel.yaml: `, the
-messages of its `errors` section excepted; one of a template of the
-compiler, with the template's (`oidc-dcr.cel.yaml: `). The errors of
-loading the package are those of [`Chart.yaml`](#chartyaml), of its
-[dependencies](#dependencies) and of [`okdp.yaml`](#okdpyaml)'s package
-keys. An error of an expression reads
+starts with the name of its file, `okdp.yaml: ` or `values.cel.yaml: `
+(`values.yaml: `: [values.yaml](#valuesyaml)), the messages of its
+`errors` section excepted; one of a template of the compiler, with the
+template's (`oidc-dcr.cel.yaml: `). The errors of loading the package are
+those of [`Chart.yaml`](#chartyaml), of its [dependencies](#dependencies),
+of [`okdp.yaml`](#okdpyaml)'s package keys, and of both values files
+given ([values.yaml](#valuesyaml)). An error of an expression reads
 `<where>${{ <expression> }}: <cause>`, `<where>` being:
 
 | Expression in | `<where>` |
@@ -1050,7 +1080,8 @@ Other errors of the mapping:
 | `Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it` | a client's chart key, `oidc-dcr` or `<name>-oidc-dcr`, a dependency of `Chart.yaml` or a key of the values file |
 | `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
-`<file>`: `okdp.yaml` or `values.cel.yaml`. `<client>`, `<other>`:
+`<file>`: `okdp.yaml` or the values file, `values.cel.yaml` or
+`values.yaml`. `<client>`, `<other>`:
 `oidcClients[<i>]`, the client's position in the
 evaluated list, followed by ` (<name>)` for a named client.
 `<value>`: the value as Go's `%#v` prints it (`"x"`, `true`). The errors of the

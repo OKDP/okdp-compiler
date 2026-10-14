@@ -32,7 +32,7 @@ func Example() {
 	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/demo.yaml is one
 	instanceValues := values("examples/02_advanced/input/config.yaml")
 
-	def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
+	def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 	if err != nil {
 		log.Fatal(err)
 	}

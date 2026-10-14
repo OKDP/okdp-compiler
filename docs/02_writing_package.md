@@ -39,7 +39,7 @@ the package is published as a chart.
 <name>/
 ├── Chart.yaml              name, version, the upstream charts (dependencies), Helm's other metadata
 ├── okdp.yaml               required platform values, roles, dependsOn, OKDP's defaults, upstream values, protect, append; vars, errors, OAuth clients, OKDP's own objects, descriptor, provided connections
-├── values.cel.yaml         the computed values of each chart
+├── values.cel.yaml         the computed values of each chart (values.yaml when none is computed)
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
 ├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --context
@@ -51,6 +51,31 @@ the package is published as a chart.
 compiler reads the upstream charts' defaults and schemas from
 (`okdp-compile --package examples/02_advanced/input/service --charts
 examples/02_advanced/input/charts`).
+
+## Integrating a chart
+
+Start from `Chart.yaml`, the chart as a dependency, and a plain
+`values.yaml`: the chart's values the platform sets, under the
+dependency's key, as an umbrella chart's `values.yaml` holds them. Every
+dependency is rendered, with its chart's defaults when the file does not
+write its key: `Chart.yaml` alone is a package
+([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
+Add `okdp.yaml` when the service needs more: platform values, OKDP's
+defaults, instance upstream values, `vars` and OKDP's sections (the
+descriptor, connections, OAuth clients, objects); and `config.schema.json`
+when an instance has parameters. Once a value needs an expression or a
+directive (`${{ }}`, `$if`), rename the file `values.cel.yaml`: the
+compiler reads both alike, but a `values.yaml` that holds them, which
+Helm would not read as the same values, compiles with a warning
+([values.yaml](specs/02_service_definition.md#valuesyaml)):
+
+```text
+warning: values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml
+```
+
+A package has one values file: both fail. `values.yaml` is read as the
+mapping is, not as Helm reads it: YAML 1.2 (`yes` and `on` are text), and
+an alias (`*name`) refused; write such values out in full.
 
 ## Step by step
 

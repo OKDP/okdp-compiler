@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 
@@ -16,8 +17,10 @@ import (
 )
 
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
-// okdp.yaml and values.cel.yaml when it has them, checked; each compile
-// reads its other files.
+// okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
+// has them, checked; each compile reads its other files. A values.yaml
+// that holds expressions is read all the same, with a warning
+// (Definition.Warnings).
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	b, err := fs.ReadFile(fsys, chart.MetadataFile)
 	if err != nil {
@@ -36,10 +39,53 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	if _, err := def.service(); err != nil {
 		return nil, err
 	}
-	if def.Values, err = readOptional(fsys, valuesFile); err != nil {
+	cel, err := readOptional(fsys, valuesFile)
+	if err != nil {
 		return nil, err
 	}
+	plain, err := readOptional(fsys, plainValuesFile)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case cel != nil && plain != nil:
+		return nil, errors.New("values.yaml and values.cel.yaml: a package has one of them")
+	case cel != nil:
+		def.Values, def.ValuesFile = cel, valuesFile
+	case plain != nil:
+		def.Values, def.ValuesFile = plain, plainValuesFile
+		if holdsExpressions(plain) {
+			def.Warnings = append(def.Warnings, "values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml")
+		}
+	}
 	return def, nil
+}
+
+// holdsExpressions: whether the values file b, its first YAML document,
+// holds what Helm would not read as the same values: a string holding ${{
+// (an expression, a $${{), a key starting with $ (a directive, a $$key),
+// at any depth; false when it is not YAML, which the compile reports.
+func holdsExpressions(b []byte) bool {
+	var doc yaml.Node
+	return yaml.Unmarshal(b, &doc) == nil && expressionIn(&doc)
+}
+
+// expressionIn: whether the node n, or one under it, holds an expression
+// or a $-key (holdsExpressions).
+func expressionIn(n *yaml.Node) bool {
+	if n.Kind == yaml.ScalarNode {
+		return strings.Contains(n.Value, "${{")
+	}
+	for i, c := range n.Content {
+		if n.Kind == yaml.MappingNode && i%2 == 0 {
+			if strings.HasPrefix(c.Value, "$") {
+				return true
+			}
+		} else if expressionIn(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // readOptional: the file name of fsys, nil when there is none.
@@ -67,7 +113,7 @@ func decodePackage(b []byte) (Package, error) {
 		for i := 0; i < len(top); i += 2 {
 			switch k := top[i].Value; k {
 			case "output":
-				return p, errors.New("okdp.yaml: output: the charts' values are in values.cel.yaml")
+				return p, errors.New("okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)")
 			case "name", "version", "charts":
 				return p, fmt.Errorf("okdp.yaml: %s: the name, version and charts are Chart.yaml's", k)
 			}

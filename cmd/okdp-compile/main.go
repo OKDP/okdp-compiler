@@ -41,7 +41,7 @@ type options struct {
 func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.StringVar(&o.pkg, "package", "", "package directory (Chart.yaml, okdp.yaml, values.cel.yaml, config.schema.json)")
+	flag.StringVar(&o.pkg, "package", "", "package directory (Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml, config.schema.json)")
 	flag.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme (default $OKDP_CHARTS)")
 	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
 	flag.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
@@ -66,9 +66,10 @@ func main() {
 	}
 }
 
-// run: checks the options, loads the inputs and compiles, then writes the
-// files of compiler.Write into the output directory, created if needed: a
-// compile that fails writes nothing.
+// run: checks the options, loads the inputs and compiles, prints the
+// compile's warnings on stderr, then writes the files of compiler.Write
+// into the output directory, created if needed: a compile that fails
+// writes nothing.
 func run(o options) error {
 	for _, f := range [][2]string{{"--package", o.pkg}, {"--charts (or $OKDP_CHARTS)", o.charts}, {"--contracts (or $OKDP_CONTRACTS)", o.contracts}, {"--release", o.release}, {"--namespace", o.namespace}, {"--output (-o)", o.output}} {
 		if f[1] == "" {
@@ -109,6 +110,9 @@ func run(o options) error {
 	res, err := compiler.Compile(context.Background(), def, in)
 	if err != nil {
 		return err
+	}
+	for _, w := range res.Warnings {
+		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
 	files, err := compiler.Write(res)
 	if err != nil {

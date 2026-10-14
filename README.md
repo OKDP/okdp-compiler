@@ -17,7 +17,7 @@ Two ways to use it:
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
+def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 if err != nil {
 	log.Fatal(err)
 }
@@ -90,11 +90,12 @@ with the upstream charts, rendered by the platform's objects chart,
 
 The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 expressions and `$if`/`$for`/`$merge`/`$spread`/`$vars` directives: the
-values file, `values.cel.yaml` (chart -> values), and the sections of
-`okdp.yaml`, after its package keys (`require`, `roles`, `dependsOn`,
-`defaults`, `upstream`): `vars`, `errors`, `instance` (url, usage),
-`provides` (the connections the instance publishes), `objects` (OKDP's own
-objects, whole manifests) and `oidcClients` (the service's OAuth clients).
+values file, `values.cel.yaml` (chart -> values; `values.yaml` without
+expressions), and the sections of `okdp.yaml`, after its package keys
+(`require`, `roles`, `dependsOn`, `defaults`, `upstream`): `vars`,
+`errors`, `instance` (url, usage), `provides` (the connections the
+instance publishes), `objects` (OKDP's own objects, whole manifests) and
+`oidcClients` (the service's OAuth clients).
 Expressions see `release`, `values`, `global.okdp`, `platform`, `service`,
 `labels` and `selectorLabels`, and call host functions, Helm's and OKDP's
 (`str`, `sha256`, `toJson`, `okdpFullname`, `okdpGeneratedSecret`,

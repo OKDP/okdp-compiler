@@ -1,7 +1,7 @@
 # Inputs and outputs
 
 Normative reference of what a compile reads besides the service definition
-(`Chart.yaml`, `okdp.yaml` and `values.cel.yaml`:
+(`Chart.yaml`, `okdp.yaml` and `values.cel.yaml` or `values.yaml`:
 [02_service_definition.md](02_service_definition.md)),
 and of what it produces. The flags that pass these inputs to the binary are in
 [01_usage.md](../01_usage.md); how the compiler works inside, in
@@ -35,8 +35,8 @@ Paths in an `fs.FS` are relative to its root.
 
 A package is a directory: the service definition and the parameters of the
 service. `compiler.LoadDefinition(fsys)` reads `Chart.yaml`, `okdp.yaml`
-and `values.cel.yaml` at the root of `fsys` ([service
-definition](02_service_definition.md)) and keeps `fsys` as
+and the values file, `values.cel.yaml` or `values.yaml`, at the root of
+`fsys` ([service definition](02_service_definition.md)) and keeps `fsys` as
 `Definition.Files`, from which each compile reads the other files; a
 `Definition` built in memory sets `Files` itself. The compiler reads these
 files, and no other:
@@ -46,6 +46,7 @@ files, and no other:
   Chart.yaml                          the service's name and version, its upstream charts (dependencies)
   okdp.yaml                           platform values required, OKDP's defaults, upstream values; the mapping's sections
   values.cel.yaml                     the values file: the computed values of each dependency
+  values.yaml                         or the values file under this name, without expressions: one of them
   config.schema.json                  schema of the parameters, their defaults, connection references
   <key>.defaults.yaml                 OKDP's defaults for the chart <key> (defaults.<key> of okdp.yaml)
 ```
@@ -55,6 +56,7 @@ files, and no other:
 | `Chart.yaml` | yes | YAML 1.2, Helm's chart metadata | the service: name, version, its upstream charts ([Chart.yaml](02_service_definition.md#chartyaml)) |
 | `okdp.yaml` | no | YAML 1.2; its sections, the mapping language | requirements, catalog metadata, OKDP's defaults, upstream values accepted; `vars`, `errors`, objects and outputs ([okdp.yaml](02_service_definition.md#okdpyaml)) |
 | `values.cel.yaml` | no | the mapping language | the computed values ([values.cel.yaml](02_service_definition.md#valuescelyaml)) |
+| `values.yaml` | no, and not with `values.cel.yaml` | the mapping language; holding expressions or `$`-keys, a warning | the same, under the name of an umbrella chart's values ([values.yaml](02_service_definition.md#valuesyaml)) |
 | `config.schema.json` | no: `{}` when absent | JSON | [parameter defaults](#defaults), [parameter check](#schema-check), [connection references](#declaring-a-reference) |
 | defaults file | when `defaults.<key>` of `okdp.yaml` names it | values file | second layer of the [final values](#merge-precedence) |
 
@@ -1076,7 +1078,7 @@ each layer over the previous ones:
 |---|---|---|
 | 1 | upstream defaults | `values.yaml` of the key's source, from the [chart cache](#chart-cache), its `null` values removed |
 | 2 | OKDP's defaults | the file `defaults.<key>` of `okdp.yaml` |
-| 3 | computed values | `<key>` of the values file, `values.cel.yaml`; `{}` when the file does not write the key ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
+| 3 | computed values | `<key>` of the values file, `values.cel.yaml` or `values.yaml`; `{}` when the file does not write the key ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
 | 4 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
 The source: the upstream chart of the key ([Chart index](#chart-index)).
@@ -1174,6 +1176,7 @@ chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
+| `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); nil when none. The binary prints each on stderr, `warning: <message>` |
 
 `Values` and `Charts` have one entry per compiled chart: every dependency
 of `Chart.yaml`, its computed values `{}` when the values file does not

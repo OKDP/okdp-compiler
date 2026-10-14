@@ -1,14 +1,15 @@
 // Mapping: what an OKDP mapping holds besides vars and errors (package
 // compile), and the host functions OKDP adds to the language:
 //
-//	output (chart -> values), values.cel.yaml,
+//	output (chart -> values), the values file,
 //	instance (url, usage) and provides (the connections the instance publishes),
 //	objects (OKDP's own objects, whole manifests),
 //	oidcClients (the OAuth clients of the service, oidc.go),
 //
 // their shapes described by the embedded mapping.schema.json. A package's
 // mapping is read from okdp.yaml (vars, errors and every section but
-// output, its package keys skipped) and values.cel.yaml (output).
+// output, its package keys skipped) and its values file (output),
+// values.cel.yaml or values.yaml.
 //
 // The compiler's own templates (oidc-dcr.cel.yaml,
 // generated-secret.cel.yaml, descriptor.cel.yaml) are written in the same
@@ -18,6 +19,7 @@
 package okdp
 
 import (
+	"cmp"
 	_ "embed"
 	"maps"
 	"strings"
@@ -36,18 +38,27 @@ import (
 // top-level key fails the compile.
 var sections = []string{"output", "instance", "provides", "objects", "oidcClients"}
 
-// valuesFile: the values file of a package, the mapping's output section.
-const valuesFile = "values.cel.yaml"
+// The values file of a package, the mapping's output section: one of
+// these, read alike.
+const (
+	valuesFile      = "values.cel.yaml" // with expressions; the name of a Definition's values file when it gives none
+	plainValuesFile = "values.yaml"     // without, conventionally: one that holds any gives a warning (LoadDefinition)
+)
+
+// valuesName: the name of d's values file, the first segment of its
+// errors: Definition.ValuesFile, values.cel.yaml when empty (a
+// Definition built in memory).
+func (d *Definition) valuesName() string { return cmp.Or(d.ValuesFile, valuesFile) }
 
 // sources: the mapping of d: okdp.yaml, its package keys skipped, then
-// values.cel.yaml, the output section; each when the package has it.
+// the values file, the output section; each when the package has it.
 func (d *Definition) sources() []compile.Source {
 	var srcs []compile.Source
 	if d.Okdp != nil {
 		srcs = append(srcs, compile.Source{Name: "okdp.yaml", Data: d.Okdp, Skip: packageKeys})
 	}
 	if d.Values != nil {
-		srcs = append(srcs, compile.Source{Name: valuesFile, Data: d.Values, Section: "output"})
+		srcs = append(srcs, compile.Source{Name: d.valuesName(), Data: d.Values, Section: "output"})
 	}
 	return srcs
 }

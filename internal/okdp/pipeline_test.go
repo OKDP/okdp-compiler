@@ -140,6 +140,41 @@ func TestCompile(t *testing.T) {
 	}
 }
 
+// TestValuesYAML: a package whose values file is values.yaml, loaded then
+// compiled: the warning of LoadDefinition given with the result, none
+// without; the errors of the file under its name.
+func TestValuesYAML(t *testing.T) {
+	files := maps.Clone(pkg)
+	files["Chart.yaml"] = &fstest.MapFile{Data: []byte("apiVersion: v2\nname: demo\nversion: 1.2.3\ndependencies: [{name: app, repository: https://charts.example.org, version: 1.0.0}]\n")}
+	files["values.yaml"] = &fstest.MapFile{Data: []byte("app: {replicaCount: '${{ values.replicas }}'}\n")}
+	d, err := LoadDefinition(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Compile(context.Background(), d, inputs(M{"replicas": 2}))
+	if err != nil || res.Values["app"]["replicaCount"] != float64(2) {
+		t.Fatalf("got %v (%v)", res, err)
+	}
+	if want := []string{"values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml"}; !slices.Equal(res.Warnings, want) {
+		t.Errorf("Result.Warnings: got %q, want %q", res.Warnings, want)
+	}
+	if res, err := Compile(context.Background(), def, inputs()); err != nil || res.Warnings != nil {
+		t.Errorf("no warning: got %q (%v)", res.Warnings, err)
+	}
+	for name, tc := range map[string]struct{ values, want string }{
+		"expression": {"app: {replicaCount: '${{ nope }}'}\n", "values.yaml: app: replicaCount: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
+		"key":        {"app: {}\ndb: {}\n", "values.yaml: db: not a dependency of Chart.yaml"},
+		"okdp":       {"okdp: {}\n", "values.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it"},
+		"alias":      {"app: &a {replicaCount: 1}\ndb: *a\n", "values.yaml: line 2: aliases are not read: bind the value in vars"},
+	} {
+		d := *d
+		d.Values = []byte(tc.values)
+		if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)
+		}
+	}
+}
+
 // TestCompileBudget: a compile cancelled, bounded by a cost limit; the
 // okdp chart required.
 func TestCompileBudget(t *testing.T) {

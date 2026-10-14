@@ -1,5 +1,5 @@
 // Service: the package as a compile reads it: Chart.yaml, okdp.yaml and
-// values.cel.yaml, and its other files (Definition), and what a compile
+// its values file, and its other files (Definition), and what a compile
 // builds of them (Service).
 
 package okdp
@@ -13,14 +13,16 @@ import (
 )
 
 // Definition: a package, as LoadDefinition reads it: Chart.yaml, okdp.yaml
-// (its package keys, and its mapping), values.cel.yaml, and the package's
-// other files.
+// (its package keys, and its mapping), its values file, values.cel.yaml or
+// values.yaml, and the package's other files.
 type Definition struct {
-	Chart   chart.Metadata // Chart.yaml: the service's name, version and upstream charts, the umbrella's metadata (Result.Chart)
-	Package Package        // okdp.yaml's package keys
-	Okdp    []byte         // okdp.yaml, read by the mapping: vars, errors and the OKDP sections, its package keys skipped; nil: none
-	Values  []byte         // values.cel.yaml, read by the mapping as its output section: the charts' values, by dependency key; nil: none
-	Files   fs.FS          // the package: config.schema.json, the defaults files
+	Chart      chart.Metadata // Chart.yaml: the service's name, version and upstream charts, the umbrella's metadata (Result.Chart)
+	Package    Package        // okdp.yaml's package keys
+	Okdp       []byte         // okdp.yaml, read by the mapping: vars, errors and the OKDP sections, its package keys skipped; nil: none
+	Values     []byte         // the values file, read by the mapping as its output section: the charts' values, by dependency key; nil: none
+	ValuesFile string         // the values file's name, values.cel.yaml or values.yaml, which its errors start with; "": values.cel.yaml
+	Files      fs.FS          // the package: config.schema.json, the defaults files
+	Warnings   []string       // what LoadDefinition warns of, the package read all the same: a values.yaml that holds expressions; given with each compile (Result.Warnings)
 }
 
 // Package: okdp.yaml's package keys, what the compiler reads of the
@@ -72,7 +74,7 @@ func (d *Definition) service() (*Service, error) {
 	if err := d.Chart.Check(); err != nil {
 		return nil, err
 	}
-	if err := okdpChart.listed(d.Chart.Dependencies, nil); err != nil {
+	if err := okdpChart.listed(d.Chart.Dependencies, d.valuesName(), nil); err != nil {
 		return nil, err
 	}
 	specs, err := chart.NewSpecs(d.Chart, d.Package.Defaults, d.Package.Upstream)

@@ -1,8 +1,8 @@
 // Package compiler compiles an OKDP service instance into the values of its
-// upstream charts. A package (Chart.yaml, okdp.yaml, values.cel.yaml, its
-// parameters and OKDP's defaults for its charts) is read from any fs.FS
-// (LoadDefinition), compiled for one instance (Compile), and written as the
-// files of okdp-compile (Write):
+// upstream charts. A package (Chart.yaml, okdp.yaml, values.cel.yaml or
+// values.yaml, its parameters and OKDP's defaults for its charts) is read
+// from any fs.FS (LoadDefinition), compiled for one instance (Compile), and
+// written as the files of okdp-compile (Write):
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"))
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
@@ -45,14 +45,16 @@ import (
 // The types a caller names.
 type (
 	// Definition: a package, as LoadDefinition reads it: Chart.yaml,
-	// okdp.yaml, values.cel.yaml, and the package's other files.
+	// okdp.yaml, its values file, values.cel.yaml or values.yaml, and the
+	// package's other files; its warnings (Warnings).
 	Definition = okdp.Definition
 	// Inputs: what a compile reads besides the package.
 	Inputs = okdp.Inputs
 	// ContextLayer: a values layer of the context (Inputs.Context) at its
 	// level: 0, the platform's, then each level adds to those below it.
 	ContextLayer = okdp.ContextLayer
-	// Result: what a compile produces.
+	// Result: what a compile produces, its warnings among them (Warnings),
+	// which do not fail it.
 	Result = okdp.Result
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
@@ -73,8 +75,10 @@ const (
 )
 
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
-// okdp.yaml and values.cel.yaml when it has them, checked; each compile
-// reads its other files.
+// okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
+// has them, checked; each compile reads its other files. A values.yaml
+// that holds expressions is read all the same, with a warning
+// (Definition.Warnings, then Result.Warnings).
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return okdp.LoadDefinition(fsys)
 }

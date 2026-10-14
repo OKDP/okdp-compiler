@@ -112,7 +112,7 @@ okdp-compile --version
 
 | Flag | Default | |
 |---|---|---|
-| `--package` | required | package directory: `Chart.yaml`, `okdp.yaml` (optional), `values.cel.yaml` (optional), `config.schema.json` (optional) at its root, and the defaults files `okdp.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
+| `--package` | required | package directory: `Chart.yaml`, `okdp.yaml` (optional), `values.cel.yaml` or `values.yaml` (optional, one of them), `config.schema.json` (optional) at its root, and the defaults files `okdp.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
 | `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); required, by flag or variable |
 | `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:` an instance's own connections..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
@@ -244,7 +244,7 @@ $ cat out/okdp.dependencies.yaml
 
 | Status | When |
 |---|---|
-| 0 | compiled; `--version`, `--help` |
+| 0 | compiled, each warning on stderr as `warning: <message>`; `--version`, `--help` |
 | 1 | any error: `error: <message>` on stderr |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
@@ -259,6 +259,15 @@ error: values don't meet the specifications of the schema(s) in the following ch
 webapp:
 - at '/database': got number, want string
 - at '/replicas': minimum: got 0, want 1
+```
+
+A warning (`Result.Warnings`) does not fail the compile: it is printed
+before the files are written, and the command exits with status 0. A
+`values.yaml` that holds expressions gives one
+([values.yaml](specs/02_service_definition.md#valuesyaml)):
+
+```text
+warning: values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml
 ```
 
 ### Rendering with Helm
@@ -477,12 +486,14 @@ that they are the programs above and print what they show
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
 `compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`:
-`Chart.yaml`, `okdp.yaml` and `values.cel.yaml`, then keeps `fsys`
-(`Definition.Files`) for the files each compile reads, `config.schema.json`
-and the defaults files. A `Definition` can also be built in Go: the
-`Chart.yaml` metadata (`Chart`), the package keys of `okdp.yaml`
-(`Package`; `Package.Require` is a list of keys), and `okdp.yaml` and the
-values file as bytes (`Okdp`, `Values`, nil when absent).
+`Chart.yaml`, `okdp.yaml` and the values file, `values.cel.yaml` or
+`values.yaml`, then keeps `fsys` (`Definition.Files`) for the files each
+compile reads, `config.schema.json` and the defaults files. A `Definition`
+can also be built in Go: the `Chart.yaml` metadata (`Chart`), the package
+keys of `okdp.yaml` (`Package`; `Package.Require` is a list of keys),
+`okdp.yaml` and the values file as bytes (`Okdp`, `Values`, nil when
+absent), and the values file's name (`ValuesFile`, `values.cel.yaml` when
+empty), which its errors start with.
 
 `compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
 `Contracts` (`--contracts`; it may be empty when nothing references a
@@ -504,6 +515,11 @@ charts), its
 values (`compiler.UmbrellaValues`) and the dependencies
 (`compiler.DependenciesFile`).
 
+- `Result.Warnings` lists what the compile warns of without failing: those
+  of the package, found by `LoadDefinition` (`Definition.Warnings`), a
+  `values.yaml` that holds expressions. Each compile gives them with its
+  result, so that a server compiling many instances returns them with each;
+  the binary prints each as `warning: <message>`.
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than
@@ -694,7 +710,8 @@ usage error with status 2.
 | `Chart.yaml: dependencies[0].version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version the chart cache holds |
 | `Chart.yaml: dependencies[0] (okdp): the chart of OKDP's own objects is added by the compiler: remove it` | `Chart.yaml` lists `okdp` | remove it; the platform names its chart ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `okdp.yaml: yaml: unmarshal errors:` then `line 3: field requires not found in type okdp.Package` | a key `okdp.yaml` does not define, here a misspelt `require`; one line per unknown key | fix the name ([okdp.yaml](specs/02_service_definition.md#okdpyaml)) |
-| `okdp.yaml: output: the charts' values are in values.cel.yaml`, `okdp.yaml: name: the name, version and charts are Chart.yaml's` | a key of the former package format | the values in `values.cel.yaml`, without the `output:` wrapper; the name, version and charts in `Chart.yaml` ([service definition](specs/02_service_definition.md)) |
+| `okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)`, `okdp.yaml: name: the name, version and charts are Chart.yaml's` | a key of the former package format | the values in `values.cel.yaml`, without the `output:` wrapper; the name, version and charts in `Chart.yaml` ([service definition](specs/02_service_definition.md)) |
+| `values.yaml and values.cel.yaml: a package has one of them` | the package has both values files | keep one: `values.cel.yaml` when the values hold expressions ([values.yaml](specs/02_service_definition.md#valuesyaml)) |
 | `okdp.yaml: defaults.web: not a dependency of Chart.yaml`, `okdp.yaml: upstream.web: not a dependency of Chart.yaml` | a key of `defaults` or `upstream` that is no dependency's key | fix the key, or add the dependency ([okdp.yaml](specs/02_service_definition.md#okdpyaml)) |
 | `okdp.yaml: upstream: true, false or a map by dependency`, `okdp.yaml: upstream.app: true, false or {protect, append}` | `upstream`, or a dependency's value in it, of another form: a string, a number, a list; a map with another key than `protect` and `append` (a misspelt `protect`) | `true`, `false`, or a map by key, each `true`, `false` or `{protect, append}` ([upstream](specs/02_service_definition.md#upstream)) |
 | `okdp.yaml: upstream.app.protect[0] "a[": not a path: ...` | a `protect` or `append` path out of the grammar | fix the path ([protect and append](specs/02_service_definition.md#protect-and-append)) |

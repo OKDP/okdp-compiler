@@ -67,6 +67,9 @@ type Result struct {
 	// Chart: the package's Chart.yaml, as read (Definition.Chart): the
 	// umbrella chart's metadata, its dependencies in their order.
 	Chart chart.Metadata
+	// Warnings: what the compile warns of without failing, those of the
+	// package (Definition.Warnings): a values.yaml that holds expressions.
+	Warnings []string
 }
 
 // Compile runs the mapping of def on one instance, cancelled with ctx
@@ -128,7 +131,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	}
 	// 8. Objects: the descriptor, the credentials Secrets, then the
 	// mapping's objects.
-	out := &Result{Objects: append([]M{desc}, credentials...), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart}
+	out := &Result{Objects: append([]M{desc}, credentials...), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}
@@ -136,12 +139,12 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// renders (rendered): all but those the values file leaves out. Then
 	// the compiler's own charts: the chart of each OAuth client, compiled in
 	// dcr mode, and the okdp chart, which renders the objects unless the
-	// caller deploys them otherwise; neither Chart.yaml nor values.cel.yaml
+	// caller deploys them otherwise; neither Chart.yaml nor the values file
 	// may list them. Added to the dependencies of Chart.yaml, without
 	// changing them.
 	output := rendered(svc.Charts, written, value.AsMap(res["output"]))
 	ownCharts := append(clientCharts(clients, dcrValues, dcrSource), objectsChart(out.Objects, objectsSource))
-	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, output, ownCharts)
+	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, def.valuesName(), output, ownCharts)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +153,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	}
 	// Then the final values of each chart rendered, checked against its
 	// upstream chart's schema (10. Upstream schemas).
-	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, specs, valuesFile, output, inst.values); err != nil {
+	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, specs, def.valuesName(), output, inst.values); err != nil {
 		return nil, err
 	}
 	return out, nil

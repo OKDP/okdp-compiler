@@ -20,7 +20,7 @@ import (
 // (global.okdp.charts.objects: okdp-objects, values `objects: []`), its
 // objects Result.Objects: the descriptor ConfigMap, the credentials Secrets
 // and the objects section reach the cluster with the upstream charts.
-// Neither Chart.yaml nor values.cel.yaml may list it.
+// Neither Chart.yaml nor the values file may list it.
 const ObjectsChart = "okdp"
 
 // platformCharts: the charts the platform renders the compiler's own charts
@@ -55,7 +55,7 @@ func platformChart(v any, where string) (chart.Ref, error) {
 
 // ownChart: a chart key the compiler owns in a compile: the okdp chart,
 // and the chart of each OAuth client, in every mode. Neither Chart.yaml
-// nor values.cel.yaml may list it (addOwnCharts). The compiler adds it to
+// nor the values file may list it (addOwnCharts). The compiler adds it to
 // the compile when it has values, rendered by source: no OKDP defaults, no
 // instance upstream values.
 type ownChart struct {
@@ -84,28 +84,29 @@ func objectsChart(objects []map[string]any, src chart.Ref) ownChart {
 }
 
 // listed: the error of the chart c listed by Chart.yaml (deps, its
-// dependencies), then by the mapping's output (values.cel.yaml); nil when
-// neither lists it.
-func (c ownChart) listed(deps []chart.Dependency, output M) error {
+// dependencies), then by the mapping's output (file, the values file);
+// nil when neither lists it.
+func (c ownChart) listed(deps []chart.Dependency, file string, output M) error {
 	for i, d := range deps {
 		if d.Key() == c.key {
 			return fmt.Errorf("%s: dependencies[%d] (%s): the chart of %s is added by the compiler: remove it", chart.MetadataFile, i, c.key, c.of)
 		}
 	}
 	if _, ok := output[c.key]; ok {
-		return fmt.Errorf("%s: %s: the chart of %s is compiled from %s: remove it", valuesFile, c.key, c.of, c.from)
+		return fmt.Errorf("%s: %s: the chart of %s is compiled from %s: remove it", file, c.key, c.of, c.from)
 	}
 	return nil
 }
 
 // addOwnCharts: the dependencies of Chart.yaml, deps, specs by key, plus
 // the charts of own that have values, each rendered by its source, their
-// values added to the mapping's output: what chart.FinalValues compiles. A
-// chart of own that Chart.yaml or the output lists fails (listed), the
-// first in the order of own. specs is not changed.
-func addOwnCharts(deps []chart.Dependency, specs chart.Specs, output M, own []ownChart) (chart.Specs, error) {
+// values added to the mapping's output, read from the values file file:
+// what chart.FinalValues compiles. A chart of own that Chart.yaml or the
+// output lists fails (listed), the first in the order of own. specs is not
+// changed.
+func addOwnCharts(deps []chart.Dependency, specs chart.Specs, file string, output M, own []ownChart) (chart.Specs, error) {
 	for _, c := range own {
-		if err := c.listed(deps, output); err != nil {
+		if err := c.listed(deps, file, output); err != nil {
 			return nil, err
 		}
 	}
