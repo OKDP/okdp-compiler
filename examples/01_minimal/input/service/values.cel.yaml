@@ -1,11 +1,6 @@
 # The values of the app chart, from the instance's parameters (values) and
 # the release. ${{ ... }} is a CEL expression.
-output:
-  app:
-    fullnameOverride: ${{ release.name }}
-    replicaCount: ${{ values.replicas }}
-    message: Hello from ${{ release.name }}
-
-# What OKDP shows of the instance.
-instance:
-  usage: Says hello, from ${{ release.name }}.
+app:
+  fullnameOverride: ${{ release.name }}
+  replicaCount: ${{ values.replicas }}
+  message: Hello from ${{ release.name }}

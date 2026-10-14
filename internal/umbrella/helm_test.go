@@ -3,9 +3,11 @@ package umbrella
 import (
 	"bytes"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -113,8 +115,9 @@ func TestHelmUmbrella(t *testing.T) {
 	for _, c := range cases {
 		keys[filepath.Base(c)] = filepath.Base(c)
 	}
-	res := &okdp.Result{Values: map[string]map[string]any{}, Charts: map[string]chart.Ref{}, Service: "umbrella", Version: "1.0.0"}
-	for key, c := range keys {
+	res := &okdp.Result{Values: map[string]map[string]any{}, Charts: map[string]chart.Ref{}, Chart: chart.Metadata{APIVersion: "v2", Name: "umbrella", Version: "1.0.0"}}
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		c := keys[key]
 		b, err := os.ReadFile(filepath.Join(helmtest.Dir, "values", c, "final.yaml"))
 		if err != nil {
 			t.Fatalf("%v (run go test ./internal/chart -run TestHelmValues -update)", err)
@@ -122,7 +125,12 @@ func TestHelmUmbrella(t *testing.T) {
 		if res.Values[key], err = chart.ParseValues(b); err != nil {
 			t.Fatal(err)
 		}
-		res.Charts[key] = chart.Ref{Repository: "file://../" + c, Chart: c, Version: "1.0.0"}
+		d := chart.Dependency{Name: c, Repository: "file://../" + c, Version: "1.0.0"}
+		if key != c {
+			d.Alias = key
+		}
+		res.Chart.Dependencies = append(res.Chart.Dependencies, d)
+		res.Charts[key] = d.Ref()
 	}
 	files, err := Write(res)
 	if err != nil {

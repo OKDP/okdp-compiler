@@ -101,18 +101,18 @@ func TestRun(t *testing.T) {
 
 // TestRunErrors: what run refuses, before it writes anything.
 func TestRunErrors(t *testing.T) {
-	// A package whose version an umbrella chart cannot take: it compiles,
-	// its umbrella fails.
+	// A package whose version an umbrella chart cannot take: it fails to
+	// load.
 	pkg := t.TempDir()
 	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(input, "service"))); err != nil {
 		t.Fatal(err)
 	}
-	svc, err := os.ReadFile(filepath.Join(pkg, "service.yaml"))
+	meta, err := os.ReadFile(filepath.Join(pkg, "Chart.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc = bytes.Replace(svc, []byte("version: 1.0.0"), []byte(`version: "1.0"`), 1)
-	if err := os.WriteFile(filepath.Join(pkg, "service.yaml"), svc, 0o644); err != nil {
+	meta = bytes.Replace(meta, []byte("version: 1.0.0"), []byte(`version: "1.0"`), 1)
+	if err := os.WriteFile(filepath.Join(pkg, "Chart.yaml"), meta, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	protected := filepath.Join("..", "..", "testdata", "protected-upstream.yaml")
@@ -125,7 +125,7 @@ func TestRunErrors(t *testing.T) {
 		"no namespace": {func(o *options) { o.namespace = "" }, "--namespace is required"},
 		"no output":    {func(o *options) { o.output = "" }, "--output (-o) is required"},
 		"a compile":    {func(o *options) { o.values = append(o.values, protected) }, "ingress.hosts is set by the platform"},
-		"an umbrella":  {func(o *options) { o.pkg = pkg }, `service.yaml: version "1.0": the version of the umbrella chart`},
+		"a package":    {func(o *options) { o.pkg = pkg }, `Chart.yaml: version "1.0": SemVer (1.2.3), the version of the umbrella chart`},
 		"a level":      {func(o *options) { o.contexts = append(o.contexts, "1:"+redefines) }, "context layer 2 (level 1): connections.platform-db is set at level 0"},
 		"no level":     {func(o *options) { o.contexts = append(o.contexts, "dev:x.yaml") }, "open dev:x.yaml: no such file or directory"},
 	} {

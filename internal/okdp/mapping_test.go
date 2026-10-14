@@ -45,6 +45,19 @@ func newSession(scope M) *compile.Session {
 	return s
 }
 
+// mapping: the sources of a package's mapping (Definition.sources): its
+// okdp.yaml and values.cel.yaml, each when not "".
+func mapping(okdp, values string) []compile.Source {
+	var d Definition
+	if okdp != "" {
+		d.Okdp = []byte(okdp)
+	}
+	if values != "" {
+		d.Values = []byte(values)
+	}
+	return d.sources()
+}
+
 // eval: the CEL expression expr (without ${{ }}) on the variables of scope,
 // in the session s: the value v of the template {values: {v: ${{ expr }}}}.
 func eval(s *compile.Session, expr string, scope M) (any, error) {
@@ -52,20 +65,22 @@ func eval(s *compile.Session, expr string, scope M) (any, error) {
 	return v["v"], err
 }
 
-// TestMappingSections: vars in order, instance and provides.
+// TestMappingSections: vars in order, output, instance and provides, read
+// from okdp.yaml, its package keys skipped, and values.cel.yaml.
 func TestMappingSections(t *testing.T) {
-	res, err := runMapping(newSession(mapCtx()), []byte(`
+	res, err := runMapping(newSession(mapCtx()), mapCtx(), mapping(`
+roles: [web]
+require: [a.b]
+upstream: {x: {protect: [a]}}
 vars:
   a: 1.0
   b: ${{ a + 1.0 }}
-output:
-  x: {b: '${{ b }}'}
 instance:
   url: https://${{ release.name }}
 provides:
   - contract: http
     values: {url: '${{ "u" + str(b) }}'}
-`), mapCtx())
+`, "x: {b: '${{ b }}'}\n")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,15 +99,12 @@ provides:
 // TestMappingFunctions: OKDP's host functions beside the language's, next
 // to a vars binding named fullname (the function is okdpFullname).
 func TestMappingFunctions(t *testing.T) {
-	res, err := runMapping(newSession(mapCtx()), []byte(`
-vars:
-  fullname: ${{ release.name }}-mine
-output:
-  x:
-    name: ${{ fullname }}
-    okdp: ${{ okdpFullname('app') }}
-    quoted: ${{ quote(values.items[0].n) }}
-`), mapCtx())
+	res, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
+x:
+  name: ${{ fullname }}
+  okdp: ${{ okdpFullname('app') }}
+  quoted: ${{ quote(values.items[0].n) }}
+`)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +120,13 @@ func TestMappingService(t *testing.T) {
 	ctx := mapCtx()
 	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": labels("demo", "demo-x", "", false), "selectorLabels": labels("demo", "demo-x", "", true)})
 	src := `
-output:
-  x:
-    version: ${{ service.version }}
-    labels: ${{ labels }}
-    selector: ${{ okdpSelectorLabels('db') }}
-    loop: [{$for: "service in ['a']", $vars: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
+x:
+  version: ${{ service.version }}
+  labels: ${{ labels }}
+  selector: ${{ okdpSelectorLabels('db') }}
+  loop: [{$for: "service in ['a']", $vars: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
 `
-	res, err := runMapping(newSession(ctx), []byte(src), ctx)
+	res, err := runMapping(newSession(ctx), ctx, mapping("", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +149,7 @@ output:
 		t.Errorf("$for and $vars shadow service and selectorLabels: %#v", x["loop"])
 	}
 	// A mapping's own labels binding wins over the context's.
-	res, err = runMapping(newSession(ctx), []byte("vars:\n  labels: {mine: 'yes'}\n"+src), ctx)
+	res, err = runMapping(newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +161,7 @@ output:
 // TestMappingNulls: a null section is empty; a null chart of output, a null
 // key of a client, are refused by their types.
 func TestMappingNulls(t *testing.T) {
-	res, err := runMapping(newSession(mapCtx()), []byte("output: {z: {}}\ninstance: ~\nprovides: '${{ null }}'\n"), mapCtx())
+	res, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "z: {}\n")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +172,7 @@ func TestMappingNulls(t *testing.T) {
 		t.Errorf("sections: %#v", res)
 	}
 	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/oidcClients/0/scope': got null, want string\n- at '/output': validation failed\n  - at '/output/web': got null, want object\n  - at '/output/x': got null, want object"
-	if _, err := runMapping(newSession(mapCtx()), []byte("output: {x: '${{ null }}', web: ~, z: {}}\noidcClients: [{grantTypes: [a], scope: ~}]\n"), mapCtx()); err == nil || err.Error() != want {
+	if _, err := runMapping(newSession(mapCtx()), mapCtx(), mapping("oidcClients: [{grantTypes: [a], scope: ~}]\n", "{x: '${{ null }}', web: ~, z: {}}\n")...); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
@@ -170,24 +181,25 @@ func TestMappingNulls(t *testing.T) {
 // point; a section of the wrong shape (mapping.schema.json), or none of
 // OKDP's, is refused.
 func TestMappingErrors(t *testing.T) {
-	for name, tc := range map[string]struct{ src, want string }{
-		"function error":         {"output: {x: {v: '${{ okdpGeneratedSecret({}) }}'}}\n", "values.cel.yaml: output: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
-		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "values.cel.yaml: provides[0]: values: ${{ nope }}:"},
-		"output not a map":       {"output: [x]\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/output': got array, want object"},
-		"chart a scalar":         {"output: {x: {}, web: 'on'}\n", "- at '/output/web': got string, want object"},
-		"instance not a map":     {"instance: [https://x]\n", "- at '/instance': got array, want object"},
-		"url not a string":       {"instance: {url: 8080, usage: ~}\n", "- at '/instance/url': got number, want string"},
-		"provides not a list":    {"provides: {contract: http}\n", "- at '/provides': got object, want array"},
-		"objects not a list":     {"objects: x\n", "- at '/objects': got string, want array"},
-		"oidcClients not a list": {"oidcClients: {a: 1}\n", "- at '/oidcClients': got object, want array"},
-		"no grant types":         {"oidcClients: [{grantTypes: []}, {scope: s}]\n", "- at '/oidcClients/0/grantTypes': minItems: got 0, want 1\n- at '/oidcClients/1': missing property 'grantTypes'"},
-		"client name":            {"oidcClients: [{grantTypes: [a], name: Console}]\n", "- at '/oidcClients/0/name': 'Console' does not match pattern"},
-		"client name length":     {"oidcClients: [{grantTypes: [a], name: " + strings.Repeat("a", 55) + "}]\n", "- at '/oidcClients/0/name': maxLength: got 55, want 54"},
-		"client key":             {"oidcClients: [{grantTypes: [a], redirectUri: x}]\n", "- at '/oidcClients/0': additional properties 'redirectUri' not allowed"},
-		"unknown section":        {"outptu: {x: {}}\n", "values.cel.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)"},
+	for name, tc := range map[string]struct{ okdp, values, want string }{
+		"function error":         {"", "x: {v: '${{ okdpGeneratedSecret({}) }}'}\n", "values.cel.yaml: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
+		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "", "okdp.yaml: provides[0]: values: ${{ nope }}:"},
+		"output not a map":       {"", "[x]\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/output': got array, want object"},
+		"chart a scalar":         {"", "{x: {}, web: 'on'}\n", "- at '/output/web': got string, want object"},
+		"instance not a map":     {"instance: [https://x]\n", "", "- at '/instance': got array, want object"},
+		"url not a string":       {"instance: {url: 8080, usage: ~}\n", "", "- at '/instance/url': got number, want string"},
+		"provides not a list":    {"provides: {contract: http}\n", "", "- at '/provides': got object, want array"},
+		"objects not a list":     {"objects: x\n", "", "- at '/objects': got string, want array"},
+		"oidcClients not a list": {"oidcClients: {a: 1}\n", "", "- at '/oidcClients': got object, want array"},
+		"no grant types":         {"oidcClients: [{grantTypes: []}, {scope: s}]\n", "", "- at '/oidcClients/0/grantTypes': minItems: got 0, want 1\n- at '/oidcClients/1': missing property 'grantTypes'"},
+		"client name":            {"oidcClients: [{grantTypes: [a], name: Console}]\n", "", "- at '/oidcClients/0/name': 'Console' does not match pattern"},
+		"client name length":     {"oidcClients: [{grantTypes: [a], name: " + strings.Repeat("a", 55) + "}]\n", "", "- at '/oidcClients/0/name': maxLength: got 55, want 54"},
+		"client key":             {"oidcClients: [{grantTypes: [a], redirectUri: x}]\n", "", "- at '/oidcClients/0': additional properties 'redirectUri' not allowed"},
+		"unknown section":        {"outptu: {x: {}}\n", "", "okdp.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)"},
+		"output in okdp.yaml":    {"output: {}\n", "{}\n", "values.cel.yaml: output: okdp.yaml gives it too"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := runMapping(newSession(mapCtx()), []byte(tc.src), mapCtx())
+			_, err := runMapping(newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}

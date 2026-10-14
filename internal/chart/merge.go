@@ -28,15 +28,16 @@ import (
 //
 // cache: the chart cache, the upstream charts' defaults and schemas, each in
 // its repository's directory (chartCache). pkg: the package (its
-// defaults files). values: the instance's merged values (their global, and
-// their upstream values).
-func FinalValues(cache, pkg fs.FS, specs Specs, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
+// defaults files). file: the values file the output is read from, for the
+// errors of its keys. values: the instance's merged values (their global,
+// and their upstream values).
+func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
 	charts := &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
 	for _, key := range slices.Sorted(maps.Keys(output)) {
 		if _, ok := specs[key]; !ok {
-			return nil, nil, fmt.Errorf("mapping output %q: not a chart of service.yaml", key)
+			return nil, nil, fmt.Errorf("%s: %s: not a dependency of Chart.yaml", file, key)
 		}
 		f, bad, err := keyValues(charts, pkg, key, specs[key], value.AsMap(output[key]), values)
 		if err != nil {

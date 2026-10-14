@@ -45,8 +45,8 @@ type Result struct {
 	// Values: chart -> the final values the upstream chart receives.
 	Values map[string]map[string]any
 	// Charts: chart -> the upstream chart that renders its values (`helm
-	// template <Charts[chart]> -f <Values[chart]>`): its service.yaml
-	// source, the platform's oidc-dcr chart for an OAuth client, the
+	// template <Charts[chart]> -f <Values[chart]>`): its dependency of
+	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client, the
 	// platform's objects chart for okdp.
 	Charts map[string]chart.Ref
 	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
@@ -60,9 +60,12 @@ type Result struct {
 	// Release, Namespace: the Helm release the values are compiled for, and
 	// its namespace (Inputs.Release, Inputs.Namespace).
 	Release, Namespace string
-	// Service, Version: the name and version of service.yaml, those of the
+	// Service, Version: the name and version of Chart.yaml, those of the
 	// umbrella chart.
 	Service, Version string
+	// Chart: the package's Chart.yaml, as read (Definition.Chart): the
+	// umbrella chart's metadata, its dependencies in their order.
+	Chart chart.Metadata
 }
 
 // Compile runs the mapping of def on one instance, cancelled with ctx
@@ -76,9 +79,9 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	case !chart.IsDNSLabel(in.Namespace):
 		return nil, fmt.Errorf("Inputs.Namespace %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Namespace)
 	}
-	svc := &def.Service
 	// Checked again: a Definition may be built in memory.
-	if err := svc.Check(); err != nil {
+	svc, err := def.service()
+	if err != nil {
 		return nil, err
 	}
 	// 1-3. Parameters, platform context, connections: the instance of the
@@ -106,7 +109,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	// 5. Mapping.
-	res, err := runMapping(session, def.Mapping, inst.scope)
+	res, err := runMapping(session, inst.scope, def.sources()...)
 	if err != nil {
 		return nil, err
 	}
@@ -124,18 +127,18 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	}
 	// 8. Objects: the descriptor, the credentials Secrets, then the
 	// mapping's objects.
-	out := &Result{Objects: append([]M{desc}, credentials...), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version}
+	out := &Result{Objects: append([]M{desc}, credentials...), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}
 	// 9. Final values, first the compiler's own charts: the chart of each
 	// OAuth client, compiled in dcr mode, and the okdp chart, which renders
 	// the objects unless the caller deploys them otherwise; neither
-	// service.yaml nor the mapping's output may list them. Added to those of
-	// service.yaml, without changing them.
+	// Chart.yaml nor values.cel.yaml may list them. Added to the
+	// dependencies of Chart.yaml, without changing them.
 	ownCharts := append(clientCharts(clients, dcrValues, dcrSource), objectsChart(out.Objects, objectsSource))
 	output := value.AsMap(res["output"])
-	specs, err := addOwnCharts(svc.Charts, output, ownCharts)
+	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, output, ownCharts)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +148,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// Then the final values of each chart of the output, checked against
 	// its upstream chart's schema (10. Upstream schemas); charts left out by
 	// the mapping ($if) are not rendered.
-	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, specs, output, inst.values); err != nil {
+	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, specs, valuesFile, output, inst.values); err != nil {
 		return nil, err
 	}
 	return out, nil

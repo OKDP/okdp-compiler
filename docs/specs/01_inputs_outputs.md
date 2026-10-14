@@ -1,7 +1,8 @@
 # Inputs and outputs
 
 Normative reference of what a compile reads besides the service definition
-(`service.yaml` and `values.cel.yaml`: [02_service_definition.md](02_service_definition.md)),
+(`Chart.yaml`, `okdp.yaml` and `values.cel.yaml`:
+[02_service_definition.md](02_service_definition.md)),
 and of what it produces. The flags that pass these inputs to the binary are in
 [01_usage.md](../01_usage.md); how the compiler works inside, in
 [00_architecture.md](../00_architecture.md).
@@ -33,8 +34,8 @@ Paths in an `fs.FS` are relative to its root.
 ## Package files
 
 A package is a directory: the service definition and the parameters of the
-service. `compiler.LoadDefinition(fsys)` reads `service.yaml` and
-`values.cel.yaml` at the root of `fsys` ([service
+service. `compiler.LoadDefinition(fsys)` reads `Chart.yaml`, `okdp.yaml`
+and `values.cel.yaml` at the root of `fsys` ([service
 definition](02_service_definition.md)) and keeps `fsys` as
 `Definition.Files`, from which each compile reads the other files; a
 `Definition` built in memory sets `Files` itself. The compiler reads these
@@ -42,29 +43,33 @@ files, and no other:
 
 ```
 <package>/
-  service.yaml                        the service, its charts and their sources
-  values.cel.yaml                     the mapping
+  Chart.yaml                          the service's name and version, its upstream charts (dependencies)
+  okdp.yaml                           platform values required, OKDP's defaults, upstream values; the mapping's sections
+  values.cel.yaml                     the values file: the computed values of each dependency
   config.schema.json                  schema of the parameters, their defaults, connection references
-  <key>.defaults.yaml                 OKDP's defaults for the chart <key> (charts.<key>.defaults)
+  <key>.defaults.yaml                 OKDP's defaults for the chart <key> (defaults.<key> of okdp.yaml)
 ```
 
 | File | Required | Read as | Used for |
 |---|---|---|---|
-| `service.yaml` | yes | YAML 1.2 | the service: name, versions, catalog metadata, charts ([service.yaml](02_service_definition.md#serviceyaml)) |
-| `values.cel.yaml` | yes | the mapping language | the computed values, objects and outputs ([values.cel.yaml](02_service_definition.md#valuescelyaml)) |
+| `Chart.yaml` | yes | YAML 1.2, Helm's chart metadata | the service: name, version, its upstream charts ([Chart.yaml](02_service_definition.md#chartyaml)) |
+| `okdp.yaml` | no | YAML 1.2; its sections, the mapping language | requirements, catalog metadata, OKDP's defaults, upstream values accepted; `vars`, `errors`, objects and outputs ([okdp.yaml](02_service_definition.md#okdpyaml)) |
+| `values.cel.yaml` | no | the mapping language | the computed values ([values.cel.yaml](02_service_definition.md#valuescelyaml)) |
 | `config.schema.json` | no: `{}` when absent | JSON | [parameter defaults](#defaults), [parameter check](#schema-check), [connection references](#declaring-a-reference) |
-| defaults file | when `charts.<key>.defaults` is set | values file | second layer of the [final values](#merge-precedence) |
+| defaults file | when `defaults.<key>` of `okdp.yaml` names it | values file | second layer of the [final values](#merge-precedence) |
 
-`<key>`: a chart key, a key of `charts` in `service.yaml`, the chart of an
+`<key>`: a chart key, the key of a `Chart.yaml` dependency (its `alias`,
+else its `name`), the chart of an
 OAuth client ([OAuth client charts](#oauth-client-charts)) or `okdp`
 ([the okdp chart](#the-okdp-chart)); it names the chart's values. A
-compiled chart: one the mapping outputs (`output.<key>`, not left out by
-`$if`, not null), the okdp chart, and in `dcr` mode the chart of each
-OAuth client. Each is rendered by an upstream chart, its source
+compiled chart: a dependency the values file gives values (its key, not
+left out by `$if`, not null), the okdp chart, and in `dcr` mode the chart
+of each OAuth client. Each is rendered by an upstream chart, its source
 ([chart index](#chart-index)); several keys may share one. The defaults file
 may be any path of the package, `<key>.defaults.yaml` by convention; a
-path out of it (`../app.yaml`) fails. The service's name, versions and catalog
-metadata are fields of `service.yaml` ([Service](02_service_definition.md#service)).
+path out of it (`../app.yaml`) fails. The service's name and version are
+those of `Chart.yaml` ([Chart.yaml](02_service_definition.md#chartyaml)),
+its catalog metadata in `okdp.yaml`.
 
 `config.schema.json` is optional: a package without it has the empty
 schema, `{}`. No parameter then has a [default](#defaults) or is a
@@ -150,7 +155,8 @@ default ([command line](../01_usage.md#command-line)).
 `quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`; `http://localhost:8080/charts` is
 `localhost:8080/charts/`. A repository whose host and path are no
 directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
-refused with its source ([sources](02_service_definition.md#sources)). Two
+refused ([dependencies](02_service_definition.md#dependencies),
+[platform charts](#platform-charts)). Two
 repositories that differ only by their scheme share a directory.
 
 A chart is found by its source: `<repository>/<chart>-<version>/<chart>`,
@@ -277,7 +283,7 @@ as Helm 4 checks the values of a chart:
 
 Every violation is reported with its path, sorted by path (and the keys of
 `additional properties ... not allowed` sorted: Helm's order varies), under
-the name of the service, `name` of `service.yaml`
+the name of the service, `name` of `Chart.yaml`
 (`testdata/schema-violation.yaml`):
 
 ```
@@ -777,7 +783,7 @@ context layer 3 (level 2): connections.demo-warehouse is set at level 1 (--conte
 
 ### Requirements
 
-`require` of `service.yaml`: dotted paths under `global.okdp`
+`require` of `okdp.yaml`: dotted paths under `global.okdp`
 ([require](02_service_definition.md#require)). A required key must be set
 and not empty (missing, `null`, `false`, `""`, `0`, an empty list or map
 fails). The entries are checked in order, once the mapping's context is
@@ -843,9 +849,9 @@ also reaches every upstream chart ([Merge precedence](#merge-precedence)).
 ### Platform charts
 
 `global.okdp.charts`: the upstream charts that render the charts the
-compiler adds itself, each a source as in `service.yaml`
-([sources](02_service_definition.md#sources)): `repository`, `chart`,
-`version`.
+compiler adds itself, each an upstream chart, checked as a dependency of
+`Chart.yaml` is ([dependencies](02_service_definition.md#dependencies)):
+`repository`, `chart` (the chart's name), `version`.
 
 | Key | Renders |
 |---|---|
@@ -977,12 +983,12 @@ connection resolved from them is ([Resolution](#resolution)).
 ### Upstream values
 
 Values given to an upstream chart as they are, over the values the mapping
-computed: `upstream.<key>` of the parameters, for a chart whose
-`charts.<key>.upstream` of `service.yaml` is `true`
+computed: `upstream.<key>` of the parameters, for a dependency that
+accepts them, by `upstream` of `okdp.yaml`
 ([upstream](02_service_definition.md#upstream)). Upstream values are keyed
-by the chart key, not by its source
-([sources](02_service_definition.md#sources)). Values for a chart that
-accepts none (an [OAuth client chart](#oauth-client-charts) and the [okdp
+by the chart key, not by its chart
+([dependencies](02_service_definition.md#dependencies)). Values for a
+chart that accepts none (an [OAuth client chart](#oauth-client-charts) and the [okdp
 chart](#the-okdp-chart) included), or for a name that is not a chart, are
 ignored without error. The mapping sees them as written
 (`values.upstream.<key>`).
@@ -1011,8 +1017,9 @@ precedence](#merge-precedence)):
 
 ### protect
 
-`charts.<key>.protect`: dotted paths the platform sets; `global` is always
-protected. The upstream values fail when they set a protected path (to any value,
+`protect` of the key in `upstream` of `okdp.yaml`
+(`upstream.<key>.protect`): dotted paths the platform sets; `global` is
+always protected. The upstream values fail when they set a protected path (to any value,
 `null` included), or one of its parents to anything but a map (`null`
 included). The keys beside a protected path are free:
 
@@ -1036,7 +1043,8 @@ it fail.
 
 ### append
 
-`charts.<key>.append`: dotted paths of lists. A list the upstream values
+`append` of the key in `upstream` of `okdp.yaml`
+(`upstream.<key>.append`): dotted paths of lists. A list the upstream values
 give at such a path is appended to the list the values have there
 (upstream defaults, OKDP's defaults, computed values) instead of replacing
 it. The value given must be a list; a `null` is refused too:
@@ -1065,8 +1073,8 @@ each layer over the previous ones:
 | | Layer | From |
 |---|---|---|
 | 1 | upstream defaults | `values.yaml` of the key's source, from the [chart cache](#chart-cache), its `null` values removed |
-| 2 | OKDP's defaults | the file `charts.<key>.defaults` |
-| 3 | computed values | `output.<key>` of the mapping |
+| 2 | OKDP's defaults | the file `defaults.<key>` of `okdp.yaml` |
+| 3 | computed values | `<key>` of the values file, `values.cel.yaml` |
 | 4 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
 The source: the upstream chart of the key ([Chart index](#chart-index)).
@@ -1162,18 +1170,19 @@ chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section) |
 | `Dependencies` | `[]Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
-| `Service`, `Version` | `string` | the `name` and `version` of `service.yaml`, those of the [umbrella chart](#umbrella-chart) |
+| `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
+| `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
 
-`Values` and `Charts` have one entry per compiled chart: a chart the
-mapping leaves out (`$if`) is in neither, and is not to be rendered; the
+`Values` and `Charts` have one entry per compiled chart: a dependency the
+values file leaves out (`$if`) is in neither, and is not to be rendered; the
 okdp chart is in both, and in `dcr` mode the chart of each OAuth client. Numbers are float64, as in Helm values.
 `compiler.Write(res)` gives the files the binary writes from them, file
 name -> content ([command line](../01_usage.md#command-line)): the
 [umbrella chart](#umbrella-chart); `examples/02_advanced/` holds those of
 the example ([Example](#example)).
 
-The keys of a compile are the chart keys of `service.yaml`, DNS labels
-([chart keys](02_service_definition.md#chart-keys)), and the compiler's
+The keys of a compile are the keys of the `Chart.yaml` dependencies, DNS
+labels ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
 (`okdp`, the OAuth client charts). `Write` names the umbrella's dependency
 aliases after them. It takes a `Result` as `Compile` returns it: its keys,
 charts, release and namespace are not checked again.
@@ -1193,7 +1202,7 @@ type ChartRef struct {
 
 | Compiled chart | `Result.Charts[<key>]` |
 |---|---|
-| a chart of `service.yaml` | `charts.<key>.source` ([sources](02_service_definition.md#sources)) |
+| a dependency of `Chart.yaml` | its `repository`, its `name` as `Chart`, its `version` ([dependencies](02_service_definition.md#dependencies)) |
 | the chart of an OAuth client | `global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 of `oci://quay.io/adaltas` by default ([Platform charts](#platform-charts)) |
 | the okdp chart | `global.okdp.charts.objects` |
 
@@ -1219,7 +1228,7 @@ okdp:
 ```
 
 Everything else is keyed by the key
-([sources](02_service_definition.md#sources)). The umbrella's
+([dependencies](02_service_definition.md#dependencies)). The umbrella's
 `Chart.yaml` lists them as its dependencies ([umbrella
 chart](#umbrella-chart)); rendering with it:
 [rendering with Helm](../01_usage.md#rendering-with-helm).
@@ -1252,7 +1261,7 @@ mode a client's `secret` replaces the Secret name, which
 follow, and two clients may not write one Secret
 ([compile errors](02_service_definition.md#compile-errors)).
 
-A client chart has no `service.yaml` entry, and its key is reserved
+A client chart is no dependency of `Chart.yaml`, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
 and no instance upstream values ([merge precedence](#merge-precedence)).
 
@@ -1331,14 +1340,14 @@ evaluation counts in the compile's CEL cost limit.
 | `metadata.name` | `<release>-okdp`, as `okdpFullname('okdp')` (never cut: the release has at most 53 characters) |
 | `metadata.namespace` | `Inputs.Namespace` |
 | `metadata.labels` | the labels, plus `okdp.io/provides-<contract>: "true"` per contract provided |
-| `data.service` | `name` of `service.yaml` |
-| `data.version` | `version` of `service.yaml` |
+| `data.service` | `name` of `Chart.yaml` |
+| `data.version` | `version` of `Chart.yaml` |
 | `data.url` | `instance.url`, trimmed |
 | `data.usage` | `instance.usage`, trimmed, with a final newline |
 | `data.outputs.yaml` | the provided connections, a YAML list; `[]` when none |
 
 The labels: the `labels` of the [context](02_service_definition.md#context),
-from `name` of `service.yaml` and the release.
+from `name` of `Chart.yaml` and the release.
 
 `outputs.yaml`: one item per `provides` item, keys sorted (Helm's `toYaml`):
 
@@ -1388,7 +1397,7 @@ The Secret of a `provides` item with a `secret`: named after the item's
 |---|---|
 | `{stringData: {...}}` | a `v1` `Secret`, `type: Opaque`, `stringData` as given (strings); labels: the labels and the credentials label |
 | `{generate: [<keys>], stringData: {...}}` | per key, a `generators.external-secrets.io/v1alpha1` `Password` named `<secret>-<key>`; then the `external-secrets.io/v1` `ExternalSecret` `<secret>` writing the Secret: the generated keys and the static `stringData` ones (`stringData` optional; strings, numbers or booleans, written as text) |
-| neither, in a non-empty `secret` | error: `<service>: output "<name>": secret needs stringData or generate` (`<service>`: `name` of `service.yaml`) |
+| neither, in a non-empty `secret` | error: `<service>: output "<name>": secret needs stringData or generate` (`<service>`: `name` of `Chart.yaml`) |
 
 A generated Secret is what `okdpGeneratedSecret` renders
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key options, generator
@@ -1465,15 +1474,15 @@ of `objects` as one YAML document):
 - its computed values are `objects`, a copy of `Objects`; its final values,
   those over the chart's defaults, and `global`
   ([merge precedence](#merge-precedence));
-- it is compiled whatever the mapping outputs, also when it outputs no
+- it is compiled whatever the values file gives, also when it gives no
   chart;
 - the compiler owns it: no OKDP defaults, no instance upstream values;
-  `service.yaml` may not list it (refused when it is loaded), nor the
-  mapping's `output`:
+  `Chart.yaml` may not list it (refused when it is loaded), nor the
+  values file:
 
 ```
-service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml
-mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output
+Chart.yaml: dependencies[<i>] (okdp): the chart of OKDP's own objects is added by the compiler: remove it
+values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it
 ```
 
 The descriptor, the credentials Secrets and the objects section then reach
@@ -1507,12 +1516,17 @@ compiled for. Two files, and `okdp.dependencies.yaml`
 (`compiler.DependenciesFile`, [dependencies](#dependencies)), which Helm
 ignores:
 
-- `Chart.yaml`: `apiVersion: v2`; `name` and `version` of `service.yaml`
-  (`Result.Service`, `Result.Version`; `version` must be SemVer);
-  `dependencies`, one per key of `Values`,
-  sorted by key: the [chart index](#chart-index) entry of the key (`name`,
-  `repository`, `version`), and `alias: <key>` when the key is not the
-  chart's name;
+- `Chart.yaml`: the package's (`Result.Chart`), every field kept, in
+  Helm's order (`apiVersion`, `name`, `version`, `kubeVersion`,
+  `description`, `type`, `keywords`, `home`, `sources`, `dependencies`,
+  `maintainers`, `icon`, `appVersion`, `deprecated`, `annotations`), its
+  `dependencies` replaced by one per key of `Values`, in this order:
+  1. the rendered dependencies of the package, in `Chart.yaml` order, each
+     as written (`name`, `alias` when written, `repository`, `version`);
+  2. the OAuth client charts, by key: the
+     [chart index](#chart-index) entry of the key (`name`, `repository`,
+     `version`), and `alias: <key>` when the key is not the chart's name;
+  3. `okdp`, likewise;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
   Its first line marks it generated:

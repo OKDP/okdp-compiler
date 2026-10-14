@@ -1,10 +1,10 @@
 // Package compiler compiles an OKDP service instance into the values of its
-// upstream charts. A package (service.yaml, values.cel.yaml, its parameters
-// and OKDP's defaults for its charts) is read from any fs.FS
+// upstream charts. A package (Chart.yaml, okdp.yaml, values.cel.yaml, its
+// parameters and OKDP's defaults for its charts) is read from any fs.FS
 // (LoadDefinition), compiled for one instance (Compile), and written as the
 // files of okdp-compile (Write):
 //
-//	def, err := compiler.LoadDefinition(os.DirFS("packages/myservice"))
+//	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"))
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 //		Charts:    os.DirFS("charts"),
 //		Contracts: os.DirFS("contracts"),
@@ -15,12 +15,13 @@
 //	})
 //	files, err := compiler.Write(res) // -o <dir>
 //
-// Each chart of service.yaml names the upstream chart that renders its values
-// (its source: repository, chart, version), and Result.Charts maps
-// every compiled chart to it: a deployer renders the upstream chart from its
-// repository. The compiler reads only its defaults and schema, from the chart
-// cache (Inputs.Charts). Write gives the instance as one chart, an umbrella
-// over these upstream charts, its values, and the instances it depends on.
+// A package is a Helm chart: each dependency of its Chart.yaml is the
+// upstream chart that renders the values of its key (repository, chart,
+// version), and Result.Charts maps every compiled chart to it: a deployer
+// renders the upstream chart from its repository. The compiler reads only
+// its defaults and schema, from the chart cache (Inputs.Charts). Write gives
+// the instance as one chart, an umbrella over these upstream charts, its
+// values, and the instances it depends on.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
@@ -43,8 +44,8 @@ import (
 
 // The types a caller names.
 type (
-	// Definition: a package, as LoadDefinition reads it: service.yaml, its
-	// mapping, and the package's other files.
+	// Definition: a package, as LoadDefinition reads it: Chart.yaml,
+	// okdp.yaml, values.cel.yaml, and the package's other files.
 	Definition = okdp.Definition
 	// Inputs: what a compile reads besides the package.
 	Inputs = okdp.Inputs
@@ -55,6 +56,9 @@ type (
 	Result = okdp.Result
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
+	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
+	// Result.Chart).
+	ChartMetadata = chart.Metadata
 )
 
 // The files Write gives besides Chart.yaml.
@@ -68,8 +72,9 @@ const (
 	DependenciesFile = umbrella.DependenciesFile
 )
 
-// LoadDefinition reads the package at the root of fsys: service.yaml,
-// checked, and values.cel.yaml; each compile reads its other files.
+// LoadDefinition reads the package at the root of fsys: Chart.yaml, then
+// okdp.yaml and values.cel.yaml when it has them, checked; each compile
+// reads its other files.
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return okdp.LoadDefinition(fsys)
 }
@@ -82,8 +87,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 }
 
 // Write: what `okdp-compile -o <dir>` writes for res, file name -> content:
-// Chart.yaml, the instance as one chart named and versioned after
-// service.yaml, an umbrella over the upstream charts of its keys;
+// Chart.yaml, the instance as one chart, the package's Chart.yaml with the
+// dependencies compiled, an umbrella over the upstream charts of its keys;
 // UmbrellaValues, the final values of each key under the key; and
 // DependenciesFile. res is what Compile returned: Write does not check it
 // again. Every file is built before Write returns.

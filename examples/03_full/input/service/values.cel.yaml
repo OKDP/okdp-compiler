@@ -1,407 +1,131 @@
-# The mapping of the workspace service: YAML shaped like the upstream values,
-# where ${{ <CEL> }} computes a value and $-keys shape the structure. It
-# reads the instance's parameters (values, each connection reference
-# replaced by its connection), the platform's and the project's settings
-# (global.okdp, and platform, derived from them by the compiler), the release
-# and the service.
-#
-# Sections, in the order they are evaluated: vars, errors, then output,
-# instance, provides, objects, oidcClients. Each sees the context and the vars
-# bindings, none sees another section.
+# The values of each dependency of Chart.yaml, by key, the charts' values
+# the mapping computes: they see the bindings of okdp.yaml (vars). A
+# dependency left out is not rendered.
+api:
+  fullnameOverride: ${{ api }}
+  mode: server
+  replicaCount: ${{ values.replicas }}           # a lone expression keeps its type: a number
+  resources: ${{ sizes[values.size] }}
+  podLabels: ${{ labels }}                       # the binding, with the cost center
+  podAnnotations:
+    checksum/settings: ${{ sha256(toJson(settings)) }}   # toJson sorts the keys
+    workspace.example.org/catalogs: ${{ base64.encode(bytes(json.encode(catalogNames))) }}
+  nodeSelector:
+    okdp.io/node-pool: {$if: "${{ project.?nodePool.hasValue() }}", $value: "${{ project.?nodePool.orValue('') }}"}
+  tolerations:
+    - $for: "pool in [project.?nodePool.orValue('')].filter(p, p != '')"
+      $each: {key: okdp.io/node-pool, operator: Equal, value: "${{ pool }}", effect: NoSchedule}
+  env: ${{ env }}
+  ingress:
+    enabled: true
+    className: ${{ global.okdp.ingress.className }}
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: 64m
+      nginx.ingress.kubernetes.io/whitelist-source-range: {$if: "${{ ranges.size() > 0 }}", $value: "${{ ranges.join(',') }}"}
+      $merge: ${{ platform.ingressAnnotations }}  # cert-manager.io/cluster-issuer, over the keys above
+    hosts:
+      - host: ${{ host }}
+        paths: [{path: /, pathType: Prefix}]
+    tls:
+      - hosts: ["${{ host }}"]
+        secretName: ${{ okdpFullname('tls') }}
+  config:                                        # keys with dots
+    workspace.auth.issuer: ${{ global.okdp.oidc.issuerUri }}
+    workspace.auth.realm: ${{ global.okdp.oidc.issuerUri.split('/').filter(s, s != '').last().orValue('') }}
+    workspace.auth.scope: ${{ platform.oidc.scope }} offline_access
+    workspace.auth.consoleSecret: ${{ oidcClientSecret('console') }}   # a named client's Secret
+    workspace.storage.endpoint: ${{ storage.?endpoint.orValue('') }}
+    workspace.storage.bucket: ${{ storage.?bucket.orValue('') }}
+    workspace.storage.pathStyle: ${{ str(storage.?pathStyle.orValue(false)) }}
+    workspace.notifications.url: ${{ webhook.?internalUrl.orValue('') }}
+    workspace.notifications.channels: ${{ values.notifications.channels.join(',') }}
+    $merge: >-
+      ${{ values.extraEnv.transformMapEntry(k, v,
+          {'workspace.env.' + k.lowerAscii().replace('workspace_', ''): v}) }}
+  # A map, one key per element: $for with $key and $value.
+  catalogs:
+    $for: c in values.catalogs
+    $vars:
+      cdb: '${{ type(c.?database.orValue("")) == map ? c.database : {} }}'
+    $key: ${{ c.name }}
+    $value:
+      storage:
+        endpoint: ${{ c.storage.endpoint }}
+        bucket: ${{ c.storage.bucket }}
+        region: ${{ c.storage.region }}
+        pathStyle: ${{ c.storage.?pathStyle.orValue(false) }}
+        credentials: ${{ c.storage.?secretRef.name.orValue('') }}
+      database:
+        $if: ${{ cdb.size() > 0 }}               # left out for a catalog without one
+        url: jdbc:${{ cdb.engine }}://${{ cdb.host }}:${{ str(cdb.port) }}/${{ cdb.dbName }}
+        driver: ${{ cdb.driver }}
+        credentials: ${{ cdb.secretRef.name }}
+        from: ${{ cdb.okdp.source }}             # internal or external
+      properties: ${{ c.?properties.orValue({}) }}
 
-vars:
-  # Text and expressions: a string.
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
-  # okdpFullname(suffix): <release>-<suffix>, cut to 63 characters.
-  api: ${{ okdpFullname('api') }}
-  gateway: ${{ okdpFullname('gateway') }}
-  gatewayHost: ${{ gateway }}.${{ global.okdp.ingress.suffix }}
-  # cel.bind: a name inside one expression.
-  apiUrl: ${{ cel.bind(base, 'https://' + host, base + '/api') }}
-  internalUrl: http://${{ api }}.${{ release.namespace }}.svc:8080
-
-  # The project's settings (demo.yaml), optional: read with .? and orValue,
-  # a missing key failing the expression otherwise. m[?'k'] is the same.
-  project: ${{ global.okdp.?project.orValue({}) }}
-  projectName: ${{ project.?displayName.or(project.?name).orValue(release.namespace) }}
-  costCenter: ${{ project[?'costCenter'].orValue('') }}
-  ranges: ${{ project.?allowedSourceRanges.orValue([]) }}
-
-  # A binding named after a context variable replaces it in every later
-  # expression: labels, here with the project's cost center. The host
-  # functions do not see bindings: okdpLabels() keeps the context's.
-  labels:
-    $merge: ${{ labels }}                # the context's labels: the binding is not bound yet
-    okdp.io/cost-center: {$if: "${{ costCenter != '' }}", $value: "${{ costCenter }}"}
-
-  # Connection references, resolved: a map of the contract's fields,
-  # secretRef and okdp (where it comes from), or "" when not set.
-  db: '${{ type(values.database) == map ? values.database : {} }}'
-  audit: '${{ type(values.audit) == map ? values.audit : {} }}'
-  storage: '${{ type(values.storage) == map ? values.storage : {} }}'
-  webhook: '${{ type(values.notifications.webhook) == map ? values.notifications.webhook : {} }}'
-  catalogNames: ${{ values.catalogs.map(c, c.name).sort() }}
-  # The connections whose credentials the pods read, checked in errors: vars
-  # is evaluated before errors, so the bindings read their secretRef with .?
-  secured: >-
-    ${{ [db, audit, storage].filter(c, c.size() > 0) + values.catalogs.map(c, c.storage)
-        + values.catalogs.filter(c, type(c.?database.orValue('')) == map).map(c, c.database) }}
-
-  # The API servers, pods of a StatefulSet: lists.range and format.
-  apiPods: >-
-    ${{ lists.range(int(values.replicas)).map(i, '%s-%d.%s.%s.svc'.format([api, i, api, release.namespace])) }}
-
-  # A value used twice: a binding, read by name (YAML's aliases are
-  # refused).
-  small:
-    requests: {cpu: 250m, memory: 512Mi}
-    limits: {memory: 1Gi}
-  sizes:
-    small: ${{ small }}
-    medium:
-      requests: ${{ small.requests }}    # the requests of small
-      limits: {memory: 2Gi}
-    large:
-      requests: {cpu: "1", memory: 2Gi}
-      limits: {memory: 4Gi}
-
-  # The environment of the API servers and of the scheduler: a binding is
-  # any node, directives included.
+scheduler:                                       # the second render of the workspace chart
+  fullnameOverride: ${{ okdpFullname('scheduler') }}
+  mode: scheduler
+  podLabels: ${{ labels }}
   env:
-    - name: WORKSPACE_URL
-      value: https://${{ host }}
-    - name: WORKSPACE_INSTANCE
-      value: ${{ okdpFullname() }}       # the release name alone
-    - name: WORKSPACE_PROJECT
-      value: ${{ first([project.?name.orValue(''), release.namespace]) }}   # Helm's default
-    # A group of items on one condition: a $for over zero or one element.
-    - $for: "secret in (platform.oidc.enabled ? [platform.oidcClientSecret] : [])"
-      $each:                             # a list: spliced, two items per element
-        - name: OIDC_CLIENT_ID
-          valueFrom: {secretKeyRef: {name: "${{ secret }}", key: client_id}}
-        - name: OIDC_CLIENT_SECRET
-          valueFrom: {secretKeyRef: {name: "${{ secret }}", key: client_secret}}
-    - $if: ${{ db.size() > 0 }}          # an item left out when false
-      name: DB_URL
-      value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
-    - $if: ${{ has(db.sslMode) }}        # a default of the contract for postgresql only
-      name: DB_SSL_MODE
-      value: ${{ db.sslMode }}
-    - $if: ${{ db.size() > 0 }}
-      name: DB_PASSWORD
-      valueFrom: {secretKeyRef: {name: "${{ db.?secretRef.name.orValue('') }}", key: password}}
-    # One item either way: $value when the condition is true, $else otherwise.
-    - $if: ${{ db.size() > 0 }}
-      $value: {name: WORKSPACE_SESSIONS, value: database}
-      $else: {name: WORKSPACE_SESSIONS_DIR, value: /var/lib/workspace/sessions}
-    - $if: ${{ audit.size() > 0 }}
-      name: AUDIT_DB_URL
-      value: jdbc:${{ audit.engine }}://${{ audit.host }}:${{ str(audit.port) }}/${{ audit.dbName }}
-    - $if: ${{ audit.size() > 0 }}
-      name: AUDIT_DB_PASSWORD
-      valueFrom: {secretKeyRef: {name: "${{ audit.?secretRef.name.orValue('') }}", key: password}}
-    # Items per element, with bindings per element ($vars).
+    - $spread: ${{ env }}
+    - name: WORKSPACE_API_URL
+      value: ${{ internalUrl }}
+    - $for: "s in (values.admins.size() > 0 ? [okdpFullname('automation-oauth')] : [])"
+      $each:                                     # the automation client's Secret, a name it sets
+        - name: AUTOMATION_CLIENT_ID
+          valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_id}}
+        - name: AUTOMATION_CLIENT_SECRET
+          valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_secret}}
+  config:
+    workspace.pipeline.template: ${{ pipelineTemplate }}
+  schedules:
     - $for: c in values.catalogs
       $vars:
-        prefix: CATALOG_${{ c.name.upperAscii() }}
+        slug: ${{ c.name.replace('_', '-') }}
       $each:
-        - name: ${{ prefix }}_BUCKET
-          value: ${{ c.storage.bucket }}
-        - name: ${{ prefix }}_S3_ACCESS_KEY
-          valueFrom: {secretKeyRef: {name: "${{ c.storage.?secretRef.name.orValue('') }}", key: accessKey}}
-    # The platform's proxy (platform.proxyEnv), upper and lower case, in a
-    # fixed order: items computed in an expression, spliced ($spread).
-    - $spread: >-
-        ${{ ['HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY'].filter(k, k in platform.proxyEnv)
-            .map(k, [{'name': k, 'value': platform.proxyEnv[k]},
-                     {'name': k.lowerAscii(), 'value': platform.proxyEnv[k]}]).flatten() }}
-    # The instance's extraEnv, a map: a two-variable comprehension, sorted.
-    - $spread: ${{ values.extraEnv.transformList(k, v, {'name':k, 'value':v}).sortBy(e, e.name) }}
+        - name: sync-${{ slug }}
+          cron: "0 * * * *"
+          catalog: ${{ c.name }}
+          notify:                                # a $for in an $each sees the outer variable
+            - $for: ch in values.notifications.channels
+              $each: {channel: "${{ ch }}", when: failure, subject: "${{ c.name }} sync failed"}
+        - $if: ${{ c.?properties.?format.orValue('') == 'parquet' }}
+          name: compact-${{ slug }}
+          cron: "30 4 * * 0"
+          catalog: ${{ c.name }}
 
-  # What the pods read: their checksum restarts them on a change.
-  settings:
-    WORKSPACE_API_URL: ${{ apiUrl }}
-    WORKSPACE_REPLICAS: ${{ str(values.replicas) }}   # ConfigMap data: text
-    WORKSPACE_CATALOGS: ${{ catalogNames.join(',') }}
-    WORKSPACE_ADMINS: ${{ values.admins.join(',') }}
-    $merge: ${{ values.extraEnv }}       # merged over the keys above
+gateway:
+  fullnameOverride: ${{ gateway }}
+  replicaCount: ${{ int(values.replicas) + 1 }}  # values numbers are doubles: int() for int arithmetic
+  upstreams: ${{ apiPods.map(p, p + ':8080') }}
+  routes:                                        # a map from a list
+    $for: r in routes
+    $key: ${{ r.path }}
+    $value: ${{ r.target }}
+  headers: >-                                    # an optional entry: left out when none
+    ${{ {'X-Workspace-Instance': release.name, ?'X-Workspace-Cost-Center': optional.ofNonZeroValue(costCenter)} }}
+  rateLimit: ${{ '%d/s'.format([int(values.replicas) * 50]) }}
+  config: |
+    # gateway.conf: a file with expressions in it
+    server_name ${{ gatewayHost }};
+    banner ${{ strings.quote('Workspace ' + release.name + ' of ' + projectName) }};
+    upstream ${{ api }} { ${{ apiPods.map(p, 'server ' + p + ':8080;').join(' ') }} }
 
-  # $$ writes a key starting with $: $$schema is the key $schema.
-  settingsSchema:
-    $$schema: https://json-schema.org/draft/2020-12/schema
-    type: object
-    required: ${{ settings.map(k, k).sort() }}
-    additionalProperties: {type: string}
+metrics:
+  $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
+  fullnameOverride: ${{ okdpFullname('metrics') }}
+  interval: ${{ values.features.metrics.interval }}
+  scrapeTimeout: ${{ duration(values.features.metrics.interval) - duration('5s') }}   # a duration, as text
+  labels: ${{ okdpSelectorLabels('metrics') }}
+  targets: >-
+    ${{ [apiPods.map(p, 'http://' + p + ':9090/metrics'),
+         ['http://' + gateway + ':9090/metrics', 'http://' + gateway + ':9090/metrics']].flatten().distinct() }}
+  serviceMonitor:
+    enabled: true
+    labels: ${{ labels }}
 
-  # $${{ writes a literal ${{: the workspace's own pipeline templates use it.
-  pipelineTemplate: |
-    name: sync-$${{ catalog }}
-    run: workspace sync --catalog $${{ catalog }} --api ${{ internalUrl }}
-
-  # The gateway's routes, a list made into a map below.
-  routes:
-    - {path: /api, target: "${{ internalUrl }}/api"}
-    - {path: /, target: "${{ internalUrl }}"}
-    - $if: ${{ values.features.console }}
-      path: /console
-      target: ${{ internalUrl }}/console
-
-# The rules of the instance: every message fails the compile, together.
-errors:
-  # A rule: its message when its condition holds.
-  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
-    $value: "workspace: replicas > 1 needs a database, sessions are stored there"
-  # A rule per element; its message is evaluated only when the condition
-  # holds, and may read what exists only then (c.properties.format).
-  - $for: c in values.catalogs
-    $each:
-      $if: "${{ has(c.properties) && has(c.properties.format) && !(c.properties.format in ['parquet', 'orc', 'csv']) }}"
-      $value: 'workspace: catalog "${{ c.name }}": format ${{ c.properties.format }} is not parquet, orc or csv'
-  # A rule per distinct element: a connection used twice, a catalog name
-  # written twice, gives one message.
-  - $for: c in secured.distinct()
-    $each:
-      $if: ${{ !has(c.secretRef) }}
-      $value: 'workspace: ${{ c.okdp.contract }} connection "${{ c.okdp.ref }}" has no secretRef, its credentials cannot be read'
-  - $for: n in values.catalogs.map(c, c.name).distinct()
-    $each:
-      $if: ${{ !values.catalogs.exists_one(c, c.name == n) }}
-      $value: 'workspace: catalog "${{ n }}" is defined twice'
-  - $for: k in values.extraEnv.transformList(k, v, k).sort()
-    $each:
-      $if: ${{ !k.matches('^WORKSPACE_[A-Z0-9_]+$') }}
-      $value: 'workspace: extraEnv ${{ k }} must start with WORKSPACE_'
-  - $if: ${{ !values.admins.all(a, a.contains('@')) }}
-    $value: "workspace: admins are e-mail addresses"
-  # The mapping sees the instance's upstream values: a rule no protect path
-  # expresses.
-  - $if: ${{ values.upstream.?api.?replicaCount.hasValue() }}
-    $value: "workspace: set replicas, not upstream.api.replicaCount"
-
-# The values of each chart of service.yaml; a chart left out is not rendered.
-output:
-  api:
-    fullnameOverride: ${{ api }}
-    mode: server
-    replicaCount: ${{ values.replicas }}           # a lone expression keeps its type: a number
-    resources: ${{ sizes[values.size] }}
-    podLabels: ${{ labels }}                       # the binding, with the cost center
-    podAnnotations:
-      checksum/settings: ${{ sha256(toJson(settings)) }}   # toJson sorts the keys
-      workspace.example.org/catalogs: ${{ base64.encode(bytes(json.encode(catalogNames))) }}
-    nodeSelector:
-      okdp.io/node-pool: {$if: "${{ project.?nodePool.hasValue() }}", $value: "${{ project.?nodePool.orValue('') }}"}
-    tolerations:
-      - $for: "pool in [project.?nodePool.orValue('')].filter(p, p != '')"
-        $each: {key: okdp.io/node-pool, operator: Equal, value: "${{ pool }}", effect: NoSchedule}
-    env: ${{ env }}
-    ingress:
-      enabled: true
-      className: ${{ global.okdp.ingress.className }}
-      annotations:
-        nginx.ingress.kubernetes.io/proxy-body-size: 64m
-        nginx.ingress.kubernetes.io/whitelist-source-range: {$if: "${{ ranges.size() > 0 }}", $value: "${{ ranges.join(',') }}"}
-        $merge: ${{ platform.ingressAnnotations }}  # cert-manager.io/cluster-issuer, over the keys above
-      hosts:
-        - host: ${{ host }}
-          paths: [{path: /, pathType: Prefix}]
-      tls:
-        - hosts: ["${{ host }}"]
-          secretName: ${{ okdpFullname('tls') }}
-    config:                                        # keys with dots
-      workspace.auth.issuer: ${{ global.okdp.oidc.issuerUri }}
-      workspace.auth.realm: ${{ global.okdp.oidc.issuerUri.split('/').filter(s, s != '').last().orValue('') }}
-      workspace.auth.scope: ${{ platform.oidc.scope }} offline_access
-      workspace.auth.consoleSecret: ${{ oidcClientSecret('console') }}   # a named client's Secret
-      workspace.storage.endpoint: ${{ storage.?endpoint.orValue('') }}
-      workspace.storage.bucket: ${{ storage.?bucket.orValue('') }}
-      workspace.storage.pathStyle: ${{ str(storage.?pathStyle.orValue(false)) }}
-      workspace.notifications.url: ${{ webhook.?internalUrl.orValue('') }}
-      workspace.notifications.channels: ${{ values.notifications.channels.join(',') }}
-      $merge: >-
-        ${{ values.extraEnv.transformMapEntry(k, v,
-            {'workspace.env.' + k.lowerAscii().replace('workspace_', ''): v}) }}
-    # A map, one key per element: $for with $key and $value.
-    catalogs:
-      $for: c in values.catalogs
-      $vars:
-        cdb: '${{ type(c.?database.orValue("")) == map ? c.database : {} }}'
-      $key: ${{ c.name }}
-      $value:
-        storage:
-          endpoint: ${{ c.storage.endpoint }}
-          bucket: ${{ c.storage.bucket }}
-          region: ${{ c.storage.region }}
-          pathStyle: ${{ c.storage.?pathStyle.orValue(false) }}
-          credentials: ${{ c.storage.?secretRef.name.orValue('') }}
-        database:
-          $if: ${{ cdb.size() > 0 }}               # left out for a catalog without one
-          url: jdbc:${{ cdb.engine }}://${{ cdb.host }}:${{ str(cdb.port) }}/${{ cdb.dbName }}
-          driver: ${{ cdb.driver }}
-          credentials: ${{ cdb.secretRef.name }}
-          from: ${{ cdb.okdp.source }}             # internal or external
-        properties: ${{ c.?properties.orValue({}) }}
-
-  scheduler:                                       # the second render of the workspace chart
-    fullnameOverride: ${{ okdpFullname('scheduler') }}
-    mode: scheduler
-    podLabels: ${{ labels }}
-    env:
-      - $spread: ${{ env }}
-      - name: WORKSPACE_API_URL
-        value: ${{ internalUrl }}
-      - $for: "s in (values.admins.size() > 0 ? [okdpFullname('automation-oauth')] : [])"
-        $each:                                     # the automation client's Secret, a name it sets
-          - name: AUTOMATION_CLIENT_ID
-            valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_id}}
-          - name: AUTOMATION_CLIENT_SECRET
-            valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_secret}}
-    config:
-      workspace.pipeline.template: ${{ pipelineTemplate }}
-    schedules:
-      - $for: c in values.catalogs
-        $vars:
-          slug: ${{ c.name.replace('_', '-') }}
-        $each:
-          - name: sync-${{ slug }}
-            cron: "0 * * * *"
-            catalog: ${{ c.name }}
-            notify:                                # a $for in an $each sees the outer variable
-              - $for: ch in values.notifications.channels
-                $each: {channel: "${{ ch }}", when: failure, subject: "${{ c.name }} sync failed"}
-          - $if: ${{ c.?properties.?format.orValue('') == 'parquet' }}
-            name: compact-${{ slug }}
-            cron: "30 4 * * 0"
-            catalog: ${{ c.name }}
-
-  gateway:
-    fullnameOverride: ${{ gateway }}
-    replicaCount: ${{ int(values.replicas) + 1 }}  # values numbers are doubles: int() for int arithmetic
-    upstreams: ${{ apiPods.map(p, p + ':8080') }}
-    routes:                                        # a map from a list
-      $for: r in routes
-      $key: ${{ r.path }}
-      $value: ${{ r.target }}
-    headers: >-                                    # an optional entry: left out when none
-      ${{ {'X-Workspace-Instance': release.name, ?'X-Workspace-Cost-Center': optional.ofNonZeroValue(costCenter)} }}
-    rateLimit: ${{ '%d/s'.format([int(values.replicas) * 50]) }}
-    config: |
-      # gateway.conf: a file with expressions in it
-      server_name ${{ gatewayHost }};
-      banner ${{ strings.quote('Workspace ' + release.name + ' of ' + projectName) }};
-      upstream ${{ api }} { ${{ apiPods.map(p, 'server ' + p + ':8080;').join(' ') }} }
-
-  metrics:
-    $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
-    fullnameOverride: ${{ okdpFullname('metrics') }}
-    interval: ${{ values.features.metrics.interval }}
-    scrapeTimeout: ${{ duration(values.features.metrics.interval) - duration('5s') }}   # a duration, as text
-    labels: ${{ okdpSelectorLabels('metrics') }}
-    targets: >-
-      ${{ [apiPods.map(p, 'http://' + p + ':9090/metrics'),
-           ['http://' + gateway + ':9090/metrics', 'http://' + gateway + ':9090/metrics']].flatten().distinct() }}
-    serviceMonitor:
-      enabled: true
-      labels: ${{ labels }}
-
-  backup:
-    $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read from the chart cache
-    schedule: ${{ values.features.backup.schedule }}
-    bucket: ${{ storage.?bucket.orValue('') }}
-
-# What OKDP shows of the instance: its descriptor ConfigMap.
-instance:
-  url: https://${{ host }}
-  usage: |
-    Notebooks and SQL (${{ service.name }} ${{ service.version }}) for the project ${{ projectName }}.
-    Open https://${{ host }}; its API is ${{ apiUrl }}.
-    Catalogs: ${{ catalogNames.join(', ') }}.
-
-# The connections the instance publishes, checked against their contracts.
-provides:
-  - contract: http                                 # under the release name: what references to it resolve to
-    values:
-      url: https://${{ host }}
-      internalUrl: ${{ internalUrl }}
-  - contract: http                                 # a second output of the contract, named
-    name: ${{ gateway }}
-    values:
-      url: https://${{ gatewayHost }}
-      internalUrl: http://${{ gateway }}.${{ release.namespace }}.svc:8443
-  - contract: s3
-    name: ${{ okdpFullname('exports') }}
-    values:                                        # region: the contract's default
-      provider: minio                              # pathStyle: true, the default when minio
-      endpoint: https://${{ gatewayHost }}/s3
-      bucket: exports
-    secret:                                        # Secret <name>-s3-credentials, generated in the cluster
-      generate:
-        - {key: accessKey, length: 20, digits: 4, noUpper: true}
-        - {key: secretKey, length: 40, symbols: 4}
-      stringData: {region: us-east-1}
-
-# OKDP's own objects, whole manifests: rendered by the okdp chart, after the
-# descriptor and the credentials Secrets.
-objects:
-  - apiVersion: v1
-    kind: ConfigMap
-    metadata:
-      name: ${{ okdpFullname('settings') }}
-      namespace: ${{ release.namespace }}
-      labels: ${{ okdpLabels('settings') }}        # the context's labels, component settings
-    data:
-      $merge: ${{ settings }}
-      settings.schema.json: ${{ toPrettyJson(settingsSchema) }}
-      catalogs.yaml: >-
-        ${{ toYaml(values.catalogs.map(c, {'name': c.name, 'bucket': c.storage.bucket,
-            ?'database': c.?database.?okdp.?ref})) }}
-      pipeline.yaml: ${{ pipelineTemplate }}
-      init.sh: |
-        #!/bin/sh
-        set -eu
-        ${{ values.admins.map(a, 'workspace admin add ' + quote(a)).join('\n') }}
-  # A generated Secret: Password generators and an ExternalSecret, spliced.
-  - $spread: >-
-      ${{ okdpGeneratedSecret({'name': okdpFullname('internal'),
-          'keys': [{'key': 'jwt-secret', 'length': 64},
-                   {'key': 'fernet-key', 'length': 32, 'transform': 'b64enc'},
-                   {'key': 'api.token', 'length': 40, 'digits': 0, 'transform': 'sha256'}],
-          'stringData': {'issuer': global.okdp.oidc.issuerUri, 'replicas': values.replicas},
-          'labels': {'okdp.io/cost-center': costCenter},
-          'annotations': {'helm.sh/resource-policy': 'keep'}}) }}
-  - $if: ${{ ranges.size() > 0 }}                  # an object left out when false
-    apiVersion: networking.k8s.io/v1
-    kind: NetworkPolicy
-    metadata:
-      name: ${{ okdpFullname('allowlist') }}
-      namespace: ${{ release.namespace }}
-      labels: ${{ okdpLabels('allowlist') }}
-    spec:
-      podSelector: {matchLabels: "${{ selectorLabels }}"}
-      policyTypes: [Ingress]
-      ingress:
-        - from:
-            - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
-            - $for: cidr in ranges
-              $each: {ipBlock: {cidr: "${{ cidr }}"}}
-
-# The service's OAuth clients: in dcr mode (platform.yaml), one oidc-dcr
-# chart each, added by the compiler.
-oidcClients:
-  - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client: chart oidc-dcr
-    grantTypes: [authorization_code, refresh_token]
-    scope: ${{ platform.oidc.scope }} offline_access
-  - $if: ${{ values.features.console }}                      # a client left out when false
-    name: console                                            # chart console-oidc-dcr
-    public: true                                             # a browser application: no secret
-    clientName: ${{ release.name }} console
-    redirectUris: ['https://${{ host }}/console/callback', 'https://${{ gatewayHost }}/console/callback']
-    grantTypes: [authorization_code]
-    request:                                                 # registration fields, over the computed ones
-      logo_uri: https://${{ host }}/console/logo.svg
-      post_logout_redirect_uris: ['https://${{ host }}/console']
-  # Clients computed in an expression: a machine client when there are
-  # admins, writing a Secret of its own name.
-  - $spread: >-
-      ${{ values.admins.size() == 0 ? [] : [{'name': 'automation', 'grantTypes': ['client_credentials'],
-          'secret': okdpFullname('automation-oauth')}] }}
+backup:
+  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read from the chart cache
+  schedule: ${{ values.features.backup.schedule }}
+  bucket: ${{ storage.?bucket.orValue('') }}

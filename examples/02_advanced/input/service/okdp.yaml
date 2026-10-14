@@ -1,0 +1,57 @@
+# OKDP's part of the webapp package: what the service is, the platform
+# values it needs, OKDP's defaults for its chart and the instance values it
+# accepts; then the mapping besides the chart's values (values.cel.yaml):
+# its bindings, its rules, its OAuth client and what OKDP shows of the
+# instance, from the instance's parameters (values), the platform values
+# (global.okdp, and platform, derived from them) and the release.
+# ${{ ... }} is a CEL expression.
+
+roles: [webapp]
+dependsOn: [database-server, ingress]
+require:                               # platform values the service needs, under global.okdp
+  - ingress.suffix
+  - ingress.className
+  - certificateIssuers.selfSigned.name
+  - oidc.issuerUri
+defaults:
+  app: app.defaults.yaml               # OKDP's defaults, over the chart's own
+upstream:
+  app:                                 # the instance may set any value, under upstream.app...
+    # ...except these, set by the platform; and its env is appended to.
+    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls, 'ingress.annotations["cert-manager.io/*"]']
+    append: [env]
+
+vars:
+  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  # The database parameter: the resolved connection, or {} when not set.
+  db: '${{ type(values.database) == map ? values.database : {} }}'
+  dbSecret: ${{ db.?secretRef.name.orValue('') }}
+  # The audit database, likewise.
+  audit: '${{ type(values.audit) == map ? values.audit : {} }}'
+  auditSecret: ${{ audit.?secretRef.name.orValue('') }}
+
+# A message fails the compile when its condition holds.
+errors:
+  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
+    $value: "webapp: replicas > 1 needs a database, sessions are stored there"
+  - $if: ${{ db.size() > 0 && dbSecret == '' }}
+    $value: 'webapp: database connection "${{ db.okdp.ref }}" has no secretRef, the password cannot be read'
+  - $if: ${{ audit.size() > 0 && auditSecret == '' }}
+    $value: 'webapp: audit connection "${{ audit.okdp.ref }}" has no secretRef, the password cannot be read'
+
+# The service's OAuth client: provisioned by the platform (the default), or
+# registered by an oidc-dcr chart the compiler adds (clientProvisioning: dcr).
+oidcClients:
+  - redirectUris: ['https://${{ host }}/oauth2/callback']
+    grantTypes: [authorization_code, refresh_token]
+
+instance:
+  url: https://${{ host }}
+  usage: A web application. Open https://${{ host }}
+
+# What other instances can reference this one as.
+provides:
+  - contract: http
+    values:
+      url: https://${{ host }}
+      internalUrl: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080

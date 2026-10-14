@@ -103,7 +103,7 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 	specs := Specs{"": {Source: src, Upstream: true}, "app": {Source: src}}
 	values := M{"upstream": M{"": M{"a": 1.0}}}
 	cache := fstest.MapFS{"x/app-1.0.0/app/values.yaml": {Data: []byte("b: 2\n")}}
-	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, M{"app": M{}}, values)
+	out, _, err := FinalValues(cache, fstest.MapFS{}, specs, "values.cel.yaml", M{"app": M{}}, values)
 	if err != nil || out["app"]["a"] != nil {
 		t.Errorf("app: %v %#v", err, out["app"])
 	}

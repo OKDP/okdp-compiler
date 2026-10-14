@@ -32,7 +32,7 @@ func Example() {
 	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/demo.yaml is one
 	instanceValues := values("examples/02_advanced/input/config.yaml")
 
-	def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
+	def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func Example() {
 	}
 	// res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
 	// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
-	//               its service.yaml source, the platform's objects chart for okdp,
+	//               its Chart.yaml dependency, the platform's objects chart for okdp,
 	//               the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 	// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
 	//               Secrets of the provided connections, the mapping's objects section
@@ -127,14 +127,14 @@ func ExampleCompile() {
 // memory, written as okdp-compile -o <dir> writes them.
 func ExampleWrite() {
 	def, err := compiler.LoadDefinition(fstest.MapFS{
-		"service.yaml": {Data: []byte(`name: demo
+		"Chart.yaml": {Data: []byte(`apiVersion: v2
+name: demo
 version: 1.2.3
-charts:
-  app:
-    source: {repository: https://charts.example.org, chart: app, version: 1.0.0}
-    defaults: app.defaults.yaml
+dependencies:
+  - {name: app, repository: https://charts.example.org, version: 1.0.0}
 `)},
-		"values.cel.yaml":    {Data: []byte("output:\n  app:\n    replicaCount: ${{ values.replicas }}\n")},
+		"okdp.yaml":          {Data: []byte("defaults: {app: app.defaults.yaml}\n")},
+		"values.cel.yaml":    {Data: []byte("app:\n  replicaCount: ${{ values.replicas }}\n")},
 		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
 		"app.defaults.yaml":  {Data: []byte("image: {tag: \"4.5\"}\n")},
 	})
@@ -197,7 +197,7 @@ func ExampleCompile_server() {
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
 	// [app okdp] ConfigMap
-	// values.cel.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
+	// okdp.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }
 

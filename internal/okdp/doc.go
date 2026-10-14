@@ -12,21 +12,25 @@
 // computes on the same inputs), and the mapping's host functions reproduce
 // Helm's.
 //
-// Each chart of service.yaml names the upstream chart that renders its values
-// (chart.Spec.Source: repository, chart, version), and Result.Charts maps
-// every compiled chart to it. The compiler reads only its defaults and
-// schema, from the chart cache (Inputs.Charts); one upstream chart may
-// render several charts of service.yaml, each with its own values.
+// A package is a Helm chart, Chart.yaml, plus OKDP's files: okdp.yaml (its
+// package keys and the mapping's vars, errors and OKDP sections) and
+// values.cel.yaml (the charts' values, the mapping's output). Each
+// dependency of Chart.yaml is an upstream chart that renders the values of
+// its key, its alias or its name (chart.Spec.Source: repository, chart,
+// version), and Result.Charts maps every compiled chart to it. The compiler
+// reads only its defaults and schema, from the chart cache (Inputs.Charts);
+// one upstream chart may render several dependencies, each under an alias
+// with its own values.
 //
 // A mapping's oidcClients section declares the service's OAuth clients
 // (oidc.go): when the platform registers them by dynamic client
 // registration, the compiler adds one chart per client, rendered by the
 // oidc-dcr chart (oidc-dcr for the main client, <name>-oidc-dcr for a named
-// one), which service.yaml does not list; their values come from a template
+// one), which Chart.yaml does not list; their values come from a template
 // in the mapping language embedded in the compiler (oidc-dcr.cel.yaml).
 //
-// An instance may set any value of a chart whose service.yaml entry accepts
-// it (upstream), under upstream.<chart> of its values. The mapping sees them
+// An instance may set any value of a chart that okdp.yaml's upstream
+// accepts, under upstream.<chart> of its values. The mapping sees them
 // (values.upstream.<chart>), so that a rule of its errors section covers
 // them; the compiler then merges them over the computed values, refusing
 // the protect paths and appending to the append lists. A path names a key

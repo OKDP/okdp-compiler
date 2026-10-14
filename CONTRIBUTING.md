@@ -85,7 +85,8 @@ behaviour, a flag, an input, an output or an error message that changes
 changes its doc. [docs/README.md](docs/README.md) says which doc is for
 what:
 
-- `service.yaml` and the mapping language:
+- the package files (`Chart.yaml`, `okdp.yaml`, `values.cel.yaml`) and the
+  mapping language:
   [docs/specs/02_service_definition.md](docs/specs/02_service_definition.md),
   its directives in [docs/specs/03_control_flow.md](docs/specs/03_control_flow.md),
   its functions in [docs/specs/04_functions.md](docs/specs/04_functions.md);
@@ -119,7 +120,7 @@ it tags `vX.Y.Z` and publishes the GitHub release. Do not edit
 | `docs:`, `test:`, `ci:`, `chore:`, `refactor:` | no change of behaviour | none by itself |
 
 `!` after the type (`feat!:`) marks a breaking change of the library, the
-command line, `service.yaml`, the mapping language or the outputs: a minor
+command line, the package files, the mapping language or the outputs: a minor
 version before 1.0, a major one after.
 
 ## CEL libraries

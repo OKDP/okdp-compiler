@@ -1,60 +1,220 @@
 # Service definition
 
-Normative reference of a service definition: the two files at the root of
-a package that `compiler.LoadDefinition(fsys)` reads.
+Normative reference of a service definition: the files at the root of a
+package that `compiler.LoadDefinition(fsys)` reads. A package is laid out
+as a Helm umbrella chart over the service's upstream charts, plus OKDP's
+own files.
 
-| File | Content |
-|---|---|
-| [`service.yaml`](#serviceyaml) | the engine-neutral part: the service's name and versions, the upstream charts and their sources, OKDP's defaults for them, what an instance may override, the platform values the service needs |
-| [`values.cel.yaml`](#valuescelyaml) | the mapping: YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives; it computes the values of each chart, OKDP's own objects and what the instance publishes, and declares the service's OAuth clients |
+| File | Required | Content |
+|---|---|---|
+| [`Chart.yaml`](#chartyaml) | yes | Helm's chart metadata: the service's name and version, and its upstream charts, the `dependencies`, each by its name, repository and pinned version |
+| [`okdp.yaml`](#okdpyaml) | no | OKDP's part: the platform values the service needs, catalog metadata, OKDP's defaults for each dependency, the instance upstream values each accepts; then the sections of the mapping that are not chart values: `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` |
+| [`values.cel.yaml`](#valuescelyaml) | no | the values file: the values of each dependency, by key, YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives |
 
-Both files are required: a missing one fails `LoadDefinition` with the read
-error (`open service.yaml: ...`), and a `service.yaml` that does not decode
-fails with `service.yaml: <error>`. `LoadDefinition` only reads
-`values.cel.yaml`: each `Compile` parses and evaluates it, so its errors
-are compile errors ([Errors](#errors)). It keeps the package
-(`Definition.Files`): each compile reads its other files,
+The mapping is the sections of `okdp.yaml` and the values file
+([sections](#sections)): it computes the values of each chart, OKDP's own
+objects and what the instance publishes, and declares the service's OAuth
+clients.
+
+`LoadDefinition` reads `Chart.yaml` and checks it: a missing one fails with
+the read error (`open Chart.yaml: ...`). It then decodes the package keys of
+`okdp.yaml` and checks them against `Chart.yaml`, and reads the values
+file; either file may be absent. It does not evaluate the mapping: each
+`Compile` parses and evaluates the sections of `okdp.yaml` and the values
+file, so their errors are compile errors ([Errors](#errors)). It keeps the
+package (`Definition.Files`): each compile reads its other files,
 `config.schema.json` and the defaults files
-([package files](01_inputs_outputs.md#package-files)).
+([package files](01_inputs_outputs.md#package-files)). `Compile` checks a
+`Definition` built in memory again: its name and version, its chart keys,
+their upstream charts and their `protect` and `append` paths.
 
 The other inputs of a compile (the chart cache, contracts, platform and
 instance values) and its outputs are specified in
 [01_inputs_outputs.md](01_inputs_outputs.md).
 
-## service.yaml
+## Chart.yaml
 
-Decoded by `go.yaml.in/yaml/v3`: YAML 1.2, unlike values files and the
-mapping (a plain `upstream: no` is a string, refused:
-[upstream](#upstream)). Strictly: a field the tables below
-do not list fails rather than being ignored, where a misspelt `protect`
-would leave its paths unprotected, and so does a key that only holds an
-anchor (write the anchor at its first use, as in [sources](#sources)).
-Each unknown field is reported, one per line, as yaml.v3 reports it, with
-the Go type of its place (`okdp.Service` the top level, `chart.Spec` a
-chart, `chart.Ref` a `source`); [`upstream`](#upstream) checks its own
-form:
+Helm's chart metadata (`apiVersion: v2`): the package is an umbrella chart
+over its upstream charts, its `dependencies`. The compiler writes it back
+as the instance's chart, its metadata kept and its dependencies those
+compiled ([umbrella chart](01_inputs_outputs.md#umbrella-chart)).
+
+Decoded by `go.yaml.in/yaml/v3`: YAML 1.2, unlike values files. Strictly: a
+field Helm does not define fails rather than being ignored, each reported,
+one per line, as yaml.v3 reports it, with the Go type of its place
+(`chart.Metadata` the top level, `chart.Dependency` a dependency,
+`chart.Maintainer` a maintainer):
 
 ```text
-service.yaml: yaml: unmarshal errors:
-  line 7: field protcet not found in type chart.Spec
+Chart.yaml: yaml: unmarshal errors:
+  line 9: field condtion not found in type chart.Dependency
 ```
 
-The file is one YAML document: a second one, after `---`, is ignored. An
-empty file is a service without a name (`service.yaml: name is required`).
+The file is one YAML document: a second one, after `---`, fails
+(`Chart.yaml: one YAML document`).
 
-### Service
+| Field | Type | Meaning |
+|---|---|---|
+| `apiVersion` | string | Required: `v2`. |
+| `name` | string | Required. The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations, the umbrella chart's name. |
+| `version` | string | Required, SemVer, as a [dependency's](#dependencies) is: the package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`, the umbrella chart's version. |
+| `type` | string | Absent or `application`: a package is an application chart. |
+| `dependencies` | list of [dependencies](#dependencies) | The upstream charts of the service. |
+| `kubeVersion`, `description`, `keywords`, `home`, `sources`, `maintainers` (`name`, `email`, `url`), `icon`, `appVersion`, `deprecated`, `annotations` (strings) | as Helm defines them | Not read by the compiler: written back to the umbrella's `Chart.yaml`. |
 
-| Field | Type | Default | Meaning |
+The fields are checked when the file is loaded, in this order, then the
+dependencies, in order ([dependencies](#dependencies)); the first failing
+check is reported:
+
+| Case | Error |
+|---|---|
+| `apiVersion` other than `v2` (`v1`, absent) | `Chart.yaml: apiVersion "<apiVersion>": v2, the only one the compiler reads` |
+| no `name` | `Chart.yaml: name is required` |
+| no `version` | `Chart.yaml: version is required` |
+| `version` not SemVer (`1.0`, `1.x`) | `Chart.yaml: version "<version>": SemVer (1.2.3), the version of the umbrella chart` |
+| `type` other than `application` | `Chart.yaml: type "<type>": a package is an application chart` |
+
+### Dependencies
+
+```yaml
+dependencies:
+  - name: workspace                    # the chart, in its repository
+    alias: api                         # its key: api
+    repository: https://charts.example.org
+    version: 3.2.0
+  - name: workspace                    # a second render of the chart
+    alias: scheduler
+    repository: https://charts.example.org
+    version: 3.2.0
+  - name: gateway                      # its key: gateway
+    repository: oci://registry.example.org/charts
+    version: 1.4.2
+```
+
+A dependency is an upstream chart of the service, as its repository
+publishes it:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | Required: the chart's name in its repository. |
+| `alias` | string | The dependency's key, when it is not the chart's name. |
+| `repository` | string | Required: a chart repository (`https://`, `http://`) or an OCI registry path (`oci://`). |
+| `version` | string | Required: a pinned version. |
+
+Its key is its `alias`, else its `name`: a [chart key](#chart-keys). The
+key names the dependency's values everywhere: its key in the
+[values file](#valuescelyaml), in `defaults` and `upstream` of
+[`okdp.yaml`](#okdpyaml), in the instance's `upstream` values,
+`Result.Values`, and the umbrella's dependency alias.
+
+A deployer renders the chart from its repository. The compiler reads only
+its `values.yaml` and `values.schema.json`, from the chart cache
+(`<repository>/<name>-<version>/<name>/`, `<repository>` the URL without
+its scheme: [chart cache](01_inputs_outputs.md#chart-cache)): the first
+layer of the final values, and their schema
+([merge precedence](01_inputs_outputs.md#merge-precedence)).
+`Result.Charts` maps each compiled key to its upstream chart, the
+dependency's `name` as `Chart`
+([chart index](01_inputs_outputs.md#chart-index)).
+
+Two dependencies of one chart, each with its alias, are two renders of
+it, each with its own values (polaris-admin's bootstrap and principals
+phases). A dependency is rendered when the values file gives its key
+values: one it leaves out (absent, `$if`) is not rendered, and the chart
+cache need not hold its chart ([values.cel.yaml](#valuescelyaml)).
+
+`condition`, `tags`, `enabled` and `import-values`, Helm's means of
+choosing what renders and of passing values between charts, fail: the
+values file decides what is rendered, and each chart's values are its
+key's.
+
+Each dependency is checked when the file is loaded, the first failing
+check reported; `<i>` is its position in the list, from 0, `<key>` its
+key:
+
+| Case | Error |
+|---|---|
+| `condition` set (`tags`, `enabled`, `import-values` alike) | `Chart.yaml: dependencies[<i>] (<key>): condition: the values decide what is rendered ($if on <key> in values.cel.yaml)` |
+| no `name` | `Chart.yaml: dependencies[<i>].name is required` |
+| a key that is not a DNS label ([chart keys](#chart-keys)) | `Chart.yaml: dependencies[<i>] (<key>): key "<key>": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` |
+| the key of an earlier dependency (a chart rendered twice without an alias) | `Chart.yaml: dependencies[<i>] (<key>): the key of dependencies[<j>] too: give one of them an alias` |
+| `repository` not starting with `https://`, `http://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
+| `name` holding a `/`, `.` or `..`, or with leading or trailing spaces | `Chart.yaml: dependencies[<i>].name "<name>": the name of a chart of the repository` |
+| `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `Chart.yaml: dependencies[<i>].version "<version>": a pinned chart version (1.2.3), not a range` |
+| the key `okdp` | `Chart.yaml: dependencies[<i>] (okdp): the chart of OKDP's own objects is added by the compiler: remove it` |
+
+The key of a declared OAuth client's chart is refused by each compile
+that declares the client ([oidcClients](#oidcclients)).
+
+### Chart keys
+
+A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
+a letter or a digit at each end, 63 characters at most (`app`,
+`admin-users`). It names the umbrella's dependency alias
+([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
+(`../app`, `my_app`, `App`), an `alias` or, without one, a `name`, fails
+when `Chart.yaml` is loaded:
+
+```text
+Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias
+```
+
+`okdp`, `oidc-dcr` and the `<name>-oidc-dcr` of a declared client are the
+compiler's keys ([the okdp chart](#the-okdp-chart),
+[oidcClients](#oidcclients)).
+
+### The okdp chart
+
+`okdp` is the compiler's: it adds the chart to
+every compile, rendered by the platform's objects chart
+(`global.okdp.charts.objects`), its values `Result.Objects`: [the okdp
+chart](01_inputs_outputs.md#the-okdp-chart). `Chart.yaml` may not declare it
+(`Chart.yaml: dependencies[<i>] (okdp): the chart of OKDP's own objects is added by the compiler: remove it`,
+when the file is loaded), nor the values file compute it
+([values.cel.yaml](#valuescelyaml)).
+
+## okdp.yaml
+
+OKDP's part of the package, optional: one YAML file, read by two readers.
+`LoadDefinition` decodes its package keys; each compile reads its sections
+with the mapping, the package keys skipped ([sections](#sections)).
+
+| Key | Type | Default | Meaning |
 |---|---|---|---|
-| `name` | string | required | The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations. |
-| `version` | string | required | The package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`. |
+| `require` | list of keys | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
-| `require` | list of keys | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
-| `charts` | map: key → [chart](#chart) | `{}` | The upstream charts of the service, by key, a DNS label ([chart keys](#chart-keys)): chart `<key>` is `output.<key>` of the mapping, rendered by its [source](#sources). `okdp` and the charts of the OAuth clients are not listed: the compiler adds them ([the okdp chart](#the-okdp-chart), [oidcClients](#oidcclients)). |
+| `defaults` | map: key → path | `{}` | OKDP's defaults for a dependency: [defaults](#defaults). |
+| `upstream` | `true`, `false`, or a map: key → `true`, `false` or `{protect, append}` | `false` | The instance upstream values each dependency accepts: [upstream](#upstream). |
+| `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` | | | The sections of the mapping, not read when the file is loaded: [sections](#sections). |
 
-Without `name` or `version`, loading fails: `service.yaml: name is required`,
-`service.yaml: version is required`.
+Absent, or empty, `okdp.yaml` is a package with no requirements, no catalog
+metadata, no OKDP defaults, no upstream values accepted, no `vars` and no
+OKDP sections.
+
+The package keys are decoded by `go.yaml.in/yaml/v3`, YAML 1.2, strictly:
+any other key fails rather than being ignored, where a misspelt `upstream`
+would accept no upstream values, each reported, one per line, as yaml.v3
+reports it (`okdp.Package` the type of the top level):
+
+```text
+okdp.yaml: yaml: unmarshal errors:
+  line 3: field requires not found in type okdp.Package
+```
+
+Two keys of the former package format get a message of their own:
+
+| Key | Error |
+|---|---|
+| `output` | `okdp.yaml: output: the charts' values are in values.cel.yaml` |
+| `name`, `version`, `charts` | `okdp.yaml: name: the name, version and charts are Chart.yaml's` (`version`, `charts` alike) |
+
+Every key of `defaults` and of `upstream` is the key of a `Chart.yaml`
+dependency: another fails when the file is loaded,
+`okdp.yaml: defaults.<key>: not a dependency of Chart.yaml`
+(`upstream.<key>` alike). The whole file is read by the mapping reader too,
+at each compile: an alias, anywhere in it, fails the compile
+([YAML reading](#yaml-reading)).
 
 ### require
 
@@ -73,100 +233,67 @@ whole of `global.okdp`. A value the platform sets in one mode only is read
 by the mapping, which fails in its `errors` section when that mode lacks it
 ([recipe](../02_writing_package.md#require-a-platform-value-in-one-mode)).
 `require` of another form, a map or an entry that is a list or a map,
-fails when `service.yaml` is loaded, with yaml.v3's error:
+fails when `okdp.yaml` is loaded, with yaml.v3's error:
 
 | Case | Error |
 |---|---|
-| `require` not a list | ``service.yaml: yaml: unmarshal errors:`` then ``line <n>: cannot unmarshal !!str `a` into []string`` |
-| an entry a list or a map | `service.yaml: yaml: unmarshal errors:` then `line <n>: cannot unmarshal !!map into string` |
+| `require` not a list | ``okdp.yaml: yaml: unmarshal errors:`` then ``line <n>: cannot unmarshal !!str `a` into []string`` |
+| an entry a list or a map | `okdp.yaml: yaml: unmarshal errors:` then `line <n>: cannot unmarshal !!map into string` |
 
-### Chart
-
-| Field | Type | Default | Meaning |
-|---|---|---|---|
-| `source` | `{repository, chart, version}` | required | The upstream chart that renders the key's values: [sources](#sources). |
-| `defaults` | string | none | Path, in the package, of OKDP's defaults for this chart, over its `values.yaml` and under the computed values (by convention `<key>.defaults.yaml`). Read as a Helm values file; a missing file, or a path out of the package, fails the compile (`<key>: open <path>: ...`). |
-| `upstream` | `true` or `false` | `false` | The instance upstream values the chart accepts: [upstream](#upstream). |
-| `protect` | list of paths | `[]` | Values the instance upstream values may not set: [protect and append](#protect-and-append). |
-| `append` | list of paths | `[]` | Lists the instance upstream values append to instead of replacing them: [protect and append](#protect-and-append). |
-
-How the chart's own defaults, OKDP's (`defaults`), the computed values and the instance
-upstream values combine: [merge precedence](01_inputs_outputs.md#merge-precedence).
-A chart is rendered only when the mapping outputs it; its source must then
-be in the chart cache ([chart cache](01_inputs_outputs.md#chart-cache)).
-
-### Chart keys
-
-A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
-a letter or a digit at each end, 63 characters at most (`app`,
-`admin-users`). It names the umbrella's dependency alias
-([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
-(`""`, `../app`, `my_app`, `App`) fails when `service.yaml` is loaded, and
-by `Compile` for a definition built in memory:
-
-```text
-service.yaml: charts: key "../app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias
-```
-
-### Sources
+### defaults
 
 ```yaml
-charts:
-  polaris-admin:
-    source: &admin {repository: https://charts.example.org, chart: polaris-admin, version: 1.0.0}
-    defaults: polaris-admin.defaults.yaml
-    upstream: true
-    protect: [fullnameOverride, phase, realms]
-  polaris-admin-principals:            # the values of a second render
-    source: *admin                     # the same chart
-    defaults: polaris-admin-principals.defaults.yaml
+defaults:
+  api: api.defaults.yaml               # OKDP's defaults of the dependency api
+  scheduler: scheduler.defaults.yaml
 ```
 
-`source` names the upstream chart that renders the key's values, as its
-repository publishes it: `repository`, a chart repository (`https://`) or an
-OCI registry path (`oci://`); `chart`, the chart's name in it; `version`, a
-pinned version. A deployer renders the chart from there. The compiler reads
-only its `values.yaml` and `values.schema.json`, from the chart cache
-(`<repository>/<chart>-<version>/<chart>/`, `<repository>` the URL
-without its scheme:
-[chart cache](01_inputs_outputs.md#chart-cache)): the first layer of the
-final values, and their schema
-([merge precedence](01_inputs_outputs.md#merge-precedence)).
-`Result.Charts` maps each compiled key to its source:
-[chart index](01_inputs_outputs.md#chart-index).
-
-Two keys of the same source are two renders of one upstream chart, each
-with its own values (polaris-admin's bootstrap and principals phases).
-Everything else stays keyed by the key: `output.<key>` of the mapping,
-`Result.Values`, the instance's `upstream.<key>` values.
-
-A source is checked when `service.yaml` is loaded, and by `Compile` for a
-definition built in memory:
-
-| Source | Error |
-|---|---|
-| absent, or all three fields empty | `service.yaml: charts.<key>.source is required: the upstream chart (repository, chart, version)` |
-| `repository` not starting with `https://`, `http://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `service.yaml: charts.<key>.source.repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
-| `chart` empty, holding a `/`, `.` or `..`, or with leading or trailing spaces | `service.yaml: charts.<key>.source.chart "<chart>": the name of a chart of the repository` |
-| `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `service.yaml: charts.<key>.source.version "<version>": a pinned chart version (1.2.3), not a range` |
+A map: dependency key → the path, in the package, of OKDP's defaults for
+that dependency, over its `values.yaml` and under the computed values (by
+convention `<key>.defaults.yaml`). Read as a Helm values file, by each
+compile that renders the dependency; a missing file, or a path out of the
+package, fails the compile (`<key>: open <path>: ...`). A dependency
+without an entry has no OKDP defaults. How the chart's own defaults, OKDP's,
+the computed values and the instance upstream values combine:
+[merge precedence](01_inputs_outputs.md#merge-precedence).
 
 ### upstream
 
-| Value | Instance upstream values read |
+```yaml
+upstream:
+  api:                                 # the instance's upstream.api
+    protect: [fullnameOverride, ingress.hosts, 'ingress.annotations["cert-manager.io/*"]']
+    append: [env, tolerations]
+  admin: true                          # the instance's upstream.admin, any value
+```
+
+The dependencies that accept the instance's upstream values,
+`upstream.<key>` of its values, and what these may not set:
+
+| `upstream` | Accept upstream values |
 |---|---|
-| absent, `false`, `null` | none: the instance's `upstream.<name>` values are ignored |
-| `true` | the instance's `upstream.<name>` values |
+| absent, `false` | no dependency |
+| `true` | every dependency of `Chart.yaml`, nothing protected or appended |
+| a map, by dependency key | each dependency as its value says, below; a dependency the map does not name accepts none |
 
-A boolean of YAML 1.1 (`y`, `yes`, `n`, `no`, `on`, `off`, capitalized or
-upper case) reads as the boolean it spells, as yaml.v3 decodes a boolean
-field. A value of another form (a string, a number, a list, a map) fails
-with yaml.v3's error:
+| Value of a key | The dependency |
+|---|---|
+| `true`, `{}` | accepts them, nothing protected or appended |
+| `false` | accepts none |
+| `{protect: [...], append: [...]}`, either optional | accepts them, with these paths: [protect and append](#protect-and-append) |
 
-```
-service.yaml: line 7: cannot unmarshal !!map into bool
-```
-How the instance values are written:
+The compiler's own charts (`okdp`, the OAuth client charts) never accept
+upstream values. The instance's values for a dependency that accepts none
+are ignored. How they are written and applied:
 [upstream values](01_inputs_outputs.md#upstream-values).
+
+Another form fails when `okdp.yaml` is loaded:
+
+| Case | Error |
+|---|---|
+| `upstream` neither a boolean nor a map (a string, a number, a list) | `okdp.yaml: upstream: true, false or a map by dependency` |
+| a key that is no dependency's | `okdp.yaml: upstream.<key>: not a dependency of Chart.yaml` |
+| a value neither a boolean nor a map, or a map with another key than `protect` and `append` (a misspelt `protect`) | `okdp.yaml: upstream.<key>: true, false or {protect, append}` |
 
 ### protect and append
 
@@ -175,94 +302,159 @@ written in brackets, as one literal key (`config["spark.ui.filters"]`); a
 bracketed key ending with `*` names every key starting with the text before
 it (`ingress.annotations["cert-manager.io/*"]`; `["*"]` names every key);
 no key holds a quote, a backslash or a star but a glob's. A
-malformed path fails when `service.yaml` is loaded:
-`service.yaml: charts.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])` (`append[<i>]`
+malformed path fails when `okdp.yaml` is loaded:
+`okdp.yaml: upstream.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])` (`append[<i>]`
 alike). `global` is always protected. Both apply to each instance upstream
 file, then to the inline values: [protect](01_inputs_outputs.md#protect),
 [append](01_inputs_outputs.md#append).
 
-### The okdp chart
-
-`okdp` is the compiler's: it adds the chart to
-every compile, rendered by the platform's objects chart
-(`global.okdp.charts.objects`), its values `Result.Objects`: [the okdp
-chart](01_inputs_outputs.md#the-okdp-chart). `charts` may not declare it
-(`service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml`,
-when the file is loaded), nor `output` compute it ([output](#output)).
-
-### Example
-
-```yaml
-name: webapp
-version: 2.3.0-1.0.0                   # <upstream>-<okdp semver>
-roles: [webapp]                        # catalog metadata
-dependsOn: [database-server, ingress]
-require:                               # global.okdp.<path>, each non-empty
-  - ingress.suffix
-  - certificateIssuers.selfSigned.name
-  - key: oidc.issuerUri                # only when OIDC is enabled
-    $if: ${{ platform.oidc.enabled }}
-charts:
-  app:                                 # output.app of the mapping
-    source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    defaults: app.defaults.yaml        # OKDP's defaults, over the chart's values.yaml
-    upstream: true                     # the instance's upstream.app
-    protect: [fullnameOverride, ingress.enabled, ingress.hosts, 'ingress.annotations["cert-manager.io/*"]']
-    append: [env]                      # instance lists appended to the computed ones
-  admin:
-    source: &admin {repository: oci://registry.example.org/charts, chart: admin, version: 0.3.1}
-    defaults: admin.defaults.yaml
-    upstream: true                     # the instance's upstream.admin
-  admin-users:                         # output.admin-users, a second render of the admin chart
-    source: *admin
-    defaults: admin-users.defaults.yaml
-  metrics:                             # no OKDP defaults, no instance values
-    source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
-```
-
 ## values.cel.yaml
 
-A YAML map: values shaped like the upstream values, where `${{ <CEL> }}`
-computes a value ([Expressions](#expressions)) and `$`-keys shape the
-structure ([Directives](#directives)). Its top-level keys are the
-[sections](#sections):
-
-| Key | Type | Content |
-|---|---|---|
-| [`vars`](#vars) | map | named values, evaluated in order |
-| [`errors`](#the-errors-section) | list | messages, each kept by its `$if`: any message fails the compile |
-| [`output`](#output) | map | chart → computed values |
-| [`objects`](#objects) | list | OKDP's own objects, whole manifests |
-| [`instance`](#instance) | map | `url` and `usage` of the instance |
-| [`provides`](#provides) | list | the connections the instance publishes |
-| [`oidcClients`](#oidcclients) | list | the OAuth clients of the service |
-
-Every section is optional. Any other top-level key, a directive included,
-fails rather than being ignored (`outptu:` would render no chart),
-`values.cel.yaml: <key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`.
+The values file, optional: the values the mapping computes for each
+dependency, by key. A YAML map: values shaped like the upstream values, where
+`${{ <CEL> }}` computes a value ([Expressions](#expressions)) and `$`-keys
+shape the structure ([Directives](#directives)). Each key's value is the
+computed layer of that dependency's final values
+([merge precedence](01_inputs_outputs.md#merge-precedence)).
 
 ```yaml
+app:
+  fullnameOverride: ${{ release.name }}-app
+  replicaCount: ${{ values.replicas }}          # a number: the expression is the whole scalar
+  ingress:
+    annotations: ${{ platform.ingressAnnotations }}
+    hosts:
+      - host: ${{ host }}                       # host: a vars binding of okdp.yaml
+  env:
+    - $if: ${{ db.size() > 0 }}                 # the item is left out when false
+      name: DB_URL
+      value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
+metrics:
+  $if: ${{ values.metrics.enabled }}            # the chart is not rendered when false
+  interval: ${{ values.metrics.interval }}
+```
+
+It is a section of the mapping, the whole file: evaluated after `vars` and
+`errors`, it sees the context and the `vars` bindings of `okdp.yaml`
+([evaluation order](#evaluation-order)). Its top level is the values, not
+sections: `vars` or `errors` there is a dependency key.
+
+- The file is a map, and the values of a dependency a map too, checked as
+  the mapping's sections are, under `/output`
+  (`- at '/output/<key>': got string, want object`): a scalar, a list or a
+  null is refused, not compiled as the chart's defaults alone; `$if`
+  leaves the dependency out.
+- Every key must be a dependency's key:
+  `values.cel.yaml: <key>: not a dependency of Chart.yaml`. A key may not be
+  the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
+  `okdp`: `values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it`
+  ([the okdp chart](#the-okdp-chart)).
+- A dependency the file leaves out (absent, dropped by `$if`) is not
+  rendered: no `Result.Values` entry, no dependency of the umbrella. Without
+  the file, or empty, no dependency is rendered; the compiler's own charts
+  are.
+- An error of the file starts with `values.cel.yaml: `, then the path from
+  the dependency's key (`values.cel.yaml: app: env[2]: value: `:
+  [compile errors](#compile-errors)).
+
+## Example
+
+`examples/03_full/input/service/`, abridged: the package of the
+`workspace` service, five dependencies, two of them renders of one chart.
+
+```yaml
+# Chart.yaml
+apiVersion: v2
+name: workspace
+version: 3.2.0-1.4.0                   # <upstream>-<okdp semver>
+dependencies:
+  - {name: workspace, alias: api, repository: https://charts.example.org, version: 3.2.0}
+  - {name: workspace, alias: scheduler, repository: https://charts.example.org, version: 3.2.0}
+  - {name: gateway, repository: oci://registry.example.org/charts, version: 1.4.2}
+  - {name: metrics-exporter, alias: metrics, repository: oci://registry.example.org/charts, version: 0.7.0}
+  - {name: backup, repository: oci://registry.example.org/charts, version: 2.0.1}
+```
+
+```yaml
+# okdp.yaml
+roles: [notebooks, sql]                # catalog metadata, not read by the compiler
+dependsOn: [database-server, object-store, ingress]
+require:                               # global.okdp.<path>, each set and not empty
+  - ingress.suffix
+  - ingress.className
+  - certificateIssuers.selfSigned.name
+  - oidc.issuerUri
+defaults:                              # OKDP's defaults, over the chart's values.yaml
+  api: api.defaults.yaml
+  scheduler: scheduler.defaults.yaml   # the second render's own
+upstream:                              # api only: the instance's upstream.api
+  api:
+    protect: [fullnameOverride, mode, catalogs, ingress.enabled, ingress.hosts, ingress.tls, 'config["workspace.auth.*"]']
+    append: [env, tolerations]         # the instance's lists added after the computed ones
+vars:                                  # the mapping's sections
+  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  # ...
+errors:
+  - $if: ${{ values.replicas > 1 && db.size() == 0 }}
+    $value: "workspace: replicas > 1 needs a database, sessions are stored there"
+  # ...
+instance:
+  url: https://${{ host }}
+  # ...
+# provides, objects, oidcClients
+```
+
+```yaml
+# values.cel.yaml
+api:
+  fullnameOverride: ${{ api }}
+  replicaCount: ${{ values.replicas }}
+  # ...
+scheduler:                             # the second render of the workspace chart
+  fullnameOverride: ${{ okdpFullname('scheduler') }}
+  # ...
+gateway:
+  # ...
+metrics:
+  $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
+  # ...
+backup:
+  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read from the chart cache
+  # ...
+```
+
+Its `okdp.yaml` and `values.cel.yaml` use every section, directive and host
+function, most of the CEL libraries and of the YAML reading (`$$`, `$${{`),
+each commented; its `okdp.yaml` `protect` paths in brackets and with a
+glob.
+
+## Sections
+
+The mapping: the sections of `okdp.yaml`, after its package keys, and the
+values file, a section whole.
+
+| Section | In | Type | Content |
+|---|---|---|---|
+| [`vars`](#vars) | `okdp.yaml` | map | named values, evaluated in order |
+| [`errors`](#the-errors-section) | `okdp.yaml` | list | messages, each kept by its `$if`: any message fails the compile |
+| [the values](#valuescelyaml) | `values.cel.yaml`, the whole file | map | dependency key → computed values |
+| [`objects`](#objects) | `okdp.yaml` | list | OKDP's own objects, whole manifests |
+| [`instance`](#instance) | `okdp.yaml` | map | `url` and `usage` of the instance |
+| [`provides`](#provides) | `okdp.yaml` | list | the connections the instance publishes |
+| [`oidcClients`](#oidcclients) | `okdp.yaml` | list | the OAuth clients of the service |
+
+Every section is optional. `okdp.yaml` holds no other key than its package
+keys and these sections: any other, a directive included, fails when it is
+loaded ([okdp.yaml](#okdpyaml)).
+
+```yaml
+# okdp.yaml, after the package keys
 vars:
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
     $value: "webapp: replicas > 1 needs a database"
-output:
-  app:
-    fullnameOverride: ${{ release.name }}-app
-    replicaCount: ${{ values.replicas }}          # a number: the expression is the whole scalar
-    ingress:
-      annotations: ${{ platform.ingressAnnotations }}
-      hosts:
-        - host: ${{ host }}
-    env:
-      - $if: ${{ db.size() > 0 }}                 # the item is left out when false
-        name: DB_URL
-        value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
-  metrics:
-    $if: ${{ values.metrics.enabled }}            # the chart is not rendered when false
-    interval: ${{ values.metrics.interval }}
 objects:
   - $spread: >-
       ${{ okdpGeneratedSecret({'name': okdpFullname('session'), 'keys': [{'key': 'session-key'}]}) }}
@@ -279,42 +471,38 @@ oidcClients:
     grantTypes: [authorization_code, refresh_token]
 ```
 
-`examples/03_full/input/service/values.cel.yaml` uses every section,
-directive and host function, most of the CEL libraries and of the YAML
-reading (`$$`, `$${{`), each commented; its
-`service.yaml` two renders of one chart, `protect` paths in brackets and
-with a glob.
-
-## Sections
-
 ### Evaluation order
 
-The mapping is loaded first: read ([YAML reading](#yaml-reading)), its
-top-level keys checked, then every [directive](03_control_flow.md#loading-and-evaluation) checked and
-every [expression](#lone-expressions-and-interpolation) compiled, in the
-whole document, the branches no instance takes included. The first
+The mapping is loaded first: `okdp.yaml` and the values file read
+([YAML reading](#yaml-reading)), the top-level keys of `okdp.yaml` checked,
+its package keys skipped, then every
+[directive](03_control_flow.md#loading-and-evaluation) checked and
+every [expression](#lone-expressions-and-interpolation) compiled, in both
+files, the branches no instance takes included. The first
 mistake fails the compile before anything is evaluated. Then:
 
 1. `vars`, entry by entry: each sees the [context](#context) and the
    bindings before it.
 2. `errors`, every entry, then the messages fail the compile together
    ([the errors section](#the-errors-section)).
-3. `output`, `instance`, `provides`, `objects`, `oidcClients`, in this
-   order: each sees the context and every `vars` binding. Then they are
-   checked together for their shapes.
+3. The values file, `instance`, `provides`, `objects`, `oidcClients`, in
+   this order: each sees the context and every `vars` binding. Then they
+   are checked together for their shapes.
 4. The OAuth clients are checked across clients, their charts added in
    `dcr` mode ([oidcClients](#oidcclients)); then the
    compile builds the descriptor from `instance` and `provides`, checked
-   against the contracts, and the final values of each chart in `output`,
-   of each client chart and of the `okdp` chart.
+   against the contracts, and the final values of each dependency the
+   values file gives, of each client chart and of the `okdp` chart.
 
-A section does not see the others: there is no `output` or `instance`
-variable. A value used by several sections is a `vars` binding.
+A section does not see the others: there is no variable of the values or
+of `instance`. A value used by several sections is a `vars` binding.
 
-Each section has a shape: `output` and `instance` are maps, `provides`,
-`objects` and `oidcClients` lists. So have the items and keys the compiler
-reads in them, described by the mapping schema the compiler embeds,
-[`internal/okdp/mapping.schema.json`](../../internal/okdp/mapping.schema.json):
+Each section has a shape: the values file and `instance` are maps,
+`provides`, `objects` and `oidcClients` lists. So have the items and keys
+the compiler reads in them, described by the mapping schema the compiler
+embeds,
+[`internal/okdp/mapping.schema.json`](../../internal/okdp/mapping.schema.json),
+where the values file is the section `output`:
 their types, the keys required, the keys allowed where another is
 refused, what each means in its `description`. It is the package authors'
 reference. Absent or null (left out by `$if`, a null expression), a
@@ -322,7 +510,8 @@ section is empty. Below it, a null is read as in a chart's values: it
 deletes a default the schema gives, and is refused by the type of a key
 that has none (`- at '/output/app': got null, want object`); leave a key
 out with `$if`. A value of another shape fails the compile rather than
-read as empty: `output: [app]` would otherwise render no chart. Every violation
+read as empty: a values file that is a list, `[app]`, would otherwise
+render no chart. Every violation
 is reported at once, sorted by path, in Helm's words, as those of the
 [parameters](01_inputs_outputs.md#schema-check):
 
@@ -333,11 +522,10 @@ the mapping's sections don't meet the specifications of mapping.schema.json:
 - at '/output/app': got string, want object
 ```
 
-A mapping that is not a YAML map fails with
-`values.cel.yaml: the mapping must be a YAML map`; invalid YAML with the
-parser's error (`values.cel.yaml: yaml: line <n>: ...`). The mapping
-is its first YAML document: a second one, after `---`, is ignored. An
-empty or null document (comments, `---` or `~` at most) has no section.
+Invalid YAML fails with the parser's error, after the file's name
+(`okdp.yaml: yaml: line <n>: ...`, `values.cel.yaml: yaml: line <n>: ...`).
+Each file is its first YAML document. An empty or null document
+(comments, `---` or `~` at most) has no section.
 
 ### vars
 
@@ -349,11 +537,13 @@ vars:
     APP_URL: https://${{ host }}              # host: the binding above
 ```
 
-A map of bindings, evaluated in order. Each value is a node, evaluated as
+A map of bindings, in `okdp.yaml`, evaluated in order. Each value is a
+node, evaluated as
 any other ([Expressions](#expressions), [Directives](#directives)); a value
 left out by `$if` binds null. The binding is named by the key as written
 ([YAML reading](#yaml-reading)); it is referenced by that name, which must
-be a CEL identifier (`my-var` reads as `my - var`). A binding referenced
+be a CEL identifier (`my-var` reads as `my - var`), in every section, the
+values file included. A binding referenced
 before its entry fails: `undeclared reference`. Of a name written twice,
 the later binding wins, as of any key ([YAML reading](#yaml-reading)).
 
@@ -361,25 +551,7 @@ A binding with the name of a context variable replaces it for every later
 expression (a `vars` binding named `labels` wins over the context's
 `labels`), not for the host functions ([Context](#context)). A `vars`
 section that is neither a map nor null fails:
-`values.cel.yaml: vars: must be a map of bindings, got <value>`.
-
-### output
-
-A map: chart name → the values the mapping computes for that chart.
-Another value fails ([sections](#evaluation-order)).
-
-- The values of a chart are a map (`- at '/output/<key>': got string, want object`):
-  a scalar, a list or a null is refused, not compiled as the chart's
-  defaults alone; `$if` leaves the chart out.
-- Every key must be a chart of `service.yaml`:
-  `mapping output "<key>": not a chart of service.yaml`. A key may not be
-  the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
-  `okdp`: `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output`
-  ([the okdp chart](#the-okdp-chart)).
-- A chart the mapping leaves out (absent, dropped by `$if`) is not
-  rendered: no `Result.Values` entry.
-- The values are the computed layer of the chart's final values:
-  [merge precedence](01_inputs_outputs.md#merge-precedence).
+`okdp.yaml: vars: must be a map of bindings, got <value>`.
 
 ### objects
 
@@ -482,7 +654,7 @@ The Secret is named after `secretRef.name` when given, else
 and the output has a `secretRef` only when the mapping gives one. A
 `secret` with neither a non-empty `generate` nor a non-empty `stringData`
 fails with `<service>: output "<name>": secret needs stringData or generate`
-(`<service>`: the `name` of `service.yaml`). The rendered objects
+(`<service>`: the `name` of `Chart.yaml`). The rendered objects
 and their labels: [credentials Secrets](01_inputs_outputs.md#credentials-secrets).
 
 ### oidcClients
@@ -534,7 +706,9 @@ its `name` of the form above, of these keys only, each of its type,
 one client at most has no name, and names are unique. In
 `dcr` mode, no two clients write one Secret. As soon as the
 mapping declares a client, its chart key belongs to the compiler:
-`service.yaml` may not list it, nor `output` compute it. Only `dcr` mode
+`Chart.yaml` may not list it, nor the values file compute it
+(`Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`,
+`values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it`). Only `dcr` mode
 reads the oidc-dcr chart, from the chart cache
 ([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
 check stops the compile ([compile errors](#compile-errors)).
@@ -621,8 +795,8 @@ Helm prints a values number: `8080`, `2.5`, `1e+06` (from one million on),
 
 ### YAML reading
 
-The mapping is read as YAML 1.2, as yaml.v3 decodes it, its maps in the
-order written. A snippet copied from a `values.yaml`, which Helm reads as
+The mapping, `okdp.yaml` and the values file, is read as YAML 1.2, as
+yaml.v3 decodes it, its maps in the order written. A snippet copied from a `values.yaml`, which Helm reads as
 YAML 1.1, means the same unless it holds YAML 1.1's booleans or keys Helm
 converts (`on:`, `1.0:`): write `true` and `false`, and the keys as Helm
 reads them.
@@ -634,12 +808,13 @@ reads them.
 | `0777`, `0o17`, `0x1F`, `0b101`, `1_000` | `511`, `15`, `31`, `5`, `1000` |
 | `2001-12-14` | the string: timestamps are not decoded |
 | `~`, `null`, empty | null |
-| `.nan`, `.inf`, `-.inf` | refused, values cannot hold them: `values.cel.yaml: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` |
+| `.nan`, `.inf`, `-.inf` | refused, values cannot hold them: `<file>: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` |
 
 A tagged scalar is decoded as its tag says (`!!str 1` is the string `"1"`),
 and fails when it cannot be: `!!bool yes` fails with
-``values.cel.yaml: line <n>: yaml: cannot decode !!str `yes` as a !!bool``.
-Text that is not UTF-8 (a `!!binary`) is refused too.
+``<file>: line <n>: yaml: cannot decode !!str `yes` as a !!bool``.
+Text that is not UTF-8 (a `!!binary`) is refused too. `<file>`: `okdp.yaml`
+or `values.cel.yaml`.
 
 Keys are taken as written: `on:` is the key `on`, `1.0:` the key `1.0`,
 binding names included. Of a key written twice, the later value wins. A
@@ -647,8 +822,9 @@ second YAML document, after `---`, is ignored. As in a values file Helm
 reads, a `|` or `>` block scalar that ends the file without a final line
 break keeps its newline.
 
-Aliases are refused, where Helm resolves them:
-`values.cel.yaml: line <n>: aliases are not read: bind the value in vars`,
+Aliases are refused, where Helm resolves them, in the whole of `okdp.yaml`,
+its package keys included:
+`<file>: line <n>: aliases are not read: bind the value in vars`,
 `<n>` the line of the alias. A value used twice is a [`vars`](#vars)
 binding, read by name (`${{ small }}`, `${{ small.requests }}`). An anchor
 is ignored, and a merge key `<<` is a plain key.
@@ -686,7 +862,7 @@ The variables of every expression:
 | `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([context values](01_inputs_outputs.md#context-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
-| `service` | `{name, version}` of `service.yaml`, as written ([service](#service)). |
+| `service` | `{name, version}` of `Chart.yaml`, as written ([Chart.yaml](#chartyaml)). |
 | `labels` | the labels of OKDP's objects, below, without component. |
 | `selectorLabels` | their selector labels, below, without component. |
 | `vars` bindings | [vars](#vars), in order |
@@ -780,23 +956,27 @@ A value that is not a list (null included) gives no message, and an item
 of another form is printed as text: a map, `{$if: ..., message: ...}`,
 prints as `map[message:...]`. An item whose evaluation fails stops the
 compile with that error, prefixed with the file and the position of the
-item as written (`values.cel.yaml: errors[1]: `).
+item as written (`okdp.yaml: errors[1]: `).
 
 ### Compile errors
 
 The first error stops the compile (the `errors` section and the schema
 violations excepted). An error found reading or evaluating the mapping
-starts with the name of its file, `values.cel.yaml: `, the messages of its
-`errors` section excepted; one of a template of the compiler, with the
-template's (`oidc-dcr.cel.yaml: `). An error of an expression reads
+starts with the name of its file, `okdp.yaml: ` or `values.cel.yaml: `, the
+messages of its `errors` section excepted; one of a template of the
+compiler, with the template's (`oidc-dcr.cel.yaml: `). The errors of
+loading the package are those of [`Chart.yaml`](#chartyaml), of its
+[dependencies](#dependencies) and of [`okdp.yaml`](#okdpyaml)'s package
+keys. An error of an expression reads
 `<where>${{ <expression> }}: <cause>`, `<where>` being:
 
 | Expression in | `<where>` |
 |---|---|
-| a `vars` binding | `values.cel.yaml: vars <name>: ` and the path below it |
-| a `$vars` binding | `values.cel.yaml: `, the path to its `$for`, then `$vars <name>: ` |
-| a section | `values.cel.yaml: <section>: ` and the path to the expression: `values.cel.yaml: output: app: env[2]: value: ` |
-| an `errors` item | `values.cel.yaml: errors[<i>]: ` and the path below it |
+| a `vars` binding | `okdp.yaml: vars <name>: ` and the path below it |
+| a `$vars` binding | the file (`okdp.yaml: `, `values.cel.yaml: `), the path to its `$for`, then `$vars <name>: ` |
+| a section of `okdp.yaml` | `okdp.yaml: <section>: ` and the path to the expression: `okdp.yaml: objects[1]: data: ` |
+| the values file | `values.cel.yaml: ` and the path to the expression, from the dependency's key: `values.cel.yaml: app: env[2]: value: ` |
+| an `errors` item | `okdp.yaml: errors[<i>]: ` and the path below it |
 
 The path names each map key, followed by `: `, and each list position, as
 `[<i>]` (from 0) right after the key of its list: `hosts[0]: `,
@@ -809,39 +989,39 @@ source line, reported when the mapping is loaded whatever branch holds the
 expression, or an evaluation error:
 
 ```text
-values.cel.yaml: output: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
+values.cel.yaml: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
  |  hots
  | .^
-values.cel.yaml: vars db: ${{ values.databse }}: no such key: databse
-values.cel.yaml: output: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
-values.cel.yaml: objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
+okdp.yaml: vars db: ${{ values.databse }}: no such key: databse
+values.cel.yaml: app: replicaCount: ${{ values.replicas + 1 }}: no such overload
+okdp.yaml: objects[1]: ${{ okdpGeneratedSecret({'keys': []}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
 - at '/okdpGeneratedSecret': missing property 'name'
-values.cel.yaml: vars host: ${{ values.?host }}: optional.none() dereference
+okdp.yaml: vars host: ${{ values.?host }}: optional.none() dereference
 ```
 
 Other errors of the mapping:
 
 | Message | Cause |
 |---|---|
-| `values.cel.yaml: yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)) |
-| `values.cel.yaml: the mapping must be a YAML map` | the document is not a map |
-| `values.cel.yaml: line <n>: aliases are not read: bind the value in vars` | an alias ([YAML reading](#yaml-reading)) |
-| ``values.cel.yaml: line <n>: yaml: cannot decode !!str `<scalar>` as a !!bool``, `values.cel.yaml: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` | a tagged scalar of another form, `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
-| `values.cel.yaml: <key>: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)`, `values.cel.yaml: vars: must be a map of bindings, got <value>` | the top level ([values.cel.yaml](#valuescelyaml)) |
+| `<file>: yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)) |
+| `<file>: line <n>: aliases are not read: bind the value in vars` | an alias ([YAML reading](#yaml-reading)) |
+| ``<file>: line <n>: yaml: cannot decode !!str `<scalar>` as a !!bool``, `<file>: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` | a tagged scalar of another form, `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
+| `okdp.yaml: vars: must be a map of bindings, got <value>` | [vars](#vars) |
 | `<where><key>: not allowed here (allowed: <directives>)`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` | a directive ([errors](03_control_flow.md#errors)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](03_control_flow.md#for) |
-| `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [`output`](#output), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |
+| `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [the values file](#valuescelyaml) (`/output`), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |
 | `<where>${{ <expression> }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:` then `- at '/okdpGeneratedSecret<path>': <violation>`, one line each | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
-| `mapping output "<name>": not a chart of service.yaml` | [`output`](#output) |
-| `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output` | [the okdp chart](#the-okdp-chart) |
+| `values.cel.yaml: <key>: not a dependency of Chart.yaml` | a key of the [values file](#valuescelyaml) |
+| `values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it` | [the okdp chart](#the-okdp-chart) |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
-| `service.yaml: charts.<chart>: the chart of <client> is added by the compiler: remove it from service.yaml`, `mapping output "<chart>": the chart of <client> is compiled from oidcClients: remove it from output` | a client's chart listed in `service.yaml` or computed in `output` |
+| `Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it` | a client's chart key, `oidc-dcr` or `<name>-oidc-dcr`, a dependency of `Chart.yaml` or a key of the values file |
 | `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
-`<client>`, `<other>`: `oidcClients[<i>]`, the client's position in the
+`<file>`: `okdp.yaml` or `values.cel.yaml`. `<client>`, `<other>`:
+`oidcClients[<i>]`, the client's position in the
 evaluated list, followed by ` (<name>)` for a named client.
 `<value>`: the value as Go's `%#v` prints it (`"x"`, `true`). The errors of the
 platform's `global.okdp.oidc.dcr` settings:

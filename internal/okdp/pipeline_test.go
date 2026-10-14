@@ -10,8 +10,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"go.yaml.in/yaml/v3"
-
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
@@ -35,32 +33,44 @@ var (
 		"registry.example.org/okdp/okdp-objects-1.0.0/okdp-objects/values.yaml": {Data: []byte("objects: []\n")},
 	}
 	appSource     = chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
+	appDep        = chart.Dependency{Name: "app", Repository: appSource.Repository, Version: appSource.Version}
 	objectsSource = chart.Ref{Repository: "oci://registry.example.org/okdp", Chart: "okdp-objects", Version: "1.0.0"}
 	contracts     = fstest.MapFS{}
 	def           = &Definition{
-		Service: Service{
-			Name:    "demo",
-			Version: "1.2.3",
-			Charts:  chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml"}},
-			Require: []string{"ingress.suffix"},
-		},
-		Files: pkg,
-		Mapping: []byte(`
+		Chart:   chart.Metadata{APIVersion: "v2", Name: "demo", Version: "1.2.3", Dependencies: []chart.Dependency{appDep}},
+		Package: Package{Require: []string{"ingress.suffix"}, Defaults: map[string]string{"app": "app.defaults.yaml"}},
+		Files:   pkg,
+		Okdp: []byte(`
 vars:
   host: ${{ release.name + "." + global.okdp.ingress.suffix }}
 errors:
   - {$if: '${{ values.replicas > 10 }}', $value: at most 10 replicas}
-output:
-  app:
-    replicaCount: ${{ values.replicas }}
-    labels:
-      tier: {$if: "${{ values.replicas > 1 }}", $value: ha}
 instance:
   url: https://${{ host }}
   usage: demo
 `),
+		Values: []byte(`
+app:
+  replicaCount: ${{ values.replicas }}
+  labels:
+    tier: {$if: "${{ values.replicas > 1 }}", $value: ha}
+`),
 	}
 )
+
+// defService: the Service of def.
+var defService = func() *Service {
+	svc, err := def.service()
+	if err != nil {
+		panic(err)
+	}
+	return svc
+}()
+
+// upstreamOf: okdp.yaml's upstream, the entry k of the dependency key only.
+func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
+	return chart.Upstream{Keys: map[string]chart.UpstreamKey{key: k}}
+}
 
 // inputs: the in-memory chart cache and contracts, with these values
 // layers: the global of each, a context layer at level 0 (Inputs.Context),
@@ -190,12 +200,12 @@ func TestCompileErrors(t *testing.T) {
 // upstream values.
 func TestServicePaths(t *testing.T) {
 	d := *def
-	d.Mapping = []byte("output:\n  app: {}\n")
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Protect: []string{"labels.*"}}}
-	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), `charts.app.protect[0] "labels.*"`) {
+	d.Values = []byte("app: {}\n")
+	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{"labels.*"}})
+	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), `okdp.yaml: upstream.app.protect[0] "labels.*"`) {
 		t.Errorf("in memory: got %v", err)
 	}
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: true, Protect: []string{`labels["okdp.io/*"]`}}}
+	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{`labels["okdp.io/*"]`}})
 	in := inputs(M{"upstream": M{"app": M{"labels": M{"okdp.io/instance": "other"}}}})
 	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), `app: upstream.app.labels["okdp.io/instance"]: labels["okdp.io/*"] is set by the platform and cannot be changed`) {
 		t.Errorf("a protected key: got %v", err)
@@ -251,7 +261,7 @@ func TestUpstreamValues(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: tc.upstream, Append: []string{"env"}}}
+			d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: tc.upstream, Append: []string{"env"}})
 			res, err := Compile(context.Background(), &d, inputs(inline))
 			if err != nil {
 				t.Fatal(err)
@@ -264,7 +274,7 @@ func TestUpstreamValues(t *testing.T) {
 		})
 	}
 	d := *def
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: true, Protect: []string{"labels"}}}
+	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{"labels"}})
 	if _, err := Compile(context.Background(), &d, inputs(M{"upstream": M{"app": M{"labels": M{"x": "y"}}}})); err == nil || !strings.Contains(err.Error(), "app: upstream.app.labels: labels is set by the platform") {
 		t.Errorf("a protected path: got %v", err)
 	}
@@ -274,14 +284,13 @@ func TestUpstreamValues(t *testing.T) {
 // values, so that a rule of its errors section covers them.
 func TestUpstreamSeenByMapping(t *testing.T) {
 	d := *def
-	d.Mapping = []byte(`
+	d.Okdp = []byte(`
 errors:
   - $if: ${{ values.?upstream.?app.?image.?tag.orValue('') == 'latest' }}
     $value: 'demo: upstream.app.image.tag: latest is refused'
-output:
-  app: {}
 `)
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true}}
+	d.Values = []byte("app: {}\n")
+	d.Package.Upstream = chart.Upstream{All: true}
 	for name, tc := range map[string]struct {
 		inline M      // upstream.app
 		want   string // the error, or the image tag applied
@@ -333,7 +342,7 @@ func TestCompileSchemas(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true}}
+			d.Package.Upstream = chart.Upstream{All: true}
 			_, err := Compile(context.Background(), &d, withCharts(inputs(tc.values), tc.files))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
@@ -342,7 +351,7 @@ func TestCompileSchemas(t *testing.T) {
 	}
 	// A null that deletes a default is checked as Helm checks it: gone.
 	d := *def
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Upstream: true}}
+	d.Package.Defaults, d.Package.Upstream = nil, chart.Upstream{All: true}
 	in := withCharts(inputs(M{"upstream": M{"app": M{"labels": nil}}}), fstest.MapFS{"charts.example.org/app-1.0.0/app/values.schema.json": {Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}})
 	res, err := Compile(context.Background(), &d, in)
 	if err != nil {
@@ -359,13 +368,13 @@ func TestCompileSchemas(t *testing.T) {
 func TestCompileWithoutSchema(t *testing.T) {
 	d := *def
 	d.Files = fstest.MapFS{"app.defaults.yaml": pkg["app.defaults.yaml"]}
-	d.Mapping = []byte(`
-output:
-  app:
-    replicaCount: ${{ values.?replicas.orValue('none') }}
-    labels: ${{ values.labels }}
+	d.Okdp = nil
+	d.Values = []byte(`
+app:
+  replicaCount: ${{ values.?replicas.orValue('none') }}
+  labels: ${{ values.labels }}
 `)
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true}}
+	d.Package.Upstream = chart.Upstream{All: true}
 	in := inputs(M{"labels": M{"tier": "gold"}, "upstream": M{"app": M{"image": M{"tag": "5.0"}}, "other": M{"x": "y"}}})
 	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"connections": M{"ext": M{"contract": "database", "host": "db.example.org"}}}})
 	res, err := Compile(context.Background(), &d, in)
@@ -385,7 +394,7 @@ output:
 // TestObjects: the objects section (directives included) after the
 // descriptor, and the okdp chart the compiler adds to every compile:
 // Result.Objects as its values, rendered by the platform's objects chart;
-// service.yaml and the mapping's output may not list it.
+// Chart.yaml and values.cel.yaml may not list it.
 func TestObjects(t *testing.T) {
 	names := func(objects []any) []string {
 		var out []string
@@ -395,9 +404,8 @@ func TestObjects(t *testing.T) {
 		return out
 	}
 	d := *def
-	d.Mapping = []byte(`
-output:
-  app: {}
+	d.Values = []byte("app: {}\n")
+	d.Okdp = []byte(`
 objects:
   - apiVersion: v1
     kind: ConfigMap
@@ -430,49 +438,47 @@ objects:
 		t.Errorf("okdp chart objects: got %v, want %v", got, all)
 	}
 	// A mapping that outputs no chart: the okdp chart all the same.
-	d.Mapping = []byte("instance: {url: https://x}\n")
+	d.Okdp, d.Values = []byte("instance: {url: https://x}\n"), nil
 	if res, err = Compile(context.Background(), &d, inputs()); err != nil || !slices.Equal(slices.Sorted(maps.Keys(res.Values)), []string{"okdp"}) {
 		t.Errorf("no output: %v %v", err, res)
 	}
+	okdpDep := chart.Dependency{Name: "okdp-objects", Alias: "okdp", Repository: objectsSource.Repository, Version: objectsSource.Version}
 	for name, tc := range map[string]struct {
-		mapping string
-		charts  chart.Specs
-		values  M
-		want    string
+		okdp, values string // okdp.yaml, values.cel.yaml
+		deps         []chart.Dependency
+		layer        M
+		want         string
 	}{
-		"not an object":   {"objects: [{metadata: {name: x}}]\n", nil, nil, "- at '/objects/0': missing property 'kind'"},
-		"in output":       {"output: {okdp: {}}\n", nil, nil, `mapping output "okdp": the chart of OKDP's own objects is compiled from the objects section: remove it from output`},
-		"in service.yaml": {"{}\n", chart.Specs{"okdp": {Source: objectsSource}}, nil, "service.yaml: charts.okdp: the chart of OKDP's own objects is added by the compiler: remove it from service.yaml"},
-		"null charts":     {"{}\n", nil, M{"global": M{"okdp": M{"charts": nil}}}, "- at '/global/okdp/charts': got null, want object"},
-		"a range":         {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}, `global.okdp.charts.objects.version "1.x": a pinned chart version`},
-		"oidcDcr":         {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": "quay.io"}}}}}, `global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository`},
-		"not in cache":    {"{}\n", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "2.0.0"}}}}}, "okdp: chart okdp-objects-2.0.0 is not in the chart cache"},
+		"not an object": {"objects: [{metadata: {name: x}}]\n", "", nil, nil, "- at '/objects/0': missing property 'kind'"},
+		"in values":     {"", "okdp: {}\n", nil, nil, "values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it"},
+		"in Chart.yaml": {"", "", []chart.Dependency{appDep, okdpDep}, nil, "Chart.yaml: dependencies[1] (okdp): the chart of OKDP's own objects is added by the compiler: remove it"},
+		"null charts":   {"", "", nil, M{"global": M{"okdp": M{"charts": nil}}}, "- at '/global/okdp/charts': got null, want object"},
+		"a range":       {"", "", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}, `global.okdp.charts.objects.version "1.x": a pinned chart version`},
+		"oidcDcr":       {"", "", nil, M{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": "quay.io"}}}}}, `global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository`},
+		"not in cache":  {"", "", nil, M{"global": M{"okdp": M{"charts": M{"objects": M{"version": "2.0.0"}}}}}, "okdp: chart okdp-objects-2.0.0 is not in the chart cache"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
-			d.Mapping = []byte(tc.mapping)
-			if tc.charts != nil {
-				d.Service.Charts = tc.charts
+			d.Okdp, d.Values = []byte(tc.okdp), []byte(tc.values)
+			if tc.deps != nil {
+				d.Chart.Dependencies = tc.deps
 			}
-			if _, err := Compile(context.Background(), &d, inputs(tc.values)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := Compile(context.Background(), &d, inputs(tc.layer)); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
 }
 
-// TestSharedSource: two charts of service.yaml rendered by one upstream
-// chart: its defaults and schema, read once from the chart cache, each with
-// its own values; Result.Charts maps every chart to its source.
+// TestSharedSource: two dependencies of Chart.yaml, one aliased, rendered by
+// one upstream chart: its defaults and schema, read once from the chart
+// cache, each with its own values; Result.Charts maps every chart to its
+// source.
 func TestSharedSource(t *testing.T) {
-	var svc Service
-	if err := yaml.Unmarshal([]byte("charts:\n  canary: {source: {repository: https://charts.example.org, chart: app, version: 1.0.0}, defaults: app.defaults.yaml}\n"), &svc); err != nil || svc.Charts["canary"].Source != appSource {
-		t.Fatalf("service.yaml: %v %#v", err, svc)
-	}
-	mapping := "output:\n  app: {}\n  canary: {replicaCount: '${{ values.replicas }}'}\n"
 	d := *def
-	d.Mapping = []byte(mapping)
-	d.Service.Charts = chart.Specs{"app": {Source: appSource}, "canary": svc.Charts["canary"]}
+	d.Chart.Dependencies = []chart.Dependency{appDep, {Name: "app", Alias: "canary", Repository: "https://charts.example.org", Version: "1.0.0"}}
+	d.Package.Defaults = map[string]string{"canary": "app.defaults.yaml"}
+	d.Okdp, d.Values = nil, []byte("app: {}\ncanary: {replicaCount: '${{ values.replicas }}'}\n")
 	res, err := Compile(context.Background(), &d, inputs(M{"replicas": 2}))
 	if err != nil {
 		t.Fatal(err)

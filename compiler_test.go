@@ -58,7 +58,7 @@ func TestConcurrentCompile(t *testing.T) {
 	dcr.Context = append(slices.Clip(in.Context), compiler.ContextLayer{Values: values("examples/02_advanced/input/platform-dcr.yaml")})
 	inputs := []compiler.Inputs{in, dcr}
 	snapshot := func() string {
-		b, err := json.Marshal([]any{def.Service, string(def.Mapping), dcr.Context, in.Values})
+		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), dcr.Context, in.Values})
 		if err != nil {
 			t.Fatal(err)
 		}

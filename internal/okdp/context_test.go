@@ -15,7 +15,7 @@ import (
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": okdp}}), &def.Service)
+	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": okdp}}), defService)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func TestContextErrors(t *testing.T) {
 	ch := maps.Clone(pkg)
 	delete(ch, "config.schema.json")
 	ch["config.schema.json/x"] = &fstest.MapFile{}
-	if _, err := newInstance(ch, inputs(), &def.Service); err == nil || !strings.Contains(err.Error(), "read config.schema.json") {
+	if _, err := newInstance(ch, inputs(), defService); err == nil || !strings.Contains(err.Error(), "read config.schema.json") {
 		t.Errorf("config.schema.json a directory: got %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestContextErrors(t *testing.T) {
 // TestContextValues: the parameters the mapping sees, without global and
 // connections, and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	inst, err := newInstance(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), &def.Service)
+	inst, err := newInstance(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), defService)
 	if err != nil {
 		t.Fatal(err)
 	}

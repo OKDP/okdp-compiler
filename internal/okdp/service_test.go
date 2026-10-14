@@ -6,24 +6,62 @@ import (
 	"strings"
 	"testing"
 
-	"go.yaml.in/yaml/v3"
+	"github.com/okdp/okdp-compiler/internal/chart"
 )
 
-// TestRequireYAML: require in service.yaml, a list of keys; an entry of
+// TestRequireYAML: require in okdp.yaml, a list of keys; an entry of
 // another form fails with its line.
 func TestRequireYAML(t *testing.T) {
-	var svc Service
-	if err := yaml.Unmarshal([]byte("require: [ingress.suffix, oidc.issuerUri]\n"), &svc); err != nil || !reflect.DeepEqual(svc.Require, []string{"ingress.suffix", "oidc.issuerUri"}) {
-		t.Errorf("got %#v (%v)", svc.Require, err)
+	if p, err := decodePackage([]byte("require: [ingress.suffix, oidc.issuerUri]\n")); err != nil || !reflect.DeepEqual(p.Require, []string{"ingress.suffix", "oidc.issuerUri"}) {
+		t.Errorf("got %#v (%v)", p.Require, err)
 	}
 	for src, want := range map[string]string{
 		"require: a":          "line 1: cannot unmarshal !!str `a` into []string",
 		"require: [a, [b]]":   "line 1: cannot unmarshal !!seq into string",
 		"require: [{key: a}]": "line 1: cannot unmarshal !!map into string",
 	} {
-		var svc Service
-		if err := yaml.Unmarshal([]byte(src), &svc); err == nil || err.Error() != "yaml: unmarshal errors:\n  "+want {
+		if _, err := decodePackage([]byte(src)); err == nil || err.Error() != "okdp.yaml: yaml: unmarshal errors:\n  "+want {
 			t.Errorf("%s: got %v, want %q", src, err, want)
+		}
+	}
+}
+
+// TestDefinitionService: the Service of a Definition built in memory, and
+// what it refuses before any compile, its messages naming the file: the
+// checks of Chart.yaml, the chart of OKDP's own objects among its
+// dependencies, okdp.yaml's defaults and upstream.
+func TestDefinitionService(t *testing.T) {
+	d := *def
+	d.Package.Roles, d.Package.DependsOn = []string{"web"}, []string{"ingress"}
+	d.Package.Upstream = chart.Upstream{All: true}
+	svc, err := d.service()
+	want := &Service{Name: "demo", Version: "1.2.3", Roles: []string{"web"}, DependsOn: []string{"ingress"}, Require: []string{"ingress.suffix"}, Charts: chart.Specs{
+		"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true},
+	}}
+	if err != nil || !reflect.DeepEqual(svc, want) {
+		t.Errorf("got %#v (%v)", svc, err)
+	}
+	okdpDep := chart.Dependency{Name: "okdp-objects", Alias: "okdp", Repository: objectsSource.Repository, Version: objectsSource.Version}
+	for name, tc := range map[string]struct {
+		set  func(d *Definition)
+		want string
+	}{
+		"no name":    {func(d *Definition) { d.Chart.Name = "" }, "Chart.yaml: name is required"},
+		"no version": {func(d *Definition) { d.Chart.Version = "" }, "Chart.yaml: version is required"},
+		"a key": {func(d *Definition) {
+			d.Chart.Dependencies = []chart.Dependency{{Name: "App", Repository: "https://x", Version: "1.0.0"}}
+		}, `Chart.yaml: dependencies[0] (App): key "App": a DNS label`},
+		"the okdp key": {func(d *Definition) { d.Chart.Dependencies = []chart.Dependency{appDep, okdpDep} }, "Chart.yaml: dependencies[1] (okdp): the chart of OKDP's own objects is added by the compiler: remove it"},
+		"defaults":     {func(d *Definition) { d.Package.Defaults = map[string]string{"web": "web.yaml"} }, "okdp.yaml: defaults.web: not a dependency of Chart.yaml"},
+		"upstream":     {func(d *Definition) { d.Package.Upstream = upstreamOf("okdp", chart.UpstreamKey{Accept: true}) }, "okdp.yaml: upstream.okdp: not a dependency of Chart.yaml"},
+	} {
+		d := *def
+		tc.set(&d)
+		if _, err := d.service(); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+		if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			t.Errorf("%s: Compile: got %v, want %q", name, err, tc.want)
 		}
 	}
 }
@@ -33,7 +71,7 @@ func TestRequireYAML(t *testing.T) {
 // errors first), before the platform charts and the mapping.
 func TestRequire(t *testing.T) {
 	d := *def
-	d.Service.Require = []string{"ingress.suffix", "oidc.issuerUri"}
+	d.Package.Require = []string{"ingress.suffix", "oidc.issuerUri"}
 	missing := "global.okdp.oidc.issuerUri is required. It is a context value: set it with --context (Inputs.Context)"
 	issuer := M{"global": M{"okdp": M{"oidc": M{"issuerUri": "https://sso.example.org"}}}}
 	for name, tc := range map[string]struct {

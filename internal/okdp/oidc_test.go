@@ -24,7 +24,7 @@ func dcrCtx(settings ...M) M {
 	for _, s := range settings {
 		dcr = value.Merge(dcr, s)
 	}
-	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "scope": "openid profile email", "dcr": dcr}}}}), &def.Service)
+	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "scope": "openid profile email", "dcr": dcr}}}}), defService)
 	if err != nil {
 		panic(err)
 	}
@@ -244,7 +244,7 @@ func TestDcrModes(t *testing.T) {
 		}
 		ctx := dcrCtx()
 		value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = tc.dcr
-		res, err := runMapping(newSession(ctx), []byte("output:\n  x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n"), ctx)
+		res, err := runMapping(newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -284,23 +284,17 @@ func TestDcrErrors(t *testing.T) {
 }
 
 // TestDcrCompile: a mapping's oidcClients compiled with the service: in dcr
-// mode, one oidc-dcr chart per client, which service.yaml does not list,
+// mode, one oidc-dcr chart per client, which Chart.yaml does not list,
 // rendered by DcrSource (its defaults merged, from the chart cache); the
-// compiler owns these charts: service.yaml and the mapping's output may not
-// list them.
+// compiler owns these charts: Chart.yaml and values.cel.yaml may not list
+// them.
 func TestDcrCompile(t *testing.T) {
 	ch := maps.Clone(charts)
 	ch["quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
-	mapping := `
+	okdpYAML := `
 vars:
   host: app.${{ global.okdp.ingress.suffix }}
-output:
-  app:
-    labels:
-      main: ${{ oidcClientSecret('') }}
-      console: ${{ oidcClientSecret('console') }}
-  %s
 oidcClients:
   - redirectUris: ['https://${{ host }}/callback']
     grantTypes: [authorization_code]
@@ -309,10 +303,17 @@ oidcClients:
     public: true
     grantTypes: [authorization_code]
 `
-	compile := func(output string, existing bool, specs chart.Specs, cache fstest.MapFS, values M) (*Result, error) {
+	valuesYAML := `
+app:
+  labels:
+    main: ${{ oidcClientSecret('') }}
+    console: ${{ oidcClientSecret('console') }}
+%s
+`
+	compile := func(output string, existing bool, deps []chart.Dependency, cache fstest.MapFS, values M) (*Result, error) {
 		d := *def
-		d.Mapping = []byte(strings.Replace(mapping, "%s", output, 1))
-		d.Service.Charts = specs
+		d.Okdp, d.Values = []byte(okdpYAML), []byte(strings.Replace(valuesYAML, "%s", output, 1))
+		d.Chart.Dependencies = deps
 		p := value.AsMap(value.Copy(platform))
 		if existing {
 			value.Dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
@@ -321,7 +322,7 @@ oidcClients:
 		in.Charts = cache
 		return Compile(context.Background(), &d, in)
 	}
-	app := chart.Specs{"app": {Source: appSource}}
+	app := []chart.Dependency{appDep}
 	for name, tc := range map[string]struct {
 		values   M
 		existing bool
@@ -361,16 +362,16 @@ oidcClients:
 	for name, tc := range map[string]struct {
 		output   string
 		existing bool
-		charts   chart.Specs
+		deps     []chart.Dependency
 		files    fstest.MapFS
 		want     string
 	}{
-		"in output":        {"oidc-dcr: {}", true, app, ch, `mapping output "oidc-dcr": the chart of oidcClients[0] is compiled from oidcClients: remove it from output`},
-		"in service.yaml":  {"", false, chart.Specs{"app": {Source: appSource}, "console-oidc-dcr": {Source: DcrSource}}, ch, "service.yaml: charts.console-oidc-dcr: the chart of oidcClients[1] (console) is added by the compiler: remove it from service.yaml"},
+		"in values":        {"oidc-dcr: {}", true, app, ch, "values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it"},
+		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: DcrSource.Repository, Version: DcrSource.Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
 		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := compile(tc.output, tc.existing, tc.charts, tc.files, M{"replicas": 2})
+			_, err := compile(tc.output, tc.existing, tc.deps, tc.files, M{"replicas": 2})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
@@ -388,8 +389,8 @@ oidcClients:
 	if _, err := compile("", true, app, charts, M{"replicas": 2}); err != nil {
 		t.Errorf("existing mode without oidc-dcr: %v", err)
 	}
-	// def.Service is left as it was.
+	// The dependencies of Chart.yaml are left as they were.
 	if _, err := compile("", false, app, ch, M{"replicas": 2}); err != nil || len(app) != 1 {
-		t.Errorf("service.yaml changed: %v %v", err, app)
+		t.Errorf("Chart.yaml changed: %v %v", err, app)
 	}
 }

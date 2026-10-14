@@ -1,0 +1,22 @@
+# The package of the workspace service: an API server, its scheduler (a
+# second render of the same chart), a gateway in front of them, a metrics
+# exporter and an optional backup job. okdp.yaml says what OKDP reads of it
+# and how the charts' values are set; values.cel.yaml computes them from the
+# instance's parameters (its config.yaml over the defaults of
+# config.schema.json) and the platform's and project's values.
+#
+# Chart.yaml is read as YAML 1.2, strictly: an unknown field fails. Each
+# dependency's key, its alias or else its name, names its values.
+
+apiVersion: v2
+name: workspace
+version: 3.2.0-1.4.0                   # <upstream>-<okdp semver>
+dependencies:
+  - {name: workspace, alias: api, repository: https://charts.example.org, version: 3.2.0}
+  # A second render of the workspace chart.
+  - {name: workspace, alias: scheduler, repository: https://charts.example.org, version: 3.2.0}
+  # No OKDP defaults, no instance values.
+  - {name: gateway, repository: oci://registry.example.org/charts, version: 1.4.2}
+  - {name: metrics-exporter, alias: metrics, repository: oci://registry.example.org/charts, version: 0.7.0}
+  # Left out by values.cel.yaml unless enabled: never read then.
+  - {name: backup, repository: oci://registry.example.org/charts, version: 2.0.1}

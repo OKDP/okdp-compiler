@@ -6,14 +6,10 @@ dependencies:
     alias: api
     repository: https://charts.example.org
     version: 3.2.0
-  - name: oidc-dcr
-    alias: automation-oidc-dcr
-    repository: oci://registry.example.org/mirror
-    version: 0.5.0
-  - name: oidc-dcr
-    alias: console-oidc-dcr
-    repository: oci://registry.example.org/mirror
-    version: 0.5.0
+  - name: workspace
+    alias: scheduler
+    repository: https://charts.example.org
+    version: 3.2.0
   - name: gateway
     repository: oci://registry.example.org/charts
     version: 1.4.2
@@ -22,13 +18,17 @@ dependencies:
     repository: oci://registry.example.org/charts
     version: 0.7.0
   - name: oidc-dcr
+    alias: automation-oidc-dcr
+    repository: oci://registry.example.org/mirror
+    version: 0.5.0
+  - name: oidc-dcr
+    alias: console-oidc-dcr
+    repository: oci://registry.example.org/mirror
+    version: 0.5.0
+  - name: oidc-dcr
     repository: oci://registry.example.org/mirror
     version: 0.5.0
   - name: okdp-objects
     alias: okdp
     repository: oci://registry.example.org/okdp
     version: 1.0.0
-  - name: workspace
-    alias: scheduler
-    repository: https://charts.example.org
-    version: 3.2.0

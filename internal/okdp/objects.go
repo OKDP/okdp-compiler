@@ -20,7 +20,7 @@ import (
 // (global.okdp.charts.objects: okdp-objects, values `objects: []`), its
 // objects Result.Objects: the descriptor ConfigMap, the credentials Secrets
 // and the objects section reach the cluster with the upstream charts.
-// Neither service.yaml nor the mapping's output may list it.
+// Neither Chart.yaml nor values.cel.yaml may list it.
 const ObjectsChart = "okdp"
 
 // platformCharts: the charts the platform renders the compiler's own charts
@@ -54,9 +54,10 @@ func platformChart(v any, where string) (chart.Ref, error) {
 }
 
 // ownChart: a chart key the compiler owns in a compile: the okdp chart,
-// and the chart of each OAuth client, in every mode. Neither service.yaml nor the mapping's output may list it
-// (addOwnCharts). The compiler adds it to the compile when it has values,
-// rendered by source: no OKDP defaults, no instance upstream values.
+// and the chart of each OAuth client, in every mode. Neither Chart.yaml
+// nor values.cel.yaml may list it (addOwnCharts). The compiler adds it to
+// the compile when it has values, rendered by source: no OKDP defaults, no
+// instance upstream values.
 type ownChart struct {
 	key    string
 	of     string    // what it is the chart of, for the messages: OKDP's own objects, oidcClients[<i>] (<name>)
@@ -66,8 +67,8 @@ type ownChart struct {
 }
 
 // okdpChart: the okdp chart (ObjectsChart) as the compiler owns it, before
-// a compile gives its source and values (objectsChart); service.yaml may
-// not list it, refused when it is loaded (Service.Check).
+// a compile gives its source and values (objectsChart); Chart.yaml may not
+// list it, refused when it is loaded (Definition.service).
 var okdpChart = ownChart{key: ObjectsChart, of: "OKDP's own objects", from: "the objects section"}
 
 // objectsChart: the okdp chart, rendered by the platform's objects chart
@@ -82,26 +83,29 @@ func objectsChart(objects []map[string]any, src chart.Ref) ownChart {
 	return c
 }
 
-// listed: the error of the chart c listed by service.yaml (specs), then by
-// the mapping's output; nil when neither lists it.
-func (c ownChart) listed(specs chart.Specs, output M) error {
-	if _, ok := specs[c.key]; ok {
-		return fmt.Errorf("service.yaml: charts.%s: the chart of %s is added by the compiler: remove it from service.yaml", c.key, c.of)
+// listed: the error of the chart c listed by Chart.yaml (deps, its
+// dependencies), then by the mapping's output (values.cel.yaml); nil when
+// neither lists it.
+func (c ownChart) listed(deps []chart.Dependency, output M) error {
+	for i, d := range deps {
+		if d.Key() == c.key {
+			return fmt.Errorf("%s: dependencies[%d] (%s): the chart of %s is added by the compiler: remove it", chart.MetadataFile, i, c.key, c.of)
+		}
 	}
 	if _, ok := output[c.key]; ok {
-		return fmt.Errorf("mapping output %q: the chart of %s is compiled from %s: remove it from output", c.key, c.of, c.from)
+		return fmt.Errorf("%s: %s: the chart of %s is compiled from %s: remove it", valuesFile, c.key, c.of, c.from)
 	}
 	return nil
 }
 
-// addOwnCharts: the charts of service.yaml, specs, plus those of own that
-// have values, each rendered by its source, their values added to the
-// mapping's output: what chart.FinalValues compiles. A chart of own that
-// service.yaml or the output lists fails (listed), the first in the order
-// of own. specs is not changed.
-func addOwnCharts(specs chart.Specs, output M, own []ownChart) (chart.Specs, error) {
+// addOwnCharts: the dependencies of Chart.yaml, deps, specs by key, plus
+// the charts of own that have values, each rendered by its source, their
+// values added to the mapping's output: what chart.FinalValues compiles. A
+// chart of own that Chart.yaml or the output lists fails (listed), the
+// first in the order of own. specs is not changed.
+func addOwnCharts(deps []chart.Dependency, specs chart.Specs, output M, own []ownChart) (chart.Specs, error) {
 	for _, c := range own {
-		if err := c.listed(specs, output); err != nil {
+		if err := c.listed(deps, output); err != nil {
 			return nil, err
 		}
 	}

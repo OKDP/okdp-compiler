@@ -1,6 +1,6 @@
 // Paths: where a value is in values, as messages name it: plain keys joined
 // by dots, a list item [i], a key a dot would split in brackets. The same
-// form as the protect and append paths of service.yaml, which chart's
+// form as the protect and append paths of okdp.yaml, which chart's
 // parsePath reads back as these literal keys (but a key with a quote, a
 // backslash or a star): env[1].name,
 // annotations["nginx.ingress.kubernetes.io/auth-type"], ["a.b"].

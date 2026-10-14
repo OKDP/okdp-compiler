@@ -1,8 +1,9 @@
 // Package chart is what the compiler reproduces of Helm and needs of the
 // upstream charts: values read, merged and coalesced as Helm does
 // (values.go), checked against a values.schema.json (schema.go), the chart
-// references and the chart cache (ref.go, cache.go), the charts section of
-// service.yaml (spec.go, paths.go), a values schema, its defaults and the
+// references and the chart cache (ref.go, cache.go), a package's Chart.yaml
+// (metadata.go) and its dependencies, with okdp.yaml's defaults and
+// upstream (spec.go, paths.go), a values schema, its defaults and the
 // parameters of an instance (parameters.go), the final values of each
 // chart key (merge.go). It knows neither the mapping language nor OKDP.
 //

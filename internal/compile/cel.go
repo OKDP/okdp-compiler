@@ -378,9 +378,9 @@ type Doc struct {
 // its vars bindings evaluated in order, then its errors section, every
 // message collected before failing; then its sections, in order, by name,
 // those it has. The bindings of vars are seen by every source. An error
-// starts with the name of its source, then its path, under the section but
-// in a source that is the section (values.cel.yaml: output: app: env[2]:
-// ...).
+// starts with the name of its source, then its path, under the section
+// (okdp.yaml: objects[1]: ...) but in a source that is the section
+// (values.cel.yaml: app: env[2]: ...).
 func (s *Session) Eval(scope M, sections []string, srcs ...Source) (*Doc, error) {
 	t, err := builder{s}.document(srcs, slices.Sorted(maps.Keys(scope)), sections)
 	if err != nil {

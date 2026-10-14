@@ -37,12 +37,19 @@ func (r Ref) Check(where string) error {
 		return fmt.Errorf("%s is required: the upstream chart (repository, chart, version)", where)
 	case r.cacheDir() == "":
 		return fmt.Errorf("%s.repository %q: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
-	case r.Chart == "" || r.Chart != path.Base(r.Chart) || r.Chart == "." || r.Chart == ".." || strings.TrimSpace(r.Chart) != r.Chart:
+	case !isChartName(r.Chart):
 		return fmt.Errorf("%s.chart %q: the name of a chart of the repository", where, r.Chart)
 	case !chartVersion.MatchString(r.Version):
 		return fmt.Errorf("%s.version %q: a pinned chart version (1.2.3), not a range", where, r.Version)
 	}
 	return nil
+}
+
+// isChartName: name may name a chart of a repository, and its directory
+// in the chart cache: not empty, one path element, not . or .., without
+// spaces at either end.
+func isChartName(name string) bool {
+	return name != "" && name == path.Base(name) && name != "." && name != ".." && strings.TrimSpace(name) == name
 }
 
 // id: <chart>-<version>, the chart's name in the chart cache and in the

@@ -17,7 +17,7 @@ Two ways to use it:
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-def, err := compiler.LoadDefinition(packageFS) // service.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
+def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 if err != nil {
 	log.Fatal(err)
 }
@@ -37,7 +37,7 @@ if err != nil {
 }
 // res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
 // res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
-//               its service.yaml source, the platform's objects chart for okdp,
+//               its Chart.yaml dependency, the platform's objects chart for okdp,
 //               the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 // res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
 //               Secrets of the provided connections, the mapping's objects section
@@ -64,11 +64,14 @@ Helm gives with OKDP's defaults, the computed values and the instance's
 upstream values as `-f` files
 ([Helm fidelity](docs/00_architecture.md#helm-fidelity)).
 
-A chart of `service.yaml` is a key and its `source`, the published chart
-that renders its values: `{repository, chart, version}`, pinned. Two keys
-may name one source, for a chart rendered more than once
-([sources](docs/specs/02_service_definition.md#sources)). The compiler reads
-only the chart's `values.yaml` and `values.schema.json`, from a chart cache
+A package is a Helm `Chart.yaml` and OKDP's files: each of its
+`dependencies` is a key, its `alias` or its `name`, and the published chart
+that renders its values, `{name, repository, version}`, pinned. Two
+dependencies may name one chart, each with its alias, for a chart rendered
+more than once
+([dependencies](docs/specs/02_service_definition.md#dependencies)). The
+compiler reads only the chart's `values.yaml` and `values.schema.json`,
+from a chart cache
 the caller fills with `helm pull --untar`, each chart unpacked under its
 repository's directory, the URL without its scheme
 (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`)
@@ -85,9 +88,11 @@ with the upstream charts, rendered by the platform's objects chart,
 
 ## Mapping
 
-`values.cel.yaml` is YAML shaped like the upstream values, with `${{ CEL }}`
-expressions and `$if`/`$for`/`$merge`/`$spread`/`$vars` directives. Sections:
-`vars`, `errors`, `output` (chart -> values), `instance` (url, usage),
+The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
+expressions and `$if`/`$for`/`$merge`/`$spread`/`$vars` directives: the
+values file, `values.cel.yaml` (chart -> values), and the sections of
+`okdp.yaml`, after its package keys (`require`, `roles`, `dependsOn`,
+`defaults`, `upstream`): `vars`, `errors`, `instance` (url, usage),
 `provides` (the connections the instance publishes), `objects` (OKDP's own
 objects, whole manifests) and `oidcClients` (the service's OAuth clients).
 Expressions see `release`, `values`, `global.okdp`, `platform`, `service`,
@@ -183,7 +188,7 @@ files of a successful one overwrite those of the same name. `--release` and
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients, the `okdp` chart), `LoadDefinition` and `Compile`, the order of the stages |
 | `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values and the instances it depends on |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
-| `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, the `charts` section of `service.yaml`, the final values |
+| `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, `Chart.yaml` and the charts of a package, the final values |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
 | `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/`, what `-o <dir>` writes, checked by `go test` ([example](docs/00_architecture.md#example)) |

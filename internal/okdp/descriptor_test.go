@@ -26,7 +26,7 @@ var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
 // provideCompile: compiles the in-memory chart with this provides section.
 func provideCompile(provides string) (*Result, error) {
 	d := *def
-	d.Mapping = []byte("output: {app: {}}\ninstance: {url: ' https://x ', usage: use it}\nprovides:\n" + provides)
+	d.Okdp = []byte("instance: {url: ' https://x ', usage: use it}\nprovides:\n" + provides)
 	in := inputs()
 	in.Contracts = httpContract
 	return Compile(context.Background(), &d, in)

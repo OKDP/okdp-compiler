@@ -1,101 +1,103 @@
 package chart
 
 import (
-	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
 )
 
-// specsCheck: the charts section of service.yaml, decoded and checked.
-func specsCheck(yml string) error {
-	var s Specs
-	if err := yaml.Unmarshal([]byte(yml), &s); err != nil {
-		return err
-	}
-	return s.Check()
-}
-
-// TestRefCheck: a source names a repository URL, a chart and a pinned
-// version.
-func TestRefCheck(t *testing.T) {
-	for source, want := range map[string]string{
-		"{repository: https://x, chart: app, version: 1.0.0}":            "",
-		"{repository: oci://x/charts, chart: app, version: v2.1.0-rc.1}": "",
-		"": "charts.app.source is required: the upstream chart (repository, chart, version)",
-		"{repository: x.org, chart: app, version: 1.0.0}":          `charts.app.source.repository "x.org": the URL of a chart repository`,
-		"{repository: https://x/../y, chart: app, version: 1.0.0}": `charts.app.source.repository "https://x/../y": the URL of a chart repository`,
-		"{repository: 'oci://', chart: app, version: 1.0.0}":       `charts.app.source.repository "oci://": the URL of a chart repository`,
-		"{repository: https://x, chart: ../app, version: 1}":       `charts.app.source.chart "../app": the name of a chart`,
-		"{repository: https://x, chart: a/b, version: 1.0.0}":      `charts.app.source.chart "a/b": the name of a chart`,
-		"{repository: https://x, version: 1.0.0}":                  `charts.app.source.chart "": the name of a chart`,
-		"{repository: https://x, chart: app, version: ^1.0}":       `charts.app.source.version "^1.0": a pinned chart version (1.2.3), not a range`,
-		"{repository: https://x, chart: app}":                      `charts.app.source.version "": a pinned chart version`,
-	} {
-		yml := "app: {source: " + source + "}\n"
-		if source == "" {
-			yml = "app: {}\n"
-		}
-		err := specsCheck(yml)
-		if want == "" {
-			if err != nil {
-				t.Errorf("%s: %v", source, err)
-			}
-		} else if err == nil || !strings.Contains(err.Error(), "service.yaml: "+want) {
-			t.Errorf("%s: got %v, want an error containing %q", source, err, want)
-		}
-	}
-}
-
-// TestSpecKeys: a chart key is a DNS label: it names the umbrella's
-// dependency alias.
-func TestSpecKeys(t *testing.T) {
-	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
-	for key, ok := range map[string]bool{
-		"app": true, "a-1": true, "0": true, strings.Repeat("a", 63): true,
-		"": false, "../escaped": false, "App": false, "my_app": false, "my.app": false, "-app": false, "app-": false, strings.Repeat("a", 64): false,
-	} {
-		err := Specs{key: {Source: src}}.Check()
-		if want := fmt.Sprintf("service.yaml: charts: key %q: a DNS label", key); ok && err != nil || !ok && (err == nil || !strings.HasPrefix(err.Error(), want)) {
-			t.Errorf("%q: got %v", key, err)
-		}
-	}
-}
-
-// TestUpstreamYAML: upstream: in service.yaml, a boolean; a YAML 1.1
-// boolean (off, yes) read as the one it spells.
+// TestUpstreamYAML: okdp.yaml's upstream, a boolean (a YAML 1.1 one read
+// as the one it spells), or a map by dependency key of booleans, {} and
+// {protect, append}; another form fails.
 func TestUpstreamYAML(t *testing.T) {
-	for in, want := range map[string]bool{"": false, "upstream: false": false, "upstream: true": true, "upstream: off": false, "upstream: Yes": true} {
-		var spec Spec
-		if err := yaml.Unmarshal([]byte(in), &spec); err != nil || spec.Upstream != want {
-			t.Errorf("%q: got %v %v, want %v", in, spec.Upstream, err, want)
+	type pkg struct {
+		Upstream Upstream `yaml:"upstream"`
+	}
+	for in, want := range map[string]Upstream{
+		"":                {},
+		"upstream: ~":     {},
+		"upstream: false": {},
+		"upstream: true":  {All: true},
+		"upstream: off":   {},
+		"upstream: Yes":   {All: true},
+		"upstream: {}":    {Keys: map[string]UpstreamKey{}},
+		"upstream: {api: true, web: false, db: yes, x: {}, y: {protect: [a, 'b[\"c.d\"]'], append: [env]}, z: {append: []}}": {Keys: map[string]UpstreamKey{
+			"api": {Accept: true}, "web": {}, "db": {Accept: true}, "x": {Accept: true},
+			"y": {Accept: true, Protect: []string{"a", `b["c.d"]`}, Append: []string{"env"}}, "z": {Accept: true, Append: []string{}},
+		}},
+	} {
+		var p pkg
+		if err := yaml.Unmarshal([]byte(in), &p); err != nil || !reflect.DeepEqual(p.Upstream, want) {
+			t.Errorf("%q: got %#v (%v), want %#v", in, p.Upstream, err, want)
 		}
 	}
-	for _, in := range []string{`upstream: ""`, "upstream: 1", "upstream: a.yaml", "upstream: {from: a}"} {
-		var spec Spec
-		if err := yaml.Unmarshal([]byte(in), &spec); err == nil {
-			t.Errorf("%q: no error", in)
+	for in, want := range map[string]string{
+		`upstream: ""`:                               "upstream: true, false or a map by dependency",
+		"upstream: 1":                                "upstream: true, false or a map by dependency",
+		"upstream: [api]":                            "upstream: true, false or a map by dependency",
+		"upstream: {api: 1}":                         "upstream.api: true, false or {protect, append}",
+		"upstream: {api: ~}":                         "upstream.api: true, false or {protect, append}",
+		"upstream: {api: [a]}":                       "upstream.api: true, false or {protect, append}",
+		"upstream: {api: {protcet: [a]}}":            "upstream.api: true, false or {protect, append}",
+		"upstream: {api: {upstream: true}}":          "upstream.api: true, false or {protect, append}",
+		"upstream: {api: {protect: a}}":              "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into []string",
+		"upstream: {api: {protect: [[a]]}}":          "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string",
+		"upstream: {api: true, api: false}":          "yaml: unmarshal errors:\n  line 1: mapping key \"api\" already defined at line 1",
+		"upstream: {api: {append: [], append: [a]}}": "yaml: unmarshal errors:\n  line 1: mapping key \"append\" already defined at line 1",
+	} {
+		var p pkg
+		if err := yaml.Unmarshal([]byte(in), &p); err == nil || err.Error() != want {
+			t.Errorf("%q: got %v, want %q", in, err, want)
 		}
 	}
 }
 
-// TestSpecPaths: a malformed protect or append path is refused before any
-// compile, not when an instance first sets a value under it.
-func TestSpecPaths(t *testing.T) {
-	const app = "app:\n  source: {repository: https://x, chart: app, version: 1.0.0}\n"
-	for yml, want := range map[string]string{
-		app + "  protect: [a.b, 'a[\"b']\n":    `service.yaml: charts.app.protect[1] "a[\"b": not a path: keys joined by dots`,
-		app + "  append: ['env.*']\n":          `service.yaml: charts.app.append[0] "env.*": not a path`,
-		app + "  protect: ['a[\"b.c*\"].d']\n": "",
+// TestNewSpecs: the dependencies of Chart.yaml by key, each rendered by its
+// chart, with okdp.yaml's defaults and upstream; a key of either that is
+// not a dependency fails.
+func TestNewSpecs(t *testing.T) {
+	workspace := Ref{Repository: "https://x", Chart: "workspace", Version: "1.0.0"}
+	gateway := Ref{Repository: "oci://x/charts", Chart: "gateway", Version: "2.0.0"}
+	meta := Metadata{APIVersion: "v2", Name: "demo", Version: "1.0.0", Dependencies: []Dependency{
+		{Name: "workspace", Alias: "api", Repository: workspace.Repository, Version: workspace.Version},
+		{Name: "workspace", Alias: "scheduler", Repository: workspace.Repository, Version: workspace.Version},
+		{Name: "gateway", Repository: gateway.Repository, Version: gateway.Version},
+	}}
+	defaults := map[string]string{"api": "api.defaults.yaml"}
+	s, err := NewSpecs(meta, defaults, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true, Protect: []string{"mode"}, Append: []string{"env"}}, "gateway": {}}})
+	want := Specs{
+		"api":       {Source: workspace, Defaults: "api.defaults.yaml", Upstream: true, Protect: []string{"mode"}, Append: []string{"env"}},
+		"scheduler": {Source: workspace},
+		"gateway":   {Source: gateway},
+	}
+	if err != nil || !reflect.DeepEqual(s, want) {
+		t.Errorf("got %#v (%v)", s, err)
+	}
+	if s, err := NewSpecs(meta, nil, Upstream{All: true}); err != nil || !s["api"].Upstream || !s["scheduler"].Upstream || !s["gateway"].Upstream || s["api"].Protect != nil {
+		t.Errorf("upstream: true: got %#v (%v)", s, err)
+	}
+	if s, err := NewSpecs(Metadata{}, nil, Upstream{All: true}); err != nil || len(s) != 0 {
+		t.Errorf("no dependency: got %#v (%v)", s, err)
+	}
+	for name, tc := range map[string]struct {
+		defaults map[string]string
+		upstream Upstream
+		want     string
+	}{
+		"defaults":         {map[string]string{"api": "a.yaml", "web": "web.defaults.yaml"}, Upstream{}, "okdp.yaml: defaults.web: not a dependency of Chart.yaml"},
+		"upstream":         {nil, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true}, "workspace": {}}}, "okdp.yaml: upstream.workspace: not a dependency of Chart.yaml"},
+		"defaults first":   {map[string]string{"x": "x.yaml"}, Upstream{Keys: map[string]UpstreamKey{"a": {}}}, "okdp.yaml: defaults.x: not a dependency of Chart.yaml"},
+		"a protect path":   {nil, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true, Protect: []string{"a.b", `a["b`}}}}, `okdp.yaml: upstream.api.protect[1] "a[\"b": not a path: keys joined by dots`},
+		"an append path":   {nil, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true, Append: []string{"env.*"}}}}, `okdp.yaml: upstream.api.append[0] "env.*": not a path`},
+		"not accepted yet": {nil, Upstream{Keys: map[string]UpstreamKey{"api": {Protect: []string{"a..b"}}}}, `okdp.yaml: upstream.api.protect[0] "a..b": not a path`},
 	} {
-		err := specsCheck(yml)
-		if want == "" {
-			if err != nil {
-				t.Errorf("%s: %v", yml, err)
-			}
-		} else if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%s: got %v, want an error containing %q", yml, err, want)
+		if _, err := NewSpecs(meta, tc.defaults, tc.upstream); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
 		}
+	}
+	if _, err := NewSpecs(meta, nil, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true, Protect: []string{`a["b.c*"].d`}}}}); err != nil {
+		t.Errorf("a bracketed glob: %v", err)
 	}
 }

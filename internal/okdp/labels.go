@@ -1,5 +1,5 @@
 // Labels: the labels of the objects OKDP renders itself, from the package
-// (service.yaml's name) and the release.
+// (Chart.yaml's name) and the release.
 
 package okdp
 

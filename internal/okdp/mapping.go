@@ -1,12 +1,14 @@
 // Mapping: what an OKDP mapping holds besides vars and errors (package
 // compile), and the host functions OKDP adds to the language:
 //
-//	output (chart -> values),
+//	output (chart -> values), values.cel.yaml,
 //	instance (url, usage) and provides (the connections the instance publishes),
 //	objects (OKDP's own objects, whole manifests),
 //	oidcClients (the OAuth clients of the service, oidc.go),
 //
-// their shapes described by the embedded mapping.schema.json.
+// their shapes described by the embedded mapping.schema.json. A package's
+// mapping is read from okdp.yaml (vars, errors and every section but
+// output, its package keys skipped) and values.cel.yaml (output).
 //
 // The compiler's own templates (oidc-dcr.cel.yaml,
 // generated-secret.cel.yaml, descriptor.cel.yaml) are written in the same
@@ -34,6 +36,22 @@ import (
 // top-level key fails the compile.
 var sections = []string{"output", "instance", "provides", "objects", "oidcClients"}
 
+// valuesFile: the values file of a package, the mapping's output section.
+const valuesFile = "values.cel.yaml"
+
+// sources: the mapping of d: okdp.yaml, its package keys skipped, then
+// values.cel.yaml, the output section; each when the package has it.
+func (d *Definition) sources() []compile.Source {
+	var srcs []compile.Source
+	if d.Okdp != nil {
+		srcs = append(srcs, compile.Source{Name: "okdp.yaml", Data: d.Okdp, Skip: packageKeys})
+	}
+	if d.Values != nil {
+		srcs = append(srcs, compile.Source{Name: valuesFile, Data: d.Values, Section: "output"})
+	}
+	return srcs
+}
+
 // mappingSchemaFile: the schema of what a mapping writes that the compiler
 // reads: the sections, and the argument of okdpGeneratedSecret; the
 // reference of package authors, its descriptions their meaning.
@@ -47,15 +65,16 @@ var mappingSchema = sync.OnceValues(func() (*chart.Schema, error) {
 	return chart.ParseSchema("mapping.schema.json", mappingSchemaFile)
 })
 
-// runMapping: runs a mapping, b (values.cel.yaml, the first segment of its
-// errors), on scope, what it sees (instance.scope), in the compile's
-// session, its sections in order, then checks them against mappingSchema
-// (schemaValues): the sections, by name, a null one (absent, $if) not set.
-// output (chart -> computed values), instance (url, usage), provides
-// ([{contract, name?, values, secretRef?, secret?}]), objects (OKDP's own
-// objects, whole manifests), oidcClients (checked further by oidc.go).
-func runMapping(session *compile.Session, b []byte, scope M) (M, error) {
-	doc, err := session.Eval(scope, sections, compile.Source{Name: "values.cel.yaml", Data: b})
+// runMapping: runs a mapping, read from srcs (Definition.sources: the
+// name of each the first segment of its errors), on scope, what it sees
+// (instance.scope), in the compile's session, its sections in order, then
+// checks them against mappingSchema (schemaValues): the sections, by name,
+// a null one (absent, $if) not set. output (chart -> computed values),
+// instance (url, usage), provides ([{contract, name?, values, secretRef?,
+// secret?}]), objects (OKDP's own objects, whole manifests), oidcClients
+// (checked further by oidc.go).
+func runMapping(session *compile.Session, scope M, srcs ...compile.Source) (M, error) {
+	doc, err := session.Eval(scope, sections, srcs...)
 	if err != nil {
 		return nil, err
 	}

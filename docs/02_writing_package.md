@@ -16,16 +16,20 @@ in [usage](01_usage.md), the internals in [architecture](00_architecture.md).
 
 ## What a package is
 
-A package is a directory of a git repository, not a chart. It carries the
+A package is a directory of a git repository, laid out as a Helm umbrella
+chart, not published as one. It carries the
 parameters an instance sets (`config.schema.json`, their defaults
 included), OKDP's defaults for each upstream chart
-(`<key>.defaults.yaml`), and the service definition. `service.yaml` names
-the service, the upstream charts it is made of, each by its source
-(repository, chart, pinned version), and what an instance may override;
-`values.cel.yaml` says how the values of each chart follow from the
-parameters, the platform values (`global.okdp`) and the connections, and
-declares the service's OAuth clients. `okdp-compile`
-turns the values of one instance into the final values of every chart and
+(`<key>.defaults.yaml`), and the service definition. `Chart.yaml` names
+the service and the upstream charts it is made of, its dependencies, each
+by its name, repository and pinned version; `okdp.yaml` says what the
+service needs of the platform, which defaults each chart takes and what an
+instance may override, and holds the mapping's sections that are not chart
+values: `vars`, `errors`, the OAuth clients, OKDP's own objects, the
+descriptor and the provided connections; `values.cel.yaml`, the values
+file, says how the values of each chart follow from the parameters, the
+platform values (`global.okdp`) and the connections. `okdp-compile` turns
+the values of one instance into the final values of every chart and
 OKDP's own objects; a deployer then renders each upstream chart from its
 repository with its values, as the
 [chart index](specs/01_inputs_outputs.md#chart-index) names it. Nothing of
@@ -33,8 +37,9 @@ the package is published as a chart.
 
 ```
 <name>/
-├── service.yaml            name, version, roles, dependsOn; the charts and their sources, OKDP's defaults, required platform values, protect, append
-├── values.cel.yaml         computed values, OAuth clients, OKDP's own objects, descriptor, provided connections
+├── Chart.yaml              name, version, the upstream charts (dependencies), Helm's other metadata
+├── okdp.yaml               required platform values, roles, dependsOn, OKDP's defaults, upstream values, protect, append; vars, errors, OAuth clients, OKDP's own objects, descriptor, provided connections
+├── values.cel.yaml         the computed values of each chart
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
 ├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --context
@@ -51,9 +56,9 @@ examples/02_advanced/input/charts`).
 
 ### 1. Choose the upstream charts
 
-Each upstream chart the service is made of is a chart key of `service.yaml`
-with its source: the chart repository (`https://`) or OCI registry path
-(`oci://`), the chart's name in it, and a pinned version. The package holds
+Each upstream chart the service is made of is a dependency of
+`Chart.yaml`: the chart's name, its chart repository (`https://`) or OCI
+registry path (`oci://`), and a pinned version. The package holds
 no copy of it: a deployer renders the chart from its repository, and the
 compiler reads its `values.yaml` and `values.schema.json` from the chart
 cache, filled with `helm pull --untar`, each chart unpacked under its
@@ -61,26 +66,32 @@ repository's directory, the URL without its scheme
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ```yaml
-# service.yaml (airflow)
-charts:
-  airflow:                    # the chart key: output.airflow of the mapping
-    source: {repository: https://airflow.apache.org, chart: airflow, version: 1.22.0}
+# Chart.yaml (airflow)
+dependencies:
+  - name: airflow             # the chart; its key too, without an alias
+    repository: https://airflow.apache.org
+    version: 1.22.0
 ```
 
 ```bash
 helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d "$OKDP_CHARTS/airflow.apache.org/airflow-1.22.0"
 ```
 
-- The key names the chart's values everywhere (`output`, the instance's
-  `upstream.<key>`, the umbrella's dependency alias and its values in
-  `instance.values.yaml`); it need not be the chart's name. It is a DNS label: lowercase letters, digits and `-`, 63
-  characters at most ([chart keys](specs/02_service_definition.md#chart-keys)).
-- `service.yaml` is read strictly: a field it does not define, a misspelt
-  `protect` among them, fails the load rather than being ignored.
+- The key, the `alias` when given, else the chart's `name`, names the
+  chart's values everywhere (the values file, `defaults` and `upstream` of
+  `okdp.yaml`, the instance's `upstream.<key>`, the umbrella's dependency
+  alias and its values in `instance.values.yaml`). It is a DNS label:
+  lowercase letters, digits and `-`, 63 characters at most
+  ([chart keys](specs/02_service_definition.md#chart-keys)).
+- `Chart.yaml` is read strictly, as Helm defines it: a field it does not
+  define fails the load rather than being ignored. Helm's `condition`,
+  `tags`, `enabled` and `import-values` fail too: the values file decides
+  what is rendered
+  ([dependencies](specs/02_service_definition.md#dependencies)).
 - A compile that needs a chart the cache lacks fails with the `helm pull
   --untar` command that fetches it.
-- A chart rendered twice is two keys of one source
-  ([recipe](#render-a-chart-twice)).
+- A chart rendered twice is two dependencies of one chart, each with its
+  alias ([recipe](#render-a-chart-twice)).
 - The chart is rendered as published. A bundled subchart the package does
   not use is disabled by values, in OKDP's defaults, and protected (superset
   disables the bundled `postgresql` and `redis` and runs a Valkey of its
@@ -89,7 +100,7 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d 
   another package. CRDs upgraded with the release (spark-operator) are a
   deployer setting: `upgrade.crds: CreateReplace` on the Flux HelmRelease;
   Argo CD applies `crds/` on every sync.
-- `okdp` and `oidc-dcr` are not charts of the package: the compiler adds
+- `okdp` and `oidc-dcr` are not dependencies of the package: the compiler adds
   them, the okdp chart of OKDP's own objects in every compile, one oidc-dcr
   chart per OAuth client in `dcr` mode, and the platform names the charts
   that render them (`global.okdp.charts`:
@@ -103,24 +114,35 @@ objects. An upstream feature built on `lookup`, a random function, `genCA` or
 ### 2. Name the package
 
 ```yaml
-# service.yaml
+# Chart.yaml
+apiVersion: v2
 name: webapp
 version: 2.3.0-1.0.0      # <upstream>-<okdp semver>
+dependencies:             # step 1
+  - {name: app, repository: https://charts.example.org, version: 1.8.0}
+  - {name: metrics, repository: oci://registry.example.org/charts, version: 0.4.2}
+```
+
+```yaml
+# okdp.yaml
 roles: [webapp]           # what the service provides in the catalog
 dependsOn:                # the platform services it needs
   - database-server
   - ingress
 ```
 
-`name` and `version` are required. The upstream half of `version` stays
-SemVer (`480.0.0-1.0.0` for Trino 480): the console compares versions,
-and the umbrella chart (`-o`) takes it as its version;
-release-please owns the OKDP half. The mapping sees `name` and `version`
+`apiVersion: v2`, `name` and `version` are required, and `version` is
+SemVer: the umbrella chart (`-o`) takes it as its version, and the console
+compares versions. Its upstream half stays SemVer (`480.0.0-1.0.0` for
+Trino 480); release-please owns the OKDP half. Helm's other fields
+(`description`, `maintainers`, `annotations`...) are written back to the
+umbrella's `Chart.yaml`, not read. The mapping sees `name` and `version`
 as `service` (`service.name`, `service.version`); the labels of OKDP's
 objects take `app.kubernetes.io/name` and `okdp.io/service` from the name,
-the descriptor its `service` and `version`. `roles` and `dependsOn` are the
-console's: the compiler does not read them
-([service](specs/02_service_definition.md#service)).
+the descriptor its `service` and `version`. `roles` and `dependsOn`, in
+`okdp.yaml`, are the console's: the compiler does not read them
+([Chart.yaml](specs/02_service_definition.md#chartyaml),
+[okdp.yaml](specs/02_service_definition.md#okdpyaml)).
 
 ### 3. Design the parameters
 
@@ -211,41 +233,40 @@ chart is reached through `upstream.<chart>`, without a parameter.
   `upstream.<key>` of any key), and an instance sets no key
   of `global` ([package files](specs/01_inputs_outputs.md#package-files)).
 
-### 4. Write service.yaml
+### 4. Write okdp.yaml
 
 ```yaml
 require:                                 # read by the mapping in every case
   - ingress.suffix
   - ingress.className
   - certificateIssuers.selfSigned.name
-charts:
-  app:
-    source: {repository: https://charts.example.org, chart: app, version: 1.8.0}
-    defaults: app.defaults.yaml          # OKDP's defaults, plain YAML
-    upstream: true                       # the instance's upstream.app
+defaults:
+  app: app.defaults.yaml                 # OKDP's defaults, plain YAML; metrics has none
+upstream:
+  app:                                   # the instance's upstream.app; metrics: none
     protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
     append: [env]
-  metrics:                               # no OKDP defaults, no instance values
-    source: {repository: oci://registry.example.org/charts, chart: metrics, version: 0.4.2}
 ```
 
+- `okdp.yaml` is optional, and read strictly: a key it does not define, a
+  misspelt `require` among them, fails the load rather than being ignored;
+  so does a key of `defaults` or `upstream` that no dependency has
+  ([okdp.yaml](specs/02_service_definition.md#okdpyaml)). The mapping's
+  sections follow its package keys (step 5).
 - `require` lists the `global.okdp` keys the mapping reads in every case: the
   compile fails, naming the key, when one is missing or empty. A value needed
   in one mode only is checked by a rule of the mapping's `errors`
   ([recipe](#require-a-platform-value-in-one-mode)).
-- `source` names the upstream chart that renders the key's values; two keys
-  may name one ([recipe](#render-a-chart-twice),
-  [sources](specs/02_service_definition.md#sources)). `okdp` and the charts
-  of the OAuth clients (`oidc-dcr`, `<name>-oidc-dcr`) are not listed: the
-  compiler adds them ([OAuth clients](#oauth-clients)).
-- `defaults` holds what depends on no parameter, platform value or connection:
+- `defaults` names, by key, the file of OKDP's defaults of a chart: what
+  depends on no parameter, platform value or connection:
   images, probes, switches, static configuration. The mapping's values go
   over it, the instance's over both
   ([merge precedence](specs/01_inputs_outputs.md#merge-precedence)).
-- `upstream` lets an instance set any value of the chart, under
-  `upstream.<key>` of its values
-  ([upstream](specs/02_service_definition.md#upstream)). Leave it out
-  for a chart an instance has no reason to set (the webapp's `metrics`).
+- `upstream` lets an instance set any value of a chart, under
+  `upstream.<key>` of its values: `true` for every dependency, or by key,
+  `true`, `false` or `{protect, append}`
+  ([upstream](specs/02_service_definition.md#upstream)). Leave out
+  a chart an instance has no reason to set (the webapp's `metrics`).
 - `protect` refuses instance values on a path, under it, or a non-map on the
   way to it ([protect](specs/01_inputs_outputs.md#protect)).
   Protect what the platform relies on:
@@ -271,17 +292,30 @@ charts:
   (airflow's `extraEnv`) cannot be appended to: protect it and point users at
   another list.
 
-### 5. Write values.cel.yaml
+### 5. Write the mapping
 
 The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [expressions](specs/02_service_definition.md#expressions) and
 [directives](specs/03_control_flow.md) (`$if`, `$else`, `$for`,
-`$merge`, `$spread`, `$vars`). Its [sections](specs/02_service_definition.md#sections),
-as the webapp writes them (the
+`$merge`, `$spread`, `$vars`). The values of the charts are the values file,
+`values.cel.yaml`, by key; the other
+[sections](specs/02_service_definition.md#sections) follow the package keys
+of `okdp.yaml`. As the webapp writes them (the
 [evaluation order](specs/02_service_definition.md#evaluation-order)
-puts `objects` and `oidcClients` last):
+puts `vars` and `errors` first, `objects` and `oidcClients` last):
 
 ```yaml
+# values.cel.yaml: chart key -> the values computed for it
+app:
+  fullnameOverride: ${{ release.name }}-app   # the name the http contract promises
+  replicaCount: ${{ values.replicas }}
+metrics:
+  $if: ${{ values.metrics.enabled }}   # left out: the chart is not rendered
+  target: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080/metrics
+```
+
+```yaml
+# okdp.yaml, after the package keys
 vars:                      # names and hosts computed once, in order
   host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
@@ -290,14 +324,6 @@ vars:                      # names and hosts computed once, in order
 errors:                    # a message fails the compile when its $if holds
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
     $value: "webapp: replicas > 1 needs a database, sessions are stored there"
-
-output:                    # chart -> the values computed for it
-  app:
-    fullnameOverride: ${{ release.name }}-app   # the name the http contract promises
-    replicaCount: ${{ values.replicas }}
-  metrics:
-    $if: ${{ values.metrics.enabled }}   # left out: the chart is not rendered
-    target: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080/metrics
 
 oidcClients:               # the OAuth clients: the platform's, or registered by DCR
   - redirectUris: ['https://${{ host }}/oauth2/callback']
@@ -322,11 +348,12 @@ provides:                  # the connections the instance publishes
 - `vars` computes every name, host and repeated structure once; a binding
   sees the previous ones, and hides a
   [context](specs/02_service_definition.md#context) variable of the
-  same name (`labels`).
-- `output` holds only what is computed. A `$if` on a chart, or a null
-  value, leaves it out: it is neither compiled nor rendered (the webapp's
-  `metrics`, trino's `opa-kube-mgmt` and `opal`). Any other value that is
-  not a map fails the compile. `okdp` is not a key of `output`: the
+  same name (`labels`). The values file reads the bindings too (`host`).
+- The values file holds only what is computed, by key. A `$if` on a chart,
+  or a null value, leaves it out: it is neither compiled nor rendered (the
+  webapp's `metrics`, trino's `opa-kube-mgmt` and `opal`); so is a
+  dependency the file does not write. Any other value that is not a map
+  fails the compile. `okdp` is not a key of the values file: the
   compiler adds the okdp chart to every compile, so the descriptor always
   reaches the cluster
   ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
@@ -340,8 +367,8 @@ provides:                  # the connections the instance publishes
 - `objects` are whole manifests (a `kind` and a `metadata.name` at least) the
   okdp chart renders after the descriptor: generated Secrets, hooks, custom
   resources, a workload the upstream charts lack. A component without an
-  upstream chart (cnpg-postgresql) declares no chart and writes everything
-  here.
+  upstream chart (cnpg-postgresql) declares no dependency, has no values
+  file, and writes everything here.
 - `instance.url` is what the console opens (none without a UI); `usage` is
   shown with the instance. Both are strings: write a number with `str`.
 
@@ -384,7 +411,7 @@ instance of the namespace: host `demo-db-db.demo.svc`, Secret
 sync waves). The mapping reads both the same way, credentials through a
 `secretKeyRef` on `secretRef.name`; it fails with a clear message when it
 needs the Secret and the connection has none (the second `errors` entry of
-`examples/02_advanced/input/service/values.cel.yaml`). `s3` and
+`examples/02_advanced/input/service/okdp.yaml`). `s3` and
 `database-server` have no internal convention: they are always external (cnpg-postgresql publishes one
 `database-server` connection per database, which consumers declare as
 connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
@@ -472,18 +499,18 @@ The host follows the platform suffix; the class and the certificate issuer
 are platform values (`require` them, `protect` the four ingress paths).
 
 ```yaml
-output:
-  app:
-    ingress:
-      enabled: true
-      className: ${{ global.okdp.ingress.className }}
-      annotations: ${{ platform.ingressAnnotations }}   # cert-manager.io/cluster-issuer
-      hosts:
-        - host: ${{ host }}
-          paths: [{path: /, pathType: Prefix}]
-      tls:
-        - hosts: ["${{ host }}"]
-          secretName: ${{ release.name }}-tls
+# values.cel.yaml
+app:
+  ingress:
+    enabled: true
+    className: ${{ global.okdp.ingress.className }}
+    annotations: ${{ platform.ingressAnnotations }}   # cert-manager.io/cluster-issuer
+    hosts:
+      - host: ${{ host }}
+        paths: [{path: /, pathType: Prefix}]
+    tls:
+      - hosts: ["${{ host }}"]
+        secretName: ${{ release.name }}-tls
 ```
 
 To add annotations, write them in a map next to
@@ -497,6 +524,7 @@ client is public. The main client has no name; any other is named
 (polaris's `console`):
 
 ```yaml
+# okdp.yaml
 vars:
   consoleHost: ${{ release.name }}-console.${{ global.okdp.ingress.suffix }}
 oidcClients:
@@ -507,15 +535,18 @@ oidcClients:
     public: true                                             # a browser application: no secret
     redirectUris: ['https://${{ consoleHost }}/auth/callback']
     grantTypes: [authorization_code]
-output:
-  app:
-    env:
-      - name: OIDC_CLIENT_ID
-        valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_id}}
-      - name: OIDC_CLIENT_SECRET
-        valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_secret}}
-      - name: CONSOLE_CLIENT_ID
-        valueFrom: {secretKeyRef: {name: "${{ oidcClientSecret('console') }}", key: client_id}}
+```
+
+```yaml
+# values.cel.yaml
+app:
+  env:
+    - name: OIDC_CLIENT_ID
+      valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_id}}
+    - name: OIDC_CLIENT_SECRET
+      valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_secret}}
+    - name: CONSOLE_CLIENT_ID
+      valueFrom: {secretKeyRef: {name: "${{ oidcClientSecret('console') }}", key: client_id}}
 ```
 
 The same lines serve both provisioning modes of the platform
@@ -551,39 +582,51 @@ supports it.
 ### Render a chart twice
 
 Two renders of one upstream chart (polaris-admin's bootstrap and principals
-phases) are two chart keys of `service.yaml` with the same source:
+phases) are two dependencies of `Chart.yaml` with the same chart, each
+under its alias, its key:
 
 ```yaml
-# service.yaml
-charts:
-  polaris-admin:
-    source: &admin {repository: https://charts.example.org, chart: polaris-admin, version: 1.0.0}
-    defaults: polaris-admin.defaults.yaml
-    upstream: true                     # the instance's upstream.polaris-admin
+# Chart.yaml
+dependencies:
+  - name: polaris-admin
+    alias: polaris-admin               # optional: the chart's name is the key
+    repository: https://charts.example.org
+    version: 1.0.0
+  - name: polaris-admin                # the same chart
+    alias: polaris-admin-principals    # the values of a second render
+    repository: https://charts.example.org
+    version: 1.0.0
+```
+
+```yaml
+# okdp.yaml
+defaults:
+  polaris-admin: polaris-admin.defaults.yaml
+  polaris-admin-principals: polaris-admin-principals.defaults.yaml
+upstream:
+  polaris-admin:                       # the instance's upstream.polaris-admin
     protect: [fullnameOverride, phase, realms]
-  polaris-admin-principals:            # the values of a second render
-    source: *admin                     # the same chart
-    defaults: polaris-admin-principals.defaults.yaml
 ```
 
 ```yaml
 # values.cel.yaml
-output:
-  polaris-admin:
-    realms: ${{ adminRealms }}
-  polaris-admin-principals:
-    realms: ${{ adminRealms }}
-    principals:
-      polaris: {url: "${{ internalUrl }}"}
+polaris-admin:
+  realms: ${{ adminRealms }}
+polaris-admin-principals:
+  realms: ${{ adminRealms }}
+  principals:
+    polaris: {url: "${{ internalUrl }}"}
 ```
 
 Both keys take the chart's defaults and `values.schema.json` and render
 with it, each with its own values file: the index maps both to the same
-source ([rendering with Helm](01_usage.md#rendering-with-helm)). Everything
-else is keyed by the key ([sources](specs/02_service_definition.md#sources)).
-The second render accepts no instance upstream values: `upstream: true`
-on it would read the instance's `upstream.polaris-admin-principals`, with
-its own `protect` and `append`
+chart ([rendering with Helm](01_usage.md#rendering-with-helm)). Everything
+else is keyed by the key
+([dependencies](specs/02_service_definition.md#dependencies)).
+Without an alias, the second would have the key of the first, and fail
+the load. The second render accepts no instance upstream values: an entry
+of its key in `upstream` would read the instance's
+`upstream.polaris-admin-principals`, with its own `protect` and `append`
 ([upstream](specs/02_service_definition.md#upstream)).
 
 ### Generated secrets
@@ -592,6 +635,7 @@ Nothing random is computed at compile time: passwords and keys come from
 External Secrets Operator generators, generated once in the cluster.
 
 ```yaml
+# okdp.yaml
 vars:
   keep:                     # outlive the release: the database they encrypt does
     helm.sh/resource-policy: keep
@@ -614,14 +658,11 @@ it a new name.
 ### Restart the pods when a configuration changes
 
 ```yaml
+# okdp.yaml
 vars:
   settings:
     APP_URL: https://${{ host }}
     METRICS_ENABLED: ${{ str(values.metrics.enabled) }}
-output:
-  app:
-    podAnnotations:
-      checksum/settings: ${{ sha256(toJson(settings)) }}
 objects:
   - apiVersion: v1
     kind: ConfigMap
@@ -629,6 +670,13 @@ objects:
       name: ${{ okdpFullname('settings') }}
       labels: ${{ okdpLabels('settings') }}
     data: ${{ settings }}
+```
+
+```yaml
+# values.cel.yaml
+app:
+  podAnnotations:
+    checksum/settings: ${{ sha256(toJson(settings)) }}
 ```
 
 `toJson` sorts the keys: the checksum changes with the content only. Hash
@@ -671,17 +719,21 @@ extra labels: set it (polaris-console `podLabels`, airflow `labels`).
 ### Database connection
 
 ```yaml
+# okdp.yaml
 vars:
   db: '${{ type(values.database) == map ? values.database : {} }}'
-output:
-  app:
-    env:
-      - $if: ${{ db.size() > 0 }}
-        name: DB_URL
-        value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
-      - $if: ${{ db.size() > 0 }}
-        name: DB_PASSWORD
-        valueFrom: {secretKeyRef: {name: "${{ db.secretRef.name }}", key: password}}
+```
+
+```yaml
+# values.cel.yaml
+app:
+  env:
+    - $if: ${{ db.size() > 0 }}
+      name: DB_URL
+      value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}
+    - $if: ${{ db.size() > 0 }}
+      name: DB_PASSWORD
+      valueFrom: {secretKeyRef: {name: "${{ db.secretRef.name }}", key: password}}
 ```
 
 The same lines serve an internal and an external database. A required
@@ -706,15 +758,16 @@ env:                                            # a list (superset)
 
 ### Require a platform value in one mode
 
-`require` in `service.yaml` lists the values of every case
+`require` in `okdp.yaml` lists the values of every case
 ([require](specs/02_service_definition.md#require)). A value of one mode
 is checked by a rule of the mapping's `errors`, with the condition of the
 mode:
 
 ```yaml
+# okdp.yaml
 errors:
   - $if: ${{ platform.oidc.enabled && platform.oidc.?issuerUri.orValue('') == '' }}
-    message: global.okdp.oidc.issuerUri is required when OIDC is enabled. It is a context value
+    $value: global.okdp.oidc.issuerUri is required when OIDC is enabled. It is a context value
 ```
 
 Read an optional platform value with `.?` and `orValue`
@@ -740,7 +793,8 @@ keys with a final glob
 ([protect and append](specs/02_service_definition.md#protect-and-append)):
 
 ```yaml
-charts:
+# okdp.yaml
+upstream:
   app:
     protect:
       - 'ingress.annotations["nginx.ingress.kubernetes.io/auth-*"]'   # every auth-* annotation
@@ -776,9 +830,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   booleans, `0440` is the octal 288; quote a string that looks like one
   (`"no"`). The mapping is read as YAML 1.2: there `no`, `off`, `y` are
   strings, write `false` and `true`
-  ([YAML reading](specs/02_service_definition.md#yaml-reading)).
-  `service.yaml` is decoded into typed fields: `upstream: no` is false
-  ([upstream](specs/02_service_definition.md#upstream)).
+  ([YAML reading](specs/02_service_definition.md#yaml-reading)), in the
+  package keys of `okdp.yaml` too (`upstream: false`).
 - **Untested branches are not evaluated.** Every expression compiles when
   the mapping is loaded, in every branch (a misspelled name fails every
   compile), but one in a branch no case takes is never evaluated: a type
@@ -813,27 +866,32 @@ A rule no path expresses (a value that depends on a parameter) goes in
   reference: test `type(...) == map` first, or report it in `errors`.
 - **Some chart keys are the compiler's.** `okdp` names the chart of OKDP's
   own objects, `oidc-dcr` and `<name>-oidc-dcr` the charts of the declared
-  clients: a `service.yaml` chart or an `output` entry of the same key fails
-  the compile, in every mode.
+  clients: a `Chart.yaml` dependency or a key of the values file of the
+  same key fails, in every mode.
 - **A client's `secret` is not followed.** It renames the Secret the Job
   writes, in `dcr` mode only; `oidcClientSecret(name)` still returns the
   mode's name, and in `existing` mode the platform's Secret keeps its own.
   Reference the name you set yourself:
   `platform.oidc.dcr.enabled ? mySecret : oidcClientSecret('n')`.
-- **A source is pinned.** `version` is one version, not a range (`^1.2`,
-  `1.x` fail): bump it in `service.yaml`, then pull the new version into the
-  chart cache.
+- **A dependency is pinned.** `version` is one version, not a range
+  (`^1.2`, `1.x` fail): bump it in `Chart.yaml`, then pull the new version
+  into the chart cache.
+- **A dependency left out of the values file is not rendered.** Give each
+  dependency a key in the values file, `{}` when nothing is computed for
+  it; leave one out on purpose with `$if`.
 
 ## Checklist
 
-- [ ] Every chart of `service.yaml` has its `source`, version pinned; a
-  bundled subchart the package does not use is disabled by values; no
-  `lookup`, random or `.Capabilities` feature is on.
-- [ ] `service.yaml` and `output` use no chart key of the compiler (`okdp`,
-  `oidc-dcr`, `<name>-oidc-dcr`); a second render of a chart is a key with
-  the same source.
-- [ ] `service.yaml`: `name`, `version` `<upstream>-<okdp semver>`,
-  `roles` and `dependsOn`.
+- [ ] Every dependency of `Chart.yaml` has its name, repository and
+  version, pinned; a bundled subchart the package does not use is disabled
+  by values; no `lookup`, random or `.Capabilities` feature is on.
+- [ ] `Chart.yaml` and the values file use no chart key of the compiler
+  (`okdp`, `oidc-dcr`, `<name>-oidc-dcr`); a second render of a chart is a
+  dependency of the same chart with its alias.
+- [ ] `Chart.yaml`: `apiVersion: v2`, `name`, `version`
+  `<upstream>-<okdp semver>`; `okdp.yaml`: `roles` and `dependsOn`.
+- [ ] The values file writes every dependency's key, those rendered on a
+  condition under `$if`.
 - [ ] `config.schema.json` declares `$schema`, every parameter with its
   rules, `global`, and `upstream` for exactly the charts that accept
   instance values, no `connections`; strings pasted into files refuse `{{`,

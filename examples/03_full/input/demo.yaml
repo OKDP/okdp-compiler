@@ -18,7 +18,7 @@ global:
   storageClass: fast-ssd               # every chart receives global
   okdp:
     # Read by the mapping, which the compiler does not: labels, node pool,
-    # ingress allowlist (global.okdp.?project in values.cel.yaml).
+    # ingress allowlist (global.okdp.?project in okdp.yaml).
     project:
       name: demo
       costCenter: cc-4217

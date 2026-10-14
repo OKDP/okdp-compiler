@@ -23,7 +23,7 @@ import (
 // and what the mapping sees (scope).
 type instance struct {
 	release, namespace string       // Inputs.Release, Inputs.Namespace
-	svc                *Service     // service.yaml: its name and version
+	svc                *Service     // the package: Chart.yaml's name and version
 	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
 	okdp               M            // global.okdp as written, as the mapping sees it, checked against platform.schema.json
 	suffix             string       // global.okdp.ingress.suffix: the hosts of internal references

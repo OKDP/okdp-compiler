@@ -35,7 +35,7 @@
             },
             "charts": {
               "type": "object",
-              "description": "The upstream charts that render the charts the compiler adds itself, each a source as in service.yaml. Each is checked as a source after the requirements: a repository URL, the name of a chart, a pinned version.",
+              "description": "The upstream charts that render the charts the compiler adds itself, each a repository, a chart and its version. Each is checked after the requirements as a dependency of Chart.yaml is: a repository URL, the name of a chart, a pinned version.",
               "additionalProperties": false,
               "properties": {
                 "objects": {

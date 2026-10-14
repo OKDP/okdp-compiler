@@ -13,7 +13,7 @@ Four kinds of document share the directives, the
 
 | Document | Directives |
 |---|---|
-| the mapping, `values.cel.yaml` ([service definition](02_service_definition.md#valuescelyaml)) | all |
+| the mapping: the sections of `okdp.yaml` and the values file, `values.cel.yaml` ([service definition](02_service_definition.md#sections)) | all |
 | the values of an OAuth client's chart, `internal/okdp/oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
 | the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `internal/okdp/generated-secret.cel.yaml`, embedded in the compiler | all |
 | the [descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap), `internal/okdp/descriptor.cel.yaml`, embedded in the compiler | all |
@@ -107,8 +107,10 @@ unknown (`$iff`) or misplaced, fails, `<where><key>: not allowed here
 | a list item with `$spread` | `$spread` |
 
 The top level of a document holds its sections only: a directive there
-fails, `values.cel.yaml: <key>: unknown section (allowed: ...)` in the
-mapping.
+fails (`<file>: <key>: unknown section (allowed: ...)`; `okdp.yaml`
+refuses it when it is loaded, as any key it does not define). The values
+file is one section whole: its top level is a map, and holds what a map
+holds.
 
 A key starting with `$` is written with one more `$`, as `$${{` writes a
 literal `${{`: `$$schema: x` is the key `$schema`, `$$$x` the key `$$x`.
@@ -136,17 +138,21 @@ reading a name out of its scope, a `$vars` binding outside its `$for`
 included, fails the load, `undeclared reference to '<name>'`.
 
 ```yaml
+# okdp.yaml
 vars:
   suffix: ${{ global.okdp.ingress.suffix }}
-output:
-  app:
-    ingress:
-      hosts:
-        - $for: h in values.hosts
-          $vars:
-            fqdn: ${{ h }}.${{ suffix }}    # h, and the vars bindings
-          $each: {host: "${{ fqdn }}"}
-      tls: ${{ fqdn }}                       # fails: undeclared reference to 'fqdn'
+```
+
+```yaml
+# values.cel.yaml
+app:
+  ingress:
+    hosts:
+      - $for: h in values.hosts
+        $vars:
+          fqdn: ${{ h }}.${{ suffix }}    # h, and the vars bindings
+        $each: {host: "${{ fqdn }}"}
+    tls: ${{ fqdn }}                       # fails: undeclared reference to 'fqdn'
 ```
 
 The host functions do not see bindings: `okdpFullname`, `okdpLabels`,
@@ -158,7 +164,7 @@ compile's release, service and OAuth client mode
 
 ```yaml
 metrics:
-  $if: ${{ values.metrics.enabled }}      # output.metrics: the chart is not rendered
+  $if: ${{ values.metrics.enabled }}      # metrics of the values file: the chart is not rendered
   target: http://${{ release.name }}-app:8080/metrics
 env:
   - $if: ${{ db.size() > 0 }}             # the item is left out
@@ -185,7 +191,7 @@ left out, or is the value of its [`$else`](#else). A map left out is:
 | an `$each` | no item for this element |
 | a `$value` of a `$for` map | the key, with a null value |
 | a `vars` or `$vars` value | the binding is null |
-| a section (`output`, ...) | the section is empty |
+| a section (`instance`, ..., the values file) | the section is empty |
 
 On a list item carrying `$for` or `$spread`, `$if` fails: put the
 condition in the expression (`$for: "s in (oidcOn ? [platform.oidcClientSecret] : [])"`,
@@ -517,7 +523,7 @@ Evaluation fails on the first error: an expression's
 (`<where>${{ <expression> }}: <cause>`), or a `$for` over a value that is
 not a list, `<where>$for "<spec>": not a list`. `<where>` is the
 document's file, then the path to the map or item holding the directive,
-`values.cel.yaml: output: app: env[2]: `, where a list position counts the
+`values.cel.yaml: app: env[2]: `, where a list position counts the
 items as written: an item carrying `$for` or `$spread` is one position,
 whatever it gives
 ([compile errors](02_service_definition.md#compile-errors)).

@@ -8,7 +8,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -46,7 +45,7 @@ func resolveCtx(values M, platform ...ContextLayer) (M, []Dependency, error) {
 	in := inputs(values)
 	in.Context = append(in.Context, platform...)
 	in.Contracts = dbContract
-	inst, err := newInstance(ch, in, &def.Service)
+	inst, err := newInstance(ch, in, defService)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,7 +232,7 @@ func TestResolveUnreadableContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"q": "demo-mq"})
 			in.Contracts = tc.contracts
-			if _, err := newInstance(ch, in, &def.Service); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, err := newInstance(ch, in, defService); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error starting with %q", err, tc.want)
 			}
 		})
@@ -283,16 +282,16 @@ func testContract(t *testing.T, schema string) *contract {
 	return c
 }
 
-// TestCompileOutputErrors: the mapping may only output charts of
-// service.yaml, and their defaults file must exist.
+// TestCompileOutputErrors: values.cel.yaml may only give the values of
+// dependencies of Chart.yaml, and their defaults file must exist.
 func TestCompileOutputErrors(t *testing.T) {
 	d := *def
-	d.Mapping = []byte("output: {db: {}}\n")
-	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), `mapping output "db": not a chart of service.yaml`) {
+	d.Values = []byte("db: {}\n")
+	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), "values.cel.yaml: db: not a dependency of Chart.yaml") {
 		t.Errorf("unknown chart: got %v", err)
 	}
 	d = *def
-	d.Service.Charts = chart.Specs{"app": {Source: appSource, Defaults: "missing.defaults.yaml"}}
+	d.Package.Defaults = map[string]string{"app": "missing.defaults.yaml"}
 	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open missing.defaults.yaml") {
 		t.Errorf("missing defaults file: got %v", err)
 	}

@@ -1,5 +1,5 @@
-// Paths: the protect and append paths of service.yaml, which name keys of a
-// chart's values.
+// Paths: the protect and append paths of okdp.yaml's upstream, which name
+// keys of a chart's values.
 //
 // A path was a list of keys separated by dots, so it could not name a key
 // that contains a dot, and many keys the platform sets do: annotations
@@ -53,7 +53,7 @@ var pathKey = regexp.MustCompile(`^(?:\["([^"\\*]*)(\*?)"\]|([^.\[\]"\\*]+))`)
 var errPath = errors.New(`not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])`)
 
 // parsePath: the keys of a protect or append path (see the grammar above).
-// service.yaml is checked with it when it is loaded (Service.check), so a
+// okdp.yaml is checked with it when it is loaded (Specs.Check), so a
 // malformed path fails before any compile, not when an instance first sets
 // a value under it.
 func parsePath(p string) ([]pathSeg, error) {

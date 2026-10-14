@@ -41,7 +41,7 @@ type options struct {
 func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.StringVar(&o.pkg, "package", "", "package directory (service.yaml, values.cel.yaml, config.schema.json)")
+	flag.StringVar(&o.pkg, "package", "", "package directory (Chart.yaml, okdp.yaml, values.cel.yaml, config.schema.json)")
 	flag.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme (default $OKDP_CHARTS)")
 	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS)")
 	flag.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
