@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.0](https://github.com/alliage-io/okdp-compiler/compare/v0.2.0...v0.3.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* okdp.instance.yaml replaces the descriptor ConfigMap
+* OKDP's objects in the umbrella, no okdp chart
+* every dependency is rendered unless the values leave it out
+* Chart.yaml, okdp.yaml and values.cel.yaml replace service.yaml
+* an instance's connections are a context layer of its level
+* a missing config.schema.json is an empty schema
+* context levels replace --platform and --project
+* $else beside $if and $value
+* --project values that add to the platform's, examples/03_full
+
+### Features
+
+* --project values that add to the platform's, examples/03_full ([91b4f11](https://github.com/alliage-io/okdp-compiler/commit/91b4f11b4c0ae208da3476d60fa60896d012eeff))
+* $else beside $if and $value ([f91d187](https://github.com/alliage-io/okdp-compiler/commit/f91d187d27331444e2e08090661068dbebb3ad5c))
+* a missing config.schema.json is an empty schema ([6493e89](https://github.com/alliage-io/okdp-compiler/commit/6493e898b8dd314c74bd952fbf90c8fed246289f))
+* an instance's connections are a context layer of its level ([9406cce](https://github.com/alliage-io/okdp-compiler/commit/9406cceea0bb3ff0dc669c12e86b9d50034999be))
+* Chart.yaml, okdp.yaml and values.cel.yaml replace service.yaml ([83148f0](https://github.com/alliage-io/okdp-compiler/commit/83148f0bb59927b3e3a4ffbcd400c9edeb36a1a7))
+* context levels replace --platform and --project ([3c6b7b0](https://github.com/alliage-io/okdp-compiler/commit/3c6b7b0e126fc18ebc7c08fe8b12898b1eed7d60))
+* every dependency is rendered unless the values leave it out ([ad6d6ef](https://github.com/alliage-io/okdp-compiler/commit/ad6d6eff622d2a4adf3228133378f1f63a867536))
+* okdp.instance.yaml replaces the descriptor ConfigMap ([731eb36](https://github.com/alliage-io/okdp-compiler/commit/731eb3689b429e3b4eab25ffaf2455af909835d3))
+* OKDP's objects in the umbrella, no okdp chart ([a802f92](https://github.com/alliage-io/okdp-compiler/commit/a802f92b6b99795420e32e4b6906966fcc641222))
+* values.yaml, the charts' values without expressions ([80704bf](https://github.com/alliage-io/okdp-compiler/commit/80704bf939388e098f8f3249f6ff2c2e05c200bc))
+
 ## [0.2.0](https://github.com/alliage-io/okdp-compiler/compare/v0.1.0...v0.2.0) (2026-10-06)
 
 
