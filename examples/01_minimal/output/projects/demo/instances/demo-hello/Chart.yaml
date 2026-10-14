@@ -6,7 +6,3 @@ dependencies:
     alias: app
     repository: https://charts.example.org
     version: 1.0.0
-  - name: okdp-objects
-    alias: okdp
-    repository: oci://registry.example.org/okdp
-    version: 1.0.0

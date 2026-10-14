@@ -28,8 +28,7 @@ func TestRequireYAML(t *testing.T) {
 
 // TestDefinitionService: the Service of a Definition built in memory, and
 // what it refuses before any compile, its messages naming the file: the
-// checks of Chart.yaml, the chart of OKDP's own objects among its
-// dependencies, okdp.yaml's defaults and upstream.
+// checks of Chart.yaml, okdp.yaml's defaults and upstream.
 func TestDefinitionService(t *testing.T) {
 	d := *def
 	d.Package.Roles, d.Package.DependsOn = []string{"web"}, []string{"ingress"}
@@ -41,7 +40,6 @@ func TestDefinitionService(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(svc, want) {
 		t.Errorf("got %#v (%v)", svc, err)
 	}
-	okdpDep := chart.Dependency{Name: "okdp-objects", Alias: "okdp", Repository: objectsSource.Repository, Version: objectsSource.Version}
 	for name, tc := range map[string]struct {
 		set  func(d *Definition)
 		want string
@@ -51,9 +49,8 @@ func TestDefinitionService(t *testing.T) {
 		"a key": {func(d *Definition) {
 			d.Chart.Dependencies = []chart.Dependency{{Name: "App", Repository: "https://x", Version: "1.0.0"}}
 		}, `Chart.yaml: dependencies[0] (App): key "App": a DNS label`},
-		"the okdp key": {func(d *Definition) { d.Chart.Dependencies = []chart.Dependency{appDep, okdpDep} }, "Chart.yaml: dependencies[1] (okdp): the chart of OKDP's own objects is added by the compiler: remove it"},
-		"defaults":     {func(d *Definition) { d.Package.Defaults = map[string]string{"web": "web.yaml"} }, "okdp.yaml: defaults.web: not a dependency of Chart.yaml"},
-		"upstream":     {func(d *Definition) { d.Package.Upstream = upstreamOf("okdp", chart.UpstreamKey{Accept: true}) }, "okdp.yaml: upstream.okdp: not a dependency of Chart.yaml"},
+		"defaults": {func(d *Definition) { d.Package.Defaults = map[string]string{"web": "web.yaml"} }, "okdp.yaml: defaults.web: not a dependency of Chart.yaml"},
+		"upstream": {func(d *Definition) { d.Package.Upstream = upstreamOf("okdp", chart.UpstreamKey{Accept: true}) }, "okdp.yaml: upstream.okdp: not a dependency of Chart.yaml"},
 	} {
 		d := *def
 		tc.set(&d)
@@ -83,7 +80,7 @@ func TestRequire(t *testing.T) {
 		"empty":                  {[]map[string]any{{"global": M{"okdp": M{"oidc": M{"issuerUri": ""}}}}}, missing},
 		"in order":               {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}}}}}, "global.okdp.ingress.suffix is required"},
 		"before the mapping":     {[]map[string]any{{"replicas": 11}}, missing},
-		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}}, missing},
+		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"version": "1.x"}}}}}}, missing},
 		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}, "oidc": M{"enabled": "yes"}}}}}, "context values (--context, Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/oidc/enabled': got string, want boolean"},
 	} {
 		_, err := Compile(context.Background(), &d, inputs(tc.layers...))

@@ -9,4 +9,4 @@
 | [Functions](specs/04_functions.md) | package authors (reference) | what an expression calls: CEL's libraries at their pinned versions, the host functions (`str`, `toYaml`, `okdpFullname`, `okdpGeneratedSecret`...), Helm and sprig equivalents |
 | [Inputs and outputs](specs/01_inputs_outputs.md) | everyone (reference) | the package files, the chart cache, parameters, connections, contracts, platform and instance values, the merge precedence, the outputs |
 | [Architecture](00_architecture.md) | contributors | the compile pipeline, the source map, the design decisions, the tests, the limitations |
-| [OKDP's own objects](03_okdp_objects.md) | contributors, platform engineers | why the descriptor, the credentials Secrets and the `objects` section reach the cluster through the okdp-objects chart, what reads the descriptor; removing either: pros and cons |
+| [OKDP's own objects](03_okdp_objects.md) | contributors, platform engineers | how the descriptor, the credentials Secrets and the `objects` section reach the cluster, in the instance's umbrella, and why so; what reads the descriptor; other vehicles and removing the descriptor: pros and cons |

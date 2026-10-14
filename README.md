@@ -37,13 +37,12 @@ if err != nil {
 }
 // res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
 // res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
-//               its Chart.yaml dependency, the platform's objects chart for okdp,
-//               the platform's oidc-dcr chart for the OAuth clients (oidcClients)
-// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
-//               Secrets of the provided connections, the mapping's objects section
+//               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
+// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials Secrets of the
+//               provided connections, the mapping's objects section (okdp.objects.yaml)
 // res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
 
-// What okdp-compile -o <dir> writes, file name -> content.
+// What okdp-compile -o <dir> writes, path -> content.
 files, err := compiler.Write(res)
 if err != nil {
 	log.Fatal(err)
@@ -79,12 +78,12 @@ repository's directory, the URL without its scheme
 maps every compiled key to the upstream chart that renders it
 ([chart index](docs/specs/01_inputs_outputs.md#chart-index)).
 
-Every compile adds the chart `okdp`, its values
-`res.Objects`: the descriptor and the generated Secrets reach the cluster
-with the upstream charts, rendered by the platform's objects chart,
-`global.okdp.charts.objects` (okdp-objects)
-([the okdp chart](docs/specs/01_inputs_outputs.md#the-okdp-chart),
-[platform charts](docs/specs/01_inputs_outputs.md#platform-charts)).
+`res.Objects`, OKDP's own objects, the descriptor and the generated
+Secrets among them, reach the cluster with the upstream charts: `Write`
+gives them as a YAML stream, `okdp.objects.yaml`, which the umbrella's own
+template renders as written, in the instance's release
+([the objects file](docs/specs/01_inputs_outputs.md#the-objects-file),
+[OKDP's own objects](docs/03_okdp_objects.md)).
 
 ## Mapping
 
@@ -169,10 +168,12 @@ bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
 `-o <dir>` (`--output`), required, writes the instance as one chart, for
 one Helm release per instance: `<dir>/Chart.yaml`, an umbrella over the
 upstream charts of the index, each a dependency under its key, and
-`<dir>/instance.values.yaml`, the final values of each chart under its key
-(OKDP's own objects under `okdp`), given to Helm with `-f`
+`<dir>/instance.values.yaml`, the final values of each chart under its key,
+given to Helm with `-f`
 ([`--output`](docs/01_usage.md#--output),
-[rendering with Helm](docs/01_usage.md#rendering-with-helm)), and
+[rendering with Helm](docs/01_usage.md#rendering-with-helm)),
+`<dir>/okdp.objects.yaml`, OKDP's own objects, which the umbrella renders
+as written (`<dir>/templates/okdp.yaml`), when the instance has any, and
 `<dir>/okdp.dependencies.yaml`, the instances the connection references
 point to, for a deployer that orders the releases
 ([`okdp.dependencies.yaml`](docs/01_usage.md#okdpdependenciesyaml)). The
@@ -187,14 +188,14 @@ files of a successful one overwrite those of the same name. `--release` and
 |---|---|
 | `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `Write`... |
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
-| `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients, the `okdp` chart), `LoadDefinition` and `Compile`, the order of the stages |
-| `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values and the instances it depends on |
+| `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the descriptor, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages |
+| `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects and the instances it depends on |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, `Chart.yaml` and the charts of a package, the final values |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
 | `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the package in `catalog/<service>/<version>/`, an instance of the project `demo` in `projects/demo/instances/<instance>/`), its chart cache in `.charts/`, and what `-o <dir>` writes for the instance in `output/projects/demo/instances/<instance>/`, checked by `go test` ([example](docs/00_architecture.md#example)) |
-| `examples/01_minimal/` | the smallest package, `hello`: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs |
+| `examples/01_minimal/` | the smallest package, `hello`: one chart, a mapping that sets three of its values and the instance's usage; no platform values, none needed |
 | `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`, given with `-f`) |
 | `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, `--context 1:project.yaml`), each with connections, the instance's own connections (`connections.yaml`, `--context 2:connections.yaml`) and its values (`config.yaml`) |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |

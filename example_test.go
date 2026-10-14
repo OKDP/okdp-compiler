@@ -52,13 +52,12 @@ func Example() {
 	}
 	// res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
 	// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
-	//               its Chart.yaml dependency, the platform's objects chart for okdp,
-	//               the platform's oidc-dcr chart for the OAuth clients (oidcClients)
-	// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials
-	//               Secrets of the provided connections, the mapping's objects section
+	//               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
+	// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials Secrets of the
+	//               provided connections, the mapping's objects section (okdp.objects.yaml)
 	// res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
 
-	// What okdp-compile -o <dir> writes, file name -> content.
+	// What okdp-compile -o <dir> writes, path -> content.
 	files, err := compiler.Write(res)
 	if err != nil {
 		log.Fatal(err)
@@ -68,10 +67,10 @@ func Example() {
 	fmt.Println(res.Dependencies)
 	fmt.Println(slices.Sorted(maps.Keys(files)))
 	// Output:
-	// [app oidc-dcr okdp]
+	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database}]
-	// [Chart.yaml instance.values.yaml okdp.dependencies.yaml]
+	// [Chart.yaml instance.values.yaml okdp.dependencies.yaml okdp.objects.yaml templates/okdp.yaml]
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.
@@ -116,11 +115,10 @@ func ExampleCompile() {
 		fmt.Printf("dependency: %s -> %s (%s)\n", d.Field, d.Instance, d.Contract)
 	}
 	// Output:
-	// charts: 3 objects: 1
+	// charts: 2 objects: 1
 	// replicaCount: 2
 	// app: https://charts.example.org app 1.8.0
 	// oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
-	// okdp: oci://registry.example.org/okdp okdp-objects 1.0.0
 	// dependency: database -> demo-db (database)
 }
 
@@ -142,17 +140,12 @@ dependencies:
 	if err != nil {
 		log.Fatal(err)
 	}
-	platform := map[string]any{"global": map[string]any{"okdp": map[string]any{"charts": map[string]any{
-		"objects": map[string]any{"repository": "oci://registry.example.org/okdp", "chart": "okdp-objects", "version": "1.0.0"},
-	}}}}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 		Charts: fstest.MapFS{ // the defaults of each upstream chart
-			"charts.example.org/app-1.0.0/app/values.yaml":                          {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
-			"registry.example.org/okdp/okdp-objects-1.0.0/okdp-objects/values.yaml": {Data: []byte("objects: []\n")},
+			"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
 		},
-		Contracts: fstest.MapFS{}, // no connection, no provides: no contract read
-		Context:   []compiler.ContextLayer{{Values: platform}},
-		Values:    []map[string]any{{"replicas": 3}},
+		Contracts: fstest.MapFS{},                    // no connection, no provides: no contract read
+		Values:    []map[string]any{{"replicas": 3}}, // no context: the package requires no platform value
 		Release:   "demo-app",
 		Namespace: "demo",
 	})
@@ -171,10 +164,6 @@ dependencies:
 	// dependencies:
 	//   - name: app
 	//     repository: https://charts.example.org
-	//     version: 1.0.0
-	//   - name: okdp-objects
-	//     alias: okdp
-	//     repository: oci://registry.example.org/okdp
 	//     version: 1.0.0
 }
 
@@ -197,7 +186,7 @@ func ExampleCompile_server() {
 	_, err = compiler.Compile(ctx, def, in)
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
-	// [app oidc-dcr okdp] ConfigMap
+	// [app oidc-dcr] ConfigMap
 	// okdp.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }

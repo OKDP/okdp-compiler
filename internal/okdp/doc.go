@@ -4,8 +4,8 @@
 // Secrets of the connections it provides, and the objects section of the
 // mapping). It holds OKDP's rules: the package read from a filesystem
 // (LoadDefinition), the platform context derived from global.okdp, the
-// connections and their contracts, the descriptor, the OAuth clients, the
-// okdp chart; and the order of the stages (Compile).
+// connections and their contracts, the descriptor, the OAuth clients; and
+// the order of the stages (Compile).
 //
 // The values are read, merged and checked against the charts' schemas as
 // Helm does (internal/chart; testdata/helm holds what `helm template`

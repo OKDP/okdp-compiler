@@ -25,9 +25,12 @@
 #   differs from helm.json; helm<M>-final.json: Helm M with the final values,
 #   where it differs from Helm M with the layers.
 # umbrella/: the umbrella the compiler writes over the values cases
-#   (Chart.yaml, instance.values.yaml), each case's chart a dependency named
-#   after the case, rendered with -f instance.values.yaml: the .Values of
-#   each subchart, by its .Chart.Name (the key), in helm.json; helm<M>.json.
+#   (Chart.yaml, instance.values.yaml, okdp.objects.yaml,
+#   templates/okdp.yaml), each case's chart a dependency named after the
+#   case, rendered with -f instance.values.yaml: the .Values of each
+#   subchart, by its .Chart.Name (the key), in helm.json; helm<M>.json. The
+#   manifests of templates/okdp.yaml, in Helm's order, one document each:
+#   helm-objects.yaml, which every version must render the same.
 # schema/<case>/: a chart with <case>/values.schema.json and values.yaml,
 #   rendered with -f <case>/layer-*.yaml: what helm reports in helm.txt
 #   ("ok" when the values are valid; Helm's order varies, a report with the
@@ -207,28 +210,60 @@ for c in "$here"/values/*/; do
   cp "$c/values.yaml" "$tmp/$name/values.yaml"
   printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ .Chart.Name }}\ndata:\n  out: {{ toJson .Values | quote }}\n' > "$tmp/$name/templates/values.yaml"
 done
-cp "$here/umbrella/Chart.yaml" "$u/"
+cp "$here/umbrella/Chart.yaml" "$here/umbrella/okdp.objects.yaml" "$u/"
+mkdir "$u/templates"
+cp "$here/umbrella/templates/okdp.yaml" "$u/templates/"
 
-# umbrella <helm> <out>: the umbrella built and rendered by the binary
-# <helm>: the .Values of each subchart, by its .Chart.Name, in <out>.
-umbrella() {
-  local helm=$1 out=$2
+# build <helm>: the umbrella built and rendered by the binary <helm>: the
+# manifests of its subcharts in $tmp/charts.yaml, those of its own template
+# in $tmp/objects.yaml, by the "# Source: <template>" line that heads each,
+# in Helm's order, one YAML document each, without the blank lines around
+# it.
+build() {
+  local helm=$1
   "$helm" dependency build "$u" > /dev/null
   if ! "$helm" template t "$u" --namespace demo -f "$here/umbrella/instance.values.yaml" > "$tmp/render.yaml" 2> "$tmp/render.err"; then
-    echo "umbrella ($helm): helm template failed:" >&2
+    echo "$label ($helm): helm template failed:" >&2
     cat "$tmp/render.err" >&2
     exit 1
   fi
   python3 -c '
+import re, sys
+out = {"charts/": [], "templates/okdp.yaml": []}
+for x in re.split(r"(?m)^---\n", open(sys.argv[1]).read()):
+    s, _, b = x.partition("\n")
+    for k in out:
+        if s.startswith("# Source: umbrella/" + k):
+            out[k].append(b.strip() + "\n")
+open(sys.argv[2], "w").write("---\n".join(out["charts/"]))
+open(sys.argv[3], "w").write("---\n".join(out["templates/okdp.yaml"]))' "$tmp/render.yaml" "$tmp/charts.yaml" "$tmp/objects.yaml"
+}
+
+# umbrella <helm> <out>: the .Values of each subchart of the umbrella the
+# binary <helm> renders, by its .Chart.Name, in <out>.
+umbrella() {
+  build "$1"
+  python3 -c '
 import json, sys, yaml
 out = {d["metadata"]["name"]: json.loads(d["data"]["out"]) for d in yaml.safe_load_all(open(sys.argv[1])) if d}
 json.dump(out, open(sys.argv[2], "w"), indent=2, sort_keys=True)
-open(sys.argv[2], "a").write("\n")' "$tmp/render.yaml" "$out"
+open(sys.argv[2], "a").write("\n")' "$tmp/charts.yaml" "$2"
+}
+
+# objects <helm> <out>: the manifests of templates/okdp.yaml the binary
+# <helm> renders, in <out>.
+objects() {
+  build "$1"
+  cp "$tmp/objects.yaml" "$2"
 }
 label=umbrella
 run bytes umbrella umbrella
 cp "$r/umbrella" "$here/umbrella/helm.json"
 keep bytes umbrella "$here/umbrella/helm.json"
+label=umbrella/objects
+run bytes objects objects
+alike bytes objects
+cp "$r/objects" "$here/umbrella/helm-objects.yaml"
 
 # report <helm> <out> [helm args]: what helm reports on the values of the
 # schema chart, ok when they are valid.

@@ -61,13 +61,13 @@ files, and no other:
 | defaults file | when `defaults.<key>` of `okdp.yaml` names it | values file | second layer of the [final values](#merge-precedence) |
 
 `<key>`: a chart key, the key of a `Chart.yaml` dependency (its `alias`,
-else its `name`), the chart of an
-OAuth client ([OAuth client charts](#oauth-client-charts)) or `okdp`
-([the okdp chart](#the-okdp-chart)); it names the chart's values. A
+else its `name`) or the chart of an
+OAuth client ([OAuth client charts](#oauth-client-charts)); it names the
+chart's values. A
 compiled chart: a dependency the values file does not leave out (every
 one, but a key it writes that is left out by `$if` or null:
 [rendered dependencies](02_service_definition.md#rendered-dependencies)),
-the okdp chart, and in `dcr` mode the chart of each OAuth client. Each is
+and in `dcr` mode the chart of each OAuth client. Each is
 rendered by an upstream chart, its source
 ([chart index](#chart-index)); several keys may share one. The defaults file
 may be any path of the package, `<key>.defaults.yaml` by convention; a
@@ -181,11 +181,10 @@ no longer does, nor does the compiler: such a chart compiles, and fails to
 render with them. A UTF-8 byte order mark at the start of either file is
 dropped, as Helm drops it. Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
-it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
-objects chart in every compile. `examples/02_advanced/.charts/` holds the
+it renders is compiled: the oidc-dcr chart in `dcr` mode with a client.
+`examples/02_advanced/.charts/` holds the
 example's charts unpacked, their `values.yaml` only: enough to compile, not
 to render (`charts.example.org/app-1.8.0/app/`,
-`registry.example.org/okdp/okdp-objects-1.0.0/okdp-objects/`,
 `quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`).
 
 A chart its directory does not hold, even when the cache holds its archive
@@ -644,15 +643,13 @@ global:
   okdp:
     ingress: {suffix: okdp.example.org, className: nginx}
     certificateIssuers: {selfSigned: {name: okdp-ca}}
-    charts:
-      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
     oidc: {issuerUri: https://sso.okdp.example.org/realms/okdp}
 ```
 
 `global` is the context's: it comes from the package's
 [defaults](#defaults) and the context's layers, each level adding to the
 lower ones ([Levels](#levels)); `global.okdp` decides the instance's host, where its
-OAuth clients register and the charts its objects and clients are rendered
+OAuth clients register and the chart they are rendered
 with, and every chart receives `global` ([merge
 precedence](#merge-precedence)). `global.okdp` holds the platform's
 settings, whatever the level that sets them: [Requirements](#requirements)
@@ -819,7 +816,7 @@ values file against it.
 |---|---|
 | `ingress.suffix` | `${suffix}` of `x-okdp-internal`: internal references, provided outputs |
 | `certificateIssuers.selfSigned.name` | `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`) |
-| `charts.objects`, `charts.oidcDcr` | the upstream charts of the [okdp chart](#the-okdp-chart) and of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
+| `charts.oidcDcr` | the upstream chart of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
 | `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
 | `oidc.scope` | `platform.oidc.scope`; the scope a client chart registers when its client sets none |
 | `oidc.dcr` | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
@@ -862,29 +859,26 @@ compiler adds itself, each an upstream chart, checked as a dependency of
 
 | Key | Renders |
 |---|---|
-| `objects` | the [okdp chart](#the-okdp-chart), OKDP's own objects: an okdp-objects chart (values `objects: []`; its template prints each item of `objects` as one YAML document); required |
 | `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` when unset |
 
 Their form is checked with the other [settings the compiler
 reads](#fields-the-compiler-reads), against the platform schema: `charts`
-a map of these two keys, a misspelled `oidcDcr` refused rather than leave
-the default in place; each chart a map, its `repository`, `chart` and
-`version` strings (its other keys are ignored). Then, after the
+a map of these keys, another refused (a misspelled `oidcDcr` rather than
+leave the default in place); each chart a map, its `repository`, `chart`
+and `version` strings (its other keys are ignored). Then, after the
 [connections](#connections) and the [requirements](#requirements), before
 the mapping, each is checked as a source, `oidcDcr` when set, in every
 mode: a repository URL (`https://`, `http://` or `oci://`), the name of a
 chart, a pinned version. The first violation is reported, in this order:
 
 ```
-global.okdp.charts.objects is required: the chart OKDP's own objects are rendered with (okdp-objects: repository, chart, version). It is a context value: set it with --context (Inputs.Context)
-global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range
 global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository (https://... or oci://...)
+global.okdp.charts.oidcDcr.version "1.x": a pinned chart version (1.2.3), not a range
 ```
 
 The [chart cache](#chart-cache) holds each when its chart is compiled: the
-objects chart in every compile, the oidc-dcr chart in `dcr` mode with a
-client. Another repository with the same chart and version (a mirror) has
-its own directory there.
+oidc-dcr chart in `dcr` mode with a client. Another repository with the
+same chart and version (a mirror) has its own directory there.
 
 ### OAuth client settings
 
@@ -996,8 +990,8 @@ accepts them, by `upstream` of `okdp.yaml`
 ([upstream](02_service_definition.md#upstream)). Upstream values are keyed
 by the chart key, not by its chart
 ([dependencies](02_service_definition.md#dependencies)). Values for a
-chart that accepts none (an [OAuth client chart](#oauth-client-charts) and the [okdp
-chart](#the-okdp-chart) included), or for a name that is not a chart, are
+chart that accepts none (an [OAuth client chart](#oauth-client-charts)
+included), or for a name that is not a chart, are
 ignored without error. The mapping sees them as written
 (`values.upstream.<key>`).
 
@@ -1087,10 +1081,9 @@ each layer over the previous ones:
 
 The source: the upstream chart of the key ([Chart index](#chart-index)).
 Keys of one source take layer 1 from it, the other layers from their own
-entries. The chart of an OAuth client and the okdp chart have layers 1 (the
-defaults of their [platform chart](#platform-charts)) and 3 (the values
-the compiler computes for them: [OAuth client charts](#oauth-client-charts),
-[the okdp chart](#the-okdp-chart)) only.
+entries. The chart of an OAuth client has layers 1 (the defaults of its
+[platform chart](#platform-charts)) and 3 (the values the compiler
+computes for it: [OAuth client charts](#oauth-client-charts)) only.
 
 Then `global` is replaced by: the `global` of layer 1, under the `global` of
 the parameters (the context's, [Context values](#context-values)), under
@@ -1175,7 +1168,7 @@ chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 |---|---|---|
 | `Values` | `map[string]map[string]any` | chart key -> its final values ([Merge precedence](#merge-precedence)) |
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
-| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section) |
+| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file) |
 | `Dependencies` | `[]Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
@@ -1186,17 +1179,18 @@ chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 of `Chart.yaml`, its computed values `{}` when the values file does not
 write its key; a dependency the values file leaves out (its key left out
 by `$if`, or null) is in neither, and is not to be rendered
-([rendered dependencies](02_service_definition.md#rendered-dependencies));
-the okdp chart is in both, and in `dcr` mode the chart of each OAuth
-client. Numbers are float64, as in Helm values.
-`compiler.Write(res)` gives the files the binary writes from them, file
-name -> content ([command line](../01_usage.md#command-line)): the
-[umbrella chart](#umbrella-chart); `examples/02_advanced/output/` holds
-those of the example ([Example](#example)).
+([rendered dependencies](02_service_definition.md#rendered-dependencies)),
+and in `dcr` mode the chart of each OAuth client. Numbers are float64, as
+in Helm values.
+`compiler.Write(res)` gives the files the binary writes from them, path in
+the output directory -> content ([command line](../01_usage.md#command-line)):
+the [umbrella chart](#umbrella-chart) and [the objects
+file](#the-objects-file); `examples/02_advanced/output/` holds those of the
+example ([Example](#example)).
 
 The keys of a compile are the keys of the `Chart.yaml` dependencies, DNS
 labels ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
-(`okdp`, the OAuth client charts). `Write` names the umbrella's dependency
+(the OAuth client charts). `Write` names the umbrella's dependency
 aliases after them. It takes a `Result` as `Compile` returns it: its keys,
 charts, release and namespace are not checked again.
 
@@ -1217,7 +1211,6 @@ type ChartRef struct {
 |---|---|
 | a dependency of `Chart.yaml` | its `repository`, its `name` as `Chart`, its `version` ([dependencies](02_service_definition.md#dependencies)) |
 | the chart of an OAuth client | `global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 of `oci://quay.io/adaltas` by default ([Platform charts](#platform-charts)) |
-| the okdp chart | `global.okdp.charts.objects` |
 
 The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
@@ -1234,10 +1227,6 @@ oidc-dcr:
   repository: oci://quay.io/adaltas
   chart: oidc-dcr
   version: 0.5.0
-okdp:
-  repository: oci://registry.example.org/okdp
-  chart: okdp-objects
-  version: 1.0.0
 ```
 
 Everything else is keyed by the key
@@ -1475,30 +1464,33 @@ computed: the compiler adds no namespace, label or name. Each is a whole
 manifest, with a `kind` and a `metadata.name`
 ([objects](02_service_definition.md#objects)).
 
-### The okdp chart
+### The objects file
 
-`okdp`: the chart of OKDP's own objects, which
-the compiler adds to every compile, rendered by the platform's objects
-chart (`global.okdp.charts.objects`: [Platform charts](#platform-charts)),
-an okdp-objects chart (values `objects: []`; its template prints each item
-of `objects` as one YAML document):
+`okdp.objects.yaml` (`compiler.ObjectsFile`): `Objects`, which
+`compiler.Write` (`-o`) writes beside the [umbrella chart](#umbrella-chart)
+when there is at least one, else neither it nor its template: a YAML
+stream, one document per object, in the order of `Objects`, `---` between
+them, indented by 2 spaces, the keys of each map sorted. Its first line
+marks it generated, as the umbrella's values:
+`# Code generated by okdp-compile. DO NOT EDIT.`
 
-- its computed values are `objects`, a copy of `Objects`; its final values,
-  those over the chart's defaults, and `global`
-  ([merge precedence](#merge-precedence));
-- it is compiled whatever the values file gives, also when it leaves
-  out every dependency;
-- the compiler owns it: no OKDP defaults, no instance upstream values;
-  `Chart.yaml` may not list it (refused when it is loaded), nor the
-  values file:
+The umbrella renders it, in the release of the instance:
+`templates/okdp.yaml` (`compiler.ObjectsTemplate`), the same in every
+output, includes it as written:
 
 ```
-Chart.yaml: dependencies[<i>] (okdp): the chart of OKDP's own objects is added by the compiler: remove it
-values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it
+{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}
+{{ .Files.Get "okdp.objects.yaml" }}
 ```
 
-The descriptor, the credentials Secrets and the objects section then reach
-the cluster with the upstream charts. `Objects` holds them too.
+Helm does not template the file: the `{{` of an ExternalSecret's template,
+or of a string of the objects section, reaches the cluster as written, and
+so do its nulls and numbers; each document is one manifest of the release,
+installed with those of the upstream charts, sorted by kind
+(`testdata/helm/umbrella`; [OKDP's own
+objects](../03_okdp_objects.md#how-it-reaches-the-cluster)). The file is
+also the manifests as they are: a deployer may apply it without the
+umbrella.
 
 ### Dependencies
 
@@ -1524,9 +1516,10 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 
 `compiler.Write` (`okdp-compile -o <dir>`): the instance as one chart,
 for one Helm release per instance, under the release name the values were
-compiled for. Two files, and `okdp.dependencies.yaml`
+compiled for. Two files, [the objects file](#the-objects-file) and its
+template when the instance has objects, and `okdp.dependencies.yaml`
 (`compiler.DependenciesFile`, [dependencies](#dependencies)), which Helm
-ignores:
+ignores, by path in the directory:
 
 - `Chart.yaml`: the package's (`Result.Chart`), every field kept, in
   Helm's order (`apiVersion`, `name`, `version`, `kubeVersion`,
@@ -1541,13 +1534,14 @@ ignores:
   2. the OAuth client charts, by key: the
      [chart index](#chart-index) entry of the key (`name`, `repository`,
      `version`), and `alias: <key>` when the key is not the chart's name;
-  3. `okdp`, likewise;
 - `instance.values.yaml` (`compiler.UmbrellaValues`): `Values`, each key's
   final values under the key, each with its own `global`; none at the top.
   Its first line marks it generated:
   `# Code generated by
   okdp-compile. DO NOT EDIT.` (the line Go, GitHub, linters and editors
-  recognize).
+  recognize);
+- `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects and
+  the template that renders them: [the objects file](#the-objects-file).
 
 The chart has no `values.yaml`. Its values are user values (`helm -f`,
 Argo CD `valueFiles`, Flux `valuesFrom`): as the chart's own values they
@@ -1594,7 +1588,7 @@ entries in `upstream.app`), over the context
 `examples/02_advanced/input/db/platform.yaml`, level 0 (`dcr` mode;
 `platform-db`, the connection the instance's `audit` references): the
 OAuth client's chart, `oidc-dcr` ([its values](#oauth-client-charts)), a
-dependency beside `app` and `okdp`, its Job a pre-install hook that runs
+dependency beside `app`, its Job a pre-install hook that runs
 before the release's other resources. The `existing` mode has no example
 output: no OAuth client chart, and the client's Secret is
 `creds-demo-webapp-oauth2` ([OAuth client charts](#oauth-client-charts)).
@@ -1612,15 +1606,10 @@ dependencies:
   - name: oidc-dcr
     repository: oci://quay.io/adaltas
     version: 0.5.0
-  - name: okdp-objects
-    alias: okdp
-    repository: oci://registry.example.org/okdp
-    version: 1.0.0
 ```
 
-`instance.values.yaml`, annotated: the values of `app`, those of the OAuth
-client's chart, and those of the [okdp chart](#the-okdp-chart), the
-descriptor ConfigMap under `objects`:
+`instance.values.yaml`, annotated: the values of `app` and those of the
+OAuth client's chart:
 
 ```yaml
 # Code generated by okdp-compile. DO NOT EDIT.
@@ -1674,33 +1663,35 @@ app:
       memory: 128Mi
 oidc-dcr:
   # ... computed by the template (OAuth client charts)
-okdp:
-  global:
-    okdp:
-      # ... the platform values
-  objects:
-    - apiVersion: v1
-      data:
-        outputs.yaml: |
-          - contract: http
-            name: demo-webapp
-            values:
-              internalUrl: http://demo-webapp-app.demo.svc:8080
-              url: https://demo-webapp.okdp.example.org
-        service: webapp
+```
+
+`okdp.objects.yaml` ([the objects file](#the-objects-file)): the
+descriptor ConfigMap, the instance's one object, and `templates/okdp.yaml`:
+
+```yaml
+# Code generated by okdp-compile. DO NOT EDIT.
+apiVersion: v1
+data:
+  outputs.yaml: |
+    - contract: http
+      name: demo-webapp
+      values:
+        internalUrl: http://demo-webapp-app.demo.svc:8080
         url: https://demo-webapp.okdp.example.org
-        usage: |
-          A web application. Open https://demo-webapp.okdp.example.org
-        version: 1.0.0
-      kind: ConfigMap
-      metadata:
-        labels:
-          app.kubernetes.io/instance: demo-webapp
-          # ...
-          okdp.io/provides-http: "true"
-          okdp.io/service: webapp
-        name: demo-webapp-okdp
-        namespace: demo
+  service: webapp
+  url: https://demo-webapp.okdp.example.org
+  usage: |
+    A web application. Open https://demo-webapp.okdp.example.org
+  version: 1.0.0
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/instance: demo-webapp
+    # ...
+    okdp.io/provides-http: "true"
+    okdp.io/service: webapp
+  name: demo-webapp-okdp
+  namespace: demo
 ```
 
 And `okdp.dependencies.yaml` ([dependencies](#dependencies)):

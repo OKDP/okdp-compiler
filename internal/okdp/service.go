@@ -66,15 +66,10 @@ const platformValue = "It is a context value: set it with --context (Inputs.Cont
 
 // service: the Service of d, checked when it is loaded (LoadDefinition)
 // and before every compile (a Definition may be built in memory): what
-// Chart.yaml may not hold (chart.Metadata.Check), the chart of OKDP's own
-// objects among its dependencies (the compiler adds it, in every compile:
-// okdpChart), then what okdp.yaml's defaults and upstream may not hold
-// (chart.NewSpecs).
+// Chart.yaml may not hold (chart.Metadata.Check), then what okdp.yaml's
+// defaults and upstream may not hold (chart.NewSpecs).
 func (d *Definition) service() (*Service, error) {
 	if err := d.Chart.Check(); err != nil {
-		return nil, err
-	}
-	if err := okdpChart.listed(d.Chart.Dependencies, d.valuesName(), nil); err != nil {
 		return nil, err
 	}
 	specs, err := chart.NewSpecs(d.Chart, d.Package.Defaults, d.Package.Upstream)

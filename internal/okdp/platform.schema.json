@@ -38,15 +38,6 @@
               "description": "The upstream charts that render the charts the compiler adds itself, each a repository, a chart and its version. Each is checked after the requirements as a dependency of Chart.yaml is: a repository URL, the name of a chart, a pinned version.",
               "additionalProperties": false,
               "properties": {
-                "objects": {
-                  "type": "object",
-                  "description": "The chart of OKDP's own objects, the okdp chart: an okdp-objects chart (values objects: [], each item printed as one YAML document). Required.",
-                  "properties": {
-                    "repository": {"type": "string", "description": "The URL of the chart repository: https://, http:// or oci://."},
-                    "chart": {"type": "string", "description": "The name of the chart in the repository."},
-                    "version": {"type": "string", "description": "A pinned version (1.2.3), not a range."}
-                  }
-                },
                 "oidcDcr": {
                   "type": "object",
                   "description": "The chart of the OAuth clients in dcr mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the compiler writes. Absent: oci://quay.io/adaltas, oidc-dcr, 0.5.0.",

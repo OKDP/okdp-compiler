@@ -11,10 +11,6 @@ global:
     certificateIssuers:
       selfSigned:
         name: okdp-ca
-    # The chart OKDP's own objects are rendered with; the OAuth clients' is
-    # the default, oidc-dcr 0.5.0 of oci://quay.io/adaltas.
-    charts:
-      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
     oidc:
       issuerUri: https://sso.okdp.example.org/realms/okdp
       # The OAuth clients are registered by each service (dcr), the webapp's

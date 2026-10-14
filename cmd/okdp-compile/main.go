@@ -48,7 +48,7 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	flag.Func("context", "context values file, [<level>:]<file>, repeatable, before the -f files: global, global.okdp and connections among them; level 0 (the default), the platform's, first, a level's files merged in order; a level adds values, it changes none of a lower level's", func(s string) error { o.contexts = append(o.contexts, s); return nil })
 	flag.Func("f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares, and no connections: an instance's own are a --context file of its level", func(s string) error { o.values = append(o.values, s); return nil })
-	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), and "+compiler.DependenciesFile+", the instances the connection references point to")
+	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, and "+compiler.DependenciesFile+", the instances the connection references point to")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Parse()
 	switch {
@@ -68,8 +68,8 @@ func main() {
 
 // run: checks the options, loads the inputs and compiles, prints the
 // compile's warnings on stderr, then writes the files of compiler.Write
-// into the output directory, created if needed: a compile that fails
-// writes nothing.
+// into the output directory, created if needed, with the directories of
+// their paths: a compile that fails writes nothing.
 func run(o options) error {
 	for _, f := range [][2]string{{"--package", o.pkg}, {"--charts (or $OKDP_CHARTS)", o.charts}, {"--contracts (or $OKDP_CONTRACTS)", o.contracts}, {"--release", o.release}, {"--namespace", o.namespace}, {"--output (-o)", o.output}} {
 		if f[1] == "" {
@@ -122,7 +122,11 @@ func run(o options) error {
 		return err
 	}
 	for name, b := range files {
-		if err := os.WriteFile(filepath.Join(o.output, name), b, 0o644); err != nil {
+		path := filepath.Join(o.output, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, b, 0o644); err != nil {
 			return err
 		}
 	}

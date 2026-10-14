@@ -120,9 +120,9 @@ func TestPlatformSchema(t *testing.T) {
 		"image": {M{"okdp": M{"oidc": M{"dcr": M{"image": M{"tag": "1", "pull_policy": "Never"}}}}},
 			"- at '/global/okdp/oidc/dcr/image/pull_policy': false schema"},
 		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "oidcDCR": M{}, "dcr": nil}}},
-			"- at '/global/okdp/charts': additional properties 'dcr', 'oidcDCR' not allowed\n- at '/global/okdp/charts/objects': got string, want object\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
+			"- at '/global/okdp/charts': additional properties 'dcr', 'objects', 'oidcDCR' not allowed\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
 		"null, a default":  {M{"okdp": M{"oidc": M{"scope": "", "clientProvisioning": nil, "dcr": M{"caSecret": "", "ttlSeconds": nil}}}}, ""},
-		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "ingress": nil, "charts": M{"objects": nil}}}, "- at '/global/okdp/charts/objects': got null, want object\n- at '/global/okdp/ingress': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
+		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "ingress": nil, "charts": M{"oidcDcr": nil}}}, "- at '/global/okdp/charts/oidcDcr': got null, want object\n- at '/global/okdp/ingress': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
 		"no global":        {nil, ""},
 		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}, "oidc": M{"dcr": M{"registrationUrl": 1}}}, "imageRegistry": 1}, ""},
 	} {

@@ -15,11 +15,10 @@ global:
     certificateIssuers:
       selfSigned:
         name: okdp-ca                  # platform.ingressAnnotations
-    # The charts the compiler renders its own charts with: OKDP's objects
-    # (required), and the OAuth clients' in dcr mode, here from a mirror of
-    # oci://quay.io/adaltas (the default).
+    # The chart the compiler renders its own charts with, the OAuth
+    # clients' in dcr mode, here from a mirror of oci://quay.io/adaltas (the
+    # default).
     charts:
-      objects: {repository: oci://registry.example.org/okdp, chart: okdp-objects, version: 1.0.0}
       oidcDcr: {repository: oci://registry.example.org/mirror, chart: oidc-dcr, version: 0.5.0}
     oidc:
       issuerUri: https://sso.okdp.example.org/realms/okdp/

@@ -72,7 +72,6 @@ instance: {usage: '${{ n }}'}
 		"no Chart.yaml":       {fstest.MapFS{"service.yaml": {Data: []byte("name: demo\n")}, "values.cel.yaml": ok["values.cel.yaml"]}, "open Chart.yaml: file does not exist"},
 		"Chart.yaml fields":   {with(ok, "Chart.yaml", chartYAML+"charts: {}\n"), "Chart.yaml: yaml: unmarshal errors:\n  line 5: field charts not found in type chart.Metadata"},
 		"Chart.yaml checked":  {with(ok, "Chart.yaml", strings.Replace(chartYAML, "1.0.0\n", "\"1.0\"\n", 1)), `Chart.yaml: version "1.0": SemVer (1.2.3), the version of the umbrella chart`},
-		"okdp listed":         {with(ok, "Chart.yaml", strings.Replace(chartYAML, "]\n", ", {name: okdp, repository: oci://x, version: 1.0.0}]\n", 1)), "Chart.yaml: dependencies[1] (okdp): the chart of OKDP's own objects is added by the compiler: remove it"},
 		"output":              {with(ok, "okdp.yaml", "vars: {}\noutput: {app: {}}\n"), "okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)"},
 		"name":                {with(ok, "okdp.yaml", "name: demo\n"), "okdp.yaml: name: the name, version and charts are Chart.yaml's"},
 		"charts":              {with(ok, "okdp.yaml", "require: []\ncharts: {}\n"), "okdp.yaml: charts: the name, version and charts are Chart.yaml's"},

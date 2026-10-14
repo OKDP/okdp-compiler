@@ -13,7 +13,7 @@ import (
 // labels: the labels of every object OKDP renders itself, of the service
 // name and the release, with app.kubernetes.io/component when component is
 // not empty: the selector labels, the stable subset; then, unless selector,
-// Helm as manager (the objects chart renders them), part of okdp, and the
+// Helm as manager (the umbrella renders them), part of okdp, and the
 // instance and service OKDP finds the objects by. No helm.sh/chart: the
 // objects belong to no chart of the service.
 func labels(name, release, component string, selector bool) M {

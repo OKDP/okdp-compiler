@@ -128,10 +128,9 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d 
   another package. CRDs upgraded with the release (spark-operator) are a
   deployer setting: `upgrade.crds: CreateReplace` on the Flux HelmRelease;
   Argo CD applies `crds/` on every sync.
-- `okdp` and `oidc-dcr` are not dependencies of the package: the compiler adds
-  them, the okdp chart of OKDP's own objects in every compile, one oidc-dcr
-  chart per OAuth client in `dcr` mode, and the platform names the charts
-  that render them (`global.okdp.charts`:
+- `oidc-dcr` is not a dependency of the package: the compiler adds one
+  oidc-dcr chart per OAuth client in `dcr` mode, and the platform names the
+  chart that renders them (`global.okdp.charts`:
   [platform charts](specs/01_inputs_outputs.md#platform-charts)).
 
 Flux (`helm install`) and Argo CD (`helm template`) must render the same
@@ -386,10 +385,10 @@ provides:                  # the connections the instance publishes
   and `opal`). A key a top-level `$merge` or `$for` gives counts only when
   it gives it: to leave a dependency out, write its key
   ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
-  Any other value that is not a map fails the compile. `okdp` is not a key
-  of the values file: the compiler adds the okdp chart to every compile, so
-  the descriptor always reaches the cluster
-  ([the okdp chart](specs/01_inputs_outputs.md#the-okdp-chart)).
+  Any other value that is not a map fails the compile. OKDP's own objects
+  are not values: the descriptor reaches the cluster in the umbrella,
+  whatever the file leaves out
+  ([the objects file](specs/01_inputs_outputs.md#the-objects-file)).
 - `errors` fails the compile with every message at once. A message is the
   `$value` of an item with its condition, `$if`; `$for` checks every
   element of a list.
@@ -398,7 +397,8 @@ provides:                  # the connections the instance publishes
   from its Secret, `platform.oidcClientSecret` for the main client
   ([recipe](#oauth-clients)).
 - `objects` are whole manifests (a `kind` and a `metadata.name` at least) the
-  okdp chart renders after the descriptor: generated Secrets, hooks, custom
+  umbrella renders as written, after the descriptor (a `{{` in them is not
+  Helm's): generated Secrets, hooks, custom
   resources, a workload the upstream charts lack. A component without an
   upstream chart (cnpg-postgresql) declares no dependency, has no values
   file, and writes everything here.
@@ -480,7 +480,7 @@ it (cnpg-postgresql). Neither: consumers bring their own identity
 
 Each `ci/<case>-values.yaml` is an instance: its parameters, without
 `global` and `connections`, which an instance may not set. The
-platform values (`global.okdp`, `charts.objects` included) are given apart,
+platform values (`global.okdp`) are given apart,
 with `--context`: `ci/platform.yaml` for every case, then, for a case that
 needs others, its own `ci/<case>-platform.yaml`, and its own connections
 at level 2 (`--context 2:ci/<case>-connections.yaml`, what an instance's
@@ -503,7 +503,7 @@ okdp-compile --package charts/services/polaris \
   -f charts/services/polaris/ci/dcr-values.yaml \
   --release demo-polaris --namespace demo -o /tmp/demo-polaris
 yq '.dependencies' /tmp/demo-polaris/Chart.yaml   # the source of each key
-chart=$(mktemp -d) && cp /tmp/demo-polaris/Chart.yaml "$chart" && helm dependency build "$chart"
+chart=$(mktemp -d) && cp -R /tmp/demo-polaris/. "$chart" && helm dependency build "$chart"
 helm template demo-polaris "$chart" -n demo -f /tmp/demo-polaris/instance.values.yaml
 scripts/compile-charts.sh charts/services/polaris   # every case, compiled and rendered
 ```
@@ -514,11 +514,12 @@ scripts/compile-charts.sh charts/services/polaris   # every case, compiled and r
   dependencies are the sources the index names for the keys, the clients'
   charts the platform's oidc-dcr chart, `polaris-admin-principals` the
   source of `polaris-admin` under its own alias; `helm dependency build`
-  fetches them, in a copy of `Chart.yaml`, since the next compile into the
+  fetches them, in a copy of the directory, since the next compile into the
   directory refuses `Chart.lock` and `charts/`
   ([rendering with Helm](01_usage.md#rendering-with-helm)).
 - `-o` writes the final values, the input of `helm template`, under their
-  keys in `instance.values.yaml`.
+  keys in `instance.values.yaml`, and OKDP's own objects in
+  `okdp.objects.yaml`, which the umbrella renders as written.
 - A case whose first line is `# error: <message>` must fail with that message
   (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
@@ -901,10 +902,9 @@ A rule no path expresses (a value that depends on a parameter) goes in
   when the chart is bumped.
 - **An unset connection is `""`.** `values.database.host` fails on an empty
   reference: test `type(...) == map` first, or report it in `errors`.
-- **Some chart keys are the compiler's.** `okdp` names the chart of OKDP's
-  own objects, `oidc-dcr` and `<name>-oidc-dcr` the charts of the declared
-  clients: a `Chart.yaml` dependency or a key of the values file of the
-  same key fails, in every mode.
+- **Some chart keys are the compiler's.** `oidc-dcr` and `<name>-oidc-dcr`
+  name the charts of the declared clients: a `Chart.yaml` dependency or a
+  key of the values file of the same key fails, in every mode.
 - **A client's `secret` is not followed.** It renames the Secret the Job
   writes, in `dcr` mode only; `oidcClientSecret(name)` still returns the
   mode's name, and in `existing` mode the platform's Secret keeps its own.
@@ -920,7 +920,7 @@ A rule no path expresses (a value that depends on a parameter) goes in
   version, pinned; a bundled subchart the package does not use is disabled
   by values; no `lookup`, random or `.Capabilities` feature is on.
 - [ ] `Chart.yaml` and the values file use no chart key of the compiler
-  (`okdp`, `oidc-dcr`, `<name>-oidc-dcr`); a second render of a chart is a
+  (`oidc-dcr`, `<name>-oidc-dcr`); a second render of a chart is a
   dependency of the same chart with its alias.
 - [ ] `Chart.yaml`: `apiVersion: v2`, `name`, `version`
   `<upstream>-<okdp semver>`; `okdp.yaml`: `roles` and `dependsOn`.

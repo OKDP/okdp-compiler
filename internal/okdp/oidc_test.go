@@ -328,9 +328,9 @@ app:
 		existing bool
 		charts   map[string]chart.Ref // Result.Charts
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
-		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "okdp": objectsSource, "oidc-dcr": DcrSource}},
-		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource, "okdp": objectsSource}},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
+		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": DcrSource}},
+		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, err := compile("", tc.existing, app, ch, tc.values)
@@ -354,7 +354,7 @@ app:
 			if dcr["ttlSeconds"] != float64(30) || value.Dig(dcr, "request.redirect_uris") == nil || value.Dig(dcr, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri" {
 				t.Errorf("oidc-dcr values: %#v", dcr)
 			}
-			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 4 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || value.Dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
+			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || value.Dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
 				t.Errorf("console-oidc-dcr values, over oidc-dcr's defaults: %#v", c)
 			}
 		})

@@ -103,11 +103,11 @@ func setAt(v any, path []string, x any) {
 // TestHelmUmbrella: the umbrella the compiler writes over the charts of the
 // values cases (testdata/helm/values/<case>: its values.yaml, its final
 // values), each under its case name, nulls and globals a second time under
-// an alias: rendered by each Helm version with its values as user values
-// (testdata/helm/umbrella/helm*.json), every subchart sees the values the
-// case's chart sees alone under Helm 4 (helm-final.json), but for what
-// sameAsAlone allows and the known differences of the version, each
-// checked.
+// an alias, with objects (TestHelmObjects): rendered by each Helm version
+// with its values as user values (testdata/helm/umbrella/helm*.json),
+// every subchart sees the values the case's chart sees alone under Helm 4
+// (helm-final.json), but for what sameAsAlone allows and the known
+// differences of the version, each checked.
 func TestHelmUmbrella(t *testing.T) {
 	dir := filepath.Join(helmtest.Dir, "umbrella")
 	keys := map[string]string{"nulls-alias": "nulls", "globals-alias": "globals"} // key -> case
@@ -132,15 +132,23 @@ func TestHelmUmbrella(t *testing.T) {
 		res.Chart.Dependencies = append(res.Chart.Dependencies, d)
 		res.Charts[key] = d.Ref()
 	}
+	// Objects that Helm would change were they templates or values: a {{,
+	// a null, an integer beyond the precision of a float64; Helm installs
+	// the ConfigMap first.
+	res.Objects = []map[string]any{
+		{"apiVersion": "external-secrets.io/v1", "kind": "ExternalSecret", "metadata": map[string]any{"name": "objects"},
+			"spec": map[string]any{"template": "{{ .accessKey }}", "null": nil, "integer": uint64(12345678901234567890)}},
+		{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "objects"}},
+	}
 	files, err := Write(res)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// What Helm renders: okdp.dependencies.yaml aside.
-	for _, name := range []string{"Chart.yaml", ValuesFile} {
-		b, golden := files[name], filepath.Join(dir, name)
+	for _, name := range []string{"Chart.yaml", ValuesFile, ObjectsFile, ObjectsTemplate} {
+		b, golden := files[name], filepath.Join(dir, filepath.FromSlash(name))
 		if *update {
-			if err := os.MkdirAll(dir, 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(golden, b, 0o644); err != nil {
@@ -194,5 +202,23 @@ func TestHelmUmbrella(t *testing.T) {
 				t.Errorf("%s (Helm %s): %s: Helm renders the subchart differently from the chart alone:\n got %#v\nwant %#v", file, r.versions, key, helm[key], want)
 			}
 		}
+	}
+}
+
+// TestHelmObjects: the objects file of the umbrella (testdata/helm/umbrella,
+// as Write writes it: TestHelmUmbrella), rendered by its template with
+// every Helm version (helm-objects.yaml, the manifests in Helm's install
+// order, the same for each): each document a manifest, as written.
+func TestHelmObjects(t *testing.T) {
+	dir := filepath.Join(helmtest.Dir, "umbrella")
+	docs := func(name string) []string {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("%v (run testdata/helm/generate.sh)", err)
+		}
+		return slices.Sorted(slices.Values(strings.Split(string(b), "---\n")))
+	}
+	if got, want := docs("helm-objects.yaml"), docs(ObjectsFile); !slices.Equal(got, want) {
+		t.Errorf("helm-objects.yaml: Helm renders\n%q\nthe documents of %s are\n%q", got, ObjectsFile, want)
 	}
 }

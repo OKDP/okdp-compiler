@@ -162,32 +162,36 @@ func output(t *testing.T, res *Result) map[string][]byte {
 	return files
 }
 
-// checkDir: examples/<dir> holds these files, and only them, byte for
-// byte; -update rewrites it.
+// checkDir: examples/<dir> holds these files, path -> content, and only
+// them, byte for byte, its subdirectories included; -update rewrites it.
 func checkDir(t *testing.T, dir string, files map[string][]byte) {
 	t.Helper()
-	path := filepath.Join(examples, dir)
+	root := filepath.Join(examples, dir)
 	if *update {
-		if err := os.RemoveAll(path); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(path, 0o755); err != nil {
+		if err := os.RemoveAll(root); err != nil {
 			t.Fatal(err)
 		}
 		for name, b := range files {
-			if err := os.WriteFile(filepath.Join(path, name), b, 0o644); err != nil {
+			path := filepath.Join(root, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, b, 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
 		return
 	}
-	entries, err := os.ReadDir(path)
+	var names []string
+	err := filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
+		if err == nil && !e.IsDir() {
+			rel, _ := filepath.Rel(root, path)
+			names = append(names, filepath.ToSlash(rel))
+		}
+		return err
+	})
 	if err != nil {
 		t.Fatalf("%v (run go test . -update)", err)
-	}
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
 	}
 	for name := range files {
 		if !slices.Contains(names, name) {
@@ -195,7 +199,7 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 		}
 	}
 	for _, name := range names {
-		b, err := os.ReadFile(filepath.Join(path, name))
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(name)))
 		if err != nil {
 			t.Fatal(err)
 		}

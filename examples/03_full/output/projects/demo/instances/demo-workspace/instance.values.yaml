@@ -134,10 +134,6 @@ api:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
@@ -237,10 +233,6 @@ automation-oidc-dcr:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
@@ -345,10 +337,6 @@ console-oidc-dcr:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
@@ -460,10 +448,6 @@ gateway:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
@@ -522,10 +506,6 @@ metrics:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
@@ -593,10 +573,6 @@ oidc-dcr:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
@@ -691,391 +667,6 @@ oidc-dcr:
   waitForProvider:
     discoveryUrl: https://sso.okdp.example.org/realms/okdp/.well-known/openid-configuration
     ttlSeconds: 120
-okdp:
-  global:
-    imageRegistry: registry.example.org
-    okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
-      charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
-        oidcDcr:
-          chart: oidc-dcr
-          repository: oci://registry.example.org/mirror
-          version: 0.5.0
-      ingress:
-        className: nginx
-        suffix: okdp.example.org
-      oidc:
-        clientProvisioning: dcr
-        dcr:
-          authMethod: anonymous
-          backoffLimit: 3
-          caSecret: okdp-ca-bundle
-          image:
-            pullPolicy: Always
-            registry: registry.example.org
-            repository: mirror/oidc-dcr-job
-            tag: 0.5.0
-          registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
-          ttlSeconds: 300
-          waitTtlSeconds: 120
-        issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
-      proxy:
-        httpProxy: http://proxy.okdp.example.org:3128
-        httpsProxy: http://proxy.okdp.example.org:3128
-        noProxy: .svc,.cluster.local,.okdp.example.org
-    storageClass: fast-ssd
-  objects:
-    - apiVersion: v1
-      data:
-        outputs.yaml: |
-          - contract: http
-            name: demo-workspace
-            values:
-              internalUrl: http://demo-workspace-api.demo.svc:8080
-              url: https://demo-workspace.okdp.example.org
-          - contract: http
-            name: demo-workspace-gateway
-            values:
-              internalUrl: http://demo-workspace-gateway.demo.svc:8443
-              url: https://demo-workspace-gateway.okdp.example.org
-          - contract: s3
-            name: demo-workspace-exports
-            secretRef:
-              name: demo-workspace-exports-s3-credentials
-            values:
-              bucket: exports
-              endpoint: https://demo-workspace-gateway.okdp.example.org/s3
-              pathStyle: true
-              provider: minio
-              region: us-east-1
-        service: workspace
-        url: https://demo-workspace.okdp.example.org
-        usage: |
-          Notebooks and SQL (workspace 3.2.0-1.4.0) for the project demo.
-          Open https://demo-workspace.okdp.example.org; its API is https://demo-workspace.okdp.example.org/api.
-          Catalogs: archive, marketing, sales.
-        version: 3.2.0-1.4.0
-      kind: ConfigMap
-      metadata:
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/provides-http: "true"
-          okdp.io/provides-s3: "true"
-          okdp.io/service: workspace
-        name: demo-workspace-okdp
-        namespace: demo
-    - apiVersion: generators.external-secrets.io/v1alpha1
-      kind: Password
-      metadata:
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-exports-s3-credentials-accesskey
-        namespace: demo
-      spec:
-        allowRepeat: true
-        digits: 4
-        length: 20
-        noUpper: true
-        symbols: 0
-    - apiVersion: generators.external-secrets.io/v1alpha1
-      kind: Password
-      metadata:
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-exports-s3-credentials-secretkey
-        namespace: demo
-      spec:
-        allowRepeat: true
-        digits: 6
-        length: 40
-        noUpper: false
-        symbols: 4
-    - apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/credentials-s3: "true"
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-exports-s3-credentials
-        namespace: demo
-      spec:
-        dataFrom:
-          - rewrite:
-              - regexp:
-                  source: ^password$
-                  target: accessKey
-            sourceRef:
-              generatorRef:
-                apiVersion: generators.external-secrets.io/v1alpha1
-                kind: Password
-                name: demo-workspace-exports-s3-credentials-accesskey
-          - rewrite:
-              - regexp:
-                  source: ^password$
-                  target: secretKey
-            sourceRef:
-              generatorRef:
-                apiVersion: generators.external-secrets.io/v1alpha1
-                kind: Password
-                name: demo-workspace-exports-s3-credentials-secretkey
-        refreshInterval: "0"
-        target:
-          creationPolicy: Owner
-          name: demo-workspace-exports-s3-credentials
-          template:
-            data:
-              accessKey: '{{ index . "accessKey" }}'
-              region: us-east-1
-              secretKey: '{{ index . "secretKey" }}'
-            engineVersion: v2
-            metadata:
-              labels:
-                app.kubernetes.io/instance: demo-workspace
-                app.kubernetes.io/managed-by: Helm
-                app.kubernetes.io/name: workspace
-                app.kubernetes.io/part-of: okdp
-                okdp.io/credentials-s3: "true"
-                okdp.io/instance: demo-workspace
-                okdp.io/service: workspace
-    - apiVersion: v1
-      data:
-        WORKSPACE_ADMINS: alice@example.org,bob@example.org
-        WORKSPACE_API_URL: https://demo-workspace.okdp.example.org/api
-        WORKSPACE_CATALOGS: archive,marketing,sales
-        WORKSPACE_FEATURE_FLAGS: lineage,preview
-        WORKSPACE_LOG_FORMAT: json
-        WORKSPACE_REPLICAS: "2"
-        catalogs.yaml: |-
-          - bucket: demo-sales
-            database: demo-warehouse
-            name: sales
-          - bucket: workspace-scratch
-            database: demo-db
-            name: marketing
-          - bucket: okdp-datalake
-            name: archive
-        init.sh: |
-          #!/bin/sh
-          set -eu
-          workspace admin add "alice@example.org"
-          workspace admin add "bob@example.org"
-        pipeline.yaml: |
-          name: sync-${{ catalog }}
-          run: workspace sync --catalog ${{ catalog }} --api http://demo-workspace-api.demo.svc:8080
-        settings.schema.json: |-
-          {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "required": [
-              "WORKSPACE_ADMINS",
-              "WORKSPACE_API_URL",
-              "WORKSPACE_CATALOGS",
-              "WORKSPACE_FEATURE_FLAGS",
-              "WORKSPACE_LOG_FORMAT",
-              "WORKSPACE_REPLICAS"
-            ],
-            "type": "object"
-          }
-      kind: ConfigMap
-      metadata:
-        labels:
-          app.kubernetes.io/component: settings
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-settings
-        namespace: demo
-    - apiVersion: generators.external-secrets.io/v1alpha1
-      kind: Password
-      metadata:
-        annotations:
-          helm.sh/resource-policy: keep
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-internal-jwt-secret
-        namespace: demo
-      spec:
-        allowRepeat: true
-        digits: 6
-        length: 64
-        noUpper: false
-        symbols: 0
-    - apiVersion: generators.external-secrets.io/v1alpha1
-      kind: Password
-      metadata:
-        annotations:
-          helm.sh/resource-policy: keep
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-internal-fernet-key
-        namespace: demo
-      spec:
-        allowRepeat: true
-        digits: 6
-        length: 32
-        noUpper: false
-        symbols: 0
-    - apiVersion: generators.external-secrets.io/v1alpha1
-      kind: Password
-      metadata:
-        annotations:
-          helm.sh/resource-policy: keep
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-internal-api-token
-        namespace: demo
-      spec:
-        allowRepeat: true
-        digits: 0
-        length: 40
-        noUpper: false
-        symbols: 0
-    - apiVersion: external-secrets.io/v1
-      kind: ExternalSecret
-      metadata:
-        annotations:
-          helm.sh/resource-policy: keep
-        labels:
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/cost-center: cc-4217
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-internal
-        namespace: demo
-      spec:
-        dataFrom:
-          - rewrite:
-              - regexp:
-                  source: ^password$
-                  target: jwt-secret
-            sourceRef:
-              generatorRef:
-                apiVersion: generators.external-secrets.io/v1alpha1
-                kind: Password
-                name: demo-workspace-internal-jwt-secret
-          - rewrite:
-              - regexp:
-                  source: ^password$
-                  target: fernet-key
-            sourceRef:
-              generatorRef:
-                apiVersion: generators.external-secrets.io/v1alpha1
-                kind: Password
-                name: demo-workspace-internal-fernet-key
-          - rewrite:
-              - regexp:
-                  source: ^password$
-                  target: api.token
-            sourceRef:
-              generatorRef:
-                apiVersion: generators.external-secrets.io/v1alpha1
-                kind: Password
-                name: demo-workspace-internal-api-token
-        refreshInterval: "0"
-        target:
-          creationPolicy: Owner
-          name: demo-workspace-internal
-          template:
-            data:
-              api.token: '{{ index . "api.token" | sha256sum }}'
-              fernet-key: '{{ index . "fernet-key" | b64enc }}'
-              issuer: https://sso.okdp.example.org/realms/okdp/
-              jwt-secret: '{{ index . "jwt-secret" }}'
-              replicas: "2"
-            engineVersion: v2
-            metadata:
-              labels:
-                app.kubernetes.io/instance: demo-workspace
-                app.kubernetes.io/managed-by: Helm
-                app.kubernetes.io/name: workspace
-                app.kubernetes.io/part-of: okdp
-                okdp.io/cost-center: cc-4217
-                okdp.io/instance: demo-workspace
-                okdp.io/service: workspace
-    - apiVersion: networking.k8s.io/v1
-      kind: NetworkPolicy
-      metadata:
-        labels:
-          app.kubernetes.io/component: allowlist
-          app.kubernetes.io/instance: demo-workspace
-          app.kubernetes.io/managed-by: Helm
-          app.kubernetes.io/name: workspace
-          app.kubernetes.io/part-of: okdp
-          okdp.io/instance: demo-workspace
-          okdp.io/service: workspace
-        name: demo-workspace-allowlist
-        namespace: demo
-      spec:
-        ingress:
-          - from:
-              - namespaceSelector:
-                  matchLabels:
-                    kubernetes.io/metadata.name: ingress-nginx
-              - ipBlock:
-                  cidr: 10.20.0.0/16
-              - ipBlock:
-                  cidr: 192.168.10.0/24
-        podSelector:
-          matchLabels:
-            app.kubernetes.io/instance: demo-workspace
-            app.kubernetes.io/name: workspace
-        policyTypes:
-          - Ingress
 scheduler:
   catalogs: {}
   config:
@@ -1175,10 +766,6 @@ scheduler:
         selfSigned:
           name: okdp-ca
       charts:
-        objects:
-          chart: okdp-objects
-          repository: oci://registry.example.org/okdp
-          version: 1.0.0
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror

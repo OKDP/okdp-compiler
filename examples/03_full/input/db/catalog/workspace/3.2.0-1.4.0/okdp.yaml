@@ -243,8 +243,8 @@ provides:
         - {key: secretKey, length: 40, symbols: 4}
       stringData: {region: us-east-1}
 
-# OKDP's own objects, whole manifests: rendered by the okdp chart, after the
-# descriptor and the credentials Secrets.
+# OKDP's own objects, whole manifests: okdp.objects.yaml, after the
+# descriptor and the credentials Secrets, which the umbrella renders as written.
 objects:
   - apiVersion: v1
     kind: ConfigMap

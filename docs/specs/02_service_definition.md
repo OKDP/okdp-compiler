@@ -145,7 +145,6 @@ key:
 | `repository` not starting with `https://`, `http://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
 | `name` holding a `/`, `.` or `..`, or with leading or trailing spaces | `Chart.yaml: dependencies[<i>].name "<name>": the name of a chart of the repository` |
 | `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `Chart.yaml: dependencies[<i>].version "<version>": a pinned chart version (1.2.3), not a range` |
-| the key `okdp` | `Chart.yaml: dependencies[<i>] (okdp): the chart of OKDP's own objects is added by the compiler: remove it` |
 
 The key of a declared OAuth client's chart is refused by each compile
 that declares the client ([oidcClients](#oidcclients)).
@@ -163,19 +162,8 @@ when `Chart.yaml` is loaded:
 Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias
 ```
 
-`okdp`, `oidc-dcr` and the `<name>-oidc-dcr` of a declared client are the
-compiler's keys ([the okdp chart](#the-okdp-chart),
-[oidcClients](#oidcclients)).
-
-### The okdp chart
-
-`okdp` is the compiler's: it adds the chart to
-every compile, rendered by the platform's objects chart
-(`global.okdp.charts.objects`), its values `Result.Objects`: [the okdp
-chart](01_inputs_outputs.md#the-okdp-chart). `Chart.yaml` may not declare it
-(`Chart.yaml: dependencies[<i>] (okdp): the chart of OKDP's own objects is added by the compiler: remove it`,
-when the file is loaded), nor the values file compute it
-([values.cel.yaml](#valuescelyaml)).
+`oidc-dcr` and the `<name>-oidc-dcr` of a declared client are the
+compiler's keys ([oidcClients](#oidcclients)).
 
 ## okdp.yaml
 
@@ -286,7 +274,7 @@ The dependencies that accept the instance's upstream values,
 | `false` | accepts none |
 | `{protect: [...], append: [...]}`, either optional | accepts them, with these paths: [protect and append](#protect-and-append) |
 
-The compiler's own charts (`okdp`, the OAuth client charts) never accept
+The compiler's own charts, the OAuth client charts, never accept
 upstream values. The instance's values for a dependency that accepts none
 are ignored. How they are written and applied:
 [upstream values](01_inputs_outputs.md#upstream-values).
@@ -349,9 +337,7 @@ sections: `vars` or `errors` there is a dependency key.
   list is refused, not compiled as the chart's defaults alone.
 - Every key must be a dependency's key, null or not:
   `values.cel.yaml: <key>: not a dependency of Chart.yaml`. A key may not be
-  the chart of a declared OAuth client ([oidcClients](#oidcclients)), nor
-  `okdp`: `values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it`
-  ([the okdp chart](#the-okdp-chart)).
+  the chart of a declared OAuth client ([oidcClients](#oidcclients)).
 - An error of the file starts with `values.cel.yaml: `, then the path from
   the dependency's key (`values.cel.yaml: app: env[2]: value: `:
   [compile errors](#compile-errors)).
@@ -375,9 +361,8 @@ hold its chart.
   dependency it does not give is rendered. To leave a dependency out,
   write its key.
 - Without the file, or empty, every dependency is rendered.
-- The compiler's own charts, the OAuth clients' in `dcr` mode and `okdp`,
-  are added after ([the okdp chart](#the-okdp-chart),
-  [oidcClients](#oidcclients)).
+- The compiler's own charts, the OAuth clients' in `dcr` mode, are added
+  after ([oidcClients](#oidcclients)).
 
 ```yaml
 gateway: {}                                     # rendered: its defaults, OKDP's, the upstream values
@@ -550,7 +535,7 @@ mistake fails the compile before anything is evaluated. Then:
    `dcr` mode ([oidcClients](#oidcclients)); then the
    compile builds the descriptor from `instance` and `provides`, checked
    against the contracts, and the final values of each dependency the
-   values file gives, of each client chart and of the `okdp` chart.
+   values file gives and of each client chart.
 
 A section does not see the others: there is no variable of the values or
 of `instance`. A value used by several sections is a `vars` binding.
@@ -632,8 +617,9 @@ them (namespace and labels are the mapping's). After evaluation, every item
 must be a map with a non-empty `kind` and `metadata.name`
 (`- at '/objects/<i>': missing property 'kind'`). A value that is not a
 list fails; absent or null, there are none. They follow the descriptor and the
-credentials Secrets in `Result.Objects` and in the `okdp` chart:
-[outputs](01_inputs_outputs.md#outputs).
+credentials Secrets in `Result.Objects`, written to the objects file the
+umbrella renders as written:
+[the objects file](01_inputs_outputs.md#the-objects-file).
 
 ### instance
 
@@ -957,7 +943,7 @@ the labels of every object OKDP renders itself:
 | `app.kubernetes.io/name` | `service.name` | yes |
 | `app.kubernetes.io/instance` | `release.name` | yes |
 | `app.kubernetes.io/component` | the component, when not empty (functions only) | yes |
-| `app.kubernetes.io/managed-by` | `Helm` (the okdp chart renders them) | no |
+| `app.kubernetes.io/managed-by` | `Helm` (the umbrella renders them) | no |
 | `app.kubernetes.io/part-of` | `okdp` | no |
 | `okdp.io/instance` | `release.name` | no |
 | `okdp.io/service` | `service.name` | no |
@@ -1074,7 +1060,6 @@ Other errors of the mapping:
 | `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [the values file](#valuescelyaml) (`/output`), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |
 | `<where>${{ <expression> }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:` then `- at '/okdpGeneratedSecret<path>': <violation>`, one line each | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
 | `values.cel.yaml: <key>: not a dependency of Chart.yaml` | a key of the [values file](#valuescelyaml) |
-| `values.cel.yaml: okdp: the chart of OKDP's own objects is compiled from the objects section: remove it` | [the okdp chart](#the-okdp-chart) |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |

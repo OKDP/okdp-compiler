@@ -47,13 +47,12 @@ type Result struct {
 	Values map[string]map[string]any
 	// Charts: chart -> the upstream chart that renders its values (`helm
 	// template <Charts[chart]> -f <Values[chart]>`): its dependency of
-	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client, the
-	// platform's objects chart for okdp.
+	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client.
 	Charts map[string]chart.Ref
 	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
 	// the credentials Secrets of the provided connections, then the objects
-	// section of the mapping; also the values of the okdp chart
-	// (ObjectsChart).
+	// section of the mapping; the umbrella's objects file, which it renders
+	// as written, in its release (umbrella.Write).
 	Objects []map[string]any
 	// Dependencies: the instances the connection references point to, by
 	// parameter path. References to external connections are not listed.
@@ -107,8 +106,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// okdpGeneratedSecret evaluates its template in it too.
 	var session *compile.Session
 	session = compile.NewSession(ctx, in.CostLimit, functions(inst, &session)...)
-	// The charts the platform renders the compiler's own charts with.
-	objectsSource, dcrSource, err := platformCharts(inst.okdp)
+	// The chart the platform renders the OAuth client charts with.
+	dcrSource, err := platformCharts(inst.okdp)
 	if err != nil {
 		return nil, err
 	}
@@ -138,13 +137,10 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// 9. Final values, first the dependencies of Chart.yaml the umbrella
 	// renders (rendered): all but those the values file leaves out. Then
 	// the compiler's own charts: the chart of each OAuth client, compiled in
-	// dcr mode, and the okdp chart, which renders the objects unless the
-	// caller deploys them otherwise; neither Chart.yaml nor the values file
-	// may list them. Added to the dependencies of Chart.yaml, without
-	// changing them.
+	// dcr mode; neither Chart.yaml nor the values file may list them. Added
+	// to the dependencies of Chart.yaml, without changing them.
 	output := rendered(svc.Charts, written, value.AsMap(res["output"]))
-	ownCharts := append(clientCharts(clients, dcrValues, dcrSource), objectsChart(out.Objects, objectsSource))
-	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, def.valuesName(), output, ownCharts)
+	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, def.valuesName(), output, clientCharts(clients, dcrValues, dcrSource))
 	if err != nil {
 		return nil, err
 	}
