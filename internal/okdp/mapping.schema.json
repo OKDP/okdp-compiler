@@ -11,10 +11,10 @@
     },
     "instance": {
       "type": "object",
-      "description": "The instance, in the descriptor ConfigMap. Other keys are ignored.",
+      "description": "The instance, in okdp.instance.yaml with the connections it provides. Other keys are ignored.",
       "properties": {
         "url": {"type": "string", "description": "The instance's URL, trimmed."},
-        "usage": {"type": "string", "description": "How to use the instance, trimmed, with one final newline."}
+        "usage": {"type": "string", "description": "How to use the instance, trimmed, with one final newline when not empty."}
       }
     },
     "provides": {

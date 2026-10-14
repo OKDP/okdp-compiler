@@ -49,11 +49,14 @@ type Result struct {
 	// template <Charts[chart]> -f <Values[chart]>`): its dependency of
 	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client.
 	Charts map[string]chart.Ref
-	// Objects: OKDP's own objects, rendered whole: the descriptor ConfigMap,
-	// the credentials Secrets of the provided connections, then the objects
-	// section of the mapping; the umbrella's objects file, which it renders
-	// as written, in its release (umbrella.Write).
+	// Objects: OKDP's own objects, rendered whole: the credentials Secrets
+	// of the provided connections, then the objects section of the mapping;
+	// the umbrella's objects file, which it renders as written, in its
+	// release (umbrella.Write). nil when there is none.
 	Objects []map[string]any
+	// Instance: what the instance publishes, its instance and provides
+	// sections, checked (okdp.instance.yaml, umbrella.Write).
+	Instance Instance
 	// Dependencies: the instances the connection references point to, by
 	// parameter path. References to external connections are not listed.
 	Dependencies []Dependency
@@ -122,15 +125,14 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	// 7. Descriptor: the descriptor ConfigMap, checked against the
-	// contracts, and the credentials Secrets of the outputs.
-	desc, credentials, err := descriptor(session, inst, in.Contracts, value.AsMap(res["instance"]), value.AsList(res["provides"]))
+	// 7. Provides: the outputs, checked against the contracts, and their
+	// credentials Secrets.
+	outputs, credentials, err := provided(session, inst, in.Contracts, value.AsList(res["provides"]))
 	if err != nil {
 		return nil, err
 	}
-	// 8. Objects: the descriptor, the credentials Secrets, then the
-	// mapping's objects.
-	out := &Result{Objects: append([]M{desc}, credentials...), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
+	// 8. Objects: the credentials Secrets, then the mapping's objects.
+	out := &Result{Objects: credentials, Instance: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}

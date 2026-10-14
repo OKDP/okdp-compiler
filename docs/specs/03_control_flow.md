@@ -7,7 +7,7 @@ template writes `{{ if }}`, `{{ range }}`, `{{ with }}`, `merge` and
 the document at its place, never lines to indent (`toYaml | nindent` has no
 equivalent, and no use).
 
-Four kinds of document share the directives, the
+Three kinds of document share the directives, the
 [expressions](02_service_definition.md#expressions) and the
 [functions](04_functions.md):
 
@@ -16,7 +16,6 @@ Four kinds of document share the directives, the
 | the mapping: the sections of `okdp.yaml` and the values file, `values.cel.yaml` ([service definition](02_service_definition.md#sections)) | all |
 | the values of an OAuth client's chart, `internal/okdp/oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
 | the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `internal/okdp/generated-secret.cel.yaml`, embedded in the compiler | all |
-| the [descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap), `internal/okdp/descriptor.cel.yaml`, embedded in the compiler | all |
 
 ## Directives
 
@@ -122,9 +121,8 @@ The names an expression may read, from the outermost:
 
 1. The context variables of the document: those of the mapping
    ([context](02_service_definition.md#context)); a client template adds
-   `client` and `names`, the descriptor template `instance` and
-   `outputs`; the generated Secret template has `args`, `release` and
-   `labels` alone.
+   `client` and `names`; the generated Secret template has `args`,
+   `release` and `labels` alone.
 2. The `vars` bindings, in order, each seeing those before it.
 3. In a `$for`, its variable, then its `$vars` bindings, in order. A `$for`
    in its `$each`, `$key` or `$value` adds its own.

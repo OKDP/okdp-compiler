@@ -66,14 +66,16 @@ func tree(t *testing.T, dir string) map[string]string {
 }
 
 // TestRun: the example compiled into a directory holding the files of a
-// previous compile: it holds what the example's output holds, templates/
-// included, the files of the previous compile overwritten.
+// previous compile: it holds what the example's output holds, the files of
+// the previous compile overwritten.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"instance.values.yaml", "okdp.dependencies.yaml", filepath.Join("templates", "okdp.yaml")} {
+	// The files of an earlier compile: overwritten, and the objects files
+	// removed, the instance having no objects.
+	for _, name := range []string{"instance.values.yaml", "okdp.dependencies.yaml", "okdp.instance.yaml", "okdp.objects.yaml", "templates/okdp.yaml"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}

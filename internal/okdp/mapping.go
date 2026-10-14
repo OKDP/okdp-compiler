@@ -12,7 +12,7 @@
 // values.cel.yaml or values.yaml.
 //
 // The compiler's own templates (oidc-dcr.cel.yaml,
-// generated-secret.cel.yaml, descriptor.cel.yaml) are written in the same
+// generated-secret.cel.yaml) are written in the same
 // language, with the same functions: vars, errors, then the values they
 // compute (compile.Session.Eval), their errors under their file's name.
 

@@ -1,5 +1,6 @@
 # A compile: status 0, nothing printed, the example's outputs written: the
-# instance as one chart, its objects, and the instances it depends on.
+# instance as one chart, what it publishes, and the instances it depends
+# on; no objects file without objects.
 env OKDP_CHARTS=examples/02_advanced/.charts OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
 status 0 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o $WORK/files
 ! stdout .
@@ -7,8 +8,8 @@ status 0 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0
 cmp $WORK/files/Chart.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/Chart.yaml
 cmp $WORK/files/instance.values.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/instance.values.yaml
 cmp $WORK/files/okdp.dependencies.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/okdp.dependencies.yaml
-cmp $WORK/files/okdp.objects.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/okdp.objects.yaml
-cmp $WORK/files/templates/okdp.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/templates/okdp.yaml
+cmp $WORK/files/okdp.instance.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/okdp.instance.yaml
+! exists $WORK/files/okdp.objects.yaml $WORK/files/templates
 
 # --context 1:<file>: a project's file, level 1, merged after the platform's
 # (level 0, no prefix), whatever the order of the flags, and before the
@@ -19,7 +20,9 @@ status 0 okdp-compile --package examples/03_full/input/db/catalog/workspace/3.2.
 ! stderr .
 cmp $WORK/full/instance.values.yaml examples/03_full/output/projects/demo/instances/demo-workspace/instance.values.yaml
 cmp $WORK/full/okdp.dependencies.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.dependencies.yaml
+cmp $WORK/full/okdp.instance.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.instance.yaml
 cmp $WORK/full/okdp.objects.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.objects.yaml
+cmp $WORK/full/templates/okdp.yaml examples/03_full/output/projects/demo/instances/demo-workspace/templates/okdp.yaml
 status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml --context 1:testdata/context/1/redefines-platform-connection.yaml -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o $WORK/project
 stderr '^error: context layer 2 \(level 1\): connections.platform-db is set at level 0 \(--context, Inputs.Context\): a level adds values, it does not change a lower level.s$'
 ! exists $WORK/project

@@ -7,8 +7,8 @@ version, and the host functions, the language's own (Helm's and sprig's
 `okdpLabels`, `okdpGeneratedSecret`...).
 
 Every expression may call them: those of the mapping and of the
-compiler's templates, the OAuth client's, the generated Secret's and the
-descriptor's ([control flow](03_control_flow.md)). Nothing else is callable: no
+compiler's templates, the OAuth client's and the generated Secret's
+([control flow](03_control_flow.md)). Nothing else is callable: no
 template of a chart (`include`, `tpl`), no Go template function that is not
 below.
 

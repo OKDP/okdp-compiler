@@ -103,7 +103,8 @@ func withFiles(files fstest.MapFS) *Definition {
 	return &d
 }
 
-// TestCompile: final values and descriptor of a compile from memory.
+// TestCompile: final values and what the instance publishes, a compile
+// from memory.
 func TestCompile(t *testing.T) {
 	v, err := chart.ParseValues([]byte("replicas: 3\n"))
 	if err != nil {
@@ -123,12 +124,11 @@ func TestCompile(t *testing.T) {
 	if !reflect.DeepEqual(app, want) {
 		t.Errorf("values:\n got %#v\nwant %#v", app, want)
 	}
-	if len(res.Objects) != 1 {
-		t.Fatalf("objects: got %d, want the descriptor only", len(res.Objects))
+	if res.Objects != nil {
+		t.Errorf("objects: got %d, want none", len(res.Objects))
 	}
-	data := value.AsMap(res.Objects[0]["data"])
-	if data["url"] != "https://demo-app.example.org" || data["service"] != "demo" || data["version"] != "1.2.3" {
-		t.Errorf("descriptor data: %#v", data)
+	if want := (Instance{URL: "https://demo-app.example.org", Usage: "demo\n"}); !reflect.DeepEqual(res.Instance, want) {
+		t.Errorf("instance: got %#v, want %#v", res.Instance, want)
 	}
 }
 
@@ -488,9 +488,9 @@ app:
 	}
 }
 
-// TestObjects: the objects section (directives included) after the
-// descriptor, in Result.Objects and in no chart: okdp is a dependency key
-// as another; global.okdp.charts names no chart of the objects.
+// TestObjects: the objects section (directives included), in
+// Result.Objects and in no chart: okdp is a dependency key as another;
+// global.okdp.charts names no chart of the objects.
 func TestObjects(t *testing.T) {
 	names := func(objects []map[string]any) []string {
 		var out []string
@@ -516,11 +516,11 @@ objects:
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := []string{"ConfigMap/demo-app-okdp", "ConfigMap/demo-app-extra", "Password/demo-app-internal-token", "ExternalSecret/demo-app-internal"}
+	all := []string{"ConfigMap/demo-app-extra", "Password/demo-app-internal-token", "ExternalSecret/demo-app-internal"}
 	if got := names(res.Objects); !slices.Equal(got, all) {
 		t.Errorf("Result.Objects: got %v, want %v", got, all)
 	}
-	if lbl := value.AsMap(value.Dig(res.Objects[1], "metadata.labels")); lbl["okdp.io/service"] != "demo" || lbl["app.kubernetes.io/version"] != nil || lbl["helm.sh/chart"] != nil {
+	if lbl := value.AsMap(value.Dig(res.Objects[0], "metadata.labels")); lbl["okdp.io/service"] != "demo" || lbl["app.kubernetes.io/version"] != nil || lbl["helm.sh/chart"] != nil {
 		t.Errorf("labels: %#v", lbl)
 	}
 	if got := slices.Sorted(maps.Keys(res.Charts)); !slices.Equal(got, []string{"app"}) {
@@ -528,8 +528,8 @@ objects:
 	}
 	// A mapping that renders no dependency: no chart, the objects all the
 	// same.
-	d.Okdp, d.Values = []byte("instance: {url: https://x}\n"), []byte("app: ~\n")
-	if res, err = Compile(context.Background(), &d, inputs()); err != nil || len(res.Values) != 0 || len(res.Objects) != 1 {
+	d.Values = []byte("app: ~\n")
+	if res, err = Compile(context.Background(), &d, inputs()); err != nil || len(res.Values) != 0 || len(res.Objects) != len(all) {
 		t.Errorf("no output: %v %v", err, res)
 	}
 	// okdp, the key of a dependency.

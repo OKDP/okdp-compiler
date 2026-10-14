@@ -212,7 +212,7 @@ errors:
   - $if: ${{ values.upstream.?api.?replicaCount.hasValue() }}
     $value: "workspace: set replicas, not upstream.api.replicaCount"
 
-# What OKDP shows of the instance: its descriptor ConfigMap.
+# What OKDP shows of the instance: okdp.instance.yaml, with provides.
 instance:
   url: https://${{ host }}
   usage: |
@@ -244,7 +244,7 @@ provides:
       stringData: {region: us-east-1}
 
 # OKDP's own objects, whole manifests: okdp.objects.yaml, after the
-# descriptor and the credentials Secrets, which the umbrella renders as written.
+# credentials Secrets, which the umbrella renders as written.
 objects:
   - apiVersion: v1
     kind: ConfigMap

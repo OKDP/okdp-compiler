@@ -1,11 +1,12 @@
 // Package okdp compiles an OKDP service instance into the values of its
 // upstream charts with a YAML + CEL mapping (internal/compile), and adds the
-// OKDP objects of the instance (its descriptor ConfigMap, the credentials
-// Secrets of the connections it provides, and the objects section of the
-// mapping). It holds OKDP's rules: the package read from a filesystem
-// (LoadDefinition), the platform context derived from global.okdp, the
-// connections and their contracts, the descriptor, the OAuth clients; and
-// the order of the stages (Compile).
+// OKDP objects of the instance (the credentials Secrets of the connections
+// it provides, and the objects section of the mapping) and what it
+// publishes (its URL, its usage, the connections it provides). It holds
+// OKDP's rules: the package read from a filesystem (LoadDefinition), the
+// platform context derived from global.okdp, the connections and their
+// contracts, the outputs, the OAuth clients; and the order of the stages
+// (Compile).
 //
 // The values are read, merged and checked against the charts' schemas as
 // Helm does (internal/chart; testdata/helm holds what `helm template`

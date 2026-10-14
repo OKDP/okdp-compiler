@@ -58,8 +58,8 @@ The file is one YAML document: a second one, after `---`, fails
 | Field | Type | Meaning |
 |---|---|---|
 | `apiVersion` | string | Required: `v2`. |
-| `name` | string | Required. The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, descriptor `data.service`, heading of the parameter schema violations, the umbrella chart's name. |
-| `version` | string | Required, SemVer, as a [dependency's](#dependencies) is: the package's version, `<upstream>-<okdp semver>` by convention: `service.version`, descriptor `data.version`, the umbrella chart's version. |
+| `name` | string | Required. The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, heading of the parameter schema violations, the umbrella chart's name. |
+| `version` | string | Required, SemVer, as a [dependency's](#dependencies) is: the package's version, `<upstream>-<okdp semver>` by convention: `service.version`, the umbrella chart's version. |
 | `type` | string | Absent or `application`: a package is an application chart. |
 | `dependencies` | list of [dependencies](#dependencies) | The upstream charts of the service. |
 | `kubeVersion`, `description`, `keywords`, `home`, `sources`, `maintainers` (`name`, `email`, `url`), `icon`, `appVersion`, `deprecated`, `annotations` (strings) | as Helm defines them | Not read by the compiler: written back to the umbrella's `Chart.yaml`. |
@@ -533,9 +533,9 @@ mistake fails the compile before anything is evaluated. Then:
    are checked together for their shapes.
 4. The OAuth clients are checked across clients, their charts added in
    `dcr` mode ([oidcClients](#oidcclients)); then the
-   compile builds the descriptor from `instance` and `provides`, checked
-   against the contracts, and the final values of each dependency the
-   values file gives and of each client chart.
+   compile checks `provides` against the contracts, renders the
+   credentials Secrets, and computes the final values of each dependency
+   the values file gives and of each client chart.
 
 A section does not see the others: there is no variable of the values or
 of `instance`. A value used by several sections is a `vars` binding.
@@ -616,9 +616,9 @@ A list of OKDP's own objects, whole manifests: the compiler adds nothing to
 them (namespace and labels are the mapping's). After evaluation, every item
 must be a map with a non-empty `kind` and `metadata.name`
 (`- at '/objects/<i>': missing property 'kind'`). A value that is not a
-list fails; absent or null, there are none. They follow the descriptor and the
-credentials Secrets in `Result.Objects`, written to the objects file the
-umbrella renders as written:
+list fails; absent or null, there are none. They follow the credentials
+Secrets in `Result.Objects`, written to the objects file the umbrella
+renders as written:
 [the objects file](01_inputs_outputs.md#the-objects-file).
 
 ### instance
@@ -626,10 +626,12 @@ umbrella renders as written:
 | Key | Meaning |
 |---|---|
 | `url` | the instance's URL, a string, trimmed |
-| `usage` | how to use the instance, a string, trimmed, with one final newline |
+| `usage` | how to use the instance, a string, trimmed, with one final newline when not empty |
 
-Other keys are ignored. Both go to the descriptor ConfigMap:
-[outputs](01_inputs_outputs.md#outputs). A value that is not a map fails;
+Other keys are ignored. Both go to `Result.Instance`, written to
+`okdp.instance.yaml` with the connections the instance provides, what a
+control plane or a console reads of the instance
+([the instance file](01_inputs_outputs.md#the-instance-file)). A value that is not a map fails;
 absent or null, both are empty. `url` and `usage` are strings when set:
 another value, a null included, fails rather than is printed as text,
 `- at '/instance/url': got number, want string`.
@@ -650,7 +652,9 @@ provides:
       stringData: {region: eu}
 ```
 
-A list of outputs, the connections the instance publishes. Each item:
+A list of outputs, the connections the instance publishes, in
+`Result.Instance` and `okdp.instance.yaml`
+([the instance file](01_inputs_outputs.md#the-instance-file)). Each item:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -681,7 +685,7 @@ A key of `generate` is checked as one of `okdpGeneratedSecret`'s `keys`
 order, their fields in alphabetical order, and the first error is
 reported; the required fields the item lacks, and the schema's violations
 of that item, all at once, one line each
-([descriptor ConfigMap](01_inputs_outputs.md#descriptor-configmap)).
+([the instance file](01_inputs_outputs.md#the-instance-file)).
 
 #### secret
 

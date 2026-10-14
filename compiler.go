@@ -21,7 +21,8 @@
 // renders the upstream chart from its repository. The compiler reads only
 // its defaults and schema, from the chart cache (Inputs.Charts). Write gives
 // the instance as one chart, an umbrella over these upstream charts, its
-// values and OKDP's own objects, and the instances it depends on.
+// values and OKDP's own objects, what the instance publishes and the
+// instances it depends on.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
@@ -56,6 +57,12 @@ type (
 	// Result: what a compile produces, its warnings among them (Warnings),
 	// which do not fail it.
 	Result = okdp.Result
+	// Instance: what an instance publishes (Result.Instance), as
+	// InstanceFile holds it: its URL, its usage, the connections it
+	// provides.
+	Instance = okdp.Instance
+	// Output: a connection an instance provides (Instance.Provides).
+	Output = okdp.Output
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
@@ -72,6 +79,10 @@ const (
 	// none, for a deployer that orders the releases (Flux dependsOn, Argo CD
 	// sync waves).
 	DependenciesFile = umbrella.DependenciesFile
+	// InstanceFile: Result.Instance, what the instance publishes (url,
+	// usage, provides), for a control plane or a console that reads the
+	// deployments repository.
+	InstanceFile = umbrella.InstanceFile
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object,
 	// written when there are objects: plain manifests, which ObjectsTemplate
 	// renders as written in the umbrella's release.
@@ -101,8 +112,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // directory -> content: Chart.yaml, the instance as one chart, the
 // package's Chart.yaml with the dependencies compiled, an umbrella over the
 // upstream charts of its keys; UmbrellaValues, the final values of each key
-// under the key; DependenciesFile; and, when res has objects, ObjectsFile
-// and ObjectsTemplate. res is what Compile returned: Write does not check
+// under the key; DependenciesFile; InstanceFile; and, when res has
+// objects, ObjectsFile and ObjectsTemplate. res is what Compile returned: Write does not check
 // it again. Every file is built before Write returns.
 func Write(res *Result) (map[string][]byte, error) {
 	return umbrella.Write(res)

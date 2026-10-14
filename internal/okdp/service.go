@@ -51,8 +51,8 @@ var packageKeys = []string{"require", "roles", "dependsOn", "defaults", "upstrea
 // Service: the engine-neutral part of a package, as a compile reads it
 // (Definition.service).
 type Service struct {
-	Name      string      // Chart.yaml's name, the service: labels, descriptor, parameter schema errors
-	Version   string      // Chart.yaml's version, the package's: descriptor
+	Name      string      // Chart.yaml's name, the service: labels, parameter schema errors
+	Version   string      // Chart.yaml's version, the package's: the umbrella's
 	Roles     []string    // okdp.yaml: catalog, not read by the compiler
 	DependsOn []string    // okdp.yaml: catalog, not read by the compiler
 	Require   []string    // okdp.yaml: the global.okdp keys the service needs

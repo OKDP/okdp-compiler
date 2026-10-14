@@ -20,8 +20,8 @@ const MetadataFile = "Chart.yaml"
 // order the umbrella writes them in.
 type Metadata struct {
 	APIVersion   string            `yaml:"apiVersion" json:"apiVersion"` // v2
-	Name         string            `yaml:"name" json:"name"`             // the service: labels, descriptor, parameter schema errors
-	Version      string            `yaml:"version" json:"version"`       // the package's version, SemVer: descriptor, the umbrella's
+	Name         string            `yaml:"name" json:"name"`             // the service: labels, parameter schema errors
+	Version      string            `yaml:"version" json:"version"`       // the package's version, SemVer: the umbrella's
 	KubeVersion  string            `yaml:"kubeVersion,omitempty" json:"kubeVersion,omitempty"`
 	Description  string            `yaml:"description,omitempty" json:"description,omitempty"`
 	Type         string            `yaml:"type,omitempty" json:"type,omitempty"` // application, or absent

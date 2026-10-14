@@ -1,0 +1,4 @@
+url: ""
+usage: |
+  Says hello, from demo-hello.
+provides: []

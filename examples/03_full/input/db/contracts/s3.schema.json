@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "S3 bucket",
-  "description": "Example contract: an S3 bucket. No internal naming convention: a connection of the platform, the project or the instance, or an output read from an instance's descriptor.",
+  "description": "Example contract: an S3 bucket. No internal naming convention: a connection of the platform, the project or the instance, or an output an instance provides, read from its okdp.instance.yaml.",
   "type": "object",
   "x-okdp-contract": "s3",
   "properties": {

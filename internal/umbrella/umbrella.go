@@ -1,9 +1,9 @@
 // Package umbrella writes a compile as the files of okdp-compile (Write):
 // one chart for the whole instance, an umbrella over the upstream charts of
 // its keys with OKDP's own objects, for one Helm release per instance under
-// the release name its values were compiled for, and the instances it
-// depends on. The caller writes them (the CLI to a directory, a server to
-// git).
+// the release name its values were compiled for, what the instance
+// publishes and the instances it depends on. The caller writes them (the
+// CLI to a directory, a server to git).
 package umbrella
 
 import (
@@ -29,6 +29,11 @@ const (
 	// deployer that orders the releases (Flux dependsOn, Argo CD sync
 	// waves). Helm ignores it.
 	DependenciesFile = "okdp.dependencies.yaml"
+	// InstanceFile: Result.Instance, what the instance publishes: url,
+	// usage, and provides, the connections it provides ([] when none), what
+	// a control plane or a console reads of it in the deployments
+	// repository. Helm ignores it.
+	InstanceFile = "okdp.instance.yaml"
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object:
 	// OKDP's own objects, manifests as the compiler wrote them, which Helm
 	// does not template (ObjectsTemplate). Written when there are objects.
@@ -60,7 +65,7 @@ const objectsTemplate = `{{- /* OKDP's own objects: ` + ObjectsFile + `, as okdp
 //     the key: its .Chart.Name is the key);
 //   - ValuesFile, the final values of each key under the key, each with its
 //     own global, marked generated;
-//   - DependenciesFile;
+//   - DependenciesFile and InstanceFile;
 //   - ObjectsFile, marked generated, and ObjectsTemplate, when res has
 //     objects.
 //
@@ -90,7 +95,7 @@ func Write(res *okdp.Result) (map[string][]byte, error) {
 		}
 		c.Dependencies = append(c.Dependencies, d)
 	}
-	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}, DependenciesFile: {res.Dependencies}}
+	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}, DependenciesFile: {res.Dependencies}, InstanceFile: {res.Instance}}
 	for _, o := range res.Objects {
 		docs[ObjectsFile] = append(docs[ObjectsFile], o)
 	}

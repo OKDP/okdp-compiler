@@ -53,8 +53,9 @@ func Example() {
 	// res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
 	// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
 	//               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
-	// res.Objects:  OKDP's own objects: the descriptor ConfigMap, the credentials Secrets of the
-	//               provided connections, the mapping's objects section (okdp.objects.yaml)
+	// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
+	//               the mapping's objects section (okdp.objects.yaml)
+	// res.Instance: what the instance publishes: its url, its usage, the connections it provides (okdp.instance.yaml)
 	// res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
 
 	// What okdp-compile -o <dir> writes, path -> content.
@@ -70,7 +71,7 @@ func Example() {
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database}]
-	// [Chart.yaml instance.values.yaml okdp.dependencies.yaml okdp.objects.yaml templates/okdp.yaml]
+	// [Chart.yaml instance.values.yaml okdp.dependencies.yaml okdp.instance.yaml]
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.
@@ -104,7 +105,7 @@ func ExampleCompile() {
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
 	}
-	fmt.Println("charts:", len(res.Values), "objects:", len(res.Objects))
+	fmt.Println("charts:", len(res.Values), "outputs:", len(res.Instance.Provides))
 	fmt.Println("replicaCount:", res.Values["app"]["replicaCount"])
 	// Each chart key is rendered by the upstream chart res.Charts[key].
 	for _, key := range slices.Sorted(maps.Keys(res.Charts)) {
@@ -115,7 +116,7 @@ func ExampleCompile() {
 		fmt.Printf("dependency: %s -> %s (%s)\n", d.Field, d.Instance, d.Contract)
 	}
 	// Output:
-	// charts: 2 objects: 1
+	// charts: 2 outputs: 1
 	// replicaCount: 2
 	// app: https://charts.example.org app 1.8.0
 	// oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
@@ -177,7 +178,7 @@ func ExampleCompile_server() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(slices.Sorted(maps.Keys(res.Charts)), res.Objects[0]["kind"])
+	fmt.Println(slices.Sorted(maps.Keys(res.Charts)), res.Instance.URL)
 	// Past its cost limit, or cancelled, a compile fails.
 	in.CostLimit = 10
 	_, err = compiler.Compile(ctx, def, in)
@@ -186,7 +187,7 @@ func ExampleCompile_server() {
 	_, err = compiler.Compile(ctx, def, in)
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
-	// [app oidc-dcr] ConfigMap
+	// [app oidc-dcr] https://demo-webapp.okdp.example.org
 	// okdp.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }

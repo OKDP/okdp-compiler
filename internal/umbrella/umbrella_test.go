@@ -93,9 +93,10 @@ annotations:
 }
 
 // TestWrite: the umbrella's values, marked generated, the dependencies as
-// a YAML list, [] when there is none, and the objects as a YAML stream,
-// marked generated, with the template that renders it, indented by 2
-// spaces; without objects, neither file.
+// a YAML list, [] when there is none, what the instance publishes, its
+// provides [] when none, and the objects as a YAML stream, marked
+// generated, with the template that renders it, indented by 2 spaces;
+// without objects, neither file.
 func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &okdp.Result{
@@ -103,6 +104,9 @@ func TestWrite(t *testing.T) {
 		Charts:       map[string]chart.Ref{"oidc-dcr": okdp.DcrSource, "app": app},
 		Objects:      []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}, {"kind": "Secret", "data": nil}},
 		Dependencies: []okdp.Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[0].database"}},
+		Instance: okdp.Instance{URL: "https://x", Usage: "use it\n", Provides: []okdp.Output{
+			{Name: "demo-app", Contract: "http", Values: map[string]any{"url": "https://x"}, SecretRef: &okdp.SecretRef{Name: "creds"}},
+		}},
 	}
 	files, err := Write(res)
 	if err != nil {
@@ -111,6 +115,7 @@ func TestWrite(t *testing.T) {
 	want := map[string]string{
 		ValuesFile:       generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
 		DependenciesFile: "- instance: demo-db\n  contract: database\n  field: backends[0].database\n",
+		InstanceFile:     "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
 		ObjectsFile:      generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
 		ObjectsTemplate:  "{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}\n{{ .Files.Get \"okdp.objects.yaml\" }}\n",
 	}
@@ -122,12 +127,15 @@ func TestWrite(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", name, got, w)
 		}
 	}
-	// No dependency, no object.
-	res.Dependencies, res.Objects = nil, nil
+	// No dependency, no object, nothing published.
+	res.Dependencies, res.Objects, res.Instance = nil, nil, okdp.Instance{}
 	if files, err = Write(res); err != nil || string(files[DependenciesFile]) != "[]\n" {
 		t.Errorf("no dependency: %v %q", err, files[DependenciesFile])
 	}
-	if _, ok := files[ObjectsFile]; ok || len(files) != 3 {
+	if got := string(files[InstanceFile]); got != "url: \"\"\nusage: \"\"\nprovides: []\n" {
+		t.Errorf("nothing published: %q", got)
+	}
+	if _, ok := files[ObjectsFile]; ok || len(files) != 4 {
 		t.Errorf("no object: got %v", slices.Sorted(maps.Keys(files)))
 	}
 }

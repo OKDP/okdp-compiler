@@ -104,7 +104,7 @@ func IsDNSLabel(s string) bool {
 const ReleaseMax = 53
 
 // IsRelease: name is a release name, as Helm accepts it and OKDP derives
-// object names from it (<release>-okdp, Secrets): a DNS-1123 label of
+// object names from it (<release>-<suffix>, Secrets): a DNS-1123 label of
 // ReleaseMax characters at most.
 func IsRelease(name string) bool {
 	return len(name) <= ReleaseMax && dnsLabel.MatchString(name)

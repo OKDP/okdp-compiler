@@ -2,7 +2,7 @@
 // (x-okdp-connection-ref), resolved to an external connection or to an
 // instance of the namespace, and completed against their contract; the
 // contracts, read at each use (readContract), and their checks, which the
-// outputs of the descriptor go through too.
+// outputs the instance provides go through too.
 
 package okdp
 

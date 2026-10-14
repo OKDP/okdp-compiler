@@ -26,11 +26,12 @@ by its name, repository and pinned version; `okdp.yaml` says what the
 service needs of the platform, which defaults each chart takes and what an
 instance may override, and holds the mapping's sections that are not chart
 values: `vars`, `errors`, the OAuth clients, OKDP's own objects, the
-descriptor and the provided connections; `values.cel.yaml`, the values
-file, says how the values of each chart follow from the parameters, the
-platform values (`global.okdp`) and the connections. `okdp-compile` turns
-the values of one instance into the final values of every chart and
-OKDP's own objects; a deployer then renders each upstream chart from its
+instance's URL and usage, and the provided connections; `values.cel.yaml`,
+the values file, says how the values of each chart follow from the
+parameters, the platform values (`global.okdp`) and the connections.
+`okdp-compile` turns the values of one instance into the final values of
+every chart, OKDP's own objects and what the instance publishes
+(`okdp.instance.yaml`); a deployer then renders each upstream chart from its
 repository with its values, as the
 [chart index](specs/01_inputs_outputs.md#chart-index) names it. Nothing of
 the package is published as a chart.
@@ -38,7 +39,7 @@ the package is published as a chart.
 ```
 <name>/
 ├── Chart.yaml              name, version, the upstream charts (dependencies), Helm's other metadata
-├── okdp.yaml               required platform values, roles, dependsOn, OKDP's defaults, upstream values, protect, append; vars, errors, OAuth clients, OKDP's own objects, descriptor, provided connections
+├── okdp.yaml               required platform values, roles, dependsOn, OKDP's defaults, upstream values, protect, append; vars, errors, OAuth clients, OKDP's own objects, URL and usage, provided connections
 ├── values.cel.yaml         the computed values of each chart (values.yaml when none is computed)
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
@@ -64,8 +65,8 @@ dependency is rendered, with its chart's defaults when the file does not
 write its key: `Chart.yaml` alone is a package
 ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
 Add `okdp.yaml` when the service needs more: platform values, OKDP's
-defaults, instance upstream values, `vars` and OKDP's sections (the
-descriptor, connections, OAuth clients, objects); and `config.schema.json`
+defaults, instance upstream values, `vars` and OKDP's sections (URL and
+usage, connections, OAuth clients, objects); and `config.schema.json`
 when an instance has parameters. Once a value needs an expression or a
 directive (`${{ }}`, `$if`), rename the file `values.cel.yaml`: the
 compiler reads both alike, but a `values.yaml` that holds them, which
@@ -165,8 +166,8 @@ Trino 480); release-please owns the OKDP half. Helm's other fields
 (`description`, `maintainers`, `annotations`...) are written back to the
 umbrella's `Chart.yaml`, not read. The mapping sees `name` and `version`
 as `service` (`service.name`, `service.version`); the labels of OKDP's
-objects take `app.kubernetes.io/name` and `okdp.io/service` from the name,
-the descriptor its `service` and `version`. `roles` and `dependsOn`, in
+objects take `app.kubernetes.io/name` and `okdp.io/service` from the name.
+`roles` and `dependsOn`, in
 `okdp.yaml`, are the console's: the compiler does not read them
 ([Chart.yaml](specs/02_service_definition.md#chartyaml),
 [okdp.yaml](specs/02_service_definition.md#okdpyaml)).
@@ -301,7 +302,8 @@ upstream:
     names and ports (what `provides` publishes is built from them);
   - authentication: OIDC settings, auth types, access control;
   - the exposure: `ingress.enabled`, `className`, `hosts`, `tls` (the host is
-    registered with the identity provider and published in the descriptor);
+    registered with the identity provider and published in
+    `okdp.instance.yaml`);
   - the wiring of Secrets: `existingSecret`, `*SecretName`, any key that
     would put a credential in the values;
   - the switches of features kept off for determinism (`admissionController`,
@@ -360,7 +362,7 @@ objects:                   # OKDP's own objects, whole manifests
   - $spread: >-
       ${{ okdpGeneratedSecret({'name': sessionSecret, 'keys': [{'key': 'session-key', 'length': 48}]}) }}
 
-instance:                  # the descriptor ConfigMap <release>-okdp
+instance:                  # url and usage, in okdp.instance.yaml
   url: https://${{ host }}
   usage: |
     A web application. Open https://${{ host }}
@@ -386,8 +388,8 @@ provides:                  # the connections the instance publishes
   it gives it: to leave a dependency out, write its key
   ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
   Any other value that is not a map fails the compile. OKDP's own objects
-  are not values: the descriptor reaches the cluster in the umbrella,
-  whatever the file leaves out
+  are not values: they reach the cluster in the umbrella, whatever the
+  file leaves out
   ([the objects file](specs/01_inputs_outputs.md#the-objects-file)).
 - `errors` fails the compile with every message at once. A message is the
   `$value` of an item with its condition, `$if`; `$for` checks every
@@ -397,8 +399,8 @@ provides:                  # the connections the instance publishes
   from its Secret, `platform.oidcClientSecret` for the main client
   ([recipe](#oauth-clients)).
 - `objects` are whole manifests (a `kind` and a `metadata.name` at least) the
-  umbrella renders as written, after the descriptor (a `{{` in them is not
-  Helm's): generated Secrets, hooks, custom
+  umbrella renders as written, after the credentials Secrets (a `{{` in
+  them is not Helm's): generated Secrets, hooks, custom
   resources, a workload the upstream charts lack. A component without an
   upstream chart (cnpg-postgresql) declares no dependency, has no values
   file, and writes everything here.
@@ -892,8 +894,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   name a contract's convention promises (`<release>-app`,
   `<release>-hive-metastore`) is kept as the convention writes it.
 - **One object, one name.** Give each object of a kind its own name in its
-  namespace (the descriptor `<release>-okdp` and the credentials Secrets
-  included): applied, the second would replace the first.
+  namespace (the credentials Secrets included): applied, the second would
+  replace the first.
 - **No credential in values.** Connections and values carry `secretRef`
   names, never passwords: values end up in Git and in readable objects. A
   secret field in a connection or in `provides` fails the compile.

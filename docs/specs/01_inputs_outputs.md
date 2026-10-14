@@ -19,7 +19,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 
 A nil `*Definition`, context or file system panics: the caller gives them.
 The names are checked before anything is read: the release is a release
-name Helm accepts, from which OKDP derives object names (`<release>-okdp`,
+name Helm accepts, from which OKDP derives object names (`okdpFullname`,
 Secrets), and the namespace a namespace name, both DNS-1123 labels
 (lowercase letters, digits and `-`, a letter or a digit at each end); an
 empty one fails as another:
@@ -604,7 +604,7 @@ fails.
   non-secret field, completed, then valid against the schema; and an output
   published under the release name, of a contract with `x-okdp-internal`,
   has the values an internal reference to the release resolves to
-  ([Descriptor ConfigMap](#descriptor-configmap)).
+  ([The instance file](#the-instance-file)).
 
 Valid against the schema: the completed values (no `secretRef`, no `okdp`),
 validated as a chart's values against its `values.schema.json`
@@ -1168,7 +1168,8 @@ chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 |---|---|---|
 | `Values` | `map[string]map[string]any` | chart key -> its final values ([Merge precedence](#merge-precedence)) |
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
-| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [descriptor ConfigMap](#descriptor-configmap), the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file) |
+| `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file); nil when none |
+| `Instance` | `compiler.Instance` | what the instance publishes: its URL, its usage and the connections it provides ([The instance file](#the-instance-file)) |
 | `Dependencies` | `[]Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
@@ -1184,9 +1185,10 @@ and in `dcr` mode the chart of each OAuth client. Numbers are float64, as
 in Helm values.
 `compiler.Write(res)` gives the files the binary writes from them, path in
 the output directory -> content ([command line](../01_usage.md#command-line)):
-the [umbrella chart](#umbrella-chart) and [the objects
-file](#the-objects-file); `examples/02_advanced/output/` holds those of the
-example ([Example](#example)).
+the [umbrella chart](#umbrella-chart), [the instance
+file](#the-instance-file) and [the objects file](#the-objects-file);
+`examples/02_advanced/output/` holds those of the example
+([Example](#example)).
 
 The keys of a compile are the keys of the `Chart.yaml` dependencies, DNS
 labels ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
@@ -1328,36 +1330,50 @@ waitForProvider:
   ttlSeconds: 600                      # upstream default
 ```
 
-### Descriptor ConfigMap
+### The instance file
 
-One per instance, first of `Objects`: what the console lists, and what other
-instances reference by name. Built from the mapping's `instance` and
-`provides` sections ([Sections](02_service_definition.md#sections)) by a
-template the compiler embeds, `internal/okdp/descriptor.cel.yaml`, whose
-evaluation counts in the compile's CEL cost limit.
-
-| Field | Value |
-|---|---|
-| `metadata.name` | `<release>-okdp`, as `okdpFullname('okdp')` (never cut: the release has at most 53 characters) |
-| `metadata.namespace` | `Inputs.Namespace` |
-| `metadata.labels` | the labels, plus `okdp.io/provides-<contract>: "true"` per contract provided |
-| `data.service` | `name` of `Chart.yaml` |
-| `data.version` | `version` of `Chart.yaml` |
-| `data.url` | `instance.url`, trimmed |
-| `data.usage` | `instance.usage`, trimmed, with a final newline |
-| `data.outputs.yaml` | the provided connections, a YAML list; `[]` when none |
-
-The labels: the `labels` of the [context](02_service_definition.md#context),
-from `name` of `Chart.yaml` and the release.
-
-`outputs.yaml`: one item per `provides` item, keys sorted (Helm's `toYaml`):
+`okdp.instance.yaml` (`compiler.InstanceFile`): `Instance`, what the
+instance publishes, built from the mapping's `instance` and `provides`
+sections ([Sections](02_service_definition.md#sections)): what a control
+plane or a console reads of each instance in the deployments repository,
+and what other instances reference by name. `compiler.Write` (`-o`)
+writes it in every output, beside the [umbrella chart](#umbrella-chart),
+which gives the service's name and version; Helm ignores it. It is
+indented by 2 spaces, its keys in this order:
 
 | Key | Value |
 |---|---|
-| `contract` | `contract` of the item |
+| `url` | `instance.url`, trimmed; `""` when unset |
+| `usage` | `instance.usage`, trimmed, with a final newline; `""` when unset or blank |
+| `provides` | the provided connections, a YAML list, in the order of `provides`; `[]` when none |
+
+One item of `provides` per `provides` item, its keys in this order:
+
+| Key | Value |
+|---|---|
 | `name` | `name` of the item; `<release>` by default |
+| `contract` | `contract` of the item |
+| `values` | `values` of the item, [completed](#completion) against the contract, keys sorted |
 | `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
-| `values` | `values` of the item, [completed](#completion) against the contract |
+
+```go
+type Instance struct {
+	URL      string   `json:"url" yaml:"url"`           // what the console opens, trimmed; "" when none
+	Usage    string   `json:"usage" yaml:"usage"`       // how to use the instance, trimmed, with one final newline; "" when none
+	Provides []Output `json:"provides" yaml:"provides"` // the connections it provides, in the order of provides; nil when none
+}
+
+type Output struct {
+	Name      string         `json:"name" yaml:"name"`                               // the item's name; the release when it names none
+	Contract  string         `json:"contract" yaml:"contract"`                       // the contract it provides
+	Values    map[string]any `json:"values" yaml:"values"`                           // its values, completed against the contract
+	SecretRef *SecretRef     `json:"secretRef,omitempty" yaml:"secretRef,omitempty"` // the Secret of its credentials; nil when none
+}
+
+type SecretRef struct {
+	Name string `json:"name" yaml:"name"`
+}
+```
 
 Every item is checked for its shape first, with the mapping's other
 sections, every violation at once
@@ -1391,8 +1407,8 @@ references this one by name gets the values it publishes.
 
 The Secret of a `provides` item with a `secret`: named after the item's
 `secretRef` (`<name>-<contract>-credentials` by default), labelled
-`okdp.io/credentials-<contract>: "true"`. They follow the descriptor in
-`Objects`, in `provides` order.
+`okdp.io/credentials-<contract>: "true"`. They are first in `Objects`, in
+`provides` order.
 
 | `secret` | Objects |
 |---|---|
@@ -1421,8 +1437,7 @@ provides:
     secret: {stringData: {accessKey: ak, secretKey: sk}}
 ```
 
-`Objects`: `ConfigMap/demo-secrets-okdp`,
-`Password/store-a-s3-credentials-accesskey`,
+`Objects`: `Password/store-a-s3-credentials-accesskey`,
 `Password/store-a-s3-credentials-secretkey`,
 `ExternalSecret/store-a-s3-credentials`, `Secret/store-b-s3-credentials`.
 
@@ -1518,7 +1533,8 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 for one Helm release per instance, under the release name the values were
 compiled for. Two files, [the objects file](#the-objects-file) and its
 template when the instance has objects, and `okdp.dependencies.yaml`
-(`compiler.DependenciesFile`, [dependencies](#dependencies)), which Helm
+(`compiler.DependenciesFile`, [dependencies](#dependencies)) and
+`okdp.instance.yaml` ([the instance file](#the-instance-file)), which Helm
 ignores, by path in the directory:
 
 - `Chart.yaml`: the package's (`Result.Chart`), every field kept, in
@@ -1665,36 +1681,25 @@ oidc-dcr:
   # ... computed by the template (OAuth client charts)
 ```
 
-`okdp.objects.yaml` ([the objects file](#the-objects-file)): the
-descriptor ConfigMap, the instance's one object, and `templates/okdp.yaml`:
+`okdp.instance.yaml` ([the instance file](#the-instance-file)): its URL,
+its usage and its one output, under the release name, without
+credentials:
 
 ```yaml
-# Code generated by okdp-compile. DO NOT EDIT.
-apiVersion: v1
-data:
-  outputs.yaml: |
-    - contract: http
-      name: demo-webapp
-      values:
-        internalUrl: http://demo-webapp-app.demo.svc:8080
-        url: https://demo-webapp.okdp.example.org
-  service: webapp
-  url: https://demo-webapp.okdp.example.org
-  usage: |
-    A web application. Open https://demo-webapp.okdp.example.org
-  version: 1.0.0
-kind: ConfigMap
-metadata:
-  labels:
-    app.kubernetes.io/instance: demo-webapp
-    # ...
-    okdp.io/provides-http: "true"
-    okdp.io/service: webapp
-  name: demo-webapp-okdp
-  namespace: demo
+url: https://demo-webapp.okdp.example.org
+usage: |
+  A web application. Open https://demo-webapp.okdp.example.org
+provides:
+  - name: demo-webapp
+    contract: http
+    values:
+      internalUrl: http://demo-webapp-app.demo.svc:8080
+      url: https://demo-webapp.okdp.example.org
 ```
 
-And `okdp.dependencies.yaml` ([dependencies](#dependencies)):
+No objects file: the instance has no objects, no credentials Secret and no
+`objects` section. And `okdp.dependencies.yaml`
+([dependencies](#dependencies)):
 
 ```yaml
 - instance: demo-db
@@ -1717,4 +1722,7 @@ upstream values). Release
 writes. Its `okdp.dependencies.yaml` lists
 `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
-`$if`, is no dependency, and its chart is not in the chart cache.
+`$if`, is no dependency, and its chart is not in the chart cache. Its
+`okdp.instance.yaml` lists three outputs, one with its credentials, whose
+Secret is generated: its objects file holds the `Password` generators and
+the `ExternalSecret`, then the `objects` section.
