@@ -1,12 +1,12 @@
 # A compile error: status 1, the whole report on stderr, nothing written.
-env OKDP_CHARTS=examples/02_advanced/input/charts OKDP_CONTRACTS=examples/02_advanced/input/contracts
-status 1 okdp-compile --package examples/02_advanced/input/service --release demo-webapp --namespace demo --context examples/02_advanced/input/platform.yaml -f testdata/schema-violation.yaml -o $WORK/files
+env OKDP_CHARTS=examples/02_advanced/.charts OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
+status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml -f testdata/schema-violation.yaml -o $WORK/files
 ! stdout .
 cmp stderr $WORK/schema-violation.txt
 ! exists $WORK/files
 
 # A missing flag: status 1.
-status 1 okdp-compile --package examples/02_advanced/input/service --namespace demo
+status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --namespace demo
 stderr '^error: --release is required$'
 
 -- schema-violation.txt --

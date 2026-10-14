@@ -182,7 +182,7 @@ render with them. A UTF-8 byte order mark at the start of either file is
 dropped, as Helm drops it. Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
 it renders is compiled: the oidc-dcr chart in `dcr` mode with a client, the
-objects chart in every compile. `examples/02_advanced/input/charts/` holds the
+objects chart in every compile. `examples/02_advanced/.charts/` holds the
 example's charts unpacked, their `values.yaml` only: enough to compile, not
 to render (`charts.example.org/app-1.8.0/app/`,
 `registry.example.org/okdp/okdp-objects-1.0.0/okdp-objects/`,
@@ -313,10 +313,11 @@ Three top-level keys are not parameters of the service:
 
 `global` and `upstream` are checked with the parameters: a schema with
 `additionalProperties: false` declares them, `{"type": "object"}` at least
-(`examples/03_full/input/service/config.schema.json`). `connections` is
-not: a schema does not declare it, and a declaration of `connections` has
-no effect, its `default` included. A connection is checked against its
-contract when a reference resolves to it ([Checks](#checks)).
+(`examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/config.schema.json`).
+`connections` is not: a schema does not declare it, and a declaration of
+`connections` has no effect, its `default` included. A connection is
+checked against its contract when a reference resolves to it
+([Checks](#checks)).
 
 ## Connections
 
@@ -332,7 +333,8 @@ instance's own, a layer of a level of its own, above its project's
 level's: an instance does not redefine the platform's connections.
 
 ```yaml
-# examples/03_full/input/connections.yaml, level 2 (--context 2:connections.yaml): the instance's own
+# examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml,
+# level 2 (--context 2:connections.yaml): the instance's own
 connections:
   scratch:
     contract: s3
@@ -429,7 +431,7 @@ the connection reaches the charts' values through the mapping.
 
 The parameter, replaced by a map: the contract fields, `secretRef` when
 there is one, and `okdp`, where the connection comes from. With
-`examples/02_advanced/input/contracts/database.schema.json`:
+`examples/02_advanced/input/db/contracts/database.schema.json`:
 
 ```yaml
 # database: demo-db (internal)
@@ -545,7 +547,7 @@ The other `x-*` keywords (`x-okdp-external`, `x-okdp-required`,
 `x-ui-placeholder`, `x-ui-widget`) are not read, nor checked: an external
 connection is accepted for any contract, `x-okdp-external` or not.
 
-`examples/02_advanced/input/contracts/database.schema.json`, trimmed:
+`examples/02_advanced/input/db/contracts/database.schema.json`, trimmed:
 
 ```json
 {
@@ -629,7 +631,7 @@ level 0 without a prefix. Among them `global`, `global.okdp`, the settings
 of the platform (ingress, certificate issuers, OIDC, proxy, the platform's
 charts...), and `connections`, which only the context gives, an
 instance's own included. Level 0 is the platform's:
-`examples/02_advanced/input/platform.yaml`, `platform/platform-values.yaml` in a
+`examples/02_advanced/input/db/platform.yaml`, `platform/platform-values.yaml` in a
 platform repository; level 1, typically a project's, and each level above
 adds to the lower ones ([Levels](#levels)). The context's layers are merged by level
 over the package's [defaults](#defaults), before the instance's,
@@ -682,7 +684,7 @@ case is `connections`: a connection every instance may reference by name
 connection of the same name ([Levels](#levels)).
 
 ```yaml
-# examples/02_advanced/input/platform.yaml
+# examples/02_advanced/input/db/platform.yaml
 connections:
   platform-db:
     contract: database
@@ -726,7 +728,7 @@ their order (`helm -f`), a later one changing or deleting (`null`) a value
 of an earlier one of the same level:
 
 ```bash
-bin/okdp-compile ... --context platform.yaml --context platform-dcr.yaml --context 1:projects/demo.yaml --context 2:projects/demo/workspace/connections.yaml
+bin/okdp-compile ... --context db/platform.yaml --context 1:db/projects/demo/project.yaml --context 2:db/projects/demo/instances/demo-workspace/connections.yaml
 ```
 
 A level adds values, it changes none of a lower level's. A layer fails,
@@ -760,7 +762,8 @@ those its parameter schema declares, over the context's values, and no
 `connections` ([Context values](#context-values)).
 
 ```yaml
-# examples/03_full/input/demo.yaml, level 1 (--context 1:demo.yaml), after platform.yaml at level 0
+# examples/03_full/input/db/projects/demo/project.yaml, level 1 (--context 1:project.yaml),
+# after platform.yaml at level 0
 global:
   storageClass: fast-ssd
   okdp:
@@ -776,10 +779,10 @@ connections:
 ```
 
 Over it, the instance's own connections,
-`examples/03_full/input/connections.yaml` at level 2
-([Connections](#connections)), add `scratch`. Given after `platform.yaml`
-and `demo.yaml`, a file of level 2 that gives `demo-warehouse` again, even
-a field of it, fails:
+`examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml`
+at level 2 ([Connections](#connections)), add `scratch`. Given after
+`platform.yaml` and `project.yaml`, a file of level 2 that gives
+`demo-warehouse` again, even a field of it, fails:
 
 ```
 context layer 3 (level 2): connections.demo-warehouse is set at level 1 (--context, Inputs.Context): a level adds values, it does not change a lower level's
@@ -953,7 +956,8 @@ their own ([Levels](#levels)).
 in the order given, after its `--context` files:
 
 ```bash
-bin/okdp-compile ... --context examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml
+bin/okdp-compile ... --context examples/02_advanced/input/db/platform.yaml \
+  -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml
 ```
 
 An instance layer sets no `global` but the keys the parameter schema
@@ -1055,9 +1059,9 @@ it. The value given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
-come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in
-`examples/02_advanced/input/config.yaml`
-(`app` of `examples/02_advanced/output-no-dcr/instance.values.yaml`).
+come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
+`config.yaml` (`app` of the example's `instance.values.yaml`,
+[Example](#example)).
 
 ### Upstream errors
 
@@ -1187,8 +1191,8 @@ the okdp chart is in both, and in `dcr` mode the chart of each OAuth
 client. Numbers are float64, as in Helm values.
 `compiler.Write(res)` gives the files the binary writes from them, file
 name -> content ([command line](../01_usage.md#command-line)): the
-[umbrella chart](#umbrella-chart); `examples/02_advanced/` holds those of
-the example ([Example](#example)).
+[umbrella chart](#umbrella-chart); `examples/02_advanced/output/` holds
+those of the example ([Example](#example)).
 
 The keys of a compile are the keys of the `Chart.yaml` dependencies, DNS
 labels ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
@@ -1295,9 +1299,8 @@ The client keys, their types and defaults:
 chart's defaults: its default `mapping.keyMapping` entries stay, so the
 Secret also holds `registration_client_uri` and `registration_access_token`
 of the registration response (oidc-dcr 0.5.0). The example's final values
-in `dcr` mode (`examples/02_advanced/output-dcr/instance.values.yaml`), with the
-platform's settings above (`examples/02_advanced/input/platform-dcr.yaml`,
-at level 0 after `platform.yaml`) and oidc-dcr 0.5.0 in the chart cache, trimmed:
+in `dcr` mode ([Example](#example)), with the platform's settings above
+(its `platform.yaml`) and oidc-dcr 0.5.0 in the chart cache, trimmed:
 
 ```yaml
 # app
@@ -1583,19 +1586,18 @@ for `hasKey`, `toYaml` and `range`.
 
 ### Example
 
-`examples/02_advanced/output-no-dcr/`, what `-o <dir>` writes
-for the example: release `demo-webapp`, namespace `demo`, the instance
-`examples/02_advanced/input/config.yaml` (`replicas: 2`,
+`examples/02_advanced/output/projects/demo/instances/demo-webapp/`, what
+`-o <dir>` writes for the example: release `demo-webapp`, namespace
+`demo`, the instance's `config.yaml` (`replicas: 2`,
 `database: demo-db`, `audit: platform-db`, a memory limit and two `env`
 entries in `upstream.app`), over the context
-`examples/02_advanced/input/platform.yaml`, level 0 (`existing` mode: no OAuth client
-chart, [OAuth client charts](#oauth-client-charts); `platform-db`, the
-connection the instance's `audit` references).
-`examples/02_advanced/output-dcr/` is the same compile in `dcr` mode, with
-`examples/02_advanced/input/platform-dcr.yaml` at level 0 after `platform.yaml`: the
+`examples/02_advanced/input/db/platform.yaml`, level 0 (`dcr` mode;
+`platform-db`, the connection the instance's `audit` references): the
 OAuth client's chart, `oidc-dcr` ([its values](#oauth-client-charts)), a
 dependency beside `app` and `okdp`, its Job a pre-install hook that runs
-before the release's other resources.
+before the release's other resources. The `existing` mode has no example
+output: no OAuth client chart, and the client's Secret is
+`creds-demo-webapp-oauth2` ([OAuth client charts](#oauth-client-charts)).
 
 `Chart.yaml`:
 
@@ -1607,14 +1609,18 @@ dependencies:
   - name: app
     repository: https://charts.example.org
     version: 1.8.0
+  - name: oidc-dcr
+    repository: oci://quay.io/adaltas
+    version: 0.5.0
   - name: okdp-objects
     alias: okdp
     repository: oci://registry.example.org/okdp
     version: 1.0.0
 ```
 
-`instance.values.yaml`, annotated: the values of `app`, and those of the
-[okdp chart](#the-okdp-chart), the descriptor ConfigMap under `objects`:
+`instance.values.yaml`, annotated: the values of `app`, those of the OAuth
+client's chart, and those of the [okdp chart](#the-okdp-chart), the
+descriptor ConfigMap under `objects`:
 
 ```yaml
 # Code generated by okdp-compile. DO NOT EDIT.
@@ -1622,16 +1628,16 @@ app:
   env:
     - name: OIDC_ISSUER                     # computed
       value: https://sso.okdp.example.org/realms/okdp
-    - name: OIDC_CLIENT_ID                  # platform.oidcClientSecret, existing mode
+    - name: OIDC_CLIENT_ID                  # platform.oidcClientSecret, dcr mode
       valueFrom:
         secretKeyRef:
           key: client_id
-          name: creds-demo-webapp-oauth2
+          name: demo-webapp-demo-dcr
     - name: OIDC_CLIENT_SECRET
       valueFrom:
         secretKeyRef:
           key: client_secret
-          name: creds-demo-webapp-oauth2
+          name: demo-webapp-demo-dcr
     - name: DB_URL                          # the database connection, resolved
       value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
     - name: DB_PASSWORD
@@ -1666,6 +1672,8 @@ app:
     requests:
       cpu: 100m
       memory: 128Mi
+oidc-dcr:
+  # ... computed by the template (OAuth client charts)
 okdp:
   global:
     okdp:
@@ -1706,14 +1714,15 @@ And `okdp.dependencies.yaml` ([dependencies](#dependencies)):
 `examples/03_full/` compiles the workspace service, a package written to use
 every part of the mapping language, with four values layers:
 `platform.yaml` (`--context`, level 0: `global.okdp` in `dcr` mode, the oidc-dcr
-chart from a mirror, a proxy, two connections), `demo.yaml` (`--context
-1:demo.yaml`, level 1: the project's settings under `global`, two connections of its own),
+chart from a mirror, a proxy, two connections), `project.yaml` (`--context
+1:project.yaml`, level 1: the project's settings under `global`, two connections of its own),
 `connections.yaml` (`--context 2:connections.yaml`, level 2: the
 instance's own connection) and `config.yaml` (`-f`: references to an
 instance of the namespace and to connections of the platform, the project
 and the instance itself, in a list of catalogs and under a nested key;
 upstream values). Release
-`demo-workspace`, namespace `demo`: `output/` is what `-o <dir>`
+`demo-workspace`, namespace `demo`:
+`output/projects/demo/instances/demo-workspace/` is what `-o <dir>`
 writes. Its `okdp.dependencies.yaml` lists
 `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by

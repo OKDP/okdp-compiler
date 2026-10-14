@@ -25,12 +25,12 @@ import (
 // The program of README.md, on the example: the package, the chart cache
 // and the contracts as fs.FS, the values layers parsed.
 func Example() {
-	packageFS := os.DirFS("examples/02_advanced/input/service")
-	chartsFS := os.DirFS("examples/02_advanced/input/charts")
-	contractsFS := os.DirFS("examples/02_advanced/input/contracts")
-	platformValues := values("examples/02_advanced/input/platform.yaml")
-	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/demo.yaml is one
-	instanceValues := values("examples/02_advanced/input/config.yaml")
+	packageFS := os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0")
+	chartsFS := os.DirFS("examples/02_advanced/.charts")
+	contractsFS := os.DirFS("examples/02_advanced/input/db/contracts")
+	platformValues := values("examples/02_advanced/input/db/platform.yaml")
+	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/db/projects/demo/project.yaml is one
+	instanceValues := values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")
 
 	def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 	if err != nil {
@@ -68,7 +68,7 @@ func Example() {
 	fmt.Println(res.Dependencies)
 	fmt.Println(slices.Sorted(maps.Keys(files)))
 	// Output:
-	// [app okdp]
+	// [app oidc-dcr okdp]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database}]
 	// [Chart.yaml instance.values.yaml okdp.dependencies.yaml]
@@ -76,13 +76,13 @@ func Example() {
 
 // The first program of docs/01_usage.md: the example, from a checkout.
 func ExampleCompile() {
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service")) // the package
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/input/charts"), // the chart cache
-		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
+		Charts:    os.DirFS("examples/02_advanced/.charts"), // the chart cache
+		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
@@ -99,8 +99,8 @@ func ExampleCompile() {
 		}
 		return v
 	}
-	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/platform.yaml")}}
-	in.Values = []map[string]any{read("examples/02_advanced/input/config.yaml")}
+	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/db/platform.yaml")}}
+	in.Values = []map[string]any{read("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")}
 	res, err := compiler.Compile(context.Background(), def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -116,9 +116,10 @@ func ExampleCompile() {
 		fmt.Printf("dependency: %s -> %s (%s)\n", d.Field, d.Instance, d.Contract)
 	}
 	// Output:
-	// charts: 2 objects: 1
+	// charts: 3 objects: 1
 	// replicaCount: 2
 	// app: https://charts.example.org app 1.8.0
+	// oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
 	// okdp: oci://registry.example.org/okdp okdp-objects 1.0.0
 	// dependency: database -> demo-db (database)
 }
@@ -196,7 +197,7 @@ func ExampleCompile_server() {
 	_, err = compiler.Compile(ctx, def, in)
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
-	// [app okdp] ConfigMap
+	// [app oidc-dcr okdp] ConfigMap
 	// okdp.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }

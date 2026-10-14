@@ -154,12 +154,19 @@ and Helm drops the nulls of defaults, where a null of the final values
 deletes an upstream default
 ([layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
 
-The example's, `out/` here, are `examples/02_advanced/output-no-dcr/`:
+The example's, `out/` here, are
+`examples/02_advanced/output/projects/demo/instances/demo-webapp/`
+([repository layout](#repository-layout)). Its platform is in `dcr` mode
+(`global.okdp.oidc.clientProvisioning: dcr`): the webapp's OAuth client
+adds the key `oidc-dcr`, which `Chart.yaml` does not list, any more than
+`okdp`: a dependency between `app` and `okdp`, the platform's oidc-dcr
+chart:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service \
+$ bin/okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 \
     --release demo-webapp --namespace demo \
-    --context examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml -o out
+    --context examples/02_advanced/input/db/platform.yaml \
+    -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o out
 $ ls out
 Chart.yaml
 instance.values.yaml
@@ -172,36 +179,37 @@ dependencies:
   - name: app
     repository: https://charts.example.org
     version: 1.8.0
+  - name: oidc-dcr
+    repository: oci://quay.io/adaltas
+    version: 0.5.0
   - name: okdp-objects
     alias: okdp
     repository: oci://registry.example.org/okdp
     version: 1.0.0
 ```
 
-In `dcr` mode (`global.okdp.oidc.clientProvisioning: dcr`), the webapp's
-OAuth client adds the key `oidc-dcr`, which `Chart.yaml` does not list,
-any more than `okdp`: a dependency between `app` and `okdp`, the
-platform's oidc-dcr chart.
-The example's, with `platform-dcr.yaml` after `platform.yaml`, are
-`examples/02_advanced/output-dcr/`.
-
-The full example compiles an instance of a project: `demo.yaml`, a project
-file at level 1 (`--context 1:demo.yaml`), between the platform's file and
-the instance's, adds the project's settings and connections, and may change
-none of the platform's; `connections.yaml`, at level 2 (`--context
-2:connections.yaml`), adds the instance's own connection, and may change
-none of theirs ([levels](specs/01_inputs_outputs.md#levels)).
-Its outputs, `examples/03_full/output/`, list as dependencies those of the
-package the values file renders, in `Chart.yaml` order (`api`,
-`scheduler`, `gateway`, `metrics`: `backup`, left out, is not among them),
-then the chart of each OAuth client in `dcr` mode, by key, then `okdp`:
+The full example compiles an instance of a project: `project.yaml`, the
+project's file at level 1 (`--context 1:project.yaml`), between the
+platform's file and the instance's, adds the project's settings and
+connections, and may change none of the platform's; the instance's
+`connections.yaml`, at level 2 (`--context 2:connections.yaml`), adds its
+own connection, and may change none of theirs
+([levels](specs/01_inputs_outputs.md#levels)).
+Its outputs,
+`examples/03_full/output/projects/demo/instances/demo-workspace/`, list as
+dependencies those of the package the values file renders, in `Chart.yaml`
+order (`api`, `scheduler`, `gateway`, `metrics`: `backup`, left out, is not
+among them), then the chart of each OAuth client in `dcr` mode, by key,
+then `okdp`:
 
 ```console
-$ in=examples/03_full/input
-$ bin/okdp-compile --package $in/service --charts $in/charts --contracts $in/contracts \
+$ db=examples/03_full/input/db
+$ i=$db/projects/demo/instances/demo-workspace
+$ bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
+    --charts examples/03_full/.charts --contracts $db/contracts \
     --release demo-workspace --namespace demo \
-    --context $in/platform.yaml --context 1:$in/demo.yaml --context 2:$in/connections.yaml \
-    -f $in/config.yaml -o out-full
+    --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
+    --context 2:$i/connections.yaml -f $i/config.yaml -o out-full
 $ ls out-full
 Chart.yaml
 instance.values.yaml
@@ -230,10 +238,10 @@ read it: it is for a deployer that installs the referenced instances first
 The example's, the instance referencing `demo-db` in `database`:
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service \
+$ bin/okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 \
     --release demo-webapp --namespace demo \
-    --context examples/02_advanced/input/platform.yaml -f examples/02_advanced/input/config.yaml \
-    -o out
+    --context examples/02_advanced/input/db/platform.yaml \
+    -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o out
 $ cat out/okdp.dependencies.yaml
 - instance: demo-db
   contract: database
@@ -252,9 +260,9 @@ A message is a whole report and may span several lines: every schema
 violation, every message of the mapping's `errors` section.
 
 ```console
-$ bin/okdp-compile --package examples/02_advanced/input/service \
+$ bin/okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 \
     --release demo-webapp --namespace demo \
-    --context examples/02_advanced/input/platform.yaml -f testdata/schema-violation.yaml
+    --context examples/02_advanced/input/db/platform.yaml -f testdata/schema-violation.yaml
 error: values don't meet the specifications of the schema(s) in the following chart(s):
 webapp:
 - at '/database': got number, want string
@@ -287,9 +295,8 @@ add OKDP's defaults or the values files of the compile: the final values
 already merge the chart's own defaults, OKDP's defaults, the computed
 values and the instance's upstream values ([merge
 precedence](specs/01_inputs_outputs.md#merge-precedence)). The example's
-charts are fictional, and its chart cache,
-`examples/02_advanced/input/charts/`, holds only their `values.yaml`: its
-umbrella compiles, it does not render. The okdp chart writes each object
+charts are fictional, and its chart cache, `examples/02_advanced/.charts/`,
+holds only their `values.yaml`: its umbrella compiles, it does not render. The okdp chart writes each object
 of its values (`okdp.objects` of `instance.values.yaml`) as a manifest:
 for the example, the descriptor ConfigMap `demo-webapp-okdp`.
 
@@ -331,6 +338,60 @@ yq '.app' <dir>/instance.values.yaml > app.values.yaml
 helm template <release> app --repo https://charts.example.org --version 1.8.0 --namespace <namespace> -f app.values.yaml
 ```
 
+## Repository layout
+
+The examples lay their inputs out as a repository of OKDP: the platform,
+the catalog of packages, the projects and their instances, each file the
+input of one flag. The compiler reads none of these names: it only sees the
+package, the directories and the layers it is given. The tree is a
+convention for its callers, which give each file to its flag (`db/` is an
+example's `input/db/`, beside its `.charts/` and `output/`):
+
+```text
+db/
+  platform.yaml                          --context <file>: level 0
+  contracts/<contract>.schema.json       --contracts <dir>
+  catalog/<service>/<version>/           --package <dir>
+  projects/<project>/                    --namespace <project>
+    project.yaml                         optional: --context 1:<file>
+    instances/<instance>/                --release <instance>
+      instance.yaml                      {service: <name>, version: <version>}: which package
+      connections.yaml                   optional: --context 2:<file>
+      config.yaml                        optional: -f <file>
+.charts/                                 --charts <dir>
+output/projects/<project>/instances/<instance>/   -o <dir>
+```
+
+- `instance.yaml` holds `service` and `version`, nothing else: the
+  instance's package is `catalog/<service>/<version>/`.
+- The context has a file per level
+  ([levels](specs/01_inputs_outputs.md#levels)): 0 `platform.yaml`, the
+  platform values (`global.okdp`, the connections every instance may
+  reference); 1 `project.yaml`, what a project adds for its instances (its
+  settings under `global`, its connections); 2 `connections.yaml`, the
+  instance's own connections (`connections: {<name>: {...}}`), written as
+  the lower levels write theirs. A level adds values and changes none of a
+  lower level's.
+- `config.yaml` is the instance values: its parameters and upstream
+  values, no `connections`.
+- The release is the instance's directory name, the namespace the
+  project's: no field overrides them.
+- `.charts/`, the chart cache (`helm pull --untar`), is outside `db/`: it
+  is not source.
+
+A caller checks that `catalog/<service>/<version>/` holds a `Chart.yaml`
+of that `name` and `version`, and treats a released version directory as
+immutable: a change is a new version. The compiler does neither: it reads
+the package it is given.
+
+`TestExample` (`examples_test.go`) compiles every instance of each
+example's tree this way (`loadInstance`), and compares what it writes with
+the instance's directory of `output/`. The example instances are named
+after the release names of their outputs, `demo-hello`, `demo-webapp`,
+`demo-workspace`; a real instance would be named `hello`, the namespace
+already saying `demo`. The full example's command
+([`--output`](#--output)) gives every file of the tree.
+
 ## Go library
 
 `go get github.com/okdp/okdp-compiler@<version>` where the module can be
@@ -358,13 +419,13 @@ import (
 )
 
 func main() {
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service")) // the package
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/input/charts"), // the chart cache
-		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
+		Charts:    os.DirFS("examples/02_advanced/.charts"), // the chart cache
+		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
 	}
@@ -381,8 +442,8 @@ func main() {
 		}
 		return v
 	}
-	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/platform.yaml")}}
-	in.Values = []map[string]any{read("examples/02_advanced/input/config.yaml")}
+	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/db/platform.yaml")}}
+	in.Values = []map[string]any{read("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")}
 	res, err := compiler.Compile(context.Background(), def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -401,9 +462,10 @@ func main() {
 ```
 
 ```text
-charts: 2 objects: 1
+charts: 3 objects: 1
 replicaCount: 2
 app: https://charts.example.org app 1.8.0
+oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
 okdp: oci://registry.example.org/okdp okdp-objects 1.0.0
 dependency: database -> demo-db (database)
 ```
@@ -557,7 +619,8 @@ values (`compiler.UmbrellaValues`) and the dependencies
   limit: a compile can pass the limit by one expression's cost. A
   server compiling packages it does not review sets one, as an instance's
   values can make an expression iterate over them. The example costs under
-  1000, the descriptor's template most of it (`ExampleCompile_server`).
+  1000, the compiler's templates most of it, the descriptor's and the OAuth
+  client's (`ExampleCompile_server`).
 - Errors are messages for the user, returned as they are; the package
   defines no error types. A message carries its context: the file, the
   parameter path, the chart key, the mapping section (see
@@ -724,7 +787,7 @@ usage error with status 2.
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
 | `global.okdp.ingress.className is required. It is a context value: set it with --context (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | pass the platform values with `--context`; set the key ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context file, the second `--context` flag (`Inputs.Context[1]`), of level 1, sets a value a file of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the file: a level only adds keys and connections; change the value in the lower level's files ([levels](specs/01_inputs_outputs.md#levels)) |
-| `values layer 1: global.okdp is set by the context (--context, Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--context`; a package lets instances set a key of `global` by declaring it in `values.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
+| `values layer 1: global.okdp is set by the context (--context, Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance file, the first, second... `-f` file (`Inputs.Values[0]`, `[1]`...), sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values with `--context`; a package lets instances set a key of `global` by declaring it in `config.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `values layer 1: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level` | an instance file (`-f`) sets `connections`, to any value | give the instance's own connections in a context file of its level (`--context 2:<file>`); a connection of a lower level is not changed ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `values layer 1: database: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, upstream values; `context layer <n> (level <l>): ...` in a context file above level 0 (`--context 1:<file>`); the platform's files, level 0, are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
 | `values layer 2: json: cannot marshal from Go func() within "/hooks/0"`, `context layer 1 (level 0): json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Context`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key that is not text or a number, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |

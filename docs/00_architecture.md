@@ -809,7 +809,7 @@ The public package is tested through the example in the root package:
 [usage](01_usage.md#go-library) as examples, with their output, and
 `TestDocPrograms` checks that the documentation shows those programs and
 outputs; `ExampleCompile_server` cancels a compile and bounds its cost; `compiler_test.go`
-compiles the example in the `existing` and `dcr` modes from goroutines
+compiles the example in its `dcr` mode and in `existing` mode from goroutines
 sharing one `Definition` and the same values layers
 (`TestConcurrentCompile`, meaningful under `go test -race`).
 
@@ -833,30 +833,35 @@ it becomes a case of the unit test, and the file is removed.
 
 ### Example
 
-`examples/01_minimal/` is the smallest package: `input/service/` deploys
-one chart, `app` (the fictional `hello` chart of `input/charts/`, aliased
+Each example is a repository tree
+([repository layout](01_usage.md#repository-layout)): its sources under
+`input/db/`, the platform's files, the package in
+`catalog/<service>/<version>/` and one instance of the project `demo`;
+its chart cache in `.charts/` (the `values.yaml` of each chart only, in
+its repository's directory, the platform's okdp-objects and oidc-dcr
+included); and what `okdp-compile -o <dir>` writes for the instance in
+`output/projects/demo/instances/<instance>/`, under the release
+`<instance>` and the namespace `demo`.
+
+`examples/01_minimal/` is the smallest package: `catalog/hello/1.0.0/`
+deploys one chart, `app` (the fictional `hello` chart, aliased
 in `Chart.yaml`), whose `values.cel.yaml` sets three values from the
 parameters (`replicas`, its default in `config.schema.json`) and the
-release, its `okdp.yaml` the instance's usage; `input/platform.yaml`
-gives only the okdp chart (`global.okdp.charts.objects`), `input/config.yaml` the
-instance's values. `output/` is what `okdp-compile -o <dir>` writes for
-it, under the release `demo-hello` and the namespace `demo`. Nothing references a contract: the compile reads none.
+release, its `okdp.yaml` the instance's usage; `platform.yaml`
+gives only the okdp chart (`global.okdp.charts.objects`), the `config.yaml`
+of the instance `demo-hello` its values. It has no `contracts/`: nothing
+references a contract, the compile reads none.
 
-`examples/02_advanced/input/` is what one compile of a service, `webapp`,
-reads: `service/` (`Chart.yaml`, `okdp.yaml` with the rules of a database
-connection and an OAuth client, `values.cel.yaml`, `config.schema.json`
-with the parameters' defaults, `app.defaults.yaml`),
-`charts/` (the chart cache: the `values.yaml` of each chart only, in its
-repository's directory, the platform's okdp-objects and oidc-dcr
-included), `contracts/`, `platform.yaml` (the platform values: `global.okdp`,
-and `platform-db`, a connection every instance may reference, the
-instance's audit database),
-`platform-dcr.yaml` (a context layer of level 0 after it: the OAuth
-clients in `dcr` mode) and `config.yaml`, the instance's values (`-f`), its
-upstream values of `app` included.
-The rest of `examples/02_advanced/` is what the compile writes:
-`output-no-dcr/` as `okdp-compile -o <dir>`, and `output-dcr/`
-likewise with `platform-dcr.yaml`.
+`examples/02_advanced/` compiles an instance of a service, `webapp`:
+`catalog/webapp/1.0.0/` (`Chart.yaml`, `okdp.yaml` with the rules of a
+database connection and an OAuth client, `values.cel.yaml`,
+`config.schema.json` with the parameters' defaults, `app.defaults.yaml`),
+`contracts/`, `platform.yaml` (the platform values: `global.okdp`, the
+OAuth clients in `dcr` mode, and `platform-db`, a connection every
+instance may reference, the instance's audit database) and the
+`config.yaml` of the instance `demo-webapp`, its values (`-f`), its
+upstream values of `app` included. The OAuth clients' `existing` mode has
+no example output: its unit tests are in `internal/okdp/oidc_test.go`.
 
 `examples/03_full/` is the reference of the mapping language: its package,
 the `workspace` service, uses every section, directive and host function,
@@ -866,26 +871,24 @@ without upstream values; `backup` left out by `$if`, its chart
 not in the cache), three OAuth clients in `dcr` mode (one public, one
 computed by `$spread`), and contracts with internal conventions, derived
 and conditional defaults and secret fields. Its values come in four
-layers: `platform.yaml` (`--context`, level 0), `demo.yaml`, the project's
-(`--context 1:demo.yaml`: settings under `global.okdp.project`, which the
-mapping reads, and connections of its own), `connections.yaml`, the
-instance's own connections (`--context 2:connections.yaml`), and
-`config.yaml` (`-f`), whose references
+layers: `platform.yaml` (`--context`, level 0), `project.yaml`, the
+project's (`--context 1:project.yaml`: settings under
+`global.okdp.project`, which the mapping reads, and connections of its
+own), the `connections.yaml` of the instance `demo-workspace`, its own
+connections (`--context 2:connections.yaml`), and its `config.yaml`
+(`-f`), whose references
 reach an instance of the namespace and connections of the platform, the
 project and the instance, in a list of objects and under a nested key.
-`output/` is what `-o <dir>` writes, under the release
-`demo-workspace` and the namespace `demo`.
 
-`TestExample` (`examples_test.go`) checks the three examples.
-For `02_advanced`, it
-compiles `config.yaml`, an instance layer, over `platform.yaml`, a
-context layer of level 0, under the release
-`demo-webapp` and the namespace `demo`, and compares the files of
-`Write` with them byte for byte; then the same with
-`platform-dcr.yaml` after `platform.yaml`, with `output-dcr/`. For
-`03_full`, it compiles `config.yaml` over `connections.yaml`, at level
-2, over `demo.yaml`, at level 1, over `platform.yaml`, and compares the
-same files with `output/`.
+`TestExample` (`examples_test.go`) compiles every instance of each
+example's tree as a caller of the tree does (`loadInstance`): the package
+its `instance.yaml` names, checked against its `Chart.yaml`, the chart
+cache, the contracts (none without `contracts/`), the context files
+present (`platform.yaml` at level 0, `project.yaml` at level 1,
+`connections.yaml` at level 2) and its `config.yaml`, under the release
+of its directory and the namespace of its project's. It compares the files
+of `Write` with the instance's directory of `output/` byte for byte; a
+directory of `output/` that no instance writes fails.
 `TestRun` (`cmd/okdp-compile/main_test.go`) checks that the command line
 writes them, over the files of a previous compile.
 After a change, `go test . -update` rewrites them
@@ -900,16 +903,17 @@ fail on the example (`02_advanced`); `testdata/context/<level>/<case>.yaml`:
 context values of that level that must fail on it (those of level 2, an
 instance's own connections, also set the parameter that references them).
 The first line is `# error: <message>` (`\n` for a line break).
-`TestExampleErrors` applies an instance case as an instance layer over the
-platform values, a context
-case as a context layer of its directory's level after `platform.yaml`, and
-expects an error containing the message. The instance
+`TestExampleErrors` compiles the example's instance (`loadInstance`), an
+instance case in place of its `config.yaml`, a context case as a context
+layer of its directory's level after `platform.yaml` and without
+`config.yaml`, and expects an error containing the message. The instance
 cases cover the example's `errors` rule on replicas without a
 database, the protected upstream paths, a parameter schema violation, and
 an instance that sets `global` (`instance-sets-global.yaml`) or
 `connections` (`instance-sets-connections.yaml`); the level 0
-cases, a missing platform value and the OAuth client in `dcr` mode without
-a registration URL (`dcr-without-registration-url.yaml`); the level 1 case,
+cases, a missing platform value and a platform file that deletes the
+registration URL of the OAuth clients in `dcr` mode
+(`dcr-without-registration-url.yaml`); the level 1 case,
 a project that gives a field of a platform connection
 (`redefines-platform-connection.yaml`); the level 2 cases, the connection
 checks (wrong contract, unknown field, secret field, the contract's types)

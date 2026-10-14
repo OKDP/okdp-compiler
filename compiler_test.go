@@ -12,24 +12,21 @@ import (
 	compiler "github.com/okdp/okdp-compiler"
 )
 
-// example: the example package (examples/02_advanced/input/service), and
-// the inputs of its instance over the context, these files after
-// platform.yaml, at level 0.
-func example(platform ...string) (*compiler.Definition, compiler.Inputs) {
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/service"))
+// example: the example package
+// (examples/02_advanced/input/db/catalog/webapp/1.0.0), and the inputs of
+// its instance demo-webapp: its config.yaml over platform.yaml, at level 0.
+func example() (*compiler.Definition, compiler.Inputs) {
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0"))
 	if err != nil {
 		panic(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/input/charts"),
-		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
-		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/platform.yaml")}},
-		Values:    []map[string]any{values("examples/02_advanced/input/config.yaml")},
+		Charts:    os.DirFS("examples/02_advanced/.charts"),
+		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
+		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/db/platform.yaml")}},
+		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
-	}
-	for _, f := range platform {
-		in.Context = append(in.Context, compiler.ContextLayer{Values: values(f)})
 	}
 	return def, in
 }
@@ -49,16 +46,19 @@ func values(file string) map[string]any {
 
 // TestConcurrentCompile: the concurrent use the documentation promises,
 // one Definition and the same values layers shared by goroutines, in the
-// existing and the dcr modes (the OAuth client chart added to a copy of the
-// Definition's charts): each compile gives what it gives alone, and the
-// inputs are not changed. Meaningful under go test -race.
+// dcr mode of the example's platform (the OAuth client chart added to a copy
+// of the Definition's charts) and the existing mode, a layer after it: each
+// compile gives what it gives alone, and the inputs are not changed.
+// Meaningful under go test -race.
 func TestConcurrentCompile(t *testing.T) {
-	def, in := example()
-	dcr := in
-	dcr.Context = append(slices.Clip(in.Context), compiler.ContextLayer{Values: values("examples/02_advanced/input/platform-dcr.yaml")})
-	inputs := []compiler.Inputs{in, dcr}
+	def, dcr := example()
+	existing := dcr
+	existing.Context = append(slices.Clip(dcr.Context), compiler.ContextLayer{Values: map[string]any{
+		"global": map[string]any{"okdp": map[string]any{"oidc": map[string]any{"clientProvisioning": "existing"}}},
+	}})
+	inputs := []compiler.Inputs{existing, dcr}
 	snapshot := func() string {
-		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), dcr.Context, in.Values})
+		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), existing.Context, dcr.Values})
 		if err != nil {
 			t.Fatal(err)
 		}

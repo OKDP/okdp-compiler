@@ -16,11 +16,13 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 )
 
-// The example: what a compile reads (examples/02_advanced/input) and
-// writes (the rest of examples/02_advanced).
+// The example, a repository tree: what a compile of its instance reads
+// (examples/02_advanced/input/db, .charts) and writes (output/).
 var (
 	exampleDir = filepath.Join("..", "..", "examples", "02_advanced")
-	input      = filepath.Join(exampleDir, "input")
+	db         = filepath.Join(exampleDir, "input", "db")
+	instance   = filepath.Join(db, "projects", "demo", "instances", "demo-webapp")
+	golden     = filepath.Join(exampleDir, "output", "projects", "demo", "instances", "demo-webapp")
 )
 
 // TestMain: the test binary is also okdp-compile, the command of the
@@ -30,14 +32,14 @@ func TestMain(m *testing.M) {
 }
 
 // example: the options that compile the example instance into dir, as its
-// output-no-dcr/ (-o dir).
+// output (-o dir).
 func example(dir string) options {
 	return options{
-		pkg:       filepath.Join(input, "service"),
-		charts:    filepath.Join(input, "charts"),
-		contracts: filepath.Join(input, "contracts"),
-		contexts:  []string{filepath.Join(input, "platform.yaml")},
-		values:    []string{filepath.Join(input, "config.yaml")},
+		pkg:       filepath.Join(db, "catalog", "webapp", "1.0.0"),
+		charts:    filepath.Join(exampleDir, ".charts"),
+		contracts: filepath.Join(db, "contracts"),
+		contexts:  []string{filepath.Join(db, "platform.yaml")},
+		values:    []string{filepath.Join(instance, "config.yaml")},
 		release:   "demo-webapp",
 		namespace: "demo",
 		output:    dir,
@@ -63,39 +65,21 @@ func tree(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// TestRun: the example compiled into directories, one per output, the
-// first holding the files of a previous compile: they hold what the
-// example's outputs hold, the files of the previous compile overwritten.
+// TestRun: the example compiled into a directory holding the files of a
+// previous compile: it holds what the example's output holds, the files of
+// the previous compile overwritten.
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
-	noDcr := filepath.Join(dir, "output-no-dcr")
-	if err := os.MkdirAll(noDcr, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	for _, name := range []string{"instance.values.yaml", "okdp.dependencies.yaml"} {
-		if err := os.WriteFile(filepath.Join(noDcr, name), []byte("stale: true\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, c := range []struct {
-		output string
-		dcr    bool
-	}{
-		{"output-no-dcr", false},
-		{"output-dcr", true},
-	} {
-		o := example(filepath.Join(dir, c.output))
-		if c.dcr {
-			o.contexts = append(o.contexts, filepath.Join(input, "platform-dcr.yaml"))
-		}
-		if err := run(o); err != nil {
-			t.Fatalf("%s: %v", c.output, err)
-		}
+	if err := run(example(dir)); err != nil {
+		t.Fatal(err)
 	}
-	want := tree(t, exampleDir)
-	maps.DeleteFunc(want, func(path string, _ string) bool { return strings.HasPrefix(path, "input"+string(filepath.Separator)) })
-	if got := tree(t, dir); !maps.Equal(got, want) {
-		t.Errorf("got %v, want the example's outputs: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+	if got, want := tree(t, dir), tree(t, golden); !maps.Equal(got, want) {
+		t.Errorf("got %v, want the example's output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
 }
 
@@ -104,7 +88,7 @@ func TestRunErrors(t *testing.T) {
 	// A package whose version an umbrella chart cannot take: it fails to
 	// load.
 	pkg := t.TempDir()
-	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(input, "service"))); err != nil {
+	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(db, "catalog", "webapp", "1.0.0"))); err != nil {
 		t.Fatal(err)
 	}
 	meta, err := os.ReadFile(filepath.Join(pkg, "Chart.yaml"))

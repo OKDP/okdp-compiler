@@ -2,9 +2,11 @@ package compiler
 
 import (
 	"bytes"
-	"context"
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -12,39 +14,82 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/okdp/okdp-compiler/internal/chart"
 )
 
 var update = flag.Bool("update", false, "rewrite the examples' outputs from the current compiler")
 
-// The examples, each what a compile reads (<example>/input) and writes;
-// input, that of the example the failure cases run on (examples/02_advanced:
-// output-no-dcr/ as `okdp-compile -o <dir>`, output-dcr/
-// likewise in dcr mode).
-var (
-	examples = "examples"
-	input    = filepath.Join(examples, "02_advanced", "input")
-)
+// examples: each example a repository tree (docs/01_usage.md, repository
+// layout): its sources under input/db/, its chart cache in .charts/, and
+// what -o <dir> writes for each instance in
+// output/projects/<project>/instances/<instance>/.
+const examples = "examples"
 
-// exampleCompile: the advanced example's package compiled with its chart cache
-// and contracts, the context (platform.yaml at level 0, then these layers)
-// and these instance values files, under the example's release and
-// namespace.
-func exampleCompile(t *testing.T, context []ContextLayer, instance []string) (*Result, error) {
+// loadInstance: the compile of an instance of an example's tree,
+// input/db/projects/<project>/instances/<instance>/, as a caller of the tree
+// gives it: the package its instance.yaml names, catalog/<service>/<version>/,
+// whose Chart.yaml has that name and version; the chart cache .charts/; the
+// contracts of db/contracts/, none when absent; the context, platform.yaml at
+// level 0, the project's project.yaml at level 1 and the instance's
+// connections.yaml at level 2, then the instance values, its config.yaml,
+// each when present; the release <instance> and the namespace <project>.
+func loadInstance(t *testing.T, example, project, instance string) (*Definition, Inputs) {
 	t.Helper()
-	def, err := LoadDefinition(os.DirFS(filepath.Join(input, "service")))
+	root := filepath.Join(examples, example)
+	db := filepath.Join(root, "input", "db")
+	proj := filepath.Join(db, "projects", project)
+	dir := filepath.Join(proj, "instances", instance)
+	b, err := os.ReadFile(filepath.Join(dir, "instance.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := Inputs{
-		Charts:    os.DirFS(filepath.Join(input, "charts")),
-		Contracts: os.DirFS(filepath.Join(input, "contracts")),
-		Context:   append(readContext(t, 0, filepath.Join(input, "platform.yaml")), context...),
-		Values:    readLayers(t, instance),
-		Release:   "demo-webapp",
-		Namespace: "demo",
+	var pkg struct {
+		Service string `yaml:"service"`
+		Version string `yaml:"version"`
 	}
-	return Compile(t.Context(), def, in)
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(&pkg); err != nil {
+		t.Fatalf("%s: %v", filepath.Join(dir, "instance.yaml"), err)
+	}
+	catalog := filepath.Join(db, "catalog", pkg.Service, pkg.Version)
+	def, err := LoadDefinition(os.DirFS(catalog))
+	if err != nil {
+		t.Fatalf("%s: %v", catalog, err)
+	}
+	if def.Chart.Name != pkg.Service || def.Chart.Version != pkg.Version {
+		t.Fatalf("%s: Chart.yaml is %s %s", catalog, def.Chart.Name, def.Chart.Version)
+	}
+	in := Inputs{
+		Charts:    os.DirFS(filepath.Join(root, ".charts")),
+		Contracts: fstest.MapFS{},
+		Release:   instance,
+		Namespace: project,
+	}
+	if contracts := filepath.Join(db, "contracts"); exists(t, contracts) {
+		in.Contracts = os.DirFS(contracts)
+	}
+	for level, f := range []string{filepath.Join(db, "platform.yaml"), filepath.Join(proj, "project.yaml"), filepath.Join(dir, "connections.yaml")} {
+		if exists(t, f) {
+			in.Context = append(in.Context, readContext(t, uint(level), f)...)
+		}
+	}
+	if f := filepath.Join(dir, "config.yaml"); exists(t, f) {
+		in.Values = readLayers(t, []string{f})
+	}
+	return def, in
+}
+
+// exists: whether path exists.
+func exists(t *testing.T, path string) bool {
+	t.Helper()
+	_, err := os.Stat(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return err == nil
 }
 
 // readContext: values files, as context layers of this level.
@@ -75,72 +120,36 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 	return layers
 }
 
-// TestExample compiles the instance of each example
-// (input/config.yaml) and compares what it writes with the
-// example's outputs, byte for byte. 01_minimal: output/, what -o <dir>
-// writes; nothing references a contract. 02_advanced: output-no-dcr/,
-// likewise; output-dcr/, what it writes with platform-dcr.yaml after
-// platform.yaml. 03_full: output/, what -o <dir> writes, with the
-// project's demo.yaml at level 1 (--context 1:demo.yaml) and the
-// instance's connections.yaml at level 2 (--context 2:connections.yaml)
-// between platform.yaml and config.yaml.
+// TestExample compiles every instance of each example's tree (loadInstance)
+// and compares what it writes with the instance's outputs, byte for byte;
+// an output directory of no instance fails. 01_minimal: one chart, no
+// contract. 02_advanced: dcr mode, the OAuth client's chart added.
+// 03_full: the project's project.yaml at level 1 and the instance's
+// connections.yaml at level 2, between platform.yaml and config.yaml.
 func TestExample(t *testing.T) {
-	t.Run("01_minimal", func(t *testing.T) {
-		in := filepath.Join(examples, "01_minimal", "input")
-		def, err := LoadDefinition(os.DirFS(filepath.Join(in, "service")))
-		if err != nil {
-			t.Fatal(err)
-		}
-		res, err := Compile(context.Background(), def, Inputs{
-			Charts:    os.DirFS(filepath.Join(in, "charts")),
-			Contracts: fstest.MapFS{},
-			Context:   readContext(t, 0, filepath.Join(in, "platform.yaml")),
-			Values:    readLayers(t, []string{filepath.Join(in, "config.yaml")}),
-			Release:   "demo-hello",
-			Namespace: "demo",
+	instances, _ := filepath.Glob(filepath.Join(examples, "*", "input", "db", "projects", "*", "instances", "*"))
+	outputs, _ := filepath.Glob(filepath.Join(examples, "*", "output", "projects", "*", "instances", "*"))
+	if len(instances) == 0 {
+		t.Fatal("no example")
+	}
+	for _, dir := range instances {
+		rel, _ := filepath.Rel(examples, dir)
+		parts := strings.Split(filepath.ToSlash(rel), "/") // <example>/input/db/projects/<project>/instances/<instance>
+		example, project, instance := parts[0], parts[4], parts[6]
+		out := filepath.Join(example, "output", "projects", project, "instances", instance)
+		outputs = slices.DeleteFunc(outputs, func(o string) bool { return o == filepath.Join(examples, out) })
+		t.Run(path.Join(example, project, instance), func(t *testing.T) {
+			def, in := loadInstance(t, example, project, instance)
+			res, err := Compile(t.Context(), def, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkDir(t, out, output(t, res))
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkDir(t, "01_minimal/output", output(t, res))
-	})
-	t.Run("02_advanced", func(t *testing.T) {
-		instance := []string{filepath.Join(input, "config.yaml")}
-		res, err := exampleCompile(t, nil, instance)
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkDir(t, "02_advanced/output-no-dcr", output(t, res))
-		res, err = exampleCompile(t, readContext(t, 0, filepath.Join(input, "platform-dcr.yaml")), instance)
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkDir(t, "02_advanced/output-dcr", output(t, res))
-	})
-	t.Run("03_full", func(t *testing.T) {
-		in := filepath.Join(examples, "03_full", "input")
-		def, err := LoadDefinition(os.DirFS(filepath.Join(in, "service")))
-		if err != nil {
-			t.Fatal(err)
-		}
-		layers := slices.Concat(
-			readContext(t, 0, filepath.Join(in, "platform.yaml")),
-			readContext(t, 1, filepath.Join(in, "demo.yaml")),
-			readContext(t, 2, filepath.Join(in, "connections.yaml")),
-		)
-		res, err := Compile(context.Background(), def, Inputs{
-			Charts:    os.DirFS(filepath.Join(in, "charts")),
-			Contracts: os.DirFS(filepath.Join(in, "contracts")),
-			Context:   layers,
-			Values:    readLayers(t, []string{filepath.Join(in, "config.yaml")}),
-			Release:   "demo-workspace",
-			Namespace: "demo",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		checkDir(t, "03_full/output", output(t, res))
-	})
+	}
+	for _, o := range outputs {
+		t.Errorf("%s: the output of no instance", o)
+	}
 }
 
 // output: the files Write gives for res.
@@ -196,20 +205,21 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 	}
 }
 
-// TestExampleErrors: every testdata/<case>.yaml, an instance file over the
-// context, and every testdata/context/<level>/<case>.yaml, a context file of
-// that level after platform.yaml, must fail with the message of its first
-// line (# error: ..., \n for a line break). A context file may set
+// TestExampleErrors: on the instance of 02_advanced (loadInstance), every
+// testdata/<case>.yaml, an instance file in place of its config.yaml, and
+// every testdata/context/<level>/<case>.yaml, a context file of that level
+// after the tree's, without config.yaml, must fail with the message of its
+// first line (# error: ..., \n for a line break). A context file may set
 // parameters too: those of level 2, an instance's own connections,
 // reference the connections they give.
 func TestExampleErrors(t *testing.T) {
 	testdata := "testdata"
-	instance, _ := filepath.Glob(filepath.Join(testdata, "*.yaml"))
+	values, _ := filepath.Glob(filepath.Join(testdata, "*.yaml"))
 	context, _ := filepath.Glob(filepath.Join(testdata, "context", "*", "*.yaml"))
-	if len(instance) == 0 || len(context) == 0 {
+	if len(values) == 0 || len(context) == 0 {
 		t.Fatal("no testdata")
 	}
-	for _, f := range slices.Concat(instance, context) {
+	for _, f := range slices.Concat(values, context) {
 		name, _ := filepath.Rel(testdata, f)
 		t.Run(strings.TrimSuffix(name, ".yaml"), func(t *testing.T) {
 			b, err := os.ReadFile(f)
@@ -222,14 +232,14 @@ func TestExampleErrors(t *testing.T) {
 				t.Fatalf("first line must be \"# error: <message>\", got %q", first)
 			}
 			want = strings.ReplaceAll(want, `\n`, "\n")
-			var layers []ContextLayer
-			var values []string
+			def, in := loadInstance(t, "02_advanced", "demo", "demo-webapp")
 			if level, err := strconv.ParseUint(filepath.Base(filepath.Dir(f)), 10, 0); err == nil {
-				layers = readContext(t, uint(level), f)
+				in.Context = append(in.Context, readContext(t, uint(level), f)...)
+				in.Values = nil
 			} else {
-				values = []string{f}
+				in.Values = readLayers(t, []string{f})
 			}
-			if _, err := exampleCompile(t, layers, values); err == nil || !strings.Contains(err.Error(), want) {
+			if _, err := Compile(t.Context(), def, in); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("got %v, want an error containing %q", err, want)
 			}
 		})

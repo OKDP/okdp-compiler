@@ -46,9 +46,10 @@ regenerates the Helm fixtures and fails on a diff.
   example: the first line is `# error: <message>`, the message the compile
   must report (`TestExampleErrors`,
   [failure cases](docs/00_architecture.md#failure-cases)).
-- The outputs of each example of `examples/` (`01_minimal/output/`,
-  `02_advanced/output-no-dcr/` and `output-dcr/`, `03_full/output/`) are
-  compared byte for byte with a compile of its `input/` (`TestExample`).
+- The outputs of each example of `examples/`, a repository tree
+  (`<example>/output/projects/<project>/instances/<instance>/`), are
+  compared byte for byte with a compile of the instance of its `input/db/`
+  (`TestExample`).
   A change that changes the output runs `make example` and commits the diff:
   it is the change's effect, reviewed as such.
 

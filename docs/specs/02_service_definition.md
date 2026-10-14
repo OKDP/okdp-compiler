@@ -416,8 +416,9 @@ of them: both fail when it is loaded,
 
 ## Example
 
-`examples/03_full/input/service/`, abridged: the package of the
-`workspace` service, five dependencies, two of them renders of one chart.
+`examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/`, abridged: the
+package of the `workspace` service, five dependencies, two of them renders
+of one chart.
 
 ```yaml
 # Chart.yaml

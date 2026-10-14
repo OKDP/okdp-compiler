@@ -53,8 +53,9 @@ vars:
   apiUrl: ${{ cel.bind(base, 'https://' + host, base + '/api') }}
   internalUrl: http://${{ api }}.${{ release.namespace }}.svc:8080
 
-  # The project's settings (demo.yaml), optional: read with .? and orValue,
-  # a missing key failing the expression otherwise. m[?'k'] is the same.
+  # The project's settings (project.yaml), optional: read with .? and
+  # orValue, a missing key failing the expression otherwise. m[?'k'] is the
+  # same.
   project: ${{ global.okdp.?project.orValue({}) }}
   projectName: ${{ project.?displayName.or(project.?name).orValue(release.namespace) }}
   costCenter: ${{ project[?'costCenter'].orValue('') }}

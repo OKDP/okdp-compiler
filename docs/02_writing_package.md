@@ -3,11 +3,11 @@
 How to package an upstream application for OKDP: a directory of parameters,
 OKDP's defaults and a service definition, compiled by `okdp-compile`. The steps
 follow a `webapp` service, of which the example of this repository is a
-smaller version (`examples/02_advanced/input/service/`;
-`examples/01_minimal/input/service/` is the smallest package,
-`examples/03_full/input/service/` one that uses every part of the mapping
-language, each commented); the recipes and
-pitfalls come from the services packaged in
+smaller version (`examples/02_advanced/input/db/catalog/webapp/1.0.0/`;
+`examples/01_minimal/input/db/catalog/hello/1.0.0/` is the smallest
+package, `examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/` one
+that uses every part of the mapping language, each commented); the
+recipes and pitfalls come from the services packaged in
 `OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md), its
 [control flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
@@ -49,8 +49,11 @@ the package is published as a chart.
 
 `--package` names the package directory, `--charts` the chart cache the
 compiler reads the upstream charts' defaults and schemas from
-(`okdp-compile --package examples/02_advanced/input/service --charts
-examples/02_advanced/input/charts`).
+(`okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0
+--charts examples/02_advanced/.charts`). In a repository laid out as the
+examples, a package is a version directory of the catalog,
+`catalog/<service>/<version>/`, which its `Chart.yaml` names
+([repository layout](01_usage.md#repository-layout)).
 
 ## Integrating a chart
 
@@ -441,7 +444,7 @@ instance of the namespace: host `demo-db-db.demo.svc`, Secret
 sync waves). The mapping reads both the same way, credentials through a
 `secretKeyRef` on `secretRef.name`; it fails with a clear message when it
 needs the Secret and the connection has none (the second `errors` entry of
-`examples/02_advanced/input/service/okdp.yaml`). `s3` and
+`examples/02_advanced/input/db/catalog/webapp/1.0.0/okdp.yaml`). `s3` and
 `database-server` have no internal convention: they are always external (cnpg-postgresql publishes one
 `database-server` connection per database, which consumers declare as
 connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
@@ -479,13 +482,17 @@ Each `ci/<case>-values.yaml` is an instance: its parameters, without
 `global` and `connections`, which an instance may not set. The
 platform values (`global.okdp`, `charts.objects` included) are given apart,
 with `--context`: `ci/platform.yaml` for every case, then, for a case that
-needs others, its own `ci/<case>-platform.yaml`, and its connections at
-level 2 (`--context 2:ci/<case>-connections.yaml`). Write one case per mode:
-OIDC `existing`, `dcr` and off, internal and external connections, proxy
-set, each optional chart on, upstream values with appended lists. The `dcr`
-case's platform file gives `oidc.clientProvisioning: dcr`,
+needs others, its own `ci/<case>-platform.yaml`, and its own connections
+at level 2 (`--context 2:ci/<case>-connections.yaml`, what an instance's
+`connections.yaml` is in the
+[repository layout](01_usage.md#repository-layout)). Write one case per
+mode: OIDC `existing`, `dcr` and off, internal and external connections,
+proxy set, each optional chart on, upstream values with appended lists. The
+`dcr` case's platform file gives `oidc.clientProvisioning: dcr`,
 `oidc.dcr.registrationUrl` and `authMethod: anonymous` (polaris's
-`ci/dcr-platform.yaml`).
+`ci/dcr-platform.yaml`). The examples of this repository compile in `dcr`
+mode only; the `existing` mode is tested by the unit tests
+(`internal/okdp/oidc_test.go`), with no example output.
 
 ```bash
 export OKDP_CONTRACTS=~/okdp/contracts     # the contract schemas

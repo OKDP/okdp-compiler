@@ -128,15 +128,14 @@ checkout, `make build` ([install](docs/01_usage.md#install)):
 
 ```bash
 make build    # bin/okdp-compile
-in=examples/02_advanced/input
-export OKDP_CONTRACTS=$in/contracts   # or --contracts
-export OKDP_CHARTS=$in/charts         # or --charts
-compile() { bin/okdp-compile --package $in/service --release demo-webapp --namespace demo -f $in/config.yaml "$@"; }
-dcr="--context $in/platform-dcr.yaml"
-compile --context $in/platform.yaml -o out/output-no-dcr
-compile --context $in/platform.yaml $dcr -o out/output-dcr
-# out/ now holds the outputs of examples/02_advanced/, byte for byte
-compile --context $in/platform.yaml -f testdata/protected-upstream.yaml -o out/protected
+db=examples/02_advanced/input/db
+export OKDP_CONTRACTS=$db/contracts               # or --contracts
+export OKDP_CHARTS=examples/02_advanced/.charts   # or --charts
+compile() { bin/okdp-compile --package $db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo \
+  --context $db/platform.yaml -f $db/projects/demo/instances/demo-webapp/config.yaml "$@"; }
+compile -o out/webapp
+# out/webapp now holds examples/02_advanced/output/projects/demo/instances/demo-webapp/, byte for byte
+compile -f testdata/protected-upstream.yaml -o out/protected
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
 ```
 
@@ -157,12 +156,14 @@ connections, fails
 ([levels](docs/specs/01_inputs_outputs.md#levels)):
 
 ```bash
-in=examples/03_full/input
-bin/okdp-compile --package $in/service --charts $in/charts --contracts $in/contracts \
+db=examples/03_full/input/db
+i=$db/projects/demo/instances/demo-workspace
+bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
+  --charts examples/03_full/.charts --contracts $db/contracts \
   --release demo-workspace --namespace demo \
-  --context $in/platform.yaml --context 1:$in/demo.yaml --context 2:$in/connections.yaml \
-  -f $in/config.yaml -o out/full
-# out/full now holds examples/03_full/output/, byte for byte
+  --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
+  --context 2:$i/connections.yaml -f $i/config.yaml -o out/full
+# out/full now holds examples/03_full/output/projects/demo/instances/demo-workspace/, byte for byte
 ```
 
 `-o <dir>` (`--output`), required, writes the instance as one chart, for
@@ -192,10 +193,10 @@ files of a successful one overwrite those of the same name. `--release` and
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, `Chart.yaml` and the charts of a package, the final values |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
-| `examples/01_minimal/` | the smallest package: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs; its outputs in `output/`, what `-o <dir>` writes, checked by `go test` ([example](docs/00_architecture.md#example)) |
-| `examples/02_advanced/input/` | an example compile's inputs: the package (`service/`), the chart cache (`charts/`), the contracts, the platform values (`platform.yaml`: `global.okdp` and a connection every instance may reference, the instance's audit database; `platform-dcr.yaml` after it for `dcr` mode), the instance's values (`config.yaml`, given with `-f`) ([example](docs/00_architecture.md#example)) |
-| `examples/02_advanced/output-*/` | what `okdp-compile` writes for it, checked by `go test`: `output-no-dcr/` with `-o <dir>`, `output-dcr/` likewise in `dcr` mode |
-| `examples/03_full/` | a package that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`demo.yaml`, `--context 1:demo.yaml`), each with connections, the instance's own connections (`connections.yaml`, `--context 2:connections.yaml`) and its values (`config.yaml`); its outputs in `output/`, what `-o <dir>` writes, checked by `go test` ([example](docs/00_architecture.md#example)) |
+| `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the package in `catalog/<service>/<version>/`, an instance of the project `demo` in `projects/demo/instances/<instance>/`), its chart cache in `.charts/`, and what `-o <dir>` writes for the instance in `output/projects/demo/instances/<instance>/`, checked by `go test` ([example](docs/00_architecture.md#example)) |
+| `examples/01_minimal/` | the smallest package, `hello`: one chart, a mapping that sets three of its values and the instance's usage, the platform values the okdp chart needs |
+| `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`, given with `-f`) |
+| `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, `--context 1:project.yaml`), each with connections, the instance's own connections (`connections.yaml`, `--context 2:connections.yaml`) and its values (`config.yaml`) |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/cli/` | the binary run as a process (testscript): exit statuses, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |

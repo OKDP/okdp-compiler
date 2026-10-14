@@ -1,0 +1,6 @@
+# The instance's package: catalog/hello/1.0.0/. The directory names the
+# release (--release demo-hello), the project's directory the namespace
+# (--namespace demo). A real instance would be named hello: the namespace
+# already says demo.
+service: hello
+version: 1.0.0

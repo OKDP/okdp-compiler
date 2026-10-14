@@ -1,6 +1,6 @@
 # error: database (connection "shared-db"): the fields violate the database contract:\n- at '/engine': value must be one of 'postgresql', 'mysql'\n- at '/port': got string, want integer
 # The fields of an external connection, against the types of its contract
-# (examples/02_advanced/input/contracts/database.schema.json): every
+# (examples/02_advanced/input/db/contracts/database.schema.json): every
 # violation.
 database: shared-db
 connections:

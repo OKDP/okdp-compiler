@@ -1,7 +1,7 @@
 # The platform values, the same for every instance of every project of the
 # cluster: a context layer of level 0 (--context, Inputs.Context), merged
 # first.
-# Reviewed with the platform: no project (demo.yaml) and no instance
+# Reviewed with the platform: no project (project.yaml) and no instance
 # (connections.yaml, config.yaml) may change a value set here.
 
 global:
