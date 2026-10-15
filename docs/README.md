@@ -10,4 +10,4 @@
 | [Inputs and outputs](specs/01_inputs_outputs.md) | everyone (reference) | the package files, the chart cache of the checks, parameters, connections, contracts, platform and instance values, the merge precedence, the outputs |
 | [Architecture](00_architecture.md) | contributors | the compile pipeline, the source map, the design decisions, the tests, the limitations |
 | [OKDP's own objects](03_okdp_objects.md) | contributors, platform engineers | how the credentials Secrets and the `objects` section reach the cluster, in the instance's umbrella, and why so; other vehicles: pros and cons |
-| [Ideas](IDEAS.md) | contributors, platform engineers | what the compiler could do, not decided: a descriptor ConfigMap per instance, its advantages and what it would take |
+| [Ideas](IDEAS.md) | contributors, platform engineers | what the compiler could do in the future, not decided |
