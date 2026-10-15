@@ -447,10 +447,13 @@ connections:
 
 With the example's `database` contract, `database: demo-db` instead names an
 instance of the namespace: host `demo-db-db.demo.svc`, Secret
-`demo-db-database-credentials`, and a dependency (Flux `dependsOn`, Argo CD
-sync waves). The mapping reads both the same way, credentials through a
-`secretKeyRef` on `secretRef.name`; it fails with a clear message when it
-needs the Secret and the connection has none (the second `errors` entry of
+`demo-db-database-credentials`, and a dependency (`Result.Dependencies`),
+which [okdp-gitops](https://github.com/OKDP/okdp-gitops) orders the
+releases with (Flux `dependsOn`, Argo CD sync waves,
+[GitOps](01_usage.md#gitops)). The mapping reads both the same way,
+credentials through a `secretKeyRef` on `secretRef.name`; it fails with a
+clear message when it needs the Secret and the connection has none (the
+second `errors` entry of
 `examples/02_advanced/input/db/catalog/webapp/1.0.0/okdp.yaml`). `s3` and
 `database-server` have no internal convention: they are always external (cnpg-postgresql publishes one
 `database-server` connection per database, which consumers declare as

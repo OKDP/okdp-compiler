@@ -40,7 +40,7 @@ if err != nil {
 // res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
 //               the mapping's objects section (okdp.objects.yaml)
 // res.Instance: what the instance publishes: its url, its usage, the connections it provides (okdp.instance.yaml)
-// res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
+// res.Dependencies: instances the connection references point to (compiler.Dependency), what a deployer orders the releases with
 
 // What okdp-compile -o <dir> writes, path -> content.
 files, err := compiler.Write(res)
@@ -137,6 +137,7 @@ export OKDP_CONTRACTS=$db/contracts   # or --contracts
 compile() { bin/okdp-compile --package $db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo \
   --context $db/platform.yaml -f $db/projects/demo/instances/demo-webapp/config.yaml "$@"; }
 compile -o out/webapp
+# depends on demo-db (database, database)
 # out/webapp now holds examples/02_advanced/output/projects/demo/instances/demo-webapp/, byte for byte
 compile -f testdata/protected-upstream.yaml -o out/protected
 # error: app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
@@ -166,6 +167,9 @@ full() { bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
   --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
   --context 2:$i/connections.yaml -f $i/config.yaml "$@"; }
 full -o out/full
+# depends on demo-db (database, catalogs[1].database)
+# depends on demo-db (database, database)
+# depends on demo-alerts (http, notifications.webhook)
 # out/full now holds examples/03_full/output/projects/demo/instances/demo-workspace/, byte for byte
 full --check --charts examples/03_full/.charts
 # nothing written: the compile checked, and its final values against the upstream charts
@@ -180,15 +184,16 @@ given to Helm with `-f`
 [rendering with Helm](docs/01_usage.md#rendering-with-helm)),
 `<dir>/okdp.objects.yaml`, OKDP's own objects, which the umbrella renders
 as written (`<dir>/templates/okdp.yaml`), when the instance has any,
-`<dir>/okdp.instance.yaml`, what the instance publishes, when it publishes
-something, and `<dir>/okdp.dependencies.yaml`, the instances the
-connection references point to, when there is one, for a deployer that
-orders the releases
-([`okdp.dependencies.yaml`](docs/01_usage.md#okdpdependenciesyaml)). The
-directory is created if needed; a compile that fails writes nothing, the
-files of a successful one overwrite those of the same name. `--release` and
-`--namespace` are required, names Kubernetes and Helm accept (a release of
-53 characters at most): the values are compiled for them.
+and `<dir>/okdp.instance.yaml`, what the instance publishes, when it
+publishes something. The directory is created if needed; a compile that
+fails writes nothing, the files of a successful one overwrite those of the
+same name. The instances the connection references point to are printed on
+stderr, one line each, `depends on <instance> (<contract>, <field>)`; a
+deployer that orders the releases reads them from `Result.Dependencies`
+([okdp-gitops](https://github.com/OKDP/okdp-gitops),
+[GitOps](docs/01_usage.md#gitops)). `--release` and `--namespace` are
+required, names Kubernetes and Helm accept (a release of 53 characters at
+most): the values are compiled for them.
 
 `--check`, without `-o`, compiles and writes nothing: what fails a compile
 fails it, its warnings printed. With it, `--charts <dir>` (`$OKDP_CHARTS`),
@@ -206,7 +211,7 @@ A compile reads no chart: `--charts` without `--check` fails
 | `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `Write`... |
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages |
-| `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes and the instances it depends on |
+| `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
 | `internal/value/` | the values every package shares, and their helpers |

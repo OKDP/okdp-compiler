@@ -144,7 +144,7 @@ func TestHelmUmbrella(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// What Helm renders: okdp.dependencies.yaml aside.
+	// What Helm renders.
 	for _, name := range []string{"Chart.yaml", ValuesFile, ObjectsFile, ObjectsTemplate} {
 		b, golden := files[name], filepath.Join(dir, filepath.FromSlash(name))
 		if *update {

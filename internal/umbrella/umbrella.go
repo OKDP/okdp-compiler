@@ -1,9 +1,9 @@
 // Package umbrella writes a compile as the files of okdp-compile (Write):
 // one chart for the whole instance, an umbrella over the upstream charts of
 // its keys with OKDP's own objects, for one Helm release per instance under
-// the release name its values were compiled for, what the instance
-// publishes and the instances it depends on. The caller writes them (the
-// CLI to a directory, a server to git).
+// the release name its values were compiled for, and what the instance
+// publishes. The caller writes them (the CLI to a directory, a server to
+// git).
 package umbrella
 
 import (
@@ -24,11 +24,6 @@ const (
 	// values.yaml they would be defaults, and Helm drops the nulls of
 	// defaults: a null that deletes an upstream default would be lost.
 	ValuesFile = "instance.values.yaml"
-	// DependenciesFile: Result.Dependencies as a YAML list: the instances
-	// the connection references point to, for a deployer that orders the
-	// releases (Flux dependsOn, Argo CD sync waves). Written when there is
-	// one. Helm ignores it.
-	DependenciesFile = "okdp.dependencies.yaml"
 	// InstanceFile: Result.Instance, what the instance publishes: url,
 	// usage, and provides, the connections it provides, each key written
 	// when set, what a control plane or a console reads of it in the
@@ -66,7 +61,6 @@ const objectsTemplate = `{{- /* OKDP's own objects: ` + ObjectsFile + `, as okdp
 //     the key: its .Chart.Name is the key);
 //   - ValuesFile, the final values of each key under the key, each with its
 //     own global, marked generated;
-//   - DependenciesFile, when res has dependencies;
 //   - InstanceFile, when the instance publishes something: a URL, a usage
 //     or a connection;
 //   - ObjectsFile, marked generated, and ObjectsTemplate, when res has
@@ -99,9 +93,6 @@ func Write(res *okdp.Result) (map[string][]byte, error) {
 		c.Dependencies = append(c.Dependencies, d)
 	}
 	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}}
-	if len(res.Dependencies) > 0 {
-		docs[DependenciesFile] = []any{res.Dependencies}
-	}
 	if i := res.Instance; i.URL != "" || i.Usage != "" || len(i.Provides) > 0 {
 		docs[InstanceFile] = []any{i}
 	}

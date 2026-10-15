@@ -92,12 +92,11 @@ annotations:
 	}
 }
 
-// TestWrite: the umbrella's values, marked generated, the dependencies as
-// a YAML list, what the instance publishes, its empty keys left out, and
-// the objects as a YAML stream, marked generated, with the template that
-// renders it, indented by 2 spaces; without dependencies, no dependencies
-// file, publishing nothing, no instance file, without objects, neither
-// objects file.
+// TestWrite: the umbrella's values, marked generated, what the instance
+// publishes, its empty keys left out, and the objects as a YAML stream,
+// marked generated, with the template that renders it, indented by 2
+// spaces; the dependencies in no file; publishing nothing, no instance
+// file, without objects, neither objects file.
 func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &okdp.Result{
@@ -114,11 +113,10 @@ func TestWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		ValuesFile:       generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
-		DependenciesFile: "- instance: demo-db\n  contract: database\n  field: backends[0].database\n",
-		InstanceFile:     "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
-		ObjectsFile:      generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
-		ObjectsTemplate:  "{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}\n{{ .Files.Get \"okdp.objects.yaml\" }}\n",
+		ValuesFile:      generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
+		InstanceFile:    "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
+		ObjectsFile:     generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
+		ObjectsTemplate: "{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}\n{{ .Files.Get \"okdp.objects.yaml\" }}\n",
 	}
 	if len(files) != len(want)+1 {
 		t.Errorf("got %d files, want %d and Chart.yaml", len(files), len(want))
@@ -128,9 +126,9 @@ func TestWrite(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", name, got, w)
 		}
 	}
-	// No dependency, no object, nothing published: Chart.yaml and the
-	// values only.
-	res.Dependencies, res.Objects, res.Instance = nil, nil, okdp.Instance{}
+	// No object, nothing published: Chart.yaml and the values only, the
+	// dependencies all the same.
+	res.Objects, res.Instance = nil, okdp.Instance{}
 	if files, err = Write(res); err != nil {
 		t.Fatal(err)
 	}

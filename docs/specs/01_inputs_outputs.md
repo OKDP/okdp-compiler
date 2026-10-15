@@ -1203,7 +1203,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file); nil when none |
 | `Instance` | `compiler.Instance` | what the instance publishes: its URL, its usage and the connections it provides ([The instance file](#the-instance-file)) |
-| `Dependencies` | `[]Dependency` | the instances the parameters reference ([Dependencies](#dependencies)) |
+| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. The binary prints each on stderr, `depends on <instance> (<contract>, <field>)` |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
@@ -1540,13 +1540,13 @@ umbrella.
 
 ### Dependencies
 
-`Dependencies`: one item per internal [connection reference](#resolution),
-sorted by `field` (string order), the parameter path as the [connection
-errors](#connection-errors) write it, its `instance` a release name. Two
-references to one instance give two items; external and empty references
-give none. `nil` when there is none. Every field of an item is set: an
-empty reference gives no item, a reference without its contract fails;
-an empty field would not be written.
+`Dependencies` (`compiler.Dependency`): one item per internal
+[connection reference](#resolution), sorted by `field` (string order), the
+parameter path as the [connection errors](#connection-errors) write it,
+its `instance` a release name. Two references to one instance give two
+items; external and empty references give none. `nil` when there is none.
+Every field of an item is set: an empty reference gives no item, a
+reference without its contract fails.
 
 ```go
 type Dependency struct {
@@ -1558,20 +1558,21 @@ type Dependency struct {
 
 The compiler is not given the other instances: it does not check that the
 instance exists, nor that it provides the contract. A deployer orders the
-releases with the list ([GitOps](../01_usage.md#gitops)), written to
-`okdp.dependencies.yaml` (`compiler.DependenciesFile`) when there is one:
-no file, no dependency.
+releases with the list, read from `Result.Dependencies`: okdp-gitops makes
+each release wait for the instances it depends on, Flux `dependsOn` and
+Argo CD sync waves ([GitOps](../01_usage.md#gitops)). No file holds it:
+`okdp-compile -o` prints each item on stderr once the files are written,
+after the warnings, `depends on <instance> (<contract>, <field>)`, and
+`--check` none.
 
 ### Umbrella chart
 
 `compiler.Write` (`okdp-compile -o <dir>`): the instance as one chart,
 for one Helm release per instance, under the release name the values were
 compiled for. Two files, [the objects file](#the-objects-file) and its
-template when the instance has objects, and `okdp.dependencies.yaml`
-(`compiler.DependenciesFile`, [dependencies](#dependencies)) when there is
-one and `okdp.instance.yaml` ([the instance file](#the-instance-file))
-when the instance publishes something, which Helm ignores, by path in the
-directory:
+template when the instance has objects, and `okdp.instance.yaml`
+([the instance file](#the-instance-file)) when the instance publishes
+something, which Helm ignores, by path in the directory:
 
 - `Chart.yaml`: the package's (`Result.Chart`), every field kept, in
   Helm's order (`apiVersion`, `name`, `version`, `kubeVersion`,
@@ -1733,13 +1734,11 @@ provides:
 ```
 
 No objects file: the instance has no objects, no credentials Secret and no
-`objects` section. And `okdp.dependencies.yaml`
-([dependencies](#dependencies)):
+`objects` section. Its dependency, `Result.Dependencies`
+([dependencies](#dependencies)), which the compile prints on stderr:
 
-```yaml
-- instance: demo-db
-  contract: database
-  field: database
+```text
+depends on demo-db (database, database)
 ```
 
 `examples/03_full/` compiles the workspace service, a package written to use
@@ -1754,8 +1753,8 @@ and the instance itself, in a list of catalogs and under a nested key;
 upstream values). Release
 `demo-workspace`, namespace `demo`:
 `output/projects/demo/instances/demo-workspace/` is what `-o <dir>`
-writes. Its `okdp.dependencies.yaml` lists
-`demo-db` twice, for `catalogs[1].database` and `database`, and
+writes. Its `Result.Dependencies`, which the compile prints on stderr,
+lists `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
 `$if`, is no dependency, and its chart is not in the chart cache of the
 check. Its

@@ -54,7 +54,7 @@ func Example() {
 	// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
 	//               the mapping's objects section (okdp.objects.yaml)
 	// res.Instance: what the instance publishes: its url, its usage, the connections it provides (okdp.instance.yaml)
-	// res.Dependencies: instances the connection references point to (Flux dependsOn, Argo sync waves)
+	// res.Dependencies: instances the connection references point to (compiler.Dependency), what a deployer orders the releases with
 
 	// What okdp-compile -o <dir> writes, path -> content.
 	files, err := compiler.Write(res)
@@ -69,7 +69,7 @@ func Example() {
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database}]
-	// [Chart.yaml instance.values.yaml okdp.dependencies.yaml okdp.instance.yaml]
+	// [Chart.yaml instance.values.yaml okdp.instance.yaml]
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.

@@ -124,7 +124,7 @@ okdp-compile --version
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--context` files. It sets no `global` but the keys the parameter schema declares under it, and no `connections` ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
-| `--output`, `-o` | required, refused with `--check` | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, `okdp.instance.yaml`, what the instance publishes, when it publishes something, and `okdp.dependencies.yaml`, the instances the connection references point to, when there is one ([`--output`](#--output)) |
+| `--output`, `-o` | required, refused with `--check` | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, and `okdp.instance.yaml`, what the instance publishes, when it publishes something; the instances the connection references point to printed on stderr, `depends on <instance> (<contract>, <field>)` ([`--output`](#--output)) |
 | `--version` | | print the version and exit |
 
 Flags take one or two dashes, and every input is a flag: an argument that
@@ -146,7 +146,6 @@ The instance as one chart, for one Helm release per instance
 | `okdp.objects.yaml` | when the instance has objects, `Result.Objects`, OKDP's own objects: a YAML stream, one document per object, after the same line ([the objects file](specs/01_inputs_outputs.md#the-objects-file)) |
 | `templates/okdp.yaml` | with `okdp.objects.yaml`, the umbrella's template that renders it as written, `{{ .Files.Get "okdp.objects.yaml" }}`: Helm does not template the objects |
 | `okdp.instance.yaml` | when the instance publishes a URL, a usage or a connection, `Result.Instance`: `url`, `usage` and `provides`, the connections it provides, with their `secretRef` ([the instance file](specs/01_inputs_outputs.md#the-instance-file)) |
-| `okdp.dependencies.yaml` | when there is one, `Result.Dependencies`: the instances the connection references point to ([`okdp.dependencies.yaml`](#okdpdependenciesyaml)) |
 
 The keys are the dependencies of the package and, in `dcr` mode, one per
 [OAuth client chart](specs/01_inputs_outputs.md#oauth-client-charts).
@@ -168,17 +167,18 @@ The example's, `out/` here, are
 adds the key `oidc-dcr`, which `Chart.yaml` does not list: a dependency
 after `app`, the platform's oidc-dcr chart. It has no objects, and so no
 `okdp.objects.yaml`; `okdp.instance.yaml` holds its URL, its usage and the
-connection it provides:
+connection it provides; the instance it depends on, `demo-db`, which its
+`database` parameter references, is printed on stderr:
 
 ```console
 $ bin/okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 \
     --release demo-webapp --namespace demo \
     --context examples/02_advanced/input/db/platform.yaml \
     -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o out
+depends on demo-db (database, database)
 $ ls out
 Chart.yaml
 instance.values.yaml
-okdp.dependencies.yaml
 okdp.instance.yaml
 $ cat out/Chart.yaml
 apiVersion: v2
@@ -216,7 +216,8 @@ dependencies those of the package the values file renders, in `Chart.yaml`
 order (`api`, `scheduler`, `gateway`, `metrics`: `backup`, left out, is not
 among them), then the chart of each OAuth client in `dcr` mode, by key;
 its objects, the credentials Secrets of its outputs and its `objects`
-section, are in `okdp.objects.yaml`:
+section, are in `okdp.objects.yaml`; it depends on `demo-db`, by two
+parameters, and on `demo-alerts`:
 
 ```console
 $ db=examples/03_full/input/db
@@ -225,10 +226,12 @@ $ bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
     --contracts $db/contracts --release demo-workspace --namespace demo \
     --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
     --context 2:$i/connections.yaml -f $i/config.yaml -o out-full
+depends on demo-db (database, catalogs[1].database)
+depends on demo-db (database, database)
+depends on demo-alerts (http, notifications.webhook)
 $ ls out-full
 Chart.yaml
 instance.values.yaml
-okdp.dependencies.yaml
 okdp.instance.yaml
 okdp.objects.yaml
 templates
@@ -238,37 +241,23 @@ The directory is created if needed, `templates/` too, and the files
 written into it, overwriting those of the same name. A compile removes
 the files an earlier compile wrote there that it does not write: without
 objects, `okdp.objects.yaml` and `templates/okdp.yaml`, which Helm would
-render; publishing nothing, `okdp.instance.yaml`; without dependencies,
-`okdp.dependencies.yaml`, which a deployer would read. Nothing else in it
-is read, removed or checked. A directory an
+render; publishing nothing, `okdp.instance.yaml`, which a control plane
+would read. Nothing else in it is read, removed or checked. A directory an
 earlier version wrote may hold files this one no longer writes, a values
-file per chart, `<key>.values.yaml` (without `--umbrella`), and
-`install.sh` (`--mkinstall`): remove them, or write to another
-directory.
+file per chart, `<key>.values.yaml` (without `--umbrella`), `install.sh`
+(`--mkinstall`), and `okdp.dependencies.yaml`, the dependencies: remove
+them, or write to another directory.
 
-### `okdp.dependencies.yaml`
-
-In the output directory, the chart's directory: Helm ignores it when it
-renders, and packages it with the chart. It holds `Result.Dependencies`,
-a YAML list, and is written when there is one: one item per connection
-reference to another instance of the namespace, `instance` (its release
-name), `contract` and `field` (the parameter that references it)
-([dependencies](specs/01_inputs_outputs.md#dependencies)). Helm does not
-read it: it is for a deployer that installs the referenced instances
-first ([GitOps](#gitops)); no file, no instance to wait for.
-
-The example's, the instance referencing `demo-db` in `database`:
-
-```console
-$ bin/okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 \
-    --release demo-webapp --namespace demo \
-    --context examples/02_advanced/input/db/platform.yaml \
-    -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o out
-$ cat out/okdp.dependencies.yaml
-- instance: demo-db
-  contract: database
-  field: database
-```
+Once the files are written, the compile prints on stderr, after its
+warnings, `Result.Dependencies`: one line per connection reference to
+another instance of the namespace, by parameter path,
+`depends on <instance> (<contract>, <field>)`, the instance's release
+name, the contract it must provide and the parameter that references it
+([dependencies](specs/01_inputs_outputs.md#dependencies)). No file holds
+them: Helm installs the release alone, and a deployer that installs the
+referenced instances first reads them from `Result.Dependencies`
+([GitOps](#gitops)). None printed, no instance to wait for; `--check`
+prints none.
 
 ### `--check`
 
@@ -320,7 +309,7 @@ api (workspace-3.2.0):
 
 | Status | When |
 |---|---|
-| 0 | compiled, or checked (`--check`), each warning on stderr as `warning: <message>`; `--version`, `--help` |
+| 0 | compiled, or checked (`--check`), each warning on stderr as `warning: <message>`, then, the files written, each dependency as `depends on <instance> (<contract>, <field>)`; `--version`, `--help` |
 | 1 | any error: `error: <message>` on stderr |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
@@ -347,6 +336,14 @@ items of the chart's default list ([`--check`](#--check)):
 ```text
 warning: values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml
 warning: upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; restate them in the package's values of app (its defaults or values file) to keep them
+```
+
+A dependency (`Result.Dependencies`) is no warning: it is printed after
+the files are written, one line each, by parameter path, and never with
+`--check` ([`--output`](#--output)):
+
+```text
+depends on demo-db (database, database)
 ```
 
 ### Rendering with Helm
@@ -624,10 +621,10 @@ contract), `Context` (the `--context` files, parsed, in order, each a
 `Release` and `Namespace`; all but `Charts`, `Context` and `Values` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
 `-o` writes in `instance.values.yaml`, `Result.Charts` the index the
-umbrella's `Chart.yaml` names the charts from, `Result.Dependencies` what
-it writes in `okdp.dependencies.yaml`, `Result.Instance` what it writes in
-`okdp.instance.yaml` and `Result.Objects` OKDP's objects, what it writes in
-`okdp.objects.yaml` ([outputs](specs/01_inputs_outputs.md#outputs)).
+umbrella's `Chart.yaml` names the charts from, `Result.Instance` what it
+writes in `okdp.instance.yaml`, `Result.Objects` OKDP's objects, what it
+writes in `okdp.objects.yaml`, and `Result.Dependencies` what it prints on
+stderr, in no file ([outputs](specs/01_inputs_outputs.md#outputs)).
 `Result.Values` renders as in [rendering with Helm](#rendering-with-helm),
 `Result.Charts` being the index.
 
@@ -636,10 +633,10 @@ content, `templates/okdp.yaml` in a subdirectory), for a caller to write
 where it keeps them: the umbrella chart (the package's `Chart.yaml`,
 `Result.Chart`, its dependencies the compiled charts), its values
 (`compiler.UmbrellaValues`), OKDP's objects and their template when there
-are objects (`compiler.ObjectsFile`, `compiler.ObjectsTemplate`), what the
-instance publishes when it publishes something (`compiler.InstanceFile`)
-and the dependencies when there is one (`compiler.DependenciesFile`).
-`compiler.Instance` is what `okdp.instance.yaml` holds, to read it back.
+are objects (`compiler.ObjectsFile`, `compiler.ObjectsTemplate`), and what
+the instance publishes when it publishes something
+(`compiler.InstanceFile`). `compiler.Instance` is what `okdp.instance.yaml`
+holds, to read it back.
 
 - `Result.Warnings` lists what the compile warns of without failing: those
   of the package, found by `LoadDefinition` (`Definition.Warnings`), a
@@ -647,6 +644,13 @@ and the dependencies when there is one (`compiler.DependenciesFile`).
   appended to that leaves out items of the chart's default list. Each compile gives them with its
   result, so that a server compiling many instances returns them with each;
   the binary prints each as `warning: <message>`.
+- `Result.Dependencies` lists the instances of the namespace the
+  connection references point to, by parameter path, each a
+  `compiler.Dependency`, `{Instance, Contract, Field}`
+  ([dependencies](specs/01_inputs_outputs.md#dependencies)): what a
+  deployer orders the releases with ([GitOps](#gitops)). `Write` writes
+  them in no file; the binary prints each, once the files are written, as
+  `depends on <instance> (<contract>, <field>)`.
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than
@@ -717,60 +721,49 @@ instance).
 
 ### GitOps
 
-The compiler writes values and objects, not HelmRelease or Application
-objects. The values of every key are compiled for the instance's release
-name and namespace: a deployment renders the umbrella under these, one
-release per instance, one Flux HelmRelease or one Argo CD Application. OKDP
-publishes no chart of the service: the upstream charts come from their own
-repositories, the umbrella's dependencies.
+The compiler writes the instance as one Helm chart, not HelmRelease or
+Application objects: the umbrella deploys alone as one Helm release,
+`helm upgrade --install` ([rendering with Helm](#rendering-with-helm)).
+OKDP publishes no chart of the service: the upstream charts come from
+their own repositories, the umbrella's dependencies.
 
-**The umbrella.** Its directory is committed with the instance's compiled
-files. Flux builds the chart from the deployments repository, and takes the
-values from a ConfigMap of `instance.values.yaml` (a kustomize
-`configMapGenerator`):
+[okdp-gitops](https://github.com/OKDP/okdp-gitops) compiles a whole
+deployments repository with this library, every instance of it, and writes
+the Flux and Argo CD files of each, a Flux HelmRelease and its
+kustomization or an Argo CD Application, their `dependsOn` and sync waves
+from `Result.Dependencies`: the instances of the namespace the connection
+references point to, one item per parameter
+([dependencies](specs/01_inputs_outputs.md#dependencies)). The compiler
+does not check that an instance exists: the deployment waits for it.
 
-```yaml
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: demo-webapp
-  namespace: demo
-spec:
-  releaseName: demo-webapp
-  chart:
-    spec:
-      chart: ./compiled/demo-webapp
-      sourceRef: {kind: GitRepository, name: deployments, namespace: flux-system}
-      reconcileStrategy: Revision
-  valuesFrom:
-    - kind: ConfigMap
-      name: demo-webapp-values
-      valuesKey: instance.values.yaml
-```
+A deployer that renders the umbrella, okdp-gitops or another, respects
+what it is compiled for:
 
-`reconcileStrategy: Revision` rebuilds the chart at every revision of the
-repository: its version, the package's, does not change when the platform
-changes the version of a dependency. `chart.spec.valuesFiles` would make the
-values the chart's defaults, and drop their nulls. Argo CD takes the values
-file with `-f`:
+**The release.** The values of every key are compiled for the instance's
+release name and namespace: the umbrella renders under these, one release
+per instance, one Flux HelmRelease or one Argo CD Application.
 
-```yaml
-spec:
-  source:
-    repoURL: https://git.example.org/deployments.git
-    path: compiled/demo-webapp
-    helm:
-      releaseName: demo-webapp
-      valueFiles: [instance.values.yaml]
-```
+**The values.** `instance.values.yaml` is given to Helm as user values:
+Flux `valuesFrom` a ConfigMap of the file (a kustomize
+`configMapGenerator`, `valuesKey: instance.values.yaml`), Argo CD
+`helm.valueFiles`, `helm -f`. Never as the chart's defaults, Flux
+`chart.spec.valuesFiles` or a `values.yaml` of the chart: Helm drops the
+nulls of defaults, where a null of the final values deletes an upstream
+default ([layers and nulls](specs/01_inputs_outputs.md#layers-and-nulls)).
 
-Both fetch the dependencies from their repositories: a private repository
-needs its credentials there. Each renders with the Helm it embeds (latest
-patch releases, October 2026): Flux 2.9 Helm 4.2.4 (helm-controller 1.6), Flux 2.8 Helm 4.2.0
-(helm-controller 1.5), Flux 2.7 Helm 3.19.2 (helm-controller 1.4); Argo CD
-3.5 Helm 4.2.1, Argo CD 3.4 and 3.3 Helm 3.19.4. The umbrella, the final
-values and the schema reports are checked with each ([rendering with
-Helm](#rendering-with-helm), [Helm fixtures](00_architecture.md#helm-fixtures)).
+**The chart.** The umbrella's directory is committed with the instance's
+compiled files, and the chart built from the deployments repository. Flux
+needs `reconcileStrategy: Revision`, which rebuilds the chart at every
+revision of the repository: its version, the package's, does not change
+when the platform changes the version of a dependency. Both fetch the
+dependencies from their repositories: a private repository needs its
+credentials there. Each renders with the Helm it embeds (latest patch
+releases, October 2026): Flux 2.9 Helm 4.2.4 (helm-controller 1.6), Flux
+2.8 Helm 4.2.0 (helm-controller 1.5), Flux 2.7 Helm 3.19.2
+(helm-controller 1.4); Argo CD 3.5 Helm 4.2.1, Argo CD 3.4 and 3.3 Helm
+3.19.4. The umbrella, the final values and the schema reports are checked
+with each ([rendering with Helm](#rendering-with-helm),
+[Helm fixtures](00_architecture.md#helm-fixtures)).
 
 **OAuth clients.** In `dcr` mode the index lists one chart per OAuth client
 (`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr chart;
@@ -798,28 +791,6 @@ offer, in a deployment form, the internal connections they provide; an
 instance that publishes nothing has no file, neither URL, usage nor
 connection. The repository says what is to run; what runs is the GitOps
 engine's status.
-
-**Dependencies.** `Result.Dependencies` lists the instances of the
-namespace the connection references point to, one item per parameter
-([dependencies](specs/01_inputs_outputs.md#dependencies)), written to
-[`okdp.dependencies.yaml`](#okdpdependenciesyaml) when there is one. The
-compiler does not check that an instance exists: the deployment waits for
-it.
-
-- Flux: on the instance's HelmRelease objects, one `spec.dependsOn` entry per
-  referenced instance. With HelmReleases named after the instances:
-
-  ```console
-  $ yq '{"dependsOn": [.[].instance] | unique | map({"name": .})}' out/okdp.dependencies.yaml
-  dependsOn:
-    - name: demo-db
-  ```
-
-- Argo CD: give the instance's Application a sync wave
-  (`argocd.argoproj.io/sync-wave`) greater than the waves of the instances
-  it depends on, e.g. one more than the greatest. An app-of-apps waits for a
-  child Application to be healthy only with a health check for Application
-  resources configured in Argo CD.
 
 ## Troubleshooting
 

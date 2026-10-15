@@ -55,7 +55,7 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	flag.Func("context", "context values file, [<level>:]<file>, repeatable, before the -f files: global, global.okdp and connections among them; level 0 (the default), the platform's, first, a level's files merged in order; a level adds values, it changes none of a lower level's", func(s string) error { o.contexts = append(o.contexts, s); return nil })
 	flag.Func("f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares, and no connections: an instance's own are a --context file of its level", func(s string) error { o.values = append(o.values, s); return nil })
-	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, "+compiler.InstanceFile+", what it publishes (url, usage, provides), when it publishes something, and "+compiler.DependenciesFile+", the instances the connection references point to, when there is one")
+	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, and "+compiler.InstanceFile+", what it publishes (url, usage, provides), when it publishes something; the instances the connection references point to are printed on stderr, one line each: depends on <instance> (<contract>, <field>)")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Parse()
 	if o.check && o.charts == "" {
@@ -80,10 +80,12 @@ func main() {
 // compile's warnings on stderr, then writes the files of compiler.Write
 // into the output directory, created if needed, with the directories of
 // their paths, and removes the files an earlier compile wrote there that
-// this one does not: the objects files, which Helm would render, the
-// instance and dependencies files, which a deployer would read. A compile
+// this one does not: the objects files, which Helm would render, and the
+// instance file, which a control plane would read; then prints on stderr
+// the instances the connection references point to (Result.Dependencies),
+// one line each: depends on <instance> (<contract>, <field>). A compile
 // that fails writes nothing; --check writes nothing, the files built all
-// the same.
+// the same, and prints no dependency.
 func run(o options) error {
 	switch {
 	case o.check && o.output != "":
@@ -159,13 +161,16 @@ func run(o options) error {
 			return err
 		}
 	}
-	for _, name := range []string{compiler.ObjectsFile, compiler.ObjectsTemplate, compiler.InstanceFile, compiler.DependenciesFile} {
+	for _, name := range []string{compiler.ObjectsFile, compiler.ObjectsTemplate, compiler.InstanceFile} {
 		if _, ok := files[name]; ok {
 			continue
 		}
 		if err := os.Remove(filepath.Join(o.output, filepath.FromSlash(name))); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
+	}
+	for _, d := range res.Dependencies {
+		fmt.Fprintf(os.Stderr, "depends on %s (%s, %s)\n", d.Instance, d.Contract, d.Field)
 	}
 	return nil
 }

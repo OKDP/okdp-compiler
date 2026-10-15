@@ -74,7 +74,7 @@ func TestRun(t *testing.T) {
 	}
 	// The files of an earlier compile: overwritten, and the objects files
 	// removed, the instance having no objects.
-	for _, name := range []string{"instance.values.yaml", "okdp.dependencies.yaml", "okdp.instance.yaml", "okdp.objects.yaml", "templates/okdp.yaml"} {
+	for _, name := range []string{"instance.values.yaml", "okdp.instance.yaml", "okdp.objects.yaml", "templates/okdp.yaml"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("stale: true\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}

@@ -28,7 +28,8 @@ each, by repository, name and version
 ([Chart index](specs/01_inputs_outputs.md#chart-index));
 `Objects`, OKDP's own objects for the cluster, which the umbrella renders
 as written; `Instance`, what the instance publishes, for a control plane
-or a console that reads git; `Dependencies`, for the deployer (Flux
+or a console that reads git; `Dependencies`, the instances it depends
+on, for a deployer that orders the releases (okdp-gitops: Flux
 `dependsOn`, Argo CD sync waves); `Warnings`, what does not fail the
 compile (a `values.yaml` that holds expressions)
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
@@ -393,8 +394,8 @@ neither knows OKDP.
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `provides.go` | stage 7: `Instance`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`) | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
-| `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); when there are dependencies, `okdp.dependencies.yaml` (`DependenciesFile`); and when the instance publishes something, `Result.Instance`, `okdp.instance.yaml` (`InstanceFile`) | `okdp.Result`; `chart.Metadata` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Instance`, `Output`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `DependenciesFile`, `InstanceFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
+| `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Instance`, `okdp.instance.yaml` (`InstanceFile`) | `okdp.Result`; `chart.Metadata` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Instance`, `Output`, `Dependency`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InstanceFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -414,8 +415,9 @@ CEL session per compile for the mapping and the compiler's templates.
 `cmd/okdp-compile/main.go` is a thin caller of the public package:
 `os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
 `compiler.Compile`, its warnings printed on stderr, then the files of
-`compiler.Write`: the umbrella chart, OKDP's objects,
-`okdp.instance.yaml` and `okdp.dependencies.yaml`
+`compiler.Write`: the umbrella chart, OKDP's objects and
+`okdp.instance.yaml`; then the dependencies printed on stderr,
+`depends on <instance> (<contract>, <field>)`
 ([`--output`](01_usage.md#--output)).
 Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
@@ -804,8 +806,8 @@ oidc-dcr settings and their defaults. The template has no Helm fixture: its
 expected values are in `oidc_test.go`. `internal/okdp/load_test.go` checks
 the loading of a package, `internal/umbrella/umbrella_test.go` the files
 `-o` writes: the umbrella's chart, its values, the objects file and its
-template, none without objects, what the instance publishes and the
-dependencies.
+template, none without objects, what the instance publishes, and the
+dependencies in no file.
 `cmd/okdp-compile/main_test.go` runs the
 command line on the example: the files of a previous compile
 overwritten, the refused options, nothing written when a compile or an
@@ -865,8 +867,8 @@ values the platform sets, under its key. It has no `okdp.yaml` and no
 instance has the values of `values.yaml`, which Helm renders over the
 chart's defaults. It
 publishes nothing and depends on nothing: its output is `Chart.yaml` and
-`instance.values.yaml`, no `okdp.instance.yaml`, no
-`okdp.dependencies.yaml`. No `platform.yaml`, no `contracts/`.
+`instance.values.yaml`, no `okdp.instance.yaml`, and its compile prints
+nothing. No `platform.yaml`, no `contracts/`.
 
 `examples/01_minimal/` is the smallest package with a mapping: `catalog/hello/1.0.0/`
 deploys one chart, `app` (the fictional `hello` chart, aliased

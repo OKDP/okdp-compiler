@@ -35,9 +35,9 @@ type resolver struct {
 // Dependency: an instance of the same namespace that a connection reference
 // of the parameters points to (an internal reference: the name of an
 // instance, not of an external connection). The instance must exist and
-// provide the contract; a deployment can wait for it (Flux dependsOn, Argo
-// sync waves). Its fields are always set; an empty one would not be
-// written.
+// provide the contract. Its fields are always set. What a deployer orders
+// the releases with, read from Result.Dependencies: okdp-gitops makes the
+// release wait for the instance (Flux dependsOn, Argo CD sync waves).
 type Dependency struct {
 	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance (its release name)
 	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
