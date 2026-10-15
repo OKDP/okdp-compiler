@@ -104,7 +104,7 @@ func TestWrite(t *testing.T) {
 		Charts:       map[string]chart.Ref{"oidc-dcr": okdp.DcrSource, "app": app},
 		Objects:      []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}, {"kind": "Secret", "data": nil}},
 		Dependencies: []okdp.Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[0].database"}},
-		Instance: okdp.Instance{URL: "https://x", Usage: "use it\n", Provides: []okdp.Output{
+		Info: okdp.Info{URL: "https://x", Usage: "use it\n", Provides: []okdp.Output{
 			{Name: "demo-app", Contract: "http", Values: map[string]any{"url": "https://x"}, SecretRef: &okdp.SecretRef{Name: "creds"}},
 		}},
 	}
@@ -114,7 +114,7 @@ func TestWrite(t *testing.T) {
 	}
 	want := map[string]string{
 		ValuesFile:      generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
-		InstanceFile:    "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
+		InfoFile:        "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
 		ObjectsFile:     generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
 		ObjectsTemplate: "{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}\n{{ .Files.Get \"okdp.objects.yaml\" }}\n",
 	}
@@ -128,7 +128,7 @@ func TestWrite(t *testing.T) {
 	}
 	// No object, nothing published: Chart.yaml and the values only, the
 	// dependencies all the same.
-	res.Objects, res.Instance = nil, okdp.Instance{}
+	res.Objects, res.Info = nil, okdp.Info{}
 	if files, err = Write(res); err != nil {
 		t.Fatal(err)
 	}
@@ -137,12 +137,12 @@ func TestWrite(t *testing.T) {
 	}
 	// A usage alone is published, without the empty keys, of the instance
 	// and of an output.
-	res.Instance = okdp.Instance{Usage: "use it\n"}
-	if files, err = Write(res); err != nil || string(files[InstanceFile]) != "usage: |\n  use it\n" {
-		t.Errorf("a usage alone: %v %q", err, files[InstanceFile])
+	res.Info = okdp.Info{Usage: "use it\n"}
+	if files, err = Write(res); err != nil || string(files[InfoFile]) != "usage: |\n  use it\n" {
+		t.Errorf("a usage alone: %v %q", err, files[InfoFile])
 	}
-	res.Instance = okdp.Instance{Provides: []okdp.Output{{Name: "demo-app", Contract: "http", Values: map[string]any{}}}}
-	if files, err = Write(res); err != nil || string(files[InstanceFile]) != "provides:\n  - name: demo-app\n    contract: http\n" {
-		t.Errorf("an output without values: %v %q", err, files[InstanceFile])
+	res.Info = okdp.Info{Provides: []okdp.Output{{Name: "demo-app", Contract: "http", Values: map[string]any{}}}}
+	if files, err = Write(res); err != nil || string(files[InfoFile]) != "provides:\n  - name: demo-app\n    contract: http\n" {
+		t.Errorf("an output without values: %v %q", err, files[InfoFile])
 	}
 }

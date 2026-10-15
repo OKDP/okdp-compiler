@@ -60,11 +60,11 @@ type (
 	// Result: what a compile produces, its warnings among them (Warnings),
 	// which do not fail it.
 	Result = okdp.Result
-	// Instance: what an instance publishes (Result.Instance), as
-	// InstanceFile holds it: its URL, its usage, the connections it
+	// Info: what an instance publishes (Result.Info), as
+	// InfoFile holds it: its URL, its usage, the connections it
 	// provides.
-	Instance = okdp.Instance
-	// Output: a connection an instance provides (Instance.Provides).
+	Info = okdp.Info
+	// Output: a connection an instance provides (Info.Provides).
 	Output = okdp.Output
 	// Dependency: an instance of the namespace a connection reference
 	// points to, by its naming convention or one of its outputs
@@ -82,10 +82,10 @@ const (
 	// UmbrellaValues: the umbrella's values, given to Helm as user values
 	// (helm -f, Argo CD valueFiles, Flux valuesFrom).
 	UmbrellaValues = umbrella.ValuesFile
-	// InstanceFile: Result.Instance, what the instance publishes (url,
+	// InfoFile: Result.Info, what the instance publishes (url,
 	// usage, provides), written when it publishes something, for a control
 	// plane or a console that reads the deployments repository.
-	InstanceFile = umbrella.InstanceFile
+	InfoFile = umbrella.InfoFile
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object,
 	// written when there are objects: plain manifests, which ObjectsTemplate
 	// renders as written in the umbrella's release.
@@ -115,7 +115,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // directory -> content: Chart.yaml, the instance as one chart, the
 // package's Chart.yaml with the dependencies compiled, an umbrella over the
 // upstream charts of its keys; UmbrellaValues, the final values of each key
-// under the key; InstanceFile, when the instance publishes a URL, a usage
+// under the key; InfoFile, when the instance publishes a URL, a usage
 // or a connection; and, when res has objects, ObjectsFile and
 // ObjectsTemplate. res is what Compile returned: Write does not check it
 // again. Every file is built before Write returns.

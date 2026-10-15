@@ -58,12 +58,12 @@ func TestProvides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Instance{URL: "https://x", Usage: "use it\n", Provides: []Output{
+	want := Info{URL: "https://x", Usage: "use it\n", Provides: []Output{
 		{Name: "demo-app", Contract: "http", Values: M{"port": float64(443), "url": "https://demo-app.example.org"}},
 		{Name: "public", Contract: "api", Values: M{"port": float64(443), "url": "https://public.example.org"}, SecretRef: &SecretRef{Name: "public-credentials"}},
 	}}
-	if !reflect.DeepEqual(res.Instance, want) {
-		t.Errorf("got %#v\nwant %#v", res.Instance, want)
+	if !reflect.DeepEqual(res.Info, want) {
+		t.Errorf("got %#v\nwant %#v", res.Info, want)
 	}
 	if res.Objects != nil {
 		t.Errorf("objects: %#v", res.Objects)
@@ -79,8 +79,8 @@ func TestProvidesNone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(res.Instance, Instance{}) {
-		t.Errorf("got %#v", res.Instance)
+	if !reflect.DeepEqual(res.Info, Info{}) {
+		t.Errorf("got %#v", res.Info)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestProvidesSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref := res.Instance.Provides[0].SecretRef; ref == nil || ref.Name != "other-api-credentials" {
+	if ref := res.Info.Provides[0].SecretRef; ref == nil || ref.Name != "other-api-credentials" {
 		t.Errorf("secretRef: %#v", ref)
 	}
 	if len(res.Objects) != 1 || res.Objects[0]["kind"] != "Secret" || value.Dig(res.Objects[0], "metadata.name") != "other-api-credentials" {

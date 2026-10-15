@@ -631,10 +631,10 @@ renders as written:
 | `url` | the instance's URL, a string, trimmed |
 | `usage` | how to use the instance, a string, trimmed, with one final newline when not empty |
 
-Other keys are ignored. Both go to `Result.Instance`, written to
-`okdp.instance.yaml` with the connections the instance provides, what a
+Other keys are ignored. Both go to `Result.Info`, written to
+`okdp.info.yaml` with the connections the instance provides, what a
 control plane or a console reads of the instance
-([the instance file](01_inputs_outputs.md#the-instance-file)). A value that is not a map fails;
+([the info file](01_inputs_outputs.md#the-info-file)). A value that is not a map fails;
 absent or null, both are empty. `url` and `usage` are strings when set:
 another value, a null included, fails rather than is printed as text,
 `- at '/instance/url': got number, want string`.
@@ -656,8 +656,8 @@ provides:
 ```
 
 A list of outputs, the connections the instance publishes, in
-`Result.Instance` and `okdp.instance.yaml`
-([the instance file](01_inputs_outputs.md#the-instance-file)). What
+`Result.Info` and `okdp.info.yaml`
+([the info file](01_inputs_outputs.md#the-info-file)). What
 another instance of the namespace references: an output of a contract
 without a naming convention, by its `name`, when its compile is given what
 this one publishes (`Inputs.Published`); this instance, by its release
@@ -694,7 +694,7 @@ A key of `generate` is checked as one of `okdpGeneratedSecret`'s `keys`
 order, their name first, then their fields in alphabetical order, and the
 first error is reported; the required fields the item lacks, and the
 schema's violations of that item, all at once, one line each
-([the instance file](01_inputs_outputs.md#the-instance-file)).
+([the info file](01_inputs_outputs.md#the-info-file)).
 
 #### secret
 

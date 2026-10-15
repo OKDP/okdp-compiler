@@ -26,10 +26,10 @@ import (
 // external connections of the instance and what the other instances of the
 // namespace publish, recording those that point to an instance.
 type resolver struct {
-	contracts fs.FS               // Inputs.Contracts
-	conns     M                   // the external connections
-	published map[string]Instance // Inputs.Published, by release; nil when unknown
-	release   string              // Inputs.Release: never its own provider
+	contracts fs.FS           // Inputs.Contracts
+	conns     M               // the external connections
+	published map[string]Info // Inputs.Published, by release; nil when unknown
+	release   string          // Inputs.Release: never its own provider
 	namespace string
 	suffix    string
 	deps      []Dependency // every reference to an instance resolved, in order

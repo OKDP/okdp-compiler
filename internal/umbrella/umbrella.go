@@ -24,12 +24,12 @@ const (
 	// values.yaml they would be defaults, and Helm drops the nulls of
 	// defaults: a null that deletes an upstream default would be lost.
 	ValuesFile = "instance.values.yaml"
-	// InstanceFile: Result.Instance, what the instance publishes: url,
+	// InfoFile: Result.Info, what the instance publishes: url,
 	// usage, and provides, the connections it provides, each key written
 	// when set, what a control plane or a console reads of it in the
 	// deployments repository. Written when it publishes something. Helm
 	// ignores it.
-	InstanceFile = "okdp.instance.yaml"
+	InfoFile = "okdp.info.yaml"
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object:
 	// OKDP's own objects, manifests as the compiler wrote them, which Helm
 	// does not template (ObjectsTemplate). Written when there are objects.
@@ -61,7 +61,7 @@ const objectsTemplate = `{{- /* OKDP's own objects: ` + ObjectsFile + `, as okdp
 //     the key: its .Chart.Name is the key);
 //   - ValuesFile, the final values of each key under the key, each with its
 //     own global, marked generated;
-//   - InstanceFile, when the instance publishes something: a URL, a usage
+//   - InfoFile, when the instance publishes something: a URL, a usage
 //     or a connection;
 //   - ObjectsFile, marked generated, and ObjectsTemplate, when res has
 //     objects.
@@ -93,8 +93,8 @@ func Write(res *okdp.Result) (map[string][]byte, error) {
 		c.Dependencies = append(c.Dependencies, d)
 	}
 	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}}
-	if i := res.Instance; i.URL != "" || i.Usage != "" || len(i.Provides) > 0 {
-		docs[InstanceFile] = []any{i}
+	if i := res.Info; i.URL != "" || i.Usage != "" || len(i.Provides) > 0 {
+		docs[InfoFile] = []any{i}
 	}
 	for _, o := range res.Objects {
 		docs[ObjectsFile] = append(docs[ObjectsFile], o)

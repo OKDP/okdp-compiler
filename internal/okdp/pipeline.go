@@ -24,14 +24,14 @@ type M = value.M
 // a values file and read by Helm; what values cannot hold (a func, a NaN)
 // fails the compile, its layer and path named.
 type Inputs struct {
-	Charts    fs.FS               // chart cache, for the checks only (nil: none): the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar), <repository> the URL without its scheme; the final values are checked against their charts' defaults and schemas, and are the same without it
-	Contracts fs.FS               // the contract schemas: <contract>.schema.json
-	Context   []ContextLayer      // the context's values layers: global, global.okdp and connections among them, an instance's own connections at a level of its own; merged by level, lowest first, a level's layers in order (helm -f); a layer changes none of a lower level's values (contextLayers)
-	Values    []map[string]any    // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
-	Release   string              // the Helm release: a DNS-1123 label of 53 characters at most
-	Namespace string              // the release's namespace: a DNS-1123 label
-	Published map[string]Instance // what the other instances of the namespace publish (their okdp.instance.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections and naming conventions resolve
-	CostLimit uint64              // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
+	Charts    fs.FS            // chart cache, for the checks only (nil: none): the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar), <repository> the URL without its scheme; the final values are checked against their charts' defaults and schemas, and are the same without it
+	Contracts fs.FS            // the contract schemas: <contract>.schema.json
+	Context   []ContextLayer   // the context's values layers: global, global.okdp and connections among them, an instance's own connections at a level of its own; merged by level, lowest first, a level's layers in order (helm -f); a layer changes none of a lower level's values (contextLayers)
+	Values    []map[string]any // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
+	Release   string           // the Helm release: a DNS-1123 label of 53 characters at most
+	Namespace string           // the release's namespace: a DNS-1123 label
+	Published map[string]Info  // what the other instances of the namespace publish (their okdp.info.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections and naming conventions resolve
+	CostLimit uint64           // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
 }
 
 // ContextLayer: a values layer of the context (Inputs.Context), see
@@ -57,9 +57,9 @@ type Result struct {
 	// the umbrella's objects file, which it renders as written, in its
 	// release (umbrella.Write). nil when there is none.
 	Objects []map[string]any
-	// Instance: what the instance publishes, its instance and provides
-	// sections, checked (okdp.instance.yaml, umbrella.Write).
-	Instance Instance
+	// Info: what the instance publishes, its instance and provides
+	// sections, checked (okdp.info.yaml, umbrella.Write).
+	Info Info
 	// Dependencies: the instances of the namespace the connection
 	// references point to, by naming convention or by one of their outputs
 	// (Inputs.Published), by parameter path. References to external
@@ -139,7 +139,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	// 8. Objects: the credentials Secrets, then the mapping's objects.
-	out := &Result{Objects: credentials, Instance: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
+	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}

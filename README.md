@@ -30,7 +30,7 @@ res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 	Values:    []map[string]any{instanceValues}, // the instance's, last: no global
 	Release:   "demo-webapp",
 	Namespace: "demo",
-	Published: published, // what the other instances of the namespace publish (okdp.instance.yaml), by release: a reference may name one of their outputs
+	Published: published, // what the other instances of the namespace publish (okdp.info.yaml), by release: a reference may name one of their outputs
 })
 if err != nil {
 	log.Fatal(err) // the whole report, e.g. every schema violation
@@ -40,7 +40,7 @@ if err != nil {
 //               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 // res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
 //               the mapping's objects section (okdp.objects.yaml)
-// res.Instance: what the instance publishes: its url, its usage, the connections it provides (okdp.instance.yaml)
+// res.Info: what the instance publishes: its url, its usage, the connections it provides (okdp.info.yaml)
 // res.Dependencies: instances the connection references point to, by naming convention or output (compiler.Dependency), what a deployer orders the releases with
 
 // What okdp-compile -o <dir> writes, path -> content.
@@ -86,10 +86,10 @@ reach the cluster with the upstream charts: `Write` gives them as a YAML
 stream, `okdp.objects.yaml`, which the umbrella's own template renders as
 written, in the instance's release
 ([the objects file](docs/specs/01_inputs_outputs.md#the-objects-file),
-[OKDP's own objects](docs/03_okdp_objects.md)). `res.Instance`, what the
+[OKDP's own objects](docs/03_okdp_objects.md)). `res.Info`, what the
 instance publishes, its URL, its usage and the connections it provides,
-stays in git, `okdp.instance.yaml`, for a control plane or a console to
-read ([the instance file](docs/specs/01_inputs_outputs.md#the-instance-file)).
+stays in git, `okdp.info.yaml`, for a control plane or a console to
+read ([the info file](docs/specs/01_inputs_outputs.md#the-info-file)).
 
 ## Mapping
 
@@ -185,7 +185,7 @@ given to Helm with `-f`
 [rendering with Helm](docs/01_usage.md#rendering-with-helm)),
 `<dir>/okdp.objects.yaml`, OKDP's own objects, which the umbrella renders
 as written (`<dir>/templates/okdp.yaml`), when the instance has any,
-and `<dir>/okdp.instance.yaml`, what the instance publishes, when it
+and `<dir>/okdp.info.yaml`, what the instance publishes, when it
 publishes something. The directory is created if needed; a compile that
 fails writes nothing, the files of a successful one overwrite those of the
 same name. The instances the connection references point to are printed on
@@ -194,7 +194,7 @@ deployer that orders the releases reads them from `Result.Dependencies`
 ([okdp-gitops](https://github.com/OKDP/okdp-gitops),
 [GitOps](docs/01_usage.md#gitops)). `--published <dir>` gives what the
 other instances of the namespace publish, each instance's
-`<dir>/<release>/okdp.instance.yaml` (`Inputs.Published`): a reference
+`<dir>/<release>/okdp.info.yaml` (`Inputs.Published`): a reference
 of a contract without a naming convention may name one of their outputs,
 `depends on demo-pg (database-server demo-pg-hive, db)`
 ([resolution](docs/specs/01_inputs_outputs.md#resolution)). `--release` and `--namespace` are

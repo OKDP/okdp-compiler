@@ -38,7 +38,7 @@ app:
   from: ${{ values.db.okdp.source }} of ${{ values.db.okdp.instance }}
 -- contracts/server.schema.json --
 {"properties": {"host": {"type": "string"}, "port": {"type": "integer", "default": 5432}}, "required": ["host"]}
--- instances/demo-pg/okdp.instance.yaml --
+-- instances/demo-pg/okdp.info.yaml --
 provides:
   - name: demo-pg-hive
     contract: server
@@ -47,7 +47,7 @@ provides:
       port: 5433
     secretRef:
       name: demo-pg-hive-app
--- instances/demo-app/okdp.instance.yaml --
+-- instances/demo-app/okdp.info.yaml --
 provides:
   - name: demo-pg-hive
     contract: server

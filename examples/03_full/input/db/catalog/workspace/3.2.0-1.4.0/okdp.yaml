@@ -212,7 +212,7 @@ errors:
   - $if: ${{ values.upstream.?api.?replicaCount.hasValue() }}
     $value: "workspace: set replicas, not upstream.api.replicaCount"
 
-# What OKDP shows of the instance: okdp.instance.yaml, with provides.
+# What OKDP shows of the instance: okdp.info.yaml, with provides.
 instance:
   url: https://${{ host }}
   usage: |

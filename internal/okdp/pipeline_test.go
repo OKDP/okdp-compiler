@@ -128,8 +128,8 @@ func TestCompile(t *testing.T) {
 	if res.Objects != nil {
 		t.Errorf("objects: got %d, want none", len(res.Objects))
 	}
-	if want := (Instance{URL: "https://demo-app.example.org", Usage: "demo\n"}); !reflect.DeepEqual(res.Instance, want) {
-		t.Errorf("instance: got %#v, want %#v", res.Instance, want)
+	if want := (Info{URL: "https://demo-app.example.org", Usage: "demo\n"}); !reflect.DeepEqual(res.Info, want) {
+		t.Errorf("instance: got %#v, want %#v", res.Info, want)
 	}
 }
 

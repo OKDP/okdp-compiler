@@ -255,10 +255,10 @@ var outputContracts = fstest.MapFS{
 	"required": ["host", "password"]}`)}}
 
 // namespaceOutputs: what the instances of the namespace publish
-// (Inputs.Published), as okdp.instance.yaml decodes, a number an int:
+// (Inputs.Published), as okdp.info.yaml decodes, a number an int:
 // demo-pg a server output with its secretRef, and its database output,
 // named after it; demo-app, the compiling release, a server output.
-var namespaceOutputs = map[string]Instance{
+var namespaceOutputs = map[string]Info{
 	"demo-pg": {Provides: []Output{
 		{Name: "demo-pg-hive", Contract: "server", Values: M{"host": "demo-pg-rw.demo.svc", "port": 5433, "user": "hive"}, SecretRef: &SecretRef{Name: "demo-pg-hive-app"}},
 		{Name: "demo-pg", Contract: "database", Values: M{"host": "demo-pg-db.demo.svc", "url": "https://demo-pg.example.org", "tls": true}},
@@ -268,7 +268,7 @@ var namespaceOutputs = map[string]Instance{
 
 // outputCtx: the context of the in-memory package with a server reference,
 // db, and a database one, main, these instances published.
-func outputCtx(values M, published map[string]Instance) (M, []Dependency, error) {
+func outputCtx(values M, published map[string]Info) (M, []Dependency, error) {
 	ch := maps.Clone(pkg)
 	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
 		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}},
@@ -314,7 +314,7 @@ func TestResolveOrder(t *testing.T) {
 	conn := M{"demo-pg-hive": M{"contract": "server", "host": "h"}}
 	for name, tc := range map[string]struct {
 		values    M
-		published map[string]Instance
+		published map[string]Info
 		field     string
 		want      M // okdp
 		deps      []Dependency
@@ -352,14 +352,14 @@ func TestResolveOrder(t *testing.T) {
 // refuses; the errors of a contract with a naming convention, Published
 // unread.
 func TestResolveOutputErrors(t *testing.T) {
-	server := func(release string, values M) map[string]Instance {
-		return map[string]Instance{release: {Provides: []Output{{Name: "shared", Contract: "server", Values: values}}}}
+	server := func(release string, values M) map[string]Info {
+		return map[string]Info{release: {Provides: []Output{{Name: "shared", Contract: "server", Values: values}}}}
 	}
 	twice := server("demo-b", M{"host": "b"})
 	maps.Copy(twice, server("demo-a", M{"host": "a"}))
 	for name, tc := range map[string]struct {
 		values    M
-		published map[string]Instance
+		published map[string]Info
 		want      string
 	}{
 		"two instances": {M{"db": "shared"}, twice, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},

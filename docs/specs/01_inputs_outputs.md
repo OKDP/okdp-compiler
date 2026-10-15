@@ -16,7 +16,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
-| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Instance`, by release) | no: connections and naming conventions only | [Resolution](#resolution) |
+| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections and naming conventions only | [Resolution](#resolution) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
 The names are checked before anything is read: the release is a release
@@ -443,8 +443,8 @@ reference would get them or not, depending on whether its provider was
 compiled first.
 
 Output: `Inputs.Published`, what the other instances of the namespace
-publish, by release, each an `Instance`, its [instance
-file](#the-instance-file) (`okdp.instance.yaml`; the binary's
+publish, by release, each an `Info`, its [info
+file](#the-info-file) (`okdp.info.yaml`; the binary's
 `--published <dir>`, [01_usage.md](../01_usage.md#command-line)). The
 output whose `name` is `<name>` and `contract` `<contract>`: its `values`,
 copied and read as values are (every number a `float64`, whatever decoded
@@ -500,7 +500,7 @@ With `examples/03_full/input/db/contracts/s3.schema.json`, an output
 another instance of the namespace, `demo-store`, publishes:
 
 ```yaml
-# Inputs.Published["demo-store"], its okdp.instance.yaml
+# Inputs.Published["demo-store"], its okdp.info.yaml
 provides:
   - name: store-a
     contract: s3
@@ -623,7 +623,7 @@ of a connection or an output are checked against the schema
 | `x-ui-condition: {field, value}` | a field with a `default` | the default applies only when `field` prints as `value` |
 | `x-okdp-derived: {from, map}` | a field | its value when not set: `map[<value of from>]`; none when that value is not a key of `map` |
 | `x-okdp-secret: true` | a field | a credential: refused in a connection and in an output, it belongs to the credentials Secret (`secretRef`) |
-| `x-okdp-internal: {<field>: <template>}` | the contract | the fields of an instance reached by its name: `${ref}`, `${namespace}`, `${suffix}` replaced ([Resolution](#resolution)); an output of the contract is the release's, not named ([The instance file](#the-instance-file)), and no reference resolves to it. Without it, a reference that is no connection names an output of another instance of the namespace |
+| `x-okdp-internal: {<field>: <template>}` | the contract | the fields of an instance reached by its name: `${ref}`, `${namespace}`, `${suffix}` replaced ([Resolution](#resolution)); an output of the contract is the release's, not named ([The info file](#the-info-file)), and no reference resolves to it. Without it, a reference that is no connection names an output of another instance of the namespace |
 | `x-okdp-contract` | the contract | the name in the `required` error message |
 
 The other `x-*` keywords (`x-okdp-external`, `x-okdp-required`,
@@ -694,7 +694,7 @@ fails.
   `x-okdp-internal` is published under the release name, every key of
   `values` a non-secret field, completed, then valid against the schema;
   and such an output has the values an internal reference to the release
-  resolves to ([The instance file](#the-instance-file)).
+  resolves to ([The info file](#the-info-file)).
 
 Valid against the schema: the completed values (no `secretRef`, no `okdp`),
 validated as a chart's values against its `values.schema.json`
@@ -1284,7 +1284,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Values` | `map[string]map[string]any` | chart key -> its final values ([Merge precedence](#merge-precedence)) |
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file); nil when none |
-| `Instance` | `compiler.Instance` | what the instance publishes: its URL, its usage and the connections it provides ([The instance file](#the-instance-file)) |
+| `Info` | `compiler.Info` | what the instance publishes: its URL, its usage and the connections it provides ([The info file](#the-info-file)) |
 | `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by naming convention or by an output, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. The binary prints each on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
@@ -1300,8 +1300,8 @@ and in `dcr` mode the chart of each OAuth client. Numbers are float64, as
 in Helm values.
 `compiler.Write(res)` gives the files the binary writes from them, path in
 the output directory -> content ([command line](../01_usage.md#command-line)):
-the [umbrella chart](#umbrella-chart), [the instance
-file](#the-instance-file) and [the objects file](#the-objects-file);
+the [umbrella chart](#umbrella-chart), [the info
+file](#the-info-file) and [the objects file](#the-objects-file);
 `examples/02_advanced/output/` holds those of the example
 ([Example](#example)).
 
@@ -1439,9 +1439,9 @@ waitForProvider:
   discoveryUrl: https://sso.okdp.example.org/realms/okdp/.well-known/openid-configuration
 ```
 
-### The instance file
+### The info file
 
-`okdp.instance.yaml` (`compiler.InstanceFile`): `Instance`, what the
+`okdp.info.yaml` (`compiler.InfoFile`): `Info`, what the
 instance publishes, built from the mapping's `instance` and `provides`
 sections ([Sections](02_service_definition.md#sections)): what a control
 plane or a console reads of each instance in the deployments repository,
@@ -1450,7 +1450,7 @@ and the outputs the other instances of the namespace reference by name
 writes it when the instance publishes something, a URL, a usage or a
 provided connection, beside the [umbrella chart](#umbrella-chart), which
 gives the service's name and version; Helm ignores it. An instance that
-publishes nothing has no instance file. It is indented by 2 spaces, its
+publishes nothing has no info file. It is indented by 2 spaces, its
 keys in this order, an empty one (`""`, an empty list or map) not
 written:
 
@@ -1471,7 +1471,7 @@ empty one not written:
 | `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
 
 ```go
-type Instance struct {
+type Info struct {
 	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none
 	Usage    string   `json:"usage,omitempty" yaml:"usage,omitempty"`       // how to use the instance, trimmed, with one final newline; "" when none
 	Provides []Output `json:"provides,omitempty" yaml:"provides,omitempty"` // the connections it provides, in the order of provides; nil when none
@@ -1668,8 +1668,8 @@ the contract when it is not named after the instance, `depends on demo-pg
 `compiler.Write` (`okdp-compile -o <dir>`): the instance as one chart,
 for one Helm release per instance, under the release name the values were
 compiled for. Two files, [the objects file](#the-objects-file) and its
-template when the instance has objects, and `okdp.instance.yaml`
-([the instance file](#the-instance-file)) when the instance publishes
+template when the instance has objects, and `okdp.info.yaml`
+([the info file](#the-info-file)) when the instance publishes
 something, which Helm ignores, by path in the directory:
 
 - `Chart.yaml`: the package's (`Result.Chart`), every field kept, in
@@ -1815,7 +1815,7 @@ oidc-dcr:
   # ... computed by the template (OAuth client charts)
 ```
 
-`okdp.instance.yaml` ([the instance file](#the-instance-file)): its URL,
+`okdp.info.yaml` ([the info file](#the-info-file)): its URL,
 its usage and its one output, under the release name, without
 credentials:
 
@@ -1856,6 +1856,6 @@ lists `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
 `$if`, is no dependency, and its chart is not in the chart cache of the
 check. Its
-`okdp.instance.yaml` lists three outputs, one with its credentials, whose
+`okdp.info.yaml` lists three outputs, one with its credentials, whose
 Secret is generated: its objects file holds the `Password` generators and
 the `ExternalSecret`, then the `objects` section.

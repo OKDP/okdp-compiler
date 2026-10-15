@@ -1,4 +1,4 @@
-// Provides: what the instance publishes (Instance): its instance section,
+// Provides: what the instance publishes (Info): its instance section,
 // and the connections it provides, each checked against its contract, with
 // its credentials Secret.
 
@@ -16,11 +16,11 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// Instance: what the instance publishes, the mapping's instance and
+// Info: what the instance publishes, the mapping's instance and
 // provides sections, checked: what a control plane or a console reads of it
-// in the deployments repository (okdp.instance.yaml, umbrella.Write). An
+// in the deployments repository (okdp.info.yaml, umbrella.Write). An
 // empty field is not written, nor one of its outputs'.
-type Instance struct {
+type Info struct {
 	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none
 	Usage    string   `json:"usage,omitempty" yaml:"usage,omitempty"`       // how to use the instance, trimmed, with one final newline; "" when none
 	Provides []Output `json:"provides,omitempty" yaml:"provides,omitempty"` // the connections it provides, in the order of provides; nil when none
@@ -42,12 +42,12 @@ type SecretRef struct {
 
 // published: what the instance publishes, its instance section info, of
 // the form the mapping schema checks (runMapping), and outputs (provided).
-func published(info M, outputs []Output) Instance {
+func published(info M, outputs []Output) Info {
 	usage := strings.TrimSpace(value.Str(info["usage"]))
 	if usage != "" {
 		usage += "\n"
 	}
-	return Instance{URL: strings.TrimSpace(value.Str(info["url"])), Usage: usage, Provides: outputs}
+	return Info{URL: strings.TrimSpace(value.Str(info["url"])), Usage: usage, Provides: outputs}
 }
 
 // provided: the outputs of the instance inst, its provides section, of the

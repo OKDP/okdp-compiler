@@ -9,9 +9,9 @@ trade-offs; it changes nothing. The formats are specified in
 [credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets).
 
 What the instance publishes, its URL, its usage and the connections it
-provides, is no object: it stays in git, `okdp.instance.yaml`, which a
+provides, is no object: it stays in git, `okdp.info.yaml`, which a
 control plane or a console reads in the deployments repository
-([the instance file](specs/01_inputs_outputs.md#the-instance-file)).
+([the info file](specs/01_inputs_outputs.md#the-info-file)).
 
 ## The objects file
 

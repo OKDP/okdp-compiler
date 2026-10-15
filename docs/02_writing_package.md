@@ -33,7 +33,7 @@ the values file, says how the values of each chart follow from the
 parameters, the platform values (`global.okdp`) and the connections.
 `okdp-compile` turns the values of one instance into the final values of
 every chart, OKDP's own objects and what the instance publishes
-(`okdp.instance.yaml`); a deployer then renders each upstream chart from its
+(`okdp.info.yaml`); a deployer then renders each upstream chart from its
 repository with its values, as the
 [chart index](specs/01_inputs_outputs.md#chart-index) names it. Nothing of
 the package is published as a chart.
@@ -307,7 +307,7 @@ upstream:
   - authentication: OIDC settings, auth types, access control;
   - the exposure: `ingress.enabled`, `className`, `hosts`, `tls` (the host is
     registered with the identity provider and published in
-    `okdp.instance.yaml`);
+    `okdp.info.yaml`);
   - the wiring of Secrets: `existingSecret`, `*SecretName`, any key that
     would put a credential in the values;
   - the switches of features kept off for determinism (`admissionController`,
@@ -366,7 +366,7 @@ objects:                   # OKDP's own objects, whole manifests
   - $spread: >-
       ${{ okdpGeneratedSecret({'name': sessionSecret, 'keys': [{'key': 'session-key', 'length': 48}]}) }}
 
-instance:                  # url and usage, in okdp.instance.yaml
+instance:                  # url and usage, in okdp.info.yaml
   url: https://${{ host }}
   usage: |
     A web application. Open https://${{ host }}

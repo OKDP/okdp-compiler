@@ -16,7 +16,7 @@ what a compile writes to git about it:
   `instance` section;
 - `outputs.yaml`: the connections the instance provides, its `provides`
   section as the compiler checked it against the contracts, each with its
-  `secretRef` (`okdp.instance.yaml`);
+  `secretRef` (`okdp.info.yaml`);
 - the labels of OKDP's objects (`okdp.io/instance`, `okdp.io/service`),
   and `okdp.io/provides-<contract>` per contract it provides.
 
@@ -63,10 +63,10 @@ instance's release by its umbrella, created and deleted with it.
 Only `usage` is concerned; `url` stays as it is. Today a package says how
 to use an instance in `instance.usage` of `okdp.yaml`, beside
 `instance.url`: a CEL string the compile evaluates, checks and writes to
-`okdp.instance.yaml`, beside the umbrella, where a console reads it from
+`okdp.info.yaml`, beside the umbrella, where a console reads it from
 the deployments repository; Helm ignores the file
 ([instance](specs/02_service_definition.md#instance),
-[the instance file](specs/01_inputs_outputs.md#the-instance-file)). Helm
+[the info file](specs/01_inputs_outputs.md#the-info-file)). Helm
 has its own convention for that text: a chart's `templates/NOTES.txt`,
 rendered at each install and upgrade with the release's values, printed by
 `helm install` and `helm upgrade`, and stored in the release record, one
@@ -84,9 +84,9 @@ A web application. Open https://{{ (index .Values.app.ingress.hosts 0).host }}
 ```
 
 `instance.usage` would go, and with it the `usage` key of
-`okdp.instance.yaml`. `instance.url` is unchanged: a CEL string of the
-`instance` section, written to `okdp.instance.yaml`, a field a console
-opens rather than text it shows. The instance file keeps `url` and
+`okdp.info.yaml`. `instance.url` is unchanged: a CEL string of the
+`instance` section, written to `okdp.info.yaml`, a field a console
+opens rather than text it shows. The info file keeps `url` and
 `provides`, and an instance that has neither has no file.
 
 ### Advantages
@@ -106,7 +106,7 @@ opens rather than text it shows. The instance file keeps `url` and
   of another release; not one of this release at its first install), which
   a compile, hermetic, does not see.
 - **Less of OKDP.** `usage` out of the mapping, its schema and the
-  instance file.
+  info file.
 
 ### Drawbacks
 
@@ -140,7 +140,7 @@ opens rather than text it shows. The instance file keeps `url` and
 - **Only once deployed, and not in git.** Nothing before Helm installs
   the instance: a console that lists the instances of the repository has
   no usage for one not yet synced, and a pull request that changes the
-  usage shows no diff of it, where `okdp.instance.yaml` is committed and
+  usage shows no diff of it, where `okdp.info.yaml` is committed and
   diffed with the values.
 
 ### A middle way
@@ -151,13 +151,13 @@ the same in every output, written when the instance has a usage, prints
 it as written, as `templates/okdp.yaml` includes the objects:
 
 ```
-{{- (.Files.Get "okdp.instance.yaml" | fromYaml).usage -}}
+{{- (.Files.Get "okdp.info.yaml" | fromYaml).usage -}}
 ```
 
 Helm templates no part of the usage (a `{{` in it is printed), and a
 template the compiler writes cannot fail an install. `helm install` and
 `helm get notes` show the usage under Flux and plain Helm; Argo CD and the
-console keep `okdp.instance.yaml`. It is an addition, not a replacement:
+console keep `okdp.info.yaml`. It is an addition, not a replacement:
 the repository stays what a console reads, or the
 [descriptor ConfigMap](#a-descriptor-configmap-per-instance), which puts
 the usage in the cluster under Argo CD too, readable with a role on

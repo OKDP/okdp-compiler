@@ -7,7 +7,7 @@ status 0 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0
 cmp stderr $WORK/webapp.txt
 cmp $WORK/files/Chart.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/Chart.yaml
 cmp $WORK/files/instance.values.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/instance.values.yaml
-cmp $WORK/files/okdp.instance.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/okdp.instance.yaml
+cmp $WORK/files/okdp.info.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/okdp.info.yaml
 ! exists $WORK/files/okdp.objects.yaml $WORK/files/templates
 
 # --context 1:<file>: a project's file, level 1, merged after the platform's
@@ -18,7 +18,7 @@ status 0 okdp-compile --package examples/03_full/input/db/catalog/workspace/3.2.
 ! stdout .
 cmp stderr $WORK/workspace.txt
 cmp $WORK/full/instance.values.yaml examples/03_full/output/projects/demo/instances/demo-workspace/instance.values.yaml
-cmp $WORK/full/okdp.instance.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.instance.yaml
+cmp $WORK/full/okdp.info.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.info.yaml
 cmp $WORK/full/okdp.objects.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.objects.yaml
 cmp $WORK/full/templates/okdp.yaml examples/03_full/output/projects/demo/instances/demo-workspace/templates/okdp.yaml
 status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml --context 1:testdata/context/1/redefines-platform-connection.yaml -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o $WORK/project
@@ -34,7 +34,7 @@ status 0 okdp-compile --package examples/00_passthrough/input/db/catalog/echo/1.
 ! stderr .
 cmp $WORK/files/Chart.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/Chart.yaml
 cmp $WORK/files/instance.values.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/instance.values.yaml
-! exists $WORK/files/okdp.instance.yaml
+! exists $WORK/files/okdp.info.yaml
 
 -- webapp.txt --
 depends on demo-db (database, database)

@@ -30,7 +30,7 @@ func Example() {
 	platformValues := values("examples/02_advanced/input/db/platform.yaml")
 	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/db/projects/demo/project.yaml is one
 	instanceValues := values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")
-	published := map[string]compiler.Instance{} // what the other instances of the namespace publish, none here: demo-db by its naming convention
+	published := map[string]compiler.Info{} // what the other instances of the namespace publish, none here: demo-db by its naming convention
 
 	def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml; each compile reads config.schema.json, <key>.defaults.yaml
 	if err != nil {
@@ -45,7 +45,7 @@ func Example() {
 		Values:    []map[string]any{instanceValues}, // the instance's, last: no global
 		Release:   "demo-webapp",
 		Namespace: "demo",
-		Published: published, // what the other instances of the namespace publish (okdp.instance.yaml), by release: a reference may name one of their outputs
+		Published: published, // what the other instances of the namespace publish (okdp.info.yaml), by release: a reference may name one of their outputs
 	})
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -55,7 +55,7 @@ func Example() {
 	//               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 	// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
 	//               the mapping's objects section (okdp.objects.yaml)
-	// res.Instance: what the instance publishes: its url, its usage, the connections it provides (okdp.instance.yaml)
+	// res.Info: what the instance publishes: its url, its usage, the connections it provides (okdp.info.yaml)
 	// res.Dependencies: instances the connection references point to, by naming convention or output (compiler.Dependency), what a deployer orders the releases with
 
 	// What okdp-compile -o <dir> writes, path -> content.
@@ -71,7 +71,7 @@ func Example() {
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database demo-db}]
-	// [Chart.yaml instance.values.yaml okdp.instance.yaml]
+	// [Chart.yaml instance.values.yaml okdp.info.yaml]
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.
@@ -104,7 +104,7 @@ func ExampleCompile() {
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
 	}
-	fmt.Println("charts:", len(res.Values), "outputs:", len(res.Instance.Provides))
+	fmt.Println("charts:", len(res.Values), "outputs:", len(res.Info.Provides))
 	fmt.Println("replicaCount:", res.Values["app"]["replicaCount"])
 	// Each chart key is rendered by the upstream chart res.Charts[key].
 	for _, key := range slices.Sorted(maps.Keys(res.Charts)) {
@@ -174,7 +174,7 @@ func ExampleCompile_server() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(slices.Sorted(maps.Keys(res.Charts)), res.Instance.URL)
+	fmt.Println(slices.Sorted(maps.Keys(res.Charts)), res.Info.URL)
 	// Past its cost limit, or cancelled, a compile fails.
 	in.CostLimit = 10
 	_, err = compiler.Compile(ctx, def, in)
