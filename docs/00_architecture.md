@@ -19,7 +19,9 @@ parameters and OKDP's defaults) and, in `Inputs`, the contracts, the
 values layers (the context's,
 `Context`, by level: the platform's at 0, a project's above; then the
 instance's, `Values`), and the release and
-namespace, shared by all the instance's charts; for a check, the chart
+namespace, shared by all the instance's charts; what the other instances
+of the namespace publish (`Published`), the outputs a connection reference
+may name; for a check, the chart
 cache (the upstream charts' defaults and schemas)
 ([Inputs and outputs](specs/01_inputs_outputs.md)).
 It returns, in `Result`: `Values`, the final values each upstream chart is
@@ -52,6 +54,7 @@ flowchart TD
   pkg["package files<br/>config.schema.json, <key>.defaults.yaml"]
   layers["values layers<br/>context by level: global; instance's"]
   contracts["contracts<br/>contract schemas"]
+  published["published<br/>the other instances' okdp.instance.yaml"]
   cache["chart cache, optional<br/>repository/chart-version: values.yaml, values.schema.json"]
   tmpl["oidc-dcr.cel.yaml<br/>embedded template"]
 
@@ -60,6 +63,7 @@ flowchart TD
   s1 --> s2["2: platform context<br/>OIDC, oidc-dcr settings"]
   s2 --> s3["3: connections resolved"]
   contracts --> s3
+  published -.-> s3
   s3 --> deps["Result.Dependencies"]
   s3 --> s4["4: platform requirements"]
   def -. "require" .-> s4
@@ -187,21 +191,28 @@ dependencies, and what the mapping sees (its `scope`):
    (`walk`) together with a deep copy of the parameters, through
    `properties` (keys sorted) and `items`. A reference must be a string,
    `null` and `""` being not set. Each is resolved (`resolve`) to an
-   external connection or an instance of the namespace, whose name must be
-   a release name (`chart.IsRelease`), and completed
+   external connection; else, of a contract with a naming convention, to
+   an instance of the namespace, whose name must be a release name
+   (`chart.IsRelease`); else to the output of that name and contract one
+   other instance of the namespace publishes (`output`, on
+   `Inputs.Published`, the compiling release left out, two providers
+   refused): a contract with a convention never resolves to an output, so
+   that a reference resolves the same whatever the order the instances are
+   compiled in. It is completed
    against its contract (`contract.complete`). A contract is read by each
    reference or output that names it (`readContract`): decoded once, the
    validator keeping its numbers as written, the keywords read from its
    map view (`value.Normalize`), and compiled once. An
-   external connection holds fields of its contract only, none of them
+   external connection or an output, its values a copy read as values
+   (`value.Normalize`), holds fields of its contract only, none of them
    secret (`contract.fields`), and is validated against the contract's
    schema (`contract.check`); last, the connection must hold no `{{`
    (`chart.NoTemplate`)
    ([Connections](specs/01_inputs_outputs.md#connections)). The
    references that do not resolve are reported together, one line each,
    in the order of the walk (`walk`: keys sorted at each level, items in
-   order). Internal references are recorded as `Dependency`, sorted by
-   parameter path.
+   order). The references to an instance, internal or to an output, are
+   recorded as `Dependency`, the output named, sorted by parameter path.
    `global` and `connections` are then removed from the parameters; the
    instance's upstream values stay, `values.upstream.<key>`, so that an
    `errors` rule covers them; they are checked and applied at stage 9. The
@@ -385,7 +396,7 @@ neither knows OKDP.
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `{{` above level 0) then the instance's, normalized (`value.Normalize`); `global` and `connections` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
-| | `connections.go` | connection references, `Dependency`; the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `provides.go` without them, to compute the convention a provider must match |
+| | `connections.go` | connection references, resolved to a connection, an instance by its naming convention or an output of `Inputs.Published` (`resolver`), `Dependency`; the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `provides.go` without them, to compute the convention a provider must match |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
@@ -418,8 +429,10 @@ CEL session per compile for the mapping and the compiler's templates.
 `compiler.Compile`, its warnings printed on stderr, then the files of
 `compiler.Write`: the umbrella chart, OKDP's objects and
 `okdp.instance.yaml`; then the dependencies printed on stderr,
-`depends on <instance> (<contract>, <field>)`
-([`--output`](01_usage.md#--output)).
+`depends on <instance> (<contract>, <field>)`, the output after the
+contract when it is not named after the instance
+([`--output`](01_usage.md#--output)). `--published <dir>` reads the
+`okdp.instance.yaml` of each `<dir>/<release>/` into `Inputs.Published`.
 Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
 parsing, and is refused), and every output is built before any is
@@ -818,7 +831,8 @@ a process from the repository root: its exit statuses (0, 1 for an error, 2
 for a usage error), `$OKDP_CHARTS` and `$OKDP_CONTRACTS` and the flags that
 override them, what it prints on stdout and stderr, its warnings included
 (`warnings.txtar`, a package of its own), `--check` and its checks
-against a chart cache (`check.txtar`), one script per concern.
+against a chart cache (`check.txtar`), `--published` and a reference to
+another instance's output (`published.txtar`), one script per concern.
 The public package is tested through the example in the root package:
 `example_test.go` holds the Go programs of README.md and
 [usage](01_usage.md#go-library) as examples, with their output, and

@@ -152,6 +152,7 @@ func TestRunErrors(t *testing.T) {
 		"a package":    {func(o *options) { o.pkg = pkg }, `Chart.yaml: version "1.0": SemVer (1.2.3), the version of the umbrella chart`},
 		"a level":      {func(o *options) { o.contexts = append(o.contexts, "1:"+redefines) }, "context layer 2 (level 1): connections.platform-db is set at level 0"},
 		"no level":     {func(o *options) { o.contexts = append(o.contexts, "dev:x.yaml") }, "open dev:x.yaml: no such file or directory"},
+		"published":    {func(o *options) { o.published = filepath.Join(db, "platform.yaml") }, "platform.yaml: not a directory"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

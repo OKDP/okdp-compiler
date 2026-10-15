@@ -103,12 +103,12 @@ binaries'.
 ## Command line
 
 ```text
-okdp-compile --package <dir> [--contracts <dir>]
+okdp-compile --package <dir> [--contracts <dir>] [--published <dir>]
              [--context [<level>:]<context.yaml>]...
              [-f <values.yaml>]...
              --release <name> --namespace <name> -o <dir>
 okdp-compile --check [--charts <dir>] --package <dir> [--contracts <dir>]
-             [--context [<level>:]<context.yaml>]...
+             [--published <dir>] [--context [<level>:]<context.yaml>]...
              [-f <values.yaml>]...
              --release <name> --namespace <name>
 okdp-compile --version
@@ -120,17 +120,18 @@ okdp-compile --version
 | `--check` | | compile and check, write nothing: the compile's errors and warnings, no `--output` ([`--check`](#--check)) |
 | `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); needed, by flag or variable, when a connection reference or a provided connection names a contract: without it, a compile that reads one fails |
+| `--published` | none | compiled instances directory: what the other instances of the namespace publish, `<dir>/<release>/okdp.instance.yaml`, as `-o <dir>/<release>` writes it, read into `Inputs.Published`; the compiled release's own left out, and an instance without the file, which publishes nothing. A connection reference of a contract without a naming convention may then name one of their outputs ([resolution](specs/01_inputs_outputs.md#resolution)); without it, no output is known |
 | `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:` an instance's own connections..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--context` files. It sets no `global` but the keys the parameter schema declares under it, and no `connections` ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
-| `--output`, `-o` | required, refused with `--check` | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, and `okdp.instance.yaml`, what the instance publishes, when it publishes something; the instances the connection references point to printed on stderr, `depends on <instance> (<contract>, <field>)` ([`--output`](#--output)) |
+| `--output`, `-o` | required, refused with `--check` | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, and `okdp.instance.yaml`, what the instance publishes, when it publishes something; the instances the connection references point to printed on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance ([`--output`](#--output)) |
 | `--version` | | print the version and exit |
 
 Flags take one or two dashes, and every input is a flag: an argument that
 is not one is refused, where it would end the flags and those after it be
 ignored (a values file without its `-f`). The directories of `--package`,
-`--charts` and `--contracts`, when given, must exist. Every output is built before any
+`--charts`, `--contracts` and `--published`, when given, must exist. Every output is built before any
 is written: a compile or an output that fails writes nothing; an error
 while writing may leave some of the files written.
 
@@ -253,7 +254,21 @@ warnings, `Result.Dependencies`: one line per connection reference to
 another instance of the namespace, by parameter path,
 `depends on <instance> (<contract>, <field>)`, the instance's release
 name, the contract it must provide and the parameter that references it
-([dependencies](specs/01_inputs_outputs.md#dependencies)). No file holds
+([dependencies](specs/01_inputs_outputs.md#dependencies)); for an output
+of another name than the instance, the output after the contract:
+
+```console
+$ ls compiled
+demo-pg
+$ bin/okdp-compile --package package --contracts contracts \
+    --published compiled --release demo-hive --namespace demo \
+    -f hive.yaml -o compiled/demo-hive
+depends on demo-pg (database-server demo-pg-hive, db)
+```
+
+`compiled/demo-pg/okdp.instance.yaml` publishes the `database-server`
+output `demo-pg-hive`, which the parameter `db` names
+([resolution](specs/01_inputs_outputs.md#resolution)). No file holds
 them: Helm installs the release alone, and a deployer that installs the
 referenced instances first reads them from `Result.Dependencies`
 ([GitOps](#gitops)). None printed, no instance to wait for; `--check`
@@ -444,6 +459,9 @@ output/projects/<project>/instances/<instance>/   -o <dir>
   values, no `connections`.
 - The release is the instance's directory name, the namespace the
   project's: no field overrides them.
+- `output/projects/<project>/instances/` is what `--published <dir>`
+  reads: the `okdp.instance.yaml` of each instance of the project, the
+  compiling one left out.
 - `.charts/`, the chart cache of the checks (`helm pull --untar`), is
   outside `db/`: it is not source. Only the full example has one; the
   compiles read none.
@@ -618,7 +636,9 @@ against the upstream charts, [`--check`](#--check)),
 `Contracts` (`--contracts`; it may be empty when nothing references a
 contract), `Context` (the `--context` files, parsed, in order, each a
 `ContextLayer` of its level), `Values` (the `-f` files, parsed, in order),
-`Release` and `Namespace`; all but `Charts`, `Context` and `Values` are required
+`Release`, `Namespace` and `Published` (`--published`: what the other
+instances of the namespace publish, by release, each a `compiler.Instance`;
+nil, none is known); all but `Charts`, `Context`, `Values` and `Published` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
 `-o` writes in `instance.values.yaml`, `Result.Charts` the index the
 umbrella's `Chart.yaml` names the charts from, `Result.Instance` what it
@@ -646,11 +666,14 @@ holds, to read it back.
   the binary prints each as `warning: <message>`.
 - `Result.Dependencies` lists the instances of the namespace the
   connection references point to, by parameter path, each a
-  `compiler.Dependency`, `{Instance, Contract, Field}`
+  `compiler.Dependency`, `{Instance, Contract, Field, Output}`, `Output`
+  the output the reference resolved to, the instance's release for one by
+  naming convention
   ([dependencies](specs/01_inputs_outputs.md#dependencies)): what a
   deployer orders the releases with ([GitOps](#gitops)). `Write` writes
   them in no file; the binary prints each, once the files are written, as
-  `depends on <instance> (<contract>, <field>)`.
+  `depends on <instance> (<contract>, <field>)`, the output after the
+  contract when it is not named after the instance.
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than
@@ -709,6 +732,11 @@ done
 test -z "$(git status --porcelain compiled/)" || { git status --short compiled/; exit 1; }
 ```
 
+An instance that references an output of another
+([resolution](specs/01_inputs_outputs.md#resolution)) needs what that one
+publishes: compile it first, then the consumer with `--published
+compiled`, the directory the loop writes.
+
 A job that pulls the upstream charts into a chart cache checks the final
 values against them too: the same flags, `--check --charts charts` for
 `-o` ([`--check`](#--check)).
@@ -733,8 +761,11 @@ the Flux and Argo CD files of each, a Flux HelmRelease and its
 kustomization or an Argo CD Application, their `dependsOn` and sync waves
 from `Result.Dependencies`: the instances of the namespace the connection
 references point to, one item per parameter
-([dependencies](specs/01_inputs_outputs.md#dependencies)). The compiler
-does not check that an instance exists: the deployment waits for it.
+([dependencies](specs/01_inputs_outputs.md#dependencies)). Each compile
+is given what the other instances of its namespace publish
+(`Inputs.Published`): a reference may name one of their outputs. The
+compiler does not check that an instance reached by its naming convention
+exists: the deployment waits for it.
 
 A deployer that renders the umbrella, okdp-gitops or another, respects
 what it is compiled for:
@@ -787,7 +818,8 @@ the instance's directory, beside its chart: its `url`, its `usage`, and
 it is deployed: a control plane or a console reads it for each instance
 from the deployments repository, to list the instances of a namespace
 (their URL, usage and version, that of the `Chart.yaml` beside it) and
-offer, in a deployment form, the internal connections they provide; an
+offer, in a deployment form, the connections they provide, which another
+instance of the namespace references by name; an
 instance that publishes nothing has no file, neither URL, usage nor
 connection. The repository says what is to run; what runs is the GitOps
 engine's status.
@@ -848,7 +880,8 @@ usage error with status 2.
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): the fields violate the database contract:` then `- at '/engine': value must be one of 'postgresql', 'mysql'`, `- at '/port': got string, want integer` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
-| `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention` | the name is not in `connections`, and the contract cannot resolve an instance | add the connection under `connections` of a context file (`--context 2:<file>` for the instance's own) |
+| `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention`; `<field>: "<name>" is not a connection, nor an output of an instance of the namespace, and ...`, with `--published` | the name is not in `connections`, nor, with `--published`, an output of that contract another instance publishes (`(demo-pg publishes it with contract "database", "s3" is expected)`: one of another contract), and the contract cannot resolve an instance | add the connection under `connections` of a context file (`--context 2:<file>` for the instance's own); for another instance's output, give `--published` and compile that instance first ([resolution](specs/01_inputs_outputs.md#resolution)) |
+| `<field>: "<name>" names s3 outputs of several instances of the namespace: demo-a, demo-b` | two instances of the namespace publish an output of that name and contract | rename one of the outputs, or reference a connection |
 | `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` of a context file |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
 | `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (a context file above level 0 fails earlier, `context layer <n> (level <l>): ...`) | fix the platform values or the contract |

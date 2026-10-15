@@ -238,7 +238,8 @@ func TestServicePaths(t *testing.T) {
 	}
 }
 
-// TestDependencies: internal references only, with their parameter path.
+// TestDependencies: references to an instance only, with their parameter
+// path, the output named after the instance by the naming convention.
 func TestDependencies(t *testing.T) {
 	ch := maps.Clone(pkg)
 	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
@@ -262,7 +263,7 @@ func TestDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[1].database"}}
+	want := []Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[1].database", Output: "demo-db"}}
 	if !reflect.DeepEqual(res.Dependencies, want) {
 		t.Errorf("got %#v, want %#v", res.Dependencies, want)
 	}

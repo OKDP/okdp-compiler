@@ -71,7 +71,7 @@ func TestResolve(t *testing.T) {
 		"host": "demo-pg-db.demo.svc", "url": "https://demo-pg.example.org",
 		"engine": "postgresql", "driver": "pg", "ssl": "require", "tls": false,
 		"secretRef": M{"name": "demo-pg-database-credentials"},
-		"okdp":      M{"ref": "demo-pg", "contract": "database", "source": "internal"},
+		"okdp":      M{"ref": "demo-pg", "contract": "database", "source": "internal", "instance": "demo-pg"},
 	}
 	external := M{
 		"host": "replica.example.org", "engine": "mysql", "driver": "my", "tls": false,
@@ -93,7 +93,7 @@ func TestResolve(t *testing.T) {
 	if values["other"] != "demo-pg" {
 		t.Error("a field without x-okdp-connection-ref is left as it is")
 	}
-	if want := []Dependency{{Instance: "demo-pg", Contract: "database", Field: "main.db"}}; !reflect.DeepEqual(deps, want) {
+	if want := []Dependency{{Instance: "demo-pg", Contract: "database", Field: "main.db", Output: "demo-pg"}}; !reflect.DeepEqual(deps, want) {
 		t.Errorf("dependencies: %#v", deps)
 	}
 }
@@ -234,6 +234,157 @@ func TestResolveUnreadableContract(t *testing.T) {
 			in.Contracts = tc.contracts
 			if _, err := newInstance(ch, in, defService); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error starting with %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// outputContracts: dbContract's database, and server, a contract without a
+// naming convention, whose outputs are named (cnpg-postgresql's
+// database-server).
+var outputContracts = fstest.MapFS{
+	"database.schema.json": dbContract["database.schema.json"],
+	"server.schema.json": {Data: []byte(`{
+	"x-okdp-contract": "server",
+	"properties": {
+		"host": {"type": "string"},
+		"port": {"type": "integer", "default": 5432},
+		"user": {"type": "string"},
+		"password": {"type": "string", "x-okdp-secret": true}
+	},
+	"required": ["host", "password"]}`)}}
+
+// namespaceOutputs: what the instances of the namespace publish
+// (Inputs.Published), as okdp.instance.yaml decodes, a number an int:
+// demo-pg a server output with its secretRef, and its database output,
+// named after it; demo-app, the compiling release, a server output.
+var namespaceOutputs = map[string]Instance{
+	"demo-pg": {Provides: []Output{
+		{Name: "demo-pg-hive", Contract: "server", Values: M{"host": "demo-pg-rw.demo.svc", "port": 5433, "user": "hive"}, SecretRef: &SecretRef{Name: "demo-pg-hive-app"}},
+		{Name: "demo-pg", Contract: "database", Values: M{"host": "demo-pg-db.demo.svc", "url": "https://demo-pg.example.org", "tls": true}},
+	}},
+	"demo-app": {Provides: []Output{{Name: "self", Contract: "server", Values: M{"host": "demo-app.demo.svc"}}}},
+}
+
+// outputCtx: the context of the in-memory package with a server reference,
+// db, and a database one, main, these instances published.
+func outputCtx(values M, published map[string]Instance) (M, []Dependency, error) {
+	ch := maps.Clone(pkg)
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}},
+		"main": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)}
+	in := inputs(values)
+	in.Contracts, in.Published = outputContracts, published
+	inst, err := newInstance(ch, in, defService)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value.AsMap(inst.scope["values"]), inst.deps, nil
+}
+
+// TestResolveOutput: a reference to an output of an instance of the
+// namespace resolves to its values, a copy, completed and read as values
+// (an int a float64), and its secretRef; the instance is a dependency, the
+// output named.
+func TestResolveOutput(t *testing.T) {
+	values, deps, err := outputCtx(M{"db": "demo-pg-hive"}, namespaceOutputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{
+		"host": "demo-pg-rw.demo.svc", "port": float64(5433), "user": "hive",
+		"secretRef": M{"name": "demo-pg-hive-app"},
+		"okdp":      M{"ref": "demo-pg-hive", "contract": "server", "source": "output", "instance": "demo-pg"},
+	}
+	if !reflect.DeepEqual(values["db"], want) {
+		t.Errorf("got %#v\nwant %#v", values["db"], want)
+	}
+	if want := []Dependency{{Instance: "demo-pg", Contract: "server", Field: "db", Output: "demo-pg-hive"}}; !reflect.DeepEqual(deps, want) {
+		t.Errorf("dependencies: %#v", deps)
+	}
+	if v := namespaceOutputs["demo-pg"].Provides[0].Values["port"]; v != 5433 {
+		t.Errorf("Inputs.Published changed: port %#v", v)
+	}
+}
+
+// TestResolveOrder: a connection first, then, of a contract without a
+// naming convention, an output; of a contract with one, the convention,
+// never an output, with or without Published.
+func TestResolveOrder(t *testing.T) {
+	conn := M{"demo-pg-hive": M{"contract": "server", "host": "h"}}
+	for name, tc := range map[string]struct {
+		values    M
+		published map[string]Instance
+		field     string
+		want      M // okdp
+		deps      []Dependency
+	}{
+		"a connection first": {
+			M{"db": "demo-pg-hive", "connections": conn}, namespaceOutputs, "db",
+			M{"ref": "demo-pg-hive", "contract": "server", "source": "external"}, nil,
+		},
+		"the convention, not the output": {
+			M{"main": "demo-pg"}, namespaceOutputs, "main",
+			M{"ref": "demo-pg", "contract": "database", "source": "internal", "instance": "demo-pg"},
+			[]Dependency{{Instance: "demo-pg", Contract: "database", Field: "main", Output: "demo-pg"}},
+		},
+		"the convention, no Published": {
+			M{"main": "demo-pg"}, nil, "main",
+			M{"ref": "demo-pg", "contract": "database", "source": "internal", "instance": "demo-pg"},
+			[]Dependency{{Instance: "demo-pg", Contract: "database", Field: "main", Output: "demo-pg"}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			values, deps, err := outputCtx(tc.values, tc.published)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := value.AsMap(values[tc.field])["okdp"]; !reflect.DeepEqual(got, tc.want) || !reflect.DeepEqual(deps, tc.deps) {
+				t.Errorf("got %#v, dependencies %#v\nwant %#v, %#v", got, deps, tc.want, tc.deps)
+			}
+		})
+	}
+}
+
+// TestResolveOutputErrors: an output several instances publish; a name
+// that resolves to nothing, Published given or not, the compiling release
+// left out, an output of another contract said; an output the contract
+// refuses; the errors of a contract with a naming convention, Published
+// unread.
+func TestResolveOutputErrors(t *testing.T) {
+	server := func(release string, values M) map[string]Instance {
+		return map[string]Instance{release: {Provides: []Output{{Name: "shared", Contract: "server", Values: values}}}}
+	}
+	twice := server("demo-b", M{"host": "b"})
+	maps.Copy(twice, server("demo-a", M{"host": "a"}))
+	for name, tc := range map[string]struct {
+		values    M
+		published map[string]Instance
+		want      string
+	}{
+		"two instances": {M{"db": "shared"}, twice, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
+		"the compiling release": {
+			M{"db": "self"}, namespaceOutputs,
+			`db: "self" is not a connection, nor an output of an instance of the namespace, and the server contract has no internal naming convention`,
+		},
+		"another contract": {
+			M{"db": "demo-pg"}, namespaceOutputs,
+			`db: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "server" is expected), and the server contract has no internal naming convention`,
+		},
+		"not a release name": {
+			M{"main": "Demo_PG"}, namespaceOutputs,
+			`main: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most`,
+		},
+		"no Published":  {M{"db": "demo-pg-hive"}, nil, `db: "demo-pg-hive" is not a connection, and the server contract has no internal naming convention`},
+		"unknown field": {M{"db": "shared"}, server("demo-a", M{"host": "a", "zone": "z"}), `db: output "shared" of demo-a: field "zone" is not part of the server contract`},
+		"types": {
+			M{"db": "shared"}, server("demo-a", M{"host": "a", "port": "5432"}),
+			"db (output \"shared\" of demo-a): the fields violate the server contract:\n- at '/port': got string, want integer",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := outputCtx(tc.values, tc.published); err == nil || err.Error() != tc.want {
+				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})
 	}

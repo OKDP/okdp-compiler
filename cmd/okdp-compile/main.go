@@ -1,4 +1,4 @@
-// okdp-compile --package <dir> [--contracts <dir>]
+// okdp-compile --package <dir> [--contracts <dir>] [--published <dir>]
 //
 //	--context [<level>:]context.yaml [--context ...]
 //	-f values.yaml [-f ...]
@@ -10,16 +10,20 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	compiler "github.com/okdp/okdp-compiler"
 )
@@ -32,6 +36,7 @@ var version string
 type options struct {
 	pkg, charts        string
 	contracts          string
+	published          string
 	release, namespace string
 	contexts           []string
 	values             []string
@@ -51,11 +56,12 @@ func main() {
 	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the compile's errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
 	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme; the final values, over each chart's defaults, checked against its values.schema.json, and an instance list appended to that leaves out items of the chart's default list warned of (default $OKDP_CHARTS with --check)")
 	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS), needed when a connection reference or a provided connection names a contract")
+	flag.StringVar(&o.published, "published", "", "compiled instances directory: what the other instances of the namespace publish, <dir>/<release>/"+compiler.InstanceFile+" (-o <dir>/<release>), the compiled release's left out; a connection reference of a contract without a naming convention may name one of their outputs. Without it, a reference resolves to a connection or by naming convention only")
 	flag.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	flag.Func("context", "context values file, [<level>:]<file>, repeatable, before the -f files: global, global.okdp and connections among them; level 0 (the default), the platform's, first, a level's files merged in order; a level adds values, it changes none of a lower level's", func(s string) error { o.contexts = append(o.contexts, s); return nil })
 	flag.Func("f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares, and no connections: an instance's own are a --context file of its level", func(s string) error { o.values = append(o.values, s); return nil })
-	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, and "+compiler.InstanceFile+", what it publishes (url, usage, provides), when it publishes something; the instances the connection references point to are printed on stderr, one line each: depends on <instance> (<contract>, <field>)")
+	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, and "+compiler.InstanceFile+", what it publishes (url, usage, provides), when it publishes something; the instances the connection references point to are printed on stderr, one line each: depends on <instance> (<contract>, <field>), (<contract> <output>, <field>) for an output of another name than the instance's")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Parse()
 	if o.check && o.charts == "" {
@@ -83,7 +89,8 @@ func main() {
 // this one does not: the objects files, which Helm would render, and the
 // instance file, which a control plane would read; then prints on stderr
 // the instances the connection references point to (Result.Dependencies),
-// one line each: depends on <instance> (<contract>, <field>). A compile
+// one line each: depends on <instance> (<contract>, <field>), the output
+// after the contract when it is not named after the instance. A compile
 // that fails writes nothing; --check writes nothing, the files built all
 // the same, and prints no dependency.
 func run(o options) error {
@@ -116,6 +123,11 @@ func run(o options) error {
 	}
 	if o.contracts != "" {
 		in.Contracts = os.DirFS(o.contracts)
+	}
+	if o.published != "" {
+		if in.Published, err = readPublished(o.published, o.release); err != nil {
+			return err
+		}
 	}
 	for _, c := range o.contexts {
 		// [<level>:]<file>: a file without a level is the platform's, 0.
@@ -170,9 +182,46 @@ func run(o options) error {
 		}
 	}
 	for _, d := range res.Dependencies {
-		fmt.Fprintf(os.Stderr, "depends on %s (%s, %s)\n", d.Instance, d.Contract, d.Field)
+		contract := d.Contract
+		if d.Output != d.Instance {
+			contract += " " + d.Output
+		}
+		fmt.Fprintf(os.Stderr, "depends on %s (%s, %s)\n", d.Instance, contract, d.Field)
 	}
 	return nil
+}
+
+// readPublished: what the instances compiled into dir publish, by release:
+// <dir>/<release>/okdp.instance.yaml, as -o <dir>/<release> writes it, read
+// strictly. The compiled release's own is left out, and so is a directory
+// without the file: an instance that publishes nothing.
+func readPublished(dir, release string) (map[string]compiler.Instance, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	published := map[string]compiler.Instance{}
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == release {
+			continue
+		}
+		file := filepath.Join(dir, e.Name(), compiler.InstanceFile)
+		b, err := os.ReadFile(file)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var i compiler.Instance
+		dec := yaml.NewDecoder(bytes.NewReader(b))
+		dec.KnownFields(true)
+		if err := dec.Decode(&i); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		published[e.Name()] = i
+	}
+	return published, nil
 }
 
 // noContracts: the contracts without --contracts, none: a compile reads a

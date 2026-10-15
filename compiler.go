@@ -22,8 +22,10 @@
 // defaults. A compile reads no chart; with a chart cache (Inputs.Charts), it
 // checks the final values against each chart's defaults and schema. Write gives
 // the instance as one chart, an umbrella over these upstream charts, its
-// values and OKDP's own objects, and what the instance publishes; the
-// instances it depends on are for a deployer (Result.Dependencies).
+// values and OKDP's own objects, and what the instance publishes, whose
+// outputs the other instances of the namespace reference by name
+// (Inputs.Published); the instances it depends on are for a deployer
+// (Result.Dependencies).
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
@@ -64,7 +66,8 @@ type (
 	Instance = okdp.Instance
 	// Output: a connection an instance provides (Instance.Provides).
 	Output = okdp.Output
-	// Dependency: an instance a connection reference points to
+	// Dependency: an instance of the namespace a connection reference
+	// points to, by its naming convention or one of its outputs
 	// (Result.Dependencies), what a deployer orders the releases with.
 	Dependency = okdp.Dependency
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.

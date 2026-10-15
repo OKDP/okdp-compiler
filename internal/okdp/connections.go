@@ -1,6 +1,7 @@
 // Connections: the references declared in the parameter schema
-// (x-okdp-connection-ref), resolved to an external connection or to an
-// instance of the namespace, and completed against their contract; the
+// (x-okdp-connection-ref), resolved to an external connection, to an
+// instance of the namespace or to an output another instance of the
+// namespace publishes, and completed against their contract; the
 // contracts, read at each use (readContract), and their checks, which the
 // outputs the instance provides go through too.
 
@@ -21,27 +22,34 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// resolver: resolves connection references against the contracts and the
-// external connections of the instance, recording the internal ones.
+// resolver: resolves connection references against the contracts, the
+// external connections of the instance and what the other instances of the
+// namespace publish, recording those that point to an instance.
 type resolver struct {
-	contracts fs.FS // Inputs.Contracts
-	conns     M
+	contracts fs.FS               // Inputs.Contracts
+	conns     M                   // the external connections
+	published map[string]Instance // Inputs.Published, by release; nil when unknown
+	release   string              // Inputs.Release: never its own provider
 	namespace string
 	suffix    string
-	deps      []Dependency // every internal reference resolved, in order
+	deps      []Dependency // every reference to an instance resolved, in order
 	errs      []error      // every reference that does not resolve, in order (walk)
 }
 
 // Dependency: an instance of the same namespace that a connection reference
-// of the parameters points to (an internal reference: the name of an
-// instance, not of an external connection). The instance must exist and
-// provide the contract. Its fields are always set. What a deployer orders
-// the releases with, read from Result.Dependencies: okdp-gitops makes the
-// release wait for the instance (Flux dependsOn, Argo CD sync waves).
+// of the parameters points to, not an external connection: the instance the
+// reference names, by the contract's naming convention (an internal
+// reference), or, of a contract without one, the instance that publishes
+// the output the reference names (Inputs.Published). The instance must
+// exist and publish an output of the contract by that name. Its fields are
+// always set. What a deployer orders the releases with, read from
+// Result.Dependencies: okdp-gitops makes the release wait for the instance
+// (Flux dependsOn, Argo CD sync waves).
 type Dependency struct {
-	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance (its release name)
+	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance, or the one that publishes the referenced output (its release name)
 	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
 	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
+	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name: the instance's release for a reference by naming convention
 }
 
 // walk: v, at path, of the schema s, with every string carrying an
@@ -83,22 +91,30 @@ func (r *resolver) walk(s M, v any, path string) any {
 }
 
 // resolve: a reference to its contract fields. An entry of connections is
-// external; any other name is an instance of the namespace (internal), a
-// release name. The first error is reported: the contract, then the name of
-// an internal reference, the fields of an external connection in
-// alphabetical order (contract.fields), then the required fields, then the
-// violations of the contract by an external connection, all of them
-// (contract.check), then "{{" in the connection (chart.NoTemplate). An
-// internal reference that resolves is recorded (deps), field naming it.
+// external. Any other name, of a contract with a naming convention, is an
+// instance of the namespace (internal), a release name; of a contract
+// without one, an output named ref of the contract that another instance of
+// the namespace publishes (Published, the compiling release left out:
+// output). A contract with a convention never resolves to an output: its
+// references resolve the same whatever the other instances publish, and so
+// whatever the order the instances are compiled in. The first error is
+// reported: the contract, then the name of an internal reference, or the
+// output of another one (several instances, none), the fields of an
+// external connection or an output in alphabetical order (contract.fields),
+// then the required fields, then the violations of the contract by an
+// external connection or an output, all of them (contract.check), then "{{"
+// in what it resolves to (chart.NoTemplate). A reference to an instance
+// that resolves is recorded (deps), field naming it, ref the output.
 func (r *resolver) resolve(ref, contract, field string) (M, error) {
 	c, err := readContract(r.contracts, contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
 	}
-	out, source := M{}, "internal"
+	out, source, instance := M{}, "internal", ref
 	var secretRef any
+	where := fmt.Sprintf("%s (connection %q)", field, ref)
 	if conn, ok := r.conns[ref].(M); ok {
-		source = "external"
+		source, instance = "external", ""
 		if value.Str(conn["contract"]) != contract {
 			return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(conn["contract"]), contract)
 		}
@@ -115,11 +131,8 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 		if err := c.fields(out, fmt.Sprintf("%s: connection %q", field, ref)); err != nil {
 			return nil, err
 		}
-	} else {
+	} else if c.internal != nil {
 		// An instance: its fields follow the contract's naming convention.
-		if c.internal == nil {
-			return nil, fmt.Errorf("%s: %q is not a connection, and the %s contract has no internal naming convention", field, ref, contract)
-		}
 		// Its name goes into hosts, Secret names and the dependency.
 		if !chart.IsRelease(ref) {
 			return nil, fmt.Errorf("%s: %q is not a connection, nor a release name: lowercase letters, digits and \"-\", a letter or digit at each end, %d characters at most", field, ref, chart.ReleaseMax)
@@ -131,14 +144,34 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 		if len(c.secret) > 0 {
 			secretRef = M{"name": fmt.Sprintf("%s-%s-credentials", ref, contract)}
 		}
+	} else {
+		// An output: its values as the context's layers give a connection,
+		// in a copy, every number a float64 whatever decoded them.
+		o, provider, err := r.output(ref, contract, field)
+		if err != nil {
+			return nil, err
+		}
+		source, instance = "output", provider
+		from := fmt.Sprintf("output %q of %s", ref, provider)
+		where = fmt.Sprintf("%s (%s)", field, from)
+		v, err := value.Normalize(o.Values)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", field, from, err)
+		}
+		out = value.AsMap(v)
+		if err := c.fields(out, field+": "+from); err != nil {
+			return nil, err
+		}
+		if o.SecretRef != nil && o.SecretRef.Name != "" {
+			secretRef = M{"name": o.SecretRef.Name}
+		}
 	}
-	where := fmt.Sprintf("%s (connection %q)", field, ref)
 	if err := c.complete(out, where); err != nil {
 		return nil, err
 	}
 	// An instance's fields follow from the contract; a connection's are
-	// written by hand.
-	if source == "external" {
+	// written by hand, an output's read from elsewhere.
+	if source != "internal" {
 		if err := c.check(out, where); err != nil {
 			return nil, err
 		}
@@ -146,17 +179,63 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 	if secretRef != nil {
 		out["secretRef"] = secretRef
 	}
-	// Where it comes from, for the mapping (e.g. error messages).
-	out["okdp"] = M{"ref": ref, "contract": contract, "source": source}
-	// No template code in what the mapping receives, whatever layer or
-	// default it comes from.
+	// Where it comes from, for the mapping (e.g. error messages): the
+	// instance too, unless external.
+	from := M{"ref": ref, "contract": contract, "source": source}
+	if instance != "" {
+		from["instance"] = instance
+	}
+	out["okdp"] = from
+	// No template code in what the mapping receives, whatever layer,
+	// output or default it comes from.
 	if err := chart.NoTemplate(out, func(p string) string { return fmt.Sprintf("%s: field %q", where, p) }); err != nil {
 		return nil, err
 	}
-	if source == "internal" {
-		r.deps = append(r.deps, Dependency{Instance: ref, Contract: contract, Field: field})
+	if instance != "" {
+		r.deps = append(r.deps, Dependency{Instance: instance, Contract: contract, Field: field, Output: ref})
 	}
 	return out, nil
+}
+
+// output: the output named ref of the contract, one without a naming
+// convention, that an instance of Published publishes, the compiling
+// release left out, and that instance. Several instances fail, named in
+// release order; none fails, saying, with Published, which instances
+// publish an output of that name of another contract, in release order.
+func (r *resolver) output(ref, contract, field string) (Output, string, error) {
+	var found Output
+	var providers, others []string
+	for _, release := range slices.Sorted(maps.Keys(r.published)) {
+		if release == r.release {
+			continue
+		}
+		for _, o := range r.published[release].Provides {
+			switch {
+			case o.Name != ref:
+			case o.Contract == contract:
+				found, providers = o, append(providers, release)
+			case others == nil:
+				others = append(others, fmt.Sprintf("%s publishes it with contract %q", release, o.Contract))
+			default:
+				others = append(others, fmt.Sprintf("%s with contract %q", release, o.Contract))
+			}
+		}
+	}
+	// One release, one output of a contract and name (twice).
+	switch providers = slices.Compact(providers); {
+	case len(providers) == 1:
+		return found, providers[0], nil
+	case len(providers) > 1:
+		return Output{}, "", fmt.Errorf("%s: %q names %s outputs of several instances of the namespace: %s", field, ref, contract, strings.Join(providers, ", "))
+	}
+	msg := fmt.Sprintf("%s: %q is not a connection", field, ref)
+	if r.published != nil {
+		msg += ", nor an output of an instance of the namespace"
+		if others != nil {
+			msg += fmt.Sprintf(" (%s, %q is expected)", strings.Join(others, ", "), contract)
+		}
+	}
+	return Output{}, "", fmt.Errorf("%s, and the %s contract has no internal naming convention", msg, contract)
 }
 
 // contract: a contract, the JSON Schema of a kind of connection, as each

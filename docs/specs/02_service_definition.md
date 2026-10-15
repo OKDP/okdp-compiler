@@ -657,12 +657,18 @@ provides:
 
 A list of outputs, the connections the instance publishes, in
 `Result.Instance` and `okdp.instance.yaml`
-([the instance file](01_inputs_outputs.md#the-instance-file)). Each item:
+([the instance file](01_inputs_outputs.md#the-instance-file)). What
+another instance of the namespace references: an output of a contract
+without a naming convention, by its `name`, when its compile is given what
+this one publishes (`Inputs.Published`); this instance, by its release
+name, for a contract with one, its fields given by the convention, the
+output never read ([resolution](01_inputs_outputs.md#resolution)). Each
+item:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
-| `name` | string | the release name | The output's name, the one other instances reference. Unique per contract: `two <contract> outputs are named "<name>"`. Only for a contract without a naming convention: one with `x-okdp-internal` reaches an instance by its release name, and its output is the release's; another name fails, `provides "<name>" (<contract>): the <contract> contract reaches an instance by its release name: name it "<release>" or leave name out`. |
+| `name` | string | the release name | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. Only for a contract without a naming convention: one with `x-okdp-internal` reaches an instance by its release name, and its output is the release's; another name fails, `provides "<name>" (<contract>): the <contract> contract reaches an instance by its release name: name it "<release>" or leave name out`. |
 | `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; of a contract with `x-okdp-internal`, the values its convention gives for the release): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
@@ -912,7 +918,7 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
-| `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
+| `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([context values](01_inputs_outputs.md#context-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `Chart.yaml`, as written ([Chart.yaml](#chartyaml)). |

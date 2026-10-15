@@ -419,14 +419,16 @@ and give OKDP's names, labels and Secrets.
 
 ### 6. Consume and provide connections
 
-A parameter carrying `x-okdp-connection-ref` names either an entry of
+A parameter carrying `x-okdp-connection-ref` names an entry of
 `connections` (external, from a context file: the platform's, the
-project's, or the instance's own at a level of its own) or another instance
-of the namespace (internal). Before the mapping runs, the compiler replaces
-the name with the connection, completed against its contract
+project's, or the instance's own at a level of its own), another instance
+of the namespace (internal, for a contract with a naming convention), or
+an output another instance of the namespace publishes (for a contract
+without one). Before the mapping runs, the compiler replaces the name with
+the connection, completed against its contract
 ([what the mapping receives](specs/01_inputs_outputs.md#what-the-mapping-receives)).
 A reference left empty stays `""` (or `null`); a name that is not an entry
-of `connections` must be a release name.
+of `connections` must be a release name, or an output's name.
 
 ```yaml
 # instance values (-f): an external database
@@ -455,9 +457,17 @@ credentials through a `secretKeyRef` on `secretRef.name`; it fails with a
 clear message when it needs the Secret and the connection has none (the
 second `errors` entry of
 `examples/02_advanced/input/db/catalog/webapp/1.0.0/okdp.yaml`). `s3` and
-`database-server` have no internal convention: they are always external (cnpg-postgresql publishes one
-`database-server` connection per database, which consumers declare as
-connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
+`database-server` have no internal convention: a reference names a
+connection, or an output by its name. cnpg-postgresql publishes one
+`database-server` output per database: an instance of the namespace
+references it by that name (`database: demo-pg-hive`), which resolves to
+the output's values and `secretRef`, and depends on the cnpg-postgresql
+instance, as on `demo-db` above; an instance of another namespace gets it
+as a connection, its credentials Secret being in the provider's namespace
+([resolution](specs/01_inputs_outputs.md#resolution)). The compile is
+given what the other instances publish (`Inputs.Published`,
+`okdp-compile --published`). See
+[contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
 contract, its schema included (a `port` is a number, not a string built by
@@ -469,7 +479,9 @@ hosts and Service names from the contract's convention (trino's host is
 `trino-<namespace>.<suffix>`, hive-metastore's Service
 `<release>-hive-metastore`), once, in `vars`, for the ingress and `provides`
 alike. A `name` is for a contract without a convention (cnpg-postgresql's
-`database-server` outputs, one per database). Then say where the
+`database-server` outputs, one per database): the name the other
+instances of the namespace reference the output by, unique per contract
+in the namespace, or their references fail. Then say where the
 credentials come from:
 
 ```yaml
