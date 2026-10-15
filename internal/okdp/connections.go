@@ -36,11 +36,12 @@ type resolver struct {
 // of the parameters points to (an internal reference: the name of an
 // instance, not of an external connection). The instance must exist and
 // provide the contract; a deployment can wait for it (Flux dependsOn, Argo
-// sync waves).
+// sync waves). Its fields are always set; an empty one would not be
+// written.
 type Dependency struct {
-	Instance string `json:"instance" yaml:"instance"` // the referenced instance (its release name)
-	Contract string `json:"contract" yaml:"contract"` // the contract it must provide
-	Field    string `json:"field" yaml:"field"`       // the parameter that references it, e.g. backends[0].database
+	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance (its release name)
+	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
+	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
 }
 
 // walk: v, at path, of the schema s, with every string carrying an

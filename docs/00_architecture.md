@@ -387,7 +387,7 @@ neither knows OKDP.
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `provides.go` | stage 7: `Instance`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`) | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
-| `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); `okdp.dependencies.yaml` (`DependenciesFile`); and `Result.Instance`, `okdp.instance.yaml` (`InstanceFile`) | `okdp.Result`; `chart.Metadata` |
+| `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); when there are dependencies, `okdp.dependencies.yaml` (`DependenciesFile`); and when the instance publishes something, `Result.Instance`, `okdp.instance.yaml` (`InstanceFile`) | `okdp.Result`; `chart.Metadata` |
 | `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Instance`, `Output`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `DependenciesFile`, `InstanceFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
@@ -846,8 +846,10 @@ its repository's directory, the platform's oidc-dcr included); and what `okdp-co
 `echo` chart, without an alias), and a plain `values.yaml`, the chart's
 values the platform sets, under its key. It has no `okdp.yaml` and no
 `config.schema.json`, its instance `demo-echo` no `config.yaml`: every
-instance has the chart's defaults under those of `values.yaml`, and
-publishes neither URL nor usage. No `platform.yaml`, no `contracts/`.
+instance has the chart's defaults under those of `values.yaml`. It
+publishes nothing and depends on nothing: its output is `Chart.yaml` and
+`instance.values.yaml`, no `okdp.instance.yaml`, no
+`okdp.dependencies.yaml`. No `platform.yaml`, no `contracts/`.
 
 `examples/01_minimal/` is the smallest package with a mapping: `catalog/hello/1.0.0/`
 deploys one chart, `app` (the fictional `hello` chart, aliased

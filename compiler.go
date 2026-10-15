@@ -75,13 +75,13 @@ const (
 	// UmbrellaValues: the umbrella's values, given to Helm as user values
 	// (helm -f, Argo CD valueFiles, Flux valuesFrom).
 	UmbrellaValues = umbrella.ValuesFile
-	// DependenciesFile: Result.Dependencies as a YAML list, [] when there is
-	// none, for a deployer that orders the releases (Flux dependsOn, Argo CD
-	// sync waves).
+	// DependenciesFile: Result.Dependencies as a YAML list, written when
+	// there is one, for a deployer that orders the releases (Flux
+	// dependsOn, Argo CD sync waves).
 	DependenciesFile = umbrella.DependenciesFile
 	// InstanceFile: Result.Instance, what the instance publishes (url,
-	// usage, provides), for a control plane or a console that reads the
-	// deployments repository.
+	// usage, provides), written when it publishes something, for a control
+	// plane or a console that reads the deployments repository.
 	InstanceFile = umbrella.InstanceFile
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object,
 	// written when there are objects: plain manifests, which ObjectsTemplate
@@ -112,9 +112,11 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // directory -> content: Chart.yaml, the instance as one chart, the
 // package's Chart.yaml with the dependencies compiled, an umbrella over the
 // upstream charts of its keys; UmbrellaValues, the final values of each key
-// under the key; DependenciesFile; InstanceFile; and, when res has
-// objects, ObjectsFile and ObjectsTemplate. res is what Compile returned: Write does not check
-// it again. Every file is built before Write returns.
+// under the key; DependenciesFile, when res has dependencies; InstanceFile,
+// when the instance publishes a URL, a usage or a connection; and, when res
+// has objects, ObjectsFile and ObjectsTemplate. res is what Compile
+// returned: Write does not check it again. Every file is built before
+// Write returns.
 func Write(res *Result) (map[string][]byte, error) {
 	return umbrella.Write(res)
 }

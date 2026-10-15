@@ -178,9 +178,10 @@ given to Helm with `-f`
 [rendering with Helm](docs/01_usage.md#rendering-with-helm)),
 `<dir>/okdp.objects.yaml`, OKDP's own objects, which the umbrella renders
 as written (`<dir>/templates/okdp.yaml`), when the instance has any,
-`<dir>/okdp.instance.yaml`, what the instance publishes, and
-`<dir>/okdp.dependencies.yaml`, the instances the connection references
-point to, for a deployer that orders the releases
+`<dir>/okdp.instance.yaml`, what the instance publishes, when it publishes
+something, and `<dir>/okdp.dependencies.yaml`, the instances the
+connection references point to, when there is one, for a deployer that
+orders the releases
 ([`okdp.dependencies.yaml`](docs/01_usage.md#okdpdependenciesyaml)). The
 directory is created if needed; a compile that fails writes nothing, the
 files of a successful one overwrite those of the same name. `--release` and

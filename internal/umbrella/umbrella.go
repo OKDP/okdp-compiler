@@ -24,15 +24,16 @@ const (
 	// values.yaml they would be defaults, and Helm drops the nulls of
 	// defaults: a null that deletes an upstream default would be lost.
 	ValuesFile = "instance.values.yaml"
-	// DependenciesFile: Result.Dependencies as a YAML list, [] when there is
-	// none: the instances the connection references point to, for a
-	// deployer that orders the releases (Flux dependsOn, Argo CD sync
-	// waves). Helm ignores it.
+	// DependenciesFile: Result.Dependencies as a YAML list: the instances
+	// the connection references point to, for a deployer that orders the
+	// releases (Flux dependsOn, Argo CD sync waves). Written when there is
+	// one. Helm ignores it.
 	DependenciesFile = "okdp.dependencies.yaml"
 	// InstanceFile: Result.Instance, what the instance publishes: url,
-	// usage, and provides, the connections it provides ([] when none), what
-	// a control plane or a console reads of it in the deployments
-	// repository. Helm ignores it.
+	// usage, and provides, the connections it provides, each key written
+	// when set, what a control plane or a console reads of it in the
+	// deployments repository. Written when it publishes something. Helm
+	// ignores it.
 	InstanceFile = "okdp.instance.yaml"
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object:
 	// OKDP's own objects, manifests as the compiler wrote them, which Helm
@@ -65,7 +66,9 @@ const objectsTemplate = `{{- /* OKDP's own objects: ` + ObjectsFile + `, as okdp
 //     the key: its .Chart.Name is the key);
 //   - ValuesFile, the final values of each key under the key, each with its
 //     own global, marked generated;
-//   - DependenciesFile and InstanceFile;
+//   - DependenciesFile, when res has dependencies;
+//   - InstanceFile, when the instance publishes something: a URL, a usage
+//     or a connection;
 //   - ObjectsFile, marked generated, and ObjectsTemplate, when res has
 //     objects.
 //
@@ -95,7 +98,13 @@ func Write(res *okdp.Result) (map[string][]byte, error) {
 		}
 		c.Dependencies = append(c.Dependencies, d)
 	}
-	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}, DependenciesFile: {res.Dependencies}, InstanceFile: {res.Instance}}
+	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}}
+	if len(res.Dependencies) > 0 {
+		docs[DependenciesFile] = []any{res.Dependencies}
+	}
+	if i := res.Instance; i.URL != "" || i.Usage != "" || len(i.Provides) > 0 {
+		docs[InstanceFile] = []any{i}
+	}
 	for _, o := range res.Objects {
 		docs[ObjectsFile] = append(docs[ObjectsFile], o)
 	}

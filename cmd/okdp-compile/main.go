@@ -50,7 +50,7 @@ func main() {
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
 	flag.Func("context", "context values file, [<level>:]<file>, repeatable, before the -f files: global, global.okdp and connections among them; level 0 (the default), the platform's, first, a level's files merged in order; a level adds values, it changes none of a lower level's", func(s string) error { o.contexts = append(o.contexts, s); return nil })
 	flag.Func("f", "instance values file, repeatable; it sets no global but the keys the parameter schema declares, and no connections: an instance's own are a --context file of its level", func(s string) error { o.values = append(o.values, s); return nil })
-	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, "+compiler.InstanceFile+", what it publishes (url, usage, provides), and "+compiler.DependenciesFile+", the instances the connection references point to")
+	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, "+compiler.InstanceFile+", what it publishes (url, usage, provides), when it publishes something, and "+compiler.DependenciesFile+", the instances the connection references point to, when there is one")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Parse()
 	switch {
@@ -71,8 +71,9 @@ func main() {
 // run: checks the options, loads the inputs and compiles, prints the
 // compile's warnings on stderr, then writes the files of compiler.Write
 // into the output directory, created if needed, with the directories of
-// their paths, and removes the objects files an earlier compile wrote
-// there when this one has no objects: Helm would render them. A compile
+// their paths, and removes the files an earlier compile wrote there that
+// this one does not: the objects files, which Helm would render, the
+// instance and dependencies files, which a deployer would read. A compile
 // that fails writes nothing.
 func run(o options) error {
 	for _, f := range [][2]string{{"--package", o.pkg}, {"--charts (or $OKDP_CHARTS)", o.charts}, {"--release", o.release}, {"--namespace", o.namespace}, {"--output (-o)", o.output}} {
@@ -137,7 +138,7 @@ func run(o options) error {
 			return err
 		}
 	}
-	for _, name := range []string{compiler.ObjectsFile, compiler.ObjectsTemplate} {
+	for _, name := range []string{compiler.ObjectsFile, compiler.ObjectsTemplate, compiler.InstanceFile, compiler.DependenciesFile} {
 		if _, ok := files[name]; ok {
 			continue
 		}

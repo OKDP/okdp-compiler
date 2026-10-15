@@ -4,7 +4,7 @@ status 0 okdp-compile --package $WORK/hello --charts $WORK/charts --release demo
 ! stdout .
 cmp stderr $WORK/warning.txt
 grep '^  message: Hello from demo-hello$' $WORK/files/instance.values.yaml
-exists $WORK/files/Chart.yaml $WORK/files/okdp.dependencies.yaml
+exists $WORK/files/Chart.yaml
 
 # Named values.cel.yaml: no warning. Both files: an error, nothing written.
 mv $WORK/hello/values.yaml $WORK/hello/values.cel.yaml

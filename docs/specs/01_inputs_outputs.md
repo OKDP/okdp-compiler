@@ -1341,41 +1341,45 @@ instance publishes, built from the mapping's `instance` and `provides`
 sections ([Sections](02_service_definition.md#sections)): what a control
 plane or a console reads of each instance in the deployments repository,
 and what other instances reference by name. `compiler.Write` (`-o`)
-writes it in every output, beside the [umbrella chart](#umbrella-chart),
-which gives the service's name and version; Helm ignores it. It is
-indented by 2 spaces, its keys in this order:
+writes it when the instance publishes something, a URL, a usage or a
+provided connection, beside the [umbrella chart](#umbrella-chart), which
+gives the service's name and version; Helm ignores it. An instance that
+publishes nothing has no instance file. It is indented by 2 spaces, its
+keys in this order, an empty one (`""`, an empty list or map) not
+written:
 
 | Key | Value |
 |---|---|
-| `url` | `instance.url`, trimmed; `""` when unset |
-| `usage` | `instance.usage`, trimmed, with a final newline; `""` when unset or blank |
-| `provides` | the provided connections, a YAML list, in the order of `provides`; `[]` when none |
+| `url` | `instance.url`, trimmed; absent when unset |
+| `usage` | `instance.usage`, trimmed, with a final newline; absent when unset or blank |
+| `provides` | the provided connections, a YAML list, in the order of `provides`; absent when none |
 
-One item of `provides` per `provides` item, its keys in this order:
+One item of `provides` per `provides` item, its keys in this order, an
+empty one not written:
 
 | Key | Value |
 |---|---|
 | `name` | `name` of the item; `<release>` by default |
 | `contract` | `contract` of the item |
-| `values` | `values` of the item, [completed](#completion) against the contract, keys sorted |
+| `values` | `values` of the item, [completed](#completion) against the contract, keys sorted; absent when it has none |
 | `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
 
 ```go
 type Instance struct {
-	URL      string   `json:"url" yaml:"url"`           // what the console opens, trimmed; "" when none
-	Usage    string   `json:"usage" yaml:"usage"`       // how to use the instance, trimmed, with one final newline; "" when none
-	Provides []Output `json:"provides" yaml:"provides"` // the connections it provides, in the order of provides; nil when none
+	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none
+	Usage    string   `json:"usage,omitempty" yaml:"usage,omitempty"`       // how to use the instance, trimmed, with one final newline; "" when none
+	Provides []Output `json:"provides,omitempty" yaml:"provides,omitempty"` // the connections it provides, in the order of provides; nil when none
 }
 
 type Output struct {
-	Name      string         `json:"name" yaml:"name"`                               // the item's name; the release when it names none
-	Contract  string         `json:"contract" yaml:"contract"`                       // the contract it provides
-	Values    map[string]any `json:"values" yaml:"values"`                           // its values, completed against the contract
+	Name      string         `json:"name,omitempty" yaml:"name,omitempty"`           // the item's name; the release when it names none
+	Contract  string         `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it provides
+	Values    map[string]any `json:"values,omitempty" yaml:"values,omitempty"`       // its values, completed against the contract
 	SecretRef *SecretRef     `json:"secretRef,omitempty" yaml:"secretRef,omitempty"` // the Secret of its credentials; nil when none
 }
 
 type SecretRef struct {
-	Name string `json:"name" yaml:"name"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 }
 ```
 
@@ -1517,19 +1521,23 @@ umbrella.
 sorted by `field` (string order), the parameter path as the [connection
 errors](#connection-errors) write it, its `instance` a release name. Two
 references to one instance give two items; external and empty references
-give none. `nil` when there is none.
+give none. `nil` when there is none. Every field of an item is set: an
+empty reference gives no item, a reference without its contract fails;
+an empty field would not be written.
 
 ```go
 type Dependency struct {
-	Instance string `json:"instance" yaml:"instance"` // the referenced instance (its release name)
-	Contract string `json:"contract" yaml:"contract"` // the contract it must provide
-	Field    string `json:"field" yaml:"field"`       // the parameter that references it, e.g. backends[0].database
+	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance (its release name)
+	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
+	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
 }
 ```
 
 The compiler is not given the other instances: it does not check that the
 instance exists, nor that it provides the contract. A deployer orders the
-releases with the list ([GitOps](../01_usage.md#gitops)).
+releases with the list ([GitOps](../01_usage.md#gitops)), written to
+`okdp.dependencies.yaml` (`compiler.DependenciesFile`) when there is one:
+no file, no dependency.
 
 ### Umbrella chart
 
@@ -1537,9 +1545,10 @@ releases with the list ([GitOps](../01_usage.md#gitops)).
 for one Helm release per instance, under the release name the values were
 compiled for. Two files, [the objects file](#the-objects-file) and its
 template when the instance has objects, and `okdp.dependencies.yaml`
-(`compiler.DependenciesFile`, [dependencies](#dependencies)) and
-`okdp.instance.yaml` ([the instance file](#the-instance-file)), which Helm
-ignores, by path in the directory:
+(`compiler.DependenciesFile`, [dependencies](#dependencies)) when there is
+one and `okdp.instance.yaml` ([the instance file](#the-instance-file))
+when the instance publishes something, which Helm ignores, by path in the
+directory:
 
 - `Chart.yaml`: the package's (`Result.Chart`), every field kept, in
   Helm's order (`apiVersion`, `name`, `version`, `kubeVersion`,

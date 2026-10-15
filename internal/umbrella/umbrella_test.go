@@ -93,10 +93,11 @@ annotations:
 }
 
 // TestWrite: the umbrella's values, marked generated, the dependencies as
-// a YAML list, [] when there is none, what the instance publishes, its
-// provides [] when none, and the objects as a YAML stream, marked
-// generated, with the template that renders it, indented by 2 spaces;
-// without objects, neither file.
+// a YAML list, what the instance publishes, its empty keys left out, and
+// the objects as a YAML stream, marked generated, with the template that
+// renders it, indented by 2 spaces; without dependencies, no dependencies
+// file, publishing nothing, no instance file, without objects, neither
+// objects file.
 func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &okdp.Result{
@@ -127,15 +128,23 @@ func TestWrite(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", name, got, w)
 		}
 	}
-	// No dependency, no object, nothing published.
+	// No dependency, no object, nothing published: Chart.yaml and the
+	// values only.
 	res.Dependencies, res.Objects, res.Instance = nil, nil, okdp.Instance{}
-	if files, err = Write(res); err != nil || string(files[DependenciesFile]) != "[]\n" {
-		t.Errorf("no dependency: %v %q", err, files[DependenciesFile])
+	if files, err = Write(res); err != nil {
+		t.Fatal(err)
 	}
-	if got := string(files[InstanceFile]); got != "url: \"\"\nusage: \"\"\nprovides: []\n" {
-		t.Errorf("nothing published: %q", got)
+	if got := slices.Sorted(maps.Keys(files)); !slices.Equal(got, []string{"Chart.yaml", ValuesFile}) {
+		t.Errorf("nothing but the chart: got %v", got)
 	}
-	if _, ok := files[ObjectsFile]; ok || len(files) != 4 {
-		t.Errorf("no object: got %v", slices.Sorted(maps.Keys(files)))
+	// A usage alone is published, without the empty keys, of the instance
+	// and of an output.
+	res.Instance = okdp.Instance{Usage: "use it\n"}
+	if files, err = Write(res); err != nil || string(files[InstanceFile]) != "usage: |\n  use it\n" {
+		t.Errorf("a usage alone: %v %q", err, files[InstanceFile])
+	}
+	res.Instance = okdp.Instance{Provides: []okdp.Output{{Name: "demo-app", Contract: "http", Values: map[string]any{}}}}
+	if files, err = Write(res); err != nil || string(files[InstanceFile]) != "provides:\n  - name: demo-app\n    contract: http\n" {
+		t.Errorf("an output without values: %v %q", err, files[InstanceFile])
 	}
 }

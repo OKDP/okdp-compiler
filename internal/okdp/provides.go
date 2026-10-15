@@ -18,25 +18,26 @@ import (
 
 // Instance: what the instance publishes, the mapping's instance and
 // provides sections, checked: what a control plane or a console reads of it
-// in the deployments repository (okdp.instance.yaml, umbrella.Write).
+// in the deployments repository (okdp.instance.yaml, umbrella.Write). An
+// empty field is not written, nor one of its outputs'.
 type Instance struct {
-	URL      string   `json:"url" yaml:"url"`           // what the console opens, trimmed; "" when none
-	Usage    string   `json:"usage" yaml:"usage"`       // how to use the instance, trimmed, with one final newline; "" when none
-	Provides []Output `json:"provides" yaml:"provides"` // the connections it provides, in the order of provides; nil when none
+	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none
+	Usage    string   `json:"usage,omitempty" yaml:"usage,omitempty"`       // how to use the instance, trimmed, with one final newline; "" when none
+	Provides []Output `json:"provides,omitempty" yaml:"provides,omitempty"` // the connections it provides, in the order of provides; nil when none
 }
 
 // Output: a connection the instance provides, an item of provides checked
 // against its contract: what an instance that references it by name gets.
 type Output struct {
-	Name      string         `json:"name" yaml:"name"`                               // the item's name; the release when it names none
-	Contract  string         `json:"contract" yaml:"contract"`                       // the contract it provides
-	Values    map[string]any `json:"values" yaml:"values"`                           // its values, completed against the contract
+	Name      string         `json:"name,omitempty" yaml:"name,omitempty"`           // the item's name; the release when it names none
+	Contract  string         `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it provides
+	Values    map[string]any `json:"values,omitempty" yaml:"values,omitempty"`       // its values, completed against the contract
 	SecretRef *SecretRef     `json:"secretRef,omitempty" yaml:"secretRef,omitempty"` // the Secret of its credentials; nil when none
 }
 
 // SecretRef: a Secret, by name.
 type SecretRef struct {
-	Name string `json:"name" yaml:"name"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 }
 
 // published: what the instance publishes, its instance section info, of
