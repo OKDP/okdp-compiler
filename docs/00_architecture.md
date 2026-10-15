@@ -271,13 +271,14 @@ dependencies, and what the mapping sees (its `scope`):
 7. **Outputs and credentials Secrets** (`provided`,
    `internal/okdp/provides.go`). Each `provides` entry, of the form the
    mapping schema checks (stage 5), is
-   checked against its contract, read again, as an
-   external connection is: its fields (`contract.fields`), completed
+   checked against its contract, read again: of a contract with a naming
+   convention (`x-okdp-internal`), its name must be the release's, the one
+   internal references reach; then, as an external
+   connection is, its fields (`contract.fields`), completed
    (`contract.complete`), validated against its schema
-   (`contract.check`); published
-   under the release name, it is compared with what the `resolver`
-   computes for an internal reference to this instance
-   (`x-okdp-internal`): provider and consumers compute the same names. An
+   (`contract.check`); of such a contract, it is compared with what the
+   `resolver` computes for an internal reference to this instance:
+   provider and consumers compute the same names. An
    entry with a `secret` gets its credentials Secret
    (`credentialsSecret`; a generated one by `okdpGeneratedSecret`'s
    template, `generatedSecret`). Then two outputs of one contract and name
@@ -667,7 +668,7 @@ filled from the pinned references. The compiler enforces:
 | Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below. An internal reference is a release name (`chart.IsRelease`): it becomes hosts, Secret names and `Dependency.Instance` |
 | Credentials never inlined | `contract.fields`, from `resolve` and `provided` | an external connection and a provided output carry contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and `okdp.instance.yaml` are not secret |
 | Contracts | `resolve`, `provided` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`contract.check`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
-| Provider and consumers agree | `provided` | an output under the release name equals what internal references resolve to |
+| Provider and consumers agree | `provided` | an output of a contract with a naming convention is named after the release, the name internal references reach, and equals what they resolve to |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
 | No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the context's layers above level 0 and of the instance's layers (parameters, `global`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
 | Upstream schemas | stage 10, with a chart cache | an upstream chart's rules fail the check, not the deployment |

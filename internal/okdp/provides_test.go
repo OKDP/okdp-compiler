@@ -11,11 +11,20 @@ import (
 )
 
 // httpContract: an http contract with an internal naming convention and a
-// secret field, required (it is in the Secret, never in the values); and a
-// contract that cannot be read.
+// secret field, required (it is in the Secret, never in the values); api,
+// the same fields without a convention, its outputs named; and a contract
+// that cannot be read.
 var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "http",
 	"x-okdp-internal": {"url": "https://${ref}.${suffix}"},
+	"properties": {
+		"url": {"type": "string"},
+		"port": {"type": "integer", "default": 443},
+		"token": {"type": "string", "x-okdp-secret": true}
+	},
+	"required": ["url", "token"]}`)},
+	"api.schema.json": {Data: []byte(`{
+	"x-okdp-contract": "api",
 	"properties": {
 		"url": {"type": "string"},
 		"port": {"type": "integer", "default": 443},
@@ -34,13 +43,14 @@ func provideCompile(provides string) (*Result, error) {
 }
 
 // TestProvides: what the instance publishes, its url and usage trimmed,
-// its outputs completed, named after the release unless named, their
-// secretRef; no object without a secret.
+// its outputs completed, named after the release unless named (a contract
+// without a naming convention), their secretRef; no object without a
+// secret.
 func TestProvides(t *testing.T) {
 	res, err := provideCompile(`
   - contract: http
     values: {url: https://demo-app.example.org}
-  - contract: http
+  - contract: api
     name: public
     values: {url: https://public.example.org}
     secretRef: {name: public-credentials, extra: dropped}
@@ -50,7 +60,7 @@ func TestProvides(t *testing.T) {
 	}
 	want := Instance{URL: "https://x", Usage: "use it\n", Provides: []Output{
 		{Name: "demo-app", Contract: "http", Values: M{"port": float64(443), "url": "https://demo-app.example.org"}},
-		{Name: "public", Contract: "http", Values: M{"port": float64(443), "url": "https://public.example.org"}, SecretRef: &SecretRef{Name: "public-credentials"}},
+		{Name: "public", Contract: "api", Values: M{"port": float64(443), "url": "https://public.example.org"}, SecretRef: &SecretRef{Name: "public-credentials"}},
 	}}
 	if !reflect.DeepEqual(res.Instance, want) {
 		t.Errorf("got %#v\nwant %#v", res.Instance, want)
@@ -80,28 +90,32 @@ func TestProvidesErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ provides, want string }{
 		"missing contract": {"  - {contract: ftp, values: {}}\n", `provides "demo-app" (ftp): the ftp contract cannot be read: ftp.schema.json: file does not exist`},
 		"unreadable":       {"  - {contract: broken, values: {}}\n", `provides "demo-app" (broken): the broken contract cannot be read: broken.schema.json: unexpected EOF`},
-		"type":             {"  - {contract: http, name: other, values: {url: u, port: '443'}}\n", "provides \"other\" (http): the fields violate the http contract:\n- at '/port': got string, want integer"},
+		"type":             {"  - {contract: api, name: other, values: {url: u, port: '443'}}\n", "provides \"other\" (api): the fields violate the api contract:\n- at '/port': got string, want integer"},
 		"unknown field":    {"  - {contract: http, values: {url: u, path: /}}\n", `field "path" is not part of the http contract`},
 		"secret field":     {"  - {contract: http, values: {url: u, token: t}}\n", `"token" is a secret field`},
-		"required field":   {"  - {contract: http, name: other, values: {}}\n", `field "url" is required by the http contract`},
-		"empty secret":     {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
+		"required field":   {"  - {contract: api, name: other, values: {}}\n", `field "url" is required by the api contract`},
+		"empty secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: https://demo-app.example.org}}\n", `two http outputs are named "demo-app"`},
-		"two names twice":  {"  - {contract: http, name: b, values: {url: u}}\n  - {contract: http, name: a, values: {url: u}}\n  - {contract: http, name: a, values: {url: u}}\n  - {contract: http, name: b, values: {url: u}}\n", "two http outputs are named \"b\"\ntwo http outputs are named \"a\""},
+		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"b\"\ntwo api outputs are named \"a\""},
 		"internal mismatch": {
 			"  - {contract: http, values: {url: https://elsewhere}}\n",
 			`url is "https://elsewhere" but internal references to "demo-app" resolve it to "https://demo-app.example.org"`,
 		},
-		"not a map":            {"  - {contract: http, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
+		"internal name": {
+			"  - {contract: http, name: other, values: {url: https://other.example.org}}\n",
+			`provides "other" (http): the http contract reaches an instance by its release name: name it "demo-app" or leave name out`,
+		},
+		"not a map":            {"  - {contract: api, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
 		"values not a map":     {"  - {contract: http, values: [url]}\n", "- at '/provides/0/values': got array, want object"},
-		"secretRef not a map":  {"  - {contract: http, name: other, values: {url: u}, secretRef: creds}\n", "- at '/provides/0/secretRef': got string, want object"},
-		"secret not a map":     {"  - {contract: http, name: other, values: {url: u}, secret: [token]}\n", "- at '/provides/0/secret': got array, want object"},
-		"a null secret":        {"  - {contract: http, name: other, values: {url: u}, secret: ~}\n", "- at '/provides/0/secret': got null, want object"},
-		"generate not a list":  {"  - {contract: http, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", "- at '/provides/0/secret/generate': got object, want array"},
-		"generated key":        {"  - {contract: http, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", "- at '/provides/0/secret/generate/0/length': got string, want integer"},
-		"stringData not a map": {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: [token]}}\n", "- at '/provides/0/secret/stringData': got array, want object"},
-		"stringData a number":  {"  - {contract: http, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", "- at '/provides/0/secret/stringData/token': got number, want string"},
-		"secretRef no name":    {"  - {contract: http, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", "- at '/provides/0/secretRef': missing property 'name'"},
-		"secretRef name":       {"  - {contract: http, name: other, values: {url: u}, secretRef: {name: 1}}\n", "- at '/provides/0/secretRef/name': got number, want string"},
+		"secretRef not a map":  {"  - {contract: api, name: other, values: {url: u}, secretRef: creds}\n", "- at '/provides/0/secretRef': got string, want object"},
+		"secret not a map":     {"  - {contract: api, name: other, values: {url: u}, secret: [token]}\n", "- at '/provides/0/secret': got array, want object"},
+		"a null secret":        {"  - {contract: api, name: other, values: {url: u}, secret: ~}\n", "- at '/provides/0/secret': got null, want object"},
+		"generate not a list":  {"  - {contract: api, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", "- at '/provides/0/secret/generate': got object, want array"},
+		"generated key":        {"  - {contract: api, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", "- at '/provides/0/secret/generate/0/length': got string, want integer"},
+		"stringData not a map": {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: [token]}}\n", "- at '/provides/0/secret/stringData': got array, want object"},
+		"stringData a number":  {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", "- at '/provides/0/secret/stringData/token': got number, want string"},
+		"secretRef no name":    {"  - {contract: api, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", "- at '/provides/0/secretRef': missing property 'name'"},
+		"secretRef name":       {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: 1}}\n", "- at '/provides/0/secretRef/name': got number, want string"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := provideCompile(tc.provides)
@@ -116,8 +130,8 @@ func TestProvidesErrors(t *testing.T) {
 // provides, the fields of each in key order: the same from one compile to
 // the next.
 func TestProvidesReport(t *testing.T) {
-	provides := "  - {contract: http, name: a, values: {url: u}}\n  - {contract: http, name: b, values: {url: u, zone: z, path: /}}\n  - {contract: ftp}\n"
-	want := `provides "b" (http): field "path" is not part of the http contract`
+	provides := "  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u, zone: z, path: /}}\n  - {contract: ftp}\n"
+	want := `provides "b" (api): field "path" is not part of the api contract`
 	for range 20 {
 		if _, err := provideCompile(provides); err == nil || err.Error() != want {
 			t.Fatalf("got %v, want %q", err, want)
@@ -128,8 +142,8 @@ func TestProvidesReport(t *testing.T) {
 // TestProvidesTypes: the values of the first output that fails, completed,
 // against the contract's types: every violation at once, sorted by field.
 func TestProvidesTypes(t *testing.T) {
-	provides := "  - {contract: http, name: a, values: {url: u}}\n  - {contract: http, name: b, values: {url: 1, port: '443'}}\n  - {contract: http, name: c, values: {url: 2}}\n"
-	want := `provides "b" (http): the fields violate the http contract:
+	provides := "  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: 1, port: '443'}}\n  - {contract: api, name: c, values: {url: 2}}\n"
+	want := `provides "b" (api): the fields violate the api contract:
 - at '/port': got string, want integer
 - at '/url': got number, want string`
 	for range 20 {
@@ -142,21 +156,21 @@ func TestProvidesTypes(t *testing.T) {
 // TestProvidesSecret: an output with a secret gets a secretRef, and its
 // credentials Secret is an object.
 func TestProvidesSecret(t *testing.T) {
-	res, err := provideCompile("  - {contract: http, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
+	res, err := provideCompile("  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref := res.Instance.Provides[0].SecretRef; ref == nil || ref.Name != "other-http-credentials" {
+	if ref := res.Instance.Provides[0].SecretRef; ref == nil || ref.Name != "other-api-credentials" {
 		t.Errorf("secretRef: %#v", ref)
 	}
-	if len(res.Objects) != 1 || res.Objects[0]["kind"] != "Secret" || value.Dig(res.Objects[0], "metadata.name") != "other-http-credentials" {
+	if len(res.Objects) != 1 || res.Objects[0]["kind"] != "Secret" || value.Dig(res.Objects[0], "metadata.name") != "other-api-credentials" {
 		t.Fatalf("objects: %#v", res.Objects)
 	}
-	if l := value.AsMap(value.AsMap(res.Objects[0]["metadata"])["labels"]); l["okdp.io/credentials-http"] != "true" {
+	if l := value.AsMap(value.AsMap(res.Objects[0]["metadata"])["labels"]); l["okdp.io/credentials-api"] != "true" {
 		t.Errorf("labels: %#v", l)
 	}
 	// Generated, the Secret's stringData is written as text, a number too.
-	res, err = provideCompile("  - {contract: http, name: other, values: {url: u}, secret: {generate: [{key: token}], stringData: {port: 443}}}\n")
+	res, err = provideCompile("  - {contract: api, name: other, values: {url: u}, secret: {generate: [{key: token}], stringData: {port: 443}}}\n")
 	if err != nil {
 		t.Fatal(err)
 	}

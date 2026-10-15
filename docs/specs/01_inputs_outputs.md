@@ -547,7 +547,7 @@ of a connection or an output are checked against the schema
 | `x-ui-condition: {field, value}` | a field with a `default` | the default applies only when `field` prints as `value` |
 | `x-okdp-derived: {from, map}` | a field | its value when not set: `map[<value of from>]`; none when that value is not a key of `map` |
 | `x-okdp-secret: true` | a field | a credential: refused in a connection and in an output, it belongs to the credentials Secret (`secretRef`) |
-| `x-okdp-internal: {<field>: <template>}` | the contract | the fields of an instance reached by its name: `${ref}`, `${namespace}`, `${suffix}` replaced ([Resolution](#resolution)) |
+| `x-okdp-internal: {<field>: <template>}` | the contract | the fields of an instance reached by its name: `${ref}`, `${namespace}`, `${suffix}` replaced ([Resolution](#resolution)); an output of the contract is the release's, not named ([The instance file](#the-instance-file)) |
 | `x-okdp-contract` | the contract | the name in the `required` error message |
 
 The other `x-*` keywords (`x-okdp-external`, `x-okdp-required`,
@@ -609,11 +609,11 @@ fails.
 - Consumed, internal: the contract has `x-okdp-internal`, completed. Its
   values are not checked against the schema: they follow from the contract,
   and are those the instance publishes, checked as provided.
-- Provided (`provides`): the contract exists, every key of `values` a
-  non-secret field, completed, then valid against the schema; and an output
-  published under the release name, of a contract with `x-okdp-internal`,
-  has the values an internal reference to the release resolves to
-  ([The instance file](#the-instance-file)).
+- Provided (`provides`): the contract exists, an output of a contract with
+  `x-okdp-internal` is published under the release name, every key of
+  `values` a non-secret field, completed, then valid against the schema;
+  and such an output has the values an internal reference to the release
+  resolves to ([The instance file](#the-instance-file)).
 
 Valid against the schema: the completed values (no `secretRef`, no `okdp`),
 validated as a chart's values against its `values.schema.json`
@@ -1382,7 +1382,7 @@ empty one not written:
 
 | Key | Value |
 |---|---|
-| `name` | `name` of the item; `<release>` by default |
+| `name` | `name` of the item; `<release>` by default, always for a contract with `x-okdp-internal` |
 | `contract` | `contract` of the item |
 | `values` | `values` of the item, [completed](#completion) against the contract, keys sorted; absent when it has none |
 | `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
@@ -1409,7 +1409,7 @@ type SecretRef struct {
 Every item is checked for its shape first, with the mapping's other
 sections, every violation at once
 ([provides](02_service_definition.md#provides)). Then each is checked
-against its contract, in the order of `provides`, the fields of its `values` and of the contract's
+against its contract, in the order of `provides`: its name, then the fields of its `values` and of the contract's
 `x-okdp-internal` convention in alphabetical order. The first error is
 reported, as for an expression of the mapping: `provides` is the package's
 to fix, not the instance's, and the error is the same from one compile to
@@ -1422,6 +1422,7 @@ item passes, two items of one contract and name fail, one line per name.
 |---|---|
 | an item that is not a map, without a `contract`; its `values`, `secretRef` or `secret` set, not a map; a `secretRef` that is set without a `name`, or whose `name` is not a non-empty string; the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '/provides/<i>/values': got array, want object`, `- at '/provides/<i>/secretRef': missing property 'name'`, one line per violation ([provides](02_service_definition.md#provides)) |
 | no `<contract>.schema.json`, or one that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<out>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
+| a `name` other than `<release>`, of a contract with `x-okdp-internal` | `<out>: the <contract> contract reaches an instance by its release name: name it "<release>" or leave name out` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
 | a secret field | `<out>: "<key>" is a secret field, put it in the credentials Secret` |
 | required field not set | `<out>: field "<key>" is required by the <contract> contract`, one line per field |
@@ -1429,10 +1430,12 @@ item passes, two items of one contract and name fail, one line per name.
 | internal convention | `<out>: <field> is "<value>" but internal references to "<name>" resolve it to "<expected>"` |
 | same contract and name twice | `two <contract> outputs are named "<name>"` |
 
-Internal convention: an output named `<release>` (the default), of a contract
-with `x-okdp-internal`, must hold, for each field of the convention, the
-value an internal reference to `<release>` resolves to. An instance that
-references this one by name gets the values it publishes.
+Internal convention: an output of a contract with `x-okdp-internal` is
+named `<release>`, the default, the name internal references reach the
+instance by: no reference resolves to another name. It must hold, for each
+field of the convention, the value an internal reference to `<release>`
+resolves to. An instance that references this one by name gets the values
+it publishes. A `name` is for a contract without a convention.
 
 ### Credentials Secrets
 

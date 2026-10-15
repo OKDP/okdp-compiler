@@ -647,7 +647,7 @@ provides:
     values:
       uri: ${{ apiUrl }}/api/catalog
       realm: ${{ str(values.realm) }}
-  - contract: s3
+  - contract: s3                              # no naming convention: named
     name: store-a
     values: {apiUrl: 'https://a.${{ global.okdp.ingress.suffix }}'}
     secret:                                   # Secret store-a-s3-credentials, generated
@@ -662,8 +662,8 @@ A list of outputs, the connections the instance publishes, in
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
-| `name` | string | the release name | The output's name, the one other instances reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
-| `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; under the release name, the values the contract's `x-okdp-internal` convention gives): [contracts](01_inputs_outputs.md#contracts). |
+| `name` | string | the release name | The output's name, the one other instances reference. Unique per contract: `two <contract> outputs are named "<name>"`. Only for a contract without a naming convention: one with `x-okdp-internal` reaches an instance by its release name, and its output is the release's; another name fails, `provides "<name>" (<contract>): the <contract> contract reaches an instance by its release name: name it "<release>" or leave name out`. |
+| `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; of a contract with `x-okdp-internal`, the values its convention gives for the release): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
 
@@ -685,9 +685,9 @@ A key of `generate` is checked as one of `okdpGeneratedSecret`'s `keys`
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret)). With a `generate`,
 `stringData` takes numbers and booleans too. The contract checks then report
 `provides "<name>" (<contract>): <message>`. The items are checked in
-order, their fields in alphabetical order, and the first error is
-reported; the required fields the item lacks, and the schema's violations
-of that item, all at once, one line each
+order, their name first, then their fields in alphabetical order, and the
+first error is reported; the required fields the item lacks, and the
+schema's violations of that item, all at once, one line each
 ([the instance file](01_inputs_outputs.md#the-instance-file)).
 
 #### secret

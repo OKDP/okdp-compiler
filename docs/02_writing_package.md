@@ -461,12 +461,16 @@ connection files). See [contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
 contract, its schema included (a `port` is a number, not a string built by
-an expression); published under the release name (the default `name`), they must
+an expression). Of a contract with an internal convention, the output is
+published under the release name, the default `name`: internal references
+reach the instance by it, and another name fails. Its values must then
 also be what an internal reference to this instance resolves to: build the
 hosts and Service names from the contract's convention (trino's host is
 `trino-<namespace>.<suffix>`, hive-metastore's Service
 `<release>-hive-metastore`), once, in `vars`, for the ingress and `provides`
-alike. Then say where the credentials come from:
+alike. A `name` is for a contract without a convention (cnpg-postgresql's
+`database-server` outputs, one per database). Then say where the
+credentials come from:
 
 ```yaml
 provides:
@@ -948,8 +952,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - [ ] The mapping writes no literal image tag, no credential, no name that
   can exceed 63 characters outside a contract's convention; every OKDP
   object is labelled.
-- [ ] `provides` follows the contract's convention and says where the
-  credentials come from.
+- [ ] `provides` follows the contract's convention, under the release
+  name, and says where the credentials come from.
 - [ ] The OAuth clients are declared in `oidcClients` and read from
   `platform.oidcClientSecret` and `oidcClientSecret('<name>')`.
 - [ ] One `ci/` case per mode and per branch, OIDC `existing` and `dcr`

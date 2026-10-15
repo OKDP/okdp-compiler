@@ -9,11 +9,6 @@ provides:
     values:
       internalUrl: http://demo-workspace-api.demo.svc:8080
       url: https://demo-workspace.okdp.example.org
-  - name: demo-workspace-gateway
-    contract: http
-    values:
-      internalUrl: http://demo-workspace-gateway.demo.svc:8443
-      url: https://demo-workspace-gateway.okdp.example.org
   - name: demo-workspace-exports
     contract: s3
     values:
