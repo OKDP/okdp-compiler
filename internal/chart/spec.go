@@ -20,7 +20,7 @@ type Specs map[string]Spec
 // values (the values file, the final values), the upstream chart renders
 // them.
 type Spec struct {
-	Source   Ref      // the upstream chart: its defaults and schema (the chart cache), and what renders the values
+	Source   Ref      // the upstream chart: what renders the values, and its defaults and schema for a check (the chart cache)
 	Defaults string   // a values file of the package, <key>.defaults.yaml by convention: OKDP's defaults for the chart
 	Protect  []string // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
 	Append   []string // instance upstream values: appended lists (same paths)

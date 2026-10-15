@@ -10,7 +10,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Input | Field | Required | Section |
 |---|---|---|---|
 | Package files | `Definition.Files` (`fs.FS`) | yes | [Package files](#package-files) |
-| Chart cache | `Inputs.Charts` (`fs.FS`) | yes | [Chart cache](#chart-cache) |
+| Chart cache | `Inputs.Charts` (`fs.FS`) | no: the checks of the final values | [Chart cache](#chart-cache) |
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
 | Context values layers | `Inputs.Context` (`[]ContextLayer`) | no | [Parameters](#parameters), [Context values](#context-values), [Values files](#values-files) |
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
@@ -95,7 +95,7 @@ app: open app.defaults.yaml: no such file or directory
 ### Values files
 
 Every values file is read as Helm 3 reads one: the upstream charts'
-`values.yaml` ([chart cache](#chart-cache)), the defaults files, and the
+`values.yaml` a check reads ([chart cache](#chart-cache)), the defaults files, and the
 values layers read by `compiler.ParseValues` (the binary's `--context` and
 `-f` files).
 
@@ -142,11 +142,14 @@ the contracts) are strict JSON: no comments.
 
 ## Chart cache
 
-`Inputs.Charts`: the upstream charts the compiled charts are rendered by,
-each unpacked under its repository's directory, as `helm pull --untar -d
-<cache>/<repository>/<chart>-<version>` writes it (`helm pull` creates the
-directory). The binary reads a directory: `--charts`, `$OKDP_CHARTS` by
-default ([command line](../01_usage.md#command-line)).
+`Inputs.Charts`, optional: the upstream charts the compiled charts are
+rendered by, for the [checks of the final values](#checks-of-the-final-values).
+Without it, a compile reads no chart; with it, its final values are the
+same, checked. Each chart is unpacked under its repository's directory, as
+`helm pull --untar -d <cache>/<repository>/<chart>-<version>` writes it
+(`helm pull` creates the directory). The binary reads a directory with
+`--check` only: `--charts`, `$OKDP_CHARTS` by default
+([`--check`](../01_usage.md#--check)).
 
 ```
 <cache>/
@@ -159,20 +162,21 @@ default ([command line](../01_usage.md#command-line)).
 `quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`; `http://localhost:8080/charts` is
 `localhost:8080/charts/`. A repository whose host and path are no
 directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
-refused ([dependencies](02_service_definition.md#dependencies),
-[platform charts](#platform-charts)). Two
-repositories that differ only by their scheme share a directory.
+refused, with or without a chart cache
+([dependencies](02_service_definition.md#dependencies),
+[platform charts](#platform-charts)). Two repositories that differ only by
+their scheme share a directory.
 
 A chart is found by its source: `<repository>/<chart>-<version>/<chart>`,
 and nowhere else: a chart archive (`helm pull -d` without `--untar`), a
 chart at the root of the cache or unpacked directly in
 `<chart>-<version>/` is not read, and one chart name and version from two
 repositories (a fork, a generic name such as `app`) are two entries. Of a
-chart, the compiler reads `values.yaml` and `values.schema.json` only, at
+chart, a check reads `values.yaml` and `values.schema.json` only, at
 the root of its directory, not those of its subcharts
 (`<chart>/charts/<sub>/values.yaml`). A chart without `values.yaml` has no
-defaults, one without `values.schema.json` no
-[schema check](#schema-check-of-the-final-values).
+defaults, one without `values.schema.json` no schema check
+([checks of the final values](#checks-of-the-final-values)).
 
 The files are read without a cap. Helm 4.2 and 3.19, which the
 deployers embed
@@ -182,10 +186,11 @@ render with them. A UTF-8 byte order mark at the start of either file is
 dropped, as Helm drops it. Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
 it renders is compiled: the oidc-dcr chart in `dcr` mode with a client.
-`examples/02_advanced/.charts/` holds the
-example's charts unpacked, their `values.yaml` only: enough to compile, not
-to render (`charts.example.org/app-1.8.0/app/`,
-`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`).
+`examples/03_full/.charts/` holds the
+full example's charts unpacked, their `values.yaml` and the workspace
+chart's `values.schema.json` only: enough to check, not to render
+(`charts.example.org/workspace-3.2.0/workspace/`,
+`registry.example.org/mirror/oidc-dcr-0.5.0/oidc-dcr/`...).
 
 A chart its directory does not hold, even when the cache holds its archive
 or the chart elsewhere, fails with the command that downloads it there,
@@ -880,8 +885,8 @@ global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository (
 global.okdp.charts.oidcDcr.version "1.x": a pinned chart version (1.2.3), not a range
 ```
 
-The [chart cache](#chart-cache) holds each when its chart is compiled: the
-oidc-dcr chart in `dcr` mode with a client. Another repository with the
+The [chart cache](#chart-cache) of a check holds each when its chart is
+compiled: the oidc-dcr chart in `dcr` mode with a client. Another repository with the
 same chart and version (a mirror) has its own directory there.
 
 ### OAuth client settings
@@ -1052,9 +1057,15 @@ it fail.
 `append` of the key in `upstream` of `okdp.yaml`
 (`upstream.<key>.append`): dotted paths of lists. A list the upstream values
 give at such a path is appended to the list the values have there
-(upstream defaults, OKDP's defaults, computed values) instead of replacing
-it. The value given must be a list; a `null` is refused too:
+(OKDP's defaults, computed values) instead of replacing it. The value
+given must be a list; a `null` is refused too:
 `upstream.app.env must be a list`.
+
+The chart's own default list is not among them: Helm replaces it with the
+final list, as it replaces a default list with that of a `-f` file. A
+package that keeps its items restates them in its defaults or values file
+of the key; with a chart cache, a compile warns of an appended list that
+lacks some of them ([checks of the final values](#checks-of-the-final-values)).
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
@@ -1078,31 +1089,35 @@ each layer over the previous ones:
 
 | | Layer | From |
 |---|---|---|
-| 1 | upstream defaults | `values.yaml` of the key's source, from the [chart cache](#chart-cache), its `null` values removed |
-| 2 | OKDP's defaults | the file `defaults.<key>` of `okdp.yaml` |
-| 3 | computed values | `<key>` of the values file, `values.cel.yaml` or `values.yaml`; `{}` when the file does not write the key ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
-| 4 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
+| 1 | OKDP's defaults | the file `defaults.<key>` of `okdp.yaml` |
+| 2 | computed values | `<key>` of the values file, `values.cel.yaml` or `values.yaml`; `{}` when the file does not write the key ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
+| 3 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
-The source: the upstream chart of the key ([Chart index](#chart-index)).
-Keys of one source take layer 1 from it, the other layers from their own
-entries. The chart of an OAuth client has layers 1 (the defaults of its
-[platform chart](#platform-charts)) and 3 (the values the compiler
-computes for it: [OAuth client charts](#oauth-client-charts)) only.
+The chart of an OAuth client has layer 2 only (the values the compiler
+computes for it: [OAuth client charts](#oauth-client-charts)).
 
-Then `global` is replaced by: the `global` of layer 1, under the `global` of
-the parameters (the context's, [Context values](#context-values)), under
-the `global` of layer 3. The `global` of OKDP's defaults is not kept; layer
-4 may not set it (protected). Every chart thus gets the context's
-`global`, the platform values among it.
+Then `global` is replaced by the `global` of the parameters (the
+context's, [Context values](#context-values)), under the `global` of layer
+2, and left out when empty: Helm gives every chart one. The `global` of
+OKDP's defaults is not kept; layer 3 may not set it (protected). Every
+chart thus gets the context's `global`, the platform values among it.
 
-Layers 2 to 4 are merged as Helm merges `-f` files: maps merge key by key,
+The layers are merged as Helm merges `-f` files: maps merge key by key,
 lists and scalars replace (except at [append](#append) paths), a `null`
-replaces too and stays `null`. The result is a complete values file, the
-upstream defaults included.
+replaces too and stays `null`.
+
+The chart's own defaults, the `values.yaml` of the key's source (the
+upstream chart of the key, [Chart index](#chart-index)), are no layer:
+Helm coalesces the final values over them when it renders the chart, as
+it coalesces `-f` files ([Equivalence with Helm](#equivalence-with-helm)).
+The final values hold what OKDP decides of the chart's values, and nothing
+of its defaults: new defaults, in another version of the chart, change no
+final value. A check reads them ([checks of the final
+values](#checks-of-the-final-values)).
 
 ### Nulls
 
-A `null` of layers 2 to 4 stays `null` in `Result.Values`; Helm gives it its
+A `null` of any layer stays `null` in `Result.Values`; Helm gives it its
 meaning when it renders: over a default, the key is deleted; with no
 default, it is kept.
 
@@ -1111,9 +1126,6 @@ default, it is kept.
 podAnnotations: null   # the chart's default {}: deleted by Helm
 newKey: null           # no default: kept by Helm
 ```
-
-The `null` defaults of the upstream chart are left out (Helm 4 drops them,
-Helm 3 copies them back).
 
 ### Equivalence with Helm
 
@@ -1141,10 +1153,15 @@ Helm 4.3.0. Helm 3.19.4 and 3.19.2 coalesce some nulls differently (a
 that `values.yaml` and the values both set to `null` is deleted:
 `helm3.json`), and render the final values as they render the layers.
 
-### Schema check of the final values
+### Checks of the final values
+
+With a [chart cache](#chart-cache) (`Inputs.Charts`, `okdp-compile --check
+--charts`), the final values of each compiled chart are checked against
+its upstream chart; without one, no chart is read and nothing below is
+checked. The final values are the same either way.
 
 Each compiled chart whose source has a `values.schema.json` in the
-[chart cache](#chart-cache) is checked on its final values coalesced over
+chart cache is checked on its final values coalesced over
 its defaults: what its templates see, a `null` that deletes a default
 checked as absent. The check is the [parameter check](#schema-check); the
 violations of every chart are reported together, sorted, under
@@ -1163,6 +1180,18 @@ canary (app-1.8.0):
 A schema that does not compile, or holds a number outside the range of a
 float64 (`1e400`), fails with its path in the cache, prefixed with the
 chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
+
+A list the instance appended to ([append](#append)) where the chart's
+defaults hold a list some item of which the final list lacks is a warning
+(`Result.Warnings`), one per path, in key order: Helm replaces the
+chart's list with the final one, and the instance's items do not extend
+it. Items compare by value, in any position; an empty default list, a
+path the instance does not append to, or a package that restates the
+items gives none:
+
+```
+upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; restate them in the package's values of app (its defaults or values file) to keep them
+```
 
 ## Outputs
 
@@ -1252,8 +1281,8 @@ platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`,
 [Platform charts](#platform-charts)): its Job, a pre-install/pre-upgrade
 hook, registers the client anonymously at the platform's `registrationUrl`
 and writes it to a Secret. In `existing` mode, or with OIDC disabled, no
-chart is added and the [chart cache](#chart-cache) needs no oidc-dcr chart;
-the clients are checked all the same.
+chart is added and the [chart cache](#chart-cache) of a check needs no
+oidc-dcr chart; the clients are checked all the same.
 
 | Client | Chart key | Job, ServiceAccount, Role | Secret, `dcr` | Secret, `existing` |
 |---|---|---|---|---|
@@ -1290,12 +1319,12 @@ context ([why](../00_architecture.md#the-oidc-dcr-template)):
 | `waitForProvider` | when `global.okdp.oidc.issuerUri` is set: `discoveryUrl`, the issuer (one trailing `/` dropped) followed by `/.well-known/openid-configuration`; `ttlSeconds` when `waitTtlSeconds` is set |
 
 The client keys, their types and defaults:
-[oidcClients](02_service_definition.md#oidcclients). Maps merge over the
-chart's defaults: its default `mapping.keyMapping` entries stay, so the
-Secret also holds `registration_client_uri` and `registration_access_token`
-of the registration response (oidc-dcr 0.5.0). The example's final values
-in `dcr` mode ([Example](#example)), with the platform's settings above
-(its `platform.yaml`) and oidc-dcr 0.5.0 in the chart cache, trimmed:
+[oidcClients](02_service_definition.md#oidcclients). Helm merges these
+maps over the chart's defaults: its default `mapping.keyMapping` entries
+stay, so the Secret also holds `registration_client_uri` and
+`registration_access_token` of the registration response (oidc-dcr
+0.5.0). The example's final values in `dcr` mode ([Example](#example)),
+with the platform's settings above (its `platform.yaml`), trimmed:
 
 ```yaml
 # app
@@ -1306,17 +1335,12 @@ env:
 # oidc-dcr
 backoffLimit: 6                        # default of the settings
 commonLabels: {app.kubernetes.io/instance: demo-webapp}
-enabled: true                          # upstream default
 fullnameOverride: demo-webapp-oidc-dcr
 global: {okdp: ...}
-image: {pullPolicy: IfNotPresent, pullSecrets: [], registry: quay.io, repository: adaltas/oidc-dcr-job, tag: ""}   # upstream default
 mapping:
-  defaultKeys: {...}                   # upstream default, unused
-  keyMapping:
+  keyMapping:                          # over the chart's default entries
     client_id: .client_id
     client_secret: .client_secret
-    registration_access_token: .registration_access_token   # upstream default
-    registration_client_uri: .registration_client_uri       # upstream default
   useDefault: false
 registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
 request:
@@ -1331,7 +1355,6 @@ tls: {certificate: certs-bundle, insecure: false}
 ttlSeconds: 300                        # global.okdp.oidc.dcr.ttlSeconds
 waitForProvider:
   discoveryUrl: https://sso.okdp.example.org/realms/okdp/.well-known/openid-configuration
-  ttlSeconds: 600                      # upstream default
 ```
 
 ### The instance file
@@ -1679,7 +1702,6 @@ app:
     okdp:
       # ... the platform values
   image:
-    repository: example/webapp              # upstream default
     tag: "1.8"                              # OKDP's defaults
   ingress:
     # ... computed
@@ -1735,7 +1757,8 @@ upstream values). Release
 writes. Its `okdp.dependencies.yaml` lists
 `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
-`$if`, is no dependency, and its chart is not in the chart cache. Its
+`$if`, is no dependency, and its chart is not in the chart cache of the
+check. Its
 `okdp.instance.yaml` lists three outputs, one with its credentials, whose
 Secret is generated: its objects file holds the `Password` generators and
 the `ExternalSecret`, then the `objects` section.

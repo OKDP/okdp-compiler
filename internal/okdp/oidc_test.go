@@ -350,12 +350,14 @@ app:
 			if tc.existing {
 				return
 			}
+			// The computed values, without the chart's defaults: Helm
+			// merges keyMapping over them.
 			dcr := res.Values["oidc-dcr"]
-			if dcr["ttlSeconds"] != float64(30) || value.Dig(dcr, "request.redirect_uris") == nil || value.Dig(dcr, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri" {
+			if dcr["ttlSeconds"] != float64(30) || value.Dig(dcr, "request.redirect_uris") == nil || value.Dig(dcr, "mapping.keyMapping.registration_client_uri") != nil {
 				t.Errorf("oidc-dcr values: %#v", dcr)
 			}
-			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || value.Dig(c, "mapping.keyMapping.registration_client_uri") != ".registration_client_uri") {
-				t.Errorf("console-oidc-dcr values, over oidc-dcr's defaults: %#v", c)
+			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || value.Dig(c, "mapping.keyMapping.registration_client_uri") != nil) {
+				t.Errorf("console-oidc-dcr values: %#v", c)
 			}
 		})
 	}

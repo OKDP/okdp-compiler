@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -22,15 +23,15 @@ import (
 var update = flag.Bool("update", false, "rewrite the examples' outputs from the current compiler")
 
 // examples: each example a repository tree (docs/01_usage.md, repository
-// layout): its sources under input/db/, its chart cache in .charts/, and
-// what -o <dir> writes for each instance in
-// output/projects/<project>/instances/<instance>/.
+// layout): its sources under input/db/, what -o <dir> writes for each
+// instance in output/projects/<project>/instances/<instance>/, and, for
+// --check --charts, a chart cache in .charts/.
 const examples = "examples"
 
 // loadInstance: the compile of an instance of an example's tree,
 // input/db/projects/<project>/instances/<instance>/, as a caller of the tree
 // gives it: the package its instance.yaml names, catalog/<service>/<version>/,
-// whose Chart.yaml has that name and version; the chart cache .charts/; the
+// whose Chart.yaml has that name and version; no chart cache; the
 // contracts of db/contracts/, none when absent; the context, platform.yaml at
 // level 0, the project's project.yaml at level 1 and the instance's
 // connections.yaml at level 2, then the instance values, its config.yaml,
@@ -63,7 +64,6 @@ func loadInstance(t *testing.T, example, project, instance string) (*Definition,
 		t.Fatalf("%s: Chart.yaml is %s %s", catalog, def.Chart.Name, def.Chart.Version)
 	}
 	in := Inputs{
-		Charts:    os.DirFS(filepath.Join(root, ".charts")),
 		Contracts: fstest.MapFS{},
 		Release:   instance,
 		Namespace: project,
@@ -126,7 +126,9 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 // and a plain values.yaml, no instance values. 01_minimal: one chart, no
 // contract. 02_advanced: dcr mode, the OAuth client's chart added.
 // 03_full: the project's project.yaml at level 1 and the instance's
-// connections.yaml at level 2, between platform.yaml and config.yaml.
+// connections.yaml at level 2, between platform.yaml and config.yaml; its
+// chart cache, .charts/, checks the compile (--check --charts), which
+// gives the same files and no other warning.
 func TestExample(t *testing.T) {
 	instances, _ := filepath.Glob(filepath.Join(examples, "*", "input", "db", "projects", "*", "instances", "*"))
 	outputs, _ := filepath.Glob(filepath.Join(examples, "*", "output", "projects", "*", "instances", "*"))
@@ -145,7 +147,20 @@ func TestExample(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			checkDir(t, out, output(t, res))
+			files := output(t, res)
+			checkDir(t, out, files)
+			charts := filepath.Join(examples, example, ".charts")
+			if !exists(t, charts) {
+				return
+			}
+			in.Charts = os.DirFS(charts)
+			checked, err := Compile(t.Context(), def, in)
+			if err != nil {
+				t.Fatalf("checked with %s: %v", charts, err)
+			}
+			if !maps.EqualFunc(output(t, checked), files, bytes.Equal) || !slices.Equal(checked.Warnings, res.Warnings) {
+				t.Errorf("checked with %s: other files, or warnings %q", charts, checked.Warnings)
+			}
 		})
 	}
 	for _, o := range outputs {

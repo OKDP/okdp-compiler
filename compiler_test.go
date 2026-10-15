@@ -21,7 +21,6 @@ func example() (*compiler.Definition, compiler.Inputs) {
 		panic(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/.charts"),
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/db/platform.yaml")}},
 		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")},

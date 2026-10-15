@@ -1,7 +1,7 @@
 # A compile: status 0, nothing printed, the example's outputs written: the
 # instance as one chart, what it publishes, and the instances it depends
 # on; no objects file without objects.
-env OKDP_CHARTS=examples/02_advanced/.charts OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
+env OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
 status 0 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml -o $WORK/files
 ! stdout .
 ! stderr .
@@ -15,7 +15,7 @@ cmp $WORK/files/okdp.instance.yaml examples/02_advanced/output/projects/demo/ins
 # (level 0, no prefix), whatever the order of the flags, and before the
 # instance's own connections, level 2; one that changes a value of level 0
 # fails, nothing written.
-status 0 okdp-compile --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --charts examples/03_full/.charts --contracts examples/03_full/input/db/contracts --release demo-workspace --namespace demo --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context examples/03_full/input/db/platform.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml -o $WORK/full
+status 0 okdp-compile --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --contracts examples/03_full/input/db/contracts --release demo-workspace --namespace demo --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context examples/03_full/input/db/platform.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml -o $WORK/full
 ! stdout .
 ! stderr .
 cmp $WORK/full/instance.values.yaml examples/03_full/output/projects/demo/instances/demo-workspace/instance.values.yaml
@@ -31,7 +31,7 @@ stderr '^error: context layer 2 \(level 1\): connections.platform-db is set at l
 # files of the first compile: publishing nothing, depending on nothing, it
 # removes their files.
 env OKDP_CONTRACTS=
-status 0 okdp-compile --package examples/00_passthrough/input/db/catalog/echo/1.2.0 --charts examples/00_passthrough/.charts --release demo-echo --namespace demo -o $WORK/files
+status 0 okdp-compile --package examples/00_passthrough/input/db/catalog/echo/1.2.0 --release demo-echo --namespace demo -o $WORK/files
 ! stdout .
 ! stderr .
 cmp $WORK/files/Chart.yaml examples/00_passthrough/output/projects/demo/instances/demo-echo/Chart.yaml

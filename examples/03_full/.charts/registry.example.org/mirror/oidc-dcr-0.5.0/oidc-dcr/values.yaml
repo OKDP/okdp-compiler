@@ -1,7 +1,7 @@
 # The chart cache's copy of oidc-dcr 0.5.0 as the platform mirrors it
 # (oci://registry.example.org/mirror, global.okdp.charts.oidcDcr), the chart
 # of the OAuth clients in dcr mode: its defaults, without their comments, all
-# a compile reads of it.
+# a check reads of it.
 enabled: true
 image:
   registry: quay.io

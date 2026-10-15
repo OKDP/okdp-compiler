@@ -59,8 +59,8 @@ written, `{{ .Files.Get "okdp.objects.yaml" }}`.
   deployer (one HelmRelease or Application per instance,
   [GitOps](01_usage.md#gitops)), and pruned with them: an object the next
   compile no longer writes, or the whole instance removed, is deleted with
-  the release. Nothing is published, and the chart cache holds nothing for
-  them.
+  the release. Nothing is published, and the chart cache of a check holds
+  nothing for them.
 - **Helm's install order.** Helm installs a release's manifests sorted by
   kind, the umbrella's and its subcharts' together: Namespaces,
   ServiceAccounts, Secrets and ConfigMaps before the workloads, the kinds

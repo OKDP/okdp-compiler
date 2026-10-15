@@ -103,23 +103,28 @@ binaries'.
 ## Command line
 
 ```text
-okdp-compile --package <dir> [--charts <dir>] [--contracts <dir>]
+okdp-compile --package <dir> [--contracts <dir>]
              [--context [<level>:]<context.yaml>]...
              [-f <values.yaml>]...
              --release <name> --namespace <name> -o <dir>
+okdp-compile --check [--charts <dir>] --package <dir> [--contracts <dir>]
+             [--context [<level>:]<context.yaml>]...
+             [-f <values.yaml>]...
+             --release <name> --namespace <name>
 okdp-compile --version
 ```
 
 | Flag | Default | |
 |---|---|---|
 | `--package` | required | package directory: `Chart.yaml`, `okdp.yaml` (optional), `values.cel.yaml` or `values.yaml` (optional, one of them), `config.schema.json` (optional) at its root, and the defaults files `okdp.yaml` names ([package files](specs/01_inputs_outputs.md#package-files)) |
-| `--charts` | `$OKDP_CHARTS` | chart cache directory: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); required, by flag or variable |
+| `--check` | | compile and check, write nothing: the compile's errors and warnings, no `--output` ([`--check`](#--check)) |
+| `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
 | `--contracts` | `$OKDP_CONTRACTS` | contract schemas directory: `<contract>.schema.json` ([contracts](specs/01_inputs_outputs.md#contracts)); needed, by flag or variable, when a connection reference or a provided connection names a contract: without it, a compile that reads one fails |
 | `--context` | none | a context values file, `[<level>:]<file>`: `global`, `global.okdp` and `connections` among them ([context values](specs/01_inputs_outputs.md#context-values)); repeatable, before the `-f` files. No prefix is level 0, the platform's; a higher level, `1:` a project's, `2:` an instance's own connections..., adds values. The files are merged by level, lowest first, whatever the order of the flags, a level's in order as `helm -f` files; a file changes no value of a lower level, nor a connection it gives, and holds no `{{` above level 0 ([levels](specs/01_inputs_outputs.md#levels)) |
 | `-f` | none | an instance values file; repeatable, merged in order as `helm -f` files, after the `--context` files. It sets no `global` but the keys the parameter schema declares under it, and no `connections` ([instance values](specs/01_inputs_outputs.md#instance-values), [merge precedence](specs/01_inputs_outputs.md#merge-precedence)) |
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
-| `--output`, `-o` | required | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, `okdp.instance.yaml`, what the instance publishes, when it publishes something, and `okdp.dependencies.yaml`, the instances the connection references point to, when there is one ([`--output`](#--output)) |
+| `--output`, `-o` | required, refused with `--check` | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, `okdp.instance.yaml`, what the instance publishes, when it publishes something, and `okdp.dependencies.yaml`, the instances the connection references point to, when there is one ([`--output`](#--output)) |
 | `--version` | | print the version and exit |
 
 Flags take one or two dashes, and every input is a flag: an argument that
@@ -217,8 +222,7 @@ section, are in `okdp.objects.yaml`:
 $ db=examples/03_full/input/db
 $ i=$db/projects/demo/instances/demo-workspace
 $ bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
-    --charts examples/03_full/.charts --contracts $db/contracts \
-    --release demo-workspace --namespace demo \
+    --contracts $db/contracts --release demo-workspace --namespace demo \
     --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
     --context 2:$i/connections.yaml -f $i/config.yaml -o out-full
 $ ls out-full
@@ -266,11 +270,57 @@ $ cat out/okdp.dependencies.yaml
   field: database
 ```
 
+### `--check`
+
+`--check` compiles as a compile does and writes nothing; it takes no `-o`.
+What fails a compile fails it, with status 1, and its warnings are
+printed: a pre-commit hook or a CI job checks an instance without writing
+its outputs.
+
+With `--check`, `--charts <dir>` (`$OKDP_CHARTS` by default) names a chart
+cache: each upstream chart the compile renders unpacked under its
+repository's directory, as `helm pull --untar` writes it
+([chart cache](specs/01_inputs_outputs.md#chart-cache)). The check reads
+each chart's `values.yaml` and `values.schema.json`, nothing else of it:
+
+- the final values of each key, coalesced over the chart's defaults as
+  Helm coalesces them when it renders, must meet its `values.schema.json`:
+  a violation is an error, those of every key reported together;
+- an instance list appended to (`append` of `okdp.yaml`'s `upstream`)
+  where the chart's defaults hold a list some item of which the final
+  list lacks is a warning: `append` extends the package's list, OKDP's
+  defaults and the computed values, and Helm replaces the chart's
+  ([append](specs/01_inputs_outputs.md#append)). The package restates the
+  items it keeps in its values of that key, its defaults file or its
+  values file.
+
+The final values are the same with or without the chart cache: a compile
+reads no chart, and `--charts` without `--check` fails, `$OKDP_CHARTS`
+not read. The full example's chart cache, `examples/03_full/.charts/`,
+holds the charts of its instance, the workspace chart's
+`values.schema.json` among them; an instance value its schema refuses
+compiles, and fails the check:
+
+```console
+$ cat bad-env.yaml
+upstream:
+  api:
+    env: [{name: bad-name, value: x}]
+$ bin/okdp-compile --check --charts examples/03_full/.charts \
+    --package $db/catalog/workspace/3.2.0-1.4.0 \
+    --contracts $db/contracts --release demo-workspace --namespace demo \
+    --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
+    --context 2:$i/connections.yaml -f $i/config.yaml -f bad-env.yaml
+error: compiled values don't meet the specifications of the schema(s) in the following chart(s):
+api (workspace-3.2.0):
+- at '/env/25/name': 'bad-name' does not match pattern '^[A-Za-z_][A-Za-z0-9_]*$'
+```
+
 ### Exit status and errors
 
 | Status | When |
 |---|---|
-| 0 | compiled, each warning on stderr as `warning: <message>`; `--version`, `--help` |
+| 0 | compiled, or checked (`--check`), each warning on stderr as `warning: <message>`; `--version`, `--help` |
 | 1 | any error: `error: <message>` on stderr |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
@@ -290,10 +340,13 @@ webapp:
 A warning (`Result.Warnings`) does not fail the compile: it is printed
 before the files are written, and the command exits with status 0. A
 `values.yaml` that holds expressions gives one
-([values.yaml](specs/02_service_definition.md#valuesyaml)):
+([values.yaml](specs/02_service_definition.md#valuesyaml)), and so does,
+with `--check --charts`, an instance list appended to that leaves out
+items of the chart's default list ([`--check`](#--check)):
 
 ```text
 warning: values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml
+warning: upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; restate them in the package's values of app (its defaults or values file) to keep them
 ```
 
 ### Rendering with Helm
@@ -310,11 +363,10 @@ helm template <release> <dir> --namespace <namespace> -f <dir>/instance.values.y
 which the next compile into it refuses: build a copy, or remove them
 first. Do not
 add OKDP's defaults or the values files of the compile: the final values
-already merge the chart's own defaults, OKDP's defaults, the computed
-values and the instance's upstream values ([merge
+already merge OKDP's defaults, the computed values and the instance's
+upstream values, and Helm applies the chart's own defaults ([merge
 precedence](specs/01_inputs_outputs.md#merge-precedence)). The example's
-charts are fictional, and its chart cache, `examples/02_advanced/.charts/`,
-holds only their `values.yaml`: its umbrella compiles, it does not render.
+charts are fictional: its umbrella compiles, it does not render.
 The umbrella's own template, `templates/okdp.yaml`, writes each document
 of `okdp.objects.yaml` as a manifest, as written
 ([the objects file](specs/01_inputs_outputs.md#the-objects-file)); the
@@ -363,7 +415,8 @@ the catalog of packages, the projects and their instances, each file the
 input of one flag. The compiler reads none of these names: it only sees the
 package, the directories and the layers it is given. The tree is a
 convention for its callers, which give each file to its flag (`db/` is an
-example's `input/db/`, beside its `.charts/` and `output/`):
+example's `input/db/`, beside its `output/`, and its `.charts/` for the full
+example):
 
 ```text
 db/
@@ -376,7 +429,7 @@ db/
       instance.yaml                      {service: <name>, version: <version>}: which package
       connections.yaml                   optional: --context 2:<file>
       config.yaml                        optional: -f <file>
-.charts/                                 --charts <dir>
+.charts/                                 --check --charts <dir>
 output/projects/<project>/instances/<instance>/   -o <dir>
 ```
 
@@ -394,8 +447,9 @@ output/projects/<project>/instances/<instance>/   -o <dir>
   values, no `connections`.
 - The release is the instance's directory name, the namespace the
   project's: no field overrides them.
-- `.charts/`, the chart cache (`helm pull --untar`), is outside `db/`: it
-  is not source.
+- `.charts/`, the chart cache of the checks (`helm pull --untar`), is
+  outside `db/`: it is not source. Only the full example has one; the
+  compiles read none.
 
 A caller checks that `catalog/<service>/<version>/` holds a `Chart.yaml`
 of that `name` and `version`, and treats a released version directory as
@@ -442,7 +496,6 @@ func main() {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/.charts"), // the chart cache
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -519,9 +572,6 @@ dependencies:
 		log.Fatal(err)
 	}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-		Charts: fstest.MapFS{ // the defaults of each upstream chart
-			"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
-		},
 		Contracts: fstest.MapFS{},                    // no connection, no provides: no contract read
 		Values:    []map[string]any{{"replicas": 3}}, // no context: the package requires no platform value
 		Release:   "demo-app",
@@ -565,11 +615,13 @@ keys of `okdp.yaml` (`Package`; `Package.Require` is a list of keys),
 absent), and the values file's name (`ValuesFile`, `values.cel.yaml` when
 empty), which its errors start with.
 
-`compiler.Inputs` takes what the flags give: `Charts` (`--charts`),
+`compiler.Inputs` takes what the flags give: `Charts` (`--charts`, nil
+without `--check`: with a chart cache, the compile checks its final values
+against the upstream charts, [`--check`](#--check)),
 `Contracts` (`--contracts`; it may be empty when nothing references a
 contract), `Context` (the `--context` files, parsed, in order, each a
 `ContextLayer` of its level), `Values` (the `-f` files, parsed, in order),
-`Release` and `Namespace`; all but `Context` and `Values` are required
+`Release` and `Namespace`; all but `Charts`, `Context` and `Values` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
 `-o` writes in `instance.values.yaml`, `Result.Charts` the index the
 umbrella's `Chart.yaml` names the charts from, `Result.Dependencies` what
@@ -591,7 +643,8 @@ and the dependencies when there is one (`compiler.DependenciesFile`).
 
 - `Result.Warnings` lists what the compile warns of without failing: those
   of the package, found by `LoadDefinition` (`Definition.Warnings`), a
-  `values.yaml` that holds expressions. Each compile gives them with its
+  `values.yaml` that holds expressions; with `Charts`, an instance list
+  appended to that leaves out items of the chart's default list. Each compile gives them with its
   result, so that a server compiling many instances returns them with each;
   the binary prints each as `warning: <message>`.
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
@@ -611,7 +664,7 @@ and the dependencies when there is one (`compiler.DependenciesFile`).
   suffix of the others; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` is the
   chart they are rendered by unless the platform names another
   ([platform charts](specs/01_inputs_outputs.md#platform-charts)): the
-  chart a chart cache needs for a `dcr` platform.
+  chart the chart cache of a check needs for a `dcr` platform.
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
   the inputs are not changed (`TestConcurrentCompile`, under `go test
@@ -645,12 +698,16 @@ namespace; any error fails the job:
 ```bash
 for f in instances/*.yaml; do
   name=$(basename "$f" .yaml)   # the instance's release name
-  bin/okdp-compile --package package --charts charts --contracts contracts \
+  bin/okdp-compile --package package --contracts contracts \
     --context platform.yaml -f "$f" --release "$name" --namespace demo \
     -o "compiled/$name" || exit 1
 done
 test -z "$(git status --porcelain compiled/)" || { git status --short compiled/; exit 1; }
 ```
+
+A job that pulls the upstream charts into a chart cache checks the final
+values against them too: the same flags, `--check --charts charts` for
+`-o` ([`--check`](#--check)).
 
 The emitted files can be committed and checked against the commit, as
 `go test .` checks the example's outputs: `git status
@@ -777,9 +834,10 @@ usage error with status 2.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `--package is required`, `--charts (or $OKDP_CHARTS) is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
+| `--package is required`, `--release is required`, `--namespace is required` | a required flag is missing | give it |
+| `--check writes nothing: no --output (-o)`, `--charts is read by --check only: a compile reads no chart` | `-o` given with `--check`, `--charts` without it | drop one of them ([`--check`](#--check)) |
 | `Inputs.Release "Demo_App": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`, `Inputs.Namespace "<name>": a namespace name, ...` | `--release` or `--namespace` is not a name Kubernetes and Helm accept | give one of that form ([inputs](specs/01_inputs_outputs.md)) |
-| `database: the database contract cannot be read: database.schema.json: no such file or directory`, `app: stat charts.example.org/app-1.8.0/app: not a directory` | a directory flag names no directory (here `--contracts`) or a file (here `--charts`): it fails at the first file read from it | fix the path |
+| `database: the database contract cannot be read: database.schema.json: no such file or directory`, `app: stat charts.example.org/app-1.8.0/app: not a directory` | a directory flag names no directory (here `--contracts`) or a file (here `--charts`, with `--check`): it fails at the first file read from it | fix the path |
 | `unexpected argument "instance.yaml": every input is a flag (-f before each values file)` | an argument that is not a flag, here a second values file after one `-f`; exit status 2, nothing compiled | one `-f` per values file |
 | `--output (-o) is required` | no output directory | give one: the command writes the compile there |
 | `open Chart.yaml: no such file or directory` | `--package` is not the package's directory | point it at the directory of `Chart.yaml` |
@@ -791,7 +849,7 @@ usage error with status 2.
 | `Chart.yaml: dependencies[2] (api): the key of dependencies[1] too: give one of them an alias` | two dependencies of one key: a chart rendered twice, one of them without its alias | an alias each ([recipe](02_writing_package.md#render-a-chart-twice)) |
 | `Chart.yaml: dependencies[0].name is required` | a dependency without its chart's name | name the published chart that renders it ([dependencies](specs/02_service_definition.md#dependencies)) |
 | `Chart.yaml: dependencies[0].repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `Chart.yaml: dependencies[0].name "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `http://`, `oci://`) or whose host and path are no directory of the chart cache (`https://`, `https://x/../y`), a name that is not a chart's name | fix the dependency ([dependencies](specs/02_service_definition.md#dependencies)) |
-| `Chart.yaml: dependencies[0].version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version the chart cache holds |
+| `Chart.yaml: dependencies[0].version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version |
 | `okdp.yaml: yaml: unmarshal errors:` then `line 3: field requires not found in type okdp.Package` | a key `okdp.yaml` does not define, here a misspelt `require`; one line per unknown key | fix the name ([okdp.yaml](specs/02_service_definition.md#okdpyaml)) |
 | `okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)`, `okdp.yaml: name: the name, version and charts are Chart.yaml's` | a key of the former package format | the values in `values.cel.yaml`, without the `output:` wrapper; the name, version and charts in `Chart.yaml` ([service definition](specs/02_service_definition.md)) |
 | `values.yaml and values.cel.yaml: a package has one of them` | the package has both values files | keep one: `values.cel.yaml` when the values hold expressions ([values.yaml](specs/02_service_definition.md#valuesyaml)) |
@@ -799,7 +857,7 @@ usage error with status 2.
 | `okdp.yaml: upstream: true, false or a map by dependency`, `okdp.yaml: upstream.app: true, false or {protect, append}` | `upstream`, or a dependency's value in it, of another form: a string, a number, a list; a map with another key than `protect` and `append` (a misspelt `protect`) | `true`, `false`, or a map by key, each `true`, `false` or `{protect, append}` ([upstream](specs/02_service_definition.md#upstream)) |
 | `okdp.yaml: upstream.app.protect[0] "a[": not a path: ...` | a `protect` or `append` path out of the grammar | fix the path ([protect and append](specs/02_service_definition.md#protect-and-append)) |
 | `okdp.yaml: yaml: unmarshal errors:` then `line 9: cannot unmarshal !!map into string` | a `require` entry of another form than a key (`{key, $if}` included) | a key; check a value of one mode in the mapping's `errors` ([require](specs/02_service_definition.md#require)) |
-| `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0` | a chart the compile renders (a dependency the values file leaves out, by `$if` or null, is not read) is not unpacked in its directory (`charts.example.org/app-1.8.0/app/`), even when the chart cache holds its archive (`helm pull -d` without `--untar`) or the chart elsewhere; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version> --untar -d <chart cache>/<repository>/<chart>-<version>` | run the command, `<chart cache>` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
+| `app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0` | with `--check --charts`, a chart the compile renders (a dependency the values file leaves out, by `$if` or null, is not read) is not unpacked in its directory (`charts.example.org/app-1.8.0/app/`), even when the chart cache holds its archive (`helm pull -d` without `--untar`) or the chart elsewhere; for an `oci://` repository the command is `helm pull oci://<repository>/<chart> --version <version> --untar -d <chart cache>/<repository>/<chart>-<version>` | run the command, `<chart cache>` the chart cache, or check `--charts` / `$OKDP_CHARTS` ([chart cache](specs/01_inputs_outputs.md#chart-cache)) |
 | `global.okdp.charts.oidcDcr.version "1.x": a pinned chart version (1.2.3), not a range` | a platform chart checked as a source is (its repository, chart and version, the same messages); its form is checked by the platform schema (below) | fix the platform values ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `database: the database contract cannot be read: database.schema.json: no such file or directory` | no `<contract>.schema.json` in the contracts directory | check `--contracts` / `$OKDP_CONTRACTS` |
 | `database: the database contract cannot be read: database.schema.json: no contracts directory: give --contracts (or $OKDP_CONTRACTS)` | a connection reference or a provided connection names a contract, and the command has no contracts directory | give `--contracts` or `$OKDP_CONTRACTS` |
@@ -812,7 +870,8 @@ usage error with status 2.
 | `values layer 1: database: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance file (`-f`), in a key or a value under any key: parameters, upstream values; `context layer <n> (level <l>): ...` in a context file above level 0 (`--context 1:<file>`); the platform's files, level 0, are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
 | `values layer 2: json: cannot marshal from Go func() within "/hooks/0"`, `context layer 1 (level 0): json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Context`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key that is not text or a number, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
-| `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | the final values violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
+| `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | with `--check --charts`, the final values, over the chart's defaults, violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
+| `warning: upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; ...` | with `--check --charts`, the instance appends to a list (`append`) the chart's defaults hold items of that the package's list leaves out: Helm replaces the chart's list with the final one | restate the items to keep in the package's values of the key, its defaults or values file ([append](specs/01_inputs_outputs.md#append)) |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
@@ -870,4 +929,4 @@ the cause or the fix is not in the message:
 | `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/context/0/dcr-without-registration-url.yaml`) | set it in the platform values |
 | `Chart.yaml: dependencies[1] (oidc-dcr): the chart of oidcClients[0] is added by the compiler: remove it` | `Chart.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; give the dependency another key (`alias`), or rename the client, when it is another chart |
 | `values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it` | the values file computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
-| `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0` | `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+| `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0` | with `--check --charts`, `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |

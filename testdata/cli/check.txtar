@@ -1,0 +1,76 @@
+# --check: the compile checked, nothing written: status 0, nothing
+# printed. With --charts (or $OKDP_CHARTS, read with --check only), the
+# final values are checked against the upstream charts too.
+env OKDP_CONTRACTS=examples/03_full/input/db/contracts
+status 0 okdp-compile --check --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml
+! stdout .
+! stderr .
+status 0 okdp-compile --check --charts examples/03_full/.charts --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml
+! stdout .
+! stderr .
+
+# A value the chart's values.schema.json refuses: compiled, and checked
+# without the chart; with it, status 1, the report on stderr.
+status 0 okdp-compile --check --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml -f $WORK/bad-env.yaml
+env OKDP_CHARTS=examples/03_full/.charts
+status 1 okdp-compile --check --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml -f $WORK/bad-env.yaml
+! stdout .
+cmp stderr $WORK/schema.txt
+
+# An instance list appended to (append) where the chart's default list has
+# items the final list lacks: Helm replaces the chart's list. A warning,
+# status 0; none without the chart, nor once the package restates them.
+env OKDP_CHARTS=$WORK/charts
+status 0 okdp-compile --check --package $WORK/hello --release demo-hello --namespace demo -f $WORK/debug.yaml
+! stdout .
+cmp stderr $WORK/warning.txt
+env OKDP_CHARTS=
+status 0 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -f $WORK/debug.yaml -o $WORK/files
+! stderr .
+grep '^  args:\n    - --debug\n' $WORK/files/instance.values.yaml
+cp $WORK/restated.yaml $WORK/hello/values.yaml
+status 0 okdp-compile --check --charts $WORK/charts --package $WORK/hello --release demo-hello --namespace demo -f $WORK/debug.yaml
+! stderr .
+
+# --check with --output, --charts without --check: status 1, nothing
+# written.
+status 1 okdp-compile --check --package $WORK/hello --release demo-hello --namespace demo -o $WORK/check
+stderr '^error: --check writes nothing: no --output \(-o\)$'
+! exists $WORK/check
+status 1 okdp-compile --charts $WORK/charts --package $WORK/hello --release demo-hello --namespace demo -o $WORK/charted
+stderr '^error: --charts is read by --check only: a compile reads no chart$'
+! exists $WORK/charted
+
+-- bad-env.yaml --
+upstream:
+  api:
+    env: [{name: bad-name, value: x}]
+-- schema.txt --
+error: compiled values don't meet the specifications of the schema(s) in the following chart(s):
+api (workspace-3.2.0):
+- at '/env/25/name': 'bad-name' does not match pattern '^[A-Za-z_][A-Za-z0-9_]*$'
+-- warning.txt --
+warning: upstream.hello.args: appended to the package's list, not to the default list of hello-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of hello (its defaults or values file) to keep them
+-- hello/Chart.yaml --
+apiVersion: v2
+name: hello
+version: 1.0.0
+dependencies:
+  - {name: hello, repository: https://charts.example.org, version: 1.0.0}
+-- hello/okdp.yaml --
+upstream:
+  hello: {append: [args]}
+-- hello/values.yaml --
+hello:
+  message: Hello
+-- restated.yaml --
+hello:
+  message: Hello
+  args: [--verbose]
+-- debug.yaml --
+upstream:
+  hello:
+    args: [--debug]
+-- charts/charts.example.org/hello-1.0.0/hello/values.yaml --
+message: Hi
+args: [--verbose]

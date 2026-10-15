@@ -22,11 +22,10 @@ import (
 	compiler "github.com/okdp/okdp-compiler"
 )
 
-// The program of README.md, on the example: the package, the chart cache
-// and the contracts as fs.FS, the values layers parsed.
+// The program of README.md, on the example: the package and the contracts
+// as fs.FS, the values layers parsed.
 func Example() {
 	packageFS := os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0")
-	chartsFS := os.DirFS("examples/02_advanced/.charts")
 	contractsFS := os.DirFS("examples/02_advanced/input/db/contracts")
 	platformValues := values("examples/02_advanced/input/db/platform.yaml")
 	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/db/projects/demo/project.yaml is one
@@ -37,7 +36,6 @@ func Example() {
 		log.Fatal(err)
 	}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-		Charts:    chartsFS,    // chart cache: each upstream chart unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar)
 		Contracts: contractsFS, // the contract schemas, <contract>.schema.json
 		Context: []compiler.ContextLayer{ // by level, lowest first, a level's layers in order (helm -f); compiler.ParseValues reads one
 			{Level: 0, Values: platformValues}, // the platform's
@@ -81,7 +79,6 @@ func ExampleCompile() {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS("examples/02_advanced/.charts"), // the chart cache
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -142,9 +139,6 @@ dependencies:
 		log.Fatal(err)
 	}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-		Charts: fstest.MapFS{ // the defaults of each upstream chart
-			"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\n")},
-		},
 		Contracts: fstest.MapFS{},                    // no connection, no provides: no contract read
 		Values:    []map[string]any{{"replicas": 3}}, // no context: the package requires no platform value
 		Release:   "demo-app",

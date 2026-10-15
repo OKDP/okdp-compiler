@@ -18,8 +18,9 @@
 // A package is a Helm chart: each dependency of its Chart.yaml is the
 // upstream chart that renders the values of its key (repository, chart,
 // version), and Result.Charts maps every compiled chart to it: a deployer
-// renders the upstream chart from its repository. The compiler reads only
-// its defaults and schema, from the chart cache (Inputs.Charts). Write gives
+// renders the upstream chart from its repository, the final values over its
+// defaults. A compile reads no chart; with a chart cache (Inputs.Charts), it
+// checks the final values against each chart's defaults and schema. Write gives
 // the instance as one chart, an umbrella over these upstream charts, its
 // values and OKDP's own objects, what the instance publishes and the
 // instances it depends on.

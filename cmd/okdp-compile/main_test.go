@@ -17,7 +17,7 @@ import (
 )
 
 // The example, a repository tree: what a compile of its instance reads
-// (examples/02_advanced/input/db, .charts) and writes (output/).
+// (examples/02_advanced/input/db) and writes (output/).
 var (
 	exampleDir = filepath.Join("..", "..", "examples", "02_advanced")
 	db         = filepath.Join(exampleDir, "input", "db")
@@ -36,7 +36,6 @@ func TestMain(m *testing.M) {
 func example(dir string) options {
 	return options{
 		pkg:       filepath.Join(db, "catalog", "webapp", "1.0.0"),
-		charts:    filepath.Join(exampleDir, ".charts"),
 		contracts: filepath.Join(db, "contracts"),
 		contexts:  []string{filepath.Join(db, "platform.yaml")},
 		values:    []string{filepath.Join(instance, "config.yaml")},
@@ -88,6 +87,40 @@ func TestRun(t *testing.T) {
 	}
 }
 
+// TestRunCheck: --check compiles and writes nothing, in the current
+// directory or elsewhere, with or without a chart cache (03_full's, which
+// holds the charts of its instance).
+func TestRunCheck(t *testing.T) {
+	full, err := filepath.Abs(filepath.Join("..", "..", "examples", "03_full"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(full, "input", "db")
+	workspace := filepath.Join(db, "projects", "demo", "instances", "demo-workspace")
+	for name, charts := range map[string]string{"no chart cache": "", "a chart cache": filepath.Join(full, ".charts")} {
+		t.Run(name, func(t *testing.T) {
+			o := options{
+				pkg:       filepath.Join(db, "catalog", "workspace", "3.2.0-1.4.0"),
+				charts:    charts,
+				contracts: filepath.Join(db, "contracts"),
+				contexts:  []string{filepath.Join(db, "platform.yaml"), "1:" + filepath.Join(db, "projects", "demo", "project.yaml"), "2:" + filepath.Join(workspace, "connections.yaml")},
+				values:    []string{filepath.Join(workspace, "config.yaml")},
+				release:   "demo-workspace",
+				namespace: "demo",
+				check:     true,
+			}
+			dir := t.TempDir()
+			t.Chdir(dir)
+			if err := run(o); err != nil {
+				t.Fatal(err)
+			}
+			if after := tree(t, dir); len(after) > 0 {
+				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
+			}
+		})
+	}
+}
+
 // TestRunErrors: what run refuses, before it writes anything.
 func TestRunErrors(t *testing.T) {
 	// A package whose version an umbrella chart cannot take: it fails to
@@ -113,6 +146,8 @@ func TestRunErrors(t *testing.T) {
 		"no release":   {func(o *options) { o.release = "" }, "--release is required"},
 		"no namespace": {func(o *options) { o.namespace = "" }, "--namespace is required"},
 		"no output":    {func(o *options) { o.output = "" }, "--output (-o) is required"},
+		"check output": {func(o *options) { o.check = true }, "--check writes nothing: no --output (-o)"},
+		"charts":       {func(o *options) { o.charts = filepath.Join("..", "..", "examples", "03_full", ".charts") }, "--charts is read by --check only: a compile reads no chart"},
 		"a compile":    {func(o *options) { o.values = append(o.values, protected) }, "ingress.hosts is set by the platform"},
 		"a package":    {func(o *options) { o.pkg = pkg }, `Chart.yaml: version "1.0": SemVer (1.2.3), the version of the umbrella chart`},
 		"a level":      {func(o *options) { o.contexts = append(o.contexts, "1:"+redefines) }, "context layer 2 (level 1): connections.platform-db is set at level 0"},

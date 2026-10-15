@@ -24,7 +24,7 @@ type M = value.M
 // a values file and read by Helm; what values cannot hold (a func, a NaN)
 // fails the compile, its layer and path named.
 type Inputs struct {
-	Charts    fs.FS            // chart cache: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar), <repository> the URL without its scheme
+	Charts    fs.FS            // chart cache, for the checks only (nil: none): the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar), <repository> the URL without its scheme; the final values are checked against their charts' defaults and schemas, and are the same without it
 	Contracts fs.FS            // the contract schemas: <contract>.schema.json
 	Context   []ContextLayer   // the context's values layers: global, global.okdp and connections among them, an instance's own connections at a level of its own; merged by level, lowest first, a level's layers in order (helm -f); a layer changes none of a lower level's values (contextLayers)
 	Values    []map[string]any // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
@@ -43,7 +43,9 @@ type ContextLayer struct {
 
 // Result: what a compile produces.
 type Result struct {
-	// Values: chart -> the final values the upstream chart receives.
+	// Values: chart -> the final values the upstream chart receives (helm
+	// -f): OKDP's defaults, the computed values and the instance's upstream
+	// values, not the chart's own defaults, which Helm applies.
 	Values map[string]map[string]any
 	// Charts: chart -> the upstream chart that renders its values (`helm
 	// template <Charts[chart]> -f <Values[chart]>`): its dependency of
@@ -70,7 +72,9 @@ type Result struct {
 	// umbrella chart's metadata, its dependencies in their order.
 	Chart chart.Metadata
 	// Warnings: what the compile warns of without failing, those of the
-	// package (Definition.Warnings): a values.yaml that holds expressions.
+	// package (Definition.Warnings): a values.yaml that holds expressions;
+	// with a chart cache, an instance list appended to that leaves out
+	// items of the chart's default list.
 	Warnings []string
 }
 
@@ -149,11 +153,13 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Then the final values of each chart rendered, checked against its
-	// upstream chart's schema (10. Upstream schemas).
-	if out.Values, out.Charts, err = chart.FinalValues(in.Charts, def.Files, specs, def.valuesName(), output, inst.values); err != nil {
+	// Then the final values of each chart rendered; with a chart cache,
+	// checked against its upstream chart (10. Upstream charts).
+	var warnings []string
+	if out.Values, out.Charts, warnings, err = chart.FinalValues(in.Charts, def.Files, specs, def.valuesName(), output, inst.values); err != nil {
 		return nil, err
 	}
+	out.Warnings = append(out.Warnings, warnings...)
 	return out, nil
 }
 

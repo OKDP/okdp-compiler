@@ -1,11 +1,12 @@
 // Package chart is what the compiler reproduces of Helm and needs of the
 // upstream charts: values read, merged and coalesced as Helm does
 // (values.go), checked against a values.schema.json (schema.go), the chart
-// references and the chart cache (ref.go, cache.go), a package's Chart.yaml
-// (metadata.go) and its dependencies, with okdp.yaml's defaults and
-// upstream (spec.go, paths.go), a values schema, its defaults and the
-// parameters of an instance (parameters.go), the final values of each
-// chart key (merge.go). It knows neither the mapping language nor OKDP.
+// references and the chart cache of the checks (ref.go, cache.go), a
+// package's Chart.yaml (metadata.go) and its dependencies, with okdp.yaml's
+// defaults and upstream (spec.go, paths.go), a values schema, its defaults
+// and the parameters of an instance (parameters.go), the final values of
+// each chart key and their check (merge.go). It knows neither the mapping
+// language nor OKDP.
 //
 // Values: reading YAML as Helm values, and Helm's merge rules.
 //
@@ -13,9 +14,10 @@
 // file decoded by sigs.k8s.io/yaml (YAML 1.1: y, yes, on... are booleans;
 // through JSON: string keys, every number a float64); Helm 4 merges the
 // later documents, which are ignored. The layers are merged as Helm merges
-// its -f files (MergeMaps), and coalesced over the chart defaults as Helm
-// does (CoalesceValues): a null deletes a default, and is kept where there
-// is no default. Helm's own functions are not imported: helm.sh/helm/v4
+// its -f files (MergeMaps); the parameters, and the final values a check
+// reads, are coalesced over their defaults as Helm does (CoalesceValues): a
+// null deletes a default, and is kept where there is no default. Helm's own
+// functions are not imported: helm.sh/helm/v4
 // pulls in client-go and a newer Go and Kubernetes than the programs that
 // embed this package, for about a hundred lines. They are reproduced from
 // helm v4.3.0 (pkg/chart/common/util/coalesce.go), and testdata/helm holds

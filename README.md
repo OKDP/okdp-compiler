@@ -22,7 +22,6 @@ if err != nil {
 	log.Fatal(err)
 }
 res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-	Charts:    chartsFS,    // chart cache: each upstream chart unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar)
 	Contracts: contractsFS, // the contract schemas, <contract>.schema.json
 	Context: []compiler.ContextLayer{ // by level, lowest first, a level's layers in order (helm -f); compiler.ParseValues reads one
 		{Level: 0, Values: platformValues}, // the platform's
@@ -58,10 +57,11 @@ if err != nil {
 What Helm does, the compiler does the same way, checked against `helm
 template` (`testdata/helm`): every values file is read as Helm
 reads it (YAML 1.1), the layers are merged and coalesced as Helm does, the
-parameters are checked against the package's `config.schema.json` and the
-final values against the charts' `values.schema.json`, and `res.Values[chart]`, rendered by Helm, gives what
-Helm gives with OKDP's defaults, the computed values and the instance's
-upstream values as `-f` files
+parameters are checked against the package's `config.schema.json`, and
+`res.Values[chart]`, OKDP's defaults, the computed values and the
+instance's upstream values merged, rendered by Helm, gives what Helm gives
+with them as `-f` files: Helm applies the chart's own defaults, which
+`res.Values` leaves out
 ([Helm fidelity](docs/00_architecture.md#helm-fidelity)).
 
 A package is a Helm `Chart.yaml` and OKDP's files: each of its
@@ -69,12 +69,13 @@ A package is a Helm `Chart.yaml` and OKDP's files: each of its
 that renders its values, `{name, repository, version}`, pinned. Two
 dependencies may name one chart, each with its alias, for a chart rendered
 more than once
-([dependencies](docs/specs/02_service_definition.md#dependencies)). The
-compiler reads only the chart's `values.yaml` and `values.schema.json`,
-from a chart cache
-the caller fills with `helm pull --untar`, each chart unpacked under its
-repository's directory, the URL without its scheme
-(`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`)
+([dependencies](docs/specs/02_service_definition.md#dependencies)). A
+compile reads no chart. A check (`Inputs.Charts`, `okdp-compile --check
+--charts`) reads the chart's `values.yaml` and `values.schema.json`, from a
+chart cache the caller fills with `helm pull --untar`, each chart unpacked
+under its repository's directory, the URL without its scheme
+(`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`): the final values, over the
+chart's defaults, must meet its schema
 ([chart cache](docs/specs/01_inputs_outputs.md#chart-cache)). `res.Charts`
 maps every compiled key to the upstream chart that renders it
 ([chart index](docs/specs/01_inputs_outputs.md#chart-index)).
@@ -132,8 +133,7 @@ checkout, `make build` ([install](docs/01_usage.md#install)):
 ```bash
 make build    # bin/okdp-compile
 db=examples/02_advanced/input/db
-export OKDP_CONTRACTS=$db/contracts               # or --contracts
-export OKDP_CHARTS=examples/02_advanced/.charts   # or --charts
+export OKDP_CONTRACTS=$db/contracts   # or --contracts
 compile() { bin/okdp-compile --package $db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo \
   --context $db/platform.yaml -f $db/projects/demo/instances/demo-webapp/config.yaml "$@"; }
 compile -o out/webapp
@@ -161,12 +161,14 @@ connections, fails
 ```bash
 db=examples/03_full/input/db
 i=$db/projects/demo/instances/demo-workspace
-bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
-  --charts examples/03_full/.charts --contracts $db/contracts \
-  --release demo-workspace --namespace demo \
+full() { bin/okdp-compile --package $db/catalog/workspace/3.2.0-1.4.0 \
+  --contracts $db/contracts --release demo-workspace --namespace demo \
   --context $db/platform.yaml --context 1:$db/projects/demo/project.yaml \
-  --context 2:$i/connections.yaml -f $i/config.yaml -o out/full
+  --context 2:$i/connections.yaml -f $i/config.yaml "$@"; }
+full -o out/full
 # out/full now holds examples/03_full/output/projects/demo/instances/demo-workspace/, byte for byte
+full --check --charts examples/03_full/.charts
+# nothing written: the compile checked, and its final values against the upstream charts
 ```
 
 `-o <dir>` (`--output`), required, writes the instance as one chart, for
@@ -188,6 +190,15 @@ files of a successful one overwrite those of the same name. `--release` and
 `--namespace` are required, names Kubernetes and Helm accept (a release of
 53 characters at most): the values are compiled for them.
 
+`--check`, without `-o`, compiles and writes nothing: what fails a compile
+fails it, its warnings printed. With it, `--charts <dir>` (`$OKDP_CHARTS`),
+a chart cache, checks the final values against each upstream chart: over
+its defaults, they must meet its `values.schema.json`, as Helm checks them
+when it renders; an instance list appended to (`append`) that leaves out
+items of the chart's default list is warned of, Helm replacing that list.
+A compile reads no chart: `--charts` without `--check` fails
+([`--check`](docs/01_usage.md#--check)).
+
 ## Layout
 
 | Path | Description |
@@ -197,16 +208,16 @@ files of a successful one overwrite those of the same name. `--release` and
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages |
 | `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes and the instances it depends on |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
-| `internal/chart/` | what the compiler reproduces of Helm: values, schemas, the chart cache, `Chart.yaml` and the charts of a package, the final values |
+| `internal/chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
 | `internal/value/` | the values every package shares, and their helpers |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
-| `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the package in `catalog/<service>/<version>/`, an instance of the project `demo` in `projects/demo/instances/<instance>/`), its chart cache in `.charts/`, and what `-o <dir>` writes for the instance in `output/projects/demo/instances/<instance>/`, checked by `go test` ([example](docs/00_architecture.md#example)) |
+| `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the package in `catalog/<service>/<version>/`, an instance of the project `demo` in `projects/demo/instances/<instance>/`), what `-o <dir>` writes for the instance in `output/projects/demo/instances/<instance>/`, checked by `go test` ([example](docs/00_architecture.md#example)) |
 | `examples/00_passthrough/` | a package that computes nothing, `echo`: `Chart.yaml`, one chart, and a plain `values.yaml`, the chart's values the platform sets; no `okdp.yaml`, no parameter, no instance values |
 | `examples/01_minimal/` | the smallest package with a mapping, `hello`: one chart, a mapping that sets three of its values and the instance's usage; no platform values, none needed |
 | `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`, given with `-f`) |
-| `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, `--context 1:project.yaml`), each with connections, the instance's own connections (`connections.yaml`, `--context 2:connections.yaml`) and its values (`config.yaml`) |
+| `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, `--context 1:project.yaml`), each with connections, the instance's own connections (`connections.yaml`, `--context 2:connections.yaml`) and its values (`config.yaml`); its chart cache in `.charts/`, for `--check --charts` |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
-| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |
+| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `$OKDP_CHARTS` and `$OKDP_CONTRACTS`, stdout and stderr |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
 | `docs/` | the documentation |
 

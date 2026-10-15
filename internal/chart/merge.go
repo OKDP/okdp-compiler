@@ -1,7 +1,9 @@
 // Merge: the final values of each upstream chart, the values file Helm
-// renders it with: upstream defaults < OKDP's defaults < computed values <
-// instance upstream values, global copied down. The layers are merged as
-// Helm merges its -f files.
+// renders it with: OKDP's defaults < computed values < instance upstream
+// values, global copied down. The layers are merged as Helm merges its -f
+// files. The chart's own defaults are not among them: Helm coalesces the
+// values over them when it renders the chart. A check reads them, with the
+// chart's schema, from the chart cache (checkKey).
 //
 // The instance's upstream values are upstream.<chart> of its values: the
 // mapping sees them as written (values.upstream.<chart>), and they are
@@ -13,6 +15,7 @@ import (
 	"io/fs"
 	"maps"
 	"path"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -23,92 +26,153 @@ import (
 // (keyValues), which must be a key of specs (its values a map:
 // mapping.schema.json says so), and the
 // upstream chart that renders them (its source). In key order: the first
-// error is the same from one compile to the next. The schema violations of
-// every key are reported together.
+// error is the same from one compile to the next.
 //
 // cache: the chart cache, the upstream charts' defaults and schemas, each in
-// its repository's directory (chartCache). pkg: the package (its
-// defaults files). file: the values file the output is read from, for the
-// errors of its keys. values: the instance's merged values (their global,
-// and their upstream values).
-func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M) (map[string]map[string]any, map[string]Ref, error) {
+// its repository's directory (chartCache); nil, no chart is read. With one,
+// the final values of each key are checked against its upstream chart
+// (checkKey): the schema violations of every key are reported together,
+// and the warnings are returned, in key order. The final values are the
+// same with or without it. pkg: the package (its defaults files). file: the
+// values file the output is read from, for the errors of its keys. values:
+// the instance's merged values (their global, and their upstream values).
+func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M) (map[string]map[string]any, map[string]Ref, []string, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
-	charts := &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
+	var warnings []string
+	var charts *chartCache
+	if cache != nil {
+		charts = &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
+	}
 	for _, key := range slices.Sorted(maps.Keys(output)) {
-		if _, ok := specs[key]; !ok {
-			return nil, nil, fmt.Errorf("%s: %s: not a dependency of Chart.yaml", file, key)
+		spec, ok := specs[key]
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%s: %s: not a dependency of Chart.yaml", file, key)
 		}
-		f, bad, err := keyValues(charts, pkg, key, specs[key], value.AsMap(output[key]), values)
+		f, appended, err := keyValues(pkg, key, spec, value.AsMap(output[key]), values)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", key, err)
+			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
-		src := specs[key].Source
-		out[key], refs[key] = f, src
-		violations[key+" ("+src.id()+")"] = bad
+		out[key], refs[key] = f, spec.Source
+		if charts == nil {
+			continue
+		}
+		u, err := charts.get(spec.Source)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
+		}
+		bad, w, err := checkKey(u, key, spec.Source, f, appended)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
+		}
+		violations[key+" ("+spec.Source.id()+")"] = bad
+		warnings = append(warnings, w...)
 	}
 	if err := schemaError("compiled values", violations); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return out, refs, nil
+	return out, refs, warnings, nil
 }
 
 // keyValues: what the upstream chart is rendered with (`helm template
-// <source> -f <final values>`). OKDP's defaults, the computed values and the
-// instance's upstream values are merged as Helm merges -f files (MergeMaps:
-// maps merge, lists and scalars replace, a null replaces and stays), over
-// the chart's own defaults without their nulls. Rendered by Helm, these
-// values give exactly what `helm template <source> -f defaults -f computed -f
-// <upstream>` gives, with Helm 3 or 4: a null
-// that deletes a default stays null (Helm deletes the key when it renders),
-// a null where there is no default stays (Helm keeps it), and the null
-// defaults are left out (Helm 4 drops them, Helm 3 copies them back).
+// <source> -f <final values>`): OKDP's defaults, the computed values and
+// the instance's upstream values, merged as Helm merges -f files
+// (MergeMaps: maps merge, lists and scalars replace, a null replaces and
+// stays). Helm renders the chart with them as with these layers given as
+// -f files: it coalesces them over the chart's defaults, where a null
+// deletes a default and stays where there is none.
 //
-// The violations of the chart's schema (its values.schema.json) by these
-// values, as Helm sees them when it renders, are returned apart.
-//
-// charts: the chart cache, the chart's defaults and schema. files: the
-// package. values: the instance's merged values.
-func keyValues(charts *chartCache, files fs.FS, key string, spec Spec, computed M, values M) (M, string, error) {
-	upstream, err := charts.get(spec.Source)
-	if err != nil {
-		return nil, "", err
-	}
-	defaults := upstream.defaults
-	// Upstream chart defaults first, then OKDP's defaults for this chart,
-	// then what the mapping computed.
+// The paths of the instance's lists appended to (append) are returned with
+// them, for checkKey. files: the package. values: the instance's merged
+// values.
+func keyValues(files fs.FS, key string, spec Spec, computed M, values M) (M, [][]string, error) {
+	// OKDP's defaults for this chart, then what the mapping computed.
 	okdpDefaults := M{}
 	if spec.Defaults != "" {
+		var err error
 		if okdpDefaults, err = readValues(files, path.Clean(spec.Defaults)); err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 	}
-	out := layered(defaults, okdpDefaults, computed)
+	out := merged(okdpDefaults, computed)
 	// Last, the instance's upstream values (upstream.<chart>), when the chart
 	// accepts them, checked ("{{", protect, append). The mapping has seen
 	// them; these checks are what the platform enforces whatever the mapping
 	// does with them.
+	var appended [][]string
 	if spec.Upstream {
 		user := value.AsMap(value.AsMap(values["upstream"])[key])
-		if err := applyUpstream(out, user, source{chart: key}, spec.Protect, spec.Append); err != nil {
-			return nil, "", err
+		var err error
+		if appended, err = applyUpstream(out, user, source{chart: key}, spec.Protect, spec.Append); err != nil {
+			return nil, nil, err
 		}
 	}
-	// Every chart gets the instance's global, as a subchart would.
-	out["global"] = layered(value.AsMap(defaults["global"]), value.AsMap(values["global"]), value.AsMap(computed["global"]))
-	v, err := checkSchema(upstream.entry+"/values.schema.json", upstream.schema, coalesceValues(defaults, out))
-	return out, v, err
+	// Every chart gets the instance's global, as a subchart would; none
+	// when it is empty: Helm gives every chart one.
+	delete(out, "global")
+	if g := merged(value.AsMap(values["global"]), value.AsMap(computed["global"])); len(g) > 0 {
+		out["global"] = g
+	}
+	return out, appended, nil
 }
 
-// layered: values layers merged as Helm merges -f files, over chart
-// defaults without their nulls: what Helm renders the chart with is the same
-// as with the layers given as -f files. No argument is changed.
-func layered(defaults M, layers ...M) M {
-	out := coalesceValues(defaults, nil)
+// merged: values layers merged as Helm merges -f files, into a new map. No
+// argument is changed.
+func merged(layers ...M) M {
+	out := M{}
 	for _, l := range layers {
 		out = value.Merge(out, l)
 	}
 	return out
+}
+
+// checkKey: the final values of a key (final) against its upstream chart
+// u (source): the violations of its values.schema.json by the values
+// coalesced over its defaults, as Helm sees them when it renders (Helm's
+// report, "" when they hold); and a warning for each list of the instance
+// appended to (appended, the paths) where the chart's defaults hold a list
+// some item of which the final list lacks: Helm replaces the chart's list,
+// and append extends the package's only.
+func checkKey(u *upstreamChart, key string, src Ref, final M, appended [][]string) (string, []string, error) {
+	var warnings []string
+	for _, p := range appended {
+		defaults, _ := valueAt(u.defaults, p).([]any)
+		list, _ := valueAt(final, p).([]any)
+		lost := 0
+		for _, item := range defaults {
+			if !slices.ContainsFunc(list, func(x any) bool { return reflect.DeepEqual(x, item) }) {
+				lost++
+			}
+		}
+		if lost == 0 {
+			continue
+		}
+		items := fmt.Sprintf("%d of its %d items", lost, len(defaults))
+		if lost == len(defaults) {
+			items = "all its items"
+		}
+		warnings = append(warnings, fmt.Sprintf("%s: appended to the package's list, not to the default list of %s, which Helm replaces: the final list lacks %s; restate them in the package's values of %s (its defaults or values file) to keep them", source{chart: key}.at(formatPath(p)), src.id(), items, key))
+	}
+	// Checked as the umbrella's subchart: Helm gives it a global, empty
+	// when the values have none.
+	values := coalesceValues(u.defaults, final)
+	if _, ok := values["global"]; !ok {
+		values["global"] = M{}
+	}
+	v, err := checkSchema(u.entry+"/values.schema.json", u.schema, values)
+	return v, warnings, err
+}
+
+// valueAt: the value at the keys of v, nil when there is none.
+func valueAt(v any, keys []string) any {
+	for _, k := range keys {
+		m, ok := v.(M)
+		if !ok {
+			return nil
+		}
+		v = m[k]
+	}
+	return v
 }
 
 // source: where instance upstream values come from, for the errors: the
@@ -128,14 +192,15 @@ func (s source) at(p string) string {
 }
 
 // applyUpstream: one source of instance upstream values over the computed
-// ones, after the {{ and protect checks.
-func applyUpstream(values, user M, src source, protect, appendPaths []string) error {
+// ones, after the {{ and protect checks; the paths of the lists appended
+// to (mergeUpstream).
+func applyUpstream(values, user M, src source, protect, appendPaths []string) ([][]string, error) {
 	if len(user) == 0 {
-		return nil
+		return nil, nil
 	}
 	// No templates: the values reach the chart as data.
 	if err := NoTemplate(user, src.at); err != nil {
-		return err
+		return nil, err
 	}
 	// Refuse any protected path, or a parent of it given as a non-map. A
 	// path may name a key containing dots, or a family of keys, in brackets
@@ -144,10 +209,10 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) er
 	for _, p := range append([]string{"global"}, protect...) {
 		segs, err := parsePath(p)
 		if err != nil {
-			return fmt.Errorf("protect %q: %w", p, err)
+			return nil, fmt.Errorf("protect %q: %w", p, err)
 		}
 		if at := protectedAt(user, segs); at != nil {
-			return fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(formatPath(at)), p)
+			return nil, fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(formatPath(at)), p)
 		}
 	}
 	return mergeUpstream(values, user, src, appendPaths)
@@ -223,23 +288,24 @@ func overlap(base, layer M, at []string, whole func([]string) bool) string {
 }
 
 // mergeUpstream: user over values, the lists at appendPaths appended to the
-// computed ones instead of replacing them. values is changed only when it
+// computed ones instead of replacing them; the paths of these lists, in
+// the order of appendPaths, each once. values is changed only when it
 // succeeds; user never is.
-func mergeUpstream(values, user M, src source, appendPaths []string) error {
+func mergeUpstream(values, user M, src source, appendPaths []string) ([][]string, error) {
 	user = value.AsMap(value.Copy(user))
 	// Listed paths are appended to the computed lists instead of replacing
 	// them; a path may name keys in brackets, globs included (paths.go).
-	done := map[string]bool{}
+	var done [][]string
 	for _, p := range appendPaths {
 		segs, err := parsePath(p)
 		if err != nil {
-			return fmt.Errorf("append %q: %w", p, err)
+			return nil, fmt.Errorf("append %q: %w", p, err)
 		}
-		if err := appendLists(user, values, segs, nil, src, done); err != nil {
-			return err
+		if err := appendLists(user, values, segs, nil, src, &done); err != nil {
+			return nil, err
 		}
 	}
 	// The rest replaces the computed values.
 	value.Merge(values, user)
-	return nil
+	return done, nil
 }

@@ -1,8 +1,11 @@
-// okdp-compile --package <dir> --charts <dir> [--contracts <dir>]
+// okdp-compile --package <dir> [--contracts <dir>]
 //
 //	--context [<level>:]context.yaml [--context ...]
 //	-f values.yaml [-f ...]
 //	--release <name> --namespace <name> -o <dir>
+//
+// okdp-compile --check [--charts <dir>], the same inputs, no -o: the
+// compile checked, the upstream charts too with --charts; nothing written.
 
 package main
 
@@ -33,6 +36,7 @@ type options struct {
 	contexts           []string
 	values             []string
 	output             string
+	check              bool
 }
 
 // main: parses the flags and runs the compile. A usage error (an unknown
@@ -44,7 +48,8 @@ func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.StringVar(&o.pkg, "package", "", "package directory (Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml, config.schema.json)")
-	flag.StringVar(&o.charts, "charts", os.Getenv("OKDP_CHARTS"), "chart cache directory: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme (default $OKDP_CHARTS)")
+	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the compile's errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
+	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme; the final values, over each chart's defaults, checked against its values.schema.json, and an instance list appended to that leaves out items of the chart's default list warned of (default $OKDP_CHARTS with --check)")
 	flag.StringVar(&o.contracts, "contracts", os.Getenv("OKDP_CONTRACTS"), "contract schemas directory (default $OKDP_CONTRACTS), needed when a connection reference or a provided connection names a contract")
 	flag.StringVar(&o.release, "release", "", "release name, required: the Helm release the values are compiled for")
 	flag.StringVar(&o.namespace, "namespace", "", "namespace, required: the release's")
@@ -53,6 +58,9 @@ func main() {
 	flag.StringVar(&o.output, "output", "", "output directory, required: the instance as one chart, Chart.yaml, an umbrella over the upstream charts, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when the instance has any, "+compiler.InstanceFile+", what it publishes (url, usage, provides), when it publishes something, and "+compiler.DependenciesFile+", the instances the connection references point to, when there is one")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Parse()
+	if o.check && o.charts == "" {
+		o.charts = os.Getenv("OKDP_CHARTS")
+	}
 	switch {
 	case flag.NArg() > 0:
 		fmt.Fprintf(os.Stderr, "unexpected argument %q: every input is a flag (-f before each values file)\n", flag.Arg(0))
@@ -74,9 +82,20 @@ func main() {
 // their paths, and removes the files an earlier compile wrote there that
 // this one does not: the objects files, which Helm would render, the
 // instance and dependencies files, which a deployer would read. A compile
-// that fails writes nothing.
+// that fails writes nothing; --check writes nothing, the files built all
+// the same.
 func run(o options) error {
-	for _, f := range [][2]string{{"--package", o.pkg}, {"--charts (or $OKDP_CHARTS)", o.charts}, {"--release", o.release}, {"--namespace", o.namespace}, {"--output (-o)", o.output}} {
+	switch {
+	case o.check && o.output != "":
+		return errors.New("--check writes nothing: no --output (-o)")
+	case !o.check && o.charts != "":
+		return errors.New("--charts is read by --check only: a compile reads no chart")
+	}
+	required := [][2]string{{"--package", o.pkg}, {"--release", o.release}, {"--namespace", o.namespace}}
+	if !o.check {
+		required = append(required, [2]string{"--output (-o)", o.output})
+	}
+	for _, f := range required {
 		if f[1] == "" {
 			return fmt.Errorf("%s is required", f[0])
 		}
@@ -86,10 +105,12 @@ func run(o options) error {
 		return err
 	}
 	in := compiler.Inputs{
-		Charts:    os.DirFS(o.charts),
 		Contracts: noContracts{},
 		Release:   o.release,
 		Namespace: o.namespace,
+	}
+	if o.charts != "" {
+		in.Charts = os.DirFS(o.charts)
 	}
 	if o.contracts != "" {
 		in.Contracts = os.DirFS(o.contracts)
@@ -123,7 +144,7 @@ func run(o options) error {
 		fmt.Fprintln(os.Stderr, "warning:", w)
 	}
 	files, err := compiler.Write(res)
-	if err != nil {
+	if err != nil || o.check {
 		return err
 	}
 	if err := os.MkdirAll(o.output, 0o755); err != nil {

@@ -1,9 +1,6 @@
 global:
     image:
-        pullPolicy: IfNotPresent
         registry: mirror.example.org
-    labels:
-        team: default
     okdp:
         ingress:
             suffix: example.org

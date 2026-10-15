@@ -1,6 +1,6 @@
 # A values.yaml that holds an expression: compiled all the same, status 0,
 # the warning on stderr, once, and the outputs written.
-status 0 okdp-compile --package $WORK/hello --charts $WORK/charts --release demo-hello --namespace demo -o $WORK/files
+status 0 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -o $WORK/files
 ! stdout .
 cmp stderr $WORK/warning.txt
 grep '^  message: Hello from demo-hello$' $WORK/files/instance.values.yaml
@@ -8,10 +8,10 @@ exists $WORK/files/Chart.yaml
 
 # Named values.cel.yaml: no warning. Both files: an error, nothing written.
 mv $WORK/hello/values.yaml $WORK/hello/values.cel.yaml
-status 0 okdp-compile --package $WORK/hello --charts $WORK/charts --release demo-hello --namespace demo -o $WORK/cel
+status 0 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -o $WORK/cel
 ! stderr .
 cp $WORK/hello/values.cel.yaml $WORK/hello/values.yaml
-status 1 okdp-compile --package $WORK/hello --charts $WORK/charts --release demo-hello --namespace demo -o $WORK/both
+status 1 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -o $WORK/both
 stderr '^error: values.yaml and values.cel.yaml: a package has one of them$'
 ! exists $WORK/both
 
@@ -26,5 +26,3 @@ dependencies:
 -- hello/values.yaml --
 hello:
   message: Hello from ${{ release.name }}
--- charts/charts.example.org/hello-1.0.0/hello/values.yaml --
-message: Hello

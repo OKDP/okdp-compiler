@@ -1,5 +1,5 @@
-// Cache: the chart cache a compile reads the upstream charts' defaults and
-// schemas from: each chart unpacked under its repository's directory
+// Cache: the chart cache a check reads the upstream charts' defaults and
+// schemas from (FinalValues): each chart unpacked under its repository's directory
 // (Ref.cacheDir), as `helm pull --untar -d
 // <cache>/<repository>/<chart>-<version>` writes it:
 // <repository>/<chart>-<version>/<chart>/. The compiler reads nothing else

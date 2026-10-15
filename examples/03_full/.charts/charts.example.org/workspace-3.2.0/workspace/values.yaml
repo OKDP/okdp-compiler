@@ -1,6 +1,6 @@
 # The chart cache's copy of the (fictional) workspace chart 3.2.0, an API
 # server or a scheduler (mode): its defaults and values.schema.json, all a
-# compile reads of it.
+# check reads of it (--check --charts).
 fullnameOverride: ""
 mode: server
 replicaCount: 1

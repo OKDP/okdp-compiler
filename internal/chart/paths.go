@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -127,9 +128,9 @@ func protectedAt(m M, segs []pathSeg) []string {
 // appendLists: every list of user at the path segs, appended to the list of
 // computed at the same keys (computed may hold anything there, or nothing:
 // the user's list is then kept as is). at: the keys of user, for the
-// errors; done: the lists already appended, so that two paths matching the
-// same key (a glob and a key) append it once.
-func appendLists(user M, computed any, segs []pathSeg, at []string, src source, done map[string]bool) error {
+// errors; done: the keys of the lists already appended, in order, so that
+// two paths matching the same key (a glob and a key) append it once.
+func appendLists(user M, computed any, segs []pathSeg, at []string, src source, done *[][]string) error {
 	cm, _ := computed.(M)
 	for _, k := range matchKeys(user, segs[0]) {
 		keys := append(append([]string{}, at...), k)
@@ -141,17 +142,16 @@ func appendLists(user M, computed any, segs []pathSeg, at []string, src source, 
 			}
 			continue
 		}
-		p := formatPath(keys)
-		if done[p] {
+		if slices.ContainsFunc(*done, func(d []string) bool { return slices.Equal(d, keys) }) {
 			continue
 		}
 		add, ok := user[k].([]any)
 		if !ok {
-			return fmt.Errorf("%s must be a list", src.at(p))
+			return fmt.Errorf("%s must be a list", src.at(formatPath(keys)))
 		}
 		base, _ := cm[k].([]any)
 		user[k] = append(append([]any{}, base...), add...)
-		done[p] = true
+		*done = append(*done, keys)
 	}
 	return nil
 }

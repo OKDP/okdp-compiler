@@ -10,13 +10,9 @@ nullThenMap:
 scalarOverMap: s
 tbl:
     a: 10
-    b: 2
     defaultNull: null
     deleted: null
-    keep:
-        d: 4
     nested:
-        c: 3
         defaultNull: z
         deleted: null
         newNull: null
@@ -24,5 +20,4 @@ tbl:
         e: null
         f: 5
     newNull: null
-top: x
 topNull: null

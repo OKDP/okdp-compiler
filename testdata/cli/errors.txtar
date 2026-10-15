@@ -1,5 +1,5 @@
 # A compile error: status 1, the whole report on stderr, nothing written.
-env OKDP_CHARTS=examples/02_advanced/.charts OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
+env OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
 status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml -f testdata/schema-violation.yaml -o $WORK/files
 ! stdout .
 cmp stderr $WORK/schema-violation.txt

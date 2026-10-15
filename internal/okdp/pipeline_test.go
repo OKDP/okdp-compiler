@@ -24,7 +24,8 @@ var (
 	// The platform values every compile gets, the first context layer of
 	// inputs, at level 0.
 	platformValues = map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}}
-	// The chart cache: the upstream charts' defaults.
+	// The chart cache of the checks (withCharts): the upstream charts'
+	// defaults.
 	charts = fstest.MapFS{
 		"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
 	}
@@ -67,12 +68,12 @@ func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
 	return chart.Upstream{Keys: map[string]chart.UpstreamKey{key: k}}
 }
 
-// inputs: the in-memory chart cache and contracts, with these values
+// inputs: the in-memory contracts, no chart cache, with these values
 // layers: the global of each, a context layer at level 0 (Inputs.Context),
 // its connections, one at level 2, the instance's own, the rest, an
 // instance layer (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
-	in := Inputs{Charts: charts, Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
+	in := Inputs{Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
 	for _, l := range layers {
 		l = maps.Clone(l)
 		if g, ok := l["global"]; ok {
@@ -88,7 +89,7 @@ func inputs(layers ...map[string]any) Inputs {
 	return in
 }
 
-// withCharts: inputs with these files added to the chart cache.
+// withCharts: inputs with the chart cache, these files added to it.
 func withCharts(in Inputs, files fstest.MapFS) Inputs {
 	cs := maps.Clone(charts)
 	maps.Copy(cs, files)
@@ -417,8 +418,8 @@ func TestRendered(t *testing.T) {
 			if got := slices.Sorted(maps.Keys(res.Values)); !slices.Equal(got, tc.want) {
 				t.Errorf("rendered: got %v, want %v", got, tc.want)
 			}
-			if app, ok := res.Values["app"]; ok && (app["replicaCount"] != float64(1) || value.Dig(app, "image.tag") != "4.5" || value.Dig(app, "labels.team") != "a") {
-				t.Errorf("app: its chart's defaults, OKDP's and its upstream values: %#v", app)
+			if app, ok := res.Values["app"]; ok && (app["replicaCount"] != nil || value.Dig(app, "image.tag") != "4.5" || value.Dig(app, "labels.team") != "a") {
+				t.Errorf("app: OKDP's defaults and its upstream values, not its chart's: %#v", app)
 			}
 		})
 	}
@@ -432,7 +433,8 @@ func TestRendered(t *testing.T) {
 }
 
 // TestChartAlone: a package that is Chart.yaml alone compiles, every
-// dependency rendered with its chart's defaults.
+// dependency rendered with the instance's global alone: Helm gives it its
+// chart's defaults.
 func TestChartAlone(t *testing.T) {
 	d, err := LoadDefinition(fstest.MapFS{"Chart.yaml": {Data: []byte(`
 apiVersion: v2
@@ -453,8 +455,8 @@ dependencies:
 		t.Errorf("rendered: got %v", got)
 	}
 	for _, k := range []string{"app", "canary"} {
-		if v := res.Values[k]; v["replicaCount"] != float64(1) || value.Dig(v, "image.tag") != "latest" || !reflect.DeepEqual(v["labels"], M{}) {
-			t.Errorf("%s: its chart's defaults: %#v", k, v)
+		if v := res.Values[k]; !reflect.DeepEqual(v, map[string]any{"global": platformValues["global"]}) {
+			t.Errorf("%s: the global alone: %#v", k, v)
 		}
 	}
 }
@@ -559,8 +561,8 @@ objects:
 }
 
 // TestSharedSource: two dependencies of Chart.yaml, one aliased, rendered by
-// one upstream chart: its defaults and schema, read once from the chart
-// cache, each with its own values; Result.Charts maps every chart to its
+// one upstream chart, each with its own values; its schema, read once from
+// the chart cache, checks both; Result.Charts maps every chart to its
 // source.
 func TestSharedSource(t *testing.T) {
 	d := *def
@@ -575,12 +577,35 @@ func TestSharedSource(t *testing.T) {
 		t.Errorf("charts: got %#v, want %#v", res.Charts, want)
 	}
 	canary := res.Values["canary"]
-	if canary["replicaCount"] != float64(2) || value.Dig(canary, "image.tag") != "4.5" || canary["labels"] == nil {
-		t.Errorf("canary: app's defaults and OKDP's, then the computed ones: %#v", canary)
+	if canary["replicaCount"] != float64(2) || value.Dig(canary, "image.tag") != "4.5" || canary["labels"] != nil {
+		t.Errorf("canary: OKDP's defaults, then the computed ones: %#v", canary)
 	}
 	// app's schema, reported under each chart's key.
 	in := withCharts(inputs(M{"replicas": 5}), fstest.MapFS{"charts.example.org/app-1.0.0/app/values.schema.json": {Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}})
 	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "canary (app-1.0.0):\n- at '/replicaCount': maximum: got 5, want 3") {
 		t.Errorf("schema: got %v", err)
+	}
+}
+
+// TestCheckWarnings: with a chart cache, an instance list appended to that
+// leaves out items of the chart's default list is warned of, after the
+// package's warnings; the final values are the same without the cache,
+// which warns of nothing.
+func TestCheckWarnings(t *testing.T) {
+	d := *def
+	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Append: []string{"env"}})
+	d.Warnings = []string{"the package's"}
+	in := inputs(M{"upstream": M{"app": M{"env": []any{"B"}}}})
+	res, err := Compile(context.Background(), &d, in)
+	if err != nil || !slices.Equal(res.Warnings, d.Warnings) {
+		t.Fatalf("without the cache: %v %q", err, res.Warnings)
+	}
+	checked, err := Compile(context.Background(), &d, withCharts(in, fstest.MapFS{"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("env: [A]\n")}}))
+	if err != nil || !reflect.DeepEqual(checked.Values, res.Values) {
+		t.Fatalf("with the cache: %v %#v", err, checked.Values)
+	}
+	want := []string{"the package's", "upstream.app.env: appended to the package's list, not to the default list of app-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of app (its defaults or values file) to keep them"}
+	if !slices.Equal(checked.Warnings, want) {
+		t.Errorf("warnings:\n got %q\nwant %q", checked.Warnings, want)
 	}
 }

@@ -195,7 +195,7 @@ func TestUpstreamBrackets(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := computed()
-			err := applyUpstream(got, tc.user, source{chart: "c"}, protect, appendPaths)
+			_, err := applyUpstream(got, tc.user, source{chart: "c"}, protect, appendPaths)
 			if tc.want != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Errorf("got %v, want an error containing %q", err, tc.want)
@@ -212,8 +212,14 @@ func TestUpstreamBrackets(t *testing.T) {
 			}
 		})
 	}
+	// The lists appended to, once each, in the order of the append paths:
+	// envs.main matched by the glob first.
+	appended, err := applyUpstream(computed(), M{"envs": M{"side": []any{"S"}, "main": []any{"B"}}, "config": M{"spark.extra.list": []any{"b"}}}, source{chart: "c"}, protect, appendPaths)
+	if want := [][]string{{"config", "spark.extra.list"}, {"envs", "main"}, {"envs", "side"}}; err != nil || !reflect.DeepEqual(appended, want) {
+		t.Errorf("appended: got %q (%v), want %q", appended, err, want)
+	}
 	// A key in brackets first: no dot after the chart.
-	err := applyUpstream(M{}, M{"a.b": float64(1)}, source{chart: "c"}, []string{`["a.b"]`}, nil)
+	_, err = applyUpstream(M{}, M{"a.b": float64(1)}, source{chart: "c"}, []string{`["a.b"]`}, nil)
 	if want := `upstream.c["a.b"]: ["a.b"] is set by the platform`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("got %v, want %q", err, want)
 	}

@@ -2,10 +2,7 @@
 globals:
   global:
     image:
-      pullPolicy: IfNotPresent
       registry: mirror.example.org
-    labels:
-      team: default
     okdp:
       ingress:
         suffix: example.org
@@ -13,10 +10,7 @@ globals:
 globals-alias:
   global:
     image:
-      pullPolicy: IfNotPresent
       registry: mirror.example.org
-    labels:
-      team: default
     okdp:
       ingress:
         suffix: example.org
@@ -28,7 +22,6 @@ layers:
   gone: null
   m:
     l: null
-    "true": 1
     x: 2
     z: null
 nulls:
@@ -44,13 +37,9 @@ nulls:
   scalarOverMap: s
   tbl:
     a: 10
-    b: 2
     defaultNull: null
     deleted: null
-    keep:
-      d: 4
     nested:
-      c: 3
       defaultNull: z
       deleted: null
       newNull: null
@@ -58,7 +47,6 @@ nulls:
       e: null
       f: 5
     newNull: null
-  top: x
   topNull: null
 nulls-alias:
   deleted: null
@@ -73,13 +61,9 @@ nulls-alias:
   scalarOverMap: s
   tbl:
     a: 10
-    b: 2
     defaultNull: null
     deleted: null
-    keep:
-      d: 4
     nested:
-      c: 3
       defaultNull: z
       deleted: null
       newNull: null
@@ -87,59 +71,12 @@ nulls-alias:
       e: null
       f: 5
     newNull: null
-  top: x
   topNull: null
 yaml11:
-  bools:
-    - true
-    - false
-    - true
-    - false
-    - true
-    - false
-    - true
-    - false
-    - true
-    - false
-    - true
-    - false
-    - true
-    - false
-    - "yes"
-    - "no"
-    - "on"
   exposure:
     loadBalancer:
       enabled: true
     nodePort:
       enabled: false
-  keys:
-    "1": c
-    "2.5": f
-    "16": d
-    "1000": e
-    "false": b
-    "true": a
-    "y": g
   mode: 420
-  nulls: {}
-  numbers:
-    - 511
-    - 31
-    - 15
-    - 5
-    - 1000
-    - 1000
-    - 1
-    - 1.5
-    - 0.5
-    - 0
-    - 12
-    - 1.2345678901234567e+19
   port: 8
-  strings:
-    - "2001-12-14"
-    - "0777"
-    - 1.2.3
-    - 0.10.0
-    - ~foo

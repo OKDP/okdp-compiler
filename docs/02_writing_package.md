@@ -50,10 +50,10 @@ the package is published as a chart.
 └── README.md               parameters, platform values read, charts, known gaps
 ```
 
-`--package` names the package directory, `--charts` the chart cache the
-compiler reads the upstream charts' defaults and schemas from
-(`okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0
---charts examples/02_advanced/.charts`). In a repository laid out as the
+`--package` names the package directory (`okdp-compile --package
+examples/02_advanced/input/db/catalog/webapp/1.0.0`); `--check --charts`
+checks a compile against the upstream charts' defaults and schemas, from
+a chart cache ([`--check`](01_usage.md#--check)). In a repository laid out as the
 examples, a package is a version directory of the catalog,
 `catalog/<service>/<version>/`, which its `Chart.yaml` names
 ([repository layout](01_usage.md#repository-layout)).
@@ -91,8 +91,9 @@ an alias (`*name`) refused; write such values out in full.
 Each upstream chart the service is made of is a dependency of
 `Chart.yaml`: the chart's name, its chart repository (`https://`) or OCI
 registry path (`oci://`), and a pinned version. The package holds
-no copy of it: a deployer renders the chart from its repository, and the
-compiler reads its `values.yaml` and `values.schema.json` from the chart
+no copy of it: a deployer renders the chart from its repository, over its
+defaults. A compile reads none of it; a check (`okdp-compile --check
+--charts`) reads its `values.yaml` and `values.schema.json` from a chart
 cache, filled with `helm pull --untar`, each chart unpacked under its
 repository's directory, the URL without its scheme
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
@@ -120,7 +121,7 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d 
   `tags`, `enabled` and `import-values` fail too: the values file decides
   what is rendered
   ([dependencies](specs/02_service_definition.md#dependencies)).
-- A compile that needs a chart the cache lacks fails with the `helm pull
+- A check that needs a chart the cache lacks fails with the `helm pull
   --untar` command that fetches it.
 - A chart rendered twice is two dependencies of one chart, each with its
   alias ([recipe](#render-a-chart-twice)).
@@ -383,8 +384,9 @@ provides:                  # the connections the instance publishes
   same name (`labels`). The values file reads the bindings too (`host`).
 - The values file holds only what is computed, by key. Every dependency
   is rendered, as Helm renders a chart's dependencies: one the file does
-  not write gets `{}` as its computed values, its chart's defaults, OKDP's
-  defaults and the instance's upstream values still applied. A `$if` on a
+  not write gets `{}` as its computed values, OKDP's defaults, the
+  instance's upstream values and, by Helm, its chart's defaults still
+  applied. A `$if` on a
   chart, or a null value (`backup: ~`), leaves it out: it is neither
   compiled nor rendered (the webapp's `metrics`, trino's `opa-kube-mgmt`
   and `opal`). A key a top-level `$merge` or `$for` gives counts only when
@@ -501,12 +503,14 @@ mode only; the `existing` mode is tested by the unit tests
 
 ```bash
 export OKDP_CONTRACTS=~/okdp/contracts     # the contract schemas
-export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache, filled with helm pull --untar
-okdp-compile --package charts/services/polaris \
+export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of --check, filled with helm pull --untar
+polaris() { okdp-compile --package charts/services/polaris \
   --context charts/services/polaris/ci/platform.yaml \
   --context charts/services/polaris/ci/dcr-platform.yaml \
   -f charts/services/polaris/ci/dcr-values.yaml \
-  --release demo-polaris --namespace demo -o /tmp/demo-polaris
+  --release demo-polaris --namespace demo "$@"; }
+polaris --check                  # against the upstream charts' defaults and schemas
+polaris -o /tmp/demo-polaris
 yq '.dependencies' /tmp/demo-polaris/Chart.yaml   # the source of each key
 chart=$(mktemp -d) && cp -R /tmp/demo-polaris/. "$chart" && helm dependency build "$chart"
 helm template demo-polaris "$chart" -n demo -f /tmp/demo-polaris/instance.values.yaml
@@ -661,8 +665,8 @@ polaris-admin-principals:
     polaris: {url: "${{ internalUrl }}"}
 ```
 
-Both keys take the chart's defaults and `values.schema.json` and render
-with it, each with its own values file: the index maps both to the same
+Both keys render with the chart, over its defaults, and a check holds
+both to its `values.schema.json`, each with its own values file: the index maps both to the same
 chart ([rendering with Helm](01_usage.md#rendering-with-helm)). Everything
 else is keyed by the key
 ([dependencies](specs/02_service_definition.md#dependencies)).
@@ -917,7 +921,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   `platform.oidc.dcr.enabled ? mySecret : oidcClientSecret('n')`.
 - **A dependency is pinned.** `version` is one version, not a range
   (`^1.2`, `1.x` fail): bump it in `Chart.yaml`, then pull the new version
-  into the chart cache.
+  into the chart cache of the checks. The final values do not change with
+  it: they hold none of the chart's defaults.
 
 ## Checklist
 

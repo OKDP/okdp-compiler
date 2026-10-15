@@ -19,9 +19,11 @@
 // mapping's output). Each dependency of Chart.yaml is an upstream chart
 // that renders the values of its key, its alias or its name
 // (chart.Spec.Source: repository, chart, version), and Result.Charts maps
-// every compiled chart to it. The compiler reads only its defaults and
-// schema, from the chart cache (Inputs.Charts); one upstream chart may
-// render several dependencies, each under an alias with its own values.
+// every compiled chart to it. A compile reads no chart: Helm coalesces the
+// final values over the chart's defaults when it renders it. A check reads
+// its defaults and schema, from the chart cache (Inputs.Charts). One
+// upstream chart may render several dependencies, each under an alias with
+// its own values.
 //
 // A mapping's oidcClients section declares the service's OAuth clients
 // (oidc.go): when the platform registers them by dynamic client

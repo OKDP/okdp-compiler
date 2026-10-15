@@ -49,13 +49,17 @@ func TestCoalesceValues(t *testing.T) {
 	}
 }
 
-// TestLayered: the final values merge: null defaults dropped, layers in
-// order, nulls kept.
-func TestLayered(t *testing.T) {
-	got := layered(M{"a": nil, "b": M{"n": nil, "c": float64(1)}}, M{"c": nil}, M{"b": M{"c": nil}, "d": float64(1)})
+// TestMerged: the final values merge: layers in order, nulls kept, no
+// layer changed.
+func TestMerged(t *testing.T) {
+	first, second := M{"c": nil, "b": M{"c": float64(1)}}, M{"b": M{"c": nil}, "d": float64(1)}
+	got := merged(first, second)
 	want := M{"b": M{"c": nil}, "c": nil, "d": float64(1)}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
+	}
+	if value.AsMap(first["b"])["c"] != float64(1) {
+		t.Errorf("a layer changed: %#v", first)
 	}
 }
 

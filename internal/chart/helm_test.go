@@ -66,7 +66,7 @@ func TestHelmValues(t *testing.T) {
 				user = value.Merge(user, l)
 			}
 			// The compiler's final values for these layers, rendered by Helm.
-			final := layered(defaults, layers...)
+			final := merged(layers...)
 			golden := filepath.Join(dir, "final.yaml")
 			if *update {
 				b, err := yaml.Marshal(final)

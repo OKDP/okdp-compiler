@@ -30,8 +30,8 @@ compile reads its other files, `config.schema.json` and the defaults files
 `Definition` built in memory again: its name and version, its chart keys,
 their upstream charts and their `protect` and `append` paths.
 
-The other inputs of a compile (the chart cache, contracts, platform and
-instance values) and its outputs are specified in
+The other inputs of a compile (contracts, platform and instance values,
+the chart cache of a check) and its outputs are specified in
 [01_inputs_outputs.md](01_inputs_outputs.md).
 
 ## Chart.yaml
@@ -109,12 +109,13 @@ key names the dependency's values everywhere: its key in the
 [`okdp.yaml`](#okdpyaml), in the instance's `upstream` values,
 `Result.Values`, and the umbrella's dependency alias.
 
-A deployer renders the chart from its repository. The compiler reads only
-its `values.yaml` and `values.schema.json`, from the chart cache
+A deployer renders the chart from its repository, the final values over
+its defaults ([merge precedence](01_inputs_outputs.md#merge-precedence)).
+A compile reads no chart; a check reads its `values.yaml` and
+`values.schema.json`, from the chart cache
 (`<repository>/<name>-<version>/<name>/`, `<repository>` the URL without
-its scheme: [chart cache](01_inputs_outputs.md#chart-cache)): the first
-layer of the final values, and their schema
-([merge precedence](01_inputs_outputs.md#merge-precedence)).
+its scheme: [chart cache](01_inputs_outputs.md#chart-cache)), and checks
+the final values against them.
 `Result.Charts` maps each compiled key to its upstream chart, the
 dependency's `name` as `Chart`
 ([chart index](01_inputs_outputs.md#chart-index)).
@@ -124,7 +125,7 @@ it, each with its own values (polaris-admin's bootstrap and principals
 phases). Every dependency is rendered, as Helm renders a chart's
 dependencies, unless the values file leaves it out: a key it writes that
 is left out by `$if` or null. A dependency left out is not rendered, and
-the chart cache need not hold its chart
+the chart cache of a check need not hold its chart
 ([rendered dependencies](#rendered-dependencies)).
 
 `condition`, `tags`, `enabled` and `import-values`, Helm's means of
@@ -298,7 +299,9 @@ malformed path fails when `okdp.yaml` is loaded:
 `okdp.yaml: upstream.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])` (`append[<i>]`
 alike). `global` is always protected. Both apply to each instance upstream
 file, then to the inline values: [protect](01_inputs_outputs.md#protect),
-[append](01_inputs_outputs.md#append).
+[append](01_inputs_outputs.md#append). `append` extends the package's
+list, not the chart's default list, which Helm replaces: a package that
+keeps its items restates them in its defaults or values file.
 
 ## values.cel.yaml
 
@@ -349,12 +352,12 @@ values file leaves it out. A dependency is left out when the file writes
 its key at its top level and the key is left out by `$if`
 (`{$if: false, ...}`, or the whole file under a top-level `$if` false) or
 null (`backup: ~`, `backup: ${{ null }}`). It has no `Result.Values`
-entry and no dependency of the umbrella, and the chart cache need not
-hold its chart.
+entry and no dependency of the umbrella, and the chart cache of a check
+need not hold its chart.
 
 - A dependency the file does not write is rendered with `{}` as its
-  computed values: its chart's defaults, its OKDP defaults (`defaults`)
-  and the instance's upstream values still apply
+  computed values: its OKDP defaults (`defaults`), the instance's upstream
+  values and, by Helm, its chart's defaults still apply
   ([merge precedence](01_inputs_outputs.md#merge-precedence)).
 - A key a top-level `$merge` or `$for` gives is written only when it is
   in the result: a null one there leaves its dependency out, and a
@@ -462,7 +465,7 @@ metrics:
   $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
   # ...
 backup:
-  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read from the chart cache
+  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read by a check
   # ...
 ```
 
@@ -759,7 +762,7 @@ mapping declares a client, its chart key belongs to the compiler:
 `Chart.yaml` may not list it, nor the values file compute it
 (`Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`,
 `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it`). Only `dcr` mode
-reads the oidc-dcr chart, from the chart cache
+checks against the oidc-dcr chart, in the chart cache of a check
 ([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
 check stops the compile ([compile errors](#compile-errors)).
 
