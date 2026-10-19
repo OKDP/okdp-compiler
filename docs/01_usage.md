@@ -24,8 +24,8 @@ a `.zip` for `windows`, for `<os>` `linux`, `darwin` or `windows` and
 `<arch>` `amd64` or `arm64`, each holding `okdp-compile` (`.exe` on
 Windows), `LICENSE` and `README.md`, and
 `okdp-compile_<version>_checksums.txt`, their SHA-256 sums. `<version>` is
-the tag without its `v`. From the releases of github.com/OKDP/okdp-compiler,
-where the repository is to be published:
+the tag without its `v`. From
+[the releases](https://github.com/OKDP/okdp-compiler/releases):
 
 ```bash
 version=X.Y.Z os=linux arch=amd64
@@ -46,11 +46,9 @@ go install github.com/okdp/okdp-compiler/cmd/okdp-compile@vX.Y.Z
 builds a release with Go 1.27 or later and installs it in `$GOBIN`
 (`$(go env GOPATH)/bin` by default); `--version` prints `dev`, the version
 being set by the `-ldflags` of the release archives and `make build`. The go
-command finds a module by its path, through the Go module proxy by
-default: this needs the module served at its path,
-`github.com/okdp/okdp-compiler` (`go.mod`). The repository is to be
-published as github.com/OKDP/okdp-compiler; until the module is served at
-its path, download a release archive or build from a checkout.
+command finds the module by its path, `github.com/okdp/okdp-compiler`
+(`go.mod`), through the Go module proxy by default; `@latest` is the latest
+release.
 
 ### From a checkout
 
@@ -481,8 +479,10 @@ already saying `demo`. The full example's command
 
 ## Go library
 
-`go get github.com/okdp/okdp-compiler@<version>` where the module can be
-fetched at its path; from a checkout next to the module:
+`go get github.com/okdp/okdp-compiler@vX.Y.Z`, a version of
+[the releases](https://github.com/OKDP/okdp-compiler/releases), `@latest`
+the latest. To build against a checkout next to the module, while changing
+both, the `replace` dropped before the commit:
 
 ```bash
 go mod edit -replace github.com/okdp/okdp-compiler=../okdp-compiler
