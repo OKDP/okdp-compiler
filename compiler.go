@@ -70,6 +70,12 @@ type (
 	// points to, by its naming convention or one of its outputs
 	// (Result.Dependencies), what a deployer orders the releases with.
 	Dependency = okdp.Dependency
+	// Instance: an instance CompileAll compiles, its package and its
+	// inputs, Published left out.
+	Instance = okdp.Instance
+	// Outcome: the compile of one instance of CompileAll: its result, nil
+	// when it is refused, and why.
+	Outcome = okdp.Outcome
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
@@ -109,6 +115,15 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 // for concurrent use: it keeps no state between calls.
 func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	return okdp.Compile(ctx, def, in)
+}
+
+// CompileAll compiles instances together: those of one namespace each
+// after the instances whose outputs it references, with what they publish
+// (Inputs.Published, set by CompileAll). An output two instances publish
+// refuses both, and the instances whose references resolved to it.
+// Outcomes in the order of instances, which changes none of them.
+func CompileAll(ctx context.Context, instances []Instance) []Outcome {
+	return okdp.CompileAll(ctx, instances)
 }
 
 // Write: what `okdp-compile -o <dir>` writes for res, path in the

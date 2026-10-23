@@ -36,6 +36,11 @@ on, for a deployer that orders the releases (okdp-gitops: Flux
 compile (a `values.yaml` that holds expressions)
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
+`CompileAll` compiles instances together, those of a namespace each
+after the instances whose outputs it references, with what they publish
+as `Published`: the order of a tree's instances is the compiler's, not
+its caller's.
+
 Callers: a Go program embeds the package at the module's root
 (`compiler`), compiles from a git tree, an embedded filesystem or memory,
 and gets the files the binary writes for a compile from one function
@@ -396,7 +401,7 @@ neither knows OKDP.
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `{{` above level 0) then the instance's, normalized (`value.Normalize`); `global` and `connections` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
-| | `connections.go` | connection references, resolved to a connection, an instance by its naming convention or an output of `Inputs.Published` (`resolver`), `Dependency`; the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `provides.go` without them, to compute the convention a provider must match |
+| | `connections.go` | connection references, resolved to a connection, an instance by its naming convention or an output of `Inputs.Published` (`resolver`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `provides.go` without them, to compute the convention a provider must match |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
@@ -406,8 +411,9 @@ neither knows OKDP.
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `provides.go` | stage 7: `Info`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`) | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
+| | `namespace.go` | `Instance`, `Outcome`, `CompileAll`: the instances of each namespace compiled together (`compileNamespace`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks), the outputs two instances publish refused, and what resolved through them compiled again (`refuseShared`); the instances that do not compile named in the refusals for an output (`notCompiled`) | `Compile`, `missingOutputs` (`connections.go`) |
 | `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -645,6 +651,24 @@ platform values, with a default (`DcrSource`)
   check visits before its first error. The example's outputs rely on
   byte-identical results.
 
+### Compiling instances together
+
+An output's name is computed by its provider's mapping: the edges between
+instances are only known by compiling them, so no graph can order the
+compiles beforehand. `CompileAll` is Kahn's algorithm with its edges
+discovered on the way: a compile that lacks outputs says which
+(`missingOutputs`, the message unchanged), and the instance waits for
+them. This holds because the outputs an instance references do not
+depend on what is published: a connection, then a naming convention, are
+tried first, and depend on the context and the contract only. Waiting
+for those outputs, rather than compiling every refused instance again
+each round until nothing changes, compiles an instance at most twice,
+and a real failure once; every refusal comes from a compile that saw
+every output it names. A successful compile is final: what it resolved
+does not change when more is published, but for an output two instances
+publish, which is refused, with what resolved through it, so that no
+outcome depends on the order of the instances.
+
 ### Everything through fs.FS
 
 The compiler opens no path itself: the package, the contracts and the
@@ -806,6 +830,12 @@ read from a file, and the layer and path of what values cannot hold
 (`TestValuesLayersGoTypes`); `internal/value/value_test.go` the reading of
 each Go type (`TestNormalize`, `TestNormalizeErrors`) and the paths of the
 messages (`TestPath`).
+`internal/okdp/namespace_test.go` compiles instances together in every
+order, each giving the same outcomes: a chain, references by convention,
+an output nobody publishes, a provider that fails, a cycle, a shared
+output and what resolved through it (`TestCompileAll`), the same result as
+a compile alone (`TestCompileAllSingle`), the namespaces apart
+(`TestCompileAllNamespaces`).
 `internal/okdp/mapping_test.go` covers OKDP's
 sections and functions, `internal/okdp/provides_test.go` what the instance
 publishes: the outputs against their contracts, the credentials

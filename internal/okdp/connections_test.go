@@ -2,6 +2,7 @@ package okdp
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"reflect"
 	"strings"
@@ -445,5 +446,44 @@ func TestCompileOutputErrors(t *testing.T) {
 	d.Package.Defaults = map[string]string{"app": "missing.defaults.yaml"}
 	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open missing.defaults.yaml") {
 		t.Errorf("missing defaults file: got %v", err)
+	}
+}
+
+// TestMissingOutputs: a reference to an output no instance publishes says
+// so (missingOutputs), its message unchanged, alone or with other errors;
+// several providers, or a reference that fails otherwise, do not.
+func TestMissingOutputs(t *testing.T) {
+	shared := map[string]Info{
+		"demo-a": {Provides: []Output{{Name: "shared", Contract: "server", Values: M{"host": "a"}}}},
+		"demo-b": {Provides: []Output{{Name: "shared", Contract: "server", Values: M{"host": "b"}}}},
+	}
+	unpublished := `db: "demo-pg-x" is not a connection, nor an output of an instance of the namespace, and the server contract has no internal naming convention`
+	for name, tc := range map[string]struct {
+		values    M
+		published map[string]Info
+		missing   []outputKey // nil: not a missingOutputs
+		want      string
+	}{
+		"unpublished": {M{"db": "demo-pg-x"}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}}, unpublished},
+		"with another error": {
+			M{"db": "demo-pg-x", "main": "Demo_PG"}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}},
+			unpublished + "\n" + `main: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most`,
+		},
+		"several providers": {M{"db": "shared"}, shared, nil, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
+		"another error":     {M{"main": "Demo_PG"}, namespaceOutputs, nil, `main: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := outputCtx(tc.values, tc.published)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("got %v\nwant %s", err, tc.want)
+			}
+			var got []outputKey
+			if m, ok := errors.AsType[*missingOutputs](err); ok {
+				got = m.outputs
+			}
+			if !reflect.DeepEqual(got, tc.missing) {
+				t.Errorf("missing outputs: got %v, want %v", got, tc.missing)
+			}
+		})
 	}
 }

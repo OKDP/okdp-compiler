@@ -34,7 +34,23 @@ type resolver struct {
 	suffix    string
 	deps      []Dependency // every reference to an instance resolved, in order
 	errs      []error      // every reference that does not resolve, in order (walk)
+	missing   []outputKey  // the outputs references name that no instance of published publishes, in order (output)
 }
+
+// outputKey: an output, by contract and name.
+type outputKey struct{ contract, name string }
+
+// missingOutputs: the error of a compile whose references name outputs no
+// instance of Inputs.Published publishes (outputs, in order), err the
+// compile's error as it is, which may say more: what CompileAll waits for
+// before compiling the instance again.
+type missingOutputs struct {
+	outputs []outputKey
+	err     error
+}
+
+func (e *missingOutputs) Error() string { return e.err.Error() }
+func (e *missingOutputs) Unwrap() error { return e.err }
 
 // Dependency: an instance of the same namespace that a connection reference
 // of the parameters points to, not an external connection: the instance the
@@ -201,7 +217,8 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 // convention, that an instance of Published publishes, the compiling
 // release left out, and that instance. Several instances fail, named in
 // release order; none fails, saying, with Published, which instances
-// publish an output of that name of another contract, in release order.
+// publish an output of that name of another contract, in release order,
+// and records the output (missing).
 func (r *resolver) output(ref, contract, field string) (Output, string, error) {
 	var found Output
 	var providers, others []string
@@ -228,6 +245,7 @@ func (r *resolver) output(ref, contract, field string) (Output, string, error) {
 	case len(providers) > 1:
 		return Output{}, "", fmt.Errorf("%s: %q names %s outputs of several instances of the namespace: %s", field, ref, contract, strings.Join(providers, ", "))
 	}
+	r.missing = append(r.missing, outputKey{contract, ref})
 	msg := fmt.Sprintf("%s: %q is not a connection", field, ref)
 	if r.published != nil {
 		msg += ", nor an output of an instance of the namespace"

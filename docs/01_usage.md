@@ -638,7 +638,7 @@ contract), `Context` (the `--context` files, parsed, in order, each a
 `ContextLayer` of its level), `Values` (the `-f` files, parsed, in order),
 `Release`, `Namespace` and `Published` (`--published`: what the other
 instances of the namespace publish, by release, each a `compiler.Info`;
-nil, none is known); all but `Charts`, `Context`, `Values` and `Published` are required
+nil, none is known; `CompileAll` sets it); all but `Charts`, `Context`, `Values` and `Published` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
 `-o` writes in `instance.values.yaml`, `Result.Charts` the index the
 umbrella's `Chart.yaml` names the charts from, `Result.Info` what it
@@ -674,6 +674,13 @@ holds, to read it back.
   them in no file; the binary prints each, once the files are written, as
   `depends on <instance> (<contract>, <field>)`, the output after the
   contract when it is not named after the instance.
+- `compiler.CompileAll(ctx, instances)` compiles instances together, each
+  a `compiler.Instance`, its `Definition` and its `Inputs` without
+  `Published`: each instance of a namespace after the instances whose
+  outputs it references, with what they publish. One `compiler.Outcome`
+  per instance, in their order: its `Result`, or, nil, why it is refused
+  (`Err`); the order changes none
+  ([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together)).
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than

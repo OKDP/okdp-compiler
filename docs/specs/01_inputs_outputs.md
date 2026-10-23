@@ -16,7 +16,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
-| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections and naming conventions only | [Resolution](#resolution) |
+| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections and naming conventions only; `CompileAll` sets it | [Resolution](#resolution), [Compiling instances together](#compiling-instances-together) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
 The names are checked before anything is read: the release is a release
@@ -435,17 +435,18 @@ publishes. The instance is not looked up: each internal reference is
 recorded as a [dependency](#dependencies). A contract with a convention
 never resolves to an output, not even the instance's own: what a reference
 resolves to follows from the contract and the name, the same whatever the
-other instances publish, and so whatever the order a deployer compiles
-them in (okdp-gitops compiles a namespace's instances in rounds, each with
-what the instances compiled before publish, and keeps a successful
-compile). An output may hold fields the convention does not give: a
+other instances publish, and so whatever the order they are compiled in
+(`CompileAll` compiles each instance of a namespace with what the
+instances compiled before publish, and keeps a successful compile:
+[Compiling instances together](#compiling-instances-together)). An output may hold fields the convention does not give: a
 reference would get them or not, depending on whether its provider was
 compiled first.
 
 Output: `Inputs.Published`, what the other instances of the namespace
 publish, by release, each an `Info`, its [info
 file](#the-info-file) (`okdp.info.yaml`; the binary's
-`--published <dir>`, [01_usage.md](../01_usage.md#command-line)). The
+`--published <dir>`, [01_usage.md](../01_usage.md#command-line); set by
+`CompileAll`). The
 output whose `name` is `<name>` and `contract` `<contract>`: its `values`,
 copied and read as values are (every number a `float64`, whatever decoded
 the file), and its `secretRef`, kept as `{name}`. The compiling release is
@@ -1859,3 +1860,52 @@ check. Its
 `okdp.info.yaml` lists three outputs, one with its credentials, whose
 Secret is generated: its objects file holds the `Password` generators and
 the `ExternalSecret`, then the `objects` section.
+
+## Compiling instances together
+
+`CompileAll(ctx, instances)` compiles instances together, each a
+`compiler.Instance`, its `Definition` and its `Inputs`, whose `Published`
+it sets: what the other instances of the namespace publish. It gives one
+`compiler.Outcome` per instance, in their order: its `Result`, or, `nil`,
+why it is refused (`Err`). The namespaces (`Inputs.Namespace`) are
+compiled apart.
+
+The references between the instances of a namespace are of two kinds:
+
+- to an output, of a contract without a naming convention: the instance
+  needs what its provider publishes, and is compiled after it;
+- by naming convention: it resolves from the name alone, whatever is
+  compiled before; the release waits for the other one when it deploys
+  ([Dependencies](#dependencies)).
+
+Which outputs an instance references does not depend on what is
+published ([Resolution](#resolution)): its first compile knows every
+output it lacks. In each namespace, in the order of the instances:
+
+1. Each instance is compiled with what the instances compiled so far
+   publish. A success is final, and publishes its `Info`; a compile that
+   lacks outputs no instance has published waits for them; any other
+   refusal is final.
+2. An instance that waits is compiled again once every output it waits
+   for is published: final, whatever it gives.
+3. Those still waiting, for an output nobody publishes or in a cycle, are
+   compiled again, everything published, for their message.
+4. Two instances that publish an output of the same contract and name
+   are refused, each: a reference to it would not know which. The
+   instances whose references resolved through it, or through an output
+   of an instance refused since, are compiled again: each gets the error
+   a compile after every provider gives.
+
+An instance is compiled once when it comes after the instances whose
+outputs it references, twice when it comes before: the outcomes are the
+same whatever the order. A refusal for an output nobody publishes names
+the instances of the namespace that are refused, one of them maybe its
+provider. Whether the instances deploy together, each reference to an
+instance that exists and provides it, is a deployer's to check
+([Dependencies](#dependencies)).
+
+| Case | Error |
+|---|---|
+| a release given twice in a namespace, each time | `release "<release>" is given twice in namespace "<namespace>"` |
+| an output another instance of the namespace publishes too | `provides "<name>" (<contract>): <instance> publishes an output of that contract and name too, a reference to it would not know which`; `<instance>, <instance> publish`, several |
+| a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order |

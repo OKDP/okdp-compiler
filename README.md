@@ -51,6 +51,9 @@ if err != nil {
 ```
 
 `example_test.go` runs this program on the example (`Example`).
+`compiler.CompileAll` compiles instances together: each instance of a
+namespace after the instances whose outputs it references, with what they
+publish as `Published`.
 `Compile` keeps no state between calls and is safe for concurrent use. Any
 `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree, `fstest.MapFS` (see
 `internal/okdp/pipeline_test.go`).

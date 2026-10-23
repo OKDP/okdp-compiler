@@ -56,9 +56,10 @@ type instance struct {
 // instances of the namespace publish (Inputs.Published); the references
 // that do not resolve are reported together, one error each, one per line,
 // in the order of the walk (resolver.walk), as the violations of the
-// parameter schema are. The references to an instance, by an output or the
-// naming convention, are recorded (deps), by parameter path, in string
-// order.
+// parameter schema are; when some name an output no instance publishes,
+// the error says which (missingOutputs). The references to an instance,
+// by an output or the naming convention, are recorded (deps), by
+// parameter path, in string order.
 //
 // The merged values stay as the user wrote them. The mapping sees release
 // (name, namespace), values (the resolved parameters), global (global.okdp,
@@ -95,7 +96,11 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	params := value.AsMap(value.Copy(values))
 	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), published: in.Published, release: in.Release, namespace: in.Namespace, suffix: inst.suffix}
 	if r.walk(schema.Doc, params, ""); r.errs != nil {
-		return nil, errors.Join(r.errs...)
+		err := errors.Join(r.errs...)
+		if r.missing != nil {
+			err = &missingOutputs{outputs: r.missing, err: err}
+		}
+		return nil, err
 	}
 	// Not parameters: global is exposed apart, connections are resolved.
 	delete(params, "global")
