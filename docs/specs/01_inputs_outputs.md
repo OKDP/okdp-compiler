@@ -1653,11 +1653,11 @@ type Dependency struct {
 
 A dependency holds when its `instance` publishes an output named `output`
 of `contract`: that of an output, in `Inputs.Published`, by resolution;
-that of an internal reference, the compiler does not check, reading no
-other instance for it. A deployer checks it, and orders the releases with
-the list, read from
-`Result.Dependencies`: okdp-gitops makes each release wait for the
-instances it depends on, Flux `dependsOn` and Argo CD sync waves
+that of an internal reference, a compile does not check, reading no
+other instance for it. The [deployment graph](#the-deployment-graph)
+checks it, and orders the releases with the list, read from
+`Result.Dependencies`: each release waits for the instances it depends
+on, Flux `dependsOn` and Argo CD sync waves
 ([GitOps](../01_usage.md#gitops)). No file holds it: `okdp-compile -o`
 prints each item on stderr once the files are written, after the
 warnings, `depends on <instance> (<contract>, <field>)`, the output after
@@ -1901,11 +1901,43 @@ outputs it references, twice when it comes before: the outcomes are the
 same whatever the order. A refusal for an output nobody publishes names
 the instances of the namespace that are refused, one of them maybe its
 provider. Whether the instances deploy together, each reference to an
-instance that exists and provides it, is a deployer's to check
-([Dependencies](#dependencies)).
+instance that exists and provides it, is the
+[deployment graph](#the-deployment-graph)'s to check.
 
 | Case | Error |
 |---|---|
 | a release given twice in a namespace, each time | `release "<release>" is given twice in namespace "<namespace>"` |
 | an output another instance of the namespace publishes too | `provides "<name>" (<contract>): <instance> publishes an output of that contract and name too, a reference to it would not know which`; `<instance>, <instance> publish`, several |
 | a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order |
+
+## The deployment graph
+
+`NewGraph(results)` builds the deployment graph of compiled instances,
+the `Result` of every instance of their namespaces, a refused one
+missing: a release (`GraphNode`, its namespace and release) waits for
+the releases of its namespace its references point to
+([Dependencies](#dependencies)), each once. It returns the graph only
+when every dependency holds and no release waits for itself; else every
+problem at once, each a `*GraphError` at its release, by namespace then
+release:
+
+| Case | Error, after `<namespace>/<release>: ` |
+|---|---|
+| a release given twice in a namespace | `release "<release>" is given twice in namespace "<namespace>"` |
+| a dependency on a release no result of the namespace has, or on itself | `<field>: it references "<instance>", which is not another instance of namespace "<namespace>"` |
+| a reference by naming convention to a release that does not provide the contract: no output of it named after the release | `<field>: it references "<instance>" as a <contract> connection, which "<instance>" does not provide` |
+| a reference to an output its release does not publish | `<field>: it references the <contract> output "<output>" of "<instance>", which "<instance>" does not publish` |
+| releases that wait for each other: from each release, a shortest cycle through it, when it is the cycle's smallest | `dependency cycle: <release> -> <release> -> <release>: the releases would wait for each other` |
+
+A cycle of references to outputs never compiles
+([Compiling instances together](#compiling-instances-together)): a cycle
+here passes through a reference by naming convention. A release that
+waits for a cycle is not reported: the cycle is.
+
+The graph gives:
+
+- `DependsOn(node)`: the releases it waits for, by namespace then
+  release: Flux's `dependsOn`;
+- `Wave(node)`: 0 for a release that waits for none, else one more than
+  the highest wave of those it waits for: an Argo CD sync wave. The
+  releases of a wave deploy together, after those of the lower waves.

@@ -681,6 +681,13 @@ holds, to read it back.
   per instance, in their order: its `Result`, or, nil, why it is refused
   (`Err`); the order changes none
   ([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together)).
+- `compiler.NewGraph(results)` is the deployment graph of the results of
+  `CompileAll`: each release waits for the releases of its namespace its
+  references point to. It checks every dependency, the release exists and
+  provides what is referenced, and refuses a cycle, every problem at once,
+  each a `*compiler.GraphError` at its release; then `DependsOn` gives
+  what a release waits for, `Wave` its Argo CD sync wave
+  ([the deployment graph](specs/01_inputs_outputs.md#the-deployment-graph)).
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than

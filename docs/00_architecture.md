@@ -39,7 +39,8 @@ compile (a `values.yaml` that holds expressions)
 `CompileAll` compiles instances together, those of a namespace each
 after the instances whose outputs it references, with what they publish
 as `Published`: the order of a tree's instances is the compiler's, not
-its caller's.
+its caller's. `NewGraph` then checks the dependencies of the results and
+orders the releases, for a deployer.
 
 Callers: a Go program embeds the package at the module's root
 (`compiler`), compiles from a git tree, an embedded filesystem or memory,
@@ -372,9 +373,9 @@ item `[i]`.
 
 The module's root is the public package, `compiler`: it gives callers the
 types they name, as aliases, and wraps the functions of `okdp`, `umbrella`
-and `chart`. Under `internal/`, five packages each import only those below
-them: `cmd/okdp-compile` -> `compiler` -> `umbrella` -> `okdp` -> `compile`
-and `chart` -> `value`.
+and `chart`. Under `internal/`, six packages each import only those below
+them: `cmd/okdp-compile` -> `compiler` -> `umbrella` and `graph` -> `okdp`
+-> `compile` and `chart` -> `value`.
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -412,8 +413,9 @@ neither knows OKDP.
 | | `provides.go` | stage 7: `Info`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`) | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | | `namespace.go` | `Instance`, `Outcome`, `CompileAll`: the instances of each namespace compiled together (`compileNamespace`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks), the outputs two instances publish refused, and what resolved through them compiled again (`refuseShared`); the instances that do not compile named in the refusals for an output (`notCompiled`) | `Compile`, `missingOutputs` (`connections.go`) |
+| `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
 | `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Graph`, `GraphNode`, `GraphError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -669,6 +671,21 @@ does not change when more is published, but for an output two instances
 publish, which is refused, with what resolved through it, so that no
 outcome depends on the order of the instances.
 
+### A graph for deployment only
+
+The compile needs no graph: its edges are discovered as it goes. A
+deployer does: Flux orders releases by their direct dependencies
+(`dependsOn`), Argo CD by layers (a sync wave, the longest path to a
+release without dependencies). `graph.New` builds the graph once, from
+the results, and returns it only when every edge reaches a release that
+provides what is referenced and there is no cycle: what reads it never
+meets a cycle nor an edge to nothing. A cycle is refused rather than
+broken somewhere: Flux would wait forever, and where to break it is the
+user's choice, a connection in place of one of the references. Its nodes
+are releases, its edges `Result.Dependencies` deduplicated; the details
+(contract, field) stay in the results. The graph imports `okdp` and
+nothing imports it but the public package: the compile knows no graph.
+
 ### Everything through fs.FS
 
 The compiler opens no path itself: the package, the contracts and the
@@ -836,6 +853,11 @@ an output nobody publishes, a provider that fails, a cycle, a shared
 output and what resolved through it (`TestCompileAll`), the same result as
 a compile alone (`TestCompileAllSingle`), the namespaces apart
 (`TestCompileAllNamespaces`).
+`internal/graph/graph_test.go` builds graphs from results written by
+hand, what the graph reads of them: the waves of a diamond and of a
+namespace apart, the dependencies deduplicated and sorted (`TestWaves`),
+every problem at once, each cycle once, a release waiting for one not
+reported (`TestErrors`, `TestNotProvided`).
 `internal/okdp/mapping_test.go` covers OKDP's
 sections and functions, `internal/okdp/provides_test.go` what the instance
 publishes: the outputs against their contracts, the credentials

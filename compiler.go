@@ -25,15 +25,18 @@
 // values and OKDP's own objects, and what the instance publishes, whose
 // outputs the other instances of the namespace reference by name
 // (Inputs.Published); the instances it depends on are for a deployer
-// (Result.Dependencies).
+// (Result.Dependencies). CompileAll compiles instances together, each with
+// what the others publish, and NewGraph orders their releases, the
+// dependencies checked.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
 // git tree without touching the disk.
 //
 // This package is the public API; the implementation is under internal/:
-// OKDP's rules and the order of the stages (okdp), the umbrella a compile is
-// written as (umbrella), the mapping language (compile), what the compiler
+// OKDP's rules and the order of the stages (okdp), the deployment graph
+// of compiled instances (graph), the umbrella a compile is written as
+// (umbrella), the mapping language (compile), what the compiler
 // reproduces of Helm (chart), and the values they share (value).
 package compiler
 
@@ -42,6 +45,7 @@ import (
 	"io/fs"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/umbrella"
 )
@@ -76,6 +80,13 @@ type (
 	// Outcome: the compile of one instance of CompileAll: its result, nil
 	// when it is refused, and why.
 	Outcome = okdp.Outcome
+	// Graph: the deployment graph of compiled instances (NewGraph): what
+	// each release waits for (DependsOn), its Argo CD sync wave (Wave).
+	Graph = graph.Graph
+	// GraphNode: a release of the graph, in its namespace.
+	GraphNode = graph.Node
+	// GraphError: a problem of the graph, at the release it is found at.
+	GraphError = graph.Error
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
@@ -124,6 +135,15 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // Outcomes in the order of instances, which changes none of them.
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return okdp.CompileAll(ctx, instances)
+}
+
+// NewGraph: the deployment graph of results, the compiled instances of
+// their namespaces: a release waits for the releases its connection
+// references point to (Result.Dependencies). Every problem at once, each
+// a *GraphError: a dependency on a release no result has, or on one that
+// does not provide what is referenced; a cycle; a release given twice.
+func NewGraph(results []*Result) (*Graph, error) {
+	return graph.New(results)
 }
 
 // Write: what `okdp-compile -o <dir>` writes for res, path in the

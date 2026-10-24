@@ -59,8 +59,9 @@ func (e *missingOutputs) Unwrap() error { return e.err }
 // the output the reference names (Inputs.Published). The instance must
 // exist and publish an output of the contract by that name. Its fields are
 // always set. What a deployer orders the releases with, read from
-// Result.Dependencies: okdp-gitops makes the release wait for the instance
-// (Flux dependsOn, Argo CD sync waves).
+// Result.Dependencies: the deployment graph checks them, and makes the
+// release wait for the instance (graph.New: Flux dependsOn, Argo CD sync
+// waves).
 type Dependency struct {
 	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance, or the one that publishes the referenced output (its release name)
 	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
