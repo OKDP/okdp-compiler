@@ -1,4 +1,4 @@
-package umbrella
+package helm
 
 import (
 	"maps"

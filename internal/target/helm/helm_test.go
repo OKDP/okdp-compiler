@@ -1,4 +1,4 @@
-package umbrella
+package helm
 
 import (
 	"bytes"
@@ -157,7 +157,7 @@ func TestHelmUmbrella(t *testing.T) {
 			continue
 		}
 		if want, err := os.ReadFile(golden); err != nil || !bytes.Equal(b, want) {
-			t.Errorf("%s differs from the umbrella the compiler writes (%v): run go test ./internal/umbrella -run TestHelmUmbrella -update, then generate.sh", golden, err)
+			t.Errorf("%s differs from the umbrella the compiler writes (%v): run go test ./internal/target/helm -run TestHelmUmbrella -update, then generate.sh", golden, err)
 		}
 	}
 	if *update {

@@ -36,7 +36,7 @@
 // This package is the public API; the implementation is under internal/:
 // OKDP's rules and the order of the stages (okdp), the deployment graph
 // of compiled instances (graph), the umbrella a compile is written as
-// (umbrella), the mapping language (compile), what the compiler
+// (target/helm), the mapping language (compile), what the compiler
 // reproduces of Helm (chart), and the values they share (value).
 package compiler
 
@@ -47,7 +47,7 @@ import (
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
-	"github.com/okdp/okdp-compiler/internal/umbrella"
+	"github.com/okdp/okdp-compiler/internal/target/helm"
 )
 
 // The types a caller names.
@@ -98,18 +98,18 @@ type (
 const (
 	// UmbrellaValues: the umbrella's values, given to Helm as user values
 	// (helm -f, Argo CD valueFiles, Flux valuesFrom).
-	UmbrellaValues = umbrella.ValuesFile
+	UmbrellaValues = helm.ValuesFile
 	// InfoFile: Result.Info, what the instance publishes (url,
 	// usage, provides), written when it publishes something, for a control
 	// plane or a console that reads the deployments repository.
-	InfoFile = umbrella.InfoFile
+	InfoFile = helm.InfoFile
 	// ObjectsFile: Result.Objects as a YAML stream, one document per object,
 	// written when there are objects: plain manifests, which ObjectsTemplate
 	// renders as written in the umbrella's release.
-	ObjectsFile = umbrella.ObjectsFile
+	ObjectsFile = helm.ObjectsFile
 	// ObjectsTemplate: the umbrella's template of ObjectsFile, a path in
 	// the chart, written with it.
-	ObjectsTemplate = umbrella.ObjectsTemplate
+	ObjectsTemplate = helm.ObjectsTemplate
 )
 
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
@@ -155,7 +155,7 @@ func NewGraph(results []*Result) (*Graph, error) {
 // ObjectsTemplate. res is what Compile returned: Write does not check it
 // again. Every file is built before Write returns.
 func Write(res *Result) (map[string][]byte, error) {
-	return umbrella.Write(res)
+	return helm.Write(res)
 }
 
 // ParseValues: a values file as Helm 3 reads it (its first document, YAML

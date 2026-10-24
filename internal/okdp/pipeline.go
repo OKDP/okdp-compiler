@@ -55,10 +55,10 @@ type Result struct {
 	// Objects: OKDP's own objects, rendered whole: the credentials Secrets
 	// of the provided connections, then the objects section of the mapping;
 	// the umbrella's objects file, which it renders as written, in its
-	// release (umbrella.Write). nil when there is none.
+	// release (helm.Write). nil when there is none.
 	Objects []map[string]any
 	// Info: what the instance publishes, its instance and provides
-	// sections, checked (okdp.info.yaml, umbrella.Write).
+	// sections, checked (okdp.info.yaml, helm.Write).
 	Info Info
 	// Dependencies: the instances of the namespace the connection
 	// references point to, by naming convention or by one of their outputs

@@ -301,14 +301,14 @@ dependencies, and what the mapping sees (its `scope`):
    template, `generatedSecret`). Then two outputs of one contract and name
    fail (`twice`). The checked outputs and the mapping's `instance`, its
    `url` and `usage` trimmed (`published`), are `Result.Info`, which
-   `umbrella.Write` writes to `okdp.info.yaml` ([The info
+   `helm.Write` writes to `okdp.info.yaml` ([The info
    file](specs/01_inputs_outputs.md#the-info-file), [Credentials
    Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
 8. **Objects** (`Compile`).
    `Result.Objects` is the credentials Secrets, then the
    mapping's `objects`
    ([objects section](specs/01_inputs_outputs.md#objects-section)): in no
-   chart, `umbrella.Write` writes them to the objects file, which the
+   chart, `helm.Write` writes them to the objects file, which the
    umbrella renders as written
    ([the objects file](specs/01_inputs_outputs.md#the-objects-file)).
 9. **Final values** (`chart.FinalValues`, `internal/chart/merge.go`), for
@@ -372,10 +372,10 @@ item `[i]`.
 ## Source map
 
 The module's root is the public package, `compiler`: it gives callers the
-types they name, as aliases, and wraps the functions of `okdp`, `umbrella`
-and `chart`. Under `internal/`, six packages each import only those below
-them: `cmd/okdp-compile` -> `compiler` -> `umbrella` and `graph` -> `okdp`
--> `compile` and `chart` -> `value`.
+types they name, as aliases, and wraps the functions of `okdp`, `graph`,
+`target/helm` and `chart`. Under `internal/`, six packages each import only
+those below them: `cmd/okdp-compile` -> `compiler` -> `target/helm` and
+`graph` -> `okdp` -> `compile` and `chart` -> `value`.
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -391,7 +391,7 @@ neither knows OKDP.
 | | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`); the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`) | the dependencies of `metadata.go`, the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`); the chart keys (`metadata.go`, `spec.go`); the release, the namespace and an internal reference (`okdp`) |
 | | `cache.go` | the chart cache of stage 10 (`chartCache`: `<repository>/<chart>-<version>/<chart>/`, `readEntry`) | `merge.go` |
-| | `metadata.go` | `Chart.yaml`: `Metadata`, Helm's fields in Helm's order, the order `Write` writes them in; `Dependency`, its key (`Key`: the alias, else the name) and its upstream chart (`Ref`); `Maintainer`; `ReadMetadata`, the strict reader of one YAML document, and `Metadata.Check`: `apiVersion: v2`, a name, a SemVer version, an application chart, each dependency's name, key (a DNS label, unique), repository and pinned version, Helm's `condition`, `tags`, `enabled` and `import-values` refused | `ref.go` (`Ref.Check`, `IsDNSLabel`, `IsVersion`); read by `LoadDefinition`, `compiler.ChartMetadata`; written back by `umbrella.Write` |
+| | `metadata.go` | `Chart.yaml`: `Metadata`, Helm's fields in Helm's order, the order `Write` writes them in; `Dependency`, its key (`Key`: the alias, else the name) and its upstream chart (`Ref`); `Maintainer`; `ReadMetadata`, the strict reader of one YAML document, and `Metadata.Check`: `apiVersion: v2`, a name, a SemVer version, an application chart, each dependency's name, key (a DNS label, unique), repository and pinned version, Helm's `condition`, `tags`, `enabled` and `import-values` refused | `ref.go` (`Ref.Check`, `IsDNSLabel`, `IsVersion`); read by `LoadDefinition`, `compiler.ChartMetadata`; written back by `helm.Write` |
 | | `spec.go` | the charts of a package, by key: `Spec` (its source, its OKDP defaults, the instance upstream values it accepts, their `protect` and `append` paths), built from the dependencies of `Chart.yaml` and the `defaults` and `upstream` of `okdp.yaml` (`NewSpecs`; `Upstream`, the forms of `upstream`, decoded by its `UnmarshalYAML`); `Specs.Check` (the `protect` and `append` paths) | `metadata.go`, `paths.go`; built by `okdp.Definition.service` |
 | | `paths.go` | the grammar of the `protect` and `append` paths (`parsePath`); `formatPath`, the keys a value was found at, written back | `spec.go`, `merge.go`; `value.Key` |
 | | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults read (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile, `{}` when missing (`ReadParameterSchema`); `Parameters` | `values.go`, `schema.go`; read by `okdp` (`context.go`: the parameters, the platform schema) |
@@ -414,8 +414,8 @@ neither knows OKDP.
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | | `namespace.go` | `Instance`, `Outcome`, `CompileAll`: the instances of each namespace compiled together (`compileNamespace`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks), the outputs two instances publish refused, and what resolved through them compiled again (`refuseShared`); the instances that do not compile named in the refusals for an output (`notCompiled`) | `Compile`, `missingOutputs` (`connections.go`) |
 | `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
-| `umbrella` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Graph`, `GraphNode`, `GraphError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `umbrella`, `chart` |
+| `target/helm` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Graph`, `GraphNode`, `GraphError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `graph`, `target/helm`, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -764,7 +764,7 @@ renders a small chart, and stores its output or its error; the
 | `values/<case>/` | `.Values` with the `layer-*.yaml` files (`helm.json`), and with the compiler's `final.yaml` (`helm-final.json`); with each other Helm major version, where it differs (`helm3.json`), and where it renders the final values differently from the layers (`helm3-final.json`) | `chart`: `TestHelmValues`, coalescing as Helm, and final values that each version renders back to the same `.Values`, but for each known difference of a version (`helmFinalKnown`) |
 | `schema/<case>/` | Helm's error report, or `ok` (`helm.txt`; `helm3.txt` where a version reports differently) | `chart`: `TestHelmSchema`, each report |
 | `functions/` | `sha256sum`, `toJson`, `toPrettyJson`, `toYaml`, `quote` of inputs given with `-f` (`helm.json`; `helm3.json` where a version renders differently) | `compile`: `TestHelmFunctions`, each render |
-| `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`); with each other Helm major version, where it differs (`helm3.json`). The manifests its template renders of its objects file (`okdp.objects.yaml`, `templates/okdp.yaml`: a `{{`, a null, an integer beyond a float64's precision), in Helm's order, the same with every version (`helm-objects.yaml`) | `umbrella`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart, and each known difference of a version (`umbrellaRenders`); `TestHelmObjects`, each document of the objects file a manifest, as written |
+| `umbrella/` | the `.Values` of each subchart of the umbrella the compiler writes (`Chart.yaml`, `instance.values.yaml`) over the charts of the values cases, two of them under a second key (`helm.json`); with each other Helm major version, where it differs (`helm3.json`). The manifests its template renders of its objects file (`okdp.objects.yaml`, `templates/okdp.yaml`: a `{{`, a null, an integer beyond a float64's precision), in Helm's order, the same with every version (`helm-objects.yaml`) | `target/helm`: `TestHelmUmbrella`, each subchart sees what its chart sees alone (`helm-final.json`), but for the empty `global` and the nested null defaults Helm adds to a subchart, and each known difference of a version (`umbrellaRenders`); `TestHelmObjects`, each document of the objects file a manifest, as written |
 
 `SOURCE` records what rendered them, written by `generate.sh`: the version
 of the helm on the `PATH` (`helm`) and the deployers' versions (`helms`).
@@ -773,7 +773,7 @@ tests only: the directory, the JSON renders, the versions of `SOURCE`, and
 the `helm<major>` files beside each reference file.
 
 To regenerate: `go test ./internal/chart -run TestHelmValues -update`
-(writes each `final.yaml`), `go test ./internal/umbrella -run TestHelmUmbrella
+(writes each `final.yaml`), `go test ./internal/target/helm -run TestHelmUmbrella
 -update` (writes the umbrella), then `generate.sh` (bash 3.2 or later,
 python3 with PyYAML; the GNU or the BSD tools), with the deployers'
 helm binaries in `UMBRELLA_HELMS`, separated by spaces, downloaded from
@@ -795,7 +795,7 @@ every fixture again, and two versions of one major version that render
 differently fail. What a major version renders differently from the helm
 on the `PATH` goes beside the reference file, `helm` renamed
 `helm<major>`, removed when it renders the same. A new version or a new difference
-goes in `umbrellaRenders` (`internal/umbrella/helm_test.go`) or
+goes in `umbrellaRenders` (`internal/target/helm/helm_test.go`) or
 `helmFinalKnown` (`internal/chart/helm_test.go`), and in the spec
 ([Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart),
 [Equivalence with Helm](specs/01_inputs_outputs.md#equivalence-with-helm)).
@@ -870,7 +870,7 @@ whole; the names, client keys, platform settings), the modes and
 client charts in a whole compile (`TestDcrCompile`); `context_test.go` the
 oidc-dcr settings and their defaults. The template has no Helm fixture: its
 expected values are in `oidc_test.go`. `internal/okdp/load_test.go` checks
-the loading of a package, `internal/umbrella/umbrella_test.go` the files
+the loading of a package, `internal/target/helm/umbrella_test.go` the files
 `-o` writes: the umbrella's chart, its values, the objects file and its
 template, none without objects, what the instance publishes, and the
 dependencies in no file.

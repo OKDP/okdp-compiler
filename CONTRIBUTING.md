@@ -75,7 +75,7 @@ Helm versions): commit it with them. Review the diff of a regeneration as a
 change of Helm's behaviour; a new
 difference between Helm versions goes in `helmFinalKnown`
 (`internal/chart/helm_test.go`) for the values cases, or `umbrellaRenders`
-(`internal/umbrella/helm_test.go`) for the umbrella, and in the spec
+(`internal/target/helm/helm_test.go`) for the umbrella, and in the spec
 ([equivalence with Helm](docs/specs/01_inputs_outputs.md#equivalence-with-helm),
 [umbrella chart](docs/specs/01_inputs_outputs.md#umbrella-chart)).
 

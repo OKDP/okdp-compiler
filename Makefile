@@ -40,7 +40,7 @@ example: ## Rewrite the outputs of examples/ from the current compiler
 
 fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
 	go test ./internal/chart -run '^TestHelmValues$$' -update
-	go test ./internal/umbrella -run '^TestHelmUmbrella$$' -update
+	go test ./internal/target/helm -run '^TestHelmUmbrella$$' -update
 	UMBRELLA_HELMS="$(UMBRELLA_HELMS)" testdata/helm/generate.sh
 
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.

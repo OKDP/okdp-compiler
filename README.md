@@ -220,7 +220,7 @@ A compile reads no chart: `--charts` without `--check` fails
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages |
 | `internal/graph/` | the deployment graph of compiled instances: their dependencies checked, what each release waits for, its sync wave |
-| `internal/umbrella/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes |
+| `internal/target/helm/` | the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes |
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
 | `internal/value/` | the values every package shares, and their helpers |

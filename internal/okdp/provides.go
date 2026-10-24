@@ -18,7 +18,7 @@ import (
 
 // Info: what the instance publishes, the mapping's instance and
 // provides sections, checked: what a control plane or a console reads of it
-// in the deployments repository (okdp.info.yaml, umbrella.Write). An
+// in the deployments repository (okdp.info.yaml, helm.Write). An
 // empty field is not written, nor one of its outputs'.
 type Info struct {
 	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none

@@ -1,10 +1,10 @@
-// Package umbrella writes a compile as the files of okdp-compile (Write):
+// Package helm writes a compile as the files of okdp-compile (Write):
 // one chart for the whole instance, an umbrella over the upstream charts of
 // its keys with OKDP's own objects, for one Helm release per instance under
 // the release name its values were compiled for, and what the instance
 // publishes. The caller writes them (the CLI to a directory, a server to
 // git).
-package umbrella
+package helm
 
 import (
 	"bytes"
