@@ -1,0 +1,7 @@
+apiVersion: v2
+name: db
+version: 1.0.0
+dependencies:
+  - name: postgresql
+    repository: https://charts.example.org
+    version: 1.0.0

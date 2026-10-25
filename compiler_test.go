@@ -3,9 +3,14 @@ package compiler_test
 import (
 	"context"
 	"encoding/json"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -86,5 +91,59 @@ func TestConcurrentCompile(t *testing.T) {
 	}
 	if snapshot() != before {
 		t.Error("the Definition or the values layers changed")
+	}
+}
+
+// TestLayers: each stage of a tree's compile in its packages, knowing only
+// those before it: the compile no graph and no target, the graph no
+// target; under the compile, OKDP is not known.
+func TestLayers(t *testing.T) {
+	const module = "github.com/okdp/okdp-compiler/"
+	imports := map[string][]string{} // a package of internal/, by directory: those of the module it imports
+	err := filepath.WalkDir("internal", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			return err
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		dir := filepath.ToSlash(filepath.Dir(p))
+		for _, imp := range f.Imports {
+			if path := strings.Trim(imp.Path.Value, `"`); strings.HasPrefix(path, module) {
+				imports[dir] = append(imports[dir], strings.TrimPrefix(path, module))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deps func(pkg string, seen map[string]bool) map[string]bool
+	deps = func(pkg string, seen map[string]bool) map[string]bool {
+		for _, d := range imports[pkg] {
+			if !seen[d] {
+				seen[d] = true
+				deps(d, seen)
+			}
+		}
+		return seen
+	}
+	for pkg, unknown := range map[string][]string{
+		"internal/okdp":    {"internal/graph", "internal/target"},
+		"internal/graph":   {"internal/target"},
+		"internal/compile": {"internal/okdp", "internal/chart"},
+		"internal/chart":   {"internal/okdp", "internal/compile"},
+	} {
+		if imports[pkg] == nil {
+			t.Fatalf("%s: no import read", pkg)
+		}
+		for d := range deps(pkg, map[string]bool{}) {
+			for _, u := range unknown {
+				if d == u || strings.HasPrefix(d, u+"/") {
+					t.Errorf("%s imports %s", pkg, d)
+				}
+			}
+		}
 	}
 }

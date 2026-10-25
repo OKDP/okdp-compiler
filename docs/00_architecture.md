@@ -40,7 +40,8 @@ compile (a `values.yaml` that holds expressions)
 after the instances whose outputs it references, with what they publish
 as `Published`: the order of a tree's instances is the compiler's, not
 its caller's. `NewGraph` then checks the dependencies of the results and
-orders the releases, for a deployer.
+orders the releases, and a target writes them for a deployer: the
+umbrella chart of each instance, with Flux's or Argo CD's objects.
 
 Callers: a Go program embeds the package at the module's root
 (`compiler`), compiles from a git tree, an embedded filesystem or memory,
@@ -373,9 +374,11 @@ item `[i]`.
 
 The module's root is the public package, `compiler`: it gives callers the
 types they name, as aliases, and wraps the functions of `okdp`, `graph`,
-`target/helm` and `chart`. Under `internal/`, six packages each import only
-those below them: `cmd/okdp-compile` -> `compiler` -> `target/helm` and
-`graph` -> `okdp` -> `compile` and `chart` -> `value`.
+the targets and `chart`. Under `internal/`, the packages each import only
+those below them: `cmd/okdp-compile` -> `compiler` -> `target/flux` and
+`target/argocd` -> `target/helm` -> `target` -> `graph` -> `okdp` ->
+`compile` and `chart` -> `value`: the compile knows no graph and no
+target, the graph no target (`TestLayers`).
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -414,8 +417,12 @@ neither knows OKDP.
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | | `namespace.go` | `Instance`, `Outcome`, `CompileAll`: the instances of each namespace compiled together (`compileNamespace`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks), the outputs two instances publish refused, and what resolved through them compiled again (`refuseShared`); the instances that do not compile named in the refusals for an output (`notCompiled`) | `Compile`, `missingOutputs` (`connections.go`) |
 | `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
+| `target` | `target.go` | `Target`, an output format, `Files` of the results and their graph; what the targets share: `ProjectDir`, `InstanceDir` (`projects/<namespace>/instances/<release>`), `Generated`, the mark of a generated file, `Lines`, a file built line by line; the checks of their options (`CheckPrefix`, `CheckQuoted`) and of the release names their objects share a namespace with (`UniqueReleases`) | `graph.Graph`, `okdp.Result` |
 | `target/helm` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Graph`, `GraphNode`, `GraphError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `graph`, `target/helm`, `chart` |
+| | `target.go` | `Target`, the helm target: the files of `Write` of each result, in its `InstanceDir` | `umbrella.go`, `target` |
+| `target/flux` | `flux.go` | the flux target (`Target`: `Source`, `PathPrefix`): the helm target's files, an instance's HelmRelease and Kustomization (`Instance`), a namespace's Kustomization (`Project`), okdp-gitops' format | `target/helm`, `target`, `graph.DependsOn`; `chart.IsDNSLabel` |
+| `target/argocd` | `argocd.go` | the argocd target (`Target`: `RepoURL`, `Revision`, `PathPrefix`): the helm target's files, an instance's Application (`Application`), okdp-gitops' format | `target/helm`, `target`, `graph.Wave` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Graph`, `GraphNode`, `GraphError`, `Target`, `Helm`, `Flux`, `ArgoCD`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `graph`, the targets, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -686,6 +693,19 @@ are releases, its edges `Result.Dependencies` deduplicated; the details
 (contract, field) stay in the results. The graph imports `okdp` and
 nothing imports it but the public package: the compile knows no graph.
 
+### Writing apart from compiling
+
+A compile gives values and objects; how a deployer gets them is a
+target's. The three stages are packages, each reading only what the one
+before it gives: the compile (`okdp`) its inputs, the graph (`graph`) the
+results, a target (`target/...`) the results and the graph. A target
+never sees a package, an input or an expression, and a new deployer is a
+new target, the compile unchanged. The flux and argocd targets write the
+helm target's files, then their own: one umbrella chart, whatever deploys
+it. Their format is okdp-gitops', byte for byte after the first line, its
+per-instance functions exported, so that one tool writes what the other
+does.
+
 ### Everything through fs.FS
 
 The compiler opens no path itself: the package, the contracts and the
@@ -858,6 +878,12 @@ hand, what the graph reads of them: the waves of a diamond and of a
 namespace apart, the dependencies deduplicated and sorted (`TestWaves`),
 every problem at once, each cycle once, a release waiting for one not
 reported (`TestErrors`, `TestNotProvided`).
+`internal/target/target_test.go` compiles three instances in two
+namespaces and writes them with each target, compared with
+`testdata/targets/<target>/` (`go test ./internal/target -update`
+rewrites them; `TestTargets`), and checks the options and the release
+names shared across namespaces (`TestOptions`). `compiler_test.go`
+checks which packages each stage imports (`TestLayers`).
 `internal/okdp/mapping_test.go` covers OKDP's
 sections and functions, `internal/okdp/provides_test.go` what the instance
 publishes: the outputs against their contracts, the credentials

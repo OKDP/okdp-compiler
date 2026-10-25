@@ -26,8 +26,8 @@
 // outputs the other instances of the namespace reference by name
 // (Inputs.Published); the instances it depends on are for a deployer
 // (Result.Dependencies). CompileAll compiles instances together, each with
-// what the others publish, and NewGraph orders their releases, the
-// dependencies checked.
+// what the others publish, NewGraph orders their releases, the
+// dependencies checked, and a Target writes them for a deployer.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
@@ -35,9 +35,10 @@
 //
 // This package is the public API; the implementation is under internal/:
 // OKDP's rules and the order of the stages (okdp), the deployment graph
-// of compiled instances (graph), the umbrella a compile is written as
-// (target/helm), the mapping language (compile), what the compiler
-// reproduces of Helm (chart), and the values they share (value).
+// of compiled instances (graph), the formats compiled instances are
+// written in (target: helm, the umbrella of Write, flux, argocd), the
+// mapping language (compile), what the compiler reproduces of Helm
+// (chart), and the values they share (value).
 package compiler
 
 import (
@@ -47,6 +48,9 @@ import (
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/internal/target"
+	"github.com/okdp/okdp-compiler/internal/target/argocd"
+	"github.com/okdp/okdp-compiler/internal/target/flux"
 	"github.com/okdp/okdp-compiler/internal/target/helm"
 )
 
@@ -87,6 +91,22 @@ type (
 	GraphNode = graph.Node
 	// GraphError: a problem of the graph, at the release it is found at.
 	GraphError = graph.Error
+	// Target: an output format of compiled instances (Helm, Flux, ArgoCD):
+	// their files, path -> content, under projects/<namespace>/, each
+	// instance's umbrella chart in instances/<release>/.
+	Target = target.Target
+	// Helm: the helm target: the umbrella chart of each instance, the files
+	// of Write.
+	Helm = helm.Target
+	// Flux: the flux target: the helm target's files, each instance's Flux
+	// HelmRelease, waiting for the releases it depends on, and the
+	// Kustomizations; okdp-gitops' format. Its fields are its options.
+	Flux = flux.Target
+	// ArgoCD: the argocd target: the helm target's files, and each
+	// instance's Argo CD Application, its sync wave after those of the
+	// releases it depends on; okdp-gitops' format. Its fields are its
+	// options.
+	ArgoCD = argocd.Target
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,

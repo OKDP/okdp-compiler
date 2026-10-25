@@ -1,0 +1,5 @@
+provides:
+  - name: demo-db
+    contract: database
+    values:
+      host: demo-db-db.demo.svc

@@ -7,6 +7,7 @@ import (
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/internal/target"
 )
 
 // TestUmbrella: the package's Chart.yaml, every field kept, in Helm's
@@ -81,7 +82,7 @@ annotations:
   a: "1"
   b: "2"
 `,
-		ValuesFile: generated + "app:\n  a: null\noidc-dcr: {}\nokdp: {}\nweb:\n  a: 1\n  global:\n    g: 1\nzeta-oidc-dcr: {}\n",
+		ValuesFile: target.Generated + "app:\n  a: null\noidc-dcr: {}\nokdp: {}\nweb:\n  a: 1\n  global:\n    g: 1\nzeta-oidc-dcr: {}\n",
 	} {
 		if got := string(files[name]); got != want {
 			t.Errorf("%s:\n got %q\nwant %q", name, got, want)
@@ -113,9 +114,9 @@ func TestWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		ValuesFile:      generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
+		ValuesFile:      target.Generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
 		InfoFile:        "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
-		ObjectsFile:     generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
+		ObjectsFile:     target.Generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
 		ObjectsTemplate: "{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}\n{{ .Files.Get \"okdp.objects.yaml\" }}\n",
 	}
 	if len(files) != len(want)+1 {

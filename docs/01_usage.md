@@ -688,6 +688,14 @@ holds, to read it back.
   each a `*compiler.GraphError` at its release; then `DependsOn` gives
   what a release waits for, `Wave` its Argo CD sync wave
   ([the deployment graph](specs/01_inputs_outputs.md#the-deployment-graph)).
+- A target writes the results for a deployer, `Files(results, graph)`,
+  path -> content, under `projects/<namespace>/`: `compiler.Helm{}`, the
+  umbrella chart of each instance, in `instances/<release>/`;
+  `compiler.Flux{Source, PathPrefix}`, with each instance's HelmRelease,
+  its `dependsOn` from the graph, and the Kustomizations;
+  `compiler.ArgoCD{RepoURL, Revision, PathPrefix}`, with each instance's
+  Application, its sync wave from the graph
+  ([targets](specs/01_inputs_outputs.md#targets)).
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than
@@ -763,11 +771,16 @@ instance).
 
 ### GitOps
 
-The compiler writes the instance as one Helm chart, not HelmRelease or
-Application objects: the umbrella deploys alone as one Helm release,
-`helm upgrade --install` ([rendering with Helm](#rendering-with-helm)).
-OKDP publishes no chart of the service: the upstream charts come from
-their own repositories, the umbrella's dependencies.
+A compile writes the instance as one Helm chart: the umbrella deploys
+alone as one Helm release, `helm upgrade --install`
+([rendering with Helm](#rendering-with-helm)). OKDP publishes no chart of
+the service: the upstream charts come from their own repositories, the
+umbrella's dependencies. The targets write compiled instances for a
+deployer: the umbrella chart of each (`Helm`), with its Flux HelmRelease,
+`dependsOn` the releases it waits for (`Flux`), or its Argo CD
+Application and sync wave (`ArgoCD`), from the
+[deployment graph](specs/01_inputs_outputs.md#the-deployment-graph), in
+okdp-gitops' format ([targets](specs/01_inputs_outputs.md#targets)).
 
 [okdp-gitops](https://github.com/OKDP/okdp-gitops) compiles a whole
 deployments repository with this library, every instance of it, and writes
@@ -777,9 +790,9 @@ from `Result.Dependencies`: the instances of the namespace the connection
 references point to, one item per parameter
 ([dependencies](specs/01_inputs_outputs.md#dependencies)). Each compile
 is given what the other instances of its namespace publish
-(`Inputs.Published`): a reference may name one of their outputs. The
-compiler does not check that an instance reached by its naming convention
-exists: the deployment waits for it.
+(`Inputs.Published`): a reference may name one of their outputs. A
+compile does not check that an instance reached by its naming convention
+exists: the deployment graph does.
 
 A deployer that renders the umbrella, okdp-gitops or another, respects
 what it is compiled for:

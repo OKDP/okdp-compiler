@@ -1,0 +1,5 @@
+provides:
+  - name: data-db
+    contract: database
+    values:
+      host: data-db-db.data.svc
