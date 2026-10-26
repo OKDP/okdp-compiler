@@ -447,7 +447,8 @@ output/projects/<project>/instances/<instance>/   -o <dir>
   reference); 1 `project.yaml`, what a project adds for its instances (its
   settings under `global`, its connections); 2 `connections.yaml`, the
   instance's own connections (`connections: {<name>: {...}}`), written as
-  the lower levels write theirs. A level adds values and changes none of a
+  the lower levels write theirs, and nothing else: `global` is the
+  platform's or the project's. A level adds values and changes none of a
   lower level's.
 - `config.yaml` is the instance values: its parameters and upstream
   values, no `connections`.
@@ -996,6 +997,7 @@ of the targets' options are in
 | `--repo-url is required by --target argocd` | no repository for the Applications | give the one Argo CD reads the output from |
 | `--repository db/projects is inside --repository db`, `--output (-o) out and --repository out/db must not contain one another: ...` | nested directories: a part read twice, or an output that would remove the sources | give disjoint directories |
 | `project "demo" is in the repositories a and b` (`platform.yaml`, `service "<name>"`) | a part of the tree in two repositories | keep it in one ([repository layout](#repository-layout)) |
+| `db/projects/demo/instances/web/connections.yaml: global: the instance's own connections only (connections): ...` | an instance's `connections.yaml` sets more than `connections` | set it in `project.yaml`, or `platform.yaml` ([repository layout](#repository-layout)) |
 | `contract s3 differs between the repositories a and b` | two repositories ship different contracts of one name | make them the same, or rename one |
 | `db/projects/demo/instances/web/instance.yaml: service "web" is in the catalog of no repository`, `version "2.0.0" of service "web" is not in db/catalog/web` | the instance names a package no repository has | add it to a catalog, or fix `instance.yaml` |
 | `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none; instances that reference each other's outputs are both refused so | fix that instance; make one of two references a connection file's: it waits for nothing |

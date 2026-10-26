@@ -58,8 +58,8 @@ type tree struct {
 // is: the package its InstanceFile names, catalog/<service>/<version>/ of
 // the repository of the service, loaded once, its Chart.yaml of that name
 // and version; the contracts of every repository; the context,
-// PlatformFile at level 0, ProjectFile at 1 and ConnectionsFile at 2, and
-// the values, ConfigFile, each when present; the release, the instance's
+// PlatformFile at level 0, ProjectFile at 1 and ConnectionsFile at 2,
+// connections only, and the values, ConfigFile, each when present; the release, the instance's
 // directory name, and the namespace, the project's. Every problem at once,
 // each naming its repository and path; a package that fails once.
 func Load(repos []Repository) ([]okdp.Instance, error) {
@@ -126,6 +126,15 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 	connections, err := readLayer(repo, path.Join(dir, ConnectionsFile), 2)
 	if err != nil {
 		return okdp.Instance{}, err
+	}
+	// The instance's own connections only: the rest of the context, global
+	// among it, is the platform's or its project's.
+	for _, l := range connections {
+		for _, k := range slices.Sorted(maps.Keys(l.Values)) {
+			if k != "connections" {
+				return okdp.Instance{}, fmt.Errorf("%s: %s: the instance's own connections only (connections): the rest of the context is the platform's or the project's", where(repo, path.Join(dir, ConnectionsFile)), k)
+			}
+		}
 	}
 	values, err := readLayer(repo, path.Join(dir, ConfigFile), 0)
 	if err != nil {

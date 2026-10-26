@@ -104,7 +104,8 @@ func TestLoad(t *testing.T) {
 // TestLoadErrors: every problem at once, each naming its repository and
 // path: the parts in two repositories, a contract that differs; an
 // instance file that is not one, a service no catalog has, a version its
-// catalog lacks, a package that fails, once, a values file that is not.
+// catalog lacks, a package that fails, once, a values file that is not,
+// an instance's connections file that holds more than connections.
 func TestLoadErrors(t *testing.T) {
 	_, err := Load([]Repository{
 		{"b", fstest.MapFS{
@@ -128,17 +129,19 @@ project "demo" is in the repositories a and b`
 		t.Errorf("got %v\nwant %s", err, want)
 	}
 	_, err = Load([]Repository{{"db", fstest.MapFS{
-		"catalog/app/1.0.0/Chart.yaml":            file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
-		"catalog/bad/1.0.0/Chart.yaml":            file("apiVersion: v2\nname: other\nversion: 1.0.0\n"),
-		"projects/demo/instances/a/instance.yaml": file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
-		"projects/demo/instances/b/instance.yaml": file("service: nope\nversion: 1.0.0\n"),
-		"projects/demo/instances/c/instance.yaml": file("service: app\nversion: 9.0.0\n"),
-		"projects/demo/instances/d/instance.yaml": file("service: bad\nversion: 1.0.0\n"),
-		"projects/demo/instances/e/instance.yaml": file("service: bad\nversion: 1.0.0\n"),
-		"projects/demo/instances/f/instance.yaml": file("service: app\nversion: 1.0.0\n"),
-		"projects/demo/instances/f/config.yaml":   file("[a\n"),
-		"projects/demo/instances/g/config.yaml":   file("{}\n"),
-		"projects/demo/instances/h/instance.yaml": file("service: app\nversion: ../1.0.0\n"),
+		"catalog/app/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
+		"catalog/bad/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: other\nversion: 1.0.0\n"),
+		"projects/demo/instances/a/instance.yaml":    file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
+		"projects/demo/instances/b/instance.yaml":    file("service: nope\nversion: 1.0.0\n"),
+		"projects/demo/instances/c/instance.yaml":    file("service: app\nversion: 9.0.0\n"),
+		"projects/demo/instances/d/instance.yaml":    file("service: bad\nversion: 1.0.0\n"),
+		"projects/demo/instances/e/instance.yaml":    file("service: bad\nversion: 1.0.0\n"),
+		"projects/demo/instances/f/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
+		"projects/demo/instances/f/config.yaml":      file("[a\n"),
+		"projects/demo/instances/g/config.yaml":      file("{}\n"),
+		"projects/demo/instances/h/instance.yaml":    file("service: app\nversion: ../1.0.0\n"),
+		"projects/demo/instances/i/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
+		"projects/demo/instances/i/connections.yaml": file("connections: {}\nglobal: {okdp: {}}\n"),
 	}}})
 	for _, w := range []string{
 		"db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found in type struct",
@@ -147,6 +150,7 @@ project "demo" is in the repositories a and b`
 		"db/projects/demo/instances/d/instance.yaml: the package db/catalog/bad/1.0.0: its Chart.yaml is other 1.0.0\ndb/projects/demo/instances/f/config.yaml: ",
 		"db/projects/demo/instances/g/instance.yaml: file does not exist",
 		`db/projects/demo/instances/h/instance.yaml: version "../1.0.0" of service "app" is not in db/catalog/app`,
+		"db/projects/demo/instances/i/connections.yaml: global: the instance's own connections only (connections): the rest of the context is the platform's or the project's",
 	} {
 		if err == nil || !strings.Contains(err.Error(), w) {
 			t.Errorf("got %v\nwant it to hold %s", err, w)
