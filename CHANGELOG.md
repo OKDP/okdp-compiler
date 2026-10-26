@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/OKDP/okdp-compiler/compare/v0.4.0...v0.5.0) (2026-10-26)
+
+
+### Features
+
+* --repository and --target ([c813881](https://github.com/OKDP/okdp-compiler/commit/c8138810db605ed8c10313466766af49629b95aa))
+* CompileAll, the instances of a namespace compiled together ([dae29fa](https://github.com/OKDP/okdp-compiler/commit/dae29fa8feaab3708e14ee0a0a964ff705bcade1))
+* the deployment graph of compiled instances ([6c084a4](https://github.com/OKDP/okdp-compiler/commit/6c084a4c72de3a3f6e81dae08c3a51769963e4fd))
+* the helm, flux and argocd targets ([496648e](https://github.com/OKDP/okdp-compiler/commit/496648e73d657cd1b8c8947cdb2e7cb15ce25127))
+
 ## [0.4.0](https://github.com/OKDP/okdp-compiler/compare/v0.3.0...v0.4.0) (2026-10-16)
 
 
