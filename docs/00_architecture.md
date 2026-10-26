@@ -942,9 +942,10 @@ it becomes a case of the unit test, and the file is removed.
 
 Each example is a repository tree
 ([repository layout](01_usage.md#repository-layout)): its sources under
-`input/db/`, the platform's files, the package in
-`catalog/<service>/<version>/` and one instance of the project `demo`;
-and what `okdp-compile -o <dir>` writes for the instance in
+`input/db/`, the platform's files, the packages in
+`catalog/<service>/<version>/` and the instances of the project `demo`,
+every instance an instance references included;
+and what `okdp-compile -o <dir>` writes for each instance in
 `output/projects/demo/instances/<instance>/`, under the release
 `<instance>` and the namespace `demo`. The full example has a chart cache
 too, in `.charts/` (the `values.yaml` of each chart, the workspace
@@ -980,8 +981,11 @@ database connection and an OAuth client, `values.cel.yaml`,
 OAuth clients in `dcr` mode, and `platform-db`, a connection every
 instance may reference, the instance's audit database) and the
 `config.yaml` of the instance `demo-webapp`, its values (`-f`), its
-upstream values of `app` included. The OAuth clients' `existing` mode has
-no example output: its unit tests are in `internal/okdp/oidc_test.go`.
+upstream values of `app` included. The database it references,
+`demo-db`, is an instance of `catalog/db/1.0.0/`, a minimal package: one
+chart, the database its naming convention gives, its credentials Secret
+generated. The OAuth clients' `existing` mode has no example output: its
+unit tests are in `internal/okdp/oidc_test.go`.
 
 `examples/03_full/` is the reference of the mapping language: its package,
 the `workspace` service, uses every section, directive and host function,
@@ -999,6 +1003,10 @@ connections (`--context 2:connections.yaml`), and its `config.yaml`
 (`-f`), whose references
 reach an instance of the namespace and connections of the platform, the
 project and the instance, in a list of objects and under a nested key.
+The instances it references, `demo-db` and `demo-alerts`, are those of
+minimal packages, `catalog/db/1.0.0/` (02_advanced's) and
+`catalog/alerts/1.0.0/`, each providing what its contract's naming
+convention gives, their charts in the cache.
 
 `TestExample` (`examples_test.go`) compiles every instance of each
 example's tree as a caller of the tree does (`loadInstance`): the package

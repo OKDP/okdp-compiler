@@ -1,0 +1,7 @@
+apiVersion: v2
+name: alerts
+version: 1.0.0
+dependencies:
+  - name: alertmanager
+    repository: https://charts.example.org
+    version: 0.28.0

@@ -473,8 +473,8 @@ the package it is given.
 example's tree this way (`loadInstance`), and compares what it writes with
 the instance's directory of `output/`. The example instances are named
 after the release names of their outputs, `demo-hello`, `demo-webapp`,
-`demo-workspace`; a real instance would be named `hello`, the namespace
-already saying `demo`. The full example's command
+`demo-db`, `demo-workspace`, `demo-alerts`; a real instance would be named
+`hello`, the namespace already saying `demo`. The full example's command
 ([`--output`](#--output)) gives every file of the tree.
 
 ## Go library

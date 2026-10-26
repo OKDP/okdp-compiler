@@ -1,0 +1,10 @@
+# OKDP's part of the alerts package: what an instance provides, an HTTP
+# endpoint reached by the contract's naming convention (x-okdp-internal),
+# its fields those the convention gives.
+
+require: [ingress.suffix]
+provides:
+  - contract: http
+    values:
+      url: https://${{ release.name }}.${{ global.okdp.ingress.suffix }}
+      internalUrl: http://${{ release.name }}-api.${{ release.namespace }}.svc:8080

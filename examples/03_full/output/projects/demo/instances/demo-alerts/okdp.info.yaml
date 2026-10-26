@@ -1,0 +1,6 @@
+provides:
+  - name: demo-alerts
+    contract: http
+    values:
+      internalUrl: http://demo-alerts-api.demo.svc:8080
+      url: https://demo-alerts.okdp.example.org

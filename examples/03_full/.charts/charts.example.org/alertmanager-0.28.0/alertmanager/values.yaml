@@ -1,0 +1,3 @@
+# The chart cache's copy of the (fictional) alertmanager chart 0.28.0, the
+# HTTP endpoint of the alerts package: its defaults.
+fullnameOverride: ""

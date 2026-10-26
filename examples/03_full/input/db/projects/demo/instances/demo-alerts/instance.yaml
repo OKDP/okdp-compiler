@@ -1,0 +1,4 @@
+# The HTTP endpoint demo-workspace references (notifications.webhook:
+# demo-alerts): the package catalog/alerts/1.0.0/.
+service: alerts
+version: 1.0.0

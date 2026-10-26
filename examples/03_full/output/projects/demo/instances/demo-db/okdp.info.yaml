@@ -1,0 +1,12 @@
+provides:
+  - name: demo-db
+    contract: database
+    values:
+      dbName: demo-db
+      driver: org.postgresql.Driver
+      engine: postgresql
+      host: demo-db-db.demo.svc
+      port: 5432
+      sslMode: prefer
+    secretRef:
+      name: demo-db-database-credentials

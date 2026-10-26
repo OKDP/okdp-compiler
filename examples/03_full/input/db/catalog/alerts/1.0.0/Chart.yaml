@@ -1,0 +1,9 @@
+# A minimal package of the alerts service, the HTTP endpoint the instance
+# demo-workspace sends its notifications to: one upstream chart, under the
+# key alertmanager; no parameter.
+
+apiVersion: v2
+name: alerts
+version: 1.0.0
+dependencies:
+  - {name: alertmanager, repository: https://charts.example.org, version: 0.28.0}

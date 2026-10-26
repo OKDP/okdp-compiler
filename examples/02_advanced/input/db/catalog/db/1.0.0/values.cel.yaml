@@ -1,0 +1,7 @@
+# The postgresql chart's values: the service and the database the
+# convention names, the generated credentials.
+postgresql:
+  fullnameOverride: ${{ release.name }}-db
+  auth:
+    database: ${{ release.name }}
+    existingSecret: ${{ release.name }}-database-credentials
