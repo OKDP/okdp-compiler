@@ -36,7 +36,8 @@ on, for a deployer that orders the releases (okdp-gitops: Flux
 compile (a `values.yaml` that holds expressions)
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
-`CompileAll` compiles instances together, those of a namespace each
+`LoadRepository` reads a tree, in one or more repositories, as its
+instances. `CompileAll` compiles instances together, those of a namespace each
 after the instances whose outputs it references, with what they publish
 as `Published`: the order of a tree's instances is the compiler's, not
 its caller's. `NewGraph` then checks the dependencies of the results and
@@ -375,10 +376,10 @@ item `[i]`.
 The module's root is the public package, `compiler`: it gives callers the
 types they name, as aliases, and wraps the functions of `okdp`, `graph`,
 the targets and `chart`. Under `internal/`, the packages each import only
-those below them: `cmd/okdp-compile` -> `compiler` -> `target/flux` and
-`target/argocd` -> `target/helm` -> `target` -> `graph` -> `okdp` ->
-`compile` and `chart` -> `value`: the compile knows no graph and no
-target, the graph no target (`TestLayers`).
+those below them: `cmd/okdp-compile` -> `compiler` -> `repository`, and
+`target/flux` and `target/argocd` -> `target/helm` -> `target` -> `graph`
+-> `okdp` -> `compile` and `chart` -> `value`: the compile knows no tree,
+no graph and no target, the graph no target (`TestLayers`).
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -416,13 +417,14 @@ neither knows OKDP.
 | | `provides.go` | stage 7: `Info`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`) | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | | `namespace.go` | `Instance`, `Outcome`, `CompileAll`: the instances of each namespace compiled together (`compileNamespace`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks), the outputs two instances publish refused, and what resolved through them compiled again (`refuseShared`); the instances that do not compile named in the refusals for an output (`notCompiled`) | `Compile`, `missingOutputs` (`connections.go`) |
+| `repository` | `repository.go` | the tree of a deployment, in one or more repositories: `Repository`, `Load`: the owner of each part, every conflict at once (`index`), then each instance (`instance`): its package, loaded once (`definition`), its context layers and values; the names of the tree | `okdp.LoadDefinition`, `chart.ParseValues` |
 | `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
 | `target` | `target.go` | `Target`, an output format, `Files` of the results and their graph; what the targets share: `ProjectDir`, `InstanceDir` (`projects/<namespace>/instances/<release>`), `Generated`, the mark of a generated file, `Lines`, a file built line by line; the checks of their options (`CheckPrefix`, `CheckQuoted`) and of the release names their objects share a namespace with (`UniqueReleases`) | `graph.Graph`, `okdp.Result` |
 | `target/helm` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
 | | `target.go` | `Target`, the helm target: the files of `Write` of each result, in its `InstanceDir` | `umbrella.go`, `target` |
 | `target/flux` | `flux.go` | the flux target (`Target`: `Source`, `PathPrefix`): the helm target's files, an instance's HelmRelease and Kustomization (`Instance`), a namespace's Kustomization (`Project`), okdp-gitops' format | `target/helm`, `target`, `graph.DependsOn`; `chart.IsDNSLabel` |
 | `target/argocd` | `argocd.go` | the argocd target (`Target`: `RepoURL`, `Revision`, `PathPrefix`): the helm target's files, an instance's Application (`Application`), okdp-gitops' format | `target/helm`, `target`, `graph.Wave` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Graph`, `GraphNode`, `GraphError`, `Target`, `Helm`, `Flux`, `ArgoCD`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `graph`, the targets, `chart` |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Instance`, `Outcome`, `Repository`, `Graph`, `GraphNode`, `GraphError`, `Target`, `Helm`, `Flux`, `ArgoCD`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`) | wraps `okdp`, `repository`, `graph`, the targets, `chart` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -448,6 +450,12 @@ CEL session per compile for the mapping and the compiler's templates.
 contract when it is not named after the instance
 ([`--output`](01_usage.md#--output)). `--published <dir>` reads the
 `okdp.info.yaml` of each `<dir>/<release>/` into `Inputs.Published`.
+`--repository` (`runRepository`) chains the stages instead: the tree
+(`compiler.LoadRepository`), `compiler.CompileAll`, `compiler.NewGraph`,
+the files of the target `--target` names (`newTarget`, its options
+checked before the tree is read), written under `-o`, whose `projects/`
+it owns (`writeTree`); each refusal, problem of the graph, warning and
+dependency printed after its `<namespace>/<release>`.
 Its own rules are the disk's:
 every input is a flag (an argument that is not one would end Go's flag
 parsing, and is refused), and every output is built before any is
@@ -678,6 +686,19 @@ does not change when more is published, but for an output two instances
 publish, which is refused, with what resolved through it, so that no
 outcome depends on the order of the instances.
 
+### One tree, several repositories
+
+A platform, its catalogs and its projects are often apart: a team writes
+its project's repository, a catalog ships its packages and their
+contracts. `LoadRepository` reads one tree from any number of
+repositories, each holding any part of it, and merges them part by part
+with no precedence: a part in two repositories is refused, not
+overridden, so that the order of the repositories never changes the
+tree, and a part's repository is the one to fix. A contract may be in
+several, the same bytes in each, as okdp-gitops' catalogs ship theirs.
+The compiler reads directories; fetching a repository at a revision is
+its caller's.
+
 ### A graph for deployment only
 
 The compile needs no graph: its edges are discovered as it goes. A
@@ -878,6 +899,11 @@ hand, what the graph reads of them: the waves of a diamond and of a
 namespace apart, the dependencies deduplicated and sorted (`TestWaves`),
 every problem at once, each cycle once, a release waiting for one not
 reported (`TestErrors`, `TestNotProvided`).
+`internal/repository/repository_test.go` reads a tree whole and split
+into repositories, in any order, the same instances (`TestLoad`), and
+every problem at once: the parts in two repositories, a contract that
+differs, an instance without its package, a package that fails, once
+(`TestLoadErrors`).
 `internal/target/target_test.go` compiles three instances in two
 namespaces and writes them with each target, compared with
 `testdata/targets/<target>/` (`go test ./internal/target -update`
@@ -910,7 +936,10 @@ for a usage error), `$OKDP_CHARTS` and `$OKDP_CONTRACTS` and the flags that
 override them, what it prints on stdout and stderr, its warnings included
 (`warnings.txtar`, a package of its own), `--check` and its checks
 against a chart cache (`check.txtar`), `--published` and a reference to
-another instance's output (`published.txtar`), one script per concern.
+another instance's output (`published.txtar`), a tree compiled whole
+(`repository.txtar`: two repositories, each target, `--check`, a stale
+instance removed, a cycle of outputs and one by convention), one script
+per concern.
 The public package is tested through the example in the root package:
 `example_test.go` holds the Go programs of README.md and
 [usage](01_usage.md#go-library) as examples, with their output, and
@@ -1008,17 +1037,15 @@ minimal packages, `catalog/db/1.0.0/` (02_advanced's) and
 `catalog/alerts/1.0.0/`, each providing what its contract's naming
 convention gives, their charts in the cache.
 
-`TestExample` (`examples_test.go`) compiles every instance of each
-example's tree as a caller of the tree does (`loadInstance`): the package
-its `instance.yaml` names, checked against its `Chart.yaml`, the chart
-cache, the contracts (none without `contracts/`), the context files
-present (`platform.yaml` at level 0, `project.yaml` at level 1,
-`connections.yaml` at level 2) and its `config.yaml`, under the release
-of its directory and the namespace of its project's. It compares the files
-of `Write` with the instance's directory of `output/` byte for byte; a
-directory of `output/` that no instance writes fails.
-`TestRun` (`cmd/okdp-compile/main_test.go`) checks that the command line
-writes them, over the files of a previous compile.
+`TestExample` (`examples_test.go`) reads each example's tree
+(`LoadRepository`, its `input/db/` one repository), compiles its
+instances together (`CompileAll`), checks their graph (`NewGraph`), and
+compares the files of the helm target with its `output/` byte for byte; a
+file of `output/` that it does not write fails.
+`TestRunRepository` (`cmd/okdp-compile/main_test.go`) checks that
+`--repository` writes them, a stale instance removed, the full example
+split into three repositories too, and `TestRun` that `-o` writes an
+instance's, over the files of a previous compile.
 After a change, `go test . -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures; `make example` only them); the diff is the change's effect,
@@ -1031,7 +1058,8 @@ fail on the example (`02_advanced`); `testdata/context/<level>/<case>.yaml`:
 context values of that level that must fail on it (those of level 2, an
 instance's own connections, also set the parameter that references them).
 The first line is `# error: <message>` (`\n` for a line break).
-`TestExampleErrors` compiles the example's instance (`loadInstance`), an
+`TestExampleErrors` compiles the example's instance `demo-webapp`, as
+`LoadRepository` reads it, an
 instance case in place of its `config.yaml`, a context case as a context
 layer of its directory's level after `platform.yaml` and without
 `config.yaml`, and expects an error containing the message. The instance

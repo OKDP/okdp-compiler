@@ -7,15 +7,11 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
-	"testing/fstest"
-
-	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 )
@@ -23,63 +19,21 @@ import (
 var update = flag.Bool("update", false, "rewrite the examples' outputs from the current compiler")
 
 // examples: each example a repository tree (docs/01_usage.md, repository
-// layout): its sources under input/db/, what -o <dir> writes for each
-// instance in output/projects/<project>/instances/<instance>/, and, for
-// --check --charts, a chart cache in .charts/.
+// layout): its sources under input/db/, what the helm target writes for
+// its instances in output/, and, for --check --charts, a chart cache in
+// .charts/.
 const examples = "examples"
 
-// loadInstance: the compile of an instance of an example's tree,
-// input/db/projects/<project>/instances/<instance>/, as a caller of the tree
-// gives it: the package its instance.yaml names, catalog/<service>/<version>/,
-// whose Chart.yaml has that name and version; no chart cache; the
-// contracts of db/contracts/, none when absent; the context, platform.yaml at
-// level 0, the project's project.yaml at level 1 and the instance's
-// connections.yaml at level 2, then the instance values, its config.yaml,
-// each when present; the release <instance> and the namespace <project>.
-func loadInstance(t *testing.T, example, project, instance string) (*Definition, Inputs) {
+// load: every instance of an example's tree, its input/db/ one
+// repository (LoadRepository).
+func load(t *testing.T, example string) []Instance {
 	t.Helper()
-	root := filepath.Join(examples, example)
-	db := filepath.Join(root, "input", "db")
-	proj := filepath.Join(db, "projects", project)
-	dir := filepath.Join(proj, "instances", instance)
-	b, err := os.ReadFile(filepath.Join(dir, "instance.yaml"))
+	db := filepath.Join(examples, example, "input", "db")
+	instances, err := LoadRepository([]Repository{{Name: db, FS: os.DirFS(db)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var pkg struct {
-		Service string `yaml:"service"`
-		Version string `yaml:"version"`
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	if err := dec.Decode(&pkg); err != nil {
-		t.Fatalf("%s: %v", filepath.Join(dir, "instance.yaml"), err)
-	}
-	catalog := filepath.Join(db, "catalog", pkg.Service, pkg.Version)
-	def, err := LoadDefinition(os.DirFS(catalog))
-	if err != nil {
-		t.Fatalf("%s: %v", catalog, err)
-	}
-	if def.Chart.Name != pkg.Service || def.Chart.Version != pkg.Version {
-		t.Fatalf("%s: Chart.yaml is %s %s", catalog, def.Chart.Name, def.Chart.Version)
-	}
-	in := Inputs{
-		Contracts: fstest.MapFS{},
-		Release:   instance,
-		Namespace: project,
-	}
-	if contracts := filepath.Join(db, "contracts"); exists(t, contracts) {
-		in.Contracts = os.DirFS(contracts)
-	}
-	for level, f := range []string{filepath.Join(db, "platform.yaml"), filepath.Join(proj, "project.yaml"), filepath.Join(dir, "connections.yaml")} {
-		if exists(t, f) {
-			in.Context = append(in.Context, readContext(t, uint(level), f)...)
-		}
-	}
-	if f := filepath.Join(dir, "config.yaml"); exists(t, f) {
-		in.Values = readLayers(t, []string{f})
-	}
-	return def, in
+	return instances
 }
 
 // exists: whether path exists.
@@ -90,16 +44,6 @@ func exists(t *testing.T, path string) bool {
 		t.Fatal(err)
 	}
 	return err == nil
-}
-
-// readContext: values files, as context layers of this level.
-func readContext(t *testing.T, level uint, files ...string) []ContextLayer {
-	t.Helper()
-	var layers []ContextLayer
-	for _, l := range readLayers(t, files) {
-		layers = append(layers, ContextLayer{Level: level, Values: l})
-	}
-	return layers
 }
 
 // readLayers: values files, as values layers.
@@ -120,62 +64,65 @@ func readLayers(t *testing.T, files []string) []map[string]any {
 	return layers
 }
 
-// TestExample compiles every instance of each example's tree (loadInstance)
-// and compares what it writes with the instance's outputs, byte for byte;
-// an output directory of no instance fails. 00_passthrough: Chart.yaml
-// and a plain values.yaml, no instance values. 01_minimal: one chart, no
-// contract. 02_advanced: dcr mode, the OAuth client's chart added.
-// 03_full: the project's project.yaml at level 1 and the instance's
-// connections.yaml at level 2, between platform.yaml and config.yaml; its
-// chart cache, .charts/, checks the compile (--check --charts), which
-// gives the same files and no other warning.
+// TestExample compiles the instances of each example's tree together
+// (load, CompileAll), checks their graph (NewGraph) and compares what the
+// helm target writes with its output/, byte for byte; a file of output/
+// that it does not write fails. 00_passthrough: Chart.yaml and a plain
+// values.yaml, no instance values. 01_minimal: one chart, no contract.
+// 02_advanced: dcr mode, the OAuth client's chart added; the database it
+// references. 03_full: the project's project.yaml at level 1 and the
+// instance's connections.yaml at level 2, between platform.yaml and
+// config.yaml; the instances it references; its chart cache, .charts/,
+// checks the compiles (--check --charts), which give the same files and
+// no other warning.
 func TestExample(t *testing.T) {
-	instances, _ := filepath.Glob(filepath.Join(examples, "*", "input", "db", "projects", "*", "instances", "*"))
-	outputs, _ := filepath.Glob(filepath.Join(examples, "*", "output", "projects", "*", "instances", "*"))
-	if len(instances) == 0 {
+	dbs, _ := filepath.Glob(filepath.Join(examples, "*", "input", "db"))
+	if len(dbs) == 0 {
 		t.Fatal("no example")
 	}
-	for _, dir := range instances {
-		rel, _ := filepath.Rel(examples, dir)
-		parts := strings.Split(filepath.ToSlash(rel), "/") // <example>/input/db/projects/<project>/instances/<instance>
-		example, project, instance := parts[0], parts[4], parts[6]
-		out := filepath.Join(example, "output", "projects", project, "instances", instance)
-		outputs = slices.DeleteFunc(outputs, func(o string) bool { return o == filepath.Join(examples, out) })
-		t.Run(path.Join(example, project, instance), func(t *testing.T) {
-			def, in := loadInstance(t, example, project, instance)
-			res, err := Compile(t.Context(), def, in)
-			if err != nil {
-				t.Fatal(err)
-			}
-			files := output(t, res)
-			checkDir(t, out, files)
+	for _, db := range dbs {
+		example := filepath.Base(filepath.Dir(filepath.Dir(db)))
+		t.Run(example, func(t *testing.T) {
+			instances := load(t, example)
+			files, warnings := compileTree(t, instances)
+			checkDir(t, filepath.Join(example, "output"), files)
 			charts := filepath.Join(examples, example, ".charts")
 			if !exists(t, charts) {
 				return
 			}
-			in.Charts = os.DirFS(charts)
-			checked, err := Compile(t.Context(), def, in)
-			if err != nil {
-				t.Fatalf("checked with %s: %v", charts, err)
+			for i := range instances {
+				instances[i].Inputs.Charts = os.DirFS(charts)
 			}
-			if !maps.EqualFunc(output(t, checked), files, bytes.Equal) || !slices.Equal(checked.Warnings, res.Warnings) {
-				t.Errorf("checked with %s: other files, or warnings %q", charts, checked.Warnings)
+			checked, checkedWarnings := compileTree(t, instances)
+			if !maps.EqualFunc(checked, files, bytes.Equal) || !slices.Equal(checkedWarnings, warnings) {
+				t.Errorf("checked with %s: other files, or warnings %q", charts, checkedWarnings)
 			}
 		})
 	}
-	for _, o := range outputs {
-		t.Errorf("%s: the output of no instance", o)
-	}
 }
 
-// output: the files Write gives for res.
-func output(t *testing.T, res *Result) map[string][]byte {
+// compileTree: what the helm target writes for instances compiled
+// together, their graph checked, and their warnings, in their order.
+func compileTree(t *testing.T, instances []Instance) (map[string][]byte, []string) {
 	t.Helper()
-	files, err := Write(res)
+	var results []*Result
+	var warnings []string
+	for i, o := range CompileAll(t.Context(), instances) {
+		if o.Err != nil {
+			t.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err)
+		}
+		results = append(results, o.Result)
+		warnings = append(warnings, o.Result.Warnings...)
+	}
+	g, err := NewGraph(results)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return files
+	files, err := Helm{}.Files(results, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files, warnings
 }
 
 // checkDir: examples/<dir> holds these files, path -> content, and only
@@ -225,7 +172,7 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 	}
 }
 
-// TestExampleErrors: on the instance of 02_advanced (loadInstance), every
+// TestExampleErrors: on the instance demo-webapp of 02_advanced (load), every
 // testdata/<case>.yaml, an instance file in place of its config.yaml, and
 // every testdata/context/<level>/<case>.yaml, a context file of that level
 // after the tree's, without config.yaml, must fail with the message of its
@@ -252,14 +199,22 @@ func TestExampleErrors(t *testing.T) {
 				t.Fatalf("first line must be \"# error: <message>\", got %q", first)
 			}
 			want = strings.ReplaceAll(want, `\n`, "\n")
-			def, in := loadInstance(t, "02_advanced", "demo", "demo-webapp")
+			var webapp Instance
+			for _, inst := range load(t, "02_advanced") {
+				if inst.Inputs.Release == "demo-webapp" {
+					webapp = inst
+				}
+			}
+			in := webapp.Inputs
 			if level, err := strconv.ParseUint(filepath.Base(filepath.Dir(f)), 10, 0); err == nil {
-				in.Context = append(in.Context, readContext(t, uint(level), f)...)
+				for _, l := range readLayers(t, []string{f}) {
+					in.Context = append(in.Context, ContextLayer{Level: uint(level), Values: l})
+				}
 				in.Values = nil
 			} else {
 				in.Values = readLayers(t, []string{f})
 			}
-			if _, err := Compile(t.Context(), def, in); err == nil || !strings.Contains(err.Error(), want) {
+			if _, err := Compile(t.Context(), webapp.Definition, in); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("got %v, want an error containing %q", err, want)
 			}
 		})

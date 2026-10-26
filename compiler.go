@@ -26,19 +26,21 @@
 // outputs the other instances of the namespace reference by name
 // (Inputs.Published); the instances it depends on are for a deployer
 // (Result.Dependencies). CompileAll compiles instances together, each with
-// what the others publish, NewGraph orders their releases, the
-// dependencies checked, and a Target writes them for a deployer.
+// what the others publish (a tree's, LoadRepository), NewGraph orders
+// their releases, the dependencies checked, and a Target writes them for
+// a deployer.
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
 // git tree without touching the disk.
 //
 // This package is the public API; the implementation is under internal/:
-// OKDP's rules and the order of the stages (okdp), the deployment graph
-// of compiled instances (graph), the formats compiled instances are
-// written in (target: helm, the umbrella of Write, flux, argocd), the
-// mapping language (compile), what the compiler reproduces of Helm
-// (chart), and the values they share (value).
+// OKDP's rules and the order of the stages (okdp), the tree of a
+// deployment read (repository), the deployment graph of compiled
+// instances (graph), the formats compiled instances are written in
+// (target: helm, the umbrella of Write, flux, argocd), the mapping
+// language (compile), what the compiler reproduces of Helm (chart), and
+// the values they share (value).
 package compiler
 
 import (
@@ -48,6 +50,7 @@ import (
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/internal/repository"
 	"github.com/okdp/okdp-compiler/internal/target"
 	"github.com/okdp/okdp-compiler/internal/target/argocd"
 	"github.com/okdp/okdp-compiler/internal/target/flux"
@@ -84,6 +87,9 @@ type (
 	// Outcome: the compile of one instance of CompileAll: its result, nil
 	// when it is refused, and why.
 	Outcome = okdp.Outcome
+	// Repository: a part of a tree LoadRepository reads: its name in
+	// messages and its files.
+	Repository = repository.Repository
 	// Graph: the deployment graph of compiled instances (NewGraph): what
 	// each release waits for (DependsOn), its Argo CD sync wave (Wave).
 	Graph = graph.Graph
@@ -132,6 +138,10 @@ const (
 	ObjectsTemplate = helm.ObjectsTemplate
 )
 
+// DefaultFluxSource: the GitRepository of the flux target when
+// Flux.Source is empty, okdp-gitops'.
+const DefaultFluxSource = flux.DefaultSource
+
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
 // okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
 // has them, checked; each compile reads its other files. A values.yaml
@@ -155,6 +165,16 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // Outcomes in the order of instances, which changes none of them.
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return okdp.CompileAll(ctx, instances)
+}
+
+// LoadRepository: every instance of the tree that repos make together
+// (docs/01_usage.md, repository layout), by project then instance, as
+// CompileAll compiles them: each part of the tree in one repository
+// (platform.yaml, catalog/<service>/, projects/<project>/), a contract in
+// several with the same bytes, so that the order of repos changes nothing.
+// Every problem at once, each naming its repository and path.
+func LoadRepository(repos []Repository) ([]Instance, error) {
+	return repository.Load(repos)
 }
 
 // NewGraph: the deployment graph of results, the compiled instances of

@@ -109,6 +109,11 @@ okdp-compile --check [--charts <dir>] --package <dir> [--contracts <dir>]
              [--published <dir>] [--context [<level>:]<context.yaml>]...
              [-f <values.yaml>]...
              --release <name> --namespace <name>
+okdp-compile --repository <dir> [--repository <dir>]... -o <dir>
+             [--target helm|flux|argocd] [--path-prefix <path>]
+             [--flux-source <namespace>/<name>]
+             [--repo-url <url>] [--revision <revision>]
+okdp-compile --check [--charts <dir>] --repository <dir> [--repository <dir>]...
 okdp-compile --version
 ```
 
@@ -124,13 +129,19 @@ okdp-compile --version
 | `--release` | required | release name: the Helm release the values are compiled for, which renders them; a DNS-1123 label (lowercase letters, digits and `-`) of 53 characters at most, as Helm accepts it |
 | `--namespace` | required | namespace: the release's; a DNS-1123 label of 63 characters at most |
 | `--output`, `-o` | required, refused with `--check` | the output directory: the instance as one chart, `Chart.yaml`, an umbrella over the upstream charts, `instance.values.yaml`, its values, `okdp.objects.yaml` and `templates/okdp.yaml`, OKDP's own objects, when the instance has any, and `okdp.info.yaml`, what the instance publishes, when it publishes something; the instances the connection references point to printed on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance ([`--output`](#--output)) |
+| `--repository` | none | a repository of the tree, its directory, repeatable: any part of the [tree](#repository-layout), each part in one repository; every instance of the tree compiled together, written for `--target`; no other input flag, `$OKDP_CONTRACTS` not read ([`--repository`](#--repository)) |
+| `--target` | `helm`, with `--repository` | what `--repository` writes: `helm`, each instance's umbrella chart; `flux`, with its HelmRelease and the Kustomizations; `argocd`, with its Application ([targets](specs/01_inputs_outputs.md#targets)) |
+| `--path-prefix` | the root | `--target flux` and `argocd`: the path of the output directory in the repository the deployer reads |
+| `--flux-source` | `flux-system/okdp-gitops` | `--target flux`: the GitRepository of that repository, `<namespace>/<name>` |
+| `--repo-url` | required by `--target argocd` | `--target argocd`: the repository Argo CD reads the output directory from |
+| `--revision` | `HEAD` | `--target argocd`: its revision |
 | `--version` | | print the version and exit |
 
 Flags take one or two dashes, and every input is a flag: an argument that
 is not one is refused, where it would end the flags and those after it be
 ignored (a values file without its `-f`). The directories of `--package`,
-`--charts`, `--contracts` and `--published`, when given, must exist. Every output is built before any
-is written: a compile or an output that fails writes nothing; an error
+`--charts`, `--contracts`, `--published` and `--repository`, when given,
+must exist. Every output is built before any is written: a compile or an output that fails writes nothing; an error
 while writing may leave some of the files written.
 
 ### `--output`
@@ -318,12 +329,62 @@ api (workspace-3.2.0):
 - at '/env/25/name': 'bad-name' does not match pattern '^[A-Za-z_][A-Za-z0-9_]*$'
 ```
 
+### `--repository`
+
+Every instance of a tree compiled together, the inputs of each read from
+the tree ([repository layout](#repository-layout)): `--repository <dir>`,
+repeatable, each directory any part of it. No other input flag:
+`--package`, `--contracts`, `--published`, `--release`, `--namespace`,
+`--context` and `-f` are refused, `$OKDP_CONTRACTS` is not read. In
+order:
+
+1. the tree: every instance, by project then instance
+   (`compiler.LoadRepository`), every problem of the tree at once;
+2. the instances compiled together, each with what the others of its
+   namespace publish, after those whose outputs it references
+   ([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together)),
+   checked against the chart cache with `--check --charts`: each refusal
+   on stderr, `error: <namespace>/<release>: <message>`, each warning,
+   `warning: <namespace>/<release>: <message>`, in the order of the
+   instances;
+3. their [deployment graph](specs/01_inputs_outputs.md#the-deployment-graph):
+   each problem on stderr, `error: <namespace>/<release>: <message>`;
+4. the files of the target ([targets](specs/01_inputs_outputs.md#targets)),
+   written under `-o`, each instance's in
+   `projects/<namespace>/instances/<release>/`; then each dependency,
+   `<namespace>/<release>: depends on <instance> (<contract>, <field>)`.
+
+Any problem exits with status 1, nothing written; `--check` stops before
+writing, and prints no dependency. The options are checked before the
+tree is read. The command owns `<output>/projects/`: a file there it does
+not write, that of an instance removed from the tree, is removed, and the
+directories left empty; so `-o` and each `--repository` must not contain
+one another, nor a `--repository` another.
+
+```console
+$ bin/okdp-compile --repository examples/03_full/input/db -o out/tree
+demo/demo-workspace: depends on demo-db (database, catalogs[1].database)
+demo/demo-workspace: depends on demo-db (database, database)
+demo/demo-workspace: depends on demo-alerts (http, notifications.webhook)
+```
+
+`out/tree` then holds `examples/03_full/output/`, byte for byte.
+
+| `--target` | Writes, besides each instance's umbrella chart | Options |
+|---|---|---|
+| `helm` (the default) | nothing: the files of `-o` | none |
+| `flux` | each instance's `helmrelease.yaml` and `kustomization.yaml`, each namespace's `kustomization.yaml` | `--path-prefix`; `--flux-source` |
+| `argocd` | each instance's `application.yaml` | `--repo-url`, required; `--revision`; `--path-prefix` |
+
+An option of another target is refused. What the deployer sets up once,
+and what sync waves order, is in [targets](specs/01_inputs_outputs.md#targets).
+
 ### Exit status and errors
 
 | Status | When |
 |---|---|
-| 0 | compiled, or checked (`--check`), each warning on stderr as `warning: <message>`, then, the files written, each dependency as `depends on <instance> (<contract>, <field>)`; `--version`, `--help` |
-| 1 | any error: `error: <message>` on stderr |
+| 0 | compiled, or checked (`--check`), each warning on stderr as `warning: <message>`, then, the files written, each dependency as `depends on <instance> (<contract>, <field>)`, each after `<namespace>/<release>: ` with `--repository`; `--version`, `--help` |
+| 1 | any error: `error: <message>` on stderr; with `--repository`, one per refused instance and per problem of the graph, `error: <namespace>/<release>: <message>` |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
 A message is a whole report and may span several lines: every schema
@@ -422,11 +483,11 @@ helm template <release> app --repo https://charts.example.org --version 1.8.0 --
 
 The examples lay their inputs out as a repository of OKDP: the platform,
 the catalog of packages, the projects and their instances, each file the
-input of one flag. The compiler reads none of these names: it only sees the
-package, the directories and the layers it is given. The tree is a
-convention for its callers, which give each file to its flag (`db/` is an
-example's `input/db/`, beside its `output/`, and its `.charts/` for the full
-example):
+input of one flag. `--repository` reads the tree whole
+(`compiler.LoadRepository`); a compile of one instance reads none of these
+names, only the package, the directories and the layers it is given, each
+file given to its flag (`db/` is an example's `input/db/`, beside its
+`output/`, and its `.charts/` for the full example):
 
 ```text
 db/
@@ -464,14 +525,32 @@ output/projects/<project>/instances/<instance>/   -o <dir>
   outside `db/`: it is not source. Only the full example has one; the
   compiles read none.
 
-A caller checks that `catalog/<service>/<version>/` holds a `Chart.yaml`
-of that `name` and `version`, and treats a released version directory as
-immutable: a change is a new version. The compiler does neither: it reads
-the package it is given.
+`--repository` checks that `catalog/<service>/<version>/` holds a
+`Chart.yaml` of that `name` and `version`; a caller of a compile does,
+and treats a released version directory as immutable: a change is a new
+version.
 
-`TestExample` (`examples_test.go`) compiles every instance of each
-example's tree this way (`loadInstance`), and compares what it writes with
-the instance's directory of `output/`. The example instances are named
+The tree may be in several repositories, `--repository` given for each (a
+`compiler.Repository` each): a platform repository with `platform.yaml`,
+catalog repositories with `catalog/` and `contracts/` (OKDP's
+platform-charts is one, as it is), a repository per project with
+`projects/<project>/`, or all in one. They make one tree, part by part,
+with no precedence, so that the order of the flags changes nothing:
+
+| Part | Across repositories |
+|---|---|
+| `platform.yaml` | in one at most |
+| `catalog/<service>/` | in one: every version of a service from it |
+| `contracts/<contract>.schema.json` | in several, the same bytes in each: a catalog ships the contracts of its packages |
+| `projects/<project>/` | in one: the project's file and its instances |
+
+An instance's package and contracts come from any repository. The
+compiler reads directories: checking a repository out at a revision is
+its caller's.
+
+`TestExample` (`examples_test.go`) compiles each example's tree this way
+(`LoadRepository`, then `CompileAll`), and compares what the helm target
+writes with its `output/`. The example instances are named
 after the release names of their outputs, `demo-hello`, `demo-webapp`,
 `demo-db`, `demo-workspace`, `demo-alerts`; a real instance would be named
 `hello`, the namespace already saying `demo`. The full example's command
@@ -674,6 +753,11 @@ holds, to read it back.
   them in no file; the binary prints each, once the files are written, as
   `depends on <instance> (<contract>, <field>)`, the output after the
   contract when it is not named after the instance.
+- `compiler.LoadRepository(repos)` reads a tree, in one or more
+  repositories, each a `compiler.Repository` (its name in messages, its
+  `fs.FS`), as the instances `CompileAll` compiles, by project then
+  instance ([repository layout](#repository-layout)); every problem at
+  once, each naming its repository and path.
 - `compiler.CompileAll(ctx, instances)` compiles instances together, each
   a `compiler.Instance`, its `Definition` and its `Inputs` without
   `Published`: each instance of a namespace after the instances whose
@@ -741,23 +825,21 @@ holds, to read it back.
 
 ### CI
 
-Compile every instance of a package, each under its release name and
-namespace; any error fails the job:
+Compile every instance of the tree, the repositories of its parts
+checked out side by side; any error fails the job:
 
 ```bash
-for f in instances/*.yaml; do
-  name=$(basename "$f" .yaml)   # the instance's release name
-  bin/okdp-compile --package package --contracts contracts \
-    --context platform.yaml -f "$f" --release "$name" --namespace demo \
-    -o "compiled/$name" || exit 1
-done
+bin/okdp-compile --repository platform --repository catalog --repository projects \
+  -o compiled --target flux || exit 1
 test -z "$(git status --porcelain compiled/)" || { git status --short compiled/; exit 1; }
 ```
 
-An instance that references an output of another
-([resolution](specs/01_inputs_outputs.md#resolution)) needs what that one
-publishes: compile it first, then the consumer with `--published
-compiled`, the directory the loop writes.
+The instances are compiled together: one that references an output of
+another ([resolution](specs/01_inputs_outputs.md#resolution)) gets what
+that one publishes, and their dependencies are checked
+([`--repository`](#--repository)). One instance alone compiles with
+`--package` and its inputs, `--published` giving what the others
+publish.
 
 A job that pulls the upstream charts into a chart cache checks the final
 values against them too: the same flags, `--check --charts charts` for
@@ -776,7 +858,8 @@ alone as one Helm release, `helm upgrade --install`
 ([rendering with Helm](#rendering-with-helm)). OKDP publishes no chart of
 the service: the upstream charts come from their own repositories, the
 umbrella's dependencies. The targets write compiled instances for a
-deployer: the umbrella chart of each (`Helm`), with its Flux HelmRelease,
+deployer, `okdp-compile --repository <dir> --target helm|flux|argocd`:
+the umbrella chart of each (`Helm`), with its Flux HelmRelease,
 `dependsOn` the releases it waits for (`Flux`), or its Argo CD
 Application and sync wave (`ArgoCD`), from the
 [deployment graph](specs/01_inputs_outputs.md#the-deployment-graph), in
@@ -961,3 +1044,26 @@ the cause or the fix is not in the message:
 | `Chart.yaml: dependencies[1] (oidc-dcr): the chart of oidcClients[0] is added by the compiler: remove it` | `Chart.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; give the dependency another key (`alias`), or rename the client, when it is another chart |
 | `values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it` | the values file computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
 | `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0` | with `--check --charts`, `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+
+### Repositories and the graph
+
+`--repository` prints each refusal and each problem of the graph after
+`error: <namespace>/<release>: `
+([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together),
+[the deployment graph](specs/01_inputs_outputs.md#the-deployment-graph));
+those of the targets' options are in [targets](specs/01_inputs_outputs.md#targets).
+
+| Message | Cause | Fix |
+|---|---|---|
+| `--repository reads every input from the tree: no --package` (`--contracts`, `--context`, `-f`...) | an input flag with `--repository` | drop it: the tree gives every input |
+| `--target is read with --repository only` (`--path-prefix`...), `--flux-source is read by --target flux only` | a target's option without `--repository`, or with another target | drop it, or give its target |
+| `--repo-url is required by --target argocd` | no repository for the Applications | give the one Argo CD reads the output from |
+| `--repository db/projects is inside --repository db`, `--output (-o) out and --repository out/db must not contain one another: ...` | nested directories: a part read twice, or an output that would remove the sources | give disjoint directories |
+| `project "demo" is in the repositories a and b` (`platform.yaml`, `service "<name>"`) | a part of the tree in two repositories | keep it in one ([repository layout](#repository-layout)) |
+| `contract s3 differs between the repositories a and b` | two repositories ship different contracts of one name | make them the same, or rename one |
+| `db/projects/demo/instances/web/instance.yaml: service "web" is in the catalog of no repository`, `version "2.0.0" of service "web" is not in db/catalog/web` | the instance names a package no repository has | add it to a catalog, or fix `instance.yaml` |
+| `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none | fix that instance; the reference then resolves |
+| `error: demo/demo-p: provides "x" (server): demo-q publishes an output of that contract and name too, ...` | two instances of the namespace publish one output | name one of them otherwise: a reference must find one |
+| `error: demo/demo-web: database: it references "demo-db", which is not another instance of namespace "demo"` | a reference by naming convention to an instance the tree lacks | add the instance, or reference an external connection |
+| `error: demo/demo-web: database: it references "demo-api" as a database connection, which "demo-api" does not provide` | the instance referenced provides no output of that contract | reference one that does |
+| `error: demo/demo-a: dependency cycle: demo-a -> demo-b -> demo-a: the releases would wait for each other` | instances that reference each other, by naming convention | make one of the references a connection file's: it creates no dependency |

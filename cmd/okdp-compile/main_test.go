@@ -168,6 +168,107 @@ func TestRunErrors(t *testing.T) {
 	}
 }
 
+// TestRunRepository: --repository: the tree of each example, its
+// input/db/, compiled into a directory holding a stale instance: it holds
+// the example's output, the stale instance removed; the full example's
+// tree split into three repositories, in either order, gives the same.
+func TestRunRepository(t *testing.T) {
+	examples := filepath.Join("..", "..", "examples")
+	for _, example := range []string{"00_passthrough", "01_minimal", "02_advanced", "03_full"} {
+		t.Run(example, func(t *testing.T) {
+			dir := t.TempDir()
+			stale := filepath.Join(dir, "projects", "demo", "instances", "demo-gone")
+			if err := os.MkdirAll(stale, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(stale, "Chart.yaml"), []byte("stale: true\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := run(options{repositories: []string{filepath.Join(examples, example, "input", "db")}, output: dir}); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := tree(t, dir), tree(t, filepath.Join(examples, example, "output")); !maps.Equal(got, want) {
+				t.Errorf("got %v, want the example's output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
+			}
+		})
+	}
+	db := filepath.Join(examples, "03_full", "input", "db")
+	parts := t.TempDir()
+	for part, names := range map[string][]string{"platform": {"platform.yaml"}, "catalog": {"catalog", "contracts"}, "projects": {"projects", "contracts"}} {
+		for _, name := range names {
+			src, dst := filepath.Join(db, name), filepath.Join(parts, part, name)
+			var err error
+			if name == "platform.yaml" {
+				var b []byte
+				if b, err = os.ReadFile(src); err == nil {
+					err = errors.Join(os.MkdirAll(filepath.Dir(dst), 0o755), os.WriteFile(dst, b, 0o644))
+				}
+			} else {
+				err = os.CopyFS(dst, os.DirFS(src))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, order := range [][]string{{"platform", "catalog", "projects"}, {"projects", "catalog", "platform"}} {
+		dir := t.TempDir()
+		var repos []string
+		for _, part := range order {
+			repos = append(repos, filepath.Join(parts, part))
+		}
+		if err := run(options{repositories: repos, output: dir}); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := tree(t, dir), tree(t, filepath.Join(examples, "03_full", "output")); !maps.Equal(got, want) {
+			t.Errorf("%v: got %v", order, slices.Sorted(maps.Keys(got)))
+		}
+	}
+}
+
+// TestRunRepositoryErrors: what --repository refuses, before it reads the
+// tree: another input, an option of another target or without
+// --repository, a target without its option, repositories inside one
+// another or the output directory; nothing written.
+func TestRunRepositoryErrors(t *testing.T) {
+	full := filepath.Join("..", "..", "examples", "03_full", "input", "db")
+	for name, tc := range map[string]struct {
+		set  func(o *options)
+		want string
+	}{
+		"package":        {func(o *options) { o.pkg = "x" }, "--repository reads every input from the tree: no --package"},
+		"contracts":      {func(o *options) { o.contracts = "x" }, "--repository reads every input from the tree: no --contracts"},
+		"context":        {func(o *options) { o.contexts = []string{"x"} }, "--repository reads every input from the tree: no --context"},
+		"values":         {func(o *options) { o.values = []string{"x"} }, "--repository reads every input from the tree: no -f"},
+		"no output":      {func(o *options) { o.output = "" }, "--output (-o) is required"},
+		"target":         {func(o *options) { o.target = "kustomize" }, `--target "kustomize": helm, flux or argocd`},
+		"repo url":       {func(o *options) { o.target = "argocd" }, "--repo-url is required by --target argocd"},
+		"flux source":    {func(o *options) { o.fluxSource = "a/b" }, "--flux-source is read by --target flux only"},
+		"path prefix":    {func(o *options) { o.pathPrefix = "x" }, "--path-prefix is read by --target flux and argocd only"},
+		"revision":       {func(o *options) { o.target, o.revision = "flux", "main" }, "--revision is read by --target argocd only"},
+		"flux options":   {func(o *options) { o.target, o.fluxSource = "flux", "okdp" }, `Flux.Source "okdp": the GitRepository of the tree, <namespace>/<name>`},
+		"twice":          {func(o *options) { o.repositories = append(o.repositories, full) }, "--repository " + full + " is given twice"},
+		"inside":         {func(o *options) { o.repositories = append(o.repositories, filepath.Join(full, "projects")) }, "--repository " + filepath.Join(full, "projects") + " is inside --repository " + full},
+		"output inside":  {func(o *options) { o.output = filepath.Join(full, "out") }, "--output (-o) " + filepath.Join(full, "out") + " and --repository " + full + " must not contain one another"},
+		"no repository":  {func(o *options) { o.repositories, o.pkg, o.release, o.namespace, o.target = nil, "x", "a", "b", "flux" }, "--target is read with --repository only"},
+		"a missing tree": {func(o *options) { o.repositories = []string{filepath.Join(full, "nope")} }, "--repository: stat " + filepath.Join(full, "nope") + ": no such file or directory"},
+		"a file":         {func(o *options) { o.repositories = []string{filepath.Join(full, "platform.yaml")} }, "--repository " + filepath.Join(full, "platform.yaml") + ": not a directory"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			o := options{repositories: []string{full}, output: dir}
+			tc.set(&o)
+			err := run(o)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+			if after := tree(t, dir); len(after) > 0 {
+				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
+			}
+		})
+	}
+}
+
 // TestScript runs the scripts of testdata/cli: okdp-compile as a
 // process, its exit status, stdout and stderr, $OKDP_CHARTS and
 // $OKDP_CONTRACTS. A script runs from the repository root, as the commands
