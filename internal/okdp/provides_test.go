@@ -10,13 +10,12 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// httpContract: an http contract with an internal naming convention and a
-// secret field, required (it is in the Secret, never in the values); api,
-// the same fields without a convention, its outputs named; and a contract
-// that cannot be read.
+// httpContract: an http contract with a secret field, required (it is in
+// the Secret, never in the values); api, the same fields, its outputs
+// named; a contract that cannot be read, and one with a naming convention,
+// removed.
 var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "http",
-	"x-okdp-internal": {"url": "https://${ref}.${suffix}"},
 	"properties": {
 		"url": {"type": "string"},
 		"port": {"type": "integer", "default": 443},
@@ -31,7 +30,8 @@ var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
 		"token": {"type": "string", "x-okdp-secret": true}
 	},
 	"required": ["url", "token"]}`)},
-	"broken.schema.json": {Data: []byte(`{`)}}
+	"broken.schema.json": {Data: []byte(`{`)},
+	"conv.schema.json":   {Data: []byte(`{"x-okdp-internal": {"url": "https://${ref}"}, "properties": {"url": {"type": "string"}}}`)}}
 
 // provideCompile: compiles the in-memory chart with this provides section.
 func provideCompile(provides string) (*Result, error) {
@@ -97,13 +97,9 @@ func TestProvidesErrors(t *testing.T) {
 		"empty secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: https://demo-app.example.org}}\n", `two http outputs are named "demo-app"`},
 		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"b\"\ntwo api outputs are named \"a\""},
-		"internal mismatch": {
-			"  - {contract: http, values: {url: https://elsewhere}}\n",
-			`url is "https://elsewhere" but internal references to "demo-app" resolve it to "https://demo-app.example.org"`,
-		},
-		"internal name": {
-			"  - {contract: http, name: other, values: {url: https://other.example.org}}\n",
-			`provides "other" (http): the http contract reaches an instance by its release name: name it "demo-app" or leave name out`,
+		"a naming convention": {
+			"  - {contract: conv, values: {url: u}}\n",
+			`provides "demo-app" (conv): the conv contract cannot be read: conv.schema.json: x-okdp-internal: naming conventions are gone, a provider publishes its connections (provides)`,
 		},
 		"not a map":            {"  - {contract: api, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
 		"values not a map":     {"  - {contract: http, values: [url]}\n", "- at '/provides/0/values': got array, want object"},

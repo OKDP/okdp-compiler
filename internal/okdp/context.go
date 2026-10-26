@@ -26,7 +26,6 @@ type instance struct {
 	svc                *Service     // the package: Chart.yaml's name and version
 	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
 	okdp               M            // global.okdp as written, as the mapping sees it, checked against platform.schema.json
-	suffix             string       // global.okdp.ingress.suffix: the hosts of internal references
 	oidc               M            // platform.oidc: global.okdp.oidc, its defaults applied, its mode derived
 	dcr                bool         // platform.oidc.dcr.enabled: OIDC enabled, the OAuth clients registered by DCR
 	deps               []Dependency // the instances of the namespace the connection references point to, by parameter path
@@ -57,9 +56,8 @@ type instance struct {
 // that do not resolve are reported together, one error each, one per line,
 // in the order of the walk (resolver.walk), as the violations of the
 // parameter schema are; when some name an output no instance publishes,
-// the error says which (missingOutputs). The references to an instance,
-// by an output or the naming convention, are recorded (deps), by
-// parameter path, in string order.
+// the error says which (missingOutputs). The references to an output are
+// recorded (deps), by parameter path, in string order.
 //
 // The merged values stay as the user wrote them. The mapping sees release
 // (name, namespace), values (the resolved parameters), global (global.okdp,
@@ -86,7 +84,6 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	}
 	inst := &instance{release: in.Release, namespace: in.Namespace, svc: svc, values: values}
 	inst.okdp = value.AsMap(value.AsMap(values["global"])["okdp"])
-	inst.suffix = value.Str(value.Dig(inst.okdp, "ingress.suffix"))
 	oidc := value.AsMap(value.Dig(settings, "global.okdp.oidc"))
 	mode := value.Str(oidc["clientProvisioning"])
 	inst.dcr = value.Truthy(oidc["enabled"]) && mode == "dcr"
@@ -94,7 +91,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
 	inst.oidc = oidc
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), published: in.Published, release: in.Release, namespace: in.Namespace, suffix: inst.suffix}
+	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), published: in.Published, release: in.Release, namespace: in.Namespace}
 	if r.walk(schema.Doc, params, ""); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {

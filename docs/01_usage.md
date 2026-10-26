@@ -525,6 +525,13 @@ func main() {
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
+		// What the other instances of the namespace publish (their okdp.info.yaml),
+		// by release: demo-db, the database the instance references.
+		Published: map[string]compiler.Info{"demo-db": {Provides: []compiler.Output{{
+			Name: "demo-db", Contract: "database",
+			Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo-db"},
+			SecretRef: &compiler.SecretRef{Name: "demo-db-database-credentials"},
+		}}}},
 	}
 	// The values layers, as helm -f files: the platform's, then the
 	// instance's.
@@ -680,8 +687,7 @@ holds, to read it back.
 - `Result.Dependencies` lists the instances of the namespace the
   connection references point to, by parameter path, each a
   `compiler.Dependency`, `{Instance, Contract, Field, Output}`, `Output`
-  the output the reference resolved to, the instance's release for one by
-  naming convention
+  the output the reference resolved to, by name
   ([dependencies](specs/01_inputs_outputs.md#dependencies)): what a
   deployer orders the releases with ([GitOps](#gitops)). `Write` writes
   them in no file; the binary prints each, once the files are written, as
@@ -805,9 +811,7 @@ from `Result.Dependencies`: the instances of the namespace the connection
 references point to, one item per parameter
 ([dependencies](specs/01_inputs_outputs.md#dependencies)). Each compile
 is given what the other instances of its namespace publish
-(`Inputs.Published`): a reference may name one of their outputs. A
-compile does not check that an instance reached by its naming convention
-exists: the deployment graph does.
+(`Inputs.Published`): a reference names one of their outputs.
 
 A deployer that renders the umbrella, okdp-gitops or another, respects
 what it is compiled for:
@@ -922,7 +926,7 @@ usage error with status 2.
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): the fields violate the database contract:` then `- at '/engine': value must be one of 'postgresql', 'mysql'`, `- at '/port': got string, want integer` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
-| `<field>: "<name>" is not a connection, and the <contract> contract has no internal naming convention`; `<field>: "<name>" is not a connection, nor an output of an instance of the namespace, and ...` | the name is not in `connections`, nor an output of that contract another instance of the namespace publishes (`(demo-pg publishes it with contract "database", "s3" is expected)`: one of another contract), and the contract cannot resolve an instance | add the connection under `connections` of a context file (`connections.yaml` for the instance's own), or the instance that publishes the output to the tree ([resolution](specs/01_inputs_outputs.md#resolution)) |
+| `<field>: "<name>" is not a connection, nor an output of an instance of the namespace` | the name is not in `connections`, nor an output of that contract another instance of the namespace publishes (`(demo-pg publishes it with contract "database", "s3" is expected)`: one of another contract) | add the connection under `connections` of a context file (`connections.yaml` for the instance's own), or the instance that publishes the output to the tree ([resolution](specs/01_inputs_outputs.md#resolution)) |
 | `<field>: "<name>" names s3 outputs of several instances of the namespace: demo-a, demo-b` | two instances of the namespace publish an output of that name and contract | rename one of the outputs, or reference a connection |
 | `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` of a context file |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
@@ -994,8 +998,5 @@ of the targets' options are in
 | `project "demo" is in the repositories a and b` (`platform.yaml`, `service "<name>"`) | a part of the tree in two repositories | keep it in one ([repository layout](#repository-layout)) |
 | `contract s3 differs between the repositories a and b` | two repositories ship different contracts of one name | make them the same, or rename one |
 | `db/projects/demo/instances/web/instance.yaml: service "web" is in the catalog of no repository`, `version "2.0.0" of service "web" is not in db/catalog/web` | the instance names a package no repository has | add it to a catalog, or fix `instance.yaml` |
-| `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none | fix that instance; the reference then resolves |
+| `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none; instances that reference each other's outputs are both refused so | fix that instance; make one of two references a connection file's: it waits for nothing |
 | `error: demo/demo-p: provides "x" (server): demo-q publishes an output of that contract and name too, ...` | two instances of the namespace publish one output | name one of them otherwise: a reference must find one |
-| `error: demo/demo-web: database: it references "demo-db", which is not another instance of namespace "demo"` | a reference by naming convention to an instance the tree lacks | add the instance, or reference an external connection |
-| `error: demo/demo-web: database: it references "demo-api" as a database connection, which "demo-api" does not provide` | the instance referenced provides no output of that contract | reference one that does |
-| `error: demo/demo-a: dependency cycle: demo-a -> demo-b -> demo-a: the releases would wait for each other` | instances that reference each other, by naming convention | make one of the references a connection file's: it creates no dependency |

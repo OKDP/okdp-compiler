@@ -1,13 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "HTTP endpoint",
-  "description": "Example contract: an HTTP service. An instance named <ref> is reached at <ref>.<ingress suffix>, and <ref>-api in the cluster.",
+  "description": "Example contract: an HTTP service, its public URL and its URL in the cluster.",
   "type": "object",
   "x-okdp-contract": "http",
-  "x-okdp-internal": {
-    "url": "https://${ref}.${suffix}",
-    "internalUrl": "http://${ref}-api.${namespace}.svc:8080"
-  },
   "properties": {
     "url": {"type": "string", "pattern": "^https://"},
     "internalUrl": {"type": "string", "pattern": "^http://"}

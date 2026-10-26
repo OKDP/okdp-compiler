@@ -37,10 +37,10 @@ instance's release by its umbrella, created and deleted with it.
   instance appear, change version or go, in one watch, beside the workloads
   of the release (`app.kubernetes.io/instance`), instead of following the
   repository's commits and the engine's syncs.
-- **Internal connections for a deployment form.** What the deployed
-  instances of a namespace provide, by contract (a label selector on
+- **Outputs for a deployment form.** What the deployed instances of a
+  namespace provide, by contract (a label selector on
   `okdp.io/provides-<contract>`), with their fields and `secretRef`: the
-  values an internal reference resolves to, for instances that run.
+  outputs a reference may name, of instances that run.
 - **Documentation beside the workloads.** `kubectl get configmap -l
   okdp.io/instance` and the `usage` text tell an operator what an instance
   is, its version and how to use it, from the cluster alone.

@@ -16,7 +16,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
-| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections and naming conventions only; `CompileAll` sets it | [Resolution](#resolution), [Compiling instances together](#compiling-instances-together) |
+| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections only; `CompileAll` sets it | [Resolution](#resolution), [Compiling instances together](#compiling-instances-together) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
 The names are checked before anything is read: the release is a release
@@ -328,9 +328,8 @@ checked against its contract when a reference resolves to it
 ## Connections
 
 A connection reference: a parameter that names a connection: an entry of
-`connections` (external), an instance of the namespace (internal) or, of a
-contract without a naming convention, an output another instance of the
-namespace publishes (output). The
+`connections` (external), or an output another instance of the namespace
+publishes (output). The
 compiler replaces it with the fields of the connection, completed against
 its [contract](#contracts), before the mapping runs.
 
@@ -395,17 +394,14 @@ declare references in lists of objects, e.g. the catalogs of trino:
 A reference `<name>` of a contract `<contract>` resolves to:
 
 1. external: `connections.<name>`, when it is a map;
-2. otherwise, of a contract with a naming convention (`x-okdp-internal`),
-   internal: the instance (the release) of the namespace named `<name>`,
-   so a release name: a DNS-1123 label of 53 characters at most (lowercase
-   letters, digits and `-`, a letter or digit at each end), as Helm accepts
-   it. It becomes hosts and Secret names;
-3. otherwise, of a contract without one, output: the output named
-   `<name>` of `<contract>` that another instance of the namespace
-   publishes (`Inputs.Published`).
+2. otherwise, output: the output named `<name>` of `<contract>` that
+   another instance of the namespace publishes (`Inputs.Published`), an
+   instance's own named after its release by default
+   ([provides](02_service_definition.md#provides)).
 
-An instance or an output is a [dependency](#dependencies). Otherwise the
-reference fails ([Connection errors](#connection-errors)).
+An output is a [dependency](#dependencies). Otherwise the reference fails
+([Connection errors](#connection-errors)). A connection is never computed
+from a name: what an instance is reached at, its provider publishes.
 
 External: the entry of `connections`, as the context's layers give it.
 
@@ -427,23 +423,6 @@ connections:
   connection has no `secretRef`.
 - Any other key: a field of the contract, not an `x-okdp-secret` one.
 
-Internal: the fields of the contract's `x-okdp-internal` naming
-convention, `${ref}` replaced by the instance name, `${namespace}` by
-`Inputs.Namespace`, `${suffix}` by `global.okdp.ingress.suffix`; and, when
-the contract has an `x-okdp-secret` field, `secretRef:
-{name: <ref>-<contract>-credentials}`, the default name of the
-[credentials Secret](#credentials-secrets) the instance publishes. The
-instance is not looked up: each internal reference is recorded as a
-[dependency](#dependencies). A contract with a convention never resolves
-to an output, not even the instance's own: what a reference resolves to
-follows from the contract and the name, the same whatever the other
-instances publish, and so whatever the order they are compiled in
-(`CompileAll` compiles each instance of a namespace with what the
-instances compiled before publish, and keeps a successful compile:
-[Compiling instances together](#compiling-instances-together)). An output
-may hold fields the convention does not give: a reference would get them
-or not, depending on whether its provider was compiled first.
-
 Output: `Inputs.Published`, what the other instances of the namespace
 publish, by release, each an `Info`, its [info
 file](#the-info-file) (`okdp.info.yaml`; set by `CompileAll`). The
@@ -453,38 +432,39 @@ the file), and its `secretRef`, kept as `{name}`. The compiling release is
 never its own provider. Two instances that publish one fail; an output of
 that name of another contract is no match. `Inputs.Published` is the
 namespace's only: an instance of another namespace is reached by a
-connection, its credentials Secret being in its own namespace. `nil`, the
-other instances are not known: a contract without a convention resolves
-connections only.
+connection. `nil`, the other instances are not known: a name
+resolves to a connection only. `CompileAll` compiles each instance after
+those whose outputs it references
+([Compiling instances together](#compiling-instances-together)).
 
-All three are then [completed](#completion) against the contract. The result,
+Each is then [completed](#completion) against the contract. The result,
 `secretRef` and `okdp` included, may not contain `{{` in a key or a string,
 whatever it comes from: the context's layers above level 0 refuse it
 already ([Levels](#levels)), and a
 connection of level 0, the platform's, a
-contract's default or `${namespace}` and `${suffix}` are checked here, as
-the connection reaches the charts' values through the mapping.
+contract's default or an output's values are checked here, as the
+connection reaches the charts' values through the mapping.
 
 ### What the mapping receives
 
 The parameter, replaced by a map: the contract fields, `secretRef` when
 there is one, and `okdp`, where the connection comes from: `ref`, the
-reference; `contract`; `source`, `external`, `output` or `internal`; and
-`instance`, the instance of the namespace it comes from, the release that
-publishes the output or the one the reference names (the
-[dependency's](#dependencies)), absent for an external connection. With
+reference; `contract`; `source`, `external` or `output`; and
+`instance`, the instance it comes from, the release that publishes the
+output (the [dependency's](#dependencies)), absent for an external
+connection. With
 `examples/02_advanced/input/db/contracts/database.schema.json`:
 
 ```yaml
-# database: demo-db (internal)
+# database: demo-db (output, what demo-db publishes)
 database:
-  host: demo-db-db.demo.svc        # x-okdp-internal
-  dbName: demo-db                  # x-okdp-internal
+  host: demo-db-db.demo.svc        # demo-db's
+  dbName: demo-db                  # demo-db's
   engine: postgresql               # default
   port: 5432                       # default
   driver: org.postgresql.Driver    # x-okdp-derived from engine
   secretRef: {name: demo-db-database-credentials}
-  okdp: {ref: demo-db, contract: database, source: internal, instance: demo-db}
+  okdp: {ref: demo-db, contract: database, source: output, instance: demo-db}
 
 # database: shared-db (external, above)
 database:
@@ -535,16 +515,15 @@ level, the items of a list in order (`a.x` before `a-b`, unlike the string
 order of the [dependencies](#dependencies)), as the violations of the
 parameter schema are. A reference gives one error, the first in this
 order: its type, its contract (unknown, unreadable; another one, for an
-external connection; a name that is not a release name, for an internal
-one; an output of several instances, or none, for a name that is no
-connection of a contract without a naming convention), the fields of an
-external connection or an output in alphabetical order, the `required`
-fields: every field not set, one line each, in alphabetical order; then
-the contract's types for an external connection or an output: every
-violation, one line each, sorted by path ([Checks](#checks)); last, `{{`
-in the connection, the first one found by path (keys sorted, items in
-order). The instances of `Inputs.Published` are visited in release order.
-The same parameters give the same report from one compile to the next:
+external connection; an output of several instances, or none, for a name
+that is no connection), the fields of an external connection or an output
+in alphabetical order, the `required` fields: every field not set, one
+line each, in alphabetical order; then the contract's types for an
+external connection or an output: every violation, one line each, sorted
+by path ([Checks](#checks)); last, `{{` in the connection, the first one
+found by path (keys sorted, items in order). The instances of
+`Inputs.Published` are visited in release order. The same parameters give
+the same report from one compile to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
@@ -552,19 +531,19 @@ replicas[1]: connection "store" has contract "s3", "database" is expected
 replicas[2] (connection "pg"): the fields violate the database contract:
 - at '/engine': value must be one of 'postgresql', 'mysql'
 - at '/port': got string, want integer
-replicas[3]: "Demo_DB" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most
+replicas[3]: "Demo_DB" is not a connection, nor an output of an instance of the namespace
 ```
 
 An output is named as a connection is, `output "<name>" of <instance>`
 for `connection "<name>"`: `<path>: output "<name>" of <instance>: field
 "<key>" is not part of the <contract> contract`, `<path> (output "<name>"
 of <instance>): field "<key>" is required by the <contract> contract`. With
-`Inputs.Published`, a name of a contract without a naming convention that
-is neither a connection nor an output says so, and names the instances
-that publish an output of that name of another contract, in release order:
+`Inputs.Published`, a name that is neither a connection nor an output
+says so, and names the instances that publish an output of that name of
+another contract, in release order:
 
 ```
-storage: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "s3" is expected), and the s3 contract has no internal naming convention
+storage: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "s3" is expected)
 ```
 
 | Case | Error | `testdata/` |
@@ -576,8 +555,7 @@ storage: "demo-pg" is not a connection, nor an output of an instance of the name
 | external or output, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `context/2/unknown-field.yaml` |
 | external or output, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` | `context/2/secret-in-connection.yaml` |
 | output, values that values cannot hold (a NaN) | `<path>: output "<name>" of <instance>: json: <cause>` | |
-| no `x-okdp-internal`, neither a connection nor an output | `<path>: "<name>" is not a connection, and the <contract> contract has no internal naming convention`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace, and ...`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` after `namespace` when instances publish an output of that name of another contract | |
-| internal, not a release name | `<path>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | |
+| neither a connection nor an output | `<path>: "<name>" is not a connection`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` when instances publish an output of that name of another contract | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
 | external or output, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `context/2/connection-types.yaml` |
 | `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
@@ -620,8 +598,14 @@ of a connection or an output are checked against the schema
 | `x-ui-condition: {field, value}` | a field with a `default` | the default applies only when `field` prints as `value` |
 | `x-okdp-derived: {from, map}` | a field | its value when not set: `map[<value of from>]`; none when that value is not a key of `map` |
 | `x-okdp-secret: true` | a field | a credential: refused in a connection and in an output, it belongs to the credentials Secret (`secretRef`) |
-| `x-okdp-internal: {<field>: <template>}` | the contract | the fields of an instance reached by its name: `${ref}`, `${namespace}`, `${suffix}` replaced ([Resolution](#resolution)); an output of the contract is the release's, not named ([The info file](#the-info-file)), and no reference resolves to it. Without it, a reference that is no connection names an output of another instance of the namespace |
 | `x-okdp-contract` | the contract | the name in the `required` error message |
+
+`x-okdp-internal`, the naming convention of a former version, is refused:
+`the <contract> contract cannot be read: <contract>.schema.json:
+x-okdp-internal: naming conventions are gone, a provider publishes its
+connections (provides)`. What an instance is reached at, its provider
+publishes, an output a reference names
+([Resolution](#resolution)).
 
 The other `x-*` keywords (`x-okdp-external`, `x-okdp-required`,
 `x-okdp-endpoint-from`, `x-okdp-icon`, `x-okdp-category`,
@@ -633,7 +617,6 @@ connection is accepted for any contract, `x-okdp-external` or not.
 ```json
 {
   "x-okdp-contract": "database",
-  "x-okdp-internal": {"host": "${ref}-db.${namespace}.svc", "dbName": "${ref}"},
   "properties": {
     "engine":   {"type": "string", "enum": ["postgresql", "mysql"], "default": "postgresql"},
     "driver":   {"type": "string", "x-okdp-derived": {"from": "engine",
@@ -669,29 +652,20 @@ A field set is kept as it is. The fields are visited in alphabetical order,
 the passes repeated: a conditional default applies whether its condition
 field sorts before it or after it, is defaulted (`sslMode` on the default
 `engine`) or derived. A derived field may follow from a defaulted one
-(`driver` from the default `engine`). An internal
-reference has only its `x-okdp-internal` fields and the defaults: if they
-leave a `required` field unset, every internal reference to the contract
-fails.
+(`driver` from the default `engine`).
 
 ### Checks
 
 - Consumed, external: the `contract` of the entry, every other key a
   non-secret field, completed, then valid against the schema
   ([Connections](#connections)).
-- Consumed, internal: the contract has `x-okdp-internal`, completed. Its
-  values are not checked against the schema: they follow from the contract,
-  and are those the instance publishes, checked as provided.
-- Consumed, output: the contract has no `x-okdp-internal`, the output one
-  instance of the namespace publishes, every key of its `values` a
-  non-secret field, completed, then valid against the schema, as an
-  external connection: checked when it was provided, it is checked again
-  against the contract as the consumer reads it.
-- Provided (`provides`): the contract exists, an output of a contract with
-  `x-okdp-internal` is published under the release name, every key of
-  `values` a non-secret field, completed, then valid against the schema;
-  and such an output has the values an internal reference to the release
-  resolves to ([The info file](#the-info-file)).
+- Consumed, output: the output an instance publishes, every key
+  of its `values` a non-secret field, completed, then valid against the
+  schema, as an external connection: checked when it was provided, it is
+  checked again against the contract as the consumer reads it.
+- Provided (`provides`): the contract exists, every key of `values` a
+  non-secret field, completed, then valid against the schema
+  ([The info file](#the-info-file)).
 
 Valid against the schema: the completed values (no `secretRef`, no `okdp`),
 validated as a chart's values against its `values.schema.json`
@@ -901,7 +875,6 @@ values file against it.
 
 | `global.okdp` | Used for |
 |---|---|
-| `ingress.suffix` | `${suffix}` of `x-okdp-internal`: internal references, provided outputs |
 | `certificateIssuers.selfSigned.name` | `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`) |
 | `charts.oidcDcr` | the upstream chart of the [OAuth client charts](#oauth-client-charts) ([Platform charts](#platform-charts)) |
 | `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
@@ -1278,7 +1251,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file); nil when none |
 | `Info` | `compiler.Info` | what the instance publishes: its URL, its usage and the connections it provides ([The info file](#the-info-file)) |
-| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by naming convention or by an output, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. The binary prints each on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance |
+| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by an output, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. The binary prints each on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
@@ -1458,7 +1431,7 @@ empty one not written:
 
 | Key | Value |
 |---|---|
-| `name` | `name` of the item; `<release>` by default, always for a contract with `x-okdp-internal` |
+| `name` | `name` of the item; `<release>` by default |
 | `contract` | `contract` of the item |
 | `values` | `values` of the item, [completed](#completion) against the contract, keys sorted; absent when it has none |
 | `secretRef` | `{name}` of `secretRef`, its `name` a non-empty string (`secretRef: {}` is not set); else `{name: <name>-<contract>-credentials}` when the item has a `secret`; else absent |
@@ -1485,36 +1458,29 @@ type SecretRef struct {
 Every item is checked for its shape first, with the mapping's other
 sections, every violation at once
 ([provides](02_service_definition.md#provides)). Then each is checked
-against its contract, in the order of `provides`: its name, then the
-fields of its `values` and of the contract's `x-okdp-internal` convention
-in alphabetical order. The first error is reported, as for an expression
-of the mapping: `provides` is the package's to fix, not the instance's,
-and the error is the same from one compile to the next; the required
-fields that item lacks, and the schema's violations of that item, all at
-once, one line each ([Checks](#checks)). Once every item passes, two items
-of one contract and name fail, one line per name. `<out>`: `provides
-"<name>" (<contract>)`; `<i>`: the item's position.
+against its contract, in the order of `provides`: the fields of its
+`values` in alphabetical order. The first error is
+reported, as for an expression of the mapping: `provides` is the package's
+to fix, not the instance's, and the error is the same from one compile to
+the next; the required fields that item lacks, and the schema's violations
+of that item, all at once, one line each ([Checks](#checks)). Once every
+item passes, two items of one contract and name fail, one line per name.
+`<out>`: `provides "<name>" (<contract>)`; `<i>`: the item's position.
 
 | Case | Error |
 |---|---|
 | an item that is not a map, without a `contract`; its `values`, `secretRef` or `secret` set, not a map; a `secretRef` that is set without a `name`, or whose `name` is not a non-empty string; the `generate` of `secret` not a list, a key of it of another type; its `stringData` not a map, a value not a string (with `generate`, nor a number or a boolean) | `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '/provides/<i>/values': got array, want object`, `- at '/provides/<i>/secretRef': missing property 'name'`, one line per violation ([provides](02_service_definition.md#provides)) |
 | no `<contract>.schema.json`, or one that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<out>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
-| a `name` other than `<release>`, of a contract with `x-okdp-internal` | `<out>: the <contract> contract reaches an instance by its release name: name it "<release>" or leave name out` |
 | not a contract field | `<out>: field "<key>" is not part of the <contract> contract` |
 | a secret field | `<out>: "<key>" is a secret field, put it in the credentials Secret` |
 | required field not set | `<out>: field "<key>" is required by the <contract> contract`, one line per field |
 | a value the contract's schema refuses | `<out>: the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation |
-| internal convention | `<out>: <field> is "<value>" but internal references to "<name>" resolve it to "<expected>"` |
 | same contract and name twice | `two <contract> outputs are named "<name>"` |
 
-Internal convention: an output of a contract with `x-okdp-internal` is
-named `<release>`, the default, the name internal references reach the
-instance by: no reference resolves to another name. It must hold, for each
-field of the convention, the value an internal reference to `<release>`
-resolves to. An instance that references this one by name gets these
-fields from the convention, and the contract's defaults, not the output
-itself ([Resolution](#resolution)). A `name` is for a contract without a
-convention: the name other instances reference the output by.
+An output named after the release, the default, is what other instances
+reach the instance by, by its name; a `name` is for several outputs of one
+contract: the name other instances reference each by
+([Resolution](#resolution)).
 
 ### Credentials Secrets
 
@@ -1623,13 +1589,11 @@ umbrella.
 ### Dependencies
 
 `Dependencies` (`compiler.Dependency`): one item per reference to an
-instance of the namespace, internal or to an output
-([Resolution](#resolution)), sorted by `field` (string order), the
-parameter path as the [connection errors](#connection-errors) write it,
-its `instance` a release name: the instance an internal reference names,
-the one that publishes the output. `output`: the output the reference
-resolved to, by name, the reference; for an internal one, the instance's
-release, the name of its output of a contract with a naming convention.
+instance, an output ([Resolution](#resolution)), sorted by `field`
+(string order), the parameter path as the
+[connection errors](#connection-errors) write it, its `instance` a
+release name: the one that publishes the output. `output`: the output
+the reference resolved to, by name, the reference.
 Two references to one instance give two items; external and empty
 references give none. `nil` when there is none. Every field of an item
 is set: an empty reference gives no item, a reference without its
@@ -1640,21 +1604,19 @@ type Dependency struct {
 	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance, or the one that publishes the referenced output (its release name)
 	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
 	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
-	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name: the instance's release for a reference by naming convention
+	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name
 }
 ```
 
 A dependency holds when its `instance` publishes an output named `output`
-of `contract`: that of an output, in `Inputs.Published`, by resolution;
-that of an internal reference, a compile does not check, reading no
-other instance for it. The [deployment graph](#the-deployment-graph)
-checks it, and orders the releases with the list, read from
-`Result.Dependencies`: each release waits for the instances it depends
-on, Flux `dependsOn` and Argo CD sync waves
+of `contract`, as resolution found it; the [deployment
+graph](#the-deployment-graph) checks it again, and orders the releases
+with the list, read from `Result.Dependencies`: each release waits for the
+instances it depends on, Flux `dependsOn` and Argo CD sync waves
 ([GitOps](../01_usage.md#gitops)). No file holds it: `okdp-compile -o`
-prints each item on stderr once the files are written, after the
-warnings, `depends on <instance> (<contract>, <field>)`, the output after
-the contract when it is not named after the instance, `depends on demo-pg
+prints each item on stderr once the files are written, after the warnings,
+`depends on <instance> (<contract>, <field>)`, the output after the
+contract when it is not named after the instance, `depends on demo-pg
 (database-server demo-pg-hive, db)`, and `--check` none.
 
 ### Umbrella chart
@@ -1863,13 +1825,8 @@ it sets: what the other instances of the namespace publish. It gives one
 why it is refused (`Err`). The namespaces (`Inputs.Namespace`) are
 compiled apart.
 
-The references between the instances of a namespace are of two kinds:
-
-- to an output, of a contract without a naming convention: the instance
-  needs what its provider publishes, and is compiled after it;
-- by naming convention: it resolves from the name alone, whatever is
-  compiled before; the release waits for the other one when it deploys
-  ([Dependencies](#dependencies)).
+The references between the instances of a namespace are to outputs: the
+instance needs what its provider publishes, and is compiled after it.
 
 Which outputs an instance references does not depend on what is
 published ([Resolution](#resolution)): its first compile knows every
@@ -1918,14 +1875,13 @@ release:
 |---|---|
 | a release given twice in a namespace | `release "<release>" is given twice in namespace "<namespace>"` |
 | a dependency on a release no result of the namespace has, or on itself | `<field>: it references "<instance>", which is not another instance of namespace "<namespace>"` |
-| a reference by naming convention to a release that does not provide the contract: no output of it named after the release | `<field>: it references "<instance>" as a <contract> connection, which "<instance>" does not provide` |
 | a reference to an output its release does not publish | `<field>: it references the <contract> output "<output>" of "<instance>", which "<instance>" does not publish` |
 | releases that wait for each other: from each release, a shortest cycle through it, when it is the cycle's smallest | `dependency cycle: <release> -> <release> -> <release>: the releases would wait for each other` |
 
-A cycle of references to outputs never compiles
-([Compiling instances together](#compiling-instances-together)): a cycle
-here passes through a reference by naming convention. A release that
-waits for a cycle is not reported: the cycle is.
+A cycle of references never compiles
+([Compiling instances together](#compiling-instances-together)): the
+graph refuses one in results compiled otherwise. A release that waits for
+a cycle is not reported: the cycle is.
 
 The graph gives:
 

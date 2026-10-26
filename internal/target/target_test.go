@@ -21,10 +21,9 @@ import (
 
 var update = flag.Bool("update", false, "rewrite testdata/targets/ from the current targets")
 
-// contracts: database, a contract with a naming convention.
+// contracts: database.
 var contracts = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "database",
-	"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc"},
 	"properties": {"host": {"type": "string"}},
 	"required": ["host"]}`)}}
 

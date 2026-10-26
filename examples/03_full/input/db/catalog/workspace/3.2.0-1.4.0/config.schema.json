@@ -12,7 +12,7 @@
     "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
               "description": "The database audit events are written to, a reference as database is."},
     "storage": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "s3"},
-                "description": "The bucket notebooks and results are stored in: a connection (s3 has no internal naming convention)."},
+                "description": "The bucket notebooks and results are stored in: a connection, or an output another instance publishes."},
     "catalogs": {"type": "array", "default": [],
                  "description": "The data catalogs of the workspace, each with its references.",
                  "items": {"type": "object", "required": ["name", "storage"], "additionalProperties": false, "properties": {

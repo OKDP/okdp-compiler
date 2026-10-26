@@ -1,3 +1,3 @@
-# The alertmanager chart's values: the service the convention names.
+# The alertmanager chart's values: the service its endpoint names.
 alertmanager:
   fullnameOverride: ${{ release.name }}-api

@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
-	"slices"
 	"strings"
 
 	"github.com/okdp/okdp-compiler/internal/compile"
@@ -54,18 +52,14 @@ func published(info M, outputs []Output) Info {
 // form the mapping schema checks (runMapping), and their credentials
 // Secrets. Every output is named after the release unless the mapping names
 // it, and checked against its contract, from contracts (Inputs.Contracts),
-// in the order of provides: its name, the release's when the contract has a
-// naming convention (x-okdp-internal), then its fields in key order
-// (contract.fields): the first error is reported, every required field not
+// in the order of provides: its fields in key order (contract.fields): the
+// first error is reported, every required field not
 // set at once (contract.complete), every violation of the contract's types
 // at once (contract.check). An output given a `secret` ({generate,
 // stringData} or {stringData}) gets its credentials Secret, named after its
 // secretRef (default <name>-<contract>-credentials). Then two outputs of one
 // contract and name fail (twice).
 func provided(session *compile.Session, inst *instance, contracts fs.FS, provides []any) ([]Output, []M, error) {
-	// No connections: only to compute what internal references resolve to
-	// (what it records is not read).
-	r := resolver{contracts: contracts, conns: M{}, namespace: inst.namespace, suffix: inst.suffix}
 	var outputs []Output
 	var credentials []M
 	for _, x := range provides {
@@ -80,12 +74,6 @@ func provided(session *compile.Session, inst *instance, contracts fs.FS, provide
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", where, err)
 		}
-		// A contract with a naming convention reaches an instance by its
-		// release name: no reference resolves to an output of another name.
-		if c.internal != nil && out != inst.release {
-			return nil, nil, fmt.Errorf("%s: the %s contract reaches an instance by its release name: name it %q or leave name out",
-				where, contract, inst.release)
-		}
 		// Only contract fields, and no secret: those go to the credentials
 		// Secret. In key order, as every check of an output: the first error
 		// is the same from one compile to the next.
@@ -98,20 +86,6 @@ func provided(session *compile.Session, inst *instance, contracts fs.FS, provide
 		}
 		if err := c.check(values, where); err != nil {
 			return nil, nil, err
-		}
-		// Published under the release name, the values must be what an internal
-		// reference to this instance resolves to (x-okdp-internal).
-		if c.internal != nil {
-			expected, err := r.resolve(out, contract, where)
-			if err != nil {
-				return nil, nil, err
-			}
-			for _, k := range slices.Sorted(maps.Keys(c.internal)) {
-				if value.Str(values[k]) != value.Str(expected[k]) {
-					return nil, nil, fmt.Errorf("%s: %s is %q but internal references to %q resolve it to %q",
-						where, k, value.Str(values[k]), out, value.Str(expected[k]))
-				}
-			}
 		}
 		o := Output{Name: out, Contract: contract, Values: values}
 		secret := value.AsMap(p["secret"])

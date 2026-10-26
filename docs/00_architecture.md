@@ -199,14 +199,11 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    (`walk`) together with a deep copy of the parameters, through
    `properties` (keys sorted) and `items`. A reference must be a string,
    `null` and `""` being not set. Each is resolved (`resolve`) to an
-   external connection; else, of a contract with a naming convention, to
-   an instance of the namespace, whose name must be a release name
-   (`chart.IsRelease`); else to the output of that name and contract one
+   external connection; else to the output of that name and contract one
    other instance of the namespace publishes (`output`, on
    `Inputs.Published`, the compiling release left out, two providers
-   refused): a contract with a convention never resolves to an output, so
-   that a reference resolves the same whatever the order the instances are
-   compiled in. It is completed
+   refused). No connection is computed from a name: what an instance is
+   reached at, its provider publishes. It is completed
    against its contract (`contract.complete`). A contract is read by each
    reference or output that names it (`readContract`): decoded once, the
    validator keeping its numbers as written, the keywords read from its
@@ -219,8 +216,8 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    ([Connections](specs/01_inputs_outputs.md#connections)). The
    references that do not resolve are reported together, one line each,
    in the order of the walk (`walk`: keys sorted at each level, items in
-   order). The references to an instance, internal or to an output, are
-   recorded as `Dependency`, the output named, sorted by parameter path.
+   order). The references to an output are recorded as `Dependency`, the
+   output named, sorted by parameter path.
    `global` and `connections` are then removed from the parameters; the
    instance's upstream values stay, `values.upstream.<key>`, so that an
    `errors` rule covers them; they are checked and applied at stage 9. The
@@ -287,14 +284,10 @@ mode, the dependencies, and what the mapping sees (its `scope`):
 7. **Outputs and credentials Secrets** (`provided`,
    `internal/okdp/provides.go`). Each `provides` entry, of the form the
    mapping schema checks (stage 5), is
-   checked against its contract, read again: of a contract with a naming
-   convention (`x-okdp-internal`), its name must be the release's, the one
-   internal references reach; then, as an external
-   connection is, its fields (`contract.fields`), completed
+   checked against its contract, read again, as an external
+   connection is: its fields (`contract.fields`), completed
    (`contract.complete`), validated against its schema
-   (`contract.check`); of such a contract, it is compared with what the
-   `resolver` computes for an internal reference to this instance:
-   provider and consumers compute the same names. An
+   (`contract.check`). An
    entry with a `secret` gets its credentials Secret
    (`credentialsSecret`; a generated one by `okdpGeneratedSecret`'s
    template, `generatedSecret`). Then two outputs of one contract and name
@@ -403,7 +396,7 @@ neither knows OKDP.
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `{{` above level 0) then the instance's, normalized (`value.Normalize`); `global` and `connections` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
-| | `connections.go` | connection references, resolved to a connection, an instance by its naming convention or an output of `Inputs.Published` (`resolver`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use (`readContract`), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; by `provides.go` without them, to compute the convention a provider must match |
+| | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection or an output of `Inputs.Published` (`resolver`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use (`readContract`, `x-okdp-internal` refused), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
@@ -667,8 +660,8 @@ compiles beforehand. `CompileAll` is Kahn's algorithm with its edges
 discovered on the way: a compile that lacks outputs says which
 (`missingOutputs`, the message unchanged), and the instance waits for
 them. This holds because the outputs an instance references do not
-depend on what is published: a connection, then a naming convention, are
-tried first, and depend on the context and the contract only. Waiting
+depend on what is published: a connection is tried first, and depends
+on the context and the contract only. Waiting
 for those outputs, rather than compiling every refused instance again
 each round until nothing changes, compiles an instance at most twice,
 and a real failure once; every refusal comes from a compile that saw
@@ -751,10 +744,10 @@ caller's, filled from the pinned references. The compiler enforces:
 |---|---|---|
 | Context values | `valuesLayers`, `contextLayers`, stage 1 | `global` comes from the package's defaults and the context's layers (`Inputs.Context`), level 0 the platform's: a higher level (a project's) only adds to the lower levels, never changing a value they set nor a connection they give; an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`, and no `connections`: an instance's own are a context layer of a level of their own. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the chart its OAuth clients are rendered with (`charts`), and every chart receives `global` (`imageRegistry`) |
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
-| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below. An internal reference is a release name (`chart.IsRelease`): it becomes hosts, Secret names and `Dependency.Instance` |
+| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below |
 | Credentials never inlined | `contract.fields`, from `resolve` and `provided` | an external connection and a provided output carry contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and `okdp.info.yaml` are not secret |
 | Contracts | `resolve`, `provided` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`contract.check`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
-| Provider and consumers agree | `provided` | an output of a contract with a naming convention is named after the release, the name internal references reach, and equals what they resolve to |
+| Provider and consumers agree | `output`, `provided` | a reference reads what its provider publishes, never a value computed from a name: an output checked against its contract when provided, and again as the consumer reads it |
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
 | No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the context's layers above level 0 and of the instance's layers (parameters, `global`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
 | Upstream schemas | stage 10, with a chart cache | an upstream chart's rules fail the check, not the deployment |
@@ -881,10 +874,9 @@ path of what values cannot hold (`TestValuesLayersGoTypes`);
 `internal/value/value_test.go` the reading of each Go type
 (`TestNormalize`, `TestNormalizeErrors`) and the paths of the messages
 (`TestPath`). `internal/okdp/namespace_test.go` compiles instances
-together in every order, each giving the same outcomes: a chain,
-references by convention, an output nobody publishes, a provider that
-fails, a cycle, a shared output and what resolved through it
-(`TestCompileAll`), the same result as a compile alone
+together in every order, each giving the same outcomes: a chain, an output
+nobody publishes, a provider that fails, a cycle, a shared output and what
+resolved through it (`TestCompileAll`), the same result as a compile alone
 (`TestCompileAllSingle`), the namespaces apart
 (`TestCompileAllNamespaces`). `internal/graph/graph_test.go` builds graphs
 from results written by hand, what the graph reads of them: the waves of a
@@ -929,9 +921,9 @@ package of its own), `--check` and its checks against a chart cache
 (`check.txtar`), the examples' trees and their dependencies
 (`compile.txtar`), a compile error (`errors.txtar`), a tree compiled whole
 (`repository.txtar`: two repositories, each target, `--check`, a stale
-instance removed, a cycle of outputs and one by convention), one script
-per concern. The public package is tested through the example in the root
-package: `example_test.go` holds the Go programs of README.md and
+instance removed, a cycle of outputs), one script per concern. The public
+package is tested through the example in the root package:
+`example_test.go` holds the Go programs of README.md and
 [usage](01_usage.md#go-library) as examples, with their output, and
 `TestDocPrograms` checks that the documentation shows those programs and
 outputs; `ExampleCompile_server` cancels a compile and bounds its cost;
@@ -999,10 +991,10 @@ database connection and an OAuth client, `values.cel.yaml`,
 `contracts/`, `platform.yaml` (the platform values: `global.okdp`, the
 OAuth clients in `dcr` mode, and `platform-db`, a connection every
 instance may reference, the instance's audit database) and the
-`config.yaml` of the instance `demo-webapp`, its values, its
-upstream values of `app` included. The database it references,
-`demo-db`, is an instance of `catalog/db/1.0.0/`, a minimal package: one
-chart, the database its naming convention gives, its credentials Secret
+`config.yaml` of the instance `demo-webapp`, its values, its upstream
+values of `app` included. The database it references, `demo-db`, is an
+instance of `catalog/db/1.0.0/`, a minimal package: one chart, the
+database it publishes, named after its release, its credentials Secret
 generated. The OAuth clients' `existing` mode has no example output: its
 unit tests are in `internal/okdp/oidc_test.go`.
 
@@ -1012,19 +1004,19 @@ most of the CEL libraries and of the YAML reading, each commented, over
 five charts (`api` and `scheduler` two renders of one chart, the second
 without upstream values; `backup` left out by `$if`, its chart
 not in the cache), three OAuth clients in `dcr` mode (one public, one
-computed by `$spread`), and contracts with internal conventions, derived
-and conditional defaults and secret fields. Its values come in four
+computed by `$spread`), and contracts with derived and conditional
+defaults and secret fields. Its values come in four
 layers: `platform.yaml` (level 0), `project.yaml`, the project's
 (level 1: settings under `global.okdp.project`, which the mapping reads,
 and connections of its own), the `connections.yaml` of the instance
 `demo-workspace`, its own connections (level 2), and its `config.yaml`,
 whose references
-reach an instance of the namespace and connections of the platform, the
+reach outputs of the namespace and connections of the platform, the
 project and the instance, in a list of objects and under a nested key.
 The instances it references, `demo-db` and `demo-alerts`, are those of
 minimal packages, `catalog/db/1.0.0/` (02_advanced's) and
-`catalog/alerts/1.0.0/`, each providing what its contract's naming
-convention gives, their charts in the cache.
+`catalog/alerts/1.0.0/`, each publishing an output named after its
+release, their charts in the cache.
 
 `TestExample` (`examples_test.go`) reads each example's tree
 (`LoadRepository`, its `input/db/` one repository), compiles its
@@ -1171,8 +1163,8 @@ weekly: the library's modules (`deps:`), golangci-lint and the actions
   goes in `internal/okdp/mapping.schema.json`, with its type and its
   `description`, and in
   [oidcClients](specs/02_service_definition.md#oidcclients).
-- **Contracts** are data: a new contract, or new `x-okdp-internal`,
-  `x-okdp-secret`, `x-okdp-derived` or default fields, needs no compiler
+- **Contracts** are data: a new contract, or new `x-okdp-secret`,
+  `x-okdp-derived` or default fields, needs no compiler
   change ([Contracts](specs/01_inputs_outputs.md#contracts)).
 - **OKDP objects.** What the mapping writes in `objects` reaches the cluster
   through the objects file, which the umbrella renders as written: a new

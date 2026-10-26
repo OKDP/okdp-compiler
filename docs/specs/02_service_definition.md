@@ -650,7 +650,7 @@ provides:
     values:
       uri: ${{ apiUrl }}/api/catalog
       realm: ${{ str(values.realm) }}
-  - contract: s3                              # no naming convention: named
+  - contract: s3                              # another output: named
     name: store-a
     values: {apiUrl: 'https://a.${{ global.okdp.ingress.suffix }}'}
     secret:                                   # Secret store-a-s3-credentials, generated
@@ -661,18 +661,16 @@ provides:
 A list of outputs, the connections the instance publishes, in
 `Result.Info` and `okdp.info.yaml`
 ([the info file](01_inputs_outputs.md#the-info-file)). What
-another instance of the namespace references: an output of a contract
-without a naming convention, by its `name`, when its compile is given what
-this one publishes (`Inputs.Published`); this instance, by its release
-name, for a contract with one, its fields given by the convention, the
-output never read ([resolution](01_inputs_outputs.md#resolution)). Each
-item:
+another instance of the namespace references: an output, by its `name`,
+the release's by default, when its compile is given what this one
+publishes (`Inputs.Published`, `CompileAll`)
+([resolution](01_inputs_outputs.md#resolution)). Each item:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
-| `name` | string | the release name | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. Only for a contract without a naming convention: one with `x-okdp-internal` reaches an instance by its release name, and its output is the release's; another name fails, `provides "<name>" (<contract>): the <contract> contract reaches an instance by its release name: name it "<release>" or leave name out`. |
-| `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema; of a contract with `x-okdp-internal`, the values its convention gives for the release): [contracts](01_inputs_outputs.md#contracts). |
+| `name` | string | the release name | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
+| `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
 

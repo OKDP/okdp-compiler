@@ -22,33 +22,26 @@ import (
 	compiler "github.com/okdp/okdp-compiler"
 )
 
-// The program of README.md, on the example: the package and the contracts
-// as fs.FS, the values layers parsed.
+// The program of README.md, on the advanced example's tree.
 func Example() {
-	packageFS := os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0")
-	contractsFS := os.DirFS("examples/02_advanced/input/db/contracts")
-	platformValues := values("examples/02_advanced/input/db/platform.yaml")
-	projectValues := map[string]any{} // a project's values, none here: examples/03_full/input/db/projects/demo/project.yaml is one
-	instanceValues := values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")
-	published := map[string]compiler.Info{} // what the other instances of the namespace publish, none here: demo-db by its naming convention
+	treeFS := os.DirFS("examples/02_advanced/input/db")
 
-	def, err := compiler.LoadDefinition(packageFS) // Chart.yaml, okdp.yaml, values.cel.yaml or values.yaml; each compile reads config.schema.json, <key>.defaults.yaml
-	if err != nil {
-		log.Fatal(err)
-	}
-	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-		Contracts: contractsFS, // the contract schemas, <contract>.schema.json
-		Context: []compiler.ContextLayer{ // by level, lowest first, a level's layers in order (helm -f); compiler.ParseValues reads one
-			{Level: 0, Values: platformValues}, // the platform's
-			{Level: 1, Values: projectValues},  // a project's: it adds values, never changes a lower level's
-		},
-		Values:    []map[string]any{instanceValues}, // the instance's, last: no global
-		Release:   "demo-webapp",
-		Namespace: "demo",
-		Published: published, // what the other instances of the namespace publish (okdp.info.yaml), by release: a reference may name one of their outputs
+	instances, err := compiler.LoadRepository([]compiler.Repository{
+		{Name: "db", FS: treeFS}, // the tree, in one or more repositories: platform.yaml, contracts/, catalog/, projects/
 	})
 	if err != nil {
-		log.Fatal(err) // the whole report, e.g. every schema violation
+		log.Fatal(err) // every problem of the tree, each naming its path
+	}
+	var results []*compiler.Result
+	for i, o := range compiler.CompileAll(context.Background(), instances) { // each after those whose outputs it references
+		if o.Err != nil {
+			log.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err) // the whole report, e.g. every schema violation
+		}
+		results = append(results, o.Result)
+	}
+	g, err := compiler.NewGraph(results) // every dependency checked, the releases ordered
+	if err != nil {
+		log.Fatal(err)
 	}
 	// res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
 	// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
@@ -56,22 +49,24 @@ func Example() {
 	// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
 	//               the mapping's objects section (okdp.objects.yaml)
 	// res.Info: what the instance publishes: its url, its usage, the connections it provides (okdp.info.yaml)
-	// res.Dependencies: instances the connection references point to, by naming convention or output (compiler.Dependency), what a deployer orders the releases with
+	// res.Dependencies: the instances the connection references point to (compiler.Dependency): the graph's edges
 
-	// What okdp-compile -o <dir> writes, path -> content.
-	files, err := compiler.Write(res)
+	// What okdp-compile -o <dir> writes, path -> content: each instance's umbrella chart
+	// (compiler.Flux{}, compiler.ArgoCD{RepoURL: ...}: with the engine's objects).
+	files, err := compiler.Helm{}.Files(results, g)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(slices.Sorted(maps.Keys(res.Values)))
-	fmt.Println(res.Values["app"]["resources"])
-	fmt.Println(res.Dependencies)
-	fmt.Println(slices.Sorted(maps.Keys(files)))
+	web := results[slices.IndexFunc(results, func(r *compiler.Result) bool { return r.Release == "demo-webapp" })]
+	fmt.Println(slices.Sorted(maps.Keys(web.Values)))
+	fmt.Println(web.Values["app"]["resources"])
+	fmt.Println(web.Dependencies)
+	fmt.Println(len(files), "files")
 	// Output:
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db database database demo-db}]
-	// [Chart.yaml instance.values.yaml okdp.info.yaml]
+	// 8 files
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.
@@ -84,6 +79,13 @@ func ExampleCompile() {
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
+		// What the other instances of the namespace publish (their okdp.info.yaml),
+		// by release: demo-db, the database the instance references.
+		Published: map[string]compiler.Info{"demo-db": {Provides: []compiler.Output{{
+			Name: "demo-db", Contract: "database",
+			Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo-db"},
+			SecretRef: &compiler.SecretRef{Name: "demo-db-database-credentials"},
+		}}}},
 	}
 	// The values layers, as helm -f files: the platform's, then the
 	// instance's.

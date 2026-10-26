@@ -26,7 +26,7 @@
         "required": ["contract"],
         "properties": {
           "contract": {"type": "string", "description": "The contract: <contract>.schema.json of the contracts."},
-          "name": {"type": "string", "description": "The output's name, unique per contract; the release name when absent or empty. Only for a contract without a naming convention (x-okdp-internal): with one, the output is the release's."},
+          "name": {"type": "string", "description": "The output's name, unique per contract, the one other instances of the namespace reference it by; the release name when absent or empty."},
           "values": {"type": "object", "description": "The contract's fields."},
           "secretRef": {
             "type": "object",

@@ -1,6 +1,6 @@
 # OKDP's part of the alerts package: what an instance provides, an HTTP
-# endpoint reached by the contract's naming convention (x-okdp-internal),
-# its fields those the convention gives.
+# endpoint named after its release, which a reference names
+# (notifications.webhook: demo-alerts).
 
 require: [ingress.suffix]
 provides:

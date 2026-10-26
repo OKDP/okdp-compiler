@@ -19,7 +19,8 @@ import (
 
 // example: the example package
 // (examples/02_advanced/input/db/catalog/webapp/1.0.0), and the inputs of
-// its instance demo-webapp: its config.yaml over platform.yaml, at level 0.
+// its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
+// and what demo-db, the database it references, publishes.
 func example() (*compiler.Definition, compiler.Inputs) {
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0"))
 	if err != nil {
@@ -31,6 +32,11 @@ func example() (*compiler.Definition, compiler.Inputs) {
 		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
+		Published: map[string]compiler.Info{"demo-db": {Provides: []compiler.Output{{
+			Name: "demo-db", Contract: "database",
+			Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo-db"},
+			SecretRef: &compiler.SecretRef{Name: "demo-db-database-credentials"},
+		}}}},
 	}
 	return def, in
 }

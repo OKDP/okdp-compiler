@@ -77,9 +77,12 @@ type (
 	Info = okdp.Info
 	// Output: a connection an instance provides (Info.Provides).
 	Output = okdp.Output
-	// Dependency: an instance of the namespace a connection reference
-	// points to, by its naming convention or one of its outputs
-	// (Result.Dependencies), what a deployer orders the releases with.
+	// SecretRef: the Secret of an output's credentials, by name
+	// (Output.SecretRef).
+	SecretRef = okdp.SecretRef
+	// Dependency: an instance a connection reference points to, by one of
+	// its outputs (Result.Dependencies), what a deployer orders the releases
+	// with.
 	Dependency = okdp.Dependency
 	// Instance: an instance CompileAll compiles, its package and its
 	// inputs, Published left out.

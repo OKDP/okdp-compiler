@@ -30,7 +30,7 @@ type Inputs struct {
 	Values    []map[string]any // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
 	Release   string           // the Helm release: a DNS-1123 label of 53 characters at most
 	Namespace string           // the release's namespace: a DNS-1123 label
-	Published map[string]Info  // what the other instances of the namespace publish (their okdp.info.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections and naming conventions resolve
+	Published map[string]Info  // what the other instances of the namespace publish (their okdp.info.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections resolve
 	CostLimit uint64           // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
 }
 
@@ -60,10 +60,9 @@ type Result struct {
 	// Info: what the instance publishes, its instance and provides
 	// sections, checked (okdp.info.yaml, helm.Write).
 	Info Info
-	// Dependencies: the instances of the namespace the connection
-	// references point to, by naming convention or by one of their outputs
-	// (Inputs.Published), by parameter path. References to external
-	// connections are not listed.
+	// Dependencies: the instances the connection references point to, by
+	// one of their outputs (Inputs.Published), by parameter path. References
+	// to external connections are not listed.
 	Dependencies []Dependency
 	// Release, Namespace: the Helm release the values are compiled for, and
 	// its namespace (Inputs.Release, Inputs.Namespace).

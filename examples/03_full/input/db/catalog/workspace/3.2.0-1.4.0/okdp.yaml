@@ -222,11 +222,11 @@ instance:
 
 # The connections the instance publishes, checked against their contracts.
 provides:
-  - contract: http                                 # under the release name (a naming convention): what references to it resolve to
+  - contract: http                                 # named after the release: what references to it resolve to
     values:
       url: https://${{ host }}
       internalUrl: ${{ internalUrl }}
-  - contract: s3                                   # no naming convention: an output may be named
+  - contract: s3                                   # an output of another name
     name: ${{ okdpFullname('exports') }}
     values:                                        # region: the contract's default
       provider: minio                              # pathStyle: true, the default when minio

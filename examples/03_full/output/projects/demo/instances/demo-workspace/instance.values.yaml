@@ -13,7 +13,7 @@ api:
       database:
         credentials: demo-db-database-credentials
         driver: org.postgresql.Driver
-        from: internal
+        from: output
         url: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
       properties: {}
       storage:

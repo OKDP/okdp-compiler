@@ -1,13 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SQL database",
-  "description": "Example contract: a SQL database. An instance named <ref> is reached at <ref>-db.",
+  "description": "Example contract: a SQL database: what its provider publishes, its credentials in a Secret.",
   "type": "object",
   "x-okdp-contract": "database",
-  "x-okdp-internal": {
-    "host": "${ref}-db.${namespace}.svc",
-    "dbName": "${ref}"
-  },
   "properties": {
     "engine": {"type": "string", "enum": ["postgresql", "mysql"], "default": "postgresql"},
     "driver": {

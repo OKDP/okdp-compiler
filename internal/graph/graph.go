@@ -1,6 +1,6 @@
 // Package graph: the deployment graph of compiled instances: a release
-// waits for the releases of its namespace its connection references point
-// to (Result.Dependencies). Built once from the results of a compile and
+// waits for the releases its connection references point to
+// (Result.Dependencies), of its namespace. Built once from the results of a compile and
 // checked, it is what a deployer orders the releases with.
 package graph
 
@@ -44,9 +44,9 @@ func (e *Error) Unwrap() error { return e.Err }
 // New: the graph of results, every instance of their namespaces, the
 // refused ones being missing. Every problem at once, each an *Error, by
 // node: a release given twice; a dependency on a release no result of the
-// namespace has, or on one that does not provide what is referenced (an
-// output of the contract named Dependency.Output, in its Info.Provides:
-// the release's name for a reference by naming convention); then each
+// namespace has, or on one that does not publish what is referenced (an
+// output of the contract named Dependency.Output, in its Info.Provides);
+// then each
 // cycle, once, from its smallest release, by a shortest cycle through it.
 func New(results []*okdp.Result) (*Graph, error) {
 	byNode := map[Node]*okdp.Result{}
@@ -63,7 +63,7 @@ func New(results []*okdp.Result) (*Graph, error) {
 		g.deps[n] = []Node{}
 		for _, d := range res.Dependencies {
 			to := Node{n.Namespace, d.Instance}
-			if err := provides(byNode[to], d, n); err != nil {
+			if err := provides(byNode[to], d, n, to); err != nil {
 				errs = append(errs, &Error{n, err})
 				continue
 			}
@@ -84,19 +84,16 @@ func New(results []*okdp.Result) (*Graph, error) {
 	return g, nil
 }
 
-// provides: nil when the result to, the dependency's release, provides
-// what d references from the release from.
-func provides(to *okdp.Result, d okdp.Dependency, from Node) error {
-	if to == nil || d.Instance == from.Release {
-		return fmt.Errorf("%s: it references %q, which is not another instance of namespace %q", d.Field, d.Instance, from.Namespace)
+// provides: nil when res, the result of the dependency's release to,
+// provides what d references from the release from.
+func provides(res *okdp.Result, d okdp.Dependency, from, to Node) error {
+	if res == nil || to == from {
+		return fmt.Errorf("%s: it references %q, which is not another instance of namespace %q", d.Field, d.Instance, to.Namespace)
 	}
-	if slices.ContainsFunc(to.Info.Provides, func(o okdp.Output) bool { return o.Contract == d.Contract && o.Name == d.Output }) {
+	if slices.ContainsFunc(res.Info.Provides, func(o okdp.Output) bool { return o.Contract == d.Contract && o.Name == d.Output }) {
 		return nil
 	}
-	if d.Output != d.Instance {
-		return fmt.Errorf("%s: it references the %s output %q of %q, which %q does not publish", d.Field, d.Contract, d.Output, d.Instance, d.Instance)
-	}
-	return fmt.Errorf("%s: it references %q as a %s connection, which %q does not provide", d.Field, d.Instance, d.Contract, d.Instance)
+	return fmt.Errorf("%s: it references the %s output %q of %q, which %q does not publish", d.Field, d.Contract, d.Output, d.Instance, d.Instance)
 }
 
 // levels sets the waves, Kahn's algorithm by levels: wave 0, the releases

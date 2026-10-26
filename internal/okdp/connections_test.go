@@ -17,7 +17,6 @@ import (
 // set), a required boolean, and a list.
 var dbContract = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 	"x-okdp-contract": "database",
-	"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc", "url": "https://${ref}.${suffix}"},
 	"properties": {
 		"host": {"type": "string"},
 		"url": {"type": "string"},
@@ -38,14 +37,21 @@ const resolveSchema = `{"properties": {
 	"untyped": {"x-okdp-connection-ref": {"contract": "database"}},
 	"other": {"type": "string"}}}`
 
+// pgPublished: what demo-pg publishes, a database named after it.
+var pgPublished = map[string]Info{"demo-pg": {Provides: []Output{{
+	Name: "demo-pg", Contract: "database",
+	Values:    M{"host": "demo-pg-db.demo.svc", "url": "https://demo-pg.example.org"},
+	SecretRef: &SecretRef{Name: "demo-pg-database-credentials"},
+}}}}
+
 // resolveCtx: the context of the in-memory package with resolveSchema, the
-// instance's values over these context layers.
+// instance's values over these context layers, demo-pg published.
 func resolveCtx(values M, platform ...ContextLayer) (M, []Dependency, error) {
 	ch := maps.Clone(pkg)
 	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
 	in.Context = append(in.Context, platform...)
-	in.Contracts = dbContract
+	in.Contracts, in.Published = dbContract, pgPublished
 	inst, err := newInstance(ch, in, defService)
 	if err != nil {
 		return nil, nil, err
@@ -53,7 +59,8 @@ func resolveCtx(values M, platform ...ContextLayer) (M, []Dependency, error) {
 	return value.AsMap(inst.scope["values"]), inst.deps, nil
 }
 
-// TestResolve: internal and external references, completed against the contract.
+// TestResolve: references to an output and to an external connection,
+// completed against the contract.
 func TestResolve(t *testing.T) {
 	values, deps, err := resolveCtx(M{
 		"main":     M{"db": "demo-pg"},
@@ -68,19 +75,19 @@ func TestResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	internal := M{
+	output := M{
 		"host": "demo-pg-db.demo.svc", "url": "https://demo-pg.example.org",
 		"engine": "postgresql", "driver": "pg", "ssl": "require", "tls": false,
 		"secretRef": M{"name": "demo-pg-database-credentials"},
-		"okdp":      M{"ref": "demo-pg", "contract": "database", "source": "internal", "instance": "demo-pg"},
+		"okdp":      M{"ref": "demo-pg", "contract": "database", "source": "output", "instance": "demo-pg"},
 	}
 	external := M{
 		"host": "replica.example.org", "engine": "mysql", "driver": "my", "tls": false,
 		"secretRef": M{"name": "ext-creds"},
 		"okdp":      M{"ref": "ext", "contract": "database", "source": "external"},
 	}
-	if got := value.AsMap(value.AsMap(values["main"])["db"]); !reflect.DeepEqual(got, internal) {
-		t.Errorf("internal:\n got %#v\nwant %#v", got, internal)
+	if got := value.AsMap(value.AsMap(values["main"])["db"]); !reflect.DeepEqual(got, output) {
+		t.Errorf("output:\n got %#v\nwant %#v", got, output)
 	}
 	if got := value.AsMap(values["replicas"].([]any)[0]); !reflect.DeepEqual(got, external) {
 		t.Errorf("external:\n got %#v\nwant %#v", got, external)
@@ -136,7 +143,7 @@ func TestResolveErrors(t *testing.T) {
 		"unknown field":  {ext(M{"port": 1}), `field "port" is not part of the database contract`},
 		"secret field":   {ext(M{"password": "p"}), `replicas[0]: connection "ext": "password" is a secret field, put it in the credentials Secret`},
 		"not a string":   {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
-		"not a release":  {M{"replicas": []any{strings.Repeat("a", 54)}}, `replicas[0]: "` + strings.Repeat("a", 54) + `" is not a connection, nor a release name`},
+		"not published":  {M{"replicas": []any{"demo-x"}}, `replicas[0]: "demo-x" is not a connection, nor an output of an instance of the namespace`},
 		"a template":     {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `values layer 1: replicas[0]: the value contains "{{"`},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -166,7 +173,7 @@ func TestResolveReport(t *testing.T) {
 	want := `main.db: connection "bad": field "port" is not part of the database contract
 replicas[1]: connection "s3" has contract "s3", "database" is expected
 replicas[3]: connection "bad": field "port" is not part of the database contract
-replicas[4]: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most
+replicas[4]: "Demo_PG" is not a connection, nor an output of an instance of the namespace
 untyped: a connection reference must be a string, got map[string]interface {}{"host":"h"}`
 	for range 20 {
 		if _, _, err := resolveCtx(values); err == nil || err.Error() != want {
@@ -178,7 +185,7 @@ untyped: a connection reference must be a string, got map[string]interface {}{"h
 // TestResolveTypes: the fields of an external connection, completed,
 // against the contract's types: every violation at once, one line each,
 // in parameter path order then by field path. The secret field, required, is not
-// in the values: not reported. An internal reference is not checked.
+// in the values: not reported.
 func TestResolveTypes(t *testing.T) {
 	values := M{
 		"main":     M{"db": "ext"},
@@ -308,9 +315,7 @@ func TestResolveOutput(t *testing.T) {
 	}
 }
 
-// TestResolveOrder: a connection first, then, of a contract without a
-// naming convention, an output; of a contract with one, the convention,
-// never an output, with or without Published.
+// TestResolveOrder: a connection first, then an output.
 func TestResolveOrder(t *testing.T) {
 	conn := M{"demo-pg-hive": M{"contract": "server", "host": "h"}}
 	for name, tc := range map[string]struct {
@@ -324,14 +329,9 @@ func TestResolveOrder(t *testing.T) {
 			M{"db": "demo-pg-hive", "connections": conn}, namespaceOutputs, "db",
 			M{"ref": "demo-pg-hive", "contract": "server", "source": "external"}, nil,
 		},
-		"the convention, not the output": {
+		"an output named after its instance": {
 			M{"main": "demo-pg"}, namespaceOutputs, "main",
-			M{"ref": "demo-pg", "contract": "database", "source": "internal", "instance": "demo-pg"},
-			[]Dependency{{Instance: "demo-pg", Contract: "database", Field: "main", Output: "demo-pg"}},
-		},
-		"the convention, no Published": {
-			M{"main": "demo-pg"}, nil, "main",
-			M{"ref": "demo-pg", "contract": "database", "source": "internal", "instance": "demo-pg"},
+			M{"ref": "demo-pg", "contract": "database", "source": "output", "instance": "demo-pg"},
 			[]Dependency{{Instance: "demo-pg", Contract: "database", Field: "main", Output: "demo-pg"}},
 		},
 	} {
@@ -366,17 +366,17 @@ func TestResolveOutputErrors(t *testing.T) {
 		"two instances": {M{"db": "shared"}, twice, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
 		"the compiling release": {
 			M{"db": "self"}, namespaceOutputs,
-			`db: "self" is not a connection, nor an output of an instance of the namespace, and the server contract has no internal naming convention`,
+			`db: "self" is not a connection, nor an output of an instance of the namespace`,
 		},
 		"another contract": {
 			M{"db": "demo-pg"}, namespaceOutputs,
-			`db: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "server" is expected), and the server contract has no internal naming convention`,
+			`db: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "server" is expected)`,
 		},
-		"not a release name": {
+		"no output of that name": {
 			M{"main": "Demo_PG"}, namespaceOutputs,
-			`main: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most`,
+			`main: "Demo_PG" is not a connection, nor an output of an instance of the namespace`,
 		},
-		"no Published":  {M{"db": "demo-pg-hive"}, nil, `db: "demo-pg-hive" is not a connection, and the server contract has no internal naming convention`},
+		"no Published":  {M{"db": "demo-pg-hive"}, nil, `db: "demo-pg-hive" is not a connection`},
 		"unknown field": {M{"db": "shared"}, server("demo-a", M{"host": "a", "zone": "z"}), `db: output "shared" of demo-a: field "zone" is not part of the server contract`},
 		"types": {
 			M{"db": "shared"}, server("demo-a", M{"host": "a", "port": "5432"}),
@@ -457,7 +457,7 @@ func TestMissingOutputs(t *testing.T) {
 		"demo-a": {Provides: []Output{{Name: "shared", Contract: "server", Values: M{"host": "a"}}}},
 		"demo-b": {Provides: []Output{{Name: "shared", Contract: "server", Values: M{"host": "b"}}}},
 	}
-	unpublished := `db: "demo-pg-x" is not a connection, nor an output of an instance of the namespace, and the server contract has no internal naming convention`
+	unpublished := `db: "demo-pg-x" is not a connection, nor an output of an instance of the namespace`
 	for name, tc := range map[string]struct {
 		values    M
 		published map[string]Info
@@ -466,11 +466,11 @@ func TestMissingOutputs(t *testing.T) {
 	}{
 		"unpublished": {M{"db": "demo-pg-x"}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}}, unpublished},
 		"with another error": {
-			M{"db": "demo-pg-x", "main": "Demo_PG"}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}},
-			unpublished + "\n" + `main: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most`,
+			M{"db": "demo-pg-x", "main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}},
+			unpublished + "\n" + `main: connection "ext" has contract "s3", "database" is expected`,
 		},
 		"several providers": {M{"db": "shared"}, shared, nil, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
-		"another error":     {M{"main": "Demo_PG"}, namespaceOutputs, nil, `main: "Demo_PG" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most`},
+		"another error":     {M{"main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, nil, `main: connection "ext" has contract "s3", "database" is expected`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := outputCtx(tc.values, tc.published)

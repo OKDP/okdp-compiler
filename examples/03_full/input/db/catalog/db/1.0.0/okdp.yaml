@@ -1,7 +1,6 @@
 # OKDP's part of the db package: what an instance provides, a database
-# reached by the contract's naming convention (x-okdp-internal): its fields
-# are those the convention gives, and its credentials Secret, the one a
-# reference to it names (<release>-database-credentials), generated.
+# named after its release, which a reference names (database: demo-db),
+# and its credentials Secret (<release>-database-credentials), generated.
 
 provides:
   - contract: database

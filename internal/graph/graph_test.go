@@ -20,8 +20,9 @@ func result(release string, servers []string, deps ...okdp.Dependency) *okdp.Res
 	return res
 }
 
-// convention: a reference by the database contract's naming convention.
-func convention(field, instance string) okdp.Dependency {
+// named: a reference to the database output of instance, named
+// after it.
+func named(field, instance string) okdp.Dependency {
 	return okdp.Dependency{Instance: instance, Contract: "database", Field: field, Output: instance}
 }
 
@@ -37,9 +38,9 @@ func TestWaves(t *testing.T) {
 	other := result("demo-a", nil)
 	other.Namespace = "other"
 	g, err := New([]*okdp.Result{
-		result("demo-a", nil, convention("x", "demo-c"), output("y", "demo-b", "b"), convention("z", "demo-b")),
-		result("demo-b", []string{"b"}, convention("x", "demo-d")),
-		result("demo-c", nil, convention("x", "demo-d")),
+		result("demo-a", nil, named("x", "demo-c"), output("y", "demo-b", "b"), named("z", "demo-b")),
+		result("demo-b", []string{"b"}, named("x", "demo-d")),
+		result("demo-c", nil, named("x", "demo-d")),
 		result("demo-d", nil),
 		other,
 	})
@@ -62,21 +63,21 @@ func TestWaves(t *testing.T) {
 }
 
 // TestErrors: every problem at once, by release: a missing release, one
-// that does not provide the convention's output or the output referenced,
+// that does not publish the output referenced,
 // a reference to itself, a release given twice, a cycle of two, and one
 // of three reached from a release outside it, each once.
 func TestErrors(t *testing.T) {
 	_, err := New([]*okdp.Result{
-		result("demo-a", nil, convention("db", "demo-x"), output("api", "demo-b", "nope"), convention("self", "demo-a")),
+		result("demo-a", nil, named("db", "demo-x"), output("api", "demo-b", "nope"), named("self", "demo-a")),
 		result("demo-b", []string{"b"}),
 		result("demo-c", nil, output("api", "demo-b", "demo-b")),
 		result("demo-c", nil),
-		result("demo-d", nil, convention("x", "demo-e")),
-		result("demo-e", nil, convention("x", "demo-d")),
-		result("demo-f", nil, convention("x", "demo-g")),
-		result("demo-g", nil, convention("x", "demo-h")),
-		result("demo-h", nil, convention("x", "demo-i")),
-		result("demo-i", nil, convention("x", "demo-g")),
+		result("demo-d", nil, named("x", "demo-e")),
+		result("demo-e", nil, named("x", "demo-d")),
+		result("demo-f", nil, named("x", "demo-g")),
+		result("demo-g", nil, named("x", "demo-h")),
+		result("demo-h", nil, named("x", "demo-i")),
+		result("demo-i", nil, named("x", "demo-g")),
 	})
 	want := []string{
 		`demo/demo-a: db: it references "demo-x", which is not another instance of namespace "demo"`,
@@ -98,13 +99,13 @@ func TestErrors(t *testing.T) {
 	}
 }
 
-// TestNotProvided: a reference by convention to a release that does not
-// provide the contract.
+// TestNotProvided: a reference to an output named after a release that
+// does not publish it.
 func TestNotProvided(t *testing.T) {
 	b := result("demo-b", nil)
 	b.Info.Provides = nil
-	_, err := New([]*okdp.Result{result("demo-a", nil, convention("db", "demo-b")), b})
-	want := `demo/demo-a: db: it references "demo-b" as a database connection, which "demo-b" does not provide`
+	_, err := New([]*okdp.Result{result("demo-a", nil, named("db", "demo-b")), b})
+	want := `demo/demo-a: db: it references the database output "demo-b" of "demo-b", which "demo-b" does not publish`
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
 	}

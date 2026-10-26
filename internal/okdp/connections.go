@@ -1,9 +1,9 @@
 // Connections: the references declared in the parameter schema
-// (x-okdp-connection-ref), resolved to an external connection, to an
-// instance of the namespace or to an output another instance of the
-// namespace publishes, and completed against their contract; the
-// contracts, read at each use (readContract), and their checks, which the
-// outputs the instance provides go through too.
+// (x-okdp-connection-ref), resolved to an external connection or to an
+// output another instance of the namespace publishes, and completed
+// against their contract; the contracts, read at each use (readContract),
+// and their checks, which the outputs the instance provides go through
+// too.
 
 package okdp
 
@@ -23,15 +23,14 @@ import (
 )
 
 // resolver: resolves connection references against the contracts, the
-// external connections of the instance and what the other instances of the
-// namespace publish, recording those that point to an instance.
+// external connections of the instance and what the other instances of
+// the namespace publish, recording those that point to an instance.
 type resolver struct {
 	contracts fs.FS           // Inputs.Contracts
 	conns     M               // the external connections
 	published map[string]Info // Inputs.Published, by release; nil when unknown
 	release   string          // Inputs.Release: never its own provider
 	namespace string
-	suffix    string
 	deps      []Dependency // every reference to an instance resolved, in order
 	errs      []error      // every reference that does not resolve, in order (walk)
 	missing   []outputKey  // the outputs references name that no instance of published publishes, in order (output)
@@ -52,11 +51,10 @@ type missingOutputs struct {
 func (e *missingOutputs) Error() string { return e.err.Error() }
 func (e *missingOutputs) Unwrap() error { return e.err }
 
-// Dependency: an instance of the same namespace that a connection reference
-// of the parameters points to, not an external connection: the instance the
-// reference names, by the contract's naming convention (an internal
-// reference), or, of a contract without one, the instance that publishes
-// the output the reference names (Inputs.Published). The instance must
+// Dependency: an instance that a connection reference of the parameters
+// points to, not an external connection: the instance of the namespace
+// that publishes the output the reference names (Inputs.Published). The
+// instance must
 // exist and publish an output of the contract by that name. Its fields are
 // always set. What a deployer orders the releases with, read from
 // Result.Dependencies: the deployment graph checks them, and makes the
@@ -66,7 +64,7 @@ type Dependency struct {
 	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance, or the one that publishes the referenced output (its release name)
 	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
 	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
-	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name: the instance's release for a reference by naming convention
+	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name
 }
 
 // walk: v, at path, of the schema s, with every string carrying an
@@ -108,30 +106,26 @@ func (r *resolver) walk(s M, v any, path string) any {
 }
 
 // resolve: a reference to its contract fields. An entry of connections is
-// external. Any other name, of a contract with a naming convention, is an
-// instance of the namespace (internal), a release name; of a contract
-// without one, an output named ref of the contract that another instance of
-// the namespace publishes (Published, the compiling release left out:
-// output). A contract with a convention never resolves to an output: its
-// references resolve the same whatever the other instances publish, and so
-// whatever the order the instances are compiled in. The first error is
-// reported: the contract, then the name of an internal reference, or the
-// output of another one (several instances, none), the fields of an
-// external connection or an output in alphabetical order (contract.fields),
-// then the required fields, then the violations of the contract by an
-// external connection or an output, all of them (contract.check), then "{{"
-// in what it resolves to (chart.NoTemplate). A reference to an instance
-// that resolves is recorded (deps), field naming it, ref the output.
+// external. Any other name is an output named ref of the contract that
+// another instance of the namespace publishes (Published, the compiling
+// release left out: output). The first
+// error is reported: the contract, then the output (several instances,
+// none), the fields of an external connection or an output in
+// alphabetical order (contract.fields), then the required fields, then the
+// violations of the contract, all of them (contract.check), then "{{" in
+// what it resolves to (chart.NoTemplate). A reference to an instance that
+// resolves is recorded (deps), field naming it, ref the output.
 func (r *resolver) resolve(ref, contract, field string) (M, error) {
 	c, err := readContract(r.contracts, contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
 	}
-	out, source, instance := M{}, "internal", ref
+	out, instance := M{}, ""
+	var source string
 	var secretRef any
 	where := fmt.Sprintf("%s (connection %q)", field, ref)
 	if conn, ok := r.conns[ref].(M); ok {
-		source, instance = "external", ""
+		source = "external"
 		if value.Str(conn["contract"]) != contract {
 			return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(conn["contract"]), contract)
 		}
@@ -148,19 +142,6 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 		if err := c.fields(out, fmt.Sprintf("%s: connection %q", field, ref)); err != nil {
 			return nil, err
 		}
-	} else if c.internal != nil {
-		// An instance: its fields follow the contract's naming convention.
-		// Its name goes into hosts, Secret names and the dependency.
-		if !chart.IsRelease(ref) {
-			return nil, fmt.Errorf("%s: %q is not a connection, nor a release name: lowercase letters, digits and \"-\", a letter or digit at each end, %d characters at most", field, ref, chart.ReleaseMax)
-		}
-		for k, tpl := range c.internal {
-			out[k] = strings.NewReplacer("${ref}", ref, "${namespace}", r.namespace, "${suffix}", r.suffix).Replace(value.Str(tpl))
-		}
-		// Its credentials Secret, when the contract has secret fields.
-		if len(c.secret) > 0 {
-			secretRef = M{"name": fmt.Sprintf("%s-%s-credentials", ref, contract)}
-		}
 	} else {
 		// An output: its values as the context's layers give a connection,
 		// in a copy, every number a float64 whatever decoded them.
@@ -171,27 +152,15 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 		source, instance = "output", provider
 		from := fmt.Sprintf("output %q of %s", ref, provider)
 		where = fmt.Sprintf("%s (%s)", field, from)
-		v, err := value.Normalize(o.Values)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %s: %w", field, from, err)
-		}
-		out = value.AsMap(v)
-		if err := c.fields(out, field+": "+from); err != nil {
+		if out, secretRef, err = c.published(o, field, from); err != nil {
 			return nil, err
-		}
-		if o.SecretRef != nil && o.SecretRef.Name != "" {
-			secretRef = M{"name": o.SecretRef.Name}
 		}
 	}
 	if err := c.complete(out, where); err != nil {
 		return nil, err
 	}
-	// An instance's fields follow from the contract; a connection's are
-	// written by hand, an output's read from elsewhere.
-	if source != "internal" {
-		if err := c.check(out, where); err != nil {
-			return nil, err
-		}
+	if err := c.check(out, where); err != nil {
+		return nil, err
 	}
 	if secretRef != nil {
 		out["secretRef"] = secretRef
@@ -214,9 +183,27 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 	return out, nil
 }
 
-// output: the output named ref of the contract, one without a naming
-// convention, that an instance of Published publishes, the compiling
-// release left out, and that instance. Several instances fail, named in
+// published: the values of an output o, as a reference gets them: a copy,
+// read as values are (every number a float64), each field of the contract
+// and not a secret one, from naming it in messages; and its secretRef,
+// {name}, nil when it has none.
+func (c *contract) published(o Output, field, from string) (M, any, error) {
+	v, err := value.Normalize(o.Values)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %s: %w", field, from, err)
+	}
+	out := value.AsMap(v)
+	if err := c.fields(out, field+": "+from); err != nil {
+		return nil, nil, err
+	}
+	if o.SecretRef != nil && o.SecretRef.Name != "" {
+		return out, M{"name": o.SecretRef.Name}, nil
+	}
+	return out, nil, nil
+}
+
+// output: the output named ref of the contract that an instance of
+// Published publishes, the compiling release left out, and that instance. Several instances fail, named in
 // release order; none fails, saying, with Published, which instances
 // publish an output of that name of another contract, in release order,
 // and records the output (missing).
@@ -254,7 +241,7 @@ func (r *resolver) output(ref, contract, field string) (Output, string, error) {
 			msg += fmt.Sprintf(" (%s, %q is expected)", strings.Join(others, ", "), contract)
 		}
 	}
-	return Output{}, "", fmt.Errorf("%s, and the %s contract has no internal naming convention", msg, contract)
+	return Output{}, "", errors.New(msg)
 }
 
 // contract: a contract, the JSON Schema of a kind of connection, as each
@@ -266,7 +253,6 @@ type contract struct {
 	props    M                  // properties: the schema of each field
 	secret   map[string]bool    // the fields marked x-okdp-secret: credentials, in the Secret, never in the values
 	required []string           // the required fields, secret ones left out, sorted
-	internal M                  // x-okdp-internal: the fields of an instance reached by its name, templates; nil without a convention
 	schema   *jsonschema.Schema // the validator of the values of its connections and outputs
 }
 
@@ -305,7 +291,10 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 		return nil, fail("not a JSON object")
 	}
 	c := &contract{name: name, label: value.Str(m["x-okdp-contract"]), props: value.AsMap(m["properties"]), secret: map[string]bool{}}
-	c.internal, _ = m["x-okdp-internal"].(M)
+	// Removed: a reference names an output its provider publishes.
+	if _, ok := m["x-okdp-internal"]; ok {
+		return nil, fail("x-okdp-internal: naming conventions are gone, a provider publishes its connections (provides)")
+	}
 	for k, p := range c.props {
 		if value.Truthy(value.AsMap(p)["x-okdp-secret"]) {
 			c.secret[k] = true

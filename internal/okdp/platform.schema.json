@@ -15,7 +15,7 @@
               "properties": {
                 "suffix": {
                   "type": "string",
-                  "description": "The domain of the platform's hosts: ${suffix} of the contracts' x-okdp-internal fields, the hosts of internal connection references and of provided outputs."
+                  "description": "The domain of the platform's hosts, which the mappings build the services' hosts with (a package requires it: require)."
                 }
               }
             },

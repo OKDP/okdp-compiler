@@ -11,15 +11,13 @@ import (
 	"testing/fstest"
 )
 
-// nodeContracts: server, a contract without a naming convention, its
-// outputs named, and database, one with.
+// nodeContracts: server, whose outputs are named.
 var nodeContracts = fstest.MapFS{
-	"server.schema.json":   {Data: []byte(`{"x-okdp-contract": "server", "properties": {"host": {"type": "string"}}, "required": ["host"]}`)},
-	"database.schema.json": {Data: []byte(`{"x-okdp-contract": "database", "x-okdp-internal": {"host": "${ref}-db.${namespace}.svc"}, "properties": {"host": {"type": "string"}}, "required": ["host"]}`)},
+	"server.schema.json": {Data: []byte(`{"x-okdp-contract": "server", "properties": {"host": {"type": "string"}}, "required": ["host"]}`)},
 }
 
-// nodeDef: def, whose instances reference server outputs (uses) and a
-// database by its convention (db), publish server outputs (publishes),
+// nodeDef: def, whose instances reference server outputs (uses), publish
+// server outputs (publishes),
 // each with its name after the host of the first it uses, and fail on
 // demand (fail).
 var nodeDef = func() *Definition {
@@ -27,7 +25,6 @@ var nodeDef = func() *Definition {
 	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
 		"replicas": {"type": "integer", "default": 1},
 		"uses": {"type": "array", "default": [], "items": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}}},
-		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}},
 		"publishes": {"type": "array", "default": [], "items": {"type": "string"}},
 		"fail": {"type": "boolean", "default": false}}}`)}
 	d := withFiles(files)
@@ -83,13 +80,12 @@ func permutations(instances []Instance) [][]Instance {
 }
 
 // TestCompileAll: instances compiled together, in every order, give the
-// same outcomes: a chain, consumers first; references by convention,
-// never waited for; an output nobody publishes; a provider that fails, a
+// same outcomes: a chain, consumers first; an output nobody publishes; a provider that fails, a
 // cycle of outputs, whose consumers say what does not compile; an output
 // two instances publish, and what resolved through it.
 func TestCompileAll(t *testing.T) {
 	missing := func(path, ref string) string {
-		return fmt.Sprintf(`error: %s: %q is not a connection, nor an output of an instance of the namespace, and the server contract has no internal naming convention`, path, ref)
+		return fmt.Sprintf(`error: %s: %q is not a connection, nor an output of an instance of the namespace`, path, ref)
 	}
 	for name, tc := range map[string]struct {
 		instances []Instance
@@ -98,10 +94,6 @@ func TestCompileAll(t *testing.T) {
 		"a chain": {
 			[]Instance{node("c", M{"uses": []any{"b"}, "publishes": []any{"c"}}), node("b", M{"uses": []any{"a"}, "publishes": []any{"b"}}), node("a", M{"publishes": []any{"a"}})},
 			map[string]string{"demo-a": "a", "demo-b": "a/b", "demo-c": "a/b/c"},
-		},
-		"by convention": {
-			[]Instance{node("a", M{"db": "demo-b"}), node("b", M{"db": "demo-a"})},
-			map[string]string{"demo-a": "", "demo-b": ""},
 		},
 		"nobody publishes it": {
 			[]Instance{node("a", M{"uses": []any{"x"}}), node("b", M{"publishes": []any{"b"}})},
@@ -188,7 +180,7 @@ func TestCompileAllNamespaces(t *testing.T) {
 	}
 	want := []string{
 		"demo/demo-a", "other/demo-a", "other/demo-c",
-		`uses[0]: "z" is not a connection, nor an output of an instance of the namespace, and the server contract has no internal naming convention`,
+		`uses[0]: "z" is not a connection, nor an output of an instance of the namespace`,
 		`release "demo-t" is given twice in namespace "other"`, `release "demo-t" is given twice in namespace "other"`,
 	}
 	if !reflect.DeepEqual(got, want) {

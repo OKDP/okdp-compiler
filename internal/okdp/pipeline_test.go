@@ -249,16 +249,16 @@ func TestDependencies(t *testing.T) {
 	in := inputs(map[string]any{
 		"backends": []any{
 			map[string]any{"database": "ext"},     // an external connection: not a dependency
-			map[string]any{"database": "demo-db"}, // an instance
+			map[string]any{"database": "demo-db"}, // an output of an instance
 			map[string]any{"database": ""},        // not set
 		},
 		"connections": map[string]any{"ext": map[string]any{"contract": "database", "host": "db.example.org"}},
 	})
 	in.Contracts = fstest.MapFS{"database.schema.json": {Data: []byte(`{
 		"x-okdp-contract": "database",
-		"x-okdp-internal": {"host": "${ref}-db.${namespace}.svc"},
 		"properties": {"host": {"type": "string"}},
 		"required": ["host"]}`)}}
+	in.Published = map[string]Info{"demo-db": {Provides: []Output{{Name: "demo-db", Contract: "database", Values: M{"host": "demo-db.demo.svc"}}}}}
 	res, err := Compile(context.Background(), withFiles(ch), in)
 	if err != nil {
 		t.Fatal(err)

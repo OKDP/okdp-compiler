@@ -421,14 +421,13 @@ and give OKDP's names, labels and Secrets.
 
 A parameter carrying `x-okdp-connection-ref` names an entry of
 `connections` (external, from a context file: the platform's, the
-project's, or the instance's own at a level of its own), another instance
-of the namespace (internal, for a contract with a naming convention), or
-an output another instance of the namespace publishes (for a contract
-without one). Before the mapping runs, the compiler replaces the name with
-the connection, completed against its contract ([what the mapping
-receives](specs/01_inputs_outputs.md#what-the-mapping-receives)). A
-reference left empty stays `""` (or `null`); a name that is not an entry
-of `connections` must be a release name, or an output's name.
+project's, or the instance's own at a level of its own), or an output
+another instance of the namespace publishes, an instance's own named after
+its release by default. Before the mapping runs, the compiler replaces the
+name with the connection, completed against its contract ([what the
+mapping receives](specs/01_inputs_outputs.md#what-the-mapping-receives)).
+A reference left empty stays `""` (or `null`); a name that is not an entry
+of `connections` must be an output's name.
 
 ```yaml
 # the instance's config.yaml: an external database
@@ -447,18 +446,17 @@ connections:
     secretRef: {name: shared-db-credentials}   # never the password itself
 ```
 
-With the example's `database` contract, `database: demo-db` instead names an
-instance of the namespace: host `demo-db-db.demo.svc`, Secret
-`demo-db-database-credentials`, and a dependency (`Result.Dependencies`),
-which [okdp-gitops](https://github.com/OKDP/okdp-gitops) orders the
+In the advanced example, `database: demo-db` instead names the output
+the instance `demo-db` publishes, named after its release: host
+`demo-db-db.demo.svc`, Secret `demo-db-database-credentials`, and a
+dependency (`Result.Dependencies`), which the deployment graph orders the
 releases with (Flux `dependsOn`, Argo CD sync waves,
 [GitOps](01_usage.md#gitops)). The mapping reads both the same way,
 credentials through a `secretKeyRef` on `secretRef.name`; it fails with a
 clear message when it needs the Secret and the connection has none (the
 second `errors` entry of
-`examples/02_advanced/input/db/catalog/webapp/1.0.0/okdp.yaml`). `s3` and
-`database-server` have no internal convention: a reference names a
-connection, or an output by its name. cnpg-postgresql publishes one
+`examples/02_advanced/input/db/catalog/webapp/1.0.0/okdp.yaml`).
+cnpg-postgresql publishes one
 `database-server` output per database: an instance of the namespace
 references it by that name (`database: demo-pg-hive`), which resolves to
 the output's values and `secretRef`, and depends on the cnpg-postgresql
@@ -471,18 +469,14 @@ See
 
 Provide a connection in `provides`. Its values are checked against the
 contract, its schema included (a `port` is a number, not a string built by
-an expression). Of a contract with an internal convention, the output is
-published under the release name, the default `name`: internal references
-reach the instance by it, and another name fails. Its values must then
-also be what an internal reference to this instance resolves to: build the
-hosts and Service names from the contract's convention (trino's host is
-`trino-<namespace>.<suffix>`, hive-metastore's Service
-`<release>-hive-metastore`), once, in `vars`, for the ingress and `provides`
-alike. A `name` is for a contract without a convention (cnpg-postgresql's
-`database-server` outputs, one per database): the name the other
-instances of the namespace reference the output by, unique per contract
-in the namespace, or their references fail. Then say where the
-credentials come from:
+an expression). An output is published under the release name, the
+default `name`: other instances reach the instance by it. Its values are
+what the instance is reached at: build the hosts and Service names once,
+in `vars`, for the ingress and `provides` alike. A `name` is for several
+outputs of one contract (cnpg-postgresql's `database-server` outputs, one
+per database): the name the other instances of the namespace reference
+each by, unique per contract in the namespace, or their references fail.
+Then say where the credentials come from:
 
 ```yaml
 provides:
@@ -803,9 +797,10 @@ app:
       valueFrom: {secretKeyRef: {name: "${{ db.secretRef.name }}", key: password}}
 ```
 
-The same lines serve an internal and an external database. A required
-connection is checked in `errors` (hive-metastore, polaris, superset), with
-what the service supports (polaris refuses any engine other than `postgresql`).
+The same lines serve a database another instance publishes and an
+external one. A required connection is checked in `errors`
+(hive-metastore, polaris, superset), with what the service supports
+(polaris refuses any engine other than `postgresql`).
 
 ### Proxy
 
@@ -917,9 +912,7 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - **Names longer than 63 characters.** `${{ release.name }}-something`
   overflows with long project and instance names: a release has up to 53
   characters (Helm's limit, checked by the compiler), which leaves 10 for
-  `-<suffix>`. Use `okdpFullname('something')`, cut to 63 characters. A
-  name a contract's convention promises (`<release>-app`,
-  `<release>-hive-metastore`) is kept as the convention writes it.
+  `-<suffix>`. Use `okdpFullname('something')`, cut to 63 characters.
 - **One object, one name.** Give each object of a kind its own name in its
   namespace (the credentials Secrets included): applied, the second would
   replace the first.
@@ -963,10 +956,9 @@ A rule no path expresses (a value that depends on a parameter) goes in
   exposure, Secret wiring and the switches kept off; `append` the lists
   carrying the platform's wiring.
 - [ ] The mapping writes no literal image tag, no credential, no name that
-  can exceed 63 characters outside a contract's convention; every OKDP
-  object is labelled.
-- [ ] `provides` follows the contract's convention, under the release
-  name, and says where the credentials come from.
+  can exceed 63 characters; every OKDP object is labelled.
+- [ ] `provides` publishes what the instance is reached at, under the
+  release name, and says where the credentials come from.
 - [ ] The OAuth clients are declared in `oidcClients` and read from
   `platform.oidcClientSecret` and `oidcClientSecret('<name>')`.
 - [ ] One `ci/` case per mode and per branch, OIDC `existing` and `dcr`

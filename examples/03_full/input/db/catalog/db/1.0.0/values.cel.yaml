@@ -1,5 +1,5 @@
 # The postgresql chart's values: the service and the database the
-# convention names, the generated credentials.
+# database publishes, the generated credentials.
 postgresql:
   fullnameOverride: ${{ release.name }}-db
   auth:
