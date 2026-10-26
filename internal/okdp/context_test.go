@@ -127,7 +127,7 @@ func TestPlatformSchema(t *testing.T) {
 		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}, "oidc": M{"dcr": M{"registrationUrl": 1}}}, "imageRegistry": 1}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			heading := "context values (--context, Inputs.Context) don't meet the specifications of the schema of global.okdp"
+			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
 			_, err := schemaValues(platformSchema, heading, M{"global": value.Copy(tc.global)})
 			want := heading + ":\n" + tc.want
 			if (err == nil) != (tc.want == "") || (err != nil && err.Error() != want) {

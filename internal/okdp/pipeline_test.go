@@ -486,7 +486,7 @@ app:
 		t.Errorf("values: %#v", app)
 	}
 	in.Values = append(in.Values, map[string]any{"global": M{"imageRegistry": "registry.example.org"}})
-	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "values layer 2: global.imageRegistry is set by the context (--context, Inputs.Context)") {
+	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "values layer 2: global.imageRegistry is set by the context (Inputs.Context)") {
 		t.Errorf("a key of global: got %v", err)
 	}
 }

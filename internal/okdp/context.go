@@ -80,7 +80,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	settings, err := schemaValues(platformSchema, "context values (--context, Inputs.Context) don't meet the specifications of the schema of global.okdp", M{"global": value.Copy(values["global"])})
+	settings, err := schemaValues(platformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", M{"global": value.Copy(values["global"])})
 	if err != nil {
 		return nil, err
 	}

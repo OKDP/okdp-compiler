@@ -44,15 +44,15 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 		layer := value.AsMap(v)
 		g, isMap := layer["global"].(M)
 		if _, set := layer["global"]; set && !isMap {
-			return nil, fmt.Errorf("%s: global is set by the context (--context, Inputs.Context)", name)
+			return nil, fmt.Errorf("%s: global is set by the context (Inputs.Context)", name)
 		}
 		for _, k := range slices.Sorted(maps.Keys(g)) {
 			if _, ok := declared[k]; !ok || k == "okdp" {
-				return nil, fmt.Errorf("%s: global.%s is set by the context (--context, Inputs.Context)", name, k)
+				return nil, fmt.Errorf("%s: global.%s is set by the context (Inputs.Context)", name, k)
 			}
 		}
 		if _, set := layer["connections"]; set {
-			return nil, fmt.Errorf("%s: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level", name)
+			return nil, fmt.Errorf("%s: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level", name)
 		}
 		// No template code in what the instance gives, whatever key it is
 		// under: parameters, upstream values (chart.NoTemplate).
@@ -96,7 +96,7 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 		}
 		for _, lower := range levels[:len(levels)-1] {
 			if p := chart.Overlap(lower.Values, layer, connection); p != "" {
-				return nil, fmt.Errorf("%s: %s is set at level %d (--context, Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
+				return nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
 			}
 		}
 		if l.Level > 0 {

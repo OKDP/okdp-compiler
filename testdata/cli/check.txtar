@@ -1,76 +1,83 @@
-# --check: the compile checked, nothing written: status 0, nothing
-# printed. With --charts (or $OKDP_CHARTS, read with --check only), the
-# final values are checked against the upstream charts too.
-env OKDP_CONTRACTS=examples/03_full/input/db/contracts
-status 0 okdp-compile --check --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml
+# --check: the tree compiled and checked, nothing written: status 0,
+# nothing printed. With --charts (or $OKDP_CHARTS, read with --check
+# only), the final values are checked against the upstream charts too.
+status 0 okdp-compile --check --repository examples/03_full/input/db
 ! stdout .
 ! stderr .
-status 0 okdp-compile --check --charts examples/03_full/.charts --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml
+status 0 okdp-compile --check --charts examples/03_full/.charts --repository examples/03_full/input/db
 ! stdout .
 ! stderr .
 
 # A value the chart's values.schema.json refuses: compiled, and checked
 # without the chart; with it, status 1, the report on stderr.
-status 0 okdp-compile --check --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml -f $WORK/bad-env.yaml
-env OKDP_CHARTS=examples/03_full/.charts
-status 1 okdp-compile --check --package examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0 --release demo-workspace --namespace demo --context examples/03_full/input/db/platform.yaml --context 1:examples/03_full/input/db/projects/demo/project.yaml --context 2:examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml -f examples/03_full/input/db/projects/demo/instances/demo-workspace/config.yaml -f $WORK/bad-env.yaml
+status 0 okdp-compile --check --repository $WORK/lib --repository $WORK/bad
+env OKDP_CHARTS=$WORK/charts
+status 1 okdp-compile --check --repository $WORK/lib --repository $WORK/bad
 ! stdout .
 cmp stderr $WORK/schema.txt
 
 # An instance list appended to (append) where the chart's default list has
 # items the final list lacks: Helm replaces the chart's list. A warning,
 # status 0; none without the chart, nor once the package restates them.
-env OKDP_CHARTS=$WORK/charts
-status 0 okdp-compile --check --package $WORK/hello --release demo-hello --namespace demo -f $WORK/debug.yaml
+status 0 okdp-compile --check --repository $WORK/lib --repository $WORK/tree
 ! stdout .
 cmp stderr $WORK/warning.txt
 env OKDP_CHARTS=
-status 0 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -f $WORK/debug.yaml -o $WORK/files
+status 0 okdp-compile --repository $WORK/lib --repository $WORK/tree -o $WORK/files
 ! stderr .
-grep '^  args:\n    - --debug\n' $WORK/files/instance.values.yaml
-cp $WORK/restated.yaml $WORK/hello/values.yaml
-status 0 okdp-compile --check --charts $WORK/charts --package $WORK/hello --release demo-hello --namespace demo -f $WORK/debug.yaml
+grep '^  args:\n    - --debug\n' $WORK/files/projects/demo/instances/demo-hello/instance.values.yaml
+cp $WORK/restated.yaml $WORK/lib/catalog/hello/1.0.0/values.yaml
+status 0 okdp-compile --check --charts $WORK/charts --repository $WORK/lib --repository $WORK/tree
 ! stderr .
 
 # --check with --output, --charts without --check: status 1, nothing
 # written.
-status 1 okdp-compile --check --package $WORK/hello --release demo-hello --namespace demo -o $WORK/check
+status 1 okdp-compile --check --repository $WORK/lib --repository $WORK/tree -o $WORK/check
 stderr '^error: --check writes nothing: no --output \(-o\)$'
 ! exists $WORK/check
-status 1 okdp-compile --charts $WORK/charts --package $WORK/hello --release demo-hello --namespace demo -o $WORK/charted
+status 1 okdp-compile --charts $WORK/charts --repository $WORK/lib --repository $WORK/tree -o $WORK/charted
 stderr '^error: --charts is read by --check only: a compile reads no chart$'
 ! exists $WORK/charted
 
--- bad-env.yaml --
-upstream:
-  api:
-    env: [{name: bad-name, value: x}]
 -- schema.txt --
-error: compiled values don't meet the specifications of the schema(s) in the following chart(s):
-api (workspace-3.2.0):
-- at '/env/25/name': 'bad-name' does not match pattern '^[A-Za-z_][A-Za-z0-9_]*$'
+error: demo/demo-bad: compiled values don't meet the specifications of the schema(s) in the following chart(s):
+hello (hello-1.0.0):
+- at '/message': got number, want string
 -- warning.txt --
-warning: upstream.hello.args: appended to the package's list, not to the default list of hello-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of hello (its defaults or values file) to keep them
--- hello/Chart.yaml --
+warning: demo/demo-hello: upstream.hello.args: appended to the package's list, not to the default list of hello-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of hello (its defaults or values file) to keep them
+-- lib/catalog/hello/1.0.0/Chart.yaml --
 apiVersion: v2
 name: hello
 version: 1.0.0
 dependencies:
   - {name: hello, repository: https://charts.example.org, version: 1.0.0}
--- hello/okdp.yaml --
+-- lib/catalog/hello/1.0.0/okdp.yaml --
 upstream:
   hello: {append: [args]}
--- hello/values.yaml --
+-- lib/catalog/hello/1.0.0/values.yaml --
 hello:
   message: Hello
 -- restated.yaml --
 hello:
   message: Hello
   args: [--verbose]
--- debug.yaml --
+-- tree/projects/demo/instances/demo-hello/instance.yaml --
+service: hello
+version: 1.0.0
+-- tree/projects/demo/instances/demo-hello/config.yaml --
 upstream:
   hello:
     args: [--debug]
+-- bad/projects/demo/instances/demo-bad/instance.yaml --
+service: hello
+version: 1.0.0
+-- bad/projects/demo/instances/demo-bad/config.yaml --
+upstream:
+  hello:
+    message: 1
+    args: [--verbose]
 -- charts/charts.example.org/hello-1.0.0/hello/values.yaml --
 message: Hi
 args: [--verbose]
+-- charts/charts.example.org/hello-1.0.0/hello/values.schema.json --
+{"properties": {"message": {"type": "string"}}}

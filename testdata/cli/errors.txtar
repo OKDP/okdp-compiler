@@ -1,16 +1,28 @@
-# A compile error: status 1, the whole report on stderr, nothing written.
-env OKDP_CONTRACTS=examples/02_advanced/input/db/contracts
-status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --release demo-webapp --namespace demo --context examples/02_advanced/input/db/platform.yaml -f testdata/schema-violation.yaml -o $WORK/files
+# A compile error: status 1, the whole report on stderr, after the
+# instance's namespace and release; nothing written.
+status 1 okdp-compile --repository $WORK/tree -o $WORK/files
 ! stdout .
 cmp stderr $WORK/schema-violation.txt
 ! exists $WORK/files
 
-# A missing flag: status 1.
-status 1 okdp-compile --package examples/02_advanced/input/db/catalog/webapp/1.0.0 --namespace demo
-stderr '^error: --release is required$'
+# No repository: status 1.
+status 1 okdp-compile -o $WORK/files
+stderr '^error: --repository is required$'
 
 -- schema-violation.txt --
-error: values don't meet the specifications of the schema(s) in the following chart(s):
-webapp:
-- at '/database': got number, want string
+error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
+web:
 - at '/replicas': minimum: got 0, want 1
+-- tree/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- tree/catalog/web/1.0.0/config.schema.json --
+{"properties": {"replicas": {"type": "integer", "minimum": 1, "default": 1}}}
+-- tree/projects/demo/instances/demo-web/instance.yaml --
+service: web
+version: 1.0.0
+-- tree/projects/demo/instances/demo-web/config.yaml --
+replicas: 0

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"io/fs"
 	"maps"
@@ -16,33 +15,10 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 )
 
-// The example, a repository tree: what a compile of its instance reads
-// (examples/02_advanced/input/db) and writes (output/).
-var (
-	exampleDir = filepath.Join("..", "..", "examples", "02_advanced")
-	db         = filepath.Join(exampleDir, "input", "db")
-	instance   = filepath.Join(db, "projects", "demo", "instances", "demo-webapp")
-	golden     = filepath.Join(exampleDir, "output", "projects", "demo", "instances", "demo-webapp")
-)
-
 // TestMain: the test binary is also okdp-compile, the command of the
 // scripts (TestScript).
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){"okdp-compile": main})
-}
-
-// example: the options that compile the example instance into dir, as its
-// output (-o dir).
-func example(dir string) options {
-	return options{
-		pkg:       filepath.Join(db, "catalog", "webapp", "1.0.0"),
-		contracts: filepath.Join(db, "contracts"),
-		contexts:  []string{filepath.Join(db, "platform.yaml")},
-		values:    []string{filepath.Join(instance, "config.yaml")},
-		release:   "demo-webapp",
-		namespace: "demo",
-		output:    dir,
-	}
 }
 
 // tree: the files under dir, path -> content.
@@ -64,115 +40,11 @@ func tree(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// TestRun: the example compiled into a directory holding the files of a
-// previous compile: it holds what the example's output holds, the files of
-// the previous compile overwritten.
+// TestRun: the tree of each example, its input/db/, compiled into a
+// directory holding a stale instance: it holds the example's output, the
+// stale instance removed; the full example's tree split into three
+// repositories, in either order, gives the same.
 func TestRun(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// The files of an earlier compile: overwritten, and the objects files
-	// removed, the instance having no objects.
-	for _, name := range []string{"instance.values.yaml", "okdp.info.yaml", "okdp.objects.yaml", "templates/okdp.yaml"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("stale: true\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := run(example(dir)); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := tree(t, dir), tree(t, golden); !maps.Equal(got, want) {
-		t.Errorf("got %v, want the example's output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
-	}
-}
-
-// TestRunCheck: --check compiles and writes nothing, in the current
-// directory or elsewhere, with or without a chart cache (03_full's, which
-// holds the charts of its instance).
-func TestRunCheck(t *testing.T) {
-	full, err := filepath.Abs(filepath.Join("..", "..", "examples", "03_full"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := filepath.Join(full, "input", "db")
-	workspace := filepath.Join(db, "projects", "demo", "instances", "demo-workspace")
-	for name, charts := range map[string]string{"no chart cache": "", "a chart cache": filepath.Join(full, ".charts")} {
-		t.Run(name, func(t *testing.T) {
-			o := options{
-				pkg:       filepath.Join(db, "catalog", "workspace", "3.2.0-1.4.0"),
-				charts:    charts,
-				contracts: filepath.Join(db, "contracts"),
-				contexts:  []string{filepath.Join(db, "platform.yaml"), "1:" + filepath.Join(db, "projects", "demo", "project.yaml"), "2:" + filepath.Join(workspace, "connections.yaml")},
-				values:    []string{filepath.Join(workspace, "config.yaml")},
-				release:   "demo-workspace",
-				namespace: "demo",
-				check:     true,
-			}
-			dir := t.TempDir()
-			t.Chdir(dir)
-			if err := run(o); err != nil {
-				t.Fatal(err)
-			}
-			if after := tree(t, dir); len(after) > 0 {
-				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
-			}
-		})
-	}
-}
-
-// TestRunErrors: what run refuses, before it writes anything.
-func TestRunErrors(t *testing.T) {
-	// A package whose version an umbrella chart cannot take: it fails to
-	// load.
-	pkg := t.TempDir()
-	if err := os.CopyFS(pkg, os.DirFS(filepath.Join(db, "catalog", "webapp", "1.0.0"))); err != nil {
-		t.Fatal(err)
-	}
-	meta, err := os.ReadFile(filepath.Join(pkg, "Chart.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	meta = bytes.Replace(meta, []byte("version: 1.0.0"), []byte(`version: "1.0"`), 1)
-	if err := os.WriteFile(filepath.Join(pkg, "Chart.yaml"), meta, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	protected := filepath.Join("..", "..", "testdata", "protected-upstream.yaml")
-	redefines := filepath.Join("..", "..", "testdata", "context", "1", "redefines-platform-connection.yaml")
-	for name, tc := range map[string]struct {
-		set  func(o *options)
-		want string
-	}{
-		"no release":   {func(o *options) { o.release = "" }, "--release is required"},
-		"no namespace": {func(o *options) { o.namespace = "" }, "--namespace is required"},
-		"no output":    {func(o *options) { o.output = "" }, "--output (-o) is required"},
-		"check output": {func(o *options) { o.check = true }, "--check writes nothing: no --output (-o)"},
-		"charts":       {func(o *options) { o.charts = filepath.Join("..", "..", "examples", "03_full", ".charts") }, "--charts is read by --check only: a compile reads no chart"},
-		"a compile":    {func(o *options) { o.values = append(o.values, protected) }, "ingress.hosts is set by the platform"},
-		"a package":    {func(o *options) { o.pkg = pkg }, `Chart.yaml: version "1.0": SemVer (1.2.3), the version of the umbrella chart`},
-		"a level":      {func(o *options) { o.contexts = append(o.contexts, "1:"+redefines) }, "context layer 2 (level 1): connections.platform-db is set at level 0"},
-		"no level":     {func(o *options) { o.contexts = append(o.contexts, "dev:x.yaml") }, "open dev:x.yaml: no such file or directory"},
-		"published":    {func(o *options) { o.published = filepath.Join(db, "platform.yaml") }, "platform.yaml: not a directory"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			o := example(dir)
-			tc.set(&o)
-			if err := run(o); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error containing %q", err, tc.want)
-			}
-			if after := tree(t, dir); len(after) > 0 {
-				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
-			}
-		})
-	}
-}
-
-// TestRunRepository: --repository: the tree of each example, its
-// input/db/, compiled into a directory holding a stale instance: it holds
-// the example's output, the stale instance removed; the full example's
-// tree split into three repositories, in either order, gives the same.
-func TestRunRepository(t *testing.T) {
 	examples := filepath.Join("..", "..", "examples")
 	for _, example := range []string{"00_passthrough", "01_minimal", "02_advanced", "03_full"} {
 		t.Run(example, func(t *testing.T) {
@@ -226,20 +98,19 @@ func TestRunRepository(t *testing.T) {
 	}
 }
 
-// TestRunRepositoryErrors: what --repository refuses, before it reads the
-// tree: another input, an option of another target or without
-// --repository, a target without its option, repositories inside one
-// another or the output directory; nothing written.
-func TestRunRepositoryErrors(t *testing.T) {
+// TestRunErrors: what run refuses, before it reads the tree: no
+// repository, --check with an output, --charts without --check, an option
+// of another target, a target without its option, repositories inside one
+// another or the output directory, a missing one; nothing written.
+func TestRunErrors(t *testing.T) {
 	full := filepath.Join("..", "..", "examples", "03_full", "input", "db")
 	for name, tc := range map[string]struct {
 		set  func(o *options)
 		want string
 	}{
-		"package":        {func(o *options) { o.pkg = "x" }, "--repository reads every input from the tree: no --package"},
-		"contracts":      {func(o *options) { o.contracts = "x" }, "--repository reads every input from the tree: no --contracts"},
-		"context":        {func(o *options) { o.contexts = []string{"x"} }, "--repository reads every input from the tree: no --context"},
-		"values":         {func(o *options) { o.values = []string{"x"} }, "--repository reads every input from the tree: no -f"},
+		"no repository":  {func(o *options) { o.repositories = nil }, "--repository is required"},
+		"check output":   {func(o *options) { o.check = true }, "--check writes nothing: no --output (-o)"},
+		"charts":         {func(o *options) { o.charts = filepath.Join("..", "..", "examples", "03_full", ".charts") }, "--charts is read by --check only: a compile reads no chart"},
 		"no output":      {func(o *options) { o.output = "" }, "--output (-o) is required"},
 		"target":         {func(o *options) { o.target = "kustomize" }, `--target "kustomize": helm, flux or argocd`},
 		"repo url":       {func(o *options) { o.target = "argocd" }, "--repo-url is required by --target argocd"},
@@ -250,7 +121,6 @@ func TestRunRepositoryErrors(t *testing.T) {
 		"twice":          {func(o *options) { o.repositories = append(o.repositories, full) }, "--repository " + full + " is given twice"},
 		"inside":         {func(o *options) { o.repositories = append(o.repositories, filepath.Join(full, "projects")) }, "--repository " + filepath.Join(full, "projects") + " is inside --repository " + full},
 		"output inside":  {func(o *options) { o.output = filepath.Join(full, "out") }, "--output (-o) " + filepath.Join(full, "out") + " and --repository " + full + " must not contain one another"},
-		"no repository":  {func(o *options) { o.repositories, o.pkg, o.release, o.namespace, o.target = nil, "x", "a", "b", "flux" }, "--target is read with --repository only"},
 		"a missing tree": {func(o *options) { o.repositories = []string{filepath.Join(full, "nope")} }, "--repository: stat " + filepath.Join(full, "nope") + ": no such file or directory"},
 		"a file":         {func(o *options) { o.repositories = []string{filepath.Join(full, "platform.yaml")} }, "--repository " + filepath.Join(full, "platform.yaml") + ": not a directory"},
 	} {
@@ -269,11 +139,33 @@ func TestRunRepositoryErrors(t *testing.T) {
 	}
 }
 
+// TestRunCheck: --check compiles and writes nothing, in the current
+// directory or elsewhere, with or without a chart cache (03_full's, which
+// holds the charts of its instances).
+func TestRunCheck(t *testing.T) {
+	full, err := filepath.Abs(filepath.Join("..", "..", "examples", "03_full"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, charts := range map[string]string{"no chart cache": "", "a chart cache": filepath.Join(full, ".charts")} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir)
+			if err := run(options{repositories: []string{filepath.Join(full, "input", "db")}, charts: charts, check: true}); err != nil {
+				t.Fatal(err)
+			}
+			if after := tree(t, dir); len(after) > 0 {
+				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
+			}
+		})
+	}
+}
+
 // TestScript runs the scripts of testdata/cli: okdp-compile as a
-// process, its exit status, stdout and stderr, $OKDP_CHARTS and
-// $OKDP_CONTRACTS. A script runs from the repository root, as the commands
-// of the documentation, with no $OKDP_* variable but those it sets; its
-// files and outputs are under $WORK.
+// process, its exit status, stdout and stderr, $OKDP_CHARTS. A script
+// runs from the repository root, as the commands of the documentation,
+// with no $OKDP_* variable but those it sets; its files and outputs are
+// under $WORK.
 func TestScript(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {

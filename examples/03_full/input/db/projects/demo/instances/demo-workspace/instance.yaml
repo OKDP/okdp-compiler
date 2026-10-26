@@ -1,6 +1,6 @@
 # The instance's package: catalog/workspace/3.2.0-1.4.0/. The directory
-# names the release (--release demo-workspace), the project's directory the
-# namespace (--namespace demo). A real instance would be named workspace:
+# names the release, demo-workspace, the project's directory the
+# namespace, demo. A real instance would be named workspace:
 # the namespace already says demo.
 service: workspace
 version: 3.2.0-1.4.0

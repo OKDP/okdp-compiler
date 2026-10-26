@@ -1,4 +1,4 @@
-# The instance's parameters (-f), over the defaults of the package's
+# The instance's parameters, over the defaults of the package's
 # config.schema.json: two replicas, the database of the instance demo-db,
 # the audit database platform-db, a connection platform.yaml gives every
 # instance, and values for the app chart as it is (upstream.app), over OKDP's

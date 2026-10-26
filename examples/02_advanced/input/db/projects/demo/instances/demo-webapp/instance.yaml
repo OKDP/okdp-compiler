@@ -1,6 +1,6 @@
 # The instance's package: catalog/webapp/1.0.0/. The directory names the
-# release (--release demo-webapp), the project's directory the namespace
-# (--namespace demo). A real instance would be named webapp: the namespace
+# release, demo-webapp, the project's directory the namespace, demo. A
+# real instance would be named webapp: the namespace
 # already says demo.
 service: webapp
 version: 1.0.0

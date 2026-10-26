@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKDP platform values",
-  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (okdp-compile --context, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, project...), and every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value.",
+  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, project...), and every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value.",
   "type": "object",
   "properties": {
     "global": {

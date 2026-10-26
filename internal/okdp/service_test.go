@@ -69,7 +69,7 @@ func TestDefinitionService(t *testing.T) {
 func TestRequire(t *testing.T) {
 	d := *def
 	d.Package.Require = []string{"ingress.suffix", "oidc.issuerUri"}
-	missing := "global.okdp.oidc.issuerUri is required. It is a context value: set it with --context (Inputs.Context)"
+	missing := "global.okdp.oidc.issuerUri is required. It is a context value: the platform's or a project's (Inputs.Context)"
 	issuer := M{"global": M{"okdp": M{"oidc": M{"issuerUri": "https://sso.example.org"}}}}
 	for name, tc := range map[string]struct {
 		layers []map[string]any
@@ -81,7 +81,7 @@ func TestRequire(t *testing.T) {
 		"in order":               {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}}}}}, "global.okdp.ingress.suffix is required"},
 		"before the mapping":     {[]map[string]any{{"replicas": 11}}, missing},
 		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"version": "1.x"}}}}}}, missing},
-		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}, "oidc": M{"enabled": "yes"}}}}}, "context values (--context, Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/oidc/enabled': got string, want boolean"},
+		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}, "oidc": M{"enabled": "yes"}}}}}, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/oidc/enabled': got string, want boolean"},
 	} {
 		_, err := Compile(context.Background(), &d, inputs(tc.layers...))
 		switch {

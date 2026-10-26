@@ -13,6 +13,6 @@ stderr '^flag provided but not defined: -nope$'
 stderr '^Usage of okdp-compile:$'
 status 2 okdp-compile -o
 stderr '^flag needs an argument: -o$'
-status 2 okdp-compile -f a.yaml b.yaml
-stderr '^unexpected argument "b.yaml": every input is a flag \(-f before each values file\)$'
+status 2 okdp-compile --repository a b
+stderr '^unexpected argument "b": every input is a flag \(--repository before each directory\)$'
 stderr '^Usage of okdp-compile:$'

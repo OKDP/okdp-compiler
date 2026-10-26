@@ -1,5 +1,5 @@
 # The platform values, the same for every instance: a context layer of
-# level 0 (--context platform.yaml), merged before the instance's layers.
+# level 0, merged before the instance's layers.
 #
 # global.okdp: the platform's settings, which an instance's layers cannot
 # change.

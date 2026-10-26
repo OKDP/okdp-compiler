@@ -1,4 +1,4 @@
-# The instance demo-workspace of the project demo (-f, Inputs.Values), over
+# The instance demo-workspace of the project demo (Inputs.Values), over
 # the defaults of the package's config.schema.json, then platform.yaml,
 # project.yaml and connections.yaml. A connection reference names a
 # connection (the platform's, the project's or the instance's own) or an

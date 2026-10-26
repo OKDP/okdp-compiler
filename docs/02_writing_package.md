@@ -46,18 +46,17 @@ the package is published as a chart.
 ├── values.cel.yaml         the computed values of each chart (values.yaml when none is computed)
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
-├── ci/platform.yaml        the platform values of the test cases (global.okdp), given with --context
-├── ci/<case>-values.yaml   test instances, without global
+├── ci/platform.yaml        the platform values of the test cases (global.okdp): a test tree's platform.yaml
+├── ci/<case>-values.yaml   test instances, without global: a test tree's config.yaml
 └── README.md               parameters, platform values read, charts, known gaps
 ```
 
-`--package` names the package directory (`okdp-compile --package
-examples/02_advanced/input/db/catalog/webapp/1.0.0`); `--check --charts`
-checks a compile against the upstream charts' defaults and schemas, from a
-chart cache ([`--check`](01_usage.md#--check)). In a repository laid out
-as the examples, a package is a version directory of the catalog,
-`catalog/<service>/<version>/`, which its `Chart.yaml` names ([repository
-layout](01_usage.md#repository-layout)).
+A package is a version directory of a catalog,
+`catalog/<service>/<version>/`, which its `Chart.yaml` names
+([repository layout](01_usage.md#repository-layout)); `okdp-compile
+--repository` compiles the instances of a tree, and `--check --charts`
+checks them against the upstream charts' defaults and schemas, from a
+chart cache ([`--check`](01_usage.md#--check)).
 
 ## Integrating a chart
 
@@ -189,7 +188,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "global": {"type": "object", "description": "Platform values: the context's layers (--context), the platform's level then higher ones adding to it, never an instance's."},
+    "global": {"type": "object", "description": "Platform values: the context's layers, the platform's level then higher ones adding to it, never an instance's."},
     "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
     "database": {
       "type": "string",
@@ -432,12 +431,12 @@ reference left empty stays `""` (or `null`); a name that is not an entry
 of `connections` must be a release name, or an output's name.
 
 ```yaml
-# instance values (-f): an external database
+# the instance's config.yaml: an external database
 database: shared-db
 ```
 
 ```yaml
-# the instance's own connections, a context file of its level (--context 2:<file>)
+# the instance's own connections, its connections.yaml, a context file of its level
 connections:
   shared-db:
     contract: database
@@ -466,8 +465,8 @@ the output's values and `secretRef`, and depends on the cnpg-postgresql
 instance, as on `demo-db` above; an instance of another namespace gets it
 as a connection, its credentials Secret being in the provider's namespace
 ([resolution](specs/01_inputs_outputs.md#resolution)). The compile is
-given what the other instances publish (`Inputs.Published`,
-`okdp-compile --published`). See
+given what the other instances of its tree publish (`Inputs.Published`).
+See
 [contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
@@ -506,13 +505,16 @@ it (cnpg-postgresql). Neither: consumers bring their own identity
 ### 7. Compile, render and check
 
 Each `ci/<case>-values.yaml` is an instance: its parameters, without
-`global` and `connections`, which an instance may not set. The
-platform values (`global.okdp`) are given apart,
-with `--context`: `ci/platform.yaml` for every case, then, for a case that
-needs others, its own `ci/<case>-platform.yaml`, and its own connections
-at level 2 (`--context 2:ci/<case>-connections.yaml`, what an instance's
-`connections.yaml` is in the
-[repository layout](01_usage.md#repository-layout)). Write one case per
+`global` and `connections`, which an instance may not set. A case is
+compiled as a tree ([repository layout](01_usage.md#repository-layout)):
+the catalog's repository, its `catalog/` and `contracts/`, and a test
+tree of the case, outside it: `platform.yaml`, the platform values
+(`global.okdp`), `ci/platform.yaml` and, for a case that needs others, its
+own `ci/<case>-platform.yaml` over it; and the instance,
+`projects/demo/instances/demo-<service>/`, its `instance.yaml` naming the
+package, its `config.yaml` the case's values, its `connections.yaml` the
+case's own connections (`ci/<case>-connections.yaml`).
+`scripts/compile-charts.sh` builds one per case. Write one case per
 mode: OIDC `existing`, `dcr` and off, internal and external connections,
 proxy set, each optional chart on, upstream values with appended lists. The
 `dcr` case's platform file gives `oidc.clientProvisioning: dcr`,
@@ -522,23 +524,20 @@ mode only; the `existing` mode is tested by the unit tests
 (`internal/okdp/oidc_test.go`), with no example output.
 
 ```bash
-export OKDP_CONTRACTS=~/okdp/contracts     # the contract schemas
 export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of --check, filled with helm pull --untar
-polaris() { okdp-compile --package charts/services/polaris \
-  --context charts/services/polaris/ci/platform.yaml \
-  --context charts/services/polaris/ci/dcr-platform.yaml \
-  -f charts/services/polaris/ci/dcr-values.yaml \
-  --release demo-polaris --namespace demo "$@"; }
-polaris --check                  # against the upstream charts' defaults and schemas
-polaris -o /tmp/demo-polaris
-yq '.dependencies' /tmp/demo-polaris/Chart.yaml   # the source of each key
-chart=$(mktemp -d) && cp -R /tmp/demo-polaris/. "$chart" && helm dependency build "$chart"
-helm template demo-polaris "$chart" -n demo -f /tmp/demo-polaris/instance.values.yaml
-scripts/compile-charts.sh charts/services/polaris   # every case, compiled and rendered
+# /tmp/polaris-dcr: platform.yaml, projects/demo/instances/demo-polaris/{instance.yaml,config.yaml}
+okdp-compile --repository . --repository /tmp/polaris-dcr --check   # against the upstream charts' defaults and schemas
+okdp-compile --repository . --repository /tmp/polaris-dcr -o /tmp/out
+i=/tmp/out/projects/demo/instances/demo-polaris
+yq '.dependencies' $i/Chart.yaml   # the source of each key
+chart=$(mktemp -d) && cp -R $i/. "$chart" && helm dependency build "$chart"
+helm template demo-polaris "$chart" -n demo -f $i/instance.values.yaml
+scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and rendered
 ```
 
-- Render with the release name and namespace of the compile: the upstream
-  charts derive their names from the release.
+- Render with the release name and namespace of the compile, the
+  instance's directory and its project's: the upstream charts derive their
+  names from the release.
 - Render the umbrella as a deployment installs it: its
   dependencies are the sources the index names for the keys, the clients'
   charts the platform's oidc-dcr chart, `polaris-admin-principals` the

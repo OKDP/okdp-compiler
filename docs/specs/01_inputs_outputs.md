@@ -97,8 +97,8 @@ app: open app.defaults.yaml: no such file or directory
 
 Every values file is read as Helm 3 reads one: the upstream charts'
 `values.yaml` a check reads ([chart cache](#chart-cache)), the defaults
-files, and the values layers read by `compiler.ParseValues` (the binary's
-`--context` and `-f` files).
+files, and the values layers read by `compiler.ParseValues` (a tree's
+context files and `config.yaml`).
 
 - Documents: the first YAML document of the file only. Helm 4 merges the
   later ones; the compiler ignores them: of an upstream chart whose
@@ -342,7 +342,7 @@ level's: an instance does not redefine the platform's connections.
 
 ```yaml
 # examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml,
-# level 2 (--context 2:connections.yaml): the instance's own
+# level 2: the instance's own
 connections:
   scratch:
     contract: s3
@@ -446,9 +446,7 @@ or not, depending on whether its provider was compiled first.
 
 Output: `Inputs.Published`, what the other instances of the namespace
 publish, by release, each an `Info`, its [info
-file](#the-info-file) (`okdp.info.yaml`; the binary's
-`--published <dir>`, [01_usage.md](../01_usage.md#command-line); set by
-`CompileAll`). The
+file](#the-info-file) (`okdp.info.yaml`; set by `CompileAll`). The
 output whose `name` is `<name>` and `contract` `<contract>`: its `values`,
 copied and read as values are (every number a `float64`, whatever decoded
 the file), and its `secretRef`, kept as `{name}`. The compiling release is
@@ -599,17 +597,14 @@ consume it.
 ### Location
 
 `Inputs.Contracts`: a file system with `<contract>.schema.json` at its root;
-the name of the contract is the name of the file. The binary reads a
-directory: `--contracts`, `$OKDP_CONTRACTS` by default
-([01_usage.md](../01_usage.md)). A contract is read by each reference
-and each `provides` item that names it: a compile that reads none needs
-no contracts, an empty file system (the binary without `--contracts`).
-A file that is missing, cannot be read, is not JSON, not an object or
-not a valid JSON Schema:
+the name of the contract is the name of the file. A tree's are the
+`contracts/` of its repositories ([repository
+layout](../01_usage.md#repository-layout)). A contract is read by each
+reference and each `provides` item that names it: a compile that reads
+none needs no contracts, an empty file system. A file that is missing,
+cannot be read, is not JSON, not an object or not a valid JSON Schema:
 `the <contract> contract cannot be read: <contract>.schema.json: <cause>`,
-`<cause>` `no such file or directory` for a missing file, `no contracts
-directory: give --contracts (or $OKDP_CONTRACTS)` for the binary without
-one.
+`<cause>` `file does not exist` for a contract no repository has.
 
 ### Format
 
@@ -718,12 +713,12 @@ path in the values, sorted by path, as those of the parameters:
 ## Context values
 
 `Inputs.Context`: the context's values layers, each a `ContextLayer`, its
-`Values` at its `Level`; the binary's `--context [<level>:]<file>` files,
-level 0 without a prefix. Among them `global`, `global.okdp`, the settings
-of the platform (ingress, certificate issuers, OIDC, proxy, the platform's
-charts...), and `connections`, which only the context gives, an instance's
-own included. Level 0 is the platform's:
-`examples/02_advanced/input/db/platform.yaml`,
+`Values` at its `Level`; a tree's `platform.yaml` at level 0, its
+project's `project.yaml` at 1, its own `connections.yaml` at 2. Among them
+`global`, `global.okdp`, the settings of the platform (ingress,
+certificate issuers, OIDC, proxy, the platform's charts...), and
+`connections`, which only the context gives, an instance's own included.
+Level 0 is the platform's: `examples/02_advanced/input/db/platform.yaml`,
 `platform/platform-values.yaml` in a platform repository; level 1,
 typically a project's, and each level above adds to the lower ones
 ([Levels](#levels)). The context's layers are merged by level over the
@@ -749,14 +744,14 @@ every chart receives `global` ([merge precedence](#merge-precedence)).
 them: [Requirements](#requirements) to [OAuth client
 settings](#oauth-client-settings). An instance layer that sets `global`
 fails before the parameter schema is checked, naming the layer by its
-position in `Inputs.Values`, from 1 (the binary's `-f` files, in order),
+position in `Inputs.Values`, from 1 (a tree's `config.yaml` the first),
 and the first key of `global` it may not set, in key order; `global` set
 to a non-map, `null` included, fails as a whole
 (`testdata/instance-sets-global.yaml`):
 
 ```
-values layer 1: global.okdp is set by the context (--context, Inputs.Context)
-values layer 2: global is set by the context (--context, Inputs.Context)
+values layer 1: global.okdp is set by the context (Inputs.Context)
+values layer 2: global is set by the context (Inputs.Context)
 ```
 
 The exception: a key the parameter schema declares under `global`
@@ -797,12 +792,12 @@ schema is checked, after the check of `global`
 (`testdata/instance-sets-connections.yaml`):
 
 ```
-values layer 1: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level
+values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level
 ```
 
 ### Levels
 
-`ContextLayer.Level`, the `<level>:` of `--context`: 0, the platform's;
+`ContextLayer.Level`: 0, the platform's;
 1, typically a project's, the namespace of its instances: what it adds to
 the platform values for each of them, its settings under `global`
 (`global.okdp.project`, which the mapping reads and the compiler does not;
@@ -815,13 +810,10 @@ rule below applies to them, so an instance adds connections beside its
 project's and the platform's, and changes none of theirs.
 
 The layers are merged by level, lowest first, whatever their order in
-`Inputs.Context` (the order of the `--context` flags); a level's layers in
-their order (`helm -f`), a later one changing or deleting (`null`) a value
-of an earlier one of the same level:
-
-```bash
-bin/okdp-compile ... --context db/platform.yaml --context 1:db/projects/demo/project.yaml --context 2:db/projects/demo/instances/demo-workspace/connections.yaml
-```
+`Inputs.Context`; a level's layers in their order (`helm -f`), a later
+one changing or deleting (`null`) a value of an earlier one of the same
+level. A tree gives one layer per level: `platform.yaml`, the project's
+`project.yaml`, the instance's `connections.yaml`.
 
 A level adds values, it changes none of a lower level's. A layer fails,
 before the parameter schema is checked, at the first lower level (lowest
@@ -831,12 +823,12 @@ the same one and `null` included; a parent of one, to anything but a map;
 or a connection, `connections.<name>`, taken whole: a layer may not give a
 field the lower level's connection leaves out, a `port` to its contract's
 default (`testdata/context/1/redefines-platform-connection.yaml`). The
-layer is named by its position in `Inputs.Context`, from 1 (the n-th
-`--context` flag), and its level:
+layer is named by its position in `Inputs.Context`, from 1, and its
+level:
 
 ```
-context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's
-context layer 2 (level 1): connections.platform-db is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's
+context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
+context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 ```
 
 Maps merge: a level adds keys beside a lower one's (`global.okdp.project`
@@ -854,7 +846,7 @@ those its parameter schema declares, over the context's values, and no
 `connections` ([Context values](#context-values)).
 
 ```yaml
-# examples/03_full/input/db/projects/demo/project.yaml, level 1 (--context 1:project.yaml),
+# examples/03_full/input/db/projects/demo/project.yaml, level 1,
 # after platform.yaml at level 0
 global:
   storageClass: fast-ssd
@@ -877,7 +869,7 @@ level 2 ([Connections](#connections)), add `scratch`. Given after
 `demo-warehouse` again, even a field of it, fails:
 
 ```
-context layer 3 (level 2): connections.demo-warehouse is set at level 1 (--context, Inputs.Context): a level adds values, it does not change a lower level's
+context layer 3 (level 2): connections.demo-warehouse is set at level 1 (Inputs.Context): a level adds values, it does not change a lower level's
 ```
 
 ### Requirements
@@ -895,7 +887,7 @@ charts](#platform-charts) and the mapping
 fails:
 
 ```
-global.okdp.ingress.className is required. It is a context value: set it with --context (Inputs.Context)
+global.okdp.ingress.className is required. It is a context value: the platform's or a project's (Inputs.Context)
 ```
 
 ### Fields the compiler reads
@@ -934,7 +926,7 @@ violation is reported at once, sorted by path, in Helm's words, as those
 of the [parameters](#schema-check):
 
 ```
-context values (--context, Inputs.Context) don't meet the specifications of the schema of global.okdp:
+context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:
 - at '/global/okdp/oidc': validation failed
   - at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'
   - at '/global/okdp/oidc/enabled': got string, want boolean
@@ -1043,13 +1035,8 @@ their own ([Levels](#levels)).
 ### Layers
 
 `Inputs.Values`: the instance's layers in order, the last one winning
-(Helm's `-f` order), after the whole context's; the binary's `-f` files,
-in the order given, after its `--context` files:
-
-```bash
-bin/okdp-compile ... --context examples/02_advanced/input/db/platform.yaml \
-  -f examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml
-```
+(Helm's `-f` order), after the whole context's; a tree's, the instance's
+`config.yaml`.
 
 An instance layer sets no `global` but the keys the parameter schema
 declares under it, and no `connections` ([Context values](#context-values)).
@@ -1846,25 +1833,26 @@ No objects file: the instance has no objects, no credentials Secret and no
 depends on demo-db (database, database)
 ```
 
-`examples/03_full/` compiles the workspace service, a package written to
-use every part of the mapping language, with four values layers:
-`platform.yaml` (`--context`, level 0: `global.okdp` in `dcr` mode, the
-oidc-dcr chart from a mirror, a proxy, two connections), `project.yaml`
-(`--context 1:project.yaml`, level 1: the project's settings under
-`global`, two connections of its own), `connections.yaml` (`--context
-2:connections.yaml`, level 2: the instance's own connection) and
-`config.yaml` (`-f`: references to an instance of the namespace and to
-connections of the platform, the project and the instance itself, in a
-list of catalogs and under a nested key; upstream values). Release
+`examples/03_full/` compiles the workspace service, a package written to use
+every part of the mapping language, with four values layers:
+`platform.yaml` (level 0: `global.okdp` in `dcr` mode, the oidc-dcr
+chart from a mirror, a proxy, two connections), `project.yaml` (level 1:
+the project's settings under `global`, two connections of its own),
+`connections.yaml` (level 2: the instance's own connection) and
+`config.yaml` (the instance's values: references to an
+instance of the namespace and to connections of the platform, the project
+and the instance itself, in a list of catalogs and under a nested key;
+upstream values). Release
 `demo-workspace`, namespace `demo`:
 `output/projects/demo/instances/demo-workspace/` is what `-o <dir>`
 writes. Its `Result.Dependencies`, which the compile prints on stderr,
 lists `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
 `$if`, is no dependency, and its chart is not in the chart cache of the
-check. Its `okdp.info.yaml` lists three outputs, one with its credentials,
-whose Secret is generated: its objects file holds the `Password`
-generators and the `ExternalSecret`, then the `objects` section.
+check. Its
+`okdp.info.yaml` lists three outputs, one with its credentials, whose
+Secret is generated: its objects file holds the `Password` generators and
+the `ExternalSecret`, then the `objects` section.
 
 ## Compiling instances together
 

@@ -25,10 +25,10 @@ func TestValuesLayers(t *testing.T) {
 		want     string // the error, none when empty
 	}{
 		"a declared key": {[]map[string]any{{"global": M{"imageRegistry": "instance.example.org"}}}, ""},
-		"okdp":           {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}}}, "values layer 1: global.okdp is set by the context (--context, Inputs.Context)"},
+		"okdp":           {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}}}, "values layer 1: global.okdp is set by the context (Inputs.Context)"},
 		"another key":    {[]map[string]any{{"replicas": 2}, {"global": M{"imageRegistry": "r", "proxy": "p"}}}, "values layer 2: global.proxy is set by the context"},
 		"not a map":      {[]map[string]any{{"global": nil}}, "values layer 1: global is set by the context"},
-		"connections":    {[]map[string]any{{"replicas": 2}, {"connections": M{}}}, "values layer 2: connections are given by the context (--context, Inputs.Context): an instance's own in a context layer of its level"},
+		"connections":    {[]map[string]any{{"replicas": 2}, {"connections": M{}}}, "values layer 2: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level"},
 		"a null":         {[]map[string]any{{"connections": nil}}, "values layer 1: connections are given by the context"},
 		"a template":     {[]map[string]any{{"replicas": 2}, {"upstream": M{"app": M{"tags": []any{"{{ .Release.Name }}"}}}}}, `values layer 2: upstream.app.tags[0]: the value contains "{{"`},
 		"a template key": {[]map[string]any{{"upstream": M{"app": M{"podAnnotations": M{"{{ x }}": "y"}}}}}, `values layer 1: upstream.app.podAnnotations.{{ x }}: the key contains "{{"`},
@@ -78,7 +78,7 @@ func TestContextLevels(t *testing.T) {
 			at(1, map[string]any{"global": M{"storageClass": "fast", "okdp": M{"project": M{"name": "demo"}}}, "connections": M{"team-db": M{"contract": "database", "host": "a"}}}),
 			at(1, map[string]any{"connections": M{"team-db": M{"host": "team-db.example.org"}}}),
 		}, ""},
-		"a platform value":       {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's"},
+		"a platform value":       {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
 		"the same value":         {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0"},
 		"a platform null":        {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"registry": M{"host": "registry.example.org"}}}})}, "context layer 3 (level 1): global.okdp.registry is set at level 0"},
 		"a parent":               {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"global": M{"okdp": nil}})}, "context layer 4 (level 1): global.okdp is set at level 0"},

@@ -439,25 +439,20 @@ CEL function and for `provides[].secret`; one resolver for consumers and
 for the provider check; one OAuth client Secret name (`clientSecret`) for
 `platform.oidcClientSecret`, `oidcClientSecret` and the oidc-dcr Job; one
 CEL session per compile for the mapping and the compiler's templates.
-`cmd/okdp-compile/main.go` is a thin caller of the public package:
-`os.DirFS`, `compiler.ParseValues`, `compiler.LoadDefinition`,
-`compiler.Compile`, its warnings printed on stderr, then the files of
-`compiler.Write`: the umbrella chart, OKDP's objects and `okdp.info.yaml`;
-then the dependencies printed on stderr, `depends on <instance>
-(<contract>, <field>)`, the output after the contract when it is not named
-after the instance ([`--output`](01_usage.md#--output)).
-`--published <dir>` reads the `okdp.info.yaml` of each `<dir>/<release>/`
-into `Inputs.Published`. `--repository` (`runRepository`) chains the
-stages instead: the tree (`compiler.LoadRepository`),
-`compiler.CompileAll`, `compiler.NewGraph`, the files of the target
-`--target` names (`newTarget`, its options checked before the tree is
-read), written under `-o`, whose `projects/` it owns (`writeTree`); each
-refusal, problem of the graph, warning and dependency printed after its
-`<namespace>/<release>`. Its own rules are the disk's: every input is a
-flag (an argument that is not one would end Go's flag parsing, and is
-refused), and every output is built before any is written, into the output
-directory (`-o`), created if needed, and the directories of their paths,
-`templates/` ([command line](01_usage.md#command-line)).
+`cmd/okdp-compile/main.go` is a thin caller of the public package that
+chains the stages (`run`): the tree of its `--repository` directories
+(`os.DirFS`, `compiler.LoadRepository`), `compiler.CompileAll`,
+`compiler.NewGraph`, the files of the target `--target` names
+(`newTarget`, its options checked before the tree is read), written under
+`-o`, whose `projects/` it owns (`writeTree`); each binding, refusal,
+problem of the graph, warning and dependency printed on stderr after its
+`<namespace>/<release>` ([`--repository`](01_usage.md#--repository)). A
+tree is its only input: an instance is compiled with the others of its
+tree, never alone. Its own rules are the disk's: every input is a flag (an
+argument that is not one would end Go's flag parsing, and is refused), and
+every output is built before any is written, into the output directory
+(`-o`), created if needed, and the directories of their paths ([command
+line](01_usage.md#command-line)).
 
 ## Design decisions
 
@@ -775,10 +770,11 @@ the stages and inside comprehensions) and a total CEL cost
 compiler's templates; the CLI sets none.
 
 Not decided by the compiler: which layers are the platform's. What the
-caller gives at level 0 of `Inputs.Context` (`--context <file>`) is trusted
+caller gives at level 0 of `Inputs.Context` (`platform.yaml`) is trusted
 as the platform values, and comes from the platform's repository, never
 from a project's owners or the instance's author, whose layers are the
-higher levels (`--context 1:<file>`) and `Inputs.Values` (`-f`); the keys of
+higher levels (`project.yaml`, `connections.yaml`) and `Inputs.Values`
+(`config.yaml`); the keys of
 `global` an instance may set are the parameter schema's decision, reviewed
 with the package
 ([Context values](specs/01_inputs_outputs.md#context-values)).
@@ -921,16 +917,17 @@ package, `internal/target/helm/umbrella_test.go` the files `-o` writes:
 the umbrella's chart, its values, the objects file and its template, none
 without objects, what the instance publishes, and the dependencies in no
 file. `cmd/okdp-compile/main_test.go` runs the command line on the
-example: the files of a previous compile overwritten, the refused options,
-nothing written when a compile or an output fails, nor by `--check`
+examples' trees, each written over a stale instance, which it removes, the
+full example split into three repositories too (`TestRun`); the refused
+options, nothing written (`TestRunErrors`), nor by `--check`
 (`TestRunCheck`); and, with `testscript`, the scripts of `testdata/cli/`
 (`TestScript`), which run the binary as a process from the repository
 root: its exit statuses (0, 1 for an error, 2 for a usage error),
-`$OKDP_CHARTS` and `$OKDP_CONTRACTS` and the flags that override them,
-what it prints on stdout and stderr, its warnings included
-(`warnings.txtar`, a package of its own), `--check` and its checks against
-a chart cache (`check.txtar`), `--published` and a reference to another
-instance's output (`published.txtar`), a tree compiled whole
+`$OKDP_CHARTS` and the flag that overrides it (`env.txtar`), what it
+prints on stdout and stderr, its warnings included (`warnings.txtar`, a
+package of its own), `--check` and its checks against a chart cache
+(`check.txtar`), the examples' trees and their dependencies
+(`compile.txtar`), a compile error (`errors.txtar`), a tree compiled whole
 (`repository.txtar`: two repositories, each target, `--check`, a stale
 instance removed, a cycle of outputs and one by convention), one script
 per concern. The public package is tested through the example in the root
@@ -1002,7 +999,7 @@ database connection and an OAuth client, `values.cel.yaml`,
 `contracts/`, `platform.yaml` (the platform values: `global.okdp`, the
 OAuth clients in `dcr` mode, and `platform-db`, a connection every
 instance may reference, the instance's audit database) and the
-`config.yaml` of the instance `demo-webapp`, its values (`-f`), its
+`config.yaml` of the instance `demo-webapp`, its values, its
 upstream values of `app` included. The database it references,
 `demo-db`, is an instance of `catalog/db/1.0.0/`, a minimal package: one
 chart, the database its naming convention gives, its credentials Secret
@@ -1017,12 +1014,11 @@ without upstream values; `backup` left out by `$if`, its chart
 not in the cache), three OAuth clients in `dcr` mode (one public, one
 computed by `$spread`), and contracts with internal conventions, derived
 and conditional defaults and secret fields. Its values come in four
-layers: `platform.yaml` (`--context`, level 0), `project.yaml`, the
-project's (`--context 1:project.yaml`: settings under
-`global.okdp.project`, which the mapping reads, and connections of its
-own), the `connections.yaml` of the instance `demo-workspace`, its own
-connections (`--context 2:connections.yaml`), and its `config.yaml`
-(`-f`), whose references
+layers: `platform.yaml` (level 0), `project.yaml`, the project's
+(level 1: settings under `global.okdp.project`, which the mapping reads,
+and connections of its own), the `connections.yaml` of the instance
+`demo-workspace`, its own connections (level 2), and its `config.yaml`,
+whose references
 reach an instance of the namespace and connections of the platform, the
 project and the instance, in a list of objects and under a nested key.
 The instances it references, `demo-db` and `demo-alerts`, are those of
@@ -1035,10 +1031,9 @@ convention gives, their charts in the cache.
 instances together (`CompileAll`), checks their graph (`NewGraph`), and
 compares the files of the helm target with its `output/` byte for byte; a
 file of `output/` that it does not write fails.
-`TestRunRepository` (`cmd/okdp-compile/main_test.go`) checks that
-`--repository` writes them, a stale instance removed, the full example
-split into three repositories too, and `TestRun` that `-o` writes an
-instance's, over the files of a previous compile.
+`TestRun` (`cmd/okdp-compile/main_test.go`) checks that the command
+writes them, a stale instance removed, the full example split into three
+repositories too.
 After a change, `go test . -update` rewrites them
 (`go test ./internal/chart -update` each `final.yaml` of the values
 fixtures; `make example` only them); the diff is the change's effect,

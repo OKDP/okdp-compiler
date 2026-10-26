@@ -1,6 +1,6 @@
 # The project demo, the namespace demo: what it adds to the platform values
-# for every instance of the project, a context layer of level 1 (--context
-# 1:project.yaml), merged after platform.yaml, level 0, and before the
+# for every instance of the project, a context layer of level 1, merged
+# after platform.yaml, level 0, and before the
 # instance's connections.yaml, level 2, and config.yaml.
 #
 # A level adds, it changes nothing a lower level sets: a key platform.yaml
@@ -11,8 +11,8 @@
 #   global: {okdp: {ingress: {suffix: demo.example.org}}}
 #   connections: {platform-db: {port: 5433}}
 #
-#   context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's
-#   context layer 2 (level 1): connections.platform-db is set at level 0 (--context, Inputs.Context): a level adds values, it does not change a lower level's
+#   context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
+#   context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 
 global:
   storageClass: fast-ssd               # every chart receives global

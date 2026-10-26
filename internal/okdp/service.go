@@ -62,7 +62,7 @@ type Service struct {
 // platformValue: the end of the error of a missing platform value: the
 // input that sets it, the context's values layers, by the binary's flag
 // and the library's field.
-const platformValue = "It is a context value: set it with --context (Inputs.Context)"
+const platformValue = "It is a context value: the platform's or a project's (Inputs.Context)"
 
 // service: the Service of d, checked when it is loaded (LoadDefinition)
 // and before every compile (a Definition may be built in memory): what

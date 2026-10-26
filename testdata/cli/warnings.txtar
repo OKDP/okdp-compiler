@@ -1,28 +1,31 @@
 # A values.yaml that holds an expression: compiled all the same, status 0,
-# the warning on stderr, once, and the outputs written.
-status 0 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -o $WORK/files
+# the warning on stderr, once, after the instance's namespace and release,
+# and the outputs written.
+status 0 okdp-compile --repository $WORK/tree -o $WORK/files
 ! stdout .
 cmp stderr $WORK/warning.txt
-grep '^  message: Hello from demo-hello$' $WORK/files/instance.values.yaml
-exists $WORK/files/Chart.yaml
+grep '^  message: Hello from demo-hello$' $WORK/files/projects/demo/instances/demo-hello/instance.values.yaml
 
 # Named values.cel.yaml: no warning. Both files: an error, nothing written.
-mv $WORK/hello/values.yaml $WORK/hello/values.cel.yaml
-status 0 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -o $WORK/cel
+mv $WORK/tree/catalog/hello/1.0.0/values.yaml $WORK/tree/catalog/hello/1.0.0/values.cel.yaml
+status 0 okdp-compile --repository $WORK/tree -o $WORK/cel
 ! stderr .
-cp $WORK/hello/values.cel.yaml $WORK/hello/values.yaml
-status 1 okdp-compile --package $WORK/hello --release demo-hello --namespace demo -o $WORK/both
-stderr '^error: values.yaml and values.cel.yaml: a package has one of them$'
+cp $WORK/tree/catalog/hello/1.0.0/values.cel.yaml $WORK/tree/catalog/hello/1.0.0/values.yaml
+status 1 okdp-compile --repository $WORK/tree -o $WORK/both
+stderr 'values.yaml and values.cel.yaml: a package has one of them$'
 ! exists $WORK/both
 
 -- warning.txt --
-warning: values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml
--- hello/Chart.yaml --
+warning: demo/demo-hello: values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml
+-- tree/catalog/hello/1.0.0/Chart.yaml --
 apiVersion: v2
 name: hello
 version: 1.0.0
 dependencies:
   - {name: hello, repository: https://charts.example.org, version: 1.0.0}
--- hello/values.yaml --
+-- tree/catalog/hello/1.0.0/values.yaml --
 hello:
   message: Hello from ${{ release.name }}
+-- tree/projects/demo/instances/demo-hello/instance.yaml --
+service: hello
+version: 1.0.0
