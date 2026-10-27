@@ -3,10 +3,10 @@
   "type": "object",
   "properties": {
     "replicas": {"type": "integer", "minimum": 1, "default": 1},
-    "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
-                 "description": "The database: an instance providing the database contract, or an entry of connections."},
-    "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database"},
-              "description": "The database audit events are written to, a reference as database is: often a connection the platform gives."},
+    "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}},
+                 "description": "The database: a connection's name or an output's. The app reads its password: it has credentials."},
+    "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}},
+              "description": "The database audit events are written to, a connection's name or an output's: often a connection the platform gives. It has credentials."},
     "upstream": {"type": "object", "default": {}, "description": "Values passed to the upstream charts as they are, by chart."},
     "global": {"type": "object"}
   }

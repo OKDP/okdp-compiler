@@ -153,7 +153,10 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    of each property reached from the root through `properties`, the
    outermost on a path (`schemaDefaults`): a `default` anywhere else is
    not read. The map view gives the keys of `global` below and the
-   connection walk (stage 3). `global` and `connections` are the context's
+   connection walk (stage 3); the requirement of each connection reference
+   it declares, set or not, is compiled there (`requirements`,
+   `readRequirement`, `internal/okdp/connections.go`), every one that
+   fails reported. `global` and `connections` are the context's
    (`valuesLayers`, `internal/okdp/layers.go`): the context's layers are
    sorted by level, lowest first, a level's in order (`contextLayers`); a
    layer that sets a value a lower level's layers set, merged, or gives
@@ -211,7 +214,11 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    external connection or an output, its values a copy read as values
    (`value.Normalize`), holds fields of its contract only, none of them
    secret (`contract.fields`), and is validated against the contract's
-   schema (`contract.check`); last, the connection must hold no `{{`
+   schema (`contract.check`). The reference's requirement, its `require`,
+   names fields of the contract or `secretRef` (`contract.requires`, before
+   the connection is looked for), and the connection, `secretRef`
+   included, is validated against it (`requirement.check`); last, the
+   connection must hold no `{{`
    (`chart.NoTemplate`)
    ([Connections](specs/01_inputs_outputs.md#connections)). The
    references that do not resolve are reported together, one line each,
@@ -395,8 +402,8 @@ neither knows OKDP.
 | | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; the values file, `values.cel.yaml` or `values.yaml` (both refused), a `values.yaml` checked for expressions and `$`-keys, a warning (`holdsExpressions`); the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `{{` above level 0) then the instance's, normalized (`value.Normalize`); `global` and `connections` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
-| | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
-| | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection or an output of `Inputs.Published` (`resolver`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use (`readContract`, `x-okdp-internal` refused), and the checks of values against one (`fields`, `complete`, `check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
+| | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
+| | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection or an output of `Inputs.Published` (`resolver`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use (`readContract`, `x-okdp-internal` refused), and the checks of values against one (`fields`, `complete`, `check`); what a reference requires (`requirement`, `require`): compiled (`readRequirement`), those of the parameter schema at stage 1 (`requirements`), its fields against the contract (`contract.requires`), the connection against it (`requirement.check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
@@ -887,12 +894,16 @@ for one not reported (`TestErrors`, `TestNotProvided`).
 repositories, in any order, the same instances (`TestLoad`), and every
 problem at once: the parts in two repositories, a contract that differs,
 an instance without its package, a package that fails, once
-(`TestLoadErrors`). `internal/target/target_test.go` compiles three
-instances in two namespaces and writes them with each target, compared
-with `testdata/targets/<target>/` (`go test ./internal/target -update`
-rewrites them; `TestTargets`), and checks the options and the release
-names shared across namespaces (`TestOptions`). `compiler_test.go` checks
-which packages each stage imports (`TestLayers`).
+(`TestLoadErrors`). `internal/okdp/connections_test.go` covers what a
+reference requires: met, not met by an external connection or an output, a
+field of no connection, a requirement that is no JSON Schema in the draft
+of the parameter schema (`TestResolveRequirement`, `TestRequirements`).
+`internal/target/target_test.go` compiles three instances in two
+namespaces and writes them with each target, compared with
+`testdata/targets/<target>/` (`go test ./internal/target -update` rewrites
+them; `TestTargets`), and checks the options and the release names shared
+across namespaces (`TestOptions`). `compiler_test.go` checks which
+packages each stage imports (`TestLayers`).
 `internal/okdp/mapping_test.go` covers OKDP's sections and functions,
 `internal/okdp/provides_test.go` what the instance publishes: the outputs
 against their contracts, the credentials Secrets.
@@ -985,15 +996,15 @@ no platform value, and no `contracts/`: nothing references a contract, the
 compile reads none.
 
 `examples/02_advanced/` compiles an instance of a service, `webapp`:
-`catalog/webapp/1.0.0/` (`Chart.yaml`, `okdp.yaml` with the rules of a
-database connection and an OAuth client, `values.cel.yaml`,
-`config.schema.json` with the parameters' defaults, `app.defaults.yaml`),
-`contracts/`, `platform.yaml` (the platform values: `global.okdp`, the
-OAuth clients in `dcr` mode, and `platform-db`, a connection every
-instance may reference, the instance's audit database) and the
-`config.yaml` of the instance `demo-webapp`, its values, its upstream
-values of `app` included. The database it references, `demo-db`, is an
-instance of `catalog/db/1.0.0/`, a minimal package: one chart, the
+`catalog/webapp/1.0.0/` (`Chart.yaml`, `okdp.yaml` with a rule on its
+database and an OAuth client, `values.cel.yaml`, `config.schema.json` with
+the parameters' defaults and the credentials its references require,
+`app.defaults.yaml`), `contracts/`, `platform.yaml` (the platform values:
+`global.okdp`, the OAuth clients in `dcr` mode, and `platform-db`, a
+connection every instance may reference, the instance's audit database)
+and the `config.yaml` of the instance `demo-webapp`, its values, its
+upstream values of `app` included. The database it references, `demo-db`,
+is an instance of `catalog/db/1.0.0/`, a minimal package: one chart, the
 database it publishes, named after its release, its credentials Secret
 generated. The OAuth clients' `existing` mode has no example output: its
 unit tests are in `internal/okdp/oidc_test.go`.
@@ -1053,7 +1064,7 @@ registration URL of the OAuth clients in `dcr` mode
 a project that gives a field of a platform connection
 (`redefines-platform-connection.yaml`); the level 2 cases, the connection
 checks (wrong contract, unknown field, secret field, the contract's types)
-and the example's `errors` rule on a connection without `secretRef`.
+and the example's requirement of a connection with `secretRef`.
 
 ### Continuous integration
 

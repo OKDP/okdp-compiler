@@ -360,8 +360,11 @@ In `config.schema.json`, on a string property:
 ```
 
 `x-okdp-connection-ref`: an object; `contract` names the contract, the file
-`<contract>.schema.json` of the contracts. Its other keys are ignored; a
-value that is not an object (`true`) declares no reference.
+`<contract>.schema.json` of the contracts; `require`,
+a JSON Schema, what the package requires of the connection beyond its
+contract ([what a reference requires](#what-a-reference-requires)). Its
+other keys are ignored; a value that is not an object (`true`) declares
+no reference.
 
 The references are found by walking the schema along the parameters, through
 `properties` (the keys present in the values) and `items` (every item of a
@@ -437,7 +440,9 @@ resolves to a connection only. `CompileAll` compiles each instance after
 those whose outputs it references
 ([Compiling instances together](#compiling-instances-together)).
 
-Each is then [completed](#completion) against the contract. The result,
+Each is then [completed](#completion) against the contract, then
+checked against what the reference requires
+([what a reference requires](#what-a-reference-requires)). The result,
 `secretRef` and `okdp` included, may not contain `{{` in a key or a string,
 whatever it comes from: the context's layers above level 0 refuse it
 already ([Levels](#levels)), and a
@@ -503,6 +508,49 @@ No secret field is ever inlined: a mapping reads the credentials from the
 Secret `secretRef.name`. How the mapping uses `values`:
 [Context](02_service_definition.md#context).
 
+### What a reference requires
+
+A package may need more of a connection than its contract says: one
+engine of those the contract allows, a version, credentials.
+`x-okdp-connection-ref`'s `require` is a JSON Schema the connection
+meets, whatever it comes from: external or output.
+
+```json
+"database": {"type": "string",
+  "x-okdp-connection-ref": {"contract": "database-server",
+    "require": {"properties": {"engine": {"const": "postgresql"}}, "required": ["secretRef"]}}}
+```
+
+- It checks the connection [completed](#completion) and valid against its
+  contract ([checks](#checks)), what the mapping receives: the contract
+  fields and `secretRef`, not `okdp`. `required: [secretRef]`: the
+  connection has credentials.
+- It names fields the connection may have: the names under its top-level
+  `properties` and `required` are fields of the contract, or `secretRef`;
+  never a secret field, which is in the credentials Secret, never in the
+  connection.
+- It is compiled as a contract is ([checks](#checks): formats, no `$ref`
+  to a file), in the draft of the parameter schema's `$schema` unless it
+  names its own, with the parameter schema, at each compile, whether the
+  parameters set the reference or not.
+- What the provider publishes is what it checks: a version to compare is
+  a number the contract declares (`major`, `"minimum": 15`); JSON Schema
+  compares numbers, not version strings.
+- It checks, it never selects: the connection the reference names is
+  checked, and one that does not meet it refuses the instance, which
+  references another.
+
+Every violation is reported, sorted by path, as the contract's:
+
+```
+database (connection "shared-db"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):
+- at '/engine': value must be 'postgresql'
+```
+
+A rule on the connection a reference resolves to belongs there rather
+than in the mapping's `errors`: the compiler says which reference, which
+connection, and where it comes from.
+
 ### Connection errors
 
 `<path>`: the parameter path, written as in [protect](#protect) errors
@@ -516,14 +564,16 @@ order of the [dependencies](#dependencies)), as the violations of the
 parameter schema are. A reference gives one error, the first in this
 order: its type, its contract (unknown, unreadable; another one, for an
 external connection; an output of several instances, or none, for a name
-that is no connection), the fields of an external connection or an output
-in alphabetical order, the `required` fields: every field not set, one
-line each, in alphabetical order; then the contract's types for an
-external connection or an output: every violation, one line each, sorted
-by path ([Checks](#checks)); last, `{{` in the connection, the first one
-found by path (keys sorted, items in order). The instances of
-`Inputs.Published` are visited in release order. The same parameters give
-the same report from one compile to the next:
+that is no connection), the fields its requirement names, the fields of an
+external connection or an output in alphabetical order, the `required`
+fields: every field not set, one line each, in alphabetical order; then
+the contract's types for an external connection or an output: every
+violation, one line each, sorted by path ([Checks](#checks)); then the
+requirement's, every violation, one line each, sorted by path ([what a
+reference requires](#what-a-reference-requires)); last, `{{` in the
+connection, the first one found by path (keys sorted, items in order). The
+instances of `Inputs.Published` are visited in release order. The same
+parameters give the same report from one compile to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
@@ -558,13 +608,17 @@ storage: "demo-pg" is not a connection, nor an output of an instance of the name
 | neither a connection nor an output | `<path>: "<name>" is not a connection`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` when instances publish an output of that name of another contract | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
 | external or output, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `context/2/connection-types.yaml` |
+| a connection that does not meet the reference's requirement | `<path> (connection "<name>"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):` then `- at '/<field>': <violation>`, one line per violation | `context/2/no-secret-ref.yaml` |
+| a requirement that names a field not of the contract | `<path>: x-okdp-connection-ref: require: field "<key>" is not part of the <contract> contract` | |
+| a requirement that names a secret field | `<path>: x-okdp-connection-ref: require: "<key>" is a secret field, in the credentials Secret, never in the connection: require secretRef` | |
+| a requirement that is not an object or not a valid JSON Schema, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: require: a JSON Schema, an object, got <value>`; `... require: <cause>`. `<place>`: the reference's place in the schema, `properties.catalogs.items.properties.database` | |
 | `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
 
-`testdata/context/2/no-secret-ref.yaml` (`database connection "shared-db"
-has no secretRef`) is not a check of the compiler: an external connection
-without `secretRef` resolves without one, and the example mapping refuses
-it in its `errors` section ([Errors](02_service_definition.md#errors)). A
-mapping that reads credentials checks `secretRef` itself.
+An external connection without `secretRef` resolves without one: a
+reference whose mapping reads credentials requires them, `"require":
+{"required": ["secretRef"]}`, as the example webapp's do
+(`testdata/context/2/no-secret-ref.yaml`,
+[what a reference requires](#what-a-reference-requires)).
 
 ## Contracts
 
@@ -666,6 +720,10 @@ field sorts before it or after it, is defaulted (`sslMode` on the default
 - Provided (`provides`): the contract exists, every key of `values` a
   non-secret field, completed, then valid against the schema
   ([The info file](#the-info-file)).
+
+A connection consumed is then checked against what its reference
+requires, `secretRef` included
+([what a reference requires](#what-a-reference-requires)).
 
 Valid against the schema: the completed values (no `secretRef`, no `okdp`),
 validated as a chart's values against its `values.schema.json`

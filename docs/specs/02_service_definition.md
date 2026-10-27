@@ -1014,6 +1014,12 @@ okdp-examples: s3SecretRef is required
 okdp-examples: realm "data" has no catalog_admin
 ```
 
+A rule on a connection a reference resolves to, its fields or its
+credentials, is the reference's `require` rather than an `errors` item:
+the compiler checks it whatever the connection comes from, and says which
+reference, which connection and which provider
+([what a reference requires](01_inputs_outputs.md#what-a-reference-requires)).
+
 A value that is not a list (null included) gives no message, and an item
 of another form is printed as text: a map, `{$if: ..., message: ...}`,
 prints as `map[message:...]`. An item whose evaluation fails stops the

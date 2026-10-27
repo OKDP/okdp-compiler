@@ -75,11 +75,6 @@ vars:
   storage: '${{ type(values.storage) == map ? values.storage : {} }}'
   webhook: '${{ type(values.notifications.webhook) == map ? values.notifications.webhook : {} }}'
   catalogNames: ${{ values.catalogs.map(c, c.name).sort() }}
-  # The connections whose credentials the pods read, checked in errors: vars
-  # is evaluated before errors, so the bindings read their secretRef with .?
-  secured: >-
-    ${{ [db, audit, storage].filter(c, c.size() > 0) + values.catalogs.map(c, c.storage)
-        + values.catalogs.filter(c, type(c.?database.orValue('')) == map).map(c, c.database) }}
 
   # The API servers, pods of a StatefulSet: lists.range and format.
   apiPods: >-
@@ -191,12 +186,9 @@ errors:
     $each:
       $if: "${{ has(c.properties) && has(c.properties.format) && !(c.properties.format in ['parquet', 'orc', 'csv']) }}"
       $value: 'workspace: catalog "${{ c.name }}": format ${{ c.properties.format }} is not parquet, orc or csv'
-  # A rule per distinct element: a connection used twice, a catalog name
-  # written twice, gives one message.
-  - $for: c in secured.distinct()
-    $each:
-      $if: ${{ !has(c.secretRef) }}
-      $value: 'workspace: ${{ c.okdp.contract }} connection "${{ c.okdp.ref }}" has no secretRef, its credentials cannot be read'
+  # A rule per distinct element: a catalog name written twice gives one
+  # message. The credentials of the connections the pods read are their
+  # references' require (config.schema.json), not a rule here.
   - $for: n in values.catalogs.map(c, c.name).distinct()
     $each:
       $if: ${{ !values.catalogs.exists_one(c, c.name == n) }}

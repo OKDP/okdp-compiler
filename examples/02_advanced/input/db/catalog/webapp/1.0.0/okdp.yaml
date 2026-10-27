@@ -30,14 +30,12 @@ vars:
   audit: '${{ type(values.audit) == map ? values.audit : {} }}'
   auditSecret: ${{ audit.?secretRef.name.orValue('') }}
 
-# A message fails the compile when its condition holds.
+# A message fails the compile when its condition holds. What a connection
+# must hold, its credentials here, is its reference's require
+# (config.schema.json), checked before the mapping runs.
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
     $value: "webapp: replicas > 1 needs a database, sessions are stored there"
-  - $if: ${{ db.size() > 0 && dbSecret == '' }}
-    $value: 'webapp: database connection "${{ db.okdp.ref }}" has no secretRef, the password cannot be read'
-  - $if: ${{ audit.size() > 0 && auditSecret == '' }}
-    $value: 'webapp: audit connection "${{ audit.okdp.ref }}" has no secretRef, the password cannot be read'
 
 # The service's OAuth client: provisioned by the platform (the default), or
 # registered by an oidc-dcr chart the compiler adds (clientProvisioning: dcr).

@@ -1,9 +1,9 @@
 // Connections: the references declared in the parameter schema
 // (x-okdp-connection-ref), resolved to an external connection or to an
-// output another instance of the namespace publishes, and completed
-// against their contract; the contracts, read at each use (readContract),
-// and their checks, which the outputs the instance provides go through
-// too.
+// output another instance of the namespace publishes, completed against
+// their contract, then checked against what the package requires of them
+// (require); the contracts, read at each use (readContract), and their
+// checks, which the outputs the instance provides go through too.
 
 package okdp
 
@@ -23,14 +23,15 @@ import (
 )
 
 // resolver: resolves connection references against the contracts, the
-// external connections of the instance and what the other instances of
-// the namespace publish, recording those that point to an instance.
+// external connections of the instance, what the other instances of the
+// namespace publish, recording those that point to an instance.
 type resolver struct {
-	contracts fs.FS           // Inputs.Contracts
-	conns     M               // the external connections
-	published map[string]Info // Inputs.Published, by release; nil when unknown
-	release   string          // Inputs.Release: never its own provider
+	contracts fs.FS              // Inputs.Contracts
+	conns     M                  // the external connections
+	published map[string]Info    // Inputs.Published, by release; nil when unknown
+	release   string             // Inputs.Release: never its own provider
 	namespace string
+	draft     any          // the parameter schema's $schema: the draft of the requirements that name none
 	deps      []Dependency // every reference to an instance resolved, in order
 	errs      []error      // every reference that does not resolve, in order (walk)
 	missing   []outputKey  // the outputs references name that no instance of published publishes, in order (output)
@@ -61,64 +62,91 @@ func (e *missingOutputs) Unwrap() error { return e.err }
 // release wait for the instance (graph.New: Flux dependsOn, Argo CD sync
 // waves).
 type Dependency struct {
-	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance, or the one that publishes the referenced output (its release name)
-	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
-	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
-	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name
+	Instance  string `json:"instance,omitempty" yaml:"instance,omitempty"`   // the referenced instance, or the one that publishes the referenced output (its release name)
+	Contract  string `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it must provide
+	Field     string `json:"field,omitempty" yaml:"field,omitempty"`         // the parameter that references it, e.g. backends[0].database
+	Output    string `json:"output,omitempty" yaml:"output,omitempty"`       // the output the reference resolved to, by name
 }
 
-// walk: v, at path, of the schema s, with every string carrying an
-// x-okdp-connection-ref replaced by the resolved connection, in path order
-// (keys sorted, items in order). Null or empty means not set; another value
-// than a string would reach the mapping unresolved, past the contract. The
-// error of a reference that does not resolve is recorded (errs), at its
-// parameter path (value.Key, value.Index: a key with a dot in brackets).
-func (r *resolver) walk(s M, v any, path string) any {
+// refs: v, at path, of the schema s, each value carrying an
+// x-okdp-connection-ref (ref) replaced by what visit gives for it, in path
+// order (keys sorted, items in order), at its parameter path (value.Key,
+// value.Index: a key with a dot in brackets). The keys the schema does not
+// declare are left as they are.
+func refs(s M, v any, path string, visit func(ref M, v any, path string) any) any {
 	if ref, ok := s["x-okdp-connection-ref"].(M); ok {
-		name, isString := v.(string)
-		if v != nil && !isString {
-			r.errs = append(r.errs, fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v)))
-		} else if name != "" {
-			c, err := r.resolve(name, value.Str(ref["contract"]), path)
-			if err == nil {
-				return c
-			}
-			r.errs = append(r.errs, err)
-		}
-		return v
+		return visit(ref, v, path)
 	}
 	switch t := v.(type) {
 	case M:
-		// Only the keys the schema declares: the others are left as they are.
 		props := value.AsMap(s["properties"])
 		for _, k := range slices.Sorted(maps.Keys(props)) {
 			if x, ok := t[k]; ok {
-				t[k] = r.walk(value.AsMap(props[k]), x, value.Key(path, k))
+				t[k] = refs(value.AsMap(props[k]), x, value.Key(path, k), visit)
 			}
 		}
 	case []any:
 		// A list: the same, with the item schema.
 		for i, x := range t {
-			t[i] = r.walk(value.AsMap(s["items"]), x, value.Index(path, i))
+			t[i] = refs(value.AsMap(s["items"]), x, value.Index(path, i), visit)
 		}
 	}
 	return v
+}
+
+// walk: v, at path, of the schema s, with every reference replaced by the
+// resolved connection (refs, reference). The error of a reference that
+// does not resolve is recorded (errs).
+func (r *resolver) walk(s M, v any, path string) any { return refs(s, v, path, r.reference) }
+
+// reference: v, the value of a reference ref at path, resolved. Null or
+// empty means not set; a string is a connection's name. Another value
+// would reach the mapping unresolved, past the contract. What it resolves
+// to meets its requirement, require (readRequirement).
+func (r *resolver) reference(ref M, v any, path string) any {
+	if v == nil || v == "" {
+		return v
+	}
+	contract := value.Str(ref["contract"])
+	// Checked with the parameter schema (requirements): it compiles.
+	req, err := readRequirement(ref, r.draft)
+	if err != nil {
+		r.errs = append(r.errs, fmt.Errorf("%s: x-okdp-connection-ref: %w", path, err))
+		return v
+	}
+	var c M
+	switch t := v.(type) {
+	case string:
+		c, err = r.resolve(t, contract, path, req)
+	default:
+		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v))
+	}
+	if err != nil {
+		r.errs = append(r.errs, err)
+		return v
+	}
+	return c
 }
 
 // resolve: a reference to its contract fields. An entry of connections is
 // external. Any other name is an output named ref of the contract that
 // another instance of the namespace publishes (Published, the compiling
 // release left out: output). The first
-// error is reported: the contract, then the output (several instances,
-// none), the fields of an external connection or an output in
-// alphabetical order (contract.fields), then the required fields, then the
-// violations of the contract, all of them (contract.check), then "{{" in
-// what it resolves to (chart.NoTemplate). A reference to an instance that
-// resolves is recorded (deps), field naming it, ref the output.
-func (r *resolver) resolve(ref, contract, field string) (M, error) {
+// error is reported: the contract, then the fields the requirement req
+// names (contract.requires), then the output (several instances, none),
+// the fields of an external connection or an output in alphabetical order
+// (contract.fields), then the required fields, then the violations of the
+// contract, all of them (contract.check), then those of the requirement,
+// all of them (requirement.check), then "{{" in what it resolves to
+// (chart.NoTemplate). A reference to an instance that resolves is
+// recorded (deps), field naming it, ref the output.
+func (r *resolver) resolve(ref, contract, field string, req *requirement) (M, error) {
 	c, err := readContract(r.contracts, contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
+	}
+	if err := c.requires(req, field); err != nil {
+		return nil, err
 	}
 	out, instance := M{}, ""
 	var source string
@@ -164,6 +192,9 @@ func (r *resolver) resolve(ref, contract, field string) (M, error) {
 	}
 	if secretRef != nil {
 		out["secretRef"] = secretRef
+	}
+	if err := req.check(out, where); err != nil {
+		return nil, err
 	}
 	// Where it comes from, for the mapping (e.g. error messages): the
 	// instance too, unless external.
@@ -320,6 +351,115 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 	}
 	return c, nil
 }
+
+// requirement: what a connection reference requires of the connection it
+// resolves to, beyond its contract (x-okdp-connection-ref's require): a
+// JSON Schema of its fields and secretRef, as written (doc) and compiled
+// (schema).
+type requirement struct {
+	doc    M
+	schema *jsonschema.Schema
+}
+
+// readRequirement: the requirement of the reference ref, compiled as a
+// contract is (chart.CompileSchema), in the draft of the parameter schema
+// (draft, its $schema) unless it names its own; nil when it has none, or
+// null. One that is not an object or not a valid JSON Schema fails.
+func readRequirement(ref M, draft any) (*requirement, error) {
+	v := ref["require"]
+	if v == nil {
+		return nil, nil
+	}
+	doc, ok := v.(M)
+	if !ok {
+		return nil, fmt.Errorf("require: a JSON Schema, an object, got %s", value.Short(v))
+	}
+	doc = value.AsMap(value.Copy(doc))
+	if _, ok := doc["$schema"]; !ok && draft != nil {
+		doc["$schema"] = draft
+	}
+	s, err := chart.CompileSchema("file:///require.schema.json", doc)
+	if err != nil {
+		return nil, fmt.Errorf("require: %w", err)
+	}
+	return &requirement{doc, s}, nil
+}
+
+// requirements: stage 1, the requirement of each connection reference of
+// the parameter schema s (readRequirement), whether the parameters set it
+// or not, found as refs finds the references, through properties and
+// items: every one that fails, one line each, in key order, named by its
+// place in the schema (properties.catalogs.items.properties.database).
+func requirements(s M) error {
+	var errs []error
+	var walk func(sub M, at string)
+	walk = func(sub M, at string) {
+		if ref, ok := sub["x-okdp-connection-ref"].(M); ok {
+			if _, err := readRequirement(ref, s["$schema"]); err != nil {
+				errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: %w", at, err))
+			}
+			return
+		}
+		props := value.AsMap(sub["properties"])
+		for _, k := range slices.Sorted(maps.Keys(props)) {
+			walk(value.AsMap(props[k]), strings.TrimPrefix(at+".properties."+k, "."))
+		}
+		if items, ok := sub["items"].(M); ok {
+			walk(items, strings.TrimPrefix(at+".items", "."))
+		}
+	}
+	walk(s, "")
+	return errors.Join(errs...)
+}
+
+// requires: nil when req, the requirement of a reference of c at field,
+// names the fields the connection has, those of its properties and
+// required: each a field of the contract, not a secret one, which is in
+// the credentials Secret, never in the connection; or secretRef. The
+// first that is not, in alphabetical order, fails. nil when req is nil.
+func (c *contract) requires(req *requirement, field string) error {
+	if req == nil {
+		return nil
+	}
+	names := slices.Collect(maps.Keys(value.AsMap(req.doc["properties"])))
+	for _, k := range value.AsList(req.doc["required"]) {
+		names = append(names, value.Str(k))
+	}
+	slices.Sort(names)
+	where := field + ": x-okdp-connection-ref: require"
+	for _, k := range slices.Compact(names) {
+		_, ok := c.props[k]
+		switch {
+		case k == "secretRef":
+		case !ok:
+			return fmt.Errorf("%s: field %q is not part of the %s contract", where, k, c.name)
+		case c.secret[k]:
+			return fmt.Errorf("%s: %q is a secret field, in the credentials Secret, never in the connection: require secretRef", where, k)
+		}
+	}
+	return nil
+}
+
+// check: values, the connection a reference resolves to, completed, its
+// secretRef included, against the requirement req: every violation, one
+// line each with its path, as contract.check reports them; nil req, none.
+//
+//	<where>: the connection does not meet the package's requirement (x-okdp-connection-ref.require):
+//	- at '/engine': value must be 'postgresql'
+func (req *requirement) check(values M, where string) error {
+	if req == nil {
+		return nil
+	}
+	v, err := chart.Validate("require.schema.json", req.schema, values)
+	if err == nil && v != "" {
+		err = fmt.Errorf("the connection does not meet the package's requirement (x-okdp-connection-ref.require):\n%s", v)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %w", where, err)
+	}
+	return nil
+}
+
 
 // fields: values, the fields of an external connection or of an output,
 // in key order, each a field of the contract and not a secret one: the

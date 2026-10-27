@@ -248,11 +248,18 @@ chart is reached through `upstream.<chart>`, without a parameter.
   superset and polaris). The compiler refuses `{{` in every instance value
   anyway ([layers](specs/01_inputs_outputs.md#layers)); the pattern makes
   the console refuse it before committing, and covers the rest.
-- `x-okdp-connection-ref` makes a string a
-  [connection reference](specs/01_inputs_outputs.md#connections),
-  on the items of a list too (trino's `hiveCatalogs[].metastore`). Give it
-  `"type": "string"`: the compiler refuses any other value but `null`, after
-  the schema check.
+- `x-okdp-connection-ref` makes a string a [connection
+  reference](specs/01_inputs_outputs.md#connections), on the items of a
+  list too (trino's `hiveCatalogs[].metastore`). Give it `"type":
+  "string"`: the compiler refuses any other value but `null`, after the
+  schema check. Its `require`, a JSON Schema, is what the service needs of
+  the connection beyond its contract: `{"properties": {"engine": {"const":
+  "postgresql"}}, "required": ["secretRef"]}` for a service that speaks
+  PostgreSQL only and reads a password. Write it there rather than as an
+  `errors` rule of the mapping: it is checked whatever the connection
+  comes from, an external connection or an output, and the error names the
+  reference, the connection and its provider ([what a reference
+  requires](specs/01_inputs_outputs.md#what-a-reference-requires)).
 - `upstream` declares one object per chart key that accepts instance values:
   the inline values of any other chart would be ignored without a word. The
   compiler refuses `{{` in them, as in every instance value (upstream
@@ -452,10 +459,10 @@ the instance `demo-db` publishes, named after its release: host
 dependency (`Result.Dependencies`), which the deployment graph orders the
 releases with (Flux `dependsOn`, Argo CD sync waves,
 [GitOps](01_usage.md#gitops)). The mapping reads both the same way,
-credentials through a `secretKeyRef` on `secretRef.name`; it fails with a
-clear message when it needs the Secret and the connection has none (the
-second `errors` entry of
-`examples/02_advanced/input/db/catalog/webapp/1.0.0/okdp.yaml`).
+credentials through a `secretKeyRef` on `secretRef.name`; the reference
+requires them, `"require": {"required": ["secretRef"]}`
+(`examples/02_advanced/input/db/catalog/webapp/1.0.0/config.schema.json`),
+and a connection without a Secret is refused before the mapping runs.
 cnpg-postgresql publishes one
 `database-server` output per database: an instance of the namespace
 references it by that name (`database: demo-pg-hive`), which resolves to

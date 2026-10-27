@@ -37,11 +37,11 @@ type instance struct {
 //
 // 1. Parameters: the package's parameter schema, read once for the stages
 // that read it (chart.ReadParameterSchema): the keys of global an instance
-// sets, the parameters, the connection references. Then the values layers,
-// as Helm: the context's then the instance's (global and connections are
-// the context's: valuesLayers), merged in order as -f files, coalesced over
-// the schema's defaults, checked against it, connections apart
-// (chart.Parameters).
+// sets, the parameters, the connection references, their requirements
+// compiled (requirements). Then the values layers, as Helm: the context's
+// then the instance's (global and connections are the context's:
+// valuesLayers), merged in order as -f files, coalesced over the schema's
+// defaults, checked against it, connections apart (chart.Parameters).
 //
 // 2. Platform context: global.okdp checked against platformSchema, its
 // defaults applied (schemaValues): a value of another type is refused
@@ -52,7 +52,8 @@ type instance struct {
 // 3. Connections: the connection references of the parameters
 // (x-okdp-connection-ref) resolved in a copy against the contracts
 // (Inputs.Contracts), the context's connections and what the other
-// instances of the namespace publish (Inputs.Published); the references
+// instances of the namespace publish (Inputs.Published), then checked
+// against their requirements (require); the references
 // that do not resolve are reported together, one error each, one per line,
 // in the order of the walk (resolver.walk), as the violations of the
 // parameter schema are; when some name an output no instance publishes,
@@ -66,15 +67,7 @@ type instance struct {
 // environment), and the package: service (name, version), labels and
 // selectorLabels (without component).
 func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
-	schema, err := chart.ReadParameterSchema(files)
-	if err != nil {
-		return nil, err
-	}
-	layers, err := valuesLayers(schema.Doc, in)
-	if err != nil {
-		return nil, err
-	}
-	values, err := chart.Parameters(schema, svc.Name, layers)
+	schema, values, err := parameters(files, in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +84,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
 	inst.oidc = oidc
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), published: in.Published, release: in.Release, namespace: in.Namespace}
+	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), published: in.Published, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
 	if r.walk(schema.Doc, params, ""); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
@@ -130,6 +123,28 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		},
 	}
 	return inst, nil
+}
+
+// parameters: stage 1, the parameter schema of the package's files, the
+// requirements of its connection references compiled (requirements), and
+// the parameters: the values layers merged over its defaults, checked.
+func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, error) {
+	schema, err := chart.ReadParameterSchema(files)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := requirements(schema.Doc); err != nil {
+		return nil, nil, err
+	}
+	layers, err := valuesLayers(schema.Doc, in)
+	if err != nil {
+		return nil, nil, err
+	}
+	values, err := chart.Parameters(schema, svc.Name, layers)
+	if err != nil {
+		return nil, nil, err
+	}
+	return schema, values, nil
 }
 
 // platformSchemaFile: the schema of the platform values the compiler reads

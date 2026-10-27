@@ -3,12 +3,14 @@ package okdp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -388,6 +390,83 @@ func TestResolveOutputErrors(t *testing.T) {
 				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})
+	}
+}
+
+// requireCtx: the context of the in-memory package of draft-07 whose
+// reference db requires require (x-okdp-connection-ref), demo-pg
+// published.
+func requireCtx(require string, values M) error {
+	ch := maps.Clone(pkg)
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"$schema": "http://json-schema.org/draft-07/schema#", "properties": {
+		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database", "require": ` + require + `}}}}`)}
+	in := inputs(values)
+	in.Contracts, in.Published = dbContract, pgPublished
+	_, err := newInstance(ch, in, defService)
+	return err
+}
+
+// TestResolveRequirement: a reference's requirement, a JSON Schema of the
+// connection's fields and secretRef, completed: met; not met by an
+// external connection or an output, every violation said; one that names
+// a field of no connection, not of the contract or a secret one; one that
+// is no JSON Schema, in the draft of the parameter schema, refused when
+// the reference is not set too; met by nothing, not checked then.
+func TestResolveRequirement(t *testing.T) {
+	ext := M{"ext": M{"contract": "database", "engine": "mysql", "host": "h", "tls": true}}
+	pg := `{"properties": {"engine": {"const": "postgresql"}}, "required": ["secretRef"]}`
+	for name, tc := range map[string]struct {
+		require string
+		values  M
+		want    string
+	}{
+		"met":     {pg, M{"db": "demo-pg"}, ""},
+		"a draft": {`{"properties": {"tags": {"items": [{"const": "a"}]}}}`, M{"db": "demo-pg"}, ""},
+		"not met by an external connection": {pg, M{"db": "ext", "connections": ext}, `db (connection "ext"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):
+- at '': missing property 'secretRef'
+- at '/engine': value must be 'postgresql'`},
+		"not met by an output": {`{"properties": {"tls": {"const": true}}}`, M{"db": "demo-pg"}, `db (output "demo-pg" of demo-pg): the connection does not meet the package's requirement (x-okdp-connection-ref.require):
+- at '/tls': value must be true`},
+		"not a field":    {`{"properties": {"port": {"minimum": 1}}}`, M{"db": "demo-pg"}, `db: x-okdp-connection-ref: require: field "port" is not part of the database contract`},
+		"a secret field": {`{"required": ["host", "password"]}`, M{"db": "demo-pg"}, `db: x-okdp-connection-ref: require: "password" is a secret field, in the credentials Secret, never in the connection: require secretRef`},
+		"not an object":  {`true`, M{}, `config.schema.json: properties.db: x-okdp-connection-ref: require: a JSON Schema, an object, got true`},
+		"not a schema": {`{"minimum": "a"}`, M{}, `config.schema.json: properties.db: x-okdp-connection-ref: require: "file:///require.schema.json#" is not valid against metaschema: jsonschema validation failed with 'http://json-schema.org/draft-07/schema#'
+- at '/minimum': got string, want number`},
+		"not set": {pg, M{"db": ""}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := requireCtx(tc.require, tc.values)
+			if got := fmt.Sprint(err); err == nil && tc.want != "" || err != nil && got != tc.want {
+				t.Errorf("got %v\nwant %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestRequirements: every requirement of the parameter schema that is no
+// JSON Schema, found through properties and items, in key order, whether
+// the parameters set the reference or not, one line each, named by its
+// place in the schema; in the draft of the parameter schema, 2020-12
+// without one.
+func TestRequirements(t *testing.T) {
+	ref := func(require string) string {
+		return `{"x-okdp-connection-ref": {"contract": "database", "require": ` + require + `}}`
+	}
+	s, err := chart.ParseSchema("config.schema.json", []byte(`{"properties": {
+		"b": `+ref(`{"properties": {"tags": {"items": [{"const": "a"}]}}}`)+`,
+		"a": {"type": "array", "items": {"properties": {"db": `+ref(`"x"`)+`}}},
+		"c": `+ref(`{"properties": {"engine": {"const": "postgresql"}}}`)+`}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = requirements(s.Doc)
+	want := []string{
+		`config.schema.json: properties.a.items.properties.db: x-okdp-connection-ref: require: a JSON Schema, an object, got "x"`,
+		`config.schema.json: properties.b: x-okdp-connection-ref: require: "file:///require.schema.json#" is not valid against metaschema`,
+	}
+	lines := strings.Split(fmt.Sprint(err), "\n")
+	if err == nil || lines[0] != want[0] || !strings.HasPrefix(lines[1], want[1]) || strings.Contains(err.Error(), "properties.c") {
+		t.Errorf("got %v\nwant %s", err, strings.Join(want, "\n"))
 	}
 }
 
