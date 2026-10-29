@@ -1,0 +1,6 @@
+# The database server of the platform's projects, in the namespace data:
+# the provider of the platform's default class of database-server
+# connections (platform.yaml), and of the project demo's large class
+# (project.yaml): the one the claims bind to.
+service: postgresql
+version: 1.0.0

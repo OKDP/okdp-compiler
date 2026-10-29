@@ -1,0 +1,5 @@
+# The app chart's values: its database, as the claim resolved it.
+app:
+  database:
+    url: postgresql://${{ values.database.host }}:${{ str(values.database.port) }}/${{ values.database.dbName }}
+    credentials: ${{ values.database.secretRef.name }}

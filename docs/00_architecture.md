@@ -1117,6 +1117,22 @@ on, `demo-db` and `demo-alerts`, are those of minimal packages,
 `catalog/alerts/1.0.0/`, which publishes an output named after its
 release, their charts in the cache.
 
+`examples/04_claims/` shows claims across namespaces: a database server,
+`postgresql`, in the project `data`, that provisions a `database-server`
+connection for each claim bound to it (a CNPG Database, retained, and its
+owner's generated credentials); an application, `app`, whose `database` is
+a claim by default, a PostgreSQL database with credentials (`require`), in
+the project `demo`: `demo-app` claims a database of its own, by default,
+`demo-metrics` one it writes out (`config.yaml`: the class `standard`,
+10Gi and timescaledb), `demo-reports` and `demo-dashboards` reference
+`analytics`, a named claim of the project (`project.yaml`). Its contract
+has both sides: a claim requests a size and extensions (`x-okdp-claim`),
+the package pgvector of its own claims, `analytics` postgis, and the
+provider publishes what it granted. The platform defines the default class
+of `database-server` connections, the project a class of its own, `large`,
+which fixes the size of `analytics`; and the platform's secret store: the
+provider pushes each claim's credentials, each claimer reads its copy.
+
 `TestExample` (`examples_test.go`) reads each example's tree
 (`LoadRepository`, its `input/db/` one repository), compiles its
 instances together (`CompileAll`), checks their graph (`NewGraph`), and

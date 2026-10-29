@@ -1,0 +1,7 @@
+# An application that needs a database: one chart, under the key app.
+
+apiVersion: v2
+name: app
+version: 1.0.0
+dependencies:
+  - {name: app, repository: https://charts.example.org, version: 1.8.0}

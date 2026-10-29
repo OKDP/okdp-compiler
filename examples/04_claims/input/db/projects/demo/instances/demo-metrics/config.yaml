@@ -1,0 +1,9 @@
+# A database of its own, its claim written out, as a
+# PersistentVolumeClaim: a claim template in place of a connection's name,
+# the class it is of (standard, the platform's default, named) and what it
+# requests of the provider, 10Gi and timescaledb. The request is merged
+# over the package's (pgvector), a list replaced whole: it requests
+# pgvector again.
+database:
+  class: standard
+  request: {size: 10Gi, extensions: [pgvector, timescaledb]}

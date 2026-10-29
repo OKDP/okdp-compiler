@@ -1,0 +1,3 @@
+# The database demo-dashboards reads too: the named claim analytics of
+# the project (project.yaml).
+database: analytics

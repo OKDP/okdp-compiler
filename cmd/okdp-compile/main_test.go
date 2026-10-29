@@ -46,7 +46,7 @@ func tree(t *testing.T, dir string) map[string]string {
 // repositories, in either order, gives the same.
 func TestRun(t *testing.T) {
 	examples := filepath.Join("..", "..", "examples")
-	for _, example := range []string{"00_passthrough", "01_minimal", "02_advanced", "03_full"} {
+	for _, example := range []string{"00_passthrough", "01_minimal", "02_advanced", "03_full", "04_claims"} {
 		t.Run(example, func(t *testing.T) {
 			dir := t.TempDir()
 			stale := filepath.Join(dir, "projects", "demo", "instances", "demo-gone")

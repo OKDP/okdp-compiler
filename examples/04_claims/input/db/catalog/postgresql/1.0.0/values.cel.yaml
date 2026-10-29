@@ -1,0 +1,5 @@
+# The cluster chart's values: the cluster, named after the release, and a
+# role per claim, its password the claim's credentials.
+cluster:
+  fullnameOverride: ${{ release.name }}
+  roles: "${{ claims.map(c, {'name': c.id, 'passwordSecret': c.id + '-credentials'}) }}"

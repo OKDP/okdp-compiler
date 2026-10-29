@@ -1,0 +1,27 @@
+# The project demo, the namespace demo: a context layer of level 1, over
+# platform.yaml.
+#
+# A class of its own, beside the platform's: a project adds classes, and
+# changes none of the platform's, nor its default. large fixes the size
+# of the databases of its claims (request): a claim that sets it is
+# refused.
+global:
+  okdp:
+    provisioning:
+      database-server:
+        classes:
+          large: {provider: data/postgresql, request: {size: 50Gi}}
+
+# Its named claims. A named claim is declared once, here, and bound to its
+# provider whether an instance references it or not; an instance names it
+# as it names a connection (database: analytics), and every instance that
+# does gets the same database.
+#
+# What a named claim requests is its declaration's (request) over what its
+# class fixes, checked against the contract's claim schema (x-okdp-claim),
+# its defaults applied: a package does not change a claim of its project.
+claims:
+  analytics:
+    contract: database-server
+    class: large
+    request: {extensions: [postgis]}

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: postgresql
+version: 1.0.0
+dependencies:
+  - name: cluster
+    repository: https://charts.example.org
+    version: 0.3.0

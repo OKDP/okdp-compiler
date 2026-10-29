@@ -1,0 +1,16 @@
+# The platform values: the classes of database-server connections, as
+# Kubernetes' storage classes (global.okdp.provisioning), standard the
+# default, the class of the claims that name neither a class nor a
+# provider, its provider the instance they bind to; and the secret store
+# the credentials of a claim cross namespaces through
+# (global.okdp.secrets.store), a ClusterSecretStore of External Secrets:
+# the databases are in the namespace data, their claimers in demo.
+global:
+  okdp:
+    provisioning:
+      database-server:
+        default: standard
+        classes:
+          standard: {provider: data/postgresql}
+    secrets:
+      store: okdp-secrets
