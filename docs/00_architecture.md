@@ -988,11 +988,15 @@ of the parameter schema (`TestResolveRequirement`, `TestRequirements`).
 namespaces and writes them with each target, compared with
 `testdata/targets/<target>/` (`go test ./internal/target -update` rewrites
 them; `TestTargets`), and checks the options and the release names shared
-across namespaces (`TestOptions`). `compiler_test.go` checks which
-packages each stage imports (`TestLayers`).
-`internal/okdp/mapping_test.go` covers OKDP's sections and functions,
-`internal/okdp/provides_test.go` what the instance publishes: the outputs
-against their contracts, the credentials Secrets.
+across namespaces (`TestOptions`); the packages of the flux and argocd
+targets test their own units, small and literal: the options
+(`TestCheck`), a HelmRelease with and without `dependsOn`, a project's
+Kustomization, an Application's wave and revision, and the files of two
+namespaces (`TestInstance`, `TestProject`, `TestApplication`,
+`TestFiles`). `compiler_test.go` checks which packages each stage imports
+(`TestLayers`). `internal/okdp/mapping_test.go` covers OKDP's sections and
+functions, `internal/okdp/provides_test.go` what the instance publishes:
+the outputs against their contracts, the credentials Secrets.
 `internal/okdp/service_test.go` covers `require`: its entries decoded, the
 keys checked in a whole compile, after the context (`TestRequire`).
 `internal/okdp/oidc_test.go` covers the OAuth clients: the values the
