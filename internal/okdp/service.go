@@ -33,6 +33,9 @@ type Package struct {
 	DependsOn []string          `yaml:"dependsOn"` // catalog: the platform services it needs (not read by the compiler)
 	Defaults  map[string]string `yaml:"defaults"`  // dependency key -> a values file of the package, <key>.defaults.yaml by convention: OKDP's defaults for the chart
 	Upstream  chart.Upstream    `yaml:"upstream"`  // the dependencies that accept instance upstream values, with their protect and append paths
+	// Provisions: the contracts the package provisions connections of, one
+	// per claim bound to an instance (Inputs.Claims).
+	Provisions []string `yaml:"provisions"`
 
 	// The mapping's keys, read by the mapping (Definition.Okdp), declared
 	// so that okdp.yaml is read strictly: any other key fails.
@@ -46,7 +49,7 @@ type Package struct {
 
 // packageKeys: the keys of okdp.yaml its package reader reads (Package),
 // skipped by the mapping.
-var packageKeys = []string{"require", "roles", "dependsOn", "defaults", "upstream"}
+var packageKeys = []string{"require", "roles", "dependsOn", "defaults", "upstream", "provisions"}
 
 // Service: the engine-neutral part of a package, as a compile reads it
 // (Definition.service).
@@ -57,6 +60,8 @@ type Service struct {
 	DependsOn []string    // okdp.yaml: catalog, not read by the compiler
 	Require   []string    // okdp.yaml: the global.okdp keys the service needs
 	Charts    chart.Specs // Chart.yaml's dependencies, with okdp.yaml's defaults and upstream
+	// Provisions: okdp.yaml: the contracts it provisions connections of.
+	Provisions []string
 }
 
 // platformValue: the end of the error of a missing platform value: the
@@ -67,7 +72,8 @@ const platformValue = "It is a context value: the platform's or a project's (Inp
 // service: the Service of d, checked when it is loaded (LoadDefinition)
 // and before every compile (a Definition may be built in memory): what
 // Chart.yaml may not hold (chart.Metadata.Check), then what okdp.yaml's
-// defaults and upstream may not hold (chart.NewSpecs).
+// defaults and upstream may not hold (chart.NewSpecs), then its
+// provisions (checkProvisions).
 func (d *Definition) service() (*Service, error) {
 	if err := d.Chart.Check(); err != nil {
 		return nil, err
@@ -77,5 +83,8 @@ func (d *Definition) service() (*Service, error) {
 		return nil, err
 	}
 	p := d.Package
-	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Roles: p.Roles, DependsOn: p.DependsOn, Require: p.Require, Charts: specs}, nil
+	if err := checkProvisions(p.Provisions); err != nil {
+		return nil, err
+	}
+	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Roles: p.Roles, DependsOn: p.DependsOn, Require: p.Require, Charts: specs, Provisions: p.Provisions}, nil
 }

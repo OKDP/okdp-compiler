@@ -24,14 +24,16 @@ type M = value.M
 // a values file and read by Helm; what values cannot hold (a func, a NaN)
 // fails the compile, its layer and path named.
 type Inputs struct {
-	Charts    fs.FS            // chart cache, for the checks only (nil: none): the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar), <repository> the URL without its scheme; the final values are checked against their charts' defaults and schemas, and are the same without it
-	Contracts fs.FS            // the contract schemas: <contract>.schema.json
-	Context   []ContextLayer   // the context's values layers: global, global.okdp and connections among them, an instance's own connections at a level of its own; merged by level, lowest first, a level's layers in order (helm -f); a layer changes none of a lower level's values (contextLayers)
-	Values    []map[string]any // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
-	Release   string           // the Helm release: a DNS-1123 label of 53 characters at most
-	Namespace string           // the release's namespace: a DNS-1123 label
-	Published map[string]Info  // what the other instances of the namespace publish (their okdp.info.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections resolve
-	CostLimit uint64           // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
+	Charts    fs.FS              // chart cache, for the checks only (nil: none): the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar), <repository> the URL without its scheme; the final values are checked against their charts' defaults and schemas, and are the same without it
+	Contracts fs.FS              // the contract schemas: <contract>.schema.json
+	Context   []ContextLayer     // the context's values layers: global, global.okdp and connections among them, an instance's own connections at a level of its own; merged by level, lowest first, a level's layers in order (helm -f); a layer changes none of a lower level's values (contextLayers)
+	Values    []map[string]any   // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
+	Release   string             // the Helm release: a DNS-1123 label of 53 characters at most
+	Namespace string             // the release's namespace: a DNS-1123 label
+	Published map[string]Info    // what the other instances of the namespace publish (their okdp.info.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections and claims resolve
+	Claims    []Claim            // the claims bound to the instance, of contracts its package provisions: the mapping's claims; it publishes an output of each's contract named its ID (CompileAll sets them)
+	Bindings  map[string]Binding // the provider each claim of a reference is bound to, by parameter path, and the output it publishes for it (CompileAll sets them); nil: no claim resolves
+	CostLimit uint64             // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
 }
 
 // ContextLayer: a values layer of the context (Inputs.Context), see
@@ -53,7 +55,9 @@ type Result struct {
 	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client.
 	Charts map[string]chart.Ref
 	// Objects: OKDP's own objects, rendered whole: the credentials Secrets
-	// of the provided connections, then the objects section of the mapping;
+	// of the provided connections, then the objects section of the mapping,
+	// then the PushSecrets and ExternalSecrets of the credentials of claims
+	// across namespaces;
 	// the umbrella's objects file, which it renders as written, in its
 	// release (helm.Write). nil when there is none.
 	Objects []map[string]any
@@ -61,8 +65,9 @@ type Result struct {
 	// sections, checked (okdp.info.yaml, helm.Write).
 	Info Info
 	// Dependencies: the instances the connection references point to, by
-	// one of their outputs (Inputs.Published), by parameter path. References
-	// to external connections are not listed.
+	// one of their outputs (Inputs.Published) or a claim (Inputs.Bindings),
+	// by parameter path. References to external
+	// connections are not listed.
 	Dependencies []Dependency
 	// Release, Namespace: the Helm release the values are compiled for, and
 	// its namespace (Inputs.Release, Inputs.Namespace).
@@ -94,6 +99,9 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// Checked again: a Definition may be built in memory.
 	svc, err := def.service()
 	if err != nil {
+		return nil, err
+	}
+	if err := checkClaims(svc, in.Claims); err != nil {
 		return nil, err
 	}
 	// 1-3. Parameters, platform context, connections: the instance of the
@@ -132,15 +140,28 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	// 7. Provides: the outputs, checked against the contracts, and their
-	// credentials Secrets.
+	// credentials Secrets; an output for each claim (claimed).
 	outputs, credentials, err := provided(session, inst, in.Contracts, value.AsList(res["provides"]))
 	if err != nil {
 		return nil, err
 	}
-	// 8. Objects: the credentials Secrets, then the mapping's objects.
+	if err := claimed(in.Claims, outputs); err != nil {
+		return nil, err
+	}
+	pushes, err := pushSecrets(inst, in.Contracts, in.Claims, outputs)
+	if err != nil {
+		return nil, err
+	}
+	// 8. Objects: the credentials Secrets, then the mapping's objects,
+	// then those of the credentials of claims across namespaces: pushed for
+	// the claims of another namespace, read for its own of another.
 	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
+	}
+	out.Objects = append(out.Objects, pushes...)
+	for _, x := range inst.transfers {
+		out.Objects = append(out.Objects, pullSecret(inst, x))
 	}
 	// 9. Final values, first the dependencies of Chart.yaml the umbrella
 	// renders (rendered): all but those the values file leaves out. Then

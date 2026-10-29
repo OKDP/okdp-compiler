@@ -28,8 +28,9 @@ type instance struct {
 	okdp               M            // global.okdp as written, as the mapping sees it, checked against platform.schema.json
 	oidc               M            // platform.oidc: global.okdp.oidc, its defaults applied, its mode derived
 	dcr                bool         // platform.oidc.dcr.enabled: OIDC enabled, the OAuth clients registered by DCR
-	deps               []Dependency // the instances of the namespace the connection references point to, by parameter path
+	deps               []Dependency // the instances the connection references point to, of the namespace or, for a claim, of its provider's, by parameter path
 	scope              M            // what the mapping sees
+	transfers          []transfer   // the credentials of its claims of another namespace, copied into its own (pullSecret)
 }
 
 // newInstance: stages 1 to 3, the instance of a compile of the package
@@ -57,8 +58,9 @@ type instance struct {
 // that do not resolve are reported together, one error each, one per line,
 // in the order of the walk (resolver.walk), as the violations of the
 // parameter schema are; when some name an output no instance publishes,
-// the error says which (missingOutputs). The references to an output are
-// recorded (deps), by parameter path, in string order.
+// the error says which (missingOutputs). The references to an instance,
+// an output or a claim, are recorded (deps), by parameter path, in string
+// order.
 //
 // The merged values stay as the user wrote them. The mapping sees release
 // (name, namespace), values (the resolved parameters), global (global.okdp,
@@ -83,8 +85,12 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	value.AsMap(oidc["dcr"])["enabled"] = inst.dcr
 	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
 	inst.oidc = oidc
+	named, err := namedClaims(values)
+	if err != nil {
+		return nil, err
+	}
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), published: in.Published, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
+	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
 	if r.walk(schema.Doc, params, ""); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
@@ -92,11 +98,13 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		}
 		return nil, err
 	}
-	// Not parameters: global is exposed apart, connections are resolved.
+	// Not parameters: global is exposed apart, connections and claims are
+	// resolved.
 	delete(params, "global")
 	delete(params, "connections")
+	delete(params, "claims")
 	sort.Slice(r.deps, func(i, j int) bool { return r.deps[i].Field < r.deps[j].Field })
-	inst.deps = r.deps
+	inst.deps, inst.transfers = r.deps, r.transfers
 	// Proxy settings, as environment variables.
 	proxy := value.AsMap(inst.okdp["proxy"])
 	proxyEnv := M{}
@@ -111,6 +119,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		"selectorLabels": labels(svc.Name, in.Release, "", true),
 		"release":        M{"name": in.Release, "namespace": in.Namespace},
 		"values":         params,
+		"claims":         claimsScope(in.Claims),
 		"global":         M{"okdp": value.Copy(inst.okdp)}, // the platform values, as written
 		"platform": M{
 			"oidc": oidc,

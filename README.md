@@ -24,7 +24,7 @@ if err != nil {
 	log.Fatal(err) // every problem of the tree, each naming its path
 }
 var results []*compiler.Result
-for i, o := range compiler.CompileAll(context.Background(), instances) { // each after those whose outputs it references
+for i, o := range compiler.CompileAll(context.Background(), instances) { // each after those whose outputs it references, each claim bound to its provider
 	if o.Err != nil {
 		log.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err) // the whole report, e.g. every schema violation
 	}
@@ -52,8 +52,8 @@ if err != nil {
 
 `example_test.go` runs this program on the advanced example (`Example`).
 `compiler.LoadRepository` reads a tree, `compiler.CompileAll` compiles its
-instances together: each instance of a namespace after the instances
-whose outputs it references, with what they
+instances together: each claim bound to its provider, each instance of a
+namespace after the instances whose outputs it references, with what they
 publish as `Published`. `compiler.NewGraph` checks their dependencies and
 orders their releases, and a target writes them for a deployer: the
 umbrella chart of each (`compiler.Helm`), with its Flux HelmRelease
@@ -144,7 +144,7 @@ together, each directory any part of it
 with the context its tree gives, `platform.yaml` at level 0, its
 project's `project.yaml` at level 1, its own `connections.yaml` at level
 2, then its values, `config.yaml`; with what the others of its namespace
-publish, compiled after them; their
+publish, compiled after them; each claim bound to its provider; their
 dependencies checked; written for `--target`: `helm` (the default), each
 instance's umbrella chart, `flux` with its HelmRelease or `argocd` with
 its Application ([`--repository`](docs/01_usage.md#--repository)):
@@ -152,8 +152,10 @@ its Application ([`--repository`](docs/01_usage.md#--repository)):
 ```bash
 make build    # bin/okdp-compile
 bin/okdp-compile --repository examples/03_full/input/db -o out/tree
-# demo/demo-workspace: depends on demo-db (database, catalogs[1].database)
-# demo/demo-workspace: depends on demo-db (database, database)
+# demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
+# demo/demo-workspace: database: claim demo.demo-workspace.database (database) bound to demo/demo-db, the default class standard
+# demo/demo-workspace: depends on demo-db (database demo.marketing, catalogs[1].database)
+# demo/demo-workspace: depends on demo-db (database demo.demo-workspace.database, database)
 # demo/demo-workspace: depends on demo-alerts (http, notifications.webhook)
 # out/tree now holds examples/03_full/output/, byte for byte
 bin/okdp-compile --repository examples/03_full/input/db -o out/flux --target flux
@@ -164,12 +166,17 @@ bin/okdp-compile --repository examples/03_full/input/db --check --charts example
 
 The settings of `global.okdp` the compiler reads are described, typed
 and defaulted by
-[`internal/okdp/platform.schema.json`](internal/okdp/platform.schema.json).
-An instance's `config.yaml` that sets `connections`, or `global` but for
-the keys the package's parameter schema declares under it, fails
+[`internal/okdp/platform.schema.json`](internal/okdp/platform.schema.json),
+the classes of the claims among them (`global.okdp.provisioning`: the
+platform's, with the default class, and a project's own,
+[classes](docs/specs/01_inputs_outputs.md#classes)).
+An instance's `config.yaml` that sets `connections` or `claims`, or
+`global` but for the keys the package's parameter schema declares under
+it, fails
 ([context values](docs/specs/01_inputs_outputs.md#context-values)); a
-context file that changes a value of a lower level, or one of its
-connections, fails ([levels](docs/specs/01_inputs_outputs.md#levels)).
+context file that changes a value of a lower level, one of its
+connections, named claims or classes, or its default class, fails
+([levels](docs/specs/01_inputs_outputs.md#levels)).
 
 `-o <dir>` (`--output`), required, writes each instance as one chart, for
 one Helm release per instance, in
@@ -203,7 +210,7 @@ A compile reads no chart: `--charts` without `--check` fails
 |---|---|
 | `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, the targets, `Write`... |
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
-| `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages |
+| `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, claims, classes and providers, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages, `CompileAll` |
 | `internal/repository/` | the tree of a deployment, in one or more repositories, read as the instances `CompileAll` compiles |
 | `internal/graph/` | the deployment graph of compiled instances: their dependencies checked, what each release waits for, its sync wave |
 | `internal/target/` | the output formats of compiled instances (`Target`), what they share: the tree, `projects/<namespace>/instances/<release>/` |
@@ -216,10 +223,10 @@ A compile reads no chart: `--charts` without `--check` fails
 | `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the packages in `catalog/<service>/<version>/`, the instances of the project `demo` in `projects/demo/instances/<instance>/`), what `-o <dir>` writes for each instance in `output/projects/demo/instances/<instance>/`, checked by `go test` ([example](docs/00_architecture.md#example)) |
 | `examples/00_passthrough/` | a package that computes nothing, `echo`: `Chart.yaml`, one chart, and a plain `values.yaml`, the chart's values the platform sets; no `okdp.yaml`, no parameter, no instance values |
 | `examples/01_minimal/` | the smallest package with a mapping, `hello`: one chart, a mapping that sets three of its values and the instance's usage; no platform values, none needed |
-| `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`); `demo-db`, the database it references, a minimal package, `db` |
-| `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, level 1), each with connections, the instance's own connections (`connections.yaml`, level 2) and its values (`config.yaml`); the instances it references, `demo-db` and `demo-alerts`, minimal packages, `db` and `alerts`; its chart cache in `.charts/`, for `--check --charts` |
+| `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`), its database a claim; `demo-db`, the database server the claim binds to, a minimal package, `db`, that provisions a database for each claim |
+| `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, level 1), each with connections, the instance's own connections (`connections.yaml`, level 2) and its values (`config.yaml`), two claims of a database among its references, one of its own, one the project's named claim; the instances it depends on, `demo-db`, their provider, and `demo-alerts`, whose output it references, minimal packages, `db` and `alerts`; its chart cache in `.charts/`, for `--check --charts` |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
-| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, `$OKDP_CHARTS`, stdout and stderr |
+| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, stdout and stderr |
 | `testdata/targets/` | the files of each target for three instances (`go test ./internal/target -update`) |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
 | `docs/` | the documentation |

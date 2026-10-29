@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "SQL database",
-  "description": "Example contract: a SQL database: what its provider publishes, its credentials in a Secret.",
+  "description": "Example contract: a SQL database, both sides. properties: what its provider publishes, the size granted among it; x-okdp-secret: what its credentials Secret holds; x-okdp-claim: what a claim may request of the provider, a size.",
   "type": "object",
   "x-okdp-contract": "database",
   "properties": {
@@ -13,8 +13,15 @@
     "host": {"type": "string"},
     "port": {"type": "integer", "default": 5432},
     "dbName": {"type": "string"},
+    "size": {"type": "string", "description": "The size granted, as requested or more; absent for a database no claim provisions."},
     "password": {"type": "string", "x-okdp-secret": true}
   },
   "required": ["host", "dbName"],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "x-okdp-claim": {
+    "description": "What a claim requests: the size of its database, 1Gi when it asks nothing.",
+    "type": "object",
+    "properties": {"size": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$", "default": "1Gi"}},
+    "additionalProperties": false
+  }
 }

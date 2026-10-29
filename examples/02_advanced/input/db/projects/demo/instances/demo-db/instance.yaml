@@ -1,4 +1,5 @@
-# The database instance demo-webapp references (database: demo-db): the
-# package catalog/db/1.0.0/.
+# The database server demo-webapp's claim binds to (database: {}), the
+# provider of the platform's default class of database connections,
+# standard (platform.yaml): the package catalog/db/1.0.0/.
 service: db
 version: 1.0.0

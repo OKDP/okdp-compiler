@@ -121,6 +121,51 @@
                 "httpsProxy": {"type": "string", "description": "HTTPS_PROXY."},
                 "noProxy": {"type": "string", "description": "NO_PROXY."}
               }
+            },
+            "provisioning": {
+              "type": "object",
+              "description": "The classes of the claims, by contract, as Kubernetes' storage classes: each class the provider of its claims and what it fixes of their request, one of them the default class, of the claims that name neither a class nor a provider. A claim names a class (class), or its provider (provider), or takes the default class; one that names neither, without a default class, is refused. The platform gives its classes and the default (platform.yaml); a project adds classes of its own (project.yaml), and the default of a contract the platform leaves without one, and changes none of the platform's: a class and a default are each taken whole. Never an instance.",
+              "additionalProperties": {
+                "type": "object",
+                "description": "The classes of a contract.",
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "string",
+                    "description": "The default class of the contract: a class of classes, the one of the claims that name neither a class nor a provider. Set once, at the lowest level that sets it: a project that wants another provider adds a class and names it."
+                  },
+                  "classes": {
+                    "type": "object",
+                    "description": "The classes of the contract, by name, a DNS-1123 label: another name is refused.",
+                    "additionalProperties": false,
+                    "patternProperties": {
+                      "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$": {
+                        "type": "object",
+                        "description": "A class: the provider of its claims, and what it fixes of their request.",
+                        "additionalProperties": false,
+                        "required": ["provider"],
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "description": "The instance that provisions the claims of the class: <namespace>/<release>, or <release> of the claimer's namespace."
+                          },
+                          "request": {
+                            "type": "object",
+                            "description": "What the class fixes of the request of each of its claims, checked with it against the contract's claim schema (x-okdp-claim): a claim that sets one of its keys is refused."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "secrets": {
+              "type": "object",
+              "description": "Where secrets go between namespaces.",
+              "properties": {
+                "store": {"type": "string", "description": "The ClusterSecretStore of External Secrets the credentials of a claim bound across namespaces go through: its provider pushes them (a PushSecret), its claimers read them (an ExternalSecret), under the key okdp.<claimers' namespace>.<claim ID>, a property per secret field of the contract. Required by such a claim whose output has a secretRef."}
+              }
             }
           }
         }

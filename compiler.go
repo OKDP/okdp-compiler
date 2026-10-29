@@ -81,15 +81,26 @@ type (
 	// (Output.SecretRef).
 	SecretRef = okdp.SecretRef
 	// Dependency: an instance a connection reference points to, by one of
-	// its outputs (Result.Dependencies), what a deployer orders the releases
-	// with.
+	// its outputs or a claim (Result.Dependencies), what a deployer orders
+	// the releases with.
 	Dependency = okdp.Dependency
+	// Claim: a connection claimed of a provider's instance, which its
+	// package provisions (Inputs.Claims): it publishes an output of its
+	// contract named its ID.
+	Claim = okdp.Claim
+	// Binding: the provider a reference's claim is bound to
+	// (Inputs.Bindings), and the output it publishes for it.
+	Binding = okdp.Binding
 	// Instance: an instance CompileAll compiles, its package and its
-	// inputs, Published left out.
+	// inputs, Published, Claims and Bindings left out.
 	Instance = okdp.Instance
 	// Outcome: the compile of one instance of CompileAll: its result, nil
-	// when it is refused, and why.
+	// when it is refused, and why; the claims of its references, bound.
 	Outcome = okdp.Outcome
+	// Bound: a claim of a reference, bound to its provider by CompileAll:
+	// the one it names, or the provider of its class, the one it names or
+	// the default one of the claimer's context (global.okdp.provisioning).
+	Bound = okdp.Bound
 	// Repository: a part of a tree LoadRepository reads: its name in
 	// messages and its files.
 	Repository = repository.Repository
@@ -161,11 +172,15 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	return okdp.Compile(ctx, def, in)
 }
 
-// CompileAll compiles instances together: those of one namespace each
-// after the instances whose outputs it references, with what they publish
-// (Inputs.Published, set by CompileAll). An output two instances publish
-// refuses both, and the instances whose references resolved to it.
-// Outcomes in the order of instances, which changes none of them.
+// CompileAll compiles instances together: each claim of a reference bound
+// to the instance that provisions its contract, the one it names or the
+// provider of its class, the one it names or the default one of the
+// claimer's context (Outcome.Claims); each instance after the instances of its
+// namespace whose outputs it references and the providers of its claims,
+// with what they publish (Inputs.Published, Claims and Bindings, set by
+// CompileAll). An output two instances of a namespace publish refuses both,
+// and the instances whose references resolved to it. Outcomes in the order
+// of instances, which changes none of them.
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return okdp.CompileAll(ctx, instances)
 }

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: okdp
     okdp.io/instance: demo-db
     okdp.io/service: db
-  name: demo-db-database-credentials-password
+  name: demo.demo-webapp.database-credentials-password
   namespace: demo
 spec:
   allowRepeat: true
@@ -29,7 +29,7 @@ metadata:
     okdp.io/credentials-database: "true"
     okdp.io/instance: demo-db
     okdp.io/service: db
-  name: demo-db-database-credentials
+  name: demo.demo-webapp.database-credentials
   namespace: demo
 spec:
   dataFrom:
@@ -41,11 +41,11 @@ spec:
         generatorRef:
           apiVersion: generators.external-secrets.io/v1alpha1
           kind: Password
-          name: demo-db-database-credentials-password
+          name: demo.demo-webapp.database-credentials-password
   refreshInterval: "0"
   target:
     creationPolicy: Owner
-    name: demo-db-database-credentials
+    name: demo.demo-webapp.database-credentials
     template:
       data:
         password: '{{ index . "password" }}'

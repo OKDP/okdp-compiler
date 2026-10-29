@@ -11,10 +11,10 @@ api:
         region: eu-west-1
     marketing:
       database:
-        credentials: demo-db-database-credentials
+        credentials: demo.marketing-credentials
         driver: org.postgresql.Driver
-        from: output
-        url: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+        from: claim
+        url: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_marketing
       properties: {}
       storage:
         bucket: workspace-scratch
@@ -70,14 +70,14 @@ api:
           key: client_secret
           name: demo-workspace-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_workspace_database
     - name: DB_SSL_MODE
       value: prefer
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo-db-database-credentials
+          name: demo.demo-workspace.database-credentials
     - name: WORKSPACE_SESSIONS
       value: database
     - name: AUDIT_DB_URL
@@ -163,6 +163,12 @@ api:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
@@ -257,6 +263,12 @@ automation-oidc-dcr:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
@@ -331,6 +343,12 @@ console-oidc-dcr:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
@@ -413,6 +431,12 @@ gateway:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
@@ -468,6 +492,12 @@ metrics:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
@@ -534,6 +564,12 @@ oidc-dcr:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
@@ -594,14 +630,14 @@ scheduler:
           key: client_secret
           name: demo-workspace-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_workspace_database
     - name: DB_SSL_MODE
       value: prefer
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo-db-database-credentials
+          name: demo.demo-workspace.database-credentials
     - name: WORKSPACE_SESSIONS
       value: database
     - name: AUDIT_DB_URL
@@ -697,6 +733,12 @@ scheduler:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128

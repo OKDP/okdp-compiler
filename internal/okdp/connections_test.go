@@ -222,7 +222,8 @@ func TestResolveTemplate(t *testing.T) {
 }
 
 // TestResolveUnreadableContract: a contract that is missing, cannot be
-// read, parsed or compiled is reported as such, with its file and the cause.
+// read, parsed or compiled, or whose claim schema cannot, is reported as
+// such, with its file and the cause.
 func TestResolveUnreadableContract(t *testing.T) {
 	ch := maps.Clone(pkg)
 	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
@@ -238,6 +239,14 @@ func TestResolveUnreadableContract(t *testing.T) {
 			`q: the queue contract cannot be read: queue.schema.json: "file:///queue.schema.json#" is not valid against metaschema`,
 		},
 		"a directory": {fstest.MapFS{"queue.schema.json/x": {}}, `q: the queue contract cannot be read: queue.schema.json: invalid argument`},
+		"a claim schema not an object": {
+			fstest.MapFS{"queue.schema.json": {Data: []byte(`{"x-okdp-claim": true}`)}},
+			`q: the queue contract cannot be read: queue.schema.json: x-okdp-claim: a JSON Schema, an object, got true`,
+		},
+		"a claim schema not a schema": {
+			fstest.MapFS{"queue.schema.json": {Data: []byte(`{"$schema": "http://json-schema.org/draft-07/schema#", "x-okdp-claim": {"properties": {"size": {"type": 5}}}}`)}},
+			`q: the queue contract cannot be read: queue.schema.json: x-okdp-claim: "file:///values.schema.json#" is not valid against metaschema`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"q": "demo-mq"})
@@ -444,10 +453,10 @@ func TestResolveRequirement(t *testing.T) {
 }
 
 // TestRequirements: every requirement of the parameter schema that is no
-// JSON Schema, found through properties and items, in key order, whether
-// the parameters set the reference or not, one line each, named by its
-// place in the schema; in the draft of the parameter schema, 2020-12
-// without one.
+// JSON Schema, and every fixed request that is no object, found through
+// properties and items, in key order, whether the parameters set the
+// reference or not, one line each, named by its place in the schema; in
+// the draft of the parameter schema, 2020-12 without one.
 func TestRequirements(t *testing.T) {
 	ref := func(require string) string {
 		return `{"x-okdp-connection-ref": {"contract": "database", "require": ` + require + `}}`
@@ -455,7 +464,9 @@ func TestRequirements(t *testing.T) {
 	s, err := chart.ParseSchema("config.schema.json", []byte(`{"properties": {
 		"b": `+ref(`{"properties": {"tags": {"items": [{"const": "a"}]}}}`)+`,
 		"a": {"type": "array", "items": {"properties": {"db": `+ref(`"x"`)+`}}},
-		"c": `+ref(`{"properties": {"engine": {"const": "postgresql"}}}`)+`}}`))
+		"c": `+ref(`{"properties": {"engine": {"const": "postgresql"}}}`)+`,
+		"d": {"x-okdp-connection-ref": {"contract": "database", "provision": true, "request": ["size"]}},
+		"e": {"x-okdp-connection-ref": {"contract": "database", "provision": true, "request": {"size": "1Gi"}}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -463,9 +474,10 @@ func TestRequirements(t *testing.T) {
 	want := []string{
 		`config.schema.json: properties.a.items.properties.db: x-okdp-connection-ref: require: a JSON Schema, an object, got "x"`,
 		`config.schema.json: properties.b: x-okdp-connection-ref: require: "file:///require.schema.json#" is not valid against metaschema`,
+		`config.schema.json: properties.d: x-okdp-connection-ref: request: an object, got []interface {}{"size"}`,
 	}
 	lines := strings.Split(fmt.Sprint(err), "\n")
-	if err == nil || lines[0] != want[0] || !strings.HasPrefix(lines[1], want[1]) || strings.Contains(err.Error(), "properties.c") {
+	if err == nil || lines[0] != want[0] || !strings.HasPrefix(lines[1], want[1]) || lines[len(lines)-1] != want[2] || strings.Contains(err.Error(), "properties.c") || strings.Contains(err.Error(), "properties.e") {
 		t.Errorf("got %v\nwant %s", err, strings.Join(want, "\n"))
 	}
 }
@@ -543,9 +555,9 @@ func TestMissingOutputs(t *testing.T) {
 		missing   []outputKey // nil: not a missingOutputs
 		want      string
 	}{
-		"unpublished": {M{"db": "demo-pg-x"}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}}, unpublished},
+		"unpublished": {M{"db": "demo-pg-x"}, namespaceOutputs, []outputKey{{"", "server", "demo-pg-x", ""}}, unpublished},
 		"with another error": {
-			M{"db": "demo-pg-x", "main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, []outputKey{{"server", "demo-pg-x"}},
+			M{"db": "demo-pg-x", "main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, []outputKey{{"", "server", "demo-pg-x", ""}},
 			unpublished + "\n" + `main: connection "ext" has contract "s3", "database" is expected`,
 		},
 		"several providers": {M{"db": "shared"}, shared, nil, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},

@@ -37,6 +37,12 @@ alertmanager:
         costCenter: cc-4217
         name: demo
         nodePool: analytics
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo-db
+          default: standard
       proxy:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128

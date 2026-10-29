@@ -24,6 +24,26 @@ global:
       costCenter: cc-4217
       nodePool: analytics
       allowedSourceRanges: [10.20.0.0/16, 192.168.10.0/24]
+    # The project's classes of database connections, of which the
+    # platform defines none, and their default, which the platform does not
+    # set: the class of the claims that name neither a class nor a
+    # provider, its provider a release of the namespace. A project adds
+    # classes, and changes none of the platform's.
+    provisioning:
+      database:
+        default: standard
+        classes:
+          standard: {provider: demo-db}
+
+# The project's named claims: each a connection of its own provider,
+# declared once, provisioned whether an instance references it or not, and
+# referenced by name as a connection is (catalogs[1].database: marketing);
+# what it requests of its provider, checked against the contract's claim
+# schema (x-okdp-claim): the database's size.
+claims:
+  marketing:
+    contract: database
+    request: {size: 20Gi}
 
 # Connections every instance of the project may reference by name, beside
 # the platform's.

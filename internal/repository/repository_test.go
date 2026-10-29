@@ -23,7 +23,7 @@ var whole = fstest.MapFS{
 	"contracts/README.md":                        file("not a contract\n"),
 	"catalog/app/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 	"catalog/app/2.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 2.0.0\n"),
-	"projects/demo/project.yaml":                 file("global: {team: demo}\n"),
+	"projects/demo/project.yaml":                 file("global: {team: demo}\nclaims: {reports: {contract: database}}\n"),
 	"projects/demo/instances/b/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
 	"projects/demo/instances/a/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
 	"projects/demo/instances/a/connections.yaml": file("connections: {ext: {contract: database, host: h}}\n"),
@@ -72,8 +72,8 @@ func summary(t *testing.T, instances []okdp.Instance) []string {
 // same tree split into repositories, in any order.
 func TestLoad(t *testing.T) {
 	want := []string{
-		"demo/a app-1.0.0 global@0 global@1 connections@2 replicas",
-		"demo/b app-1.0.0 global@0 global@1",
+		"demo/a app-1.0.0 global@0 claims,global@1 connections@2 replicas",
+		"demo/b app-1.0.0 global@0 claims,global@1",
 		"other/c app-2.0.0 global@0",
 	}
 	instances, err := Load([]Repository{{"db", whole}})
@@ -105,7 +105,8 @@ func TestLoad(t *testing.T) {
 // path: the parts in two repositories, a contract that differs; an
 // instance file that is not one, a service no catalog has, a version its
 // catalog lacks, a package that fails, once, a values file that is not,
-// an instance's connections file that holds more than connections.
+// an instance's connections file that holds more than connections, the
+// platform's file that declares claims.
 func TestLoadErrors(t *testing.T) {
 	_, err := Load([]Repository{
 		{"b", fstest.MapFS{
@@ -129,6 +130,7 @@ project "demo" is in the repositories a and b`
 		t.Errorf("got %v\nwant %s", err, want)
 	}
 	_, err = Load([]Repository{{"db", fstest.MapFS{
+		"platform.yaml":                              file("claims: {reports: {contract: database}}\n"),
 		"catalog/app/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 		"catalog/bad/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: other\nversion: 1.0.0\n"),
 		"projects/demo/instances/a/instance.yaml":    file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
@@ -144,6 +146,7 @@ project "demo" is in the repositories a and b`
 		"projects/demo/instances/i/connections.yaml": file("connections: {}\nglobal: {okdp: {}}\n"),
 	}}})
 	for _, w := range []string{
+		"db/platform.yaml: claims: a project's (project.yaml)",
 		"db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found in type struct",
 		`db/projects/demo/instances/b/instance.yaml: service "nope" is in the catalog of no repository`,
 		`db/projects/demo/instances/c/instance.yaml: version "9.0.0" of service "app" is not in db/catalog/app`,

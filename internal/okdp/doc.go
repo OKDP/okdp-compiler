@@ -13,6 +13,15 @@
 // computes on the same inputs), and the mapping's host functions reproduce
 // Helm's.
 //
+// A package that provisions connections (okdp.yaml's provisions) gets the
+// claims bound to its instance (Inputs.Claims) and publishes an output for
+// each; the instance that claims one (a reference that takes claims) gets its
+// binding (Inputs.Bindings). CompileAll (namespace.go) binds each claim to
+// its provider, the one it names or the provider of its class, the default
+// class of the context's global.okdp.provisioning unless it names one, and
+// compiles the instances of a tree together, each after the instances it
+// references and the providers of its claims, with what they publish.
+//
 // A package is a Helm chart, Chart.yaml, plus OKDP's files: okdp.yaml (its
 // package keys and the mapping's vars, errors and OKDP sections) and a
 // values file, values.cel.yaml or values.yaml (the charts' values, the

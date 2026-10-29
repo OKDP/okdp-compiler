@@ -5,9 +5,11 @@
 // are rendered with) and what every chart receives as global
 // (chart.FinalValues). Level 0 is the platform's; each level above adds to
 // those below it, it changes none of their values: no value they set, no
-// connection they give. An instance sets only the keys of global its
-// package's parameter schema declares, never okdp, and no connections: its
-// own are a context layer of its level. None but level 0 gives template
+// connection they give, no claim they declare, no class they define, nor
+// the default class they set. An instance sets only the
+// keys of global its package's parameter schema declares, never okdp, no
+// connections, its own being a context layer of its level, and no claims,
+// its project's (level 1 or above, never the platform's). None but level 0 gives template
 // code: the platform's layers and the package's schema defaults are
 // reviewed, the higher levels' and the instance's are input.
 
@@ -27,8 +29,9 @@ import (
 // instance's, as values (normalized), for chart.Parameters. Each instance
 // layer in turn: one that sets global fails, but for the keys the parameter
 // schema (chart.Schema.Doc) declares under it (properties.global.properties),
-// okdp excepted; then one that sets connections, to any value; then one
-// with "{{" in a key or a string, anywhere (chart.NoTemplate).
+// okdp excepted; then one that sets connections, then claims, to any
+// value; then one with "{{" in a key or a string, anywhere
+// (chart.NoTemplate).
 func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 	layers, err := contextLayers(in.Context)
 	if err != nil {
@@ -54,6 +57,9 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 		if _, set := layer["connections"]; set {
 			return nil, fmt.Errorf("%s: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level", name)
 		}
+		if _, set := layer["claims"]; set {
+			return nil, fmt.Errorf("%s: claims are declared by the context (Inputs.Context): a project's, of level 1 or above", name)
+		}
 		// No template code in what the instance gives, whatever key it is
 		// under: parameters, upstream values (chart.NoTemplate).
 		if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
@@ -71,16 +77,25 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 // changes none of them: it fails at the first lower level, then the first
 // path (in path order), at which it sets a value that level sets, to any
 // value, the same one included: a key whose value is not a map, a
-// connection (connections.<name>, taken whole), or a parent of either set
-// to anything but a map (chart.Overlap). Above level 0, no template code
-// (chart.NoTemplate): only the platform's level is reviewed.
+// connection, a named claim, a class or the default class of a contract
+// (connections.<name>, claims.<name>,
+// global.okdp.provisioning.<contract>.classes.<name>,
+// global.okdp.provisioning.<contract>.default, taken whole), or a parent of
+// either set to anything but a map (chart.Overlap).
+// Level 0 declares no claims: they are a project's. Above level 0, no
+// template code (chart.NoTemplate): only the platform's level is
+// reviewed.
 func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 	order := make([]int, len(layers))
 	for i := range order {
 		order[i] = i
 	}
 	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(layers[a].Level, layers[b].Level) })
-	connection := func(keys []string) bool { return len(keys) == 2 && keys[0] == "connections" }
+	whole := func(keys []string) bool {
+		class := len(keys) == 6 && keys[4] == "classes" || len(keys) == 5 && keys[4] == "default"
+		return len(keys) == 2 && (keys[0] == "connections" || keys[0] == "claims") ||
+			class && keys[0] == "global" && keys[1] == "okdp" && keys[2] == "provisioning"
+	}
 	var out []map[string]any
 	var levels []ContextLayer // the values each level set so far, merged, lowest first
 	for _, i := range order {
@@ -95,9 +110,12 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 			levels = append(levels, ContextLayer{Level: l.Level, Values: M{}})
 		}
 		for _, lower := range levels[:len(levels)-1] {
-			if p := chart.Overlap(lower.Values, layer, connection); p != "" {
+			if p := chart.Overlap(lower.Values, layer, whole); p != "" {
 				return nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
 			}
+		}
+		if _, set := layer["claims"]; set && l.Level == 0 {
+			return nil, fmt.Errorf("%s: claims: a project's, of level 1 or above", name)
 		}
 		if l.Level > 0 {
 			if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {

@@ -179,6 +179,7 @@ with the mapping, the package keys skipped ([sections](#sections)).
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `defaults` | map: key → path | `{}` | OKDP's defaults for a dependency: [defaults](#defaults). |
 | `upstream` | `true`, `false`, or a map: key → `true`, `false` or `{protect, append}` | `false` | The instance upstream values each dependency accepts: [upstream](#upstream). |
+| `provisions` | list of contracts | `[]` | The contracts the package provisions connections of, one per claim bound to an instance: [provisions](#provisions). |
 | `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` | | | The sections of the mapping, not read when the file is loaded: [sections](#sections). |
 
 Absent, or empty, `okdp.yaml` is a package with no requirements, no catalog
@@ -304,6 +305,47 @@ apply to each instance upstream file, then to the inline values:
 [append](01_inputs_outputs.md#append). `append` extends the package's
 list, not the chart's default list, which Helm replaces: a package that
 keeps its items restates them in its defaults or values file.
+
+### provisions
+
+The contracts the package provisions connections of: a database server
+that creates a database per claim, an object store a bucket. A claim binds
+to an instance that names it, or that the claimer's context makes the
+provider of the class it names or of the default class of its contract
+(`global.okdp.provisioning`, [classes](01_inputs_outputs.md#classes)).
+Each instance gets the claims bound to it (`Inputs.Claims`), the mapping's
+`claims` ([context](#context)), and publishes, for each, an output of its
+contract named its `id` ([provides](#provides)), a Kubernetes name,
+DNS-1123 labels joined by dots (`demo.demo-app.db`,
+[claims](01_inputs_outputs.md#claims)): an object name, a Secret name or a
+label value takes it as it is, a SQL name replaces its dots and dashes,
+what it grants of the claim's `request` among its values
+([requests](01_inputs_outputs.md#requests)):
+
+```yaml
+provisions: [database-server]
+provides:
+  - $for: c in claims
+    $each:
+      contract: database-server
+      name: ${{ c.id }}
+      values: {engine: postgresql, host: '${{ release.name }}-rw.${{ release.namespace }}.svc', port: 5432, dbName: "${{ c.id.replace('.', '_').replace('-', '_') }}", size: '${{ c.request.size }}'}
+      secretRef: {name: '${{ c.id }}-credentials'}
+```
+
+The data of a claim's connection outlives the claim: once no instance
+claims it (a claim template's reference gone, a named claim no longer
+declared by its project), its output and the objects the mapping writes
+for it are gone from the compile, and the package keeps what they held (a
+database's reclaim policy, `helm.sh/resource-policy: keep`): an operator
+removes it. An entry is a contract's name, a file name of the contracts;
+one listed twice, or one that is not a name, fails when the package is
+loaded:
+
+| Case | Error |
+|---|---|
+| an entry that is not a file name (empty, `.`, `..`, a `/` or `\`) | `okdp.yaml: provisions[<i>]: "<entry>" is not a contract name` |
+| an entry listed twice | `okdp.yaml: provisions: <contract> is listed twice` |
 
 ## values.cel.yaml
 
@@ -921,7 +963,8 @@ The variables of every expression:
 | Variable | Value |
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
-| `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global` and `connections`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
+| `claims` | The claims bound to the instance (`Inputs.Claims`), in order, each `{id, contract, namespace, name, request}`: the connection to provision and publish, an output of `contract` named `id`; the namespace of the instances that claim it; the named claim's name, `""` for a claim template's; what it requests, as the contract's claim schema allows (`x-okdp-claim`), its defaults applied, `{}` when it has none ([provisions](#provisions)). `[]` when none. |
+| `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global`, `connections` and `claims`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
 | `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([context values](01_inputs_outputs.md#context-values)). Other keys of `global` are not visible. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `Chart.yaml`, as written ([Chart.yaml](#chartyaml)). |

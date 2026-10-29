@@ -33,7 +33,7 @@ func Example() {
 		log.Fatal(err) // every problem of the tree, each naming its path
 	}
 	var results []*compiler.Result
-	for i, o := range compiler.CompileAll(context.Background(), instances) { // each after those whose outputs it references
+	for i, o := range compiler.CompileAll(context.Background(), instances) { // each after those whose outputs it references, each claim bound to its provider
 		if o.Err != nil {
 			log.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err) // the whole report, e.g. every schema violation
 		}
@@ -65,7 +65,7 @@ func Example() {
 	// Output:
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
-	// [{demo-db database database demo-db}]
+	// [{demo-db  database database demo.demo-webapp.database}]
 	// 8 files
 }
 
@@ -79,13 +79,17 @@ func ExampleCompile() {
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
-		// What the other instances of the namespace publish (their okdp.info.yaml),
-		// by release: demo-db, the database the instance references.
-		Published: map[string]compiler.Info{"demo-db": {Provides: []compiler.Output{{
-			Name: "demo-db", Contract: "database",
-			Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo-db"},
-			SecretRef: &compiler.SecretRef{Name: "demo-db-database-credentials"},
-		}}}},
+		// The claims of the instance, by parameter, each bound to its provider:
+		// database's to demo-db, with the output demo-db publishes for it (its
+		// okdp.info.yaml).
+		Bindings: map[string]compiler.Binding{"database": {
+			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.demo-webapp.database",
+			Output: &compiler.Output{
+				Name: "demo.demo-webapp.database", Contract: "database",
+				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_demo_webapp_database"},
+				SecretRef: &compiler.SecretRef{Name: "demo.demo-webapp.database-credentials"},
+			},
+		}},
 	}
 	// The values layers, as helm -f files: the platform's, then the
 	// instance's.

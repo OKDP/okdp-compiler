@@ -7,8 +7,8 @@
                  "description": "API servers; more than one needs a database, sessions are stored there."},
     "size": {"type": "string", "enum": ["small", "medium", "large"], "default": "small",
              "description": "The resources of the API servers."},
-    "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}},
-                 "description": "The workspace's database: a connection's name or an output's."},
+    "database": {"type": ["string", "object"], "default": "", "x-okdp-connection-ref": {"contract": "database", "provision": true, "require": {"required": ["secretRef"]}},
+                 "description": "The workspace's database: a connection's name, a named claim's (claims of the project) or an output's; or a claim template, a database of its own ({}), of a named provider ({provider: <release>})."},
     "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}},
               "description": "The database audit events are written to, a connection's name or an output's."},
     "storage": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "s3", "require": {"required": ["secretRef"]}},
@@ -17,7 +17,7 @@
                  "description": "The data catalogs of the workspace, each with its references.",
                  "items": {"type": "object", "required": ["name", "storage"], "additionalProperties": false, "properties": {
                    "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-                   "database": {"type": "string", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}}},
+                   "database": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "database", "provision": true, "require": {"required": ["secretRef"]}}},
                    "storage": {"type": "string", "minLength": 1, "x-okdp-connection-ref": {"contract": "s3", "require": {"required": ["secretRef"]}}},
                    "properties": {"type": "object", "additionalProperties": {"type": "string"}}}}},
     "notifications": {"type": "object", "additionalProperties": false, "properties": {

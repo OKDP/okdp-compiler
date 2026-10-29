@@ -1,11 +1,11 @@
 # The instance's parameters, over the defaults of the package's
-# config.schema.json: two replicas, the database of the instance demo-db,
-# the audit database platform-db, a connection platform.yaml gives every
-# instance, and values for the app chart as it is (upstream.app), over OKDP's
+# config.schema.json: two replicas, a database of its own, claimed ({}) of
+# demo-db, the provider of the platform's default class, the audit database
+# platform-db, a connection platform.yaml gives every instance, and values for the app chart as it is (upstream.app), over OKDP's
 # defaults and the computed values: a memory limit, and two environment
 # variables appended to the computed ones (append: [env]).
 replicas: 2
-database: demo-db
+database: {}
 audit: platform-db
 upstream:
   app:

@@ -257,8 +257,8 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "postgresql"}}, "required": ["secretRef"]}` for a service that speaks
   PostgreSQL only and reads a password. Write it there rather than as an
   `errors` rule of the mapping: it is checked whatever the connection
-  comes from, an external connection or an output, and the error names the
-  reference, the connection and its provider ([what a reference
+  comes from, an external connection, an output or a claim, and the error
+  names the reference, the connection and its provider ([what a reference
   requires](specs/01_inputs_outputs.md#what-a-reference-requires)).
 - `upstream` declares one object per chart key that accepts instance values:
   the inline values of any other chart would be ignored without a word. The
@@ -453,26 +453,26 @@ connections:
     secretRef: {name: shared-db-credentials}   # never the password itself
 ```
 
-In the advanced example, `database: demo-db` instead names the output
-the instance `demo-db` publishes, named after its release: host
-`demo-db-db.demo.svc`, Secret `demo-db-database-credentials`, and a
-dependency (`Result.Dependencies`), which the deployment graph orders the
-releases with (Flux `dependsOn`, Argo CD sync waves,
-[GitOps](01_usage.md#gitops)). The mapping reads both the same way,
-credentials through a `secretKeyRef` on `secretRef.name`; the reference
-requires them, `"require": {"required": ["secretRef"]}`
+In the advanced example, `database: {}` instead claims a database of its
+own, which `demo-db`, the provider of the platform's default class of
+database connections, publishes under the claim's ID: host
+`demo-db-db.demo.svc`, Secret `demo.demo-webapp.database-credentials`, and
+a dependency (`Result.Dependencies`), which the deployment graph orders
+the releases with (Flux `dependsOn`, Argo CD sync waves,
+[GitOps](01_usage.md#gitops); claims below). The mapping reads both the
+same way, credentials through a `secretKeyRef` on `secretRef.name`; the
+reference requires them, `"require": {"required": ["secretRef"]}`
 (`examples/02_advanced/input/db/catalog/webapp/1.0.0/config.schema.json`),
 and a connection without a Secret is refused before the mapping runs.
-cnpg-postgresql publishes one
-`database-server` output per database: an instance of the namespace
-references it by that name (`database: demo-pg-hive`), which resolves to
-the output's values and `secretRef`, and depends on the cnpg-postgresql
-instance, as on `demo-db` above; an instance of another namespace gets it
-as a connection, its credentials Secret being in the provider's namespace
+cnpg-postgresql publishes one `database-server` output per database: an
+instance of the namespace references it by that name (`database:
+demo-pg-hive`), which resolves to the output's values and `secretRef`, and
+depends on the cnpg-postgresql instance; an instance of another namespace
+claims it, or gets it as a connection, its credentials Secret being in the
+provider's namespace
 ([resolution](specs/01_inputs_outputs.md#resolution)). The compile is
 given what the other instances of its tree publish (`Inputs.Published`).
-See
-[contracts](specs/01_inputs_outputs.md#contracts).
+See [contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
 contract, its schema included (a `port` is a number, not a string built by
@@ -502,6 +502,85 @@ provides:
 Secret (rustfs). `secretRef` alone: an operator or an upstream chart creates
 it (cnpg-postgresql). Neither: consumers bring their own identity
 (seaweedfs). An output never points at a Secret nobody creates.
+
+A consumer may instead claim a connection, and let the instance that
+provisions its contract create it ([claims](specs/01_inputs_outputs.md#claims)):
+a reference with `provision: true`, which accepts a map, `{}` by default:
+
+```json
+"database": {"type": ["string", "object"], "default": {},
+             "x-okdp-connection-ref": {"contract": "database-server", "provision": true,
+                                       "request": {"extensions": ["pgvector"]},
+                                       "require": {"properties": {"engine": {"const": "postgresql"}}, "required": ["secretRef"]}}}
+```
+
+A contract has two sides: what a provider publishes, its `properties`
+(and the `x-okdp-secret` fields of its credentials Secret), and what a
+claim may request of the provider, its claim schema, `x-okdp-claim`,
+with defaults and bounds (a size, the extensions of a database). The
+package fixes what the service needs of every claim of the reference
+(`request`: pgvector), the instance's `{request: {size: 5Gi}}` merged
+over it; both are checked against the claim schema when the claim
+binds, its defaults applied.
+
+An instance then says nothing for a database of its own, of the
+default class the platform or its project sets
+(`global.okdp.provisioning.database-server.default`), the claim template;
+`{class: large}` for one of another class, the platform's or one its
+project adds, each a provider and what it fixes of the request; or
+`{provider: data/postgres2}` for one of a provider it names; a
+name references an existing connection, or a named claim its project
+declares (`claims: {analytics: {contract: database-server}}` in
+`project.yaml`), one database for every instance that names it. Of a
+named claim, a package requires what it needs with `require`, as of a
+connection: the claim is its project's, and so is what it requests, its
+declaration's `request`, which the package's does not change. Without a
+default class, a claim that names neither a class nor a provider is
+refused. The mapping reads the claim's connection as any other, checked
+against what the reference requires (`require`): a provider that
+publishes what the service cannot use refuses the claimer, which names a
+class whose provider meets it; the compiler never picks one. A key a
+class fixes of the request is the class's: a package's `request` that
+sets it refuses the claims of that class.
+
+A provider declares the contracts it provisions, `provisions`, and
+creates, for each claim bound to its instance (`claims`), what the
+connection needs, as the claim requests it (`c.request`, the claim
+schema's defaults applied), publishing it under the claim's ID, with what
+it granted. Keep what it holds
+when the claim is gone: the claimer may come back, under the same ID
+(`examples/04_claims/input/db/catalog/postgresql/1.0.0/okdp.yaml`):
+
+```yaml
+provisions: [database-server]
+objects:
+  - $for: c in claims
+    $each:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Database
+      metadata: {name: '${{ c.id }}', annotations: {helm.sh/resource-policy: keep}}
+      spec: {name: "${{ c.id.replace('.', '_').replace('-', '_') }}", owner: '${{ c.id }}', cluster: {name: '${{ release.name }}'},
+             extensions: "${{ c.request.extensions.map(e, {'name': e}) }}", databaseReclaimPolicy: retain}
+provides:
+  - $for: c in claims
+    $each:
+      contract: database-server
+      name: ${{ c.id }}
+      values: {host: '${{ release.name }}-rw.${{ release.namespace }}.svc', dbName: "${{ c.id.replace('.', '_').replace('-', '_') }}",
+               size: '${{ c.request.size }}', extensions: '${{ c.request.extensions }}'}
+      secretRef: {name: '${{ c.id }}-credentials'}
+      secret: {generate: [{key: password}], stringData: {username: '${{ c.id }}'}}
+```
+
+A claim's ID is a Kubernetes name, DNS-1123 labels joined by dots
+(`demo.demo-app.db`): an object name, a Secret name or a label value takes
+it as it is; a SQL name replaces its dots and dashes, as above, and a name
+that takes a label only (a Service, a host segment) its dots, a choice of
+the provider's.
+
+The compiler carries the credentials of a claim of another namespace
+through the platform's secret store ([credentials across
+namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)).
 
 ### 7. Compile, render and check
 

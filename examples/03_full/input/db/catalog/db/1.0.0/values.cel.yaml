@@ -1,7 +1,5 @@
-# The postgresql chart's values: the service and the database the
-# database publishes, the generated credentials.
+# The postgresql chart's values: the server, and a database for each
+# claim, its owner's password the claim's generated credentials.
 postgresql:
   fullnameOverride: ${{ release.name }}-db
-  auth:
-    database: ${{ release.name }}
-    existingSecret: ${{ release.name }}-database-credentials
+  databases: "${{ claims.map(c, {'name': c.id.replace('.', '_').replace('-', '_'), 'owner': c.id, 'existingSecret': c.id + '-credentials'}) }}"

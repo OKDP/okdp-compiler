@@ -53,7 +53,7 @@ var errReported = errors.New("reported")
 func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository; every instance of the tree compiled together, each with what the others of its namespace publish, after them, the dependencies checked, written for --target under <output>/projects/, which the command owns", func(s string) error { o.repositories = append(o.repositories, s); return nil })
+	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository; every instance of the tree compiled together, each with what the others of its namespace publish, after them, each claim bound to its provider, the dependencies checked, written for --target under <output>/projects/, which the command owns", func(s string) error { o.repositories = append(o.repositories, s); return nil })
 	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
 	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme; the final values, over each chart's defaults, checked against its values.schema.json, and an instance list appended to that leaves out items of the chart's default list warned of (default $OKDP_CHARTS with --check)")
 	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, each instance's umbrella chart, Chart.yaml, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when it has any, "+compiler.InfoFile+", what it publishes, when it publishes something, and the files of --target; then the dependencies printed on stderr, one line each: <namespace>/<release>: depends on <instance> (<contract>, <field>)")
@@ -86,14 +86,18 @@ func main() {
 
 // run: every instance of the tree the repositories make together
 // (compiler.LoadRepository), the chart cache set with --check --charts,
-// compiled together (compiler.CompileAll), each refusal printed, error:
+// compiled together (compiler.CompileAll), each claim's binding printed,
+// <namespace>/<release>: <field>: claim <id> (<contract>) bound to
+// <namespace>/<release>, then ", class <class>" for the class it names,
+// ", the default class <class>" when it names none, nothing when it names
+// its provider, then each refusal, error:
 // <namespace>/<release>: <error>, each warning, warning:
-// <namespace>/<release>: <warning>, in their order; then their graph
-// (compiler.NewGraph), each of its errors printed, error:
-// <namespace>/<release>: <error>; then the files of the target, written
-// under the output directory (writeTree), and the dependencies,
-// <namespace>/<release>: depends on <instance> (<contract>, <field>), the
-// output after the contract when it is not named after the instance. Every
+// <namespace>/<release>: <warning>, in their order; then their graph (compiler.NewGraph), each of its errors
+// printed, error: <namespace>/<release>: <error>; then the files of the
+// target, written under the output directory (writeTree), and the
+// dependencies, <namespace>/<release>: depends on <instance> (<contract>,
+// <field>), the output after the contract when it is not named after the
+// instance, <namespace>/<instance> for one of another namespace. Every
 // option is checked first, the target's too; nothing is written when
 // anything fails, nor with --check.
 func run(o options) error {
@@ -131,6 +135,17 @@ func run(o options) error {
 	var results []*compiler.Result
 	for i, out := range compiler.CompileAll(context.Background(), instances) {
 		node := instances[i].Inputs.Namespace + "/" + instances[i].Inputs.Release
+		for _, b := range out.Claims {
+			how := ""
+			switch {
+			case b.Class == "":
+			case b.Named:
+				how = ", class " + b.Class
+			default:
+				how = ", the default class " + b.Class
+			}
+			fmt.Fprintf(os.Stderr, "%s: %s: claim %s (%s) bound to %s/%s%s\n", node, b.Field, b.ID, b.Contract, b.Namespace, b.Release, how)
+		}
 		if out.Err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s: %v\n", node, out.Err)
 			refused = true
@@ -167,6 +182,9 @@ func run(o options) error {
 			contract, instance := d.Contract, d.Instance
 			if d.Output != d.Instance {
 				contract += " " + d.Output
+			}
+			if d.Namespace != "" {
+				instance = d.Namespace + "/" + instance
 			}
 			fmt.Fprintf(os.Stderr, "%s/%s: depends on %s (%s, %s)\n", res.Namespace, res.Release, instance, contract, d.Field)
 		}

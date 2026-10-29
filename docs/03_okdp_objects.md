@@ -26,7 +26,14 @@ order:
   ExternalSecret and its External Secrets `Password` generators, or a plain
   Secret;
 - the mapping's [`objects`](specs/02_service_definition.md#objects)
-  section.
+  section;
+- the credentials of claims across namespaces
+  ([claims](specs/01_inputs_outputs.md#credentials-across-namespaces)): a
+  provider's PushSecret of each claim of another namespace, a claimer's
+  ExternalSecret of each of its claims of another namespace. The
+  platform's secret store does not keep the namespaces' keys apart by
+  itself: what it must enforce is in [What the store must
+  enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
 
 An instance with neither has no objects file: its umbrella is the
 upstream charts alone.

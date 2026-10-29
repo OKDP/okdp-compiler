@@ -1,7 +1,8 @@
 # A tree compiled: status 0, each instance's files written under
 # projects/<namespace>/instances/<release>/, the instance as one chart and
-# what it publishes, no objects file without objects; on stderr, the
-# instances each depends on, one line each, by parameter path.
+# what it publishes, no objects file without objects; on stderr, each
+# claim's binding, then the instances each depends on, one line each, by
+# parameter path.
 status 0 okdp-compile --repository examples/02_advanced/input/db -o $WORK/files
 ! stdout .
 cmp stderr $WORK/webapp.txt
@@ -28,8 +29,11 @@ cmp $WORK/echo/projects/demo/instances/demo-echo/instance.values.yaml examples/0
 ! exists $WORK/echo/projects/demo/instances/demo-echo/okdp.info.yaml
 
 -- webapp.txt --
-demo/demo-webapp: depends on demo-db (database, database)
+demo/demo-webapp: database: claim demo.demo-webapp.database (database) bound to demo/demo-db, the default class standard
+demo/demo-webapp: depends on demo-db (database demo.demo-webapp.database, database)
 -- workspace.txt --
-demo/demo-workspace: depends on demo-db (database, catalogs[1].database)
-demo/demo-workspace: depends on demo-db (database, database)
+demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: database: claim demo.demo-workspace.database (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: depends on demo-db (database demo.marketing, catalogs[1].database)
+demo/demo-workspace: depends on demo-db (database demo.demo-workspace.database, database)
 demo/demo-workspace: depends on demo-alerts (http, notifications.webhook)

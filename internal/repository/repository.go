@@ -58,8 +58,9 @@ type tree struct {
 // is: the package its InstanceFile names, catalog/<service>/<version>/ of
 // the repository of the service, loaded once, its Chart.yaml of that name
 // and version; the contracts of every repository; the context,
-// PlatformFile at level 0, ProjectFile at 1 and ConnectionsFile at 2,
-// connections only, and the values, ConfigFile, each when present; the release, the instance's
+// PlatformFile at level 0, without claims, ProjectFile at 1, its named
+// claims among it, and ConnectionsFile at 2, connections only, and the
+// values, ConfigFile, each when present; the release, the instance's
 // directory name, and the namespace, the project's. Every problem at once,
 // each naming its repository and path; a package that fails once.
 func Load(repos []Repository) ([]okdp.Instance, error) {
@@ -72,6 +73,13 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 	if t.platform != nil {
 		platform, err = readLayer(*t.platform, PlatformFile, 0)
 		errs = append(errs, err)
+		// The named claims are a project's, of its namespace: the
+		// platform's connections serve every project.
+		for _, l := range platform {
+			if _, set := l.Values["claims"]; set {
+				errs = append(errs, fmt.Errorf("%s: claims: a project's (%s)", where(*t.platform, PlatformFile), ProjectFile))
+			}
+		}
 	}
 	var instances []okdp.Instance
 	for _, project := range slices.Sorted(maps.Keys(t.projects)) {
@@ -158,7 +166,7 @@ func (t *tree) definition(service, version string) (*okdp.Definition, error) {
 		return nil, fmt.Errorf("service %q is in the catalog of no repository", service)
 	}
 	dir := path.Join(CatalogDir, service, version)
-	if _, err := fs.Stat(repo.FS, dir); err != nil || !segment(version) {
+	if _, err := fs.Stat(repo.FS, dir); err != nil || !chart.IsFileName(version) {
 		return nil, fmt.Errorf("version %q of service %q is not in %s", version, service, where(*repo, path.Join(CatalogDir, service)))
 	}
 	key := [2]string{service, version}
@@ -284,9 +292,6 @@ func readLayer(repo Repository, file string, level uint) ([]okdp.ContextLayer, e
 	}
 	return []okdp.ContextLayer{{Level: level, Values: v}}, nil
 }
-
-// segment: whether s is one segment of a path, not . or ...
-func segment(s string) bool { return fs.ValidPath(s) && s != "." && !strings.Contains(s, "/") }
 
 // where: a path of repo, as messages name it.
 func where(repo Repository, p string) string { return path.Join(repo.Name, p) }

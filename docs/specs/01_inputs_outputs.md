@@ -16,7 +16,9 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
-| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections only; `CompileAll` sets it | [Resolution](#resolution), [Compiling instances together](#compiling-instances-together) |
+| What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections and claims only; `CompileAll` sets it | [Resolution](#resolution), [Compiling instances together](#compiling-instances-together) |
+| The claims bound to the instance, a provider | `Inputs.Claims` (`[]Claim`) | no; `CompileAll` sets them | [Claims](#claims) |
+| The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
 The names are checked before anything is read: the release is a release
@@ -328,8 +330,11 @@ checked against its contract when a reference resolves to it
 ## Connections
 
 A connection reference: a parameter that names a connection: an entry of
-`connections` (external), or an output another instance of the namespace
-publishes (output). The
+`connections` (external), a named claim of the namespace, an entry of
+`claims`, or an output another instance of the namespace publishes
+(output); or that claims one of a provider, a claim template
+([claims](#claims)).
+The
 compiler replaces it with the fields of the connection, completed against
 its [contract](#contracts), before the mapping runs.
 
@@ -360,7 +365,12 @@ In `config.schema.json`, on a string property:
 ```
 
 `x-okdp-connection-ref`: an object; `contract` names the contract, the file
-`<contract>.schema.json` of the contracts; `require`,
+`<contract>.schema.json` of the contracts; `provision: true` lets the
+reference take a [claim](#claims), an object, in place of a name: the
+property then accepts both (`"type": ["string", "object"]`); `request`,
+an object, what the package fixes of the request of every claim
+template of the reference, the instance's merged over it
+([claims](#claims)); `require`,
 a JSON Schema, what the package requires of the connection beyond its
 contract ([what a reference requires](#what-a-reference-requires)). Its
 other keys are ignored; a value that is not an object (`true`) declares
@@ -381,8 +391,9 @@ list, with the one item schema). `$ref`, `allOf`, `anyOf`, `oneOf`,
 The path names the parameter in errors and [dependencies](#dependencies). A
 reference that is `""` or `null` is not set, and left as it is. Any other
 value that is not a string (a map, a number, a list: the schema check lets
-it through when the property does not say `"type": "string"`) fails: it
-would reach the mapping unresolved, past the contract
+it through when the property does not say `"type": "string"`) fails, but a
+claim's map of a reference that takes them: it would reach the mapping
+unresolved, past the contract
 ([Connection errors](#connection-errors)). The packages of platform-charts
 declare references in lists of objects, e.g. the catalogs of trino:
 
@@ -394,17 +405,24 @@ declare references in lists of objects, e.g. the catalogs of trino:
 
 ### Resolution
 
-A reference `<name>` of a contract `<contract>` resolves to:
+A reference of a contract `<contract>`, a claim template (a map), resolves
+to the output of `<contract>` its binding gives (`Inputs.Bindings`, by
+parameter path): what the provider bound to it publishes for it
+([claims](#claims)), as an output, below. A reference `<name>` resolves to:
 
 1. external: `connections.<name>`, when it is a map;
-2. otherwise, output: the output named `<name>` of `<contract>` that
+2. otherwise, a named claim: `claims.<name>` of the context, its contract
+   `<contract>`, when the reference takes claims (`provision`); it resolves
+   through its binding, as a claim template does;
+3. otherwise, output: the output named `<name>` of `<contract>` that
    another instance of the namespace publishes (`Inputs.Published`), an
    instance's own named after its release by default
    ([provides](02_service_definition.md#provides)).
 
-An output is a [dependency](#dependencies). Otherwise the reference fails
-([Connection errors](#connection-errors)). A connection is never computed
-from a name: what an instance is reached at, its provider publishes.
+An output and a claim are [dependencies](#dependencies). Otherwise the
+reference fails ([Connection errors](#connection-errors)). A connection is
+never computed from a name: what an instance is reached at, its provider
+publishes.
 
 External: the entry of `connections`, as the context's layers give it.
 
@@ -435,7 +453,7 @@ the file), and its `secretRef`, kept as `{name}`. The compiling release is
 never its own provider. Two instances that publish one fail; an output of
 that name of another contract is no match. `Inputs.Published` is the
 namespace's only: an instance of another namespace is reached by a
-connection. `nil`, the other instances are not known: a name
+claim, or a connection. `nil`, the other instances are not known: a name
 resolves to a connection only. `CompileAll` compiles each instance after
 those whose outputs it references
 ([Compiling instances together](#compiling-instances-together)).
@@ -454,22 +472,24 @@ connection reaches the charts' values through the mapping.
 
 The parameter, replaced by a map: the contract fields, `secretRef` when
 there is one, and `okdp`, where the connection comes from: `ref`, the
-reference; `contract`; `source`, `external` or `output`; and
-`instance`, the instance it comes from, the release that publishes the
-output (the [dependency's](#dependencies)), absent for an external
-connection. With
+reference, a claim's ID; `contract`; `source`, `external`, `output` or
+`claim`; `instance`, the instance it comes from, the release that
+publishes the output or the claim's provider (the
+[dependency's](#dependencies)), absent for an external connection; and
+`namespace`, the provider's, for a claim bound to an instance of another
+namespace. With
 `examples/02_advanced/input/db/contracts/database.schema.json`:
 
 ```yaml
-# database: demo-db (output, what demo-db publishes)
+# database: {} (claim, what demo-db publishes for it)
 database:
-  host: demo-db-db.demo.svc        # demo-db's
-  dbName: demo-db                  # demo-db's
-  engine: postgresql               # default
-  port: 5432                       # default
-  driver: org.postgresql.Driver    # x-okdp-derived from engine
-  secretRef: {name: demo-db-database-credentials}
-  okdp: {ref: demo-db, contract: database, source: output, instance: demo-db}
+  host: demo-db-db.demo.svc          # demo-db's
+  dbName: demo_demo_webapp_database  # demo-db's
+  engine: postgresql                 # default
+  port: 5432                         # default
+  driver: org.postgresql.Driver      # x-okdp-derived from engine
+  secretRef: {name: demo.demo-webapp.database-credentials}
+  okdp: {ref: demo.demo-webapp.database, contract: database, source: claim, instance: demo-db}
 
 # database: shared-db (external, above)
 database:
@@ -513,11 +533,11 @@ Secret `secretRef.name`. How the mapping uses `values`:
 A package may need more of a connection than its contract says: one
 engine of those the contract allows, a version, credentials.
 `x-okdp-connection-ref`'s `require` is a JSON Schema the connection
-meets, whatever it comes from: external or output.
+meets, whatever it comes from: external, output or claim.
 
 ```json
-"database": {"type": "string",
-  "x-okdp-connection-ref": {"contract": "database-server",
+"database": {"type": ["string", "object"], "default": {},
+  "x-okdp-connection-ref": {"contract": "database-server", "provision": true,
     "require": {"properties": {"engine": {"const": "postgresql"}}, "required": ["secretRef"]}}}
 ```
 
@@ -536,20 +556,22 @@ meets, whatever it comes from: external or output.
 - What the provider publishes is what it checks: a version to compare is
   a number the contract declares (`major`, `"minimum": 15`); JSON Schema
   compares numbers, not version strings.
-- It checks, it never selects: the connection the reference names is
-  checked, and one that does not meet it refuses the instance, which
-  references another.
+- It checks, it never selects: a claim is bound first, to the provider of
+  its class or to the one it names ([claims](#claims)), then the
+  connection that provider publishes is checked. One that does not meet it
+  refuses the instance; the claim names a class whose provider meets it,
+  or the default changes: no binding moves on its own.
 
 Every violation is reported, sorted by path, as the contract's:
 
 ```
-database (connection "shared-db"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):
+database (claim "demo.demo-app.database" of data/postgresql): the connection does not meet the package's requirement (x-okdp-connection-ref.require); data/postgresql is the provider of the default class standard of database-server connections (global.okdp.provisioning.database-server.default): name a class whose provider meets it (class), or change the default:
 - at '/engine': value must be 'postgresql'
 ```
 
 A rule on the connection a reference resolves to belongs there rather
 than in the mapping's `errors`: the compiler says which reference, which
-connection, and where it comes from.
+connection, where it comes from, and which provider to change.
 
 ### Connection errors
 
@@ -563,17 +585,18 @@ level, the items of a list in order (`a.x` before `a-b`, unlike the string
 order of the [dependencies](#dependencies)), as the violations of the
 parameter schema are. A reference gives one error, the first in this
 order: its type, its contract (unknown, unreadable; another one, for an
-external connection; an output of several instances, or none, for a name
-that is no connection), the fields its requirement names, the fields of an
-external connection or an output in alphabetical order, the `required`
-fields: every field not set, one line each, in alphabetical order; then
-the contract's types for an external connection or an output: every
-violation, one line each, sorted by path ([Checks](#checks)); then the
-requirement's, every violation, one line each, sorted by path ([what a
-reference requires](#what-a-reference-requires)); last, `{{` in the
-connection, the first one found by path (keys sorted, items in order). The
-instances of `Inputs.Published` are visited in release order. The same
-parameters give the same report from one compile to the next:
+external connection or a named claim; a named claim of a reference that
+takes none; an output of several instances, or none, for a name that is no
+connection), the fields its requirement names, the fields of an external
+connection or an output in alphabetical order, the `required` fields:
+every field not set, one line each, in alphabetical order; then the
+contract's types for an external connection or an output: every violation,
+one line each, sorted by path ([Checks](#checks)); then the requirement's,
+every violation, one line each, sorted by path ([what a reference
+requires](#what-a-reference-requires)); last, `{{` in the connection, the
+first one found by path (keys sorted, items in order). The instances of
+`Inputs.Published` are visited in release order. The same parameters give
+the same report from one compile to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
@@ -598,7 +621,16 @@ storage: "demo-pg" is not a connection, nor an output of an instance of the name
 
 | Case | Error | `testdata/` |
 |---|---|---|
-| neither a string nor `null` | `<path>: a connection reference must be a string, got <value>` | |
+| neither a string nor `null`, nor a claim of a reference that takes them | `<path>: a connection reference must be a string, got <value>` | |
+| a claim template with another key than `class`, `provider` and `request` | `<path>: claim: unknown key "<key>": class, provider and request only` | |
+| a claim's `class` or `provider` not a string | `<path>: claim: <key> must be a string, got <value>` | |
+| a claim's `request` not a map | `<path>: claim: request must be an object, got <value>` | |
+| a `provider` that is not `<release>` or `<namespace>/<release>` | `<path>: claim: provider "<provider>": <release> or <namespace>/<release>` | |
+| a named claim of another contract | `<path>: claim "<name>" has contract "<c>", "<contract>" is expected` | |
+| a named claim, the reference taking none (no `provision`) | `<path>: "<name>" is a claim: the reference takes none (x-okdp-connection-ref's provision)` | |
+| a claim with no binding | `<path>: claim (<contract>): no provider is bound to it: the claims bind when the instances compile together (CompileAll)` | |
+| a binding of another contract (built by hand, through the library) | `<path>: claim (<contract>): bound as a <binding's contract> claim` | |
+| a binding without its output | `<path>: claim "<id>" (<contract>): <namespace>/<release> publishes no output for it` | |
 | no `<contract>.schema.json`, or one that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` | |
 | external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `context/2/wrong-contract.yaml` |
 | output, of several instances | `<path>: "<name>" names <contract> outputs of several instances of the namespace: <instance>, <instance>`, in release order | |
@@ -608,10 +640,11 @@ storage: "demo-pg" is not a connection, nor an output of an instance of the name
 | neither a connection nor an output | `<path>: "<name>" is not a connection`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` when instances publish an output of that name of another contract | |
 | required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
 | external or output, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `context/2/connection-types.yaml` |
-| a connection that does not meet the reference's requirement | `<path> (connection "<name>"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):` then `- at '/<field>': <violation>`, one line per violation | `context/2/no-secret-ref.yaml` |
+| a connection that does not meet the reference's requirement | `<path> (connection "<name>"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):` then `- at '/<field>': <violation>`, one line per violation; a claim of the default class, `; <namespace>/<release> is the provider of the default class <class> of <contract> connections (global.okdp.provisioning.<contract>.default): name a class whose provider meets it (class), or change the default` before the colon | `context/2/no-secret-ref.yaml` |
 | a requirement that names a field not of the contract | `<path>: x-okdp-connection-ref: require: field "<key>" is not part of the <contract> contract` | |
 | a requirement that names a secret field | `<path>: x-okdp-connection-ref: require: "<key>" is a secret field, in the credentials Secret, never in the connection: require secretRef` | |
 | a requirement that is not an object or not a valid JSON Schema, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: require: a JSON Schema, an object, got <value>`; `... require: <cause>`. `<place>`: the reference's place in the schema, `properties.catalogs.items.properties.database` | |
+| a fixed request that is not an object, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: request: an object, got <value>` | |
 | `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
 
 An external connection without `secretRef` resolves without one: a
@@ -634,14 +667,20 @@ the name of the contract is the name of the file. A tree's are the
 layout](../01_usage.md#repository-layout)). A contract is read by each
 reference and each `provides` item that names it: a compile that reads
 none needs no contracts, an empty file system. A file that is missing,
-cannot be read, is not JSON, not an object or not a valid JSON Schema:
+cannot be read, is not JSON, not an object or not a valid JSON Schema, or
+whose claim schema is not:
 `the <contract> contract cannot be read: <contract>.schema.json: <cause>`,
-`<cause>` `file does not exist` for a contract no repository has.
+`<cause>` `file does not exist` for a contract no repository has,
+`x-okdp-claim: <cause>` for its claim schema.
 
 ### Format
 
-A JSON Schema with OKDP keywords. The values
-of a connection or an output are checked against the schema
+A JSON Schema with OKDP keywords, of the two sides of a claim: what a
+provider publishes, its `properties`, the connection; what its
+credentials Secret holds, the `x-okdp-secret` fields; and what a claim
+may request of the provider, `x-okdp-claim`, as a PersistentVolumeClaim
+asks (`resources.requests`) and its volume answers (`capacity`). The
+values of a connection or an output are checked against the schema
 ([Checks](#checks)); besides, the compiler reads:
 
 | Keyword | On | Meaning |
@@ -653,6 +692,7 @@ of a connection or an output are checked against the schema
 | `x-okdp-derived: {from, map}` | a field | its value when not set: `map[<value of from>]`; none when that value is not a key of `map` |
 | `x-okdp-secret: true` | a field | a credential: refused in a connection and in an output, it belongs to the credentials Secret (`secretRef`) |
 | `x-okdp-contract` | the contract | the name in the `required` error message |
+| `x-okdp-claim` | the contract | the claim schema: a JSON Schema of what a claim may request (`request`), read as a values schema, in the contract's draft unless it names its own: its defaults, those of its `properties` as a parameter schema's, applied to every claim's request; a contract without one takes no request ([claims](#claims)) |
 
 `x-okdp-internal`, the naming convention of a former version, is refused:
 `the <contract> contract cannot be read: <contract>.schema.json:
@@ -678,11 +718,19 @@ connection is accepted for any contract, `x-okdp-external` or not.
     "host":     {"type": "string"},
     "port":     {"type": "integer", "default": 5432},
     "dbName":   {"type": "string"},
+    "size":     {"type": "string"},
     "password": {"type": "string", "x-okdp-secret": true}
   },
-  "required": ["host", "dbName"]
+  "required": ["host", "dbName"],
+  "x-okdp-claim": {
+    "properties": {"size": {"type": "string", "pattern": "^[0-9]+(Mi|Gi)$", "default": "1Gi"}},
+    "additionalProperties": false
+  }
 }
 ```
+
+A claim requests a size, 1Gi when it asks none; its provider publishes
+the size granted, `size` among the connection's fields.
 
 A conditional default, in a `database-server` contract:
 
@@ -713,7 +761,7 @@ field sorts before it or after it, is defaulted (`sslMode` on the default
 - Consumed, external: the `contract` of the entry, every other key a
   non-secret field, completed, then valid against the schema
   ([Connections](#connections)).
-- Consumed, output: the output an instance publishes, every key
+- Consumed, output or claim: the output an instance publishes, every key
   of its `values` a non-secret field, completed, then valid against the
   schema, as an external connection: checked when it was provided, it is
   checked again against the contract as the consumer reads it.
@@ -748,9 +796,11 @@ path in the values, sorted by path, as those of the parameters:
 `Values` at its `Level`; a tree's `platform.yaml` at level 0, its
 project's `project.yaml` at 1, its own `connections.yaml` at 2. Among them
 `global`, `global.okdp`, the settings of the platform (ingress,
-certificate issuers, OIDC, proxy, the platform's charts...), and
-`connections`, which only the context gives, an instance's own included.
-Level 0 is the platform's: `examples/02_advanced/input/db/platform.yaml`,
+certificate issuers, OIDC, proxy, the platform's charts...),
+`connections`, which only the context gives, an instance's own included,
+and `claims`, the named claims of a project, which only the context above
+level 0 gives ([claims](#claims)). Level 0 is the platform's:
+`examples/02_advanced/input/db/platform.yaml`,
 `platform/platform-values.yaml` in a platform repository; level 1,
 typically a project's, and each level above adds to the lower ones
 ([Levels](#levels)). The context's layers are merged by level over the
@@ -812,19 +862,23 @@ connections:
     secretRef: {name: platform-db-credentials}
 ```
 
-The example's instance references both kinds: `database: demo-db`, an
-instance of the namespace, and `audit: platform-db`, the platform's
-connection. Parameters and `upstream` values are the package's: a
-context file every service shares keeps to `global` and `connections`.
+The example's instance claims a database, `database: {}`, and references
+the platform's connection, `audit: platform-db`. Parameters and `upstream`
+values are the package's: a context file every service shares keeps to
+`global` and `connections`.
 
 `connections` is the context's only: an instance's own connections are a
 context layer of a level of their own ([Levels](#levels)). An instance
 layer that sets `connections`, to any value, fails before the parameter
 schema is checked, after the check of `global`
-(`testdata/instance-sets-connections.yaml`):
+(`testdata/instance-sets-connections.yaml`); one that sets `claims`, after
+it: the named claims are a project's, a layer of level 1 or above, never
+the platform's ([claims](#claims)):
 
 ```
 values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level
+values layer 1: claims are declared by the context (Inputs.Context): a project's, of level 1 or above
+context layer 1 (level 0): claims: a project's, of level 1 or above
 ```
 
 ### Levels
@@ -833,8 +887,11 @@ values layer 1: connections are given by the context (Inputs.Context): an instan
 1, typically a project's, the namespace of its instances: what it adds to
 the platform values for each of them, its settings under `global`
 (`global.okdp.project`, which the mapping reads and the compiler does not;
-a key of `global` its charts read, `storageClass`), and its connections,
-which its instances reference by name as the platform's. More levels may
+a key of `global` its charts read, `storageClass`), its connections,
+which its instances reference by name as the platform's, its named
+claims (`claims`), which they reference by name too ([claims](#claims)),
+and its classes beside the platform's (`global.okdp.provisioning`,
+[classes](#classes)). More levels may
 follow (a team's...); their numbers may leave gaps (0, 10, 20). An
 instance's own connections are a layer of a level of its own, above its
 project's (2 over a project at 1), given to its compile only: the level
@@ -852,15 +909,22 @@ before the parameter schema is checked, at the first lower level (lowest
 first), then the first path (keys sorted), at which it sets a value that
 level's layers set, merged: a key whose value is not a map, to any value,
 the same one and `null` included; a parent of one, to anything but a map;
-or a connection, `connections.<name>`, taken whole: a layer may not give a
-field the lower level's connection leaves out, a `port` to its contract's
-default (`testdata/context/1/redefines-platform-connection.yaml`). The
+or a connection, `connections.<name>`, a named claim, `claims.<name>`, a
+class, `global.okdp.provisioning.<contract>.classes.<name>`, or a default
+class, `global.okdp.provisioning.<contract>.default`, taken whole: a layer
+may not give a field the lower level's connection leaves out, a `port` to
+its contract's default
+(`testdata/context/1/redefines-platform-connection.yaml`), nor change the
+platform's default class
+(`testdata/context/1/redefines-platform-class.yaml`): a project that
+wants another provider adds a class and names it. The
 layer is named by its position in `Inputs.Context`, from 1, and its
 level:
 
 ```
 context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
+context layer 2 (level 1): global.okdp.provisioning.database.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 ```
 
 Maps merge: a level adds keys beside a lower one's (`global.okdp.project`
@@ -874,8 +938,8 @@ The layers are checked in merge order, each normalized ([values
 files](#values-files)), then against the lower levels, then for `{{`.
 
 The instance's layers come last: an instance sets no key of `global` but
-those its parameter schema declares, over the context's values, and no
-`connections` ([Context values](#context-values)).
+those its parameter schema declares, over the context's values, no
+`connections` and no `claims` ([Context values](#context-values)).
 
 ```yaml
 # examples/03_full/input/db/projects/demo/project.yaml, level 1,
@@ -940,6 +1004,8 @@ values file against it.
 | `oidc.dcr` | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
 | `oidc.issuerUri` | the OAuth client charts' wait for the provider (`waitForProvider.discoveryUrl`) |
 | `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | `platform.proxyEnv` |
+| `provisioning.<contract>` | the classes of the claims of the contract, each a provider and what it fixes of the request, and the default class, of the claims that name neither a class nor a provider ([classes](#classes)) |
+| `secrets.store` | the ClusterSecretStore the credentials of claims across namespaces go through ([credentials across namespaces](#credentials-across-namespaces)) |
 
 Every compile checks `global` against the schema, in every mode, before
 the [connections](#connections) and the [requirements](#requirements),
@@ -1309,7 +1375,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section); written to [the objects file](#the-objects-file); nil when none |
 | `Info` | `compiler.Info` | what the instance publishes: its URL, its usage and the connections it provides ([The info file](#the-info-file)) |
-| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by an output, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. The binary prints each on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance |
+| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by an output or a claim, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. The binary prints each on stderr, `depends on <instance> (<contract>, <field>)`, `(<contract> <output>, <field>)` for an output of another name than the instance |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
@@ -1544,8 +1610,10 @@ contract: the name other instances reference each by
 
 The Secret of a `provides` item with a `secret`: named after the item's
 `secretRef` (`<name>-<contract>-credentials` by default), labelled
-`okdp.io/credentials-<contract>: "true"`. They are first in `Objects`, in
-`provides` order.
+`okdp.io/credentials-<contract>: "true"`, as are the claimers' copies of
+those across namespaces ([credentials across
+namespaces](#credentials-across-namespaces)). They are first in `Objects`,
+in `provides` order.
 
 | `secret` | Objects |
 |---|---|
@@ -1647,11 +1715,12 @@ umbrella.
 ### Dependencies
 
 `Dependencies` (`compiler.Dependency`): one item per reference to an
-instance, an output ([Resolution](#resolution)), sorted by `field`
-(string order), the parameter path as the
+instance, an output or a claim ([Resolution](#resolution)), sorted by
+`field` (string order), the parameter path as the
 [connection errors](#connection-errors) write it, its `instance` a
-release name: the one that publishes the output. `output`: the output
-the reference resolved to, by name, the reference.
+release name: the one that publishes the output, the claim's provider.
+`output`: the output the reference resolved to, by name, the reference
+or the claim's ID.
 Two references to one instance give two items; external and empty
 references give none. `nil` when there is none. Every field of an item
 is set: an empty reference gives no item, a reference without its
@@ -1659,10 +1728,11 @@ contract fails.
 
 ```go
 type Dependency struct {
-	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"` // the referenced instance, or the one that publishes the referenced output (its release name)
-	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // the contract it must provide
-	Field    string `json:"field,omitempty" yaml:"field,omitempty"`       // the parameter that references it, e.g. backends[0].database
-	Output   string `json:"output,omitempty" yaml:"output,omitempty"`     // the output the reference resolved to, by name
+	Instance  string `json:"instance,omitempty" yaml:"instance,omitempty"`   // the referenced instance, or the one that publishes the referenced output (its release name)
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"` // the namespace of Instance when it is not the instance's: a claim bound to a provider of another namespace
+	Contract  string `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it must provide
+	Field     string `json:"field,omitempty" yaml:"field,omitempty"`         // the parameter that references it, e.g. backends[0].database
+	Output    string `json:"output,omitempty" yaml:"output,omitempty"`       // the output the reference resolved to, by name, a claim's ID
 }
 ```
 
@@ -1675,7 +1745,8 @@ instances it depends on, Flux `dependsOn` and Argo CD sync waves
 prints each item on stderr once the files are written, after the warnings,
 `depends on <instance> (<contract>, <field>)`, the output after the
 contract when it is not named after the instance, `depends on demo-pg
-(database-server demo-pg-hive, db)`, and `--check` none.
+(database-server demo-pg-hive, db)`, `<namespace>/<instance>` for one of
+another namespace, and `--check` none.
 
 ### Umbrella chart
 
@@ -1748,7 +1819,7 @@ for `hasKey`, `toYaml` and `range`.
 `examples/02_advanced/output/projects/demo/instances/demo-webapp/`, what
 `-o <dir>` writes for the example: release `demo-webapp`, namespace
 `demo`, the instance's `config.yaml` (`replicas: 2`,
-`database: demo-db`, `audit: platform-db`, a memory limit and two `env`
+`database: {}`, a claim, `audit: platform-db`, a memory limit and two `env`
 entries in `upstream.app`), over the context
 `examples/02_advanced/input/db/platform.yaml`, level 0 (`dcr` mode;
 `platform-db`, the connection the instance's `audit` references): the
@@ -1792,13 +1863,13 @@ app:
         secretKeyRef:
           key: client_secret
           name: demo-webapp-demo-dcr
-    - name: DB_URL                          # the database connection, resolved
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+    - name: DB_URL                          # the claimed database, resolved
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_webapp_database
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo-db-database-credentials
+          name: demo.demo-webapp.database-credentials
     - name: AUDIT_DB_URL                    # the platform's connection, resolved
       value: jdbc:postgresql://db.okdp.example.org:5432/shared
     - name: AUDIT_DB_PASSWORD
@@ -1850,23 +1921,26 @@ No objects file: the instance has no objects, no credentials Secret and no
 ([dependencies](#dependencies)), which the compile prints on stderr:
 
 ```text
-depends on demo-db (database, database)
+depends on demo-db (database demo.demo-webapp.database, database)
 ```
 
 `examples/03_full/` compiles the workspace service, a package written to use
 every part of the mapping language, with four values layers:
 `platform.yaml` (level 0: `global.okdp` in `dcr` mode, the oidc-dcr
 chart from a mirror, a proxy, two connections), `project.yaml` (level 1:
-the project's settings under `global`, two connections of its own),
+the project's settings under `global`, two connections of its own, a
+named claim),
 `connections.yaml` (level 2: the instance's own connection) and
-`config.yaml` (the instance's values: references to an
-instance of the namespace and to connections of the platform, the project
+`config.yaml` (the instance's values: two claims, a claim template and
+the project's named claim, an
+output of the namespace and connections of the platform, the project
 and the instance itself, in a list of catalogs and under a nested key;
 upstream values). Release
 `demo-workspace`, namespace `demo`:
 `output/projects/demo/instances/demo-workspace/` is what `-o <dir>`
 writes. Its `Result.Dependencies`, which the compile prints on stderr,
-lists `demo-db` twice, for `catalogs[1].database` and `database`, and
+lists `demo-db`, the provider of its claims, twice, for
+`catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
 `$if`, is no dependency, and its chart is not in the chart cache of the
 check. Its
@@ -1877,37 +1951,48 @@ the `ExternalSecret`, then the `objects` section.
 ## Compiling instances together
 
 `CompileAll(ctx, instances)` compiles instances together, each a
-`compiler.Instance`, its `Definition` and its `Inputs`, whose `Published`
-it sets: what the other instances of the namespace publish. It gives one
-`compiler.Outcome` per instance, in their order: its `Result`, or, `nil`,
-why it is refused (`Err`). The namespaces (`Inputs.Namespace`) are
-compiled apart.
+`compiler.Instance`, its `Definition` and its `Inputs`, whose `Published`,
+`Claims` and `Bindings` it sets: what the other instances of the namespace
+publish, the claims bound to it, the providers its claims are bound to. It
+gives one `compiler.Outcome` per instance, in their order: its `Result`,
+or, `nil`, why it is refused (`Err`), and its claims, bound (`Claims`).
+First each [claim](#claims) is bound to its provider, then the instances
+are compiled, of every namespace (`Inputs.Namespace`) at once, each
+published to its namespace.
 
-The references between the instances of a namespace are to outputs: the
-instance needs what its provider publishes, and is compiled after it.
+The references between the instances are of two kinds:
+
+- to an output: the instance needs what its provider publishes, and is
+  compiled after it;
+- a claim: the provider it is bound to publishes the claim's output, and
+  the instance is compiled after it, of the same namespace or not; the
+  provider depends on the claim only, known before anything is compiled.
 
 Which outputs an instance references does not depend on what is
 published ([Resolution](#resolution)): its first compile knows every
-output it lacks. In each namespace, in the order of the instances:
+output it lacks. In the order of the instances:
 
 1. Each instance is compiled with what the instances compiled so far
    publish. A success is final, and publishes its `Info`; a compile that
-   lacks outputs no instance has published waits for them; any other
-   refusal is final.
+   lacks outputs no instance has published, of its namespace or a claim's
+   of its provider, waits for them; any other refusal is final.
 2. An instance that waits is compiled again once every output it waits
    for is published: final, whatever it gives.
 3. Those still waiting, for an output nobody publishes or in a cycle, are
    compiled again, everything published, for their message.
-4. Two instances that publish an output of the same contract and name
-   are refused, each: a reference to it would not know which. The
+4. Two instances of a namespace that publish an output of the same
+   contract and name are refused, each: a reference to it would not know
+   which. The
    instances whose references resolved through it, or through an output
-   of an instance refused since, are compiled again: each gets the error
-   a compile after every provider gives.
+   of an instance refused since, or whose claim's provider is refused, of
+   any namespace, are compiled again: each gets the error a compile after
+   every provider gives. A provider refused gives its claims no output.
 
 An instance is compiled once when it comes after the instances whose
 outputs it references, twice when it comes before: the outcomes are the
 same whatever the order. A refusal for an output nobody publishes names
-the instances of the namespace that are refused, one of them maybe its
+the instances of the namespace that are refused, and the refused
+providers of its claims of another namespace, one of them maybe its
 provider. Whether the instances deploy together, each reference to an
 instance that exists and provides it, is the
 [deployment graph](#the-deployment-graph)'s to check.
@@ -1916,15 +2001,16 @@ instance that exists and provides it, is the
 |---|---|
 | a release given twice in a namespace, each time | `release "<release>" is given twice in namespace "<namespace>"` |
 | an output another instance of the namespace publishes too | `provides "<name>" (<contract>): <instance> publishes an output of that contract and name too, a reference to it would not know which`; `<instance>, <instance> publish`, several |
-| a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order |
+| a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order, a provider of another namespace `<namespace>/<release>` |
 
 ## The deployment graph
 
 `NewGraph(results)` builds the deployment graph of compiled instances,
 the `Result` of every instance of their namespaces, a refused one
 missing: a release (`GraphNode`, its namespace and release) waits for
-the releases of its namespace its references point to
-([Dependencies](#dependencies)), each once. It returns the graph only
+the releases its references point to, of its namespace, or of another for
+a claim bound across namespaces ([Dependencies](#dependencies)), each
+once. It returns the graph only
 when every dependency holds and no release waits for itself; else every
 problem at once, each a `*GraphError` at its release, by namespace then
 release:
@@ -1932,7 +2018,7 @@ release:
 | Case | Error, after `<namespace>/<release>: ` |
 |---|---|
 | a release given twice in a namespace | `release "<release>" is given twice in namespace "<namespace>"` |
-| a dependency on a release no result of the namespace has, or on itself | `<field>: it references "<instance>", which is not another instance of namespace "<namespace>"` |
+| a dependency on a release no result of the namespace has, or on itself | `<field>: it references "<instance>", which is not another instance of namespace "<namespace>"`; of another namespace, `"<namespace>/<instance>", which is not an instance of namespace "<namespace>"` |
 | a reference to an output its release does not publish | `<field>: it references the <contract> output "<output>" of "<instance>", which "<instance>" does not publish` |
 | releases that wait for each other: from each release, a shortest cycle through it, when it is the cycle's smallest | `dependency cycle: <release> -> <release> -> <release>: the releases would wait for each other` |
 
@@ -2037,3 +2123,382 @@ every reconcile.
 | no `RepoURL` | `ArgoCD.RepoURL is required` |
 | a `RepoURL` or `Revision` with a quote, a backslash or a newline | `ArgoCD.RepoURL "<url>": holds a quote, a backslash or a newline`; `ArgoCD.Revision` alike |
 | one release name in two namespaces | `release "<release>" is in namespaces "<a>" and "<b>": the HelmReleases of okdp-releases need distinct names` (flux); `the Applications of argocd need distinct names` (argocd) |
+
+## Claims
+
+A provider's package provisions connections of the contracts its
+`provisions` lists ([provisions](02_service_definition.md#provisions)): one
+per claim bound to an instance, `Inputs.Claims`, each a `compiler.Claim`:
+
+```go
+type Claim struct {
+	ID        string `json:"id"`             // the connection's name, DNS-1123 labels joined by dots: <namespace>.<name>, or <namespace>.<release>.<field>
+	Contract  string `json:"contract"`       // a contract the package provisions
+	Namespace string `json:"namespace"`      // the namespace of the instances that claim it
+	Name      string         `json:"name,omitempty"`    // a named claim's name, claims.<name> of the context, the connection of every reference to it in Namespace; "" for a claim template's
+	Request   map[string]any `json:"request,omitempty"` // what the claim requests, as the contract's claim schema (x-okdp-claim) allows, its defaults applied
+}
+```
+
+The mapping reads them as `claims`, its `request` `{}` when the claim has
+none, and publishes, for each, an output of its contract named its ID,
+what it grants of the request among its values
+([provides](02_service_definition.md#provides)). The claims are checked
+before the context is built, every problem at once, `<i>` the claim's
+position; the outputs after the mapping, every claim without its output at
+once:
+
+| Case | Error |
+|---|---|
+| a claim of a contract the package does not provision | `Inputs.Claims[<i>] (<id>): the package provisions no <contract> connection (okdp.yaml's provisions)` |
+| an ID that is not DNS-1123 labels joined by dots, 63 characters at most | `Inputs.Claims[<i>] (<id>): the ID is a claim ID, DNS-1123 labels joined by dots, 63 characters at most` |
+| a `Namespace` that is not a DNS-1123 label | `Inputs.Claims[<i>] (<id>): the namespace is a DNS-1123 label` |
+| an ID that does not start with its `Namespace` and a dot | `Inputs.Claims[<i>] (<id>): the ID starts with the claimers' namespace, "<namespace>."` |
+| an ID given twice | `Inputs.Claims[<i>] (<id>): claimed twice` |
+| no output of the claim's contract named its ID | `claim "<id>" (<contract>): provides publishes no <contract> output of that name` |
+
+The words, and what each is in Kubernetes' claims of storage:
+
+| Term | Here | Kubernetes |
+|---|---|---|
+| claim | a connection a consumer asks of a provider, of a contract | a PersistentVolumeClaim |
+| request | what a claim asks (`request`), as the contract's claim schema allows (`x-okdp-claim`) | `resources.requests`, `accessModes` |
+| claim template | `{}` in place of a connection's name: a claim of the reference's own, `<namespace>.<release>.<field>` | a StatefulSet's `volumeClaimTemplates`, a claim per replica |
+| named claim | `claims.<name>` of a project, declared once, referenced by name by any instance of the namespace | a PersistentVolumeClaim of the namespace, referenced by name from pods |
+| provider | the instance a claim is bound to, which provisions it: its class's, or the one it names (`provider`) | the volume's provisioner, as deployed; a claim's `volumeName`, for the one it names |
+| class | `global.okdp.provisioning.<contract>.classes.<name>` of the context: a provider and what it fixes of the request, which a claim names (`class`) | a StorageClass: a provisioner and its parameters |
+| default class | `global.okdp.provisioning.<contract>.default`: the class of the claims that name neither a class nor a provider | the default StorageClass |
+| provisioner | the package that provisions the contract (`provisions`) | a CSI driver |
+| binding | the claim and its provider (`Inputs.Bindings`, `Outcome.Claims`) | the PersistentVolumeClaim's `claimRef` |
+| connection | the output the provider publishes for the claim, named its ID | the PersistentVolume |
+| credentials Secret | the output's `secretRef`, copied to the claimer's namespace across namespaces | the connection Secret |
+| retained | the data the provider keeps when the claim is gone, its mapping's choice | `persistentVolumeReclaimPolicy: Retain` |
+
+Two divergences, on purpose. No selection by matching: a claim is bound to
+the provider of its class or to the one it names, never to one chosen for
+what it publishes (a `selector`); what a reference requires checks the
+connection, it never selects one. No persisted binding: the binding is
+computed from the tree at each compile, never stored, so a changed
+default class, or a class's provider, moves every claim of it, each to a
+new, empty connection, the data left at the former one: the binding lines
+of `okdp-compile --repository` show the move before it is deployed.
+
+A consumer claims a connection with a reference that takes claims
+(`x-okdp-connection-ref`'s `provision: true`, [declaring a
+reference](#declaring-a-reference)): a claim template, a map in place of
+a name, or the name of a named claim of its project:
+
+| Claim | Means |
+|---|---|
+| `{}` | a connection of the reference's own, of the default class |
+| `{class: <name>}` | of that class ([classes](#classes)) |
+| `{provider: <release>}`, `{provider: <namespace>/<release>}` | of that provider's instance, whatever the classes; not with `class` |
+| `{request: {...}}`, with any | what it requests of its provider ([requests](#requests)) |
+| `<name>`, `claims.<name>` of the context | the named claim's connection, one for every reference to it in the namespace |
+
+A default `{}` in the parameter schema claims when the instance says
+nothing; a name is a connection's, a named claim's or an output's,
+resolved in that order ([resolution](#resolution)).
+
+A named claim is declared once, in its project's context
+(`project.yaml`, level 1, or a level above, never level 0, the
+platform's, nor an instance's values: [levels](#levels)), each a name of
+the namespace, a DNS-1123 label, and no connection's:
+
+```yaml
+# examples/04_claims/input/db/projects/demo/project.yaml
+claims:
+  analytics:
+    contract: database-server      # required, the contract of its connection
+    class: large                   # optional: the default class of the contract otherwise
+    request: {extensions: [postgis]}  # optional: what it requests of its provider
+```
+
+It is bound and given to its provider whether a reference names it or not,
+as a namespace holds a PersistentVolumeClaim no pod mounts; each reference
+to it is a [dependency](#dependencies). A level adds named claims, it
+changes none of a lower level's (`claims.<name>`, taken whole). Through
+the library, the context of each instance of the namespace declares its
+named claims, alike: a name declared differently in two refuses every
+instance of the namespace. A package requires what it needs of a named
+claim's connection with `require` ([what a reference
+requires](#what-a-reference-requires)): the claim is the namespace's, not
+the reference's. A claim resolves through its binding, `Inputs.Bindings`,
+by parameter path, each a `compiler.Binding`: the provider's instance, the
+claim's contract and ID, and the output the provider publishes for it, as
+an output reference ([resolution](#resolution)); its provider is a
+[dependency](#dependencies), its `namespace` set when it is another
+namespace's:
+
+```go
+type Binding struct {
+	Namespace, Release string  // the provider's instance
+	Contract           string  // the claim's contract: the one the output is of
+	ID                 string  // the claim's ID: the name of the output it publishes for it
+	Output             *Output // that output, nil when it is not known yet (the provider not compiled)
+}
+```
+
+`CompileAll` binds each claim to a provider, before compiling: among the
+instances whose package provisions its contract, of any namespace, the one
+the claim names (`provider`, `<release>` of its namespace or
+`<namespace>/<release>`), else the provider of the class it names
+(`class`), else of the default class of the contract, of the classes of
+the claimer's context ([classes](#classes)); a named claim with the
+context of the first instance, in release order, that declares it. A claim
+that names neither a class nor a provider, without a default class, is
+refused. Its ID is `<namespace>.<name>` for a named claim, else
+`<namespace>.<release>.<field>`, each part a DNS-1123 label (lowercased,
+every run of other characters than letters and digits a `-`, the field
+normalized to one), the parts joined by dots: `demo.demo-app.db`,
+`demo.demo-app.catalogs-1-database`, `demo.analytics`. No part holds a
+dot, so that two sources never give one ID (`<namespace>.<name>` has one
+dot, a claim template's two): the claims of release `a-b` and parameter
+`c`, and of release `a` and parameter `b-c`, are `demo.a-b.c` and
+`demo.a.b-c`. The ID is a Kubernetes name, a DNS subdomain: an object
+name, a Secret name, a label value and a store key take it as it is; what
+takes a label only, a Service name or a host segment, and a SQL
+identifier, replace its dots in the provider's mapping (`c.id.replace('.',
+'_').replace('-', '_')`), which the provider chooses. Two parameters of
+one instance whose names normalize to one label (`dbs["eu.main"]` and
+`dbs.eu-main`) give one ID: the instance is refused (`<field>: claim: it
+gives the same ID (<id>) as <first field>: rename one of the parameters`).
+Longer than 63 characters, the ID is cut to 54, and ended with `-` and 8
+hexadecimal digits of its SHA-256. The provider gets each claim once, a
+named claim's for all the references to it (`Inputs.Claims`, sorted by
+ID); the claimer its binding (`Inputs.Bindings`) and `Outcome.Claims`, by
+parameter path, each a `compiler.Bound`:
+
+```go
+type Bound struct {
+	Field              string // the reference's parameter path
+	Contract           string // its contract
+	ID                 string // the claim's ID: the name of the output its provider publishes for it
+	Namespace, Release string // the provider's instance
+	Class              string // the class whose provider it is (global.okdp.provisioning.<contract>.classes); "" when the claim names the provider
+	Named              bool   // the claim names its class or its provider; else the class is the default one of the claimer's context (global.okdp.provisioning.<contract>.default)
+}
+```
+
+A binding moves only when the claim's class or provider, the class's
+provider or the default class changes: a
+second instance that provisions the contract moves none, nor does what
+the reference requires, checked against the connection the provider
+bound publishes
+([what a reference requires](#what-a-reference-requires)). Another
+provider gives its claimers a new connection, the former one's data
+where it was. `okdp-compile
+--repository` prints each binding. A claim template that does not bind
+refuses its instance, whose other claims go to no provider; a named claim
+that does not bind, every instance whose context declares it, the error
+under `claims.<name>` for `<field>`; every problem at once:
+
+| Case | Error |
+|---|---|
+| the claim names neither a class nor a provider, the context sets no default class | `<field>: claim (<contract>): it names no class, and the context sets no default one, global.okdp.provisioning.<contract>.default (Inputs.Context): the classes are <class>, <class>`; `... (Inputs.Context): no class of <contract> connections is defined (global.okdp.provisioning.<contract>.classes)` when none |
+| a class that is none | `<field>: claim (<contract>): class "<class>" is not a class of <contract> connections (global.okdp.provisioning.<contract>.classes): <class>, <class>`; `... classes): none is defined` when none |
+| a default class that is none | `<field>: claim (<contract>): the default class "<class>" (global.okdp.provisioning.<contract>.default) is not a class of <contract> connections (global.okdp.provisioning.<contract>.classes): <class>, <class>` |
+| a class's provider not of the form | `<field>: claim (<contract>): class "<class>" (global.okdp.provisioning.<contract>.classes.<class>): provider "<provider>": <release> or <namespace>/<release>`; `the default class "<class>" (...)` |
+| a class's provider that does not provision the contract | `<field>: claim (<contract>): class "<class>": <namespace>/<release> is no instance that provisions <contract> connections`; `the default class "<class>": ...` |
+| the provider named does not | `<field>: claim (<contract>): <namespace>/<release> is no instance that provisions <contract> connections` |
+| both a class and a provider | `<field>: claim: class or provider, not both` |
+| the instance itself | `<field>: claim (<contract>): the instance provisions it itself: a claim is of another instance` |
+| two claim templates of the instance with one ID | `<field>: claim: it gives the same ID (<id>) as <first field>: rename one of the parameters` |
+| a named claim declared differently in the contexts of two instances of the namespace, every instance of it | `claims.<name>: declared differently in the context of <release> and <release>`, the first in release order and the first that differs from it |
+
+An instance whose claims fail to bind reports every one, the claims of its
+context first, in name order, then its references in parameter path order
+([paths](#paths)): the same errors in the same order from one compile to
+the next, whatever order the checks ran in.
+
+A named claim's declaration fails the compile of each instance whose
+context holds it, every problem at once, in name order:
+
+| Case | Error |
+|---|---|
+| `claims` not a map | `claims: the named claims, by name, got <value>` |
+| a name that is not a DNS-1123 label | `claims.<name>: claim: its name is a DNS-1123 label` |
+| a claim that is not a map | `claims.<name>: a claim, an object, got <value>` |
+| another key than `contract`, `class`, `provider` and `request` | `claims.<name>: claim: unknown key "<key>": contract, class, provider and request only` |
+| a `request` that is not a map | `claims.<name>: claim: request must be an object, got <value>` |
+| a value that is not a string | `claims.<name>: claim: <key> must be a string, got <value>` |
+| no `contract` | `claims.<name>: claim: contract is required, the contract of the connection it claims` |
+| a `contract` that is no contract name | `claims.<name>: claim: contract "<contract>" is not a contract name` |
+| a `provider` not of the form | `claims.<name>: claim: provider "<provider>": <release> or <namespace>/<release>` |
+| a connection's name | `claims.<name>: a connection of that name too (connections.<name>)` |
+| in an instance's values | `values layer <n>: claims are declared by the context (Inputs.Context): a project's, of level 1 or above` |
+| at level 0 | `context layer <n> (level 0): claims: a project's, of level 1 or above`; a tree's `platform.yaml`: `<repository>/platform.yaml: claims: a project's (project.yaml)` |
+
+### Classes
+
+A claim names a class of its contract, not a provider: as a
+PersistentVolumeClaim names a StorageClass, never the driver behind it.
+The classes are the context's, `global.okdp.provisioning.<contract>`, per
+contract a default class and the classes by name, each the provider of
+its claims and, optionally, what it fixes of their request
+([requests](#requests)):
+
+```yaml
+# platform.yaml (level 0): the platform's classes, and the default
+global:
+  okdp:
+    provisioning:
+      database-server:
+        default: standard
+        classes:
+          standard: {provider: data/postgresql}
+          fast: {provider: data/pg-nvme}
+
+# projects/demo/project.yaml (level 1): a project adds classes of its own
+global:
+  okdp:
+    provisioning:
+      database-server:
+        classes:
+          large: {provider: data/postgresql, request: {size: 50Gi}}
+```
+
+A class's `provider` is required, `<release>` of the claimer's namespace
+or `<namespace>/<release>`; its name a DNS-1123 label. A level adds
+classes, and the default of a contract the lower levels leave without
+one; it changes neither a class nor a default of a lower level, each
+taken whole ([levels](#levels)): the default class is the platform's, as
+the default StorageClass is the cluster's, or a project's for a contract
+the platform leaves without one. A project that wants another provider
+adds a class and names it: its claimers never name an instance of another
+project. A claim may still name its provider (`provider`), as a
+PersistentVolumeClaim names a volume (`volumeName`), never with a class.
+
+A key the class fixes is the class's: a claim whose request sets it, a
+template's (the package's or the instance's) or a named claim's
+declaration, is refused, every such key, in key order:
+
+| Case | Error |
+|---|---|
+| a request that sets a key of the class | `<field>: claim: request.<key>: set by the class <class> (global.okdp.provisioning.<contract>.classes.<class>): remove it, or name another class` |
+
+`okdp-compile --repository` prints a binding with its class:
+`<field>: claim <id> (<contract>) bound to <namespace>/<release>, class
+<class>` for a class named, `, the default class <class>` for the default
+one, nothing after the instance for a provider named.
+
+### Requests
+
+A claim requests what the contract's claim schema allows
+(`x-okdp-claim`, [format](#format)): what its class fixes
+([classes](#classes)), then a claim template's `request`, merged
+(`helm -f`) over what the package fixes of every claim of the reference
+(`x-okdp-connection-ref`'s `request`), the instance's winning; or a named
+claim's, its declaration's, which no package changes, as a pod does not
+change a claim it mounts. The claim schema's defaults are then applied,
+as a parameter schema's ([defaults](#defaults)), and the request is
+checked against it when the claim binds, before any compile, every
+violation at once, in the claimer's errors (a named claim's, under
+`claims.<name>`, in those of every instance whose context declares it).
+The provider's mapping reads it, `claims[i].request`, and answers in what
+it publishes:
+
+```yaml
+# examples/04_claims/input/db/catalog/postgresql/1.0.0/okdp.yaml, trimmed
+provides:
+  - $for: c in claims
+    $each:
+      contract: database-server
+      name: ${{ c.id }}
+      values:
+        host: ${{ release.name }}-rw.${{ release.namespace }}.svc
+        dbName: ${{ c.id.replace('.', '_').replace('-', '_') }}
+        size: ${{ c.request.size }}
+        extensions: ${{ c.request.extensions }}
+```
+
+The request is no part of the claim's identity: its ID does not change
+with it, nor its binding. What a provider does with a changed request
+(grow, ignore) is its own.
+
+| Case | Error |
+|---|---|
+| a request the claim schema refuses | `<field>: claim (<contract>): the request does not meet the contract's claim schema (x-okdp-claim):` then `- at '/<key>': <violation>`, one line per violation |
+| a request of a contract without claim schema | `<field>: claim (<contract>): request: the contract declares no claim schema (x-okdp-claim): a claim requests nothing of it`; an empty one is none |
+| a request that is not a map | `<field>: claim: request must be an object, got <value>` |
+| a request values cannot hold (`Inputs.Claims`, through the library) | `Inputs.Claims[<i>] (<id>): request: json: <cause>` |
+
+### Credentials across namespaces
+
+A claim bound to a provider of another namespace, its output with a
+`secretRef` and its contract with secret fields, has its credentials in
+the provider's namespace. They cross through the platform's secret store,
+`global.okdp.secrets.store`, a ClusterSecretStore of External Secrets,
+under the key `okdp.<id>`, the claim's ID, which starts with the claimers'
+namespace: the key's second label is the namespace, so that a store with
+path policies gives each namespace `okdp.<namespace>.*`. The compiler
+writes both ends, in each instance's objects, after the mapping's:
+
+- the provider: a `PushSecret` named after the claim's ID, in its
+  namespace, that pushes the Secret of the output, each secret field of
+  the contract a property of the key; `deletionPolicy: None`, the
+  credentials outlive the claim;
+- each claimer: an `ExternalSecret` that reads them into a Secret of its
+  own, `<release>-<secret>`, the output's Secret after its release, so that
+  the claimers of a named claim have one each; the connection's `secretRef`
+  names it. The ExternalSecret and, through its target's template, the
+  Secret carry the labels and `okdp.io/credentials-<contract>: "true"`, as
+  the provider's credentials Secret does.
+
+```yaml
+# data/pg, for the claim demo.demo-app.db
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata: {name: demo.demo-app.db, namespace: data, labels: {...}}
+spec:
+  refreshInterval: 1h
+  updatePolicy: Replace
+  deletionPolicy: None
+  secretStoreRefs: [{name: okdp-secrets, kind: ClusterSecretStore}]
+  selector: {secret: {name: demo.demo-app.db-credentials}}
+  data:
+    - match: {secretKey: password, remoteRef: {remoteKey: okdp.demo.demo-app.db, property: password}}
+---
+# demo/demo-app, its claim db
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: demo-app-demo.demo-app.db-credentials, namespace: demo, labels: {..., okdp.io/credentials-<contract>: "true"}}
+spec:
+  refreshInterval: 1h
+  secretStoreRef: {name: okdp-secrets, kind: ClusterSecretStore}
+  target:
+    name: demo-app-demo.demo-app.db-credentials
+    creationPolicy: Owner
+    template: {metadata: {labels: {..., okdp.io/credentials-<contract>: "true"}}}
+  data:
+    - {secretKey: password, remoteRef: {key: okdp.demo.demo-app.db, property: password}}
+```
+
+Within a namespace, the Secret is already there: neither is written.
+Without the store, such a claim is refused, on both sides:
+
+| Case | Error |
+|---|---|
+| the provider | `claim "<id>" (<contract>): claimed of namespace <namespace>: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` |
+| the claimer | `<field>: claim "<id>" (<contract>): of <namespace>/<release>, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` |
+
+#### What the store must enforce
+
+The compiler writes the keys; the store keeps them apart, and the compiler
+cannot check that it does. A `PushSecret` writes under any key its
+author names, an `ExternalSecret` reads any key its author names, and a
+package's [`objects`](02_service_definition.md#objects) may write either:
+what separates the namespaces' credentials is the store's own
+authorisation.
+
+- The store is reachable from the namespaces of the tree only (its
+  `conditions`, for a ClusterSecretStore), and from no other.
+- With a backend that has no path policies, External Secrets' Kubernetes
+  provider among them, every namespace the store admits can read every
+  key: the store is then for one trust domain, the namespaces of the tree
+  trust one another with the credentials of the claims that cross.
+- With Vault or a cloud secret manager, a policy per namespace on
+  `okdp.<namespace>.*` (the key's second label is the claimers' namespace,
+  [above](#credentials-across-namespaces)) gives each namespace the keys
+  of its own claims: the provider's namespace may write the keys of the
+  namespaces that claim of it, a claimer's reads its own.

@@ -3,8 +3,9 @@
   "type": "object",
   "properties": {
     "replicas": {"type": "integer", "minimum": 1, "default": 1},
-    "database": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}},
-                 "description": "The database: a connection's name or an output's. The app reads its password: it has credentials."},
+    "database": {"type": ["string", "object"], "default": "",
+                 "x-okdp-connection-ref": {"contract": "database", "provision": true, "require": {"required": ["secretRef"]}},
+                 "description": "The database: a connection's name, a named claim's (claims of the project) or an output's; or a claim template, a database of its own ({}), of a named provider ({provider: <release>}). The app reads its password: it has credentials."},
     "audit": {"type": "string", "default": "", "x-okdp-connection-ref": {"contract": "database", "require": {"required": ["secretRef"]}},
               "description": "The database audit events are written to, a connection's name or an output's: often a connection the platform gives. It has credentials."},
     "upstream": {"type": "object", "default": {}, "description": "Values passed to the upstream charts as they are, by chart."},

@@ -1,11 +1,12 @@
 provides:
-  - name: demo-db
+  - name: demo.demo-webapp.database
     contract: database
     values:
-      dbName: demo-db
+      dbName: demo_demo_webapp_database
       driver: org.postgresql.Driver
       engine: postgresql
       host: demo-db-db.demo.svc
       port: 5432
+      size: 1Gi
     secretRef:
-      name: demo-db-database-credentials
+      name: demo.demo-webapp.database-credentials

@@ -20,7 +20,8 @@ import (
 // example: the example package
 // (examples/02_advanced/input/db/catalog/webapp/1.0.0), and the inputs of
 // its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
-// and what demo-db, the database it references, publishes.
+// and its database's claim, bound to demo-db, with what demo-db publishes
+// for it.
 func example() (*compiler.Definition, compiler.Inputs) {
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0"))
 	if err != nil {
@@ -32,11 +33,14 @@ func example() (*compiler.Definition, compiler.Inputs) {
 		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
-		Published: map[string]compiler.Info{"demo-db": {Provides: []compiler.Output{{
-			Name: "demo-db", Contract: "database",
-			Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo-db"},
-			SecretRef: &compiler.SecretRef{Name: "demo-db-database-credentials"},
-		}}}},
+		Bindings: map[string]compiler.Binding{"database": {
+			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.demo-webapp.database",
+			Output: &compiler.Output{
+				Name: "demo.demo-webapp.database", Contract: "database",
+				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_demo_webapp_database"},
+				SecretRef: &compiler.SecretRef{Name: "demo.demo-webapp.database-credentials"},
+			},
+		}},
 	}
 	return def, in
 }

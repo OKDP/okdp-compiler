@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/part-of: okdp
     okdp.io/instance: demo-db
     okdp.io/service: db
-  name: demo-db-database-credentials-password
+  name: demo.demo-workspace.database-credentials-password
   namespace: demo
 spec:
   allowRepeat: true
@@ -29,7 +29,7 @@ metadata:
     okdp.io/credentials-database: "true"
     okdp.io/instance: demo-db
     okdp.io/service: db
-  name: demo-db-database-credentials
+  name: demo.demo-workspace.database-credentials
   namespace: demo
 spec:
   dataFrom:
@@ -41,11 +41,72 @@ spec:
         generatorRef:
           apiVersion: generators.external-secrets.io/v1alpha1
           kind: Password
-          name: demo-db-database-credentials-password
+          name: demo.demo-workspace.database-credentials-password
   refreshInterval: "0"
   target:
     creationPolicy: Owner
-    name: demo-db-database-credentials
+    name: demo.demo-workspace.database-credentials
+    template:
+      data:
+        password: '{{ index . "password" }}'
+      engineVersion: v2
+      metadata:
+        labels:
+          app.kubernetes.io/instance: demo-db
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/name: db
+          app.kubernetes.io/part-of: okdp
+          okdp.io/credentials-database: "true"
+          okdp.io/instance: demo-db
+          okdp.io/service: db
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  labels:
+    app.kubernetes.io/instance: demo-db
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: db
+    app.kubernetes.io/part-of: okdp
+    okdp.io/instance: demo-db
+    okdp.io/service: db
+  name: demo.marketing-credentials-password
+  namespace: demo
+spec:
+  allowRepeat: true
+  digits: 6
+  length: 32
+  noUpper: false
+  symbols: 0
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/instance: demo-db
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: db
+    app.kubernetes.io/part-of: okdp
+    okdp.io/credentials-database: "true"
+    okdp.io/instance: demo-db
+    okdp.io/service: db
+  name: demo.marketing-credentials
+  namespace: demo
+spec:
+  dataFrom:
+    - rewrite:
+        - regexp:
+            source: ^password$
+            target: password
+      sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: demo.marketing-credentials-password
+  refreshInterval: "0"
+  target:
+    creationPolicy: Owner
+    name: demo.marketing-credentials
     template:
       data:
         password: '{{ index . "password" }}'

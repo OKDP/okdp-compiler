@@ -1,6 +1,4 @@
 # The chart cache's copy of the (fictional) postgresql chart 16.0.0, the
 # database of the db package: its defaults.
 fullnameOverride: ""
-auth:
-  database: ""
-  existingSecret: ""
+databases: []                          # name, owner, existingSecret: the owner's password

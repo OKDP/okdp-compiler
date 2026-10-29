@@ -137,19 +137,25 @@ repeatable, each directory any part of it. In order:
 
 1. the tree: every instance, by project then instance
    (`compiler.LoadRepository`), every problem of the tree at once;
-2. the instances compiled together, each instance with what the others of
-   its namespace publish, after those whose outputs it references
-   ([compiling instances
+2. the instances compiled together, each claim bound to its provider
+   ([claims](specs/01_inputs_outputs.md#claims)), each instance with what
+   the others of its namespace publish, after those whose outputs it
+   references and the providers of its claims ([compiling instances
    together](specs/01_inputs_outputs.md#compiling-instances-together)),
-   checked against the chart cache with `--check --charts`: each refusal
-   on stderr, `error: <namespace>/<release>: <message>`, each warning,
+   checked against the chart cache with `--check --charts`: each binding
+   on stderr, `<namespace>/<release>: <field>: claim <id> (<contract>)
+   bound to <namespace>/<release>`, then `, class <class>` for the class
+   it names, `, the default class <class>` when it names neither a class
+   nor a provider, nothing when it names its provider, then each refusal,
+   `error: <namespace>/<release>: <message>`, each warning,
    `warning: <namespace>/<release>: <message>`, in the order of the
    instances;
 3. their [deployment graph](specs/01_inputs_outputs.md#the-deployment-graph):
    each problem on stderr, `error: <namespace>/<release>: <message>`;
 4. the files of the target ([targets](specs/01_inputs_outputs.md#targets)),
    written under `-o` ([`--output`](#--output)); then each dependency,
-   `<namespace>/<release>: depends on <instance> (<contract>, <field>)`.
+   `<namespace>/<release>: depends on <instance> (<contract>, <field>)`,
+   `<contract> <output>` when the output is not named after the instance.
 
 Any problem exits with status 1, nothing written; `--check` stops before
 writing, and prints no dependency. The options are checked before the
@@ -157,8 +163,10 @@ tree is read.
 
 ```console
 $ bin/okdp-compile --repository examples/03_full/input/db -o out/tree
-demo/demo-workspace: depends on demo-db (database, catalogs[1].database)
-demo/demo-workspace: depends on demo-db (database, database)
+demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: database: claim demo.demo-workspace.database (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: depends on demo-db (database demo.marketing, catalogs[1].database)
+demo/demo-workspace: depends on demo-db (database demo.demo-workspace.database, database)
 demo/demo-workspace: depends on demo-alerts (http, notifications.webhook)
 ```
 
@@ -205,12 +213,15 @@ The advanced example's platform is in `dcr` mode
 adds the key `oidc-dcr`, which `Chart.yaml` does not list: a dependency
 after `app`, the platform's oidc-dcr chart. It has no objects, and so no
 `okdp.objects.yaml`; `okdp.info.yaml` holds its URL, its usage and the
-connection it provides; the instance it depends on, `demo-db`, which its
-`database` parameter references, is printed on stderr:
+connection it provides. Its `database` parameter claims a database,
+`{}`, bound to `demo-db`, the provider of the platform's default class of
+database connections, `standard` (`global.okdp.provisioning` in
+`platform.yaml`): the binding and the dependency are printed on stderr:
 
 ```console
 $ bin/okdp-compile --repository examples/02_advanced/input/db -o out
-demo/demo-webapp: depends on demo-db (database, database)
+demo/demo-webapp: database: claim demo.demo-webapp.database (database) bound to demo/demo-db, the default class standard
+demo/demo-webapp: depends on demo-db (database demo.demo-webapp.database, database)
 $ ls out/projects/demo/instances out/projects/demo/instances/demo-webapp
 out/projects/demo/instances:
 demo-db
@@ -253,7 +264,7 @@ file renders, in `Chart.yaml` order (`api`, `scheduler`, `gateway`,
 `metrics`: `backup`, left out, is not among them), then the chart of each
 OAuth client in `dcr` mode, by key; its objects, the credentials Secrets
 of its outputs and its `objects` section, are in `okdp.objects.yaml`; it
-depends on `demo-db`, by two parameters, and on `demo-alerts`
+depends on `demo-db`, by its two claims, and on `demo-alerts`
 ([`--repository`](#--repository)).
 
 The directory is created if needed, and the files written into it,
@@ -270,7 +281,8 @@ Once the files are written, the command prints on stderr, after the
 warnings, the `Result.Dependencies` of each instance: one line per
 connection reference to another instance, by parameter path,
 `<namespace>/<release>: depends on <instance> (<contract>, <field>)`, the
-instance's release name, the contract it must provide and the parameter that
+instance's release name, `<namespace>/<instance>` for a claim's provider
+of another namespace, the contract it must provide and the parameter that
 references it ([dependencies](specs/01_inputs_outputs.md#dependencies));
 for an output of another name than the instance, the output after the
 contract, `depends on demo-pg (database-server demo-pg-hive, db)`. No file
@@ -354,7 +366,7 @@ the files are written, one line each, by parameter path, and never with
 `--check` ([`--output`](#--output)):
 
 ```text
-demo/demo-webapp: depends on demo-db (database, database)
+demo/demo-webapp: depends on demo-db (database demo.demo-webapp.database, database)
 ```
 
 ### Rendering with Helm
@@ -443,15 +455,19 @@ output/projects/<project>/instances/<instance>/   -o <dir>
   instance's package is `catalog/<service>/<version>/`.
 - The context has a file per level
   ([levels](specs/01_inputs_outputs.md#levels)): 0 `platform.yaml`, the
-  platform values (`global.okdp`, the connections every instance may
-  reference); 1 `project.yaml`, what a project adds for its instances (its
-  settings under `global`, its connections); 2 `connections.yaml`, the
-  instance's own connections (`connections: {<name>: {...}}`), written as
-  the lower levels write theirs, and nothing else: `global` is the
-  platform's or the project's. A level adds values and changes none of a
-  lower level's.
+  platform values (`global.okdp`, the classes of the claims and their
+  default among it, the connections every instance may reference); 1
+  `project.yaml`, what a project adds for its instances (its settings
+  under `global`, its classes beside the platform's, a default class of a
+  contract the platform sets none of, its connections, its named claims,
+  `claims: {<name>: {contract: <contract>}}`, which its instances
+  reference by name); 2 `connections.yaml`, the instance's own connections
+  (`connections: {<name>: {...}}`), written as the lower levels write
+  theirs, and nothing else: `global` is the platform's or the project's. A
+  level adds values and changes none of a lower level's. The named claims
+  are a project's only: `platform.yaml` declares none.
 - `config.yaml` is the instance values: its parameters and upstream
-  values, no `connections`.
+  values, no `connections`, no `claims`.
 - The release is the instance's directory name, the namespace the
   project's: no field overrides them.
 - `.charts/`, the chart cache of the checks (`helm pull --untar`), is
@@ -483,11 +499,11 @@ its caller's.
 
 `TestExample` (`examples_test.go`) compiles each example's tree this way
 (`LoadRepository`, then `CompileAll`), and compares what the helm target
-writes with its `output/`. The example instances are named
-after the release names of their outputs, `demo-hello`, `demo-webapp`,
-`demo-db`, `demo-workspace`, `demo-alerts`; a real instance would be named
-`hello`, the namespace already saying `demo`. The full example's command
-([`--output`](#--output)) gives every file of the tree.
+writes with its `output/`. The example instances are named after the
+release names of their outputs, `demo-hello`, `demo-webapp`, `demo-db`,
+`demo-workspace`, `demo-alerts`, `demo-app`; a real instance would be
+named `hello`, the namespace already saying `demo`. The full example's
+command ([`--output`](#--output)) gives every file of the tree.
 
 ## Go library
 
@@ -526,13 +542,17 @@ func main() {
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
-		// What the other instances of the namespace publish (their okdp.info.yaml),
-		// by release: demo-db, the database the instance references.
-		Published: map[string]compiler.Info{"demo-db": {Provides: []compiler.Output{{
-			Name: "demo-db", Contract: "database",
-			Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo-db"},
-			SecretRef: &compiler.SecretRef{Name: "demo-db-database-credentials"},
-		}}}},
+		// The claims of the instance, by parameter, each bound to its provider:
+		// database's to demo-db, with the output demo-db publishes for it (its
+		// okdp.info.yaml).
+		Bindings: map[string]compiler.Binding{"database": {
+			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.demo-webapp.database",
+			Output: &compiler.Output{
+				Name: "demo.demo-webapp.database", Contract: "database",
+				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_demo_webapp_database"},
+				SecretRef: &compiler.SecretRef{Name: "demo.demo-webapp.database-credentials"},
+			},
+		}},
 	}
 	// The values layers, as helm -f files: the platform's, then the
 	// instance's.
@@ -657,10 +677,14 @@ be empty when nothing references a contract), `Context` (the context
 files, parsed, each a `ContextLayer` of its level), `Values` (its
 `config.yaml`, parsed), `Release`, `Namespace` and `Published` (what the
 other instances of the namespace publish, by release, each a
-`compiler.Info`; nil, none is known; `CompileAll` sets it); all but
-`Charts`, `Context`, `Values` and `Published` are required
-([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
-`-o` writes in `instance.values.yaml`, `Result.Charts` the index the
+`compiler.Info`; nil, none is known; `CompileAll` sets it), `Claims` (the
+claims bound to the instance of a provider, `compiler.Claim`), `Bindings`
+(the providers the instance's claims are bound to, by parameter path,
+`compiler.Binding`): `CompileAll` sets both
+([claims](specs/01_inputs_outputs.md#claims)); all but `Charts`,
+`Context`, `Values`, `Published`, `Claims` and `Bindings` are required
+([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is
+what `-o` writes in `instance.values.yaml`, `Result.Charts` the index the
 umbrella's `Chart.yaml` names the charts from, `Result.Info` what it
 writes in `okdp.info.yaml`, `Result.Objects` OKDP's objects, what it
 writes in `okdp.objects.yaml`, and `Result.Dependencies` what it prints on
@@ -687,8 +711,10 @@ holds, to read it back.
   `warning: <message>`.
 - `Result.Dependencies` lists the instances of the namespace the
   connection references point to, by parameter path, each a
-  `compiler.Dependency`, `{Instance, Contract, Field, Output}`, `Output`
-  the output the reference resolved to, by name
+  `compiler.Dependency`, `{Instance, Namespace, Contract, Field, Output}`,
+  `Namespace` the instance's when it is another namespace's (a claim's
+  provider), `Output` the output the reference resolved to, by name, or
+  the claim's ID
   ([dependencies](specs/01_inputs_outputs.md#dependencies)): what a
   deployer orders the releases with ([GitOps](#gitops)). `Write` writes
   them in no file; the binary prints each, once the files are written, as
@@ -701,10 +727,12 @@ holds, to read it back.
   once, each naming its repository and path.
 - `compiler.CompileAll(ctx, instances)` compiles instances together, each
   a `compiler.Instance`, its `Definition` and its `Inputs` without
-  `Published`: each instance of a namespace after the instances whose
-  outputs it references, with what they publish. One `compiler.Outcome`
-  per instance, in their order: its `Result`, or, nil, why it is refused
-  (`Err`); the order changes none ([compiling instances
+  `Published`, `Claims` and `Bindings`: each claim bound to its provider,
+  each instance after the instances of its namespace whose outputs it
+  references and the providers of its claims, with what they publish. One
+  `compiler.Outcome` per instance, in their order: its `Result`, or, nil,
+  why it is refused (`Err`), and its claims, bound (`Claims`); the order
+  changes none ([compiling instances
   together](specs/01_inputs_outputs.md#compiling-instances-together)).
 - `compiler.NewGraph(results)` is the deployment graph of the results of
   `CompileAll`: each release waits for the releases of its namespace its
@@ -932,7 +960,7 @@ usage error with status 2.
 | `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` of a context file |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
 | `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (a context file above level 0 fails earlier, `context layer <n> (level <l>): ...`) | fix the platform values or the contract |
-| `database (connection "shared-db"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):` then `- at '': missing property 'secretRef'`; `audit (output "demo-db" of demo-db): the connection does not meet ...:` then `- at '/engine': value must be 'postgresql'` | the connection, external or an output, does not meet what the package requires of it (`require` of its `x-okdp-connection-ref`); one line per violation | reference another connection, or fix it (add its `secretRef`) ([what a reference requires](specs/01_inputs_outputs.md#what-a-reference-requires)) |
+| `database (claim "demo.demo-app.database" of data/postgresql): the connection does not meet the package's requirement (x-okdp-connection-ref.require); data/postgresql is the provider of the default class standard of database-server connections (global.okdp.provisioning.database-server.default): name a class whose provider meets it (class), or change the default:` then `- at '/engine': value must be 'postgresql'`; `database (connection "shared-db"): the connection does not meet ...:` then `- at '': missing property 'secretRef'` | the connection, external, an output or what a claim's provider publishes, does not meet what the package requires of it (`require` of its `x-okdp-connection-ref`); one line per violation | reference another connection, or fix it (add its `secretRef`); for a claim, name a class whose provider meets it (`{class: <name>}`), a project's own if need be, or change the default in `platform.yaml` ([what a reference requires](specs/01_inputs_outputs.md#what-a-reference-requires)) |
 | `database: x-okdp-connection-ref: require: field "major" is not part of the database contract`, `... require: "password" is a secret field, in the credentials Secret, never in the connection: require secretRef` | the package's requirement names a field the connection cannot have | fix the package's `config.schema.json`: require `secretRef` for credentials |
 | `config.schema.json: properties.database: x-okdp-connection-ref: require: a JSON Schema, an object, got true`, `... require: "file:///require.schema.json#" is not valid against metaschema: ...` | the package's requirement is no JSON Schema, whether the instance sets the reference or not | fix the package's `config.schema.json` |
 | several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, in parameter path order (keys sorted at each level), with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
@@ -1004,3 +1032,16 @@ of the targets' options are in
 | `db/projects/demo/instances/web/instance.yaml: service "web" is in the catalog of no repository`, `version "2.0.0" of service "web" is not in db/catalog/web` | the instance names a package no repository has | add it to a catalog, or fix `instance.yaml` |
 | `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none; instances that reference each other's outputs are both refused so | fix that instance; make one of two references a connection file's: it waits for nothing |
 | `error: demo/demo-p: provides "x" (server): demo-q publishes an output of that contract and name too, ...` | two instances of the namespace publish one output | name one of them otherwise: a reference must find one |
+| `error: demo/demo-app: db: claim (database-server): it names no class, and the context sets no default one, global.okdp.provisioning.database-server.default (Inputs.Context): the classes are fast, standard` | a claim that names neither a class nor a provider, and neither `platform.yaml` nor the project's `project.yaml` sets a default class; `no class of database-server connections is defined (...)` when none is; `claims.<name>: ...` for a named claim, every instance of its project refused | set one, `global: {okdp: {provisioning: {database-server: {default: standard, classes: {standard: {provider: data/pg}}}}}}`, or name a class: `db: {class: fast}` ([classes](specs/01_inputs_outputs.md#classes)) |
+| `error: demo/demo-app: db: claim (database-server): class "nvme" is not a class of database-server connections (global.okdp.provisioning.database-server.classes): fast, standard` (`the default class "nvme" (...default) is not a class ...`) | the claim, or the default, names a class the context does not define | name one of those, or define it |
+| `error: demo/demo-app: db: claim (database-server): the default class "standard": data/pg is no instance that provisions database-server connections` (`class "fast": ...`) | the class's provider is no instance whose package provisions the contract | fix the class's provider, or add the instance |
+| `error: demo/demo-app: db: claim: request.size: set by the class large (global.okdp.provisioning.database-server.classes.large): remove it, or name another class` | the claim requests a key its class fixes, in its `request` or its package's | remove it, or name a class that does not fix it |
+| `error: demo/demo-app: db: claim: class or provider, not both` | the claim names both | name one |
+| `context layer 2 (level 1): global.okdp.provisioning.database-server.default is set at level 0 (Inputs.Context): ...` (`...classes.standard is set at level 0`) | a project changes the platform's default class, or one of its classes | add a class of the project's own and name it ([levels](specs/01_inputs_outputs.md#levels)) |
+| `error: demo/demo-b: db: claim "reports" has contract "s3", "database-server" is expected` | the reference names a named claim of the project of another contract | name a claim of its contract, or declare one ([claims](specs/01_inputs_outputs.md#claims)) |
+| `error: demo/demo-b: db: "reports" is a claim: the reference takes none (x-okdp-connection-ref's provision)` | the reference names a named claim, and its package does not let it take claims | name a connection or an output |
+| `error: demo/demo-app: database: claim (database-server): the request does not meet the contract's claim schema (x-okdp-claim):` then `- at '/size': '5G' does not match pattern '^[0-9]+(Mi|Gi)$'` | what the claim requests (its `request`, merged over the package's, or a named claim's declaration's), its claim schema's defaults applied, is not what the contract's claim schema (`x-okdp-claim`) allows; one line per violation | request what it allows ([requests](specs/01_inputs_outputs.md#requests)) |
+| `error: demo/demo-app: database: claim (s3): request: the contract declares no claim schema (x-okdp-claim): a claim requests nothing of it` | a claim requests something of a contract that declares no claim schema | remove the request, or add the claim schema to the contract |
+| `db/platform.yaml: claims: a project's (project.yaml)` | the platform's values declare named claims | declare them in the `project.yaml` of the project whose instances reference them |
+| `error: demo/demo-b: claims.reports: claim: unknown key "share": contract, class, provider and request only` (`contract is required, ...`, `a connection of that name too (connections.reports)`) | a named claim of `project.yaml` not of the form, every instance of the project refused | fix the declaration ([claims](specs/01_inputs_outputs.md#claims)) |
+| `error: data/pg: claim "demo.demo-app.db" (database-server): claimed of namespace demo: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` | a claim across namespaces, its credentials in the provider's namespace | set the platform's ClusterSecretStore ([credentials across namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)) |

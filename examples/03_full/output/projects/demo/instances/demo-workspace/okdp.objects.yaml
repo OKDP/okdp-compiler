@@ -103,7 +103,7 @@ data:
       database: demo-warehouse
       name: sales
     - bucket: workspace-scratch
-      database: demo-db
+      database: demo.marketing
       name: marketing
     - bucket: okdp-datalake
       name: archive

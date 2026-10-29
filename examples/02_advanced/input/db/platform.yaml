@@ -21,6 +21,15 @@ global:
         registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
         authMethod: anonymous
         ttlSeconds: 300                # keep the finished Job and its logs 5 minutes
+    # The classes of each contract, as Kubernetes' storage classes: each
+    # the provider of its claims, <namespace>/<release>, the default one
+    # that of the claims that name neither a class nor a provider
+    # (database: {}).
+    provisioning:
+      database:
+        default: standard
+        classes:
+          standard: {provider: demo/demo-db}
 
 # A context layer may set more than global. A connection given here is one
 # every instance may reference by name. Here the instance's audit database

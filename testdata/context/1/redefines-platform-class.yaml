@@ -1,0 +1,12 @@
+# error: context layer 2 (level 1): global.okdp.provisioning.database.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
+# A context file of level 1, a project's (project.yaml), that changes the
+# platform's default class: a level adds classes, a lower level's classes
+# and default are taken whole. A project that wants another provider adds
+# a class of its own and names it ({class: <name>}).
+global:
+  okdp:
+    provisioning:
+      database:
+        default: fast
+        classes:
+          fast: {provider: demo/demo-db}

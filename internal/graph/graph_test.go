@@ -110,3 +110,30 @@ func TestNotProvided(t *testing.T) {
 		t.Errorf("got %v\nwant %s", err, want)
 	}
 }
+
+// TestNamespaces: a dependency on a release of another namespace, a
+// claim's provider: an edge between the namespaces; refused when that
+// release is missing or publishes no output for the claim.
+func TestNamespaces(t *testing.T) {
+	claim := okdp.Dependency{Instance: "pg", Namespace: "data", Contract: "server", Field: "db", Output: "demo.demo-a.db"}
+	pg := result("pg", []string{"demo.demo-a.db"})
+	pg.Namespace = "data"
+	g, err := New([]*okdp.Result{result("demo-a", nil, claim), pg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := Node{"demo", "demo-a"}
+	if got := g.DependsOn(a); !reflect.DeepEqual(got, []Node{{"data", "pg"}}) || g.Wave(a) != 1 {
+		t.Errorf("depends on %v, wave %d", got, g.Wave(a))
+	}
+	other := result("pg", nil)
+	other.Namespace = "data"
+	for results, want := range map[*okdp.Result]string{
+		result("pg", []string{"demo.demo-a.db"}): `demo/demo-a: db: it references "data/pg", which is not an instance of namespace "data"`,
+		other:                                    `demo/demo-a: db: it references the server output "demo.demo-a.db" of "data/pg", which "data/pg" does not publish`,
+	} {
+		if _, err := New([]*okdp.Result{result("demo-a", nil, claim), results}); err == nil || err.Error() != want {
+			t.Errorf("got %v\nwant %s", err, want)
+		}
+	}
+}

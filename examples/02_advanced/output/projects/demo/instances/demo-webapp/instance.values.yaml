@@ -14,12 +14,12 @@ app:
           key: client_secret
           name: demo-webapp-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo-db
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_webapp_database
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo-db-database-credentials
+          name: demo.demo-webapp.database-credentials
     - name: AUDIT_DB_URL
       value: jdbc:postgresql://db.okdp.example.org:5432/shared
     - name: AUDIT_DB_PASSWORD
@@ -47,6 +47,12 @@ app:
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
         issuerUri: https://sso.okdp.example.org/realms/okdp
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo/demo-db
+          default: standard
   image:
     tag: "1.8"
   ingress:
@@ -90,6 +96,12 @@ oidc-dcr:
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
         issuerUri: https://sso.okdp.example.org/realms/okdp
+      provisioning:
+        database:
+          classes:
+            standard:
+              provider: demo/demo-db
+          default: standard
   mapping:
     keyMapping:
       client_id: .client_id

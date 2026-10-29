@@ -60,7 +60,7 @@ api:
         url: jdbc:${{ cdb.engine }}://${{ cdb.host }}:${{ str(cdb.port) }}/${{ cdb.dbName }}
         driver: ${{ cdb.driver }}
         credentials: ${{ cdb.secretRef.name }}
-        from: ${{ cdb.okdp.source }}             # external or output
+        from: ${{ cdb.okdp.source }}             # external, output or claim
       properties: ${{ c.?properties.orValue({}) }}
 
 scheduler:                                       # the second render of the workspace chart

@@ -1,6 +1,6 @@
 // Package graph: the deployment graph of compiled instances: a release
 // waits for the releases its connection references point to
-// (Result.Dependencies), of its namespace. Built once from the results of a compile and
+// (Result.Dependencies), of its namespace, or of another for a claim. Built once from the results of a compile and
 // checked, it is what a deployer orders the releases with.
 package graph
 
@@ -62,7 +62,7 @@ func New(results []*okdp.Result) (*Graph, error) {
 	for n, res := range byNode {
 		g.deps[n] = []Node{}
 		for _, d := range res.Dependencies {
-			to := Node{n.Namespace, d.Instance}
+			to := Node{cmp.Or(d.Namespace, n.Namespace), d.Instance}
 			if err := provides(byNode[to], d, n, to); err != nil {
 				errs = append(errs, &Error{n, err})
 				continue
@@ -85,15 +85,20 @@ func New(results []*okdp.Result) (*Graph, error) {
 }
 
 // provides: nil when res, the result of the dependency's release to,
-// provides what d references from the release from.
+// provides what d references from the release from. A release of another
+// namespace is named with it, <namespace>/<release>.
 func provides(res *okdp.Result, d okdp.Dependency, from, to Node) error {
+	name, another := d.Instance, "another instance"
+	if to.Namespace != from.Namespace {
+		name, another = to.String(), "an instance"
+	}
 	if res == nil || to == from {
-		return fmt.Errorf("%s: it references %q, which is not another instance of namespace %q", d.Field, d.Instance, to.Namespace)
+		return fmt.Errorf("%s: it references %q, which is not %s of namespace %q", d.Field, name, another, to.Namespace)
 	}
 	if slices.ContainsFunc(res.Info.Provides, func(o okdp.Output) bool { return o.Contract == d.Contract && o.Name == d.Output }) {
 		return nil
 	}
-	return fmt.Errorf("%s: it references the %s output %q of %q, which %q does not publish", d.Field, d.Contract, d.Output, d.Instance, d.Instance)
+	return fmt.Errorf("%s: it references the %s output %q of %q, which %q does not publish", d.Field, d.Contract, d.Output, name, name)
 }
 
 // levels sets the waves, Kahn's algorithm by levels: wave 0, the releases

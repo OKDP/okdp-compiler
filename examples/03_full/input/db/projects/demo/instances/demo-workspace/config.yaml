@@ -2,10 +2,11 @@
 # the defaults of the package's config.schema.json, then platform.yaml,
 # project.yaml and connections.yaml. A connection reference names a
 # connection (the platform's, the project's or the instance's own) or an
-# instance of the namespace.
+# output of an instance of the namespace, or claims a connection of a
+# provider.
 replicas: 2
 size: medium
-database: demo-db                      # an instance of the namespace: a dependency
+database: {}                           # a claim, a database of its own: a dependency
 audit: platform-db                     # a connection of the platform
 storage: datalake                      # likewise
 catalogs:                              # references in the items of a list
@@ -16,12 +17,12 @@ catalogs:                              # references in the items of a list
       format: parquet
       compression: zstd
   - name: marketing
-    database: demo-db                  # the same instance again: a second dependency
+    database: marketing                # a named claim of the project (project.yaml): a second dependency
     storage: scratch                   # the instance's own connection (connections.yaml)
   - name: archive                      # no database
     storage: datalake
 notifications:
-  webhook: demo-alerts                 # an instance providing http
+  webhook: demo-alerts                 # an output of the namespace, demo-alerts's
   channels: ["#data-platform", "#demo-alerts"]
 admins: [alice@example.org, bob@example.org]
 extraEnv:

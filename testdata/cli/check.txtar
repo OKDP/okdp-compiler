@@ -1,12 +1,13 @@
-# --check: the tree compiled and checked, nothing written: status 0,
-# nothing printed. With --charts (or $OKDP_CHARTS, read with --check
-# only), the final values are checked against the upstream charts too.
+# --check: the tree compiled and checked, nothing written: status 0, the
+# bindings printed, no dependency. With --charts (or $OKDP_CHARTS, read
+# with --check only), the final values are checked against the upstream
+# charts too.
 status 0 okdp-compile --check --repository examples/03_full/input/db
 ! stdout .
-! stderr .
+cmp stderr $WORK/bound.txt
 status 0 okdp-compile --check --charts examples/03_full/.charts --repository examples/03_full/input/db
 ! stdout .
-! stderr .
+cmp stderr $WORK/bound.txt
 
 # A value the chart's values.schema.json refuses: compiled, and checked
 # without the chart; with it, status 1, the report on stderr.
@@ -39,6 +40,9 @@ status 1 okdp-compile --charts $WORK/charts --repository $WORK/lib --repository 
 stderr '^error: --charts is read by --check only: a compile reads no chart$'
 ! exists $WORK/charted
 
+-- bound.txt --
+demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: database: claim demo.demo-workspace.database (database) bound to demo/demo-db, the default class standard
 -- schema.txt --
 error: demo/demo-bad: compiled values don't meet the specifications of the schema(s) in the following chart(s):
 hello (hello-1.0.0):

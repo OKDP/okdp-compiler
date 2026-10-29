@@ -52,6 +52,12 @@ func isChartName(name string) bool {
 	return name != "" && name == path.Base(name) && name != "." && name != ".." && strings.TrimSpace(name) == name
 }
 
+// IsFileName: s is one element of a path, a file or directory name: not
+// empty, not . or .., without a / or a \ (fs.ValidPath).
+func IsFileName(s string) bool {
+	return fs.ValidPath(s) && s != "." && !strings.ContainsAny(s, `/\`)
+}
+
 // id: <chart>-<version>, the chart's name in the chart cache and in the
 // errors.
 func (r Ref) id() string {
@@ -97,6 +103,21 @@ var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 // characters at most.
 func IsDNSLabel(s string) bool {
 	return len(s) <= 63 && dnsLabel.MatchString(s)
+}
+
+// IsClaimID: s is a claim's ID, DNS-1123 labels joined by dots, 63
+// characters at most: a Kubernetes name, a DNS subdomain, which the dots of
+// its parts separate.
+func IsClaimID(s string) bool {
+	if len(s) > 63 {
+		return false
+	}
+	for l := range strings.SplitSeq(s, ".") {
+		if !dnsLabel.MatchString(l) {
+			return false
+		}
+	}
+	return true
 }
 
 // ReleaseMax: the longest release name Helm accepts, leaving room for the

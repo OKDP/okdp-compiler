@@ -70,8 +70,8 @@ func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
 
 // inputs: the in-memory contracts, no chart cache, with these values
 // layers: the global of each, a context layer at level 0 (Inputs.Context),
-// its connections, one at level 2, the instance's own, the rest, an
-// instance layer (Inputs.Values).
+// its connections, one at level 2, the instance's own, its claims, one at
+// level 1, the project's, the rest, an instance layer (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
 	in := Inputs{Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
 	for _, l := range layers {
@@ -83,6 +83,10 @@ func inputs(layers ...map[string]any) Inputs {
 		if c, ok := l["connections"]; ok {
 			in.Context = append(in.Context, ContextLayer{Level: 2, Values: map[string]any{"connections": c}})
 			delete(l, "connections")
+		}
+		if c, ok := l["claims"]; ok {
+			in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"claims": c}})
+			delete(l, "claims")
 		}
 		in.Values = append(in.Values, l)
 	}
