@@ -1,20 +1,21 @@
 # Writing a package
 
-How to package an upstream application for OKDP: a directory of parameters,
-OKDP's defaults and a service definition, compiled by `okdp-compile`. The steps
-follow a `webapp` service, of which the example of this repository is a
-smaller version (`examples/02_advanced/input/db/catalog/webapp/1.0.0/`;
+How to package an upstream application for OKDP: a directory of
+parameters, OKDP's defaults and a service definition, compiled by
+`okdp-compile`. The steps follow a `webapp` service, of which the example
+of this repository is a smaller version
+(`examples/02_advanced/input/db/catalog/webapp/1.0.0/`;
 `examples/00_passthrough/input/db/catalog/echo/1.2.0/` is the smallest
 package, a chart and its values,
 `examples/01_minimal/input/db/catalog/hello/1.0.0/` the smallest with a
 mapping, `examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/` one
-that uses every part of the mapping language, each commented); the
-recipes and pitfalls come from the services packaged in
-`OKDP/platform-charts` and `OKDP/sandbox-dependencies`. What each file may contain is specified in
-[the service definition](specs/02_service_definition.md), its
-[control flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
-and [inputs and outputs](specs/01_inputs_outputs.md), the command line
-in [usage](01_usage.md), the internals in [architecture](00_architecture.md).
+that uses every part of the mapping language, each commented); the recipes
+and pitfalls come from the services packaged in `OKDP/platform-charts` and
+`OKDP/sandbox-dependencies`. What each file may contain is specified in
+[the service definition](specs/02_service_definition.md), its [control
+flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
+and [inputs and outputs](specs/01_inputs_outputs.md), the command line in
+[usage](01_usage.md), the internals in [architecture](00_architecture.md).
 
 ## What a package is
 
@@ -52,11 +53,11 @@ the package is published as a chart.
 
 `--package` names the package directory (`okdp-compile --package
 examples/02_advanced/input/db/catalog/webapp/1.0.0`); `--check --charts`
-checks a compile against the upstream charts' defaults and schemas, from
-a chart cache ([`--check`](01_usage.md#--check)). In a repository laid out as the
-examples, a package is a version directory of the catalog,
-`catalog/<service>/<version>/`, which its `Chart.yaml` names
-([repository layout](01_usage.md#repository-layout)).
+checks a compile against the upstream charts' defaults and schemas, from a
+chart cache ([`--check`](01_usage.md#--check)). In a repository laid out
+as the examples, a package is a version directory of the catalog,
+`catalog/<service>/<version>/`, which its `Chart.yaml` names ([repository
+layout](01_usage.md#repository-layout)).
 
 ## Integrating a chart
 
@@ -382,20 +383,20 @@ provides:                  # the connections the instance publishes
   sees the previous ones, and hides a
   [context](specs/02_service_definition.md#context) variable of the
   same name (`labels`). The values file reads the bindings too (`host`).
-- The values file holds only what is computed, by key. Every dependency
-  is rendered, as Helm renders a chart's dependencies: one the file does
-  not write gets `{}` as its computed values, OKDP's defaults, the
-  instance's upstream values and, by Helm, its chart's defaults still
-  applied. A `$if` on a
-  chart, or a null value (`backup: ~`), leaves it out: it is neither
-  compiled nor rendered (the webapp's `metrics`, trino's `opa-kube-mgmt`
-  and `opal`). A key a top-level `$merge` or `$for` gives counts only when
-  it gives it: to leave a dependency out, write its key
-  ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
+- The values file holds only what is computed, by key. Every dependency is
+  rendered, as Helm renders a chart's dependencies: one the file does not
+  write gets `{}` as its computed values, OKDP's defaults, the instance's
+  upstream values and, by Helm, its chart's defaults still applied. A
+  `$if` on a chart, or a null value (`backup: ~`), leaves it out: it is
+  neither compiled nor rendered (the webapp's `metrics`, trino's
+  `opa-kube-mgmt` and `opal`). A key a top-level `$merge` or `$for` gives
+  counts only when it gives it: to leave a dependency out, write its key
+  ([rendered
+  dependencies](specs/02_service_definition.md#rendered-dependencies)).
   Any other value that is not a map fails the compile. OKDP's own objects
   are not values: they reach the cluster in the umbrella, whatever the
-  file leaves out
-  ([the objects file](specs/01_inputs_outputs.md#the-objects-file)).
+  file leaves out ([the objects
+  file](specs/01_inputs_outputs.md#the-objects-file)).
 - `errors` fails the compile with every message at once. A message is the
   `$value` of an item with its condition, `$if`; `$for` checks every
   element of a list.
@@ -425,9 +426,9 @@ project's, or the instance's own at a level of its own), another instance
 of the namespace (internal, for a contract with a naming convention), or
 an output another instance of the namespace publishes (for a contract
 without one). Before the mapping runs, the compiler replaces the name with
-the connection, completed against its contract
-([what the mapping receives](specs/01_inputs_outputs.md#what-the-mapping-receives)).
-A reference left empty stays `""` (or `null`); a name that is not an entry
+the connection, completed against its contract ([what the mapping
+receives](specs/01_inputs_outputs.md#what-the-mapping-receives)). A
+reference left empty stays `""` (or `null`); a name that is not an entry
 of `connections` must be a release name, or an output's name.
 
 ```yaml
@@ -684,14 +685,14 @@ polaris-admin-principals:
     polaris: {url: "${{ internalUrl }}"}
 ```
 
-Both keys render with the chart, over its defaults, and a check holds
-both to its `values.schema.json`, each with its own values file: the index maps both to the same
-chart ([rendering with Helm](01_usage.md#rendering-with-helm)). Everything
-else is keyed by the key
-([dependencies](specs/02_service_definition.md#dependencies)).
-Without an alias, the second would have the key of the first, and fail
-the load. The second render accepts no instance upstream values: an entry
-of its key in `upstream` would read the instance's
+Both keys render with the chart, over its defaults, and a check holds both
+to its `values.schema.json`, each with its own values file: the index maps
+both to the same chart ([rendering with
+Helm](01_usage.md#rendering-with-helm)). Everything else is keyed by the
+key ([dependencies](specs/02_service_definition.md#dependencies)). Without
+an alias, the second would have the key of the first, and fail the load.
+The second render accepts no instance upstream values: an entry of its key
+in `upstream` would read the instance's
 `upstream.polaris-admin-principals`, with its own `protect` and `append`
 ([upstream](specs/02_service_definition.md#upstream)).
 
@@ -776,11 +777,12 @@ spliced with `$spread`.
 ### Labels
 
 OKDP's objects take OKDP's labels, their selectors OKDP's selector labels:
-`labels` and `selectorLabels`, or, for one component
-of the instance, `okdpLabels('cache')` and `okdpSelectorLabels('cache')`
-(superset's Valkey Deployment and Service). The console finds an instance's workloads by `app.kubernetes.io/instance`.
-An upstream chart that leaves it out of its pods usually has a value for
-extra labels: set it (polaris-console `podLabels`, airflow `labels`).
+`labels` and `selectorLabels`, or, for one component of the instance,
+`okdpLabels('cache')` and `okdpSelectorLabels('cache')` (superset's Valkey
+Deployment and Service). The console finds an instance's workloads by
+`app.kubernetes.io/instance`. An upstream chart that leaves it out of its
+pods usually has a value for extra labels: set it (polaris-console
+`podLabels`, airflow `labels`).
 
 ### Database connection
 
@@ -904,8 +906,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   error (`no such overload`) or a missing key passes until a case takes it
   ([expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
   give every branch a `ci/` case that takes it, and test both OIDC modes:
-  the clients' charts are compiled, and the platform's `registrationUrl` and
-  `authMethod` required, in `dcr` mode only.
+  the clients' charts are compiled, and the platform's `registrationUrl`
+  and `authMethod` required, in `dcr` mode only.
 - **A null deletes the default.** A key computed as `null`
   (`${{ values.?x.orValue(null) }}`) removes the upstream chart's default at
   render: leave the key out with `$if`. A parameter set to `null` by a values

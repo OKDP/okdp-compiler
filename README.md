@@ -202,27 +202,26 @@ bin/okdp-compile --repository examples/03_full/input/db -o out/flux --target flu
 `-o <dir>` (`--output`), required, writes the instance as one chart, for
 one Helm release per instance: `<dir>/Chart.yaml`, an umbrella over the
 upstream charts of the index, each a dependency under its key, and
-`<dir>/instance.values.yaml`, the final values of each chart under its key,
-given to Helm with `-f`
-([`--output`](docs/01_usage.md#--output),
+`<dir>/instance.values.yaml`, the final values of each chart under its
+key, given to Helm with `-f` ([`--output`](docs/01_usage.md#--output),
 [rendering with Helm](docs/01_usage.md#rendering-with-helm)),
 `<dir>/okdp.objects.yaml`, OKDP's own objects, which the umbrella renders
-as written (`<dir>/templates/okdp.yaml`), when the instance has any,
-and `<dir>/okdp.info.yaml`, what the instance publishes, when it
-publishes something. The directory is created if needed; a compile that
-fails writes nothing, the files of a successful one overwrite those of the
-same name. The instances the connection references point to are printed on
-stderr, one line each, `depends on <instance> (<contract>, <field>)`; a
-deployer that orders the releases reads them from `Result.Dependencies`
+as written (`<dir>/templates/okdp.yaml`), when the instance has any, and
+`<dir>/okdp.info.yaml`, what the instance publishes, when it publishes
+something. The directory is created if needed; a compile that fails writes
+nothing, the files of a successful one overwrite those of the same name.
+The instances the connection references point to are printed on stderr,
+one line each, `depends on <instance> (<contract>, <field>)`; a deployer
+that orders the releases reads them from `Result.Dependencies`
 ([okdp-gitops](https://github.com/OKDP/okdp-gitops),
 [GitOps](docs/01_usage.md#gitops)). `--published <dir>` gives what the
 other instances of the namespace publish, each instance's
-`<dir>/<release>/okdp.info.yaml` (`Inputs.Published`): a reference
-of a contract without a naming convention may name one of their outputs,
+`<dir>/<release>/okdp.info.yaml` (`Inputs.Published`): a reference of a
+contract without a naming convention may name one of their outputs,
 `depends on demo-pg (database-server demo-pg-hive, db)`
-([resolution](docs/specs/01_inputs_outputs.md#resolution)). `--release` and `--namespace` are
-required, names Kubernetes and Helm accept (a release of 53 characters at
-most): the values are compiled for them.
+([resolution](docs/specs/01_inputs_outputs.md#resolution)). `--release`
+and `--namespace` are required, names Kubernetes and Helm accept (a
+release of 53 characters at most): the values are compiled for them.
 
 `--check`, without `-o`, compiles and writes nothing: what fails a compile
 fails it, its warnings printed. With it, `--charts <dir>` (`$OKDP_CHARTS`),

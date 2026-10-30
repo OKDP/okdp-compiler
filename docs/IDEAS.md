@@ -127,7 +127,8 @@ opens rather than text it shows. The info file keeps `url` and
   names), tied to that chart's layout, or the compile writes them into the
   values for the notes. Helm would run OKDP template code, which it does
   not today: the umbrella's only template includes the objects as written
-  ([values for unmodified upstream charts](00_architecture.md#values-for-unmodified-upstream-charts)).
+  ([values for unmodified upstream
+  charts](00_architecture.md#values-for-unmodified-upstream-charts)).
 - **Read through the release Secrets.** A console reads the notes from
   `sh.helm.release.v1.<release>.v<n>`, a Secret, base64 twice around a
   gzip, that holds the values and the rendered manifests too, the latest
@@ -162,3 +163,91 @@ the repository stays what a console reads, or the
 [descriptor ConfigMap](#a-descriptor-configmap-per-instance), which puts
 the usage in the cluster under Argo CD too, readable with a role on
 ConfigMaps; the notes serve the operators who use the Helm CLI.
+
+## servicebinding.io credentials Secrets
+
+The [Service Binding for
+Kubernetes](https://servicebinding.io/spec/core/1.1.0/) specification
+gives a Secret that describes a connection a shape standard tooling
+reads: a `type` entry, the abstract classification of the binding
+(`postgresql`, `mysql`), a `provider` entry, who provides it, and the
+Secret's type `servicebinding.io/<type>`; well-known entries (`host`,
+`port`, `uri`, `username`, `password`, `certificates`, `private-key`);
+entry names in lowercase (`[a-z0-9\-\.]`). A `ServiceBinding` mounts
+such a Secret into a workload, its entries as files under
+`$SERVICE_BINDING_ROOT/<name>`, from which binding libraries (Spring
+Cloud Bindings, Quarkus) configure a client.
+
+Today a [credentials
+Secret](specs/01_inputs_outputs.md#credentials-secrets) is `Opaque`,
+labelled `okdp.io/credentials-<contract>`, and holds the contract's
+secret fields (`x-okdp-secret`) only: the connection's other fields
+(`host`, `port`, `dbName`) are its values, which the claimer's mapping
+writes into its chart's values. The idea comes in two sizes:
+
+- **The shape alone.** The provider's credentials Secret and the
+  claimer's copy [across
+  namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)
+  get two more entries, `type` (the contract's name) and `provider` (the
+  provider's package), and the Secret type: a generated Secret through
+  the `type` argument `okdpGeneratedSecret` already has, the claimer's
+  `ExternalSecret` through its target's template (`mergePolicy: Merge`,
+  so that the pulled keys stay). The `PushSecret` and the store key are
+  unchanged: `type` and `provider` are known at compile time and never
+  cross the store.
+- **A binding Secret.** The Secret holds the whole connection, its values
+  written in as literals beside the credentials, under the well-known
+  entry names, with a `type` the libraries recognise.
+
+### Advantages
+
+- **Standard tooling**, with a binding Secret: a workload outside OKDP's
+  packages mounts the Secret with a `ServiceBinding`, or reads it with a
+  binding library, and connects with no knowledge of OKDP.
+- **Credentials by type.** `kubectl get secrets --field-selector
+  type=servicebinding.io/s3` lists them, as the
+  `okdp.io/credentials-<contract>` label already does.
+
+### Drawbacks
+
+- **The shape alone is of no use.** With the credentials only, a Secret
+  is conformant, but no library configures a client from a username and
+  a password without the host: a `ServiceBinding` mounts half a
+  connection.
+- **A binding Secret changes the model.** The connection twice, in the
+  claimer's values and in the Secret; the contracts' field names in
+  lowercase (`database`, `access-key`), every mapping reading
+  `values.s3['access-key']`, or a table from fields to entry names; a
+  `type` that may depend on a value (`database-server` is `postgresql`
+  or `mysql` by its `engine`).
+- **One type per Secret.** A provider whose operator requires its own
+  Secret type (`kubernetes.io/basic-auth`) keeps it. The specification
+  allows it (the Secret type is a SHOULD), and the shape then differs
+  from one provider to another.
+- **A second binding mechanism.** OKDP binds at compile time: a claim
+  comes from an instance of a package, whose mapping gets the connection
+  and its `secretRef` and wires them into its chart. servicebinding.io
+  binds at run time, for workloads that read `$SERVICE_BINDING_ROOT`,
+  which OKDP does not deploy, through a `ServiceBinding` controller in
+  the cluster or workloads that mount the Secret themselves.
+
+### Conclusion
+
+Not now, even with nothing deployed. The shape alone costs two functions
+and the fixtures and gives nothing the label does not; a binding Secret
+is a model change for consumers OKDP does not have, every claimer being
+a mapping the compile already gives the connection.
+
+It becomes worth it once workloads outside OKDP's packages (a project's
+own applications, deployed by its own CI) are to use claimed
+connections. Then the binding Secret, decided before anything is
+deployed, as two of its parts get expensive later: a Secret's type is
+immutable (an upgrade fails with `field is immutable` unless the
+deployer replaces the Secret), and a renamed contract field breaks every
+mapping. A generated Secret's `ExternalSecret` is no easier: at
+`refreshInterval: "0"`, a changed template either draws new passwords
+the database does not have or never reaches the existing Secret, by the
+version of External Secrets. Limited to a Secret of the claimer's, which
+the compiler writes with the connection's values in hand (today the copy
+across namespaces; one more for a claim of its own namespace), the
+provider's Secret unchanged.

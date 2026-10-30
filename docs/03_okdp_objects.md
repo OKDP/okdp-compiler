@@ -41,9 +41,9 @@ and Services.
 
 ### How it reaches the cluster
 
-OKDP does not modify an upstream chart
-([values for unmodified upstream charts](00_architecture.md#values-for-unmodified-upstream-charts)):
-what an upstream chart cannot produce needs a vehicle. The vehicle is the
+OKDP does not modify an upstream chart ([values for unmodified upstream
+charts](00_architecture.md#values-for-unmodified-upstream-charts)): what
+an upstream chart cannot produce needs a vehicle. The vehicle is the
 instance's umbrella, the chart the compiler writes: its template
 `templates/okdp.yaml`, the same in every output, includes the file as
 written, `{{ .Files.Get "okdp.objects.yaml" }}`.

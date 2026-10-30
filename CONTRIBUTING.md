@@ -89,8 +89,9 @@ what:
 - the package files (`Chart.yaml`, `okdp.yaml`, `values.cel.yaml`) and the
   mapping language:
   [docs/specs/02_service_definition.md](docs/specs/02_service_definition.md),
-  its directives in [docs/specs/03_control_flow.md](docs/specs/03_control_flow.md),
-  its functions in [docs/specs/04_functions.md](docs/specs/04_functions.md);
+  its directives in
+  [docs/specs/03_control_flow.md](docs/specs/03_control_flow.md), its
+  functions in [docs/specs/04_functions.md](docs/specs/04_functions.md);
 - the inputs, the outputs, the checks and their messages:
   [docs/specs/01_inputs_outputs.md](docs/specs/01_inputs_outputs.md);
 - the command line, the library, CI and GitOps, the troubleshooting table

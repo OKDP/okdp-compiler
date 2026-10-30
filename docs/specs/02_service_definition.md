@@ -290,15 +290,17 @@ Another form fails when `okdp.yaml` is loaded:
 
 ### protect and append
 
-Paths of keys separated by dots (`ingress.hosts`). A key containing dots is
-written in brackets, as one literal key (`config["spark.ui.filters"]`); a
-bracketed key ending with `*` names every key starting with the text before
-it (`ingress.annotations["cert-manager.io/*"]`; `["*"]` names every key);
-no key holds a quote, a backslash or a star but a glob's. A
-malformed path fails when `okdp.yaml` is loaded:
-`okdp.yaml: upstream.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])` (`append[<i>]`
-alike). `global` is always protected. Both apply to each instance upstream
-file, then to the inline values: [protect](01_inputs_outputs.md#protect),
+Paths of keys separated by dots (`ingress.hosts`). A key containing dots
+is written in brackets, as one literal key (`config["spark.ui.filters"]`);
+a bracketed key ending with `*` names every key starting with the text
+before it (`ingress.annotations["cert-manager.io/*"]`; `["*"]` names every
+key); no key holds a quote, a backslash or a star but a glob's. A
+malformed path fails when `okdp.yaml` is loaded: `okdp.yaml:
+upstream.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a
+key with a dot in brackets (a["b.c"]), a family of keys with a final *
+(a["prefix*"])` (`append[<i>]` alike). `global` is always protected. Both
+apply to each instance upstream file, then to the inline values:
+[protect](01_inputs_outputs.md#protect),
 [append](01_inputs_outputs.md#append). `append` extends the package's
 list, not the chart's default list, which Helm replaces: a package that
 keeps its items restates them in its defaults or values file.
@@ -390,10 +392,11 @@ of them: both fail when it is loaded,
   warning: `LoadDefinition` gives it once (`Definition.Warnings`), each
   compile with its result (`Result.Warnings`:
   [outputs](01_inputs_outputs.md#outputs)), and the binary prints it on
-  stderr, `warning: <message>`, still exiting with status 0:
-  `values.yaml holds expressions or directives (${{ }}, $-keys): name it values.cel.yaml`.
-  The check reads the YAML only: a string holding `${{` (`$${{` included),
-  a key starting with `$` (`$if`, `$$key`), at any depth.
+  stderr, `warning: <message>`, still exiting with status 0: `values.yaml
+  holds expressions or directives (${{ }}, $-keys): name it
+  values.cel.yaml`. The check reads the YAML only: a string holding `${{`
+  (`$${{` included), a key starting with `$` (`$if`, `$$key`), at any
+  depth.
 - It is read as the mapping is, not as Helm reads a values file
   ([YAML reading](#yaml-reading)): YAML 1.2, and an alias refused, as in
   `values.cel.yaml`:
@@ -633,10 +636,10 @@ renders as written:
 
 Other keys are ignored. Both go to `Result.Info`, written to
 `okdp.info.yaml` with the connections the instance provides, what a
-control plane or a console reads of the instance
-([the info file](01_inputs_outputs.md#the-info-file)). A value that is not a map fails;
-absent or null, both are empty. `url` and `usage` are strings when set:
-another value, a null included, fails rather than is printed as text,
+control plane or a console reads of the instance ([the info
+file](01_inputs_outputs.md#the-info-file)). A value that is not a map
+fails; absent or null, both are empty. `url` and `usage` are strings when
+set: another value, a null included, fails rather than is printed as text,
 `- at '/instance/url': got number, want string`.
 
 ### provides
@@ -688,33 +691,34 @@ their types ([secret](#secret)), as the mapping schema describes them
 ```
 
 A key of `generate` is checked as one of `okdpGeneratedSecret`'s `keys`
-([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret)). With a `generate`,
-`stringData` takes numbers and booleans too. The contract checks then report
-`provides "<name>" (<contract>): <message>`. The items are checked in
-order, their name first, then their fields in alphabetical order, and the
-first error is reported; the required fields the item lacks, and the
-schema's violations of that item, all at once, one line each
-([the info file](01_inputs_outputs.md#the-info-file)).
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret)). With a
+`generate`, `stringData` takes numbers and booleans too. The contract
+checks then report `provides "<name>" (<contract>): <message>`. The items
+are checked in order, their name first, then their fields in alphabetical
+order, and the first error is reported; the required fields the item
+lacks, and the schema's violations of that item, all at once, one line
+each ([the info file](01_inputs_outputs.md#the-info-file)).
 
 #### secret
 
 `{generate: [<key>, ...], stringData: {...}}` renders a generated Secret
-([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `keys` = `generate`, same
-key fields, checked the same way; `stringData` optional, strings, numbers
-or booleans, written as text), `{stringData: {...}}` a plain Secret with
-these keys, strings only: a Secret's `stringData` holds strings, the API
-server refuses a number. A `generate` that is not a list, a `stringData`
-that is not a map, fail rather than render a Secret without these keys,
-before the contract checks, a null too.
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `keys` =
+`generate`, same key fields, checked the same way; `stringData` optional,
+strings, numbers or booleans, written as text), `{stringData: {...}}` a
+plain Secret with these keys, strings only: a Secret's `stringData` holds
+strings, the API server refuses a number. A `generate` that is not a list,
+a `stringData` that is not a map, fail rather than render a Secret without
+these keys, before the contract checks, a null too.
 
 The Secret is named after `secretRef.name` when given, else
 `<name>-<contract>-credentials`, which then becomes the output's
-`secretRef`. Without `secret` (or with `secret: {}`), no Secret is rendered
-and the output has a `secretRef` only when the mapping gives one. A
-`secret` with neither a non-empty `generate` nor a non-empty `stringData`
-fails with `<service>: output "<name>": secret needs stringData or generate`
-(`<service>`: the `name` of `Chart.yaml`). The rendered objects
-and their labels: [credentials Secrets](01_inputs_outputs.md#credentials-secrets).
+`secretRef`. Without `secret` (or with `secret: {}`), no Secret is
+rendered and the output has a `secretRef` only when the mapping gives one.
+A `secret` with neither a non-empty `generate` nor a non-empty
+`stringData` fails with `<service>: output "<name>": secret needs
+stringData or generate` (`<service>`: the `name` of `Chart.yaml`). The
+rendered objects and their labels: [credentials
+Secrets](01_inputs_outputs.md#credentials-secrets).
 
 ### oidcClients
 
@@ -761,21 +765,21 @@ keys; how they become the values of the client's chart:
 
 Every mode checks the clients, after the mapping: each client is a map,
 its `name` of the form above, of these keys only, each of its type,
-`grantTypes` given and not empty ([sections](#evaluation-order)); then
-one client at most has no name, and names are unique. In
-`dcr` mode, no two clients write one Secret. As soon as the
-mapping declares a client, its chart key belongs to the compiler:
-`Chart.yaml` may not list it, nor the values file compute it
-(`Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`,
-`values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it`). Only `dcr` mode
-checks against the oidc-dcr chart, in the chart cache of a check
-([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
+`grantTypes` given and not empty ([sections](#evaluation-order)); then one
+client at most has no name, and names are unique. In `dcr` mode, no two
+clients write one Secret. As soon as the mapping declares a client, its
+chart key belongs to the compiler: `Chart.yaml` may not list it, nor the
+values file compute it (`Chart.yaml: dependencies[<i>] (<key>): the chart
+of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>:
+the chart of <client> is compiled from oidcClients: remove it`). Only
+`dcr` mode checks against the oidc-dcr chart, in the chart cache of a
+check ([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
 check stops the compile ([compile errors](#compile-errors)).
 
 The mapping reads the name of a client's Secret with
-[`oidcClientSecret(name)`](04_functions.md#oidcclientsecret) (the main client's is also
-`platform.oidcClientSecret`), in any section; a client that sets `secret`
-references that name itself. The keys the Secret holds:
+[`oidcClientSecret(name)`](04_functions.md#oidcclientsecret) (the main
+client's is also `platform.oidcClientSecret`), in any section; a client
+that sets `secret` references that name itself. The keys the Secret holds:
 [OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
 
 ## Expressions
@@ -804,10 +808,11 @@ expression unterminated), a `}}` in one closes the expression
 quoted strings (`r'\'` and `'''it's'''` are unterminated). A scalar
 without the closing `}}` fails with `unterminated ${{ in "<scalar>"`.
 
-Map keys are never evaluated: `${{ x }}: 1` is the key `${{ x }}`. Computed
-keys come from [`$for`](03_control_flow.md#for) (`$key`) or [`$merge`](03_control_flow.md#merge). A key
-starting with `$` is a [directive](03_control_flow.md#places); `$$` writes one:
-`$$schema` is the key `$schema`.
+Map keys are never evaluated: `${{ x }}: 1` is the key `${{ x }}`.
+Computed keys come from [`$for`](03_control_flow.md#for) (`$key`) or
+[`$merge`](03_control_flow.md#merge). A key starting with `$` is a
+[directive](03_control_flow.md#places); `$$` writes one: `$$schema` is the
+key `$schema`.
 
 Every expression is compiled once, when the mapping is loaded, before any
 is evaluated: one under a false `$if` or in a `$for` over no element too.
@@ -855,10 +860,10 @@ Helm prints a values number: `8080`, `2.5`, `1e+06` (from one million on),
 ### YAML reading
 
 The mapping, `okdp.yaml` and the values file, is read as YAML 1.2, as
-yaml.v3 decodes it, its maps in the order written. A snippet copied from a `values.yaml`, which Helm reads as
-YAML 1.1, means the same unless it holds YAML 1.1's booleans or keys Helm
-converts (`on:`, `1.0:`): write `true` and `false`, and the keys as Helm
-reads them.
+yaml.v3 decodes it, its maps in the order written. A snippet copied from a
+`values.yaml`, which Helm reads as YAML 1.1, means the same unless it
+holds YAML 1.1's booleans or keys Helm converts (`on:`, `1.0:`): write
+`true` and `false`, and the keys as Helm reads them.
 
 | Plain scalar | Value |
 |---|---|
@@ -947,8 +952,8 @@ schema first (`- at '/global/okdp/oidc': got boolean, want object`):
 `enabled` is `true` or `false`; a `null`, unlike another setting's, is
 kept, and reads as false.
 
-`labels` and `selectorLabels` (and the functions
-[`okdpLabels`, `okdpSelectorLabels`](04_functions.md#okdplabels-and-okdpselectorlabels)),
+`labels` and `selectorLabels` (and the functions [`okdpLabels`,
+`okdpSelectorLabels`](04_functions.md#okdplabels-and-okdpselectorlabels)),
 the labels of every object OKDP renders itself:
 
 | Label | Value | `selectorLabels` |

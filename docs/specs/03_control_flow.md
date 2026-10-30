@@ -192,8 +192,8 @@ left out, or is the value of its [`$else`](#else). A map left out is:
 | a section (`instance`, ..., the values file) | the section is empty; the dependencies the values file writes are left out ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
 
 On a list item carrying `$for` or `$spread`, `$if` fails: put the
-condition in the expression (`$for: "s in (oidcOn ? [platform.oidcClientSecret] : [])"`,
-`$spread: ${{ cond ? list : [] }}`).
+condition in the expression (`$for: "s in (oidcOn ?
+[platform.oidcClientSecret] : [])"`, `$spread: ${{ cond ? list : [] }}`).
 
 ## `$value`
 
@@ -453,8 +453,8 @@ usual "nothing to add", but a string or a map is likely a mistake
 (`$spread: ${{ values.extraEnv }}` of a map adds no item; spread its
 entries: [iterating a map](#iterating-a-map)). `$spread` takes any node,
 usually one expression; a literal YAML list is spliced as it is (rather
-write its items in the list). The item holds `$spread` only: any other key, `$if` included, fails; the
-condition goes in the expression:
+write its items in the list). The item holds `$spread` only: any other
+key, `$if` included, fails; the condition goes in the expression:
 
 ```yaml
 args:

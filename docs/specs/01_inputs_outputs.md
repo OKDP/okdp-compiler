@@ -96,9 +96,9 @@ app: open app.defaults.yaml: no such file or directory
 ### Values files
 
 Every values file is read as Helm 3 reads one: the upstream charts'
-`values.yaml` a check reads ([chart cache](#chart-cache)), the defaults files, and the
-values layers read by `compiler.ParseValues` (the binary's `--context` and
-`-f` files).
+`values.yaml` a check reads ([chart cache](#chart-cache)), the defaults
+files, and the values layers read by `compiler.ParseValues` (the binary's
+`--context` and `-f` files).
 
 - Documents: the first YAML document of the file only. Helm 4 merges the
   later ones; the compiler ignores them: of an upstream chart whose
@@ -112,12 +112,12 @@ values layers read by `compiler.ParseValues` (the binary's `--context` and
 - Shape: the document must be a map (`cannot unmarshal yaml document: ...`); a
   null key fails (`unsupported map key`).
 
-`testdata/helm/values/yaml11` holds what Helm reads
-from such a file. Values built in memory and given in `Inputs.Context`
-(`ContextLayer.Values`) or `Inputs.Values` are read as the values they would be once written to a
-file and read back, at any depth, whatever their Go types
-(`value.Normalize`): written by `encoding/json/v2`, map keys sorted, and
-read back. A map of any type is a map, its keys strings
+`testdata/helm/values/yaml11` holds what Helm reads from such a file.
+Values built in memory and given in `Inputs.Context`
+(`ContextLayer.Values`) or `Inputs.Values` are read as the values they
+would be once written to a file and read back, at any depth, whatever
+their Go types (`value.Normalize`): written by `encoding/json/v2`, map
+keys sorted, and read back. A map of any type is a map, its keys strings
 (`map[int]string{1: x}` has the key `"1"`); a slice or an array is a list;
 every number is a float64 (an integer past 2^53 rounds, as Helm reads it);
 a nil map or slice is empty, not `null`; a struct, a `[]byte` or a
@@ -138,8 +138,8 @@ context layer 1 (level 0): json: cannot marshal from Go float64 within "/global/
 values layer 1: jsontext: duplicate object member name "1" within "/labels"
 ```
 
-JSON files (`config.schema.json` of the package, `values.schema.json` of the upstream charts,
-the contracts) are strict JSON: no comments.
+JSON files (`config.schema.json` of the package, `values.schema.json` of
+the upstream charts, the contracts) are strict JSON: no comments.
 
 ## Chart cache
 
@@ -207,10 +207,10 @@ app: charts.example.org/app-1.8.0/app/values.yaml: cannot unmarshal yaml documen
 
 The parameters of an instance: the values layers, the context's
 (`Inputs.Context`, by level: [Levels](#levels)), then the instance's
-(`Inputs.Values`), merged and
-coalesced over the defaults of the package's `config.schema.json`, as Helm
-computes `.Values` of a chart from its `values.yaml` and `-f` files.
-`global` and `connections` are the context's ([Context values](#context-values)).
+(`Inputs.Values`), merged and coalesced over the defaults of the package's
+`config.schema.json`, as Helm computes `.Values` of a chart from its
+`values.yaml` and `-f` files. `global` and `connections` are the context's
+([Context values](#context-values)).
 
 ### Defaults
 
@@ -234,10 +234,11 @@ They play the part of a chart's `values.yaml`:
 gives `replicas: 1`, `metrics: {enabled: false, interval: 30s}` and
 `upstream: {}`. A default under `global` (`properties.global.properties`)
 is one of a context value: the context's layers, of any level, override
-it, and the key it declares an instance may set ([Context values](#context-values)). The
-`default` of an `x-*` keyword, of `enum`, `const` or `examples` is not
-read, nor `x-ui-condition`: unlike a [contract's](#completion), a
-parameter's default holds whatever the other values.
+it, and the key it declares an instance may set ([Context
+values](#context-values)). The `default` of an `x-*` keyword, of `enum`,
+`const` or `examples` is not read, nor `x-ui-condition`: unlike a
+[contract's](#completion), a parameter's default holds whatever the other
+values.
 
 A `default` anywhere else is not read:
 
@@ -426,21 +427,22 @@ connections:
   connection has no `secretRef`.
 - Any other key: a field of the contract, not an `x-okdp-secret` one.
 
-Internal: the fields of the contract's `x-okdp-internal` naming convention,
-`${ref}` replaced by the instance name, `${namespace}` by `Inputs.Namespace`,
-`${suffix}` by `global.okdp.ingress.suffix`; and, when the contract has an
-`x-okdp-secret` field, `secretRef: {name: <ref>-<contract>-credentials}`, the
-default name of the [credentials Secret](#credentials-secrets) the instance
-publishes. The instance is not looked up: each internal reference is
-recorded as a [dependency](#dependencies). A contract with a convention
-never resolves to an output, not even the instance's own: what a reference
-resolves to follows from the contract and the name, the same whatever the
-other instances publish, and so whatever the order they are compiled in
+Internal: the fields of the contract's `x-okdp-internal` naming
+convention, `${ref}` replaced by the instance name, `${namespace}` by
+`Inputs.Namespace`, `${suffix}` by `global.okdp.ingress.suffix`; and, when
+the contract has an `x-okdp-secret` field, `secretRef:
+{name: <ref>-<contract>-credentials}`, the default name of the
+[credentials Secret](#credentials-secrets) the instance publishes. The
+instance is not looked up: each internal reference is recorded as a
+[dependency](#dependencies). A contract with a convention never resolves
+to an output, not even the instance's own: what a reference resolves to
+follows from the contract and the name, the same whatever the other
+instances publish, and so whatever the order they are compiled in
 (`CompileAll` compiles each instance of a namespace with what the
 instances compiled before publish, and keeps a successful compile:
-[Compiling instances together](#compiling-instances-together)). An output may hold fields the convention does not give: a
-reference would get them or not, depending on whether its provider was
-compiled first.
+[Compiling instances together](#compiling-instances-together)). An output
+may hold fields the convention does not give: a reference would get them
+or not, depending on whether its provider was compiled first.
 
 Output: `Inputs.Published`, what the other instances of the namespace
 publish, by release, each an `Info`, its [info
@@ -531,21 +533,20 @@ Secret `secretRef.name`. How the mapping uses `values`:
 
 Every reference that does not resolve, or is not a string, is reported, at
 once, one line each, in parameter path order: the keys sorted at each
-level, the items of a list in order (`a.x` before `a-b`, unlike the
-string order of the [dependencies](#dependencies)), as the violations of
-the parameter schema are. A reference gives one error, the first in this order: its type, its
-contract (unknown, unreadable; another one, for an external connection; a
-name that is not a release name, for an internal one; an output of
-several instances, or none, for a name that is no connection of a
-contract without a naming convention), the fields of an external
-connection or an output in alphabetical order,
-the `required` fields: every field not set, one line each, in alphabetical
-order; then the contract's types for an external connection or an output: every
-violation, one line each, sorted by path ([Checks](#checks));
-last, `{{` in the connection, the first one found by path (keys sorted,
-items in order). The instances of `Inputs.Published` are visited in
-release order. The same parameters give the same report from one compile
-to the next:
+level, the items of a list in order (`a.x` before `a-b`, unlike the string
+order of the [dependencies](#dependencies)), as the violations of the
+parameter schema are. A reference gives one error, the first in this
+order: its type, its contract (unknown, unreadable; another one, for an
+external connection; a name that is not a release name, for an internal
+one; an output of several instances, or none, for a name that is no
+connection of a contract without a naming convention), the fields of an
+external connection or an output in alphabetical order, the `required`
+fields: every field not set, one line each, in alphabetical order; then
+the contract's types for an external connection or an output: every
+violation, one line each, sorted by path ([Checks](#checks)); last, `{{`
+in the connection, the first one found by path (keys sorted, items in
+order). The instances of `Inputs.Published` are visited in release order.
+The same parameters give the same report from one compile to the next:
 
 ```
 main.db: connection "shared-db": field "user" is not part of the database contract
@@ -720,14 +721,15 @@ path in the values, sorted by path, as those of the parameters:
 `Values` at its `Level`; the binary's `--context [<level>:]<file>` files,
 level 0 without a prefix. Among them `global`, `global.okdp`, the settings
 of the platform (ingress, certificate issuers, OIDC, proxy, the platform's
-charts...), and `connections`, which only the context gives, an
-instance's own included. Level 0 is the platform's:
-`examples/02_advanced/input/db/platform.yaml`, `platform/platform-values.yaml` in a
-platform repository; level 1, typically a project's, and each level above
-adds to the lower ones ([Levels](#levels)). The context's layers are merged by level
-over the package's [defaults](#defaults), before the instance's,
-`Inputs.Values` ([parameters](#parameters)); a later layer of a level may
-change or delete (`null`) a value of the previous ones of that level, as
+charts...), and `connections`, which only the context gives, an instance's
+own included. Level 0 is the platform's:
+`examples/02_advanced/input/db/platform.yaml`,
+`platform/platform-values.yaml` in a platform repository; level 1,
+typically a project's, and each level above adds to the lower ones
+([Levels](#levels)). The context's layers are merged by level over the
+package's [defaults](#defaults), before the instance's, `Inputs.Values`
+([parameters](#parameters)); a later layer of a level may change or delete
+(`null`) a value of the previous ones of that level, as
 `testdata/context/0/missing-platform-value.yaml` does.
 
 ```yaml
@@ -740,16 +742,17 @@ global:
 
 `global` is the context's: it comes from the package's
 [defaults](#defaults) and the context's layers, each level adding to the
-lower ones ([Levels](#levels)); `global.okdp` decides the instance's host, where its
-OAuth clients register and the chart they are rendered
-with, and every chart receives `global` ([merge
-precedence](#merge-precedence)). `global.okdp` holds the platform's
-settings, whatever the level that sets them: [Requirements](#requirements)
-to [OAuth client settings](#oauth-client-settings). An instance layer that sets `global` fails
-before the parameter schema is checked, naming the layer by its position in
-`Inputs.Values`, from 1 (the binary's `-f` files, in order), and the first
-key of `global` it may not set, in key order; `global` set to a non-map,
-`null` included, fails as a whole (`testdata/instance-sets-global.yaml`):
+lower ones ([Levels](#levels)); `global.okdp` decides the instance's host,
+where its OAuth clients register and the chart they are rendered with, and
+every chart receives `global` ([merge precedence](#merge-precedence)).
+`global.okdp` holds the platform's settings, whatever the level that sets
+them: [Requirements](#requirements) to [OAuth client
+settings](#oauth-client-settings). An instance layer that sets `global`
+fails before the parameter schema is checked, naming the layer by its
+position in `Inputs.Values`, from 1 (the binary's `-f` files, in order),
+and the first key of `global` it may not set, in key order; `global` set
+to a non-map, `null` included, fails as a whole
+(`testdata/instance-sets-global.yaml`):
 
 ```
 values layer 1: global.okdp is set by the context (--context, Inputs.Context)
@@ -867,9 +870,9 @@ connections:
     secretRef: {name: demo-warehouse-credentials}
 ```
 
-Over it, the instance's own connections,
-`examples/03_full/input/db/projects/demo/instances/demo-workspace/connections.yaml`
-at level 2 ([Connections](#connections)), add `scratch`. Given after
+Over it, the instance's own connections, its `connections.yaml` in
+`examples/03_full/input/db/projects/demo/instances/demo-workspace/`, at
+level 2 ([Connections](#connections)), add `scratch`. Given after
 `platform.yaml` and `project.yaml`, a file of level 2 that gives
 `demo-warehouse` again, even a field of it, fails:
 
@@ -969,8 +972,9 @@ global.okdp.charts.oidcDcr.version "1.x": a pinned chart version (1.2.3), not a 
 ```
 
 The [chart cache](#chart-cache) of a check holds each when its chart is
-compiled: the oidc-dcr chart in `dcr` mode with a client. Another repository with the
-same chart and version (a mirror) has its own directory there.
+compiled: the oidc-dcr chart in `dcr` mode with a client. Another
+repository with the same chart and version (a mirror) has its own
+directory there.
 
 ### OAuth client settings
 
@@ -1012,8 +1016,9 @@ whole and `>= 0` (`0` is a value), a quoted number (`"600"`) a string:
 
 `image`: the camelCase keys of oidc-dcr >= 0.5.0 (`pullPolicy`,
 `pullSecrets`); those of an earlier version, `pull_policy` and
-`pull_secrets`, are refused (`- at '/global/okdp/oidc/dcr/image/pull_policy':
-false schema`). Its other keys are passed as written. The other keys of `oidc.dcr` are kept in
+`pull_secrets`, are refused (`- at
+'/global/okdp/oidc/dcr/image/pull_policy': false schema`). Its other keys
+are passed as written. The other keys of `oidc.dcr` are kept in
 `platform.oidc.dcr` and not used. `registrationUrl` and `authMethod` are
 left as written (the schema gives them no type), and checked only in `dcr`
 mode with a client.
@@ -1113,9 +1118,9 @@ precedence](#merge-precedence)):
 
 `protect` of the key in `upstream` of `okdp.yaml`
 (`upstream.<key>.protect`): dotted paths the platform sets; `global` is
-always protected. The upstream values fail when they set a protected path (to any value,
-`null` included), or one of its parents to anything but a map (`null`
-included). The keys beside a protected path are free:
+always protected. The upstream values fail when they set a protected path
+(to any value, `null` included), or one of its parents to anything but a
+map (`null` included). The keys beside a protected path are free:
 
 | With `protect: [ingress.hosts]` | |
 |---|---|
@@ -1493,14 +1498,15 @@ type SecretRef struct {
 Every item is checked for its shape first, with the mapping's other
 sections, every violation at once
 ([provides](02_service_definition.md#provides)). Then each is checked
-against its contract, in the order of `provides`: its name, then the fields of its `values` and of the contract's
-`x-okdp-internal` convention in alphabetical order. The first error is
-reported, as for an expression of the mapping: `provides` is the package's
-to fix, not the instance's, and the error is the same from one compile to
-the next; the required fields that item lacks, and the schema's violations
-of that item, all at once, one line each ([Checks](#checks)). Once every
-item passes, two items of one contract and name fail, one line per name.
-`<out>`: `provides "<name>" (<contract>)`; `<i>`: the item's position.
+against its contract, in the order of `provides`: its name, then the
+fields of its `values` and of the contract's `x-okdp-internal` convention
+in alphabetical order. The first error is reported, as for an expression
+of the mapping: `provides` is the package's to fix, not the instance's,
+and the error is the same from one compile to the next; the required
+fields that item lacks, and the schema's violations of that item, all at
+once, one line each ([Checks](#checks)). Once every item passes, two items
+of one contract and name fail, one line per name. `<out>`: `provides
+"<name>" (<contract>)`; `<i>`: the item's position.
 
 | Case | Error |
 |---|---|
@@ -1537,11 +1543,11 @@ The Secret of a `provides` item with a `secret`: named after the item's
 | neither, in a non-empty `secret` | error: `<service>: output "<name>": secret needs stringData or generate` (`<service>`: `name` of `Chart.yaml`) |
 
 A generated Secret is what `okdpGeneratedSecret` renders
-([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key options, generator
-names), the credentials label on the `ExternalSecret` and on the Secret it
-writes, not on the `Password` generators. The random values are generated in
-the cluster, once (`refreshInterval: "0"`): every render of the release is
-the same. For these items:
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key
+options, generator names), the credentials label on the `ExternalSecret`
+and on the Secret it writes, not on the `Password` generators. The random
+values are generated in the cluster, once (`refreshInterval: "0"`): every
+render of the release is the same. For these items:
 
 ```yaml
 provides:
@@ -1840,26 +1846,25 @@ No objects file: the instance has no objects, no credentials Secret and no
 depends on demo-db (database, database)
 ```
 
-`examples/03_full/` compiles the workspace service, a package written to use
-every part of the mapping language, with four values layers:
-`platform.yaml` (`--context`, level 0: `global.okdp` in `dcr` mode, the oidc-dcr
-chart from a mirror, a proxy, two connections), `project.yaml` (`--context
-1:project.yaml`, level 1: the project's settings under `global`, two connections of its own),
-`connections.yaml` (`--context 2:connections.yaml`, level 2: the
-instance's own connection) and `config.yaml` (`-f`: references to an
-instance of the namespace and to connections of the platform, the project
-and the instance itself, in a list of catalogs and under a nested key;
-upstream values). Release
+`examples/03_full/` compiles the workspace service, a package written to
+use every part of the mapping language, with four values layers:
+`platform.yaml` (`--context`, level 0: `global.okdp` in `dcr` mode, the
+oidc-dcr chart from a mirror, a proxy, two connections), `project.yaml`
+(`--context 1:project.yaml`, level 1: the project's settings under
+`global`, two connections of its own), `connections.yaml` (`--context
+2:connections.yaml`, level 2: the instance's own connection) and
+`config.yaml` (`-f`: references to an instance of the namespace and to
+connections of the platform, the project and the instance itself, in a
+list of catalogs and under a nested key; upstream values). Release
 `demo-workspace`, namespace `demo`:
 `output/projects/demo/instances/demo-workspace/` is what `-o <dir>`
 writes. Its `Result.Dependencies`, which the compile prints on stderr,
 lists `demo-db` twice, for `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
 `$if`, is no dependency, and its chart is not in the chart cache of the
-check. Its
-`okdp.info.yaml` lists three outputs, one with its credentials, whose
-Secret is generated: its objects file holds the `Password` generators and
-the `ExternalSecret`, then the `objects` section.
+check. Its `okdp.info.yaml` lists three outputs, one with its credentials,
+whose Secret is generated: its objects file holds the `Password`
+generators and the `ExternalSecret`, then the `objects` section.
 
 ## Compiling instances together
 

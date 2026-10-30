@@ -29,8 +29,8 @@ The host functions are plain Go, and share these properties:
   `found no matching overload for '<function>' applied to '(<types>)'`.
 - **The argument as data.** The argument is converted to data, maps with
   string keys, lists, numbers, strings, booleans and null, as an
-  expression's value is
-  ([lone expressions](02_service_definition.md#lone-expressions-and-interpolation)),
+  expression's value is ([lone
+  expressions](02_service_definition.md#lone-expressions-and-interpolation)),
   but keeps what the values cannot hold: `str` prints `NaN`, a key `1` as
   `"1"`, a type as its name. A number is a float64, as Helm reads a values
   number ([numbers](02_service_definition.md#numbers)).
@@ -99,19 +99,19 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 | `okdpGeneratedSecret(args)` | list of objects | none |
 | `oidcClientSecret(name)` | string | none |
 
-Each takes one argument (`okdpFullname`: zero or one).
-`str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml` and `quote`
-belong to the language (`internal/compile`); the `okdp` functions and
-`oidcClientSecret` to OKDP (the root package, `compiler`), which adds them to the
-compile's session.
+Each takes one argument (`okdpFullname`: zero or one). `str`, `first`,
+`sha256`, `toJson`, `toPrettyJson`, `toYaml` and `quote` belong to the
+language (`internal/compile`); the `okdp` functions and `oidcClientSecret`
+to OKDP (the root package, `compiler`), which adds them to the compile's
+session.
 
 ### `str` and `first`
 
 - `str(x)`: `x` as text, as Go templates print it: null is `""`, a string
-  itself, bytes their base64, a number as a float64 ([numbers](02_service_definition.md#numbers)),
-  `true`, a list `[a b]`, a map `map[k:v]`. Interpolation converts every
-  expression's value with it. Unlike sprig's `toString`, null is `""`, not
-  `<nil>`.
+  itself, bytes their base64, a number as a float64
+  ([numbers](02_service_definition.md#numbers)), `true`, a list `[a b]`, a
+  map `map[k:v]`. Interpolation converts every expression's value with it.
+  Unlike sprig's `toString`, null is `""`, not `<nil>`.
 - `first(list)`: the first element that is not empty (null, `false`, `0`,
   `""`, `[]`, `{}`), else `""`. `first([x, d])` is Helm's `x | default d`,
   `first([a, b, c])` sprig's `coalesce a b c`. A value that is not a list

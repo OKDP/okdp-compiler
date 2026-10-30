@@ -141,8 +141,9 @@ Flags take one or two dashes, and every input is a flag: an argument that
 is not one is refused, where it would end the flags and those after it be
 ignored (a values file without its `-f`). The directories of `--package`,
 `--charts`, `--contracts`, `--published` and `--repository`, when given,
-must exist. Every output is built before any is written: a compile or an output that fails writes nothing; an error
-while writing may leave some of the files written.
+must exist. Every output is built before any is written: a compile or an
+output that fails writes nothing; an error while writing may leave some of
+the files written.
 
 ### `--output`
 
@@ -341,8 +342,9 @@ order:
 1. the tree: every instance, by project then instance
    (`compiler.LoadRepository`), every problem of the tree at once;
 2. the instances compiled together, each with what the others of its
-   namespace publish, after those whose outputs it references
-   ([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together)),
+   namespace publish, after those whose outputs it references ([compiling
+   instances
+   together](specs/01_inputs_outputs.md#compiling-instances-together)),
    checked against the chart cache with `--check --charts`: each refusal
    on stderr, `error: <namespace>/<release>: <message>`, each warning,
    `warning: <namespace>/<release>: <message>`, in the order of the
@@ -711,19 +713,20 @@ empty), which its errors start with.
 
 `compiler.Inputs` takes what the flags give: `Charts` (`--charts`, nil
 without `--check`: with a chart cache, the compile checks its final values
-against the upstream charts, [`--check`](#--check)),
-`Contracts` (`--contracts`; it may be empty when nothing references a
-contract), `Context` (the `--context` files, parsed, in order, each a
-`ContextLayer` of its level), `Values` (the `-f` files, parsed, in order),
-`Release`, `Namespace` and `Published` (`--published`: what the other
-instances of the namespace publish, by release, each a `compiler.Info`;
-nil, none is known; `CompileAll` sets it); all but `Charts`, `Context`, `Values` and `Published` are required
-([inputs and outputs](specs/01_inputs_outputs.md)). `Result.Values` is what
-`-o` writes in `instance.values.yaml`, `Result.Charts` the index the
-umbrella's `Chart.yaml` names the charts from, `Result.Info` what it
-writes in `okdp.info.yaml`, `Result.Objects` OKDP's objects, what it
-writes in `okdp.objects.yaml`, and `Result.Dependencies` what it prints on
-stderr, in no file ([outputs](specs/01_inputs_outputs.md#outputs)).
+against the upstream charts, [`--check`](#--check)), `Contracts`
+(`--contracts`; it may be empty when nothing references a contract),
+`Context` (the `--context` files, parsed, in order, each a `ContextLayer`
+of its level), `Values` (the `-f` files, parsed, in order), `Release`,
+`Namespace` and `Published` (`--published`: what the other instances of
+the namespace publish, by release, each a `compiler.Info`; nil, none is
+known; `CompileAll` sets it); all but `Charts`, `Context`, `Values` and
+`Published` are required ([inputs and
+outputs](specs/01_inputs_outputs.md)). `Result.Values` is what `-o` writes
+in `instance.values.yaml`, `Result.Charts` the index the umbrella's
+`Chart.yaml` names the charts from, `Result.Info` what it writes in
+`okdp.info.yaml`, `Result.Objects` OKDP's objects, what it writes in
+`okdp.objects.yaml`, and `Result.Dependencies` what it prints on stderr,
+in no file ([outputs](specs/01_inputs_outputs.md#outputs)).
 `Result.Values` renders as in [rendering with Helm](#rendering-with-helm),
 `Result.Charts` being the index.
 
@@ -740,9 +743,10 @@ holds, to read it back.
 - `Result.Warnings` lists what the compile warns of without failing: those
   of the package, found by `LoadDefinition` (`Definition.Warnings`), a
   `values.yaml` that holds expressions; with `Charts`, an instance list
-  appended to that leaves out items of the chart's default list. Each compile gives them with its
-  result, so that a server compiling many instances returns them with each;
-  the binary prints each as `warning: <message>`.
+  appended to that leaves out items of the chart's default list. Each
+  compile gives them with its result, so that a server compiling many
+  instances returns them with each; the binary prints each as
+  `warning: <message>`.
 - `Result.Dependencies` lists the instances of the namespace the
   connection references point to, by parameter path, each a
   `compiler.Dependency`, `{Instance, Contract, Field, Output}`, `Output`
@@ -763,8 +767,8 @@ holds, to read it back.
   `Published`: each instance of a namespace after the instances whose
   outputs it references, with what they publish. One `compiler.Outcome`
   per instance, in their order: its `Result`, or, nil, why it is refused
-  (`Err`); the order changes none
-  ([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together)).
+  (`Err`); the order changes none ([compiling instances
+  together](specs/01_inputs_outputs.md#compiling-instances-together)).
 - `compiler.NewGraph(results)` is the deployment graph of the results of
   `CompileAll`: each release waits for the releases of its namespace its
   references point to. It checks every dependency, the release exists and
@@ -906,12 +910,13 @@ releases, October 2026): Flux 2.9 Helm 4.2.4 (helm-controller 1.6), Flux
 with each ([rendering with Helm](#rendering-with-helm),
 [Helm fixtures](00_architecture.md#helm-fixtures)).
 
-**OAuth clients.** In `dcr` mode the index lists one chart per OAuth client
-(`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr chart;
-[OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts)),
-dependencies of the umbrella like the others. Their Job, a Helm pre-install/pre-upgrade hook
-(an Argo CD `PreSync` hook), writes the client's Secret; the pods that read
-it do not start before it exists.
+**OAuth clients.** In `dcr` mode the index lists one chart per OAuth
+client (`oidc-dcr`, `<name>-oidc-dcr`, rendered by the platform's oidc-dcr
+chart; [OAuth client
+charts](specs/01_inputs_outputs.md#oauth-client-charts)), dependencies of
+the umbrella like the others. Their Job, a Helm pre-install/pre-upgrade
+hook (an Argo CD `PreSync` hook), writes the client's Secret; the pods
+that read it do not start before it exists.
 
 **OKDP's own objects.** `Result.Objects`, the credentials Secrets and the
 mapping's objects, are `okdp.objects.yaml`, a
@@ -1005,23 +1010,23 @@ usage error with status 2.
 
 ### Mapping
 
-The errors of the mapping, the sections of `okdp.yaml` and the values file,
-mostly for package authors, are listed
-with their causes in [service definition](specs/02_service_definition.md#errors):
-the messages of its `errors` section, one per line, as written; CEL errors
-prefixed with the file, then the section, key and list position path
-(`values.cel.yaml: app: env[2]: value: ${{ ... }}: no such key: host`,
-`okdp.yaml: vars db: ...`); a key of the values file that is no
-dependency's (`values.cel.yaml: web: not a dependency of Chart.yaml`);
-sections of the wrong shape, against `mapping.schema.json`,
-every violation at once
-(`the mapping's sections don't meet the specifications of mapping.schema.json:`
-then `- at '/output/app': got string, want null or object`); arguments of
-`okdpGeneratedSecret` unknown or of the wrong type
-(`- at '/okdpGeneratedSecret/keys/0': additional properties 'lenght' not allowed`);
-YAML errors (`values.cel.yaml: yaml: line <n>: ...`,
-`okdp.yaml: yaml: line <n>: ...`). The `provides` checks are in [the info file](specs/01_inputs_outputs.md#the-info-file),
-the OAuth client errors [below](#oauth-clients).
+The errors of the mapping, the sections of `okdp.yaml` and the values
+file, mostly for package authors, are listed with their causes in [service
+definition](specs/02_service_definition.md#errors): the messages of its
+`errors` section, one per line, as written; CEL errors prefixed with the
+file, then the section, key and list position path (`values.cel.yaml: app:
+env[2]: value: ${{ ... }}: no such key: host`, `okdp.yaml: vars db: ...`);
+a key of the values file that is no dependency's (`values.cel.yaml: web:
+not a dependency of Chart.yaml`); sections of the wrong shape, against
+`mapping.schema.json`, every violation at once (`the mapping's sections
+don't meet the specifications of mapping.schema.json:` then `- at
+'/output/app': got string, want null or object`); arguments of
+`okdpGeneratedSecret` unknown or of the wrong type (`- at
+'/okdpGeneratedSecret/keys/0': additional properties 'lenght' not
+allowed`); YAML errors (`values.cel.yaml: yaml: line <n>: ...`,
+`okdp.yaml: yaml: line <n>: ...`). The `provides` checks are in [the info
+file](specs/01_inputs_outputs.md#the-info-file), the OAuth client errors
+[below](#oauth-clients).
 
 ### OAuth clients
 
@@ -1048,10 +1053,11 @@ the cause or the fix is not in the message:
 ### Repositories and the graph
 
 `--repository` prints each refusal and each problem of the graph after
-`error: <namespace>/<release>: `
-([compiling instances together](specs/01_inputs_outputs.md#compiling-instances-together),
-[the deployment graph](specs/01_inputs_outputs.md#the-deployment-graph));
-those of the targets' options are in [targets](specs/01_inputs_outputs.md#targets).
+`error: <namespace>/<release>: ` ([compiling instances
+together](specs/01_inputs_outputs.md#compiling-instances-together), [the
+deployment graph](specs/01_inputs_outputs.md#the-deployment-graph)); those
+of the targets' options are in
+[targets](specs/01_inputs_outputs.md#targets).
 
 | Message | Cause | Fix |
 |---|---|---|
