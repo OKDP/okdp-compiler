@@ -26,6 +26,6 @@ dependencies:
 -- tree/catalog/hello/1.0.0/values.yaml --
 hello:
   message: Hello from ${{ release.name }}
--- tree/projects/demo/instances/demo-hello/instance.yaml --
+-- tree/projects/demo/instances/hello/instance.yaml --
 service: hello
 version: 1.0.0

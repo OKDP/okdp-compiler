@@ -21,8 +21,8 @@ dependencies:
   - {name: web, repository: https://charts.example.org, version: 1.0.0}
 -- tree/catalog/web/1.0.0/config.schema.json --
 {"properties": {"replicas": {"type": "integer", "minimum": 1, "default": 1}}}
--- tree/projects/demo/instances/demo-web/instance.yaml --
+-- tree/projects/demo/instances/web/instance.yaml --
 service: web
 version: 1.0.0
--- tree/projects/demo/instances/demo-web/config.yaml --
+-- tree/projects/demo/instances/web/config.yaml --
 replicas: 0

@@ -1,4 +1,5 @@
-# The instance demo-workspace's own connections, a context layer of level
+# The instance workspace's own connections (the release demo-workspace), a
+# context layer of level
 # 2, merged after project.yaml, level 1, and before config.yaml. A level adds: a connection platform.yaml or
 # project.yaml gives (platform-db, demo-bucket) may not be given here, not
 # even by a field they leave out.

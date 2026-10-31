@@ -1,8 +1,9 @@
 // Package argocd: the argocd target: the umbrella chart of each instance,
 // with the Argo CD Application that installs it, its sync wave after those
 // of the releases its instance depends on. The format is okdp-gitops',
-// byte for byte but for the mark of the first line, so that it can write
-// its package instances with Application.
+// which commits the files as they are. An Application that applies the
+// Applications (app of apps) needs no other file: the directory
+// projects/, recurse, include */instances/*/application.yaml.
 package argocd
 
 import (

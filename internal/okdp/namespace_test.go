@@ -163,8 +163,9 @@ func TestCompileAllSingle(t *testing.T) {
 
 // TestCompileAllNamespaces: the namespaces are compiled apart: an output
 // name in two of them is no shared output, a reference does not reach
-// another namespace; a release given twice in one is refused, each time;
-// a Published given is not read.
+// another namespace; a release given twice in one is refused, each time,
+// as an instance name (Instance.Name, the release when it has none); a
+// Published given is not read.
 func TestCompileAllNamespaces(t *testing.T) {
 	other := func(inst Instance) Instance {
 		inst.Inputs.Namespace = "other"
@@ -172,10 +173,15 @@ func TestCompileAllNamespaces(t *testing.T) {
 	}
 	given := node("b", M{"uses": []any{"z"}})
 	given.Inputs.Published = map[string]Info{"demo-z": {Provides: []Output{{Name: "z", Contract: "server", Values: M{"host": "z"}}}}}
+	named := func(inst Instance, name string) Instance {
+		inst.Name = name
+		return inst
+	}
 	instances := []Instance{
 		node("a", M{"publishes": []any{"x"}}), other(node("a", M{"publishes": []any{"x"}})),
 		other(node("c", M{"uses": []any{"x"}})), given,
 		other(node("t", M{"publishes": []any{"t"}})), other(node("t", M{})),
+		named(other(node("u", M{})), "n"), named(other(node("v", M{})), "n"), named(node("w", M{}), "demo-a"),
 	}
 	var got []string
 	for _, o := range CompileAll(context.Background(), instances) {
@@ -186,9 +192,11 @@ func TestCompileAllNamespaces(t *testing.T) {
 		}
 	}
 	want := []string{
-		"demo/demo-a", "other/demo-a", "other/demo-c",
-		`uses[0]: "z" is not a connection, nor an output of an instance of the namespace`,
+		`instance name "demo-a" is given twice in namespace "demo"`, "other/demo-a", "other/demo-c",
+		`uses[0]: "z" is not a connection, nor an output of an instance of the namespace (demo-a, demo-w do not compile either: what they publish is unknown)`,
 		`release "demo-t" is given twice in namespace "other"`, `release "demo-t" is given twice in namespace "other"`,
+		`instance name "n" is given twice in namespace "other"`, `instance name "n" is given twice in namespace "other"`,
+		`instance name "demo-a" is given twice in namespace "demo"`,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %q\nwant %q", got, want)
@@ -491,7 +499,7 @@ func TestCompileAllClaims(t *testing.T) {
 		"a class's provider not of the form": {
 			[]Instance{byDefault("demo-a", M{}, "a/b/c"), pg},
 			map[string]string{
-				"demo/demo-a": `error: db: claim (server): the default class "standard" (global.okdp.provisioning.server.classes.standard): provider "a/b/c": <release> or <namespace>/<release>`,
+				"demo/demo-a": `error: db: claim (server): the default class "standard" (global.okdp.provisioning.server.classes.standard): provider "a/b/c": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>`,
 				"data/pg":     "",
 			},
 		},
@@ -622,6 +630,93 @@ dbs.us: claim (server): the request does not meet the contract's claim schema (x
 			map[string]string{
 				"demo/demo-a": `error: db: claim "demo.demo-a.db" (server): data/pg publishes no output for it (data/pg does not compile either: what it publishes is unknown)`,
 				"data/pg":     "error: it fails",
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, order := range permutations(tc.instances) {
+				if got := claimOutcomes(order); !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf("got  %q\nwant %q", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestCompileAllProviderNames: a provider, a claim's, a class's or a named
+// claim's, names an instance of its namespace by its name or by its
+// release, in every order: by name, qualified or of the claimer's
+// namespace; by release, the instance named or not; refused, a name of an
+// instance that provisions nothing, and a name that is the release of an
+// instance and the name of another, whatever they provision, each claim
+// that names it, the instances it names compiled.
+func TestCompileAllProviderNames(t *testing.T) {
+	named := func(inst Instance, name string) Instance {
+		inst.Name = name
+		return inst
+	}
+	app := func(release, name string, db any) Instance {
+		return named(claimInstance(appDef, "demo", release, M{"db": db}), name)
+	}
+	pg := named(claimInstance(pgDef, "data", "data-pg", M{}), "pg")
+	for name, tc := range map[string]struct {
+		instances []Instance
+		want      map[string]string
+	}{
+		"by name": {
+			[]Instance{
+				app("demo-a", "a", M{"provider": "data/pg"}),
+				withDefault(app("demo-b", "b", M{}), "data/pg"),
+				withClaims(withDefault(app("demo-c", "c", "s"), "data/pg"), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}),
+				pg,
+			},
+			map[string]string{
+				"demo/demo-a": "depends on data/data-pg demo.a.db; bound db demo.a.db data/data-pg named=true",
+				"demo/demo-b": "depends on data/data-pg demo.b.db; bound db demo.b.db data/data-pg class standard named=false",
+				"demo/demo-c": "depends on data/data-pg demo.s; bound db demo.s data/data-pg named=true",
+				"data/data-pg": `provides demo.a.db demo.a.db.data {"tier":"a"}; provides demo.b.db demo.b.db.data {"tier":"a"}; ` +
+					`provides demo.s demo.s.data {"tier":"a"}`,
+			},
+		},
+		"by name, of the claimer's namespace": {
+			[]Instance{app("demo-a", "a", M{"provider": "pg"}), withDefault(app("demo-b", "b", M{}), "pg"), named(claimInstance(pgDef, "demo", "demo-pg", M{}), "pg")},
+			map[string]string{
+				"demo/demo-a":  "depends on /demo-pg demo.a.db; bound db demo.a.db demo/demo-pg named=true",
+				"demo/demo-b":  "depends on /demo-pg demo.b.db; bound db demo.b.db demo/demo-pg class standard named=false",
+				"demo/demo-pg": `provides demo.a.db demo.a.db.demo {"tier":"a"}; provides demo.b.db demo.b.db.demo {"tier":"a"}`,
+			},
+		},
+		"by release": {
+			[]Instance{app("demo-a", "a", M{"provider": "data/data-pg"}), withDefault(app("demo-b", "b", M{}), "data/pg2"), pg, claimInstance(pgDef, "data", "pg2", M{})},
+			map[string]string{
+				"demo/demo-a":  "depends on data/data-pg demo.a.db; bound db demo.a.db data/data-pg named=true",
+				"demo/demo-b":  "depends on data/pg2 demo.b.db; bound db demo.b.db data/pg2 class standard named=false",
+				"data/data-pg": `provides demo.a.db demo.a.db.data {"tier":"a"}`,
+				"data/pg2":     `provides demo.b.db demo.b.db.data {"tier":"a"}`,
+			},
+		},
+		"an instance that provisions nothing": {
+			[]Instance{app("demo-a", "a", M{"provider": "data/x"}), named(claimInstance(appDef, "data", "data-x", M{}), "x"), pg},
+			map[string]string{
+				"demo/demo-a":  "error: db: claim (server): data/x is no instance that provisions server connections",
+				"data/data-x":  "",
+				"data/data-pg": "",
+			},
+		},
+		"ambiguous": {
+			[]Instance{
+				app("demo-c", "c", M{"provider": "demo-a"}),
+				withDefault(app("demo-d", "d", M{}), "demo/demo-a"),
+				app("demo-e", "e", M{"provider": "a"}),
+				named(claimInstance(pgDef, "demo", "demo-a", M{}), "a"),
+				named(claimInstance(appDef, "demo", "demo-demo-a", M{}), "demo-a"),
+			},
+			map[string]string{
+				"demo/demo-c":      "error: db: claim (server): demo/demo-a names more than one instance, demo-a (its release) and demo-demo-a (its name): the claim would not know which",
+				"demo/demo-d":      `error: db: claim (server): the default class "standard": demo/demo-a names more than one instance, demo-a (its release) and demo-demo-a (its name): the claim would not know which`,
+				"demo/demo-e":      "depends on /demo-a demo.e.db; bound db demo.e.db demo/demo-a named=true",
+				"demo/demo-a":      `provides demo.e.db demo.e.db.demo {"tier":"a"}`,
+				"demo/demo-demo-a": "",
 			},
 		},
 	} {

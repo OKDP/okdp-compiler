@@ -6,13 +6,16 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
 )
@@ -30,15 +33,15 @@ func example() (*compiler.Definition, compiler.Inputs) {
 	in := compiler.Inputs{
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/db/platform.yaml")}},
-		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")},
+		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 		Bindings: map[string]compiler.Binding{"database": {
-			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.demo-webapp.database",
+			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.webapp.database",
 			Output: &compiler.Output{
-				Name: "demo.demo-webapp.database", Contract: "database",
-				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_demo_webapp_database"},
-				SecretRef: &compiler.SecretRef{Name: "demo.demo-webapp.database-credentials"},
+				Name: "demo.webapp.database", Contract: "database",
+				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_webapp_database"},
+				SecretRef: &compiler.SecretRef{Name: "demo.webapp.database-credentials"},
 			},
 		}},
 	}
@@ -155,5 +158,50 @@ func TestLayers(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestTreeNames: a tree written with the names the package exports, read
+// by LoadRepository: its instance is the release ReleaseName of its
+// project and directory, in the project's namespace, and a target writes
+// it in InstanceDir, under ProjectDir.
+func TestTreeNames(t *testing.T) {
+	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+	instance := path.Join(compiler.ProjectsDir, "demo", compiler.InstancesDir, "web")
+	tree := fstest.MapFS{
+		compiler.PlatformFile:                                         file("global: {okdp: {}}\n"),
+		path.Join(compiler.ContractsDir, "http.schema.json"):          file(`{"properties": {"url": {"type": "string"}}}`),
+		path.Join(compiler.CatalogDir, "web", "1.0.0", "Chart.yaml"):  file("apiVersion: v2\nname: web\nversion: 1.0.0\n"),
+		path.Join(compiler.ProjectsDir, "demo", compiler.ProjectFile): file("connections: {api: {contract: http, url: https://api.example.org}}\n"),
+		path.Join(instance, compiler.InstanceFile):                    file("service: web\nversion: 1.0.0\n"),
+		path.Join(instance, compiler.ConnectionsFile):                 file("connections: {own: {contract: http, url: https://own.example.org}}\n"),
+		path.Join(instance, compiler.ConfigFile):                      file("{}\n"),
+	}
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: tree}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 || len(instances[0].Inputs.Context) != 3 || len(instances[0].Inputs.Values) != 1 {
+		t.Fatalf("got %d instances, want one with its 3 context layers and its values", len(instances))
+	}
+	in := instances[0].Inputs
+	if want := compiler.ReleaseName("demo", "web"); in.Release != want || want != "demo-web" || in.Namespace != "demo" {
+		t.Errorf("release %s/%s, want demo/%s", in.Namespace, in.Release, want)
+	}
+	res, err := compiler.Compile(t.Context(), instances[0].Definition, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := compiler.NewGraph([]*compiler.Result{res})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := compiler.Helm{}.Files([]*compiler.Result{res}, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := compiler.InstanceDir("demo", in.Release)
+	if _, ok := files[path.Join(dir, "Chart.yaml")]; !ok || dir != path.Join(compiler.ProjectDir("demo"), "instances", "demo-web") || compiler.ProjectDir("demo") != "projects/demo" {
+		t.Errorf("files %q, want the umbrella chart in %s", slices.Sorted(maps.Keys(files)), dir)
 	}
 }

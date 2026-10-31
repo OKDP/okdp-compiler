@@ -302,3 +302,44 @@ spec:
       app.kubernetes.io/name: workspace
   policyTypes:
     - Ingress
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/instance: demo-workspace
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: workspace
+    app.kubernetes.io/part-of: okdp
+    okdp.io/credentials-s3: "true"
+    okdp.io/instance: demo-workspace
+    okdp.io/service: workspace
+  name: demo-workspace.datalake-credentials
+  namespace: demo
+spec:
+  data:
+    - remoteRef:
+        key: platform.datalake
+        property: accessKey
+      secretKey: accessKey
+    - remoteRef:
+        key: platform.datalake
+        property: secretKey
+      secretKey: secretKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: okdp-secrets
+  target:
+    creationPolicy: Owner
+    name: demo-workspace.datalake-credentials
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/instance: demo-workspace
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/name: workspace
+          app.kubernetes.io/part-of: okdp
+          okdp.io/credentials-s3: "true"
+          okdp.io/instance: demo-workspace
+          okdp.io/service: workspace

@@ -1,16 +1,4 @@
 provides:
-  - name: demo.demo-workspace.database
-    contract: database
-    values:
-      dbName: demo_demo_workspace_database
-      driver: org.postgresql.Driver
-      engine: postgresql
-      host: demo-db-db.demo.svc
-      port: 5432
-      size: 1Gi
-      sslMode: prefer
-    secretRef:
-      name: demo.demo-workspace.database-credentials
   - name: demo.marketing
     contract: database
     values:
@@ -23,3 +11,15 @@ provides:
       sslMode: prefer
     secretRef:
       name: demo.marketing-credentials
+  - name: demo.workspace.database
+    contract: database
+    values:
+      dbName: demo_workspace_database
+      driver: org.postgresql.Driver
+      engine: postgresql
+      host: demo-db-db.demo.svc
+      port: 5432
+      size: 1Gi
+      sslMode: prefer
+    secretRef:
+      name: demo.workspace.database-credentials

@@ -12,9 +12,9 @@ global:
     ingress:
       suffix: okdp.example.org
       className: nginx
-    certificateIssuers:
-      selfSigned:
-        name: okdp-ca                  # platform.ingressAnnotations
+    tls:
+      clusterIssuer: okdp-ca           # platform.ingressAnnotations
+      caBundleSecret: okdp-ca-bundle   # the CA bundle the OAuth clients' Jobs trust (oidc.dcr.caSecret)
     # The chart the compiler renders its own charts with, the OAuth
     # clients' in dcr mode, here from a mirror of oci://quay.io/adaltas (the
     # default).
@@ -28,7 +28,6 @@ global:
       dcr:
         registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
         authMethod: anonymous
-        caSecret: okdp-ca-bundle       # the CA bundle the Jobs trust
         ttlSeconds: 300                # keep a finished Job and its logs 5 minutes
         backoffLimit: 3
         waitTtlSeconds: 120            # wait at most 2 minutes for the provider
@@ -42,6 +41,10 @@ global:
       httpProxy: http://proxy.okdp.example.org:3128
       httpsProxy: http://proxy.okdp.example.org:3128
       noProxy: .svc,.cluster.local,.okdp.example.org
+    # The platform's secret store, a ClusterSecretStore of External
+    # Secrets: the credentials of datalake are there.
+    secrets:
+      store: okdp-secrets
 
 # Connections every instance of the cluster may reference by name.
 connections:
@@ -51,9 +54,15 @@ connections:
     host: db.okdp.example.org
     dbName: audit
     secretRef: {name: platform-db-credentials}
-  datalake:                            # the shared object store (storage: datalake)
+  # The shared object store (storage: datalake), which OKDP neither
+  # deploys nor manages: its credentials are in the platform's secret store,
+  # under the key platform.datalake, accessKey and secretKey its
+  # properties. Each instance that references it gets an ExternalSecret
+  # that reads them into a Secret of its namespace, and the connection's
+  # secretRef names it: demo-workspace.datalake-credentials.
+  datalake:
     contract: s3
     endpoint: https://s3.eu-west-1.amazonaws.com
     region: eu-west-1
     bucket: okdp-datalake
-    secretRef: {name: datalake-credentials}
+    secretRef: {remoteKey: platform.datalake}

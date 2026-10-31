@@ -1,4 +1,5 @@
-# The instance demo-workspace of the project demo (Inputs.Values), over
+# The instance workspace of the project demo, the release demo-workspace
+# (Inputs.Values), over
 # the defaults of the package's config.schema.json, then platform.yaml,
 # project.yaml and connections.yaml. A connection reference names a
 # connection (the platform's, the project's or the instance's own) or an
@@ -22,7 +23,7 @@ catalogs:                              # references in the items of a list
   - name: archive                      # no database
     storage: datalake
 notifications:
-  webhook: demo-alerts                 # an output of the namespace, demo-alerts's
+  webhook: alerts                      # an output of the namespace, the instance alerts's
   channels: ["#data-platform", "#demo-alerts"]
 admins: [alice@example.org, bob@example.org]
 extraEnv:

@@ -30,8 +30,11 @@ order:
 - the credentials of claims across namespaces
   ([claims](specs/01_inputs_outputs.md#credentials-across-namespaces)): a
   provider's PushSecret of each claim of another namespace, a claimer's
-  ExternalSecret of each of its claims of another namespace. The
-  platform's secret store does not keep the namespaces' keys apart by
+  ExternalSecret of each of its claims of another namespace; and the
+  ExternalSecret of each connection it references whose credentials are
+  in the platform's secret store ([credentials in the platform's secret
+  store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
+  The platform's secret store does not keep the namespaces' keys apart by
   itself: what it must enforce is in [What the store must
   enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
 

@@ -14,6 +14,9 @@
 #   context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 #   context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 
+# The project's description: its own, a string, no value of the context,
+# which no instance receives (compiler.ProjectDescription).
+description: The analytics of the demo team
 global:
   storageClass: fast-ssd               # every chart receives global
   okdp:
@@ -27,8 +30,9 @@ global:
     # The project's classes of database connections, of which the
     # platform defines none, and their default, which the platform does not
     # set: the class of the claims that name neither a class nor a
-    # provider, its provider a release of the namespace. A project adds
-    # classes, and changes none of the platform's.
+    # provider, its provider an instance of the namespace, named by its
+    # release here, demo-db, or its name, db. A project adds classes, and
+    # changes none of the platform's.
     provisioning:
       database:
         default: standard

@@ -11,7 +11,7 @@ dependsOn: [database-server, ingress]
 require:                               # platform values the service needs, under global.okdp
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
   - oidc.issuerUri
 defaults:
   app: app.defaults.yaml               # OKDP's defaults, over the chart's own

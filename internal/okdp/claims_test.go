@@ -233,7 +233,7 @@ claims.a: a claim, an object, got "server"
 claims.b: claim: unknown key "size": contract, class, provider and request only
 claims.c: claim: contract is required, the contract of the connection it claims
 claims.d: claim: contract "a/b" is not a contract name
-claims.e: claim: provider "a/b/c": <release> or <namespace>/<release>
+claims.e: claim: provider "a/b/c": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>
 claims.main-db: a connection of that name too (connections.main-db)`
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
@@ -266,7 +266,7 @@ func TestResolveClaimErrors(t *testing.T) {
 		},
 		"no claim":   {M{"main": M{}}, nil, "main: a connection reference must be a string, got map[string]interface {}{}"},
 		"a key":      {M{"db": M{"size": "1Gi"}}, nil, `db: claim: unknown key "size": class, provider and request only`},
-		"a provider": {M{"db": M{"provider": "a/b/c"}}, nil, `db: claim: provider "a/b/c": <release> or <namespace>/<release>`},
+		"a provider": {M{"db": M{"provider": "a/b/c"}}, nil, `db: claim: provider "a/b/c": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>`},
 		"a value":    {M{"db": M{"provider": 1}}, nil, "db: claim: provider must be a string, got 1"},
 		"a request":  {M{"db": M{"request": "5Gi"}}, nil, `db: claim: request must be an object, got "5Gi"`},
 		"a named claim of another contract": {

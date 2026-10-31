@@ -14,12 +14,12 @@ app:
           key: client_secret
           name: demo-webapp-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_webapp_database
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_webapp_database
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo.demo-webapp.database-credentials
+          name: demo.webapp.database-credentials
     - name: AUDIT_DB_URL
       value: jdbc:postgresql://db.okdp.example.org:5432/shared
     - name: AUDIT_DB_PASSWORD
@@ -34,9 +34,6 @@ app:
   fullnameOverride: demo-webapp-app
   global:
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -53,6 +50,9 @@ app:
             standard:
               provider: demo/demo-db
           default: standard
+      tls:
+        caBundleSecret: certs-bundle
+        clusterIssuer: okdp-ca
   image:
     tag: "1.8"
   ingress:
@@ -83,9 +83,6 @@ oidc-dcr:
   fullnameOverride: demo-webapp-oidc-dcr
   global:
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -102,6 +99,9 @@ oidc-dcr:
             standard:
               provider: demo/demo-db
           default: standard
+      tls:
+        caBundleSecret: certs-bundle
+        clusterIssuer: okdp-ca
   mapping:
     keyMapping:
       client_id: .client_id

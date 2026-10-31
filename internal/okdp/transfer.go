@@ -1,5 +1,6 @@
 // Transfer: the credentials of a claim across namespaces, through the
-// platform's secret store.
+// platform's secret store, and those of a connection that are in it
+// (secretRef.remoteKey).
 
 package okdp
 
@@ -11,9 +12,10 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// transfer: credentials that cross namespaces through the platform's
-// secret store: the Secret of the instance's namespace they are in, the
-// key they are under in the store, the contract of the claim and its secret
+// transfer: credentials read from the platform's secret store, a claim's
+// across namespaces or a connection's (secretRef.remoteKey): the Secret of
+// the instance's namespace they are read into, the key they are under in
+// the store, the contract of the claim or the connection and its secret
 // fields.
 type transfer struct {
 	secret, key, contract string
@@ -21,7 +23,8 @@ type transfer struct {
 }
 
 // storeName: global.okdp.secrets.store, the ClusterSecretStore claims'
-// credentials cross namespaces through; "" when not set.
+// credentials cross namespaces through, and the connections' of a
+// secretRef.remoteKey are in; "" when not set.
 func storeName(okdp M) string { return value.Str(value.Dig(okdp, "secrets.store")) }
 
 // storeKey: the key of a claim's credentials in the platform's secret
@@ -76,11 +79,13 @@ func pushSecrets(inst *instance, contracts fs.FS, claims []Claim, outputs []Outp
 	return out, nil
 }
 
-// pullSecret: the ExternalSecret that reads the credentials of a claim of
-// another namespace from the platform's secret store into the Secret x
-// names, in the instance's namespace, which carries the labels of the
-// provider's credentials Secret: okdp.io/credentials-<contract>, on the
-// ExternalSecret and on the Secret it writes.
+// pullSecret: the ExternalSecret, named after the Secret x names, that
+// reads the credentials of a claim of another namespace, or of a
+// connection (secretRef.remoteKey), from the platform's secret store into
+// that Secret, in the instance's namespace, each secret field a property
+// of x's key; it carries the labels of a provider's credentials Secret,
+// okdp.io/credentials-<contract>, on the ExternalSecret and on the Secret
+// it writes.
 func pullSecret(inst *instance, x transfer) M {
 	var data []any
 	for _, f := range x.fields {

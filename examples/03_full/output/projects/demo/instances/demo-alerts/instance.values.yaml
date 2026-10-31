@@ -4,9 +4,6 @@ alertmanager:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -20,7 +17,6 @@ alertmanager:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -47,4 +43,9 @@ alertmanager:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd

@@ -3,7 +3,7 @@
   "type": "object",
   "properties": {
     "database": {
-      "description": "The application's database: a connection's name, a named claim's (claims of the project), or a claim template, a database of its own ({}, the default), of a named provider ({provider: <namespace>/<release>}). A PostgreSQL one, with credentials: the application speaks PostgreSQL only. A database of its own has pgvector, which the package requests of every one (request); a named claim's is its project's, what it requests the declaration's.",
+      "description": "The application's database: a connection's name, a named claim's (claims of the project), or a claim template, a database of its own ({}, the default), of a named provider ({provider: <namespace>/<instance>}). A PostgreSQL one, with credentials: the application speaks PostgreSQL only. A database of its own has pgvector, which the package requests of every one (request); a named claim's is its project's, what it requests the declaration's.",
       "type": ["string", "object"],
       "default": {},
       "x-okdp-connection-ref": {

@@ -316,7 +316,7 @@ provider of the class it names or of the default class of its contract
 Each instance gets the claims bound to it (`Inputs.Claims`), the mapping's
 `claims` ([context](#context)), and publishes, for each, an output of its
 contract named its `id` ([provides](#provides)), a Kubernetes name,
-DNS-1123 labels joined by dots (`demo.demo-app.db`,
+DNS-1123 labels joined by dots (`demo.app.db`,
 [claims](01_inputs_outputs.md#claims)): an object name, a Secret name or a
 label value takes it as it is, a SQL name replaces its dots and dashes,
 what it grants of the claim's `request` among its values
@@ -473,7 +473,7 @@ dependsOn: [database-server, object-store, ingress]
 require:                               # global.okdp.<path>, each set and not empty
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
   - oidc.issuerUri
 defaults:                              # OKDP's defaults, over the chart's values.yaml
   api: api.defaults.yaml
@@ -688,7 +688,7 @@ set: another value, a null included, fails rather than is printed as text,
 
 ```yaml
 provides:
-  - contract: iceberg-catalog                 # published under the release name
+  - contract: iceberg-catalog                 # named after the instance
     values:
       uri: ${{ apiUrl }}/api/catalog
       realm: ${{ str(values.realm) }}
@@ -704,14 +704,14 @@ A list of outputs, the connections the instance publishes, in
 `Result.Info` and `okdp.info.yaml`
 ([the info file](01_inputs_outputs.md#the-info-file)). What
 another instance of the namespace references: an output, by its `name`,
-the release's by default, when its compile is given what this one
-publishes (`Inputs.Published`, `CompileAll`)
+the instance's by default (`Inputs.Name`), when its compile is given
+what this one publishes (`Inputs.Published`, `CompileAll`)
 ([resolution](01_inputs_outputs.md#resolution)). Each item:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
-| `name` | string | the release name | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
+| `name` | string | the instance's name (`Inputs.Name`, the release when it is empty) | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
 | `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
@@ -796,7 +796,7 @@ registers its own by OIDC Dynamic Client Registration, per
 | `public` | boolean | `false` | A public client (a browser application), without a client secret. |
 | `request` | map | `{}` | Fields of the registration request (snake_case, as OIDC Dynamic Client Registration names them): they override the computed ones. |
 | `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to. |
-| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts. |
+| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts; the platform's default is its CA bundle, `global.okdp.tls.caBundleSecret`, `""` (none) when unset. |
 
 A key left out by `$if` is not set, a null one is refused by its type,
 and `""` takes the default of a string key. Only `dcr` mode uses the
@@ -982,9 +982,9 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 
 | Variable | Value |
 |---|---|
-| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
+| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied, its `caSecret` `global.okdp.tls.caBundleSecret` (else `""`) when it sets none ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
 | `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
-| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
+| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.tls.clusterIssuer>}`, the platform's ClusterIssuer, `""` when unset, and `global.okdp.ingress.annotations` over it, the ingress controller's. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 
 The settings these are derived from are checked against the platform

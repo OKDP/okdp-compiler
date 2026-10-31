@@ -5,7 +5,7 @@ api:
       properties: {}
       storage:
         bucket: okdp-datalake
-        credentials: datalake-credentials
+        credentials: demo-workspace.datalake-credentials
         endpoint: https://s3.eu-west-1.amazonaws.com
         pathStyle: false
         region: eu-west-1
@@ -70,14 +70,14 @@ api:
           key: client_secret
           name: demo-workspace-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_workspace_database
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_workspace_database
     - name: DB_SSL_MODE
       value: prefer
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo.demo-workspace.database-credentials
+          name: demo.workspace.database-credentials
     - name: WORKSPACE_SESSIONS
       value: database
     - name: AUDIT_DB_URL
@@ -107,7 +107,7 @@ api:
       valueFrom:
         secretKeyRef:
           key: accessKey
-          name: datalake-credentials
+          name: demo-workspace.datalake-credentials
     - name: HTTPS_PROXY
       value: http://proxy.okdp.example.org:3128
     - name: https_proxy
@@ -130,9 +130,6 @@ api:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -146,7 +143,6 @@ api:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -173,6 +169,11 @@ api:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   image:
     pullPolicy: IfNotPresent
@@ -230,9 +231,6 @@ automation-oidc-dcr:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -246,7 +244,6 @@ automation-oidc-dcr:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -273,6 +270,11 @@ automation-oidc-dcr:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   image:
     pullPolicy: Always
@@ -310,9 +312,6 @@ console-oidc-dcr:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -326,7 +325,6 @@ console-oidc-dcr:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -353,6 +351,11 @@ console-oidc-dcr:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   image:
     pullPolicy: Always
@@ -398,9 +401,6 @@ gateway:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -414,7 +414,6 @@ gateway:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -441,6 +440,11 @@ gateway:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   headers:
     X-Workspace-Cost-Center: cc-4217
@@ -459,9 +463,6 @@ metrics:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -475,7 +476,6 @@ metrics:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -502,6 +502,11 @@ metrics:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   interval: 15s
   labels:
@@ -531,9 +536,6 @@ oidc-dcr:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -547,7 +549,6 @@ oidc-dcr:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -574,6 +575,11 @@ oidc-dcr:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   image:
     pullPolicy: Always
@@ -630,14 +636,14 @@ scheduler:
           key: client_secret
           name: demo-workspace-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_workspace_database
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_workspace_database
     - name: DB_SSL_MODE
       value: prefer
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo.demo-workspace.database-credentials
+          name: demo.workspace.database-credentials
     - name: WORKSPACE_SESSIONS
       value: database
     - name: AUDIT_DB_URL
@@ -667,7 +673,7 @@ scheduler:
       valueFrom:
         secretKeyRef:
           key: accessKey
-          name: datalake-credentials
+          name: demo-workspace.datalake-credentials
     - name: HTTPS_PROXY
       value: http://proxy.okdp.example.org:3128
     - name: https_proxy
@@ -700,9 +706,6 @@ scheduler:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
@@ -716,7 +719,6 @@ scheduler:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
@@ -743,6 +745,11 @@ scheduler:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
     storageClass: fast-ssd
   image:
     tag: 3.2.0

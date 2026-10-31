@@ -10,16 +10,16 @@ metadata:
     okdp.io/credentials-database-server: "true"
     okdp.io/instance: demo-app
     okdp.io/service: app
-  name: demo-app-demo.demo-app.database-credentials
+  name: demo-app-demo.app.database-credentials
   namespace: demo
 spec:
   data:
     - remoteRef:
-        key: okdp.demo.demo-app.database
+        key: okdp.demo.app.database
         property: password
       secretKey: password
     - remoteRef:
-        key: okdp.demo.demo-app.database
+        key: okdp.demo.app.database
         property: username
       secretKey: username
   refreshInterval: 1h
@@ -28,7 +28,7 @@ spec:
     name: okdp-secrets
   target:
     creationPolicy: Owner
-    name: demo-app-demo.demo-app.database-credentials
+    name: demo-app-demo.app.database-credentials
     template:
       metadata:
         labels:

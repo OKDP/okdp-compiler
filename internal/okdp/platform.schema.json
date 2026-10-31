@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKDP platform values",
-  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, project...), and every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value.",
+  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, project...) but certificateIssuers, a former setting, refused (false): its selfSigned.name is tls.clusterIssuer. Every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value.",
   "type": "object",
   "properties": {
     "global": {
@@ -16,23 +16,29 @@
                 "suffix": {
                   "type": "string",
                   "description": "The domain of the platform's hosts, which the mappings build the services' hosts with (a package requires it: require)."
-                }
-              }
-            },
-            "certificateIssuers": {
-              "type": "object",
-              "properties": {
-                "selfSigned": {
+                },
+                "annotations": {
                   "type": "object",
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "The cert-manager issuer of the services' certificates: platform.ingressAnnotations, cert-manager.io/cluster-issuer."
-                    }
-                  }
+                  "additionalProperties": {"type": "string"},
+                  "description": "Annotations of every service's ingress, those the cluster's ingress controller reads (Traefik's middlewares, HAProxy's timeouts...): platform.ingressAnnotations, merged over cert-manager.io/cluster-issuer. Absent: none."
                 }
               }
             },
+            "tls": {
+              "type": "object",
+              "description": "The platform's certificates, whichever cert-manager and trust tool run on the cluster: OKDP's or the cluster's own.",
+              "properties": {
+                "clusterIssuer": {
+                  "type": "string",
+                  "description": "The cert-manager ClusterIssuer of the services' certificates (OKDP's self-signed CA, an ACME or a corporate one): platform.ingressAnnotations, cert-manager.io/cluster-issuer. Absent: \"\"."
+                },
+                "caBundleSecret": {
+                  "type": "string",
+                  "description": "The Secret of each namespace that holds the platform's CA bundle, ca.crt (PEM) and bundle.p12 (PKCS#12), as a trust-manager Bundle writes one, whichever tool fills it: the packages mount it to trust the platform's certificates, and the oidc-dcr Jobs by default (oidc.dcr.caSecret). Absent: the platform's certificates are trusted without a bundle (public CAs)."
+                }
+              }
+            },
+            "certificateIssuers": false,
             "charts": {
               "type": "object",
               "description": "The upstream charts that render the charts the compiler adds itself, each a repository, a chart and its version. Each is checked after the requirements as a dependency of Chart.yaml is: a repository URL, the name of a chart, a pinned version.",
@@ -89,8 +95,7 @@
                     },
                     "caSecret": {
                       "type": "string",
-                      "default": "certs-bundle",
-                      "description": "The Secret holding the CA bundle the Jobs trust (tls.certificate); a client's caSecret wins."
+                      "description": "The Secret holding the CA bundle the Jobs trust (tls.certificate); a client's caSecret wins. Absent: tls.caBundleSecret, else \"\"; \"\": none, the Jobs trusting their image's CAs."
                     },
                     "ttlSeconds": {
                       "type": "integer",
@@ -147,7 +152,7 @@
                         "properties": {
                           "provider": {
                             "type": "string",
-                            "description": "The instance that provisions the claims of the class: <namespace>/<release>, or <release> of the claimer's namespace."
+                            "description": "The instance that provisions the claims of the class: <namespace>/<name>, or <name> of the claimer's namespace, the name the instance's name or its release."
                           },
                           "request": {
                             "type": "object",
@@ -162,9 +167,9 @@
             },
             "secrets": {
               "type": "object",
-              "description": "Where secrets go between namespaces.",
+              "description": "The platform's secret store: where secrets go between namespaces, and where connections may keep their credentials.",
               "properties": {
-                "store": {"type": "string", "description": "The ClusterSecretStore of External Secrets the credentials of a claim bound across namespaces go through: its provider pushes them (a PushSecret), its claimers read them (an ExternalSecret), under the key okdp.<claimers' namespace>.<claim ID>, a property per secret field of the contract. Required by such a claim whose output has a secretRef."}
+                "store": {"type": "string", "description": "The ClusterSecretStore of External Secrets the credentials of a claim bound across namespaces go through: its provider pushes them (a PushSecret), its claimers read them (an ExternalSecret), under the key okdp.<claimers' namespace>.<claim ID>, a property per secret field of the contract. Required by such a claim whose output has a secretRef. A connection whose secretRef is {remoteKey: <key>} keeps its credentials there, under that key: each instance that references it reads them (an ExternalSecret) into a Secret of its namespace, <release>.<connection>-credentials. Required by such a connection."}
               }
             }
           }

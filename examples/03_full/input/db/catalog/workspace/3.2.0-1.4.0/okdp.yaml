@@ -10,7 +10,7 @@ dependsOn: [database-server, object-store, ingress]
 require:                               # global.okdp.<path>, each set and not empty
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
   - oidc.issuerUri
 defaults:                              # OKDP's defaults, over the chart's values.yaml
   api: api.defaults.yaml

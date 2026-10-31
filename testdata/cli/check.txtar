@@ -42,7 +42,7 @@ stderr '^error: --charts is read by --check only: a compile reads no chart$'
 
 -- bound.txt --
 demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
-demo/demo-workspace: database: claim demo.demo-workspace.database (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: database: claim demo.workspace.database (database) bound to demo/demo-db, the default class standard
 -- schema.txt --
 error: demo/demo-bad: compiled values don't meet the specifications of the schema(s) in the following chart(s):
 hello (hello-1.0.0):
@@ -65,17 +65,17 @@ hello:
 hello:
   message: Hello
   args: [--verbose]
--- tree/projects/demo/instances/demo-hello/instance.yaml --
+-- tree/projects/demo/instances/hello/instance.yaml --
 service: hello
 version: 1.0.0
--- tree/projects/demo/instances/demo-hello/config.yaml --
+-- tree/projects/demo/instances/hello/config.yaml --
 upstream:
   hello:
     args: [--debug]
--- bad/projects/demo/instances/demo-bad/instance.yaml --
+-- bad/projects/demo/instances/bad/instance.yaml --
 service: hello
 version: 1.0.0
--- bad/projects/demo/instances/demo-bad/config.yaml --
+-- bad/projects/demo/instances/bad/config.yaml --
 upstream:
   hello:
     message: 1

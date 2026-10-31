@@ -29,6 +29,7 @@ type Inputs struct {
 	Context   []ContextLayer     // the context's values layers: global, global.okdp and connections among them, an instance's own connections at a level of its own; merged by level, lowest first, a level's layers in order (helm -f); a layer changes none of a lower level's values (contextLayers)
 	Values    []map[string]any   // instance values layers, in order, after Context: parameters and upstream values, no global but the keys the parameter schema declares, no connections (valuesLayers)
 	Release   string             // the Helm release: a DNS-1123 label of 53 characters at most
+	Name      string             // the instance's name, a DNS-1123 label: the name of the outputs the mapping names none of, of its claims' IDs (CompileAll sets it, Instance.Name); "": the release
 	Namespace string             // the release's namespace: a DNS-1123 label
 	Published map[string]Info    // what the other instances of the namespace publish (their okdp.info.yaml), by release: a connection reference may name one of their outputs; nil when unknown: only connections and claims resolve
 	Claims    []Claim            // the claims bound to the instance, of contracts its package provisions: the mapping's claims; it publishes an output of each's contract named its ID (CompileAll sets them)
@@ -57,7 +58,8 @@ type Result struct {
 	// Objects: OKDP's own objects, rendered whole: the credentials Secrets
 	// of the provided connections, then the objects section of the mapping,
 	// then the PushSecrets and ExternalSecrets of the credentials of claims
-	// across namespaces;
+	// across namespaces, and the ExternalSecrets of the connections whose
+	// credentials are in the platform's secret store;
 	// the umbrella's objects file, which it renders as written, in its
 	// release (helm.Write). nil when there is none.
 	Objects []map[string]any
@@ -95,6 +97,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
 	case !chart.IsDNSLabel(in.Namespace):
 		return nil, fmt.Errorf("Inputs.Namespace %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Namespace)
+	case in.Name != "" && !chart.IsDNSLabel(in.Name):
+		return nil, fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
 	}
 	// Checked again: a Definition may be built in memory.
 	svc, err := def.service()
@@ -154,7 +158,9 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	}
 	// 8. Objects: the credentials Secrets, then the mapping's objects,
 	// then those of the credentials of claims across namespaces: pushed for
-	// the claims of another namespace, read for its own of another.
+	// the claims of another namespace, read for its own of another; and
+	// read for its connections whose credentials are in the platform's
+	// secret store.
 	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))

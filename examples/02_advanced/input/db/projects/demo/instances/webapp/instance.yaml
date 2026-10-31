@@ -1,0 +1,5 @@
+# The instance's package: catalog/webapp/1.0.0/. The release is
+# demo-webapp, <project>-<instance>, the project's directory the
+# namespace, demo.
+service: webapp
+version: 1.0.0

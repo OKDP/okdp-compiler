@@ -51,7 +51,7 @@ func setIssuer(ctx M, issuer string) {
 
 // TestDcrDefaults: the main client, confidential, named after the release,
 // with the instance label and 6 retries; no issuerUri, no wait for the
-// provider.
+// provider; no CA bundle, the chart's default ("").
 func TestDcrDefaults(t *testing.T) {
 	values, err := dcrValues(dcrCtx(), M{"grantTypes": []any{"authorization_code"}, "redirectUris": []any{"https://x/cb"}})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestDcrDefaults(t *testing.T) {
 			"scope":            "profile email",
 			"redirect_uris":    []any{"https://x/cb"},
 		},
-		"tls":              M{"insecure": false, "certificate": "certs-bundle"},
+		"tls":              M{"insecure": false, "certificate": ""},
 		"secret":           "demo-x-demo-dcr",
 		"mapping":          M{"useDefault": false, "keyMapping": M{"client_id": ".client_id", "client_secret": ".client_secret"}},
 		"security":         M{"serviceAccount": "demo-x-oidc-dcr", "role": "demo-x-oidc-dcr"},

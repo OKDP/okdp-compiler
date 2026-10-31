@@ -27,7 +27,7 @@ type Info struct {
 // Output: a connection the instance provides, an item of provides checked
 // against its contract: what an instance that references it by name gets.
 type Output struct {
-	Name      string         `json:"name,omitempty" yaml:"name,omitempty"`           // the item's name; the release when it names none
+	Name      string         `json:"name,omitempty" yaml:"name,omitempty"`           // the item's name; the instance's when it names none (Inputs.Name)
 	Contract  string         `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it provides
 	Values    map[string]any `json:"values,omitempty" yaml:"values,omitempty"`       // its values, completed against the contract
 	SecretRef *SecretRef     `json:"secretRef,omitempty" yaml:"secretRef,omitempty"` // the Secret of its credentials; nil when none
@@ -50,8 +50,8 @@ func published(info M, outputs []Output) Info {
 
 // provided: the outputs of the instance inst, its provides section, of the
 // form the mapping schema checks (runMapping), and their credentials
-// Secrets. Every output is named after the release unless the mapping names
-// it, and checked against its contract, from contracts (Inputs.Contracts),
+// Secrets. Every output is named after the instance (Inputs.Name, the
+// release when it is empty) unless the mapping names it, and checked against its contract, from contracts (Inputs.Contracts),
 // in the order of provides: its fields in key order (contract.fields): the
 // first error is reported, every required field not
 // set at once (contract.complete), every violation of the contract's types
@@ -67,7 +67,7 @@ func provided(session *compile.Session, inst *instance, contracts fs.FS, provide
 		contract := value.Str(p["contract"])
 		out := value.Str(p["name"])
 		if out == "" {
-			out = inst.release
+			out = inst.name
 		}
 		where := fmt.Sprintf("provides %q (%s)", out, contract)
 		c, err := readContract(contracts, contract)

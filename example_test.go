@@ -65,7 +65,7 @@ func Example() {
 	// Output:
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
-	// [{demo-db  database database demo.demo-webapp.database}]
+	// [{demo-db  database database demo.webapp.database}]
 	// 8 files
 }
 
@@ -83,11 +83,11 @@ func ExampleCompile() {
 		// database's to demo-db, with the output demo-db publishes for it (its
 		// okdp.info.yaml).
 		Bindings: map[string]compiler.Binding{"database": {
-			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.demo-webapp.database",
+			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.webapp.database",
 			Output: &compiler.Output{
-				Name: "demo.demo-webapp.database", Contract: "database",
-				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_demo_webapp_database"},
-				SecretRef: &compiler.SecretRef{Name: "demo.demo-webapp.database-credentials"},
+				Name: "demo.webapp.database", Contract: "database",
+				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_webapp_database"},
+				SecretRef: &compiler.SecretRef{Name: "demo.webapp.database-credentials"},
 			},
 		}},
 	}
@@ -105,7 +105,7 @@ func ExampleCompile() {
 		return v
 	}
 	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/db/platform.yaml")}}
-	in.Values = []map[string]any{read("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")}
+	in.Values = []map[string]any{read("examples/02_advanced/input/db/projects/demo/instances/webapp/config.yaml")}
 	res, err := compiler.Compile(context.Background(), def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation

@@ -2,7 +2,7 @@
 app:
   database:
     credentials: demo-dashboards-demo.analytics-credentials
-    url: postgresql://postgresql-rw.data.svc:5432/demo_analytics
+    url: postgresql://data-postgresql-rw.data.svc:5432/demo_analytics
   global:
     okdp:
       provisioning:

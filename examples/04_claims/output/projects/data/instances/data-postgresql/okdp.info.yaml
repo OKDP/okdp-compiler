@@ -6,33 +6,33 @@ provides:
       engine: postgresql
       extensions:
         - postgis
-      host: postgresql-rw.data.svc
+      host: data-postgresql-rw.data.svc
       port: 5432
       size: 50Gi
     secretRef:
       name: demo.analytics-credentials
-  - name: demo.demo-app.database
+  - name: demo.app.database
     contract: database-server
     values:
-      dbName: demo_demo_app_database
+      dbName: demo_app_database
       engine: postgresql
       extensions:
         - pgvector
-      host: postgresql-rw.data.svc
+      host: data-postgresql-rw.data.svc
       port: 5432
       size: 1Gi
     secretRef:
-      name: demo.demo-app.database-credentials
-  - name: demo.demo-metrics.database
+      name: demo.app.database-credentials
+  - name: demo.metrics.database
     contract: database-server
     values:
-      dbName: demo_demo_metrics_database
+      dbName: demo_metrics_database
       engine: postgresql
       extensions:
         - pgvector
         - timescaledb
-      host: postgresql-rw.data.svc
+      host: data-postgresql-rw.data.svc
       port: 5432
       size: 10Gi
     secretRef:
-      name: demo.demo-metrics.database-credentials
+      name: demo.metrics.database-credentials

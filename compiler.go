@@ -92,7 +92,13 @@ type (
 	// (Inputs.Bindings), and the output it publishes for it.
 	Binding = okdp.Binding
 	// Instance: an instance CompileAll compiles, its package and its
-	// inputs, Published, Claims and Bindings left out.
+	// inputs, Name, Published, Claims and Bindings left out, and its name
+	// (Instance.Name): a claim's or a class's provider names an instance
+	// of its namespace by its name or by its release, <namespace>/<name>
+	// or <name> of the claimer's namespace; its outputs that name none
+	// and its claims' IDs are named after it (Inputs.Name). LoadRepository
+	// names each after its directory; a caller that leaves Name empty
+	// names it by its release only.
 	Instance = okdp.Instance
 	// Outcome: the compile of one instance of CompileAll: its result, nil
 	// when it is refused, and why; the claims of its references, bound.
@@ -112,20 +118,24 @@ type (
 	// GraphError: a problem of the graph, at the release it is found at.
 	GraphError = graph.Error
 	// Target: an output format of compiled instances (Helm, Flux, ArgoCD):
-	// their files, path -> content, under projects/<namespace>/, each
-	// instance's umbrella chart in instances/<release>/.
+	// their files, path -> content, under projects/, each instance's
+	// umbrella chart in InstanceDir: all an engine needs of the compiled
+	// tree, which a deployer commits as they are.
 	Target = target.Target
 	// Helm: the helm target: the umbrella chart of each instance, the files
 	// of Write.
 	Helm = helm.Target
 	// Flux: the flux target: the helm target's files, each instance's Flux
 	// HelmRelease, waiting for the releases it depends on, and the
-	// Kustomizations; okdp-gitops' format. Its fields are its options.
+	// Kustomizations, each instance's, each project's and the root's,
+	// projects/kustomization.yaml, which a Flux Kustomization of the path
+	// projects/ syncs; okdp-gitops' format. Its fields are its options.
 	Flux = flux.Target
 	// ArgoCD: the argocd target: the helm target's files, and each
 	// instance's Argo CD Application, its sync wave after those of the
-	// releases it depends on; okdp-gitops' format. Its fields are its
-	// options.
+	// releases it depends on, which an Application of the directory
+	// projects/ applies (recurse, include */instances/*/application.yaml);
+	// okdp-gitops' format. Its fields are its options.
 	ArgoCD = argocd.Target
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
@@ -156,6 +166,66 @@ const (
 // Flux.Source is empty, okdp-gitops'.
 const DefaultFluxSource = flux.DefaultSource
 
+// The names of the tree LoadRepository reads (docs/01_usage.md, repository
+// layout), for a caller that writes or lists its parts:
+//
+//	PlatformFile                                   the platform's values
+//	ContractsDir/<contract>.schema.json            a contract
+//	CatalogDir/<service>/<version>/                a package
+//	ProjectsDir/<project>/ProjectFile              a project's values, its ProjectDescription
+//	ProjectsDir/<project>/InstancesDir/<instance>/ an instance: InstanceFile, ConnectionsFile, ConfigFile
+const (
+	// PlatformFile: the platform's values, the context at level 0.
+	PlatformFile = repository.PlatformFile
+	// ContractsDir: the contracts, <contract>.schema.json.
+	ContractsDir = repository.ContractsDir
+	// CatalogDir: the packages, <service>/<version>/.
+	CatalogDir = repository.CatalogDir
+	// ProjectsDir: the projects, <project>/, each a namespace.
+	ProjectsDir = repository.ProjectsDir
+	// ProjectFile: a project's values, the context at level 1, in its
+	// directory.
+	ProjectFile = repository.ProjectFile
+	// ProjectDescription: the key of ProjectFile that describes the
+	// project, a string, which LoadRepository leaves out of the context:
+	// no instance receives it.
+	ProjectDescription = repository.ProjectDescription
+	// InstancesDir: a project's instances, <instance>/, each the instance
+	// of that name (Instance.Name) and the release ReleaseName(<project>,
+	// <instance>), in its directory.
+	InstancesDir = repository.InstancesDir
+	// InstanceFile: an instance's package, {service, version}, in its
+	// directory.
+	InstanceFile = repository.InstanceFile
+	// ConnectionsFile: an instance's own connections, the context at level
+	// 2, in its directory; optional.
+	ConnectionsFile = repository.ConnectionsFile
+	// ConfigFile: an instance's values, its parameters and upstream values,
+	// in its directory; optional.
+	ConfigFile = repository.ConfigFile
+)
+
+// ReleaseName: the release of an instance of the tree, <project>-<instance>
+// (LoadRepository): the project's directory name and the instance's, its
+// namespace the project. The releases of a tree are unique across its
+// projects, as the HelmReleases and Applications of a deployer, which
+// share a namespace, need them; the targets refuse two of one name, which
+// project names that hold a "-" may give (a-b/c and a/b-c).
+func ReleaseName(project, instance string) string {
+	return repository.ReleaseName(project, instance)
+}
+
+// ProjectDir: projects/<namespace>, where every target writes the files of
+// the instances of a namespace, the flux target its kustomization.yaml.
+func ProjectDir(namespace string) string { return target.ProjectDir(namespace) }
+
+// InstanceDir: projects/<namespace>/instances/<release>, where every
+// target writes an instance's umbrella chart (the files of Write), the
+// flux and argocd targets its engine's files beside it.
+func InstanceDir(namespace, release string) string {
+	return target.InstanceDir(namespace, release)
+}
+
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
 // okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
 // has them, checked; each compile reads its other files. A values.yaml
@@ -175,22 +245,28 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // CompileAll compiles instances together: each claim of a reference bound
 // to the instance that provisions its contract, the one it names or the
 // provider of its class, the one it names or the default one of the
-// claimer's context (Outcome.Claims); each instance after the instances of its
-// namespace whose outputs it references and the providers of its claims,
-// with what they publish (Inputs.Published, Claims and Bindings, set by
-// CompileAll). An output two instances of a namespace publish refuses both,
-// and the instances whose references resolved to it. Outcomes in the order
-// of instances, which changes none of them.
+// claimer's context (Outcome.Claims), named by its name (Instance.Name)
+// or its release, a name of two instances refused; each instance after
+// the instances of its namespace whose outputs it references and the
+// providers of its claims, with what they publish (Inputs.Name,
+// Published, Claims and Bindings, set by CompileAll). Two instances of a
+// namespace of one release, or of one name, are refused. An output two instances of a
+// namespace publish refuses both, and the instances whose references
+// resolved to it. Outcomes in the order of instances, which changes none
+// of them.
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return okdp.CompileAll(ctx, instances)
 }
 
 // LoadRepository: every instance of the tree that repos make together
 // (docs/01_usage.md, repository layout), by project then instance, as
-// CompileAll compiles them: each part of the tree in one repository
-// (platform.yaml, catalog/<service>/, projects/<project>/), a contract in
-// several with the same bytes, so that the order of repos changes nothing.
-// Every problem at once, each naming its repository and path.
+// CompileAll compiles them, each named after its directory
+// (Instance.Name), the release ReleaseName of its project and its name,
+// in the namespace of its project: each part of the tree in one
+// repository (platform.yaml, catalog/<service>/, projects/<project>/), a
+// contract in several with the same bytes, so that the order of repos
+// changes nothing. Every problem at once, each naming its repository and
+// path.
 func LoadRepository(repos []Repository) ([]Instance, error) {
 	return repository.Load(repos)
 }

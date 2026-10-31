@@ -36,8 +36,8 @@ type resolver struct {
 	classes   M                    // global.okdp.provisioning, by contract: the default class of a claim that names none
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
-	store     string               // global.okdp.secrets.store: the ClusterSecretStore the credentials of a claim of another namespace go through
-	transfers []transfer           // those credentials, in order
+	store     string               // global.okdp.secrets.store: the ClusterSecretStore the credentials of a claim of another namespace go through, and those of a connection's secretRef.remoteKey are in
+	transfers []transfer           // those credentials, in order, each Secret once (addTransfer)
 	release   string               // Inputs.Release: never its own provider
 	namespace string
 	draft     any          // the parameter schema's $schema: the draft of the requirements that name none
@@ -178,7 +178,8 @@ type resolved struct {
 // names (contract.requires), then the named claim (its contract, the
 // reference's provision), then the binding (its contract), then the output (several instances, none),
 // the fields of an external connection or an output in alphabetical order
-// (contract.fields), then the required fields, then the violations of the
+// (contract.fields), then an external connection's secretRef.remoteKey
+// (storeSecret), then the required fields, then the violations of the
 // contract, all of them (contract.check), then those of the requirement,
 // all of them (requirement.check), then "{{" in what it resolves to
 // (chart.NoTemplate). A reference to an instance that resolves is
@@ -292,24 +293,29 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *claimSpec
 			return nil, fmt.Errorf("%s: claim %q (%s): of %s, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", field, b.ID, contract, provider)
 		}
 		name := r.release + "-" + b.Output.SecretRef.Name
-		r.transfers = append(r.transfers, transfer{secret: name, key: storeKey(b.ID), contract: contract, fields: fields})
+		r.addTransfer(transfer{secret: name, key: storeKey(b.ID), contract: contract, fields: fields})
 		x.secretRef = M{"name": name}
 	}
 	return x, nil
 }
 
-// resolveExternal: the external connection ref, conn, of the contract c.
+// resolveExternal: the external connection ref, conn, of the contract c,
+// its fields checked (contract.fields), then its secretRef: {name}, or
+// {remoteKey}, its credentials in the platform's secret store
+// (storeSecret).
 func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*resolved, error) {
 	x := &resolved{values: M{}, ref: ref, source: "external", where: fmt.Sprintf("%s (connection %q)", field, ref)}
 	if value.Str(conn["contract"]) != c.name {
 		return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(conn["contract"]), c.name)
 	}
+	var secretRef M
+	_, hasSecretRef := conn["secretRef"]
 	for k, v := range conn {
 		switch k {
 		case "contract", "description":
 		// Credentials are only referenced, never inlined.
 		case "secretRef":
-			x.secretRef = M{"name": value.AsMap(v)["name"]}
+			secretRef = value.AsMap(v)
 		default:
 			x.values[k] = v
 		}
@@ -317,7 +323,65 @@ func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*res
 	if err := c.fields(x.values, fmt.Sprintf("%s: connection %q", field, ref)); err != nil {
 		return nil, err
 	}
+	switch _, fromStore := secretRef["remoteKey"]; {
+	case fromStore:
+		name, err := r.storeSecret(c, ref, field, secretRef)
+		if err != nil {
+			return nil, err
+		}
+		x.secretRef = M{"name": name}
+	case hasSecretRef:
+		x.secretRef = M{"name": secretRef["name"]}
+	}
 	return x, nil
+}
+
+// storeSecret: the Secret of the instance's namespace the credentials of
+// the external connection ref, of the contract c, are read into from the
+// platform's secret store, under the key of its secretRef, {remoteKey}:
+// <release>.<ref>-credentials, the release and the connection's name,
+// DNS-1123 labels, joined by a dot, which neither holds, so that no other
+// connection's Secret takes the name, nor a claim's: <release>-<secret>
+// across namespaces; within one, the provider's
+// <id>-<contract>-credentials, its ID <namespace>.<...>, and a tree's
+// release is <namespace>-<instance>. Recorded once (addTransfer), each
+// secret field of the contract a property of the key. The first that
+// fails, in order: remoteKey with a name; remoteKey not a string, or
+// empty; "{{" in it; no store; the connection's name not a DNS-1123 label;
+// a contract without secret field.
+func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
+	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
+	key, ok := secretRef["remoteKey"].(string)
+	fields := c.secretFields()
+	switch {
+	case secretRef["name"] != nil:
+		return "", fmt.Errorf("%s: name or remoteKey, not both", where)
+	case !ok || key == "":
+		return "", fmt.Errorf("%s.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got %s", where, value.Short(secretRef["remoteKey"]))
+	}
+	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
+		return "", err
+	}
+	switch {
+	case r.store == "":
+		return "", fmt.Errorf("%s.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set", where)
+	case !chart.IsDNSLabel(ref):
+		return "", fmt.Errorf("%s.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials", where)
+	case fields == nil:
+		return "", fmt.Errorf("%s.remoteKey: the %s contract has no secret field (x-okdp-secret): there are no credentials to read", where, c.name)
+	}
+	name := r.release + "." + ref + "-credentials"
+	r.addTransfer(transfer{secret: name, key: key, contract: c.name, fields: fields})
+	return name, nil
+}
+
+// addTransfer: x recorded, unless a transfer of its Secret is already: two
+// references to one connection, or to one named claim, read its
+// credentials into one Secret, by one ExternalSecret.
+func (r *resolver) addTransfer(x transfer) {
+	if !slices.ContainsFunc(r.transfers, func(t transfer) bool { return t.secret == x.secret }) {
+		r.transfers = append(r.transfers, x)
+	}
 }
 
 // resolveOutput: the output ref of the contract c that another instance
