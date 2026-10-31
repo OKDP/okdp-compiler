@@ -32,11 +32,12 @@ import (
 type resolver struct {
 	contracts fs.FS                // Inputs.Contracts
 	conns     M                    // the external connections
+	levels    map[string]uint      // the level of the context each is given at, by name (connectionLevels)
 	claims    map[string]ClaimSpec // the named claims of the context (namedClaims)
 	classes   M                    // global.okdp.provisioning, by contract: the default class of a claim that names none
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
-	store     string               // global.okdp.secrets.store: the ClusterSecretStore the credentials of a claim of another namespace go through, and those of a connection's secretRef.remoteKey are in
+	store     string               // global.okdp.secrets.store: the store the credentials of a claim of another namespace go through, and those of a connection's secretRef.remoteKey are in
 	transfers []transfer           // those credentials, in order, each Secret once (addTransfer)
 	release   string               // Inputs.Release: never its own provider
 	namespace string
@@ -293,7 +294,7 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 			return nil, fmt.Errorf("%s: claim %q (%s): of %s, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", field, b.ID, contract, provider)
 		}
 		name := r.release + "-" + b.Output.SecretRef.Name
-		r.addTransfer(transfer{secret: name, key: storeKey(b.ID), contract: contract, fields: fields})
+		r.addTransfer(transfer{secret: name, key: storeKey(b.Namespace, b.ID), contract: contract, fields: fields})
 		x.secretRef = M{"name": name}
 	}
 	return x, nil
@@ -410,10 +411,15 @@ func (c Connection) MarshalYAML() (any, error) {
 // across namespaces; within one, the provider's
 // <id>-<contract>-credentials, its ID <namespace>.<...>, and a tree's
 // release is <namespace>-<instance>. Recorded once (addTransfer), each
-// secret field of the contract a property of the key. The first that
-// fails, in order: remoteKey with a name; remoteKey not a string, or
-// empty; "{{" in it; no store; the connection's name not a DNS-1123 label;
-// a contract without secret field.
+// secret field of the contract a property of the key. The key is a path
+// of the store (isStorePath); a connection above level 0, a project's or
+// an instance's, names one under its namespace, <namespace>/<rest>,
+// where its own PushSecrets or an administrator put it (storeKey): the
+// platform's keys are read through the platform's connections, and
+// another namespace's never. The first that fails, in order: remoteKey
+// with a name; remoteKey not a string, or empty; "{{" in it; no store;
+// the connection's name not a DNS-1123 label; a contract without secret
+// field; a key that is no path; a key outside the namespace.
 func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
 	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
 	key, ok := secretRef["remoteKey"].(string)
@@ -427,6 +433,7 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
 		return "", err
 	}
+	level := r.levels[ref]
 	switch {
 	case r.store == "":
 		return "", fmt.Errorf("%s.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set", where)
@@ -434,10 +441,48 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 		return "", fmt.Errorf("%s.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials", where)
 	case fields == nil:
 		return "", fmt.Errorf("%s.remoteKey: the %s contract has no secret field (x-okdp-secret): there are no credentials to read", where, c.name)
+	case !isStorePath(key):
+		return "", fmt.Errorf("%s.remoteKey %q: a path of the platform's secret store, segments separated by \"/\", none empty, \".\" or \"..\"", where, key)
+	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
+		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
 	}
 	name := r.release + "." + ref + "-credentials"
 	r.addTransfer(transfer{secret: name, key: key, contract: c.name, fields: fields})
 	return name, nil
+}
+
+// isStorePath: key is a path of the platform's secret store, as the
+// compiler writes them (storeKey): segments separated by "/", none empty,
+// "." or "..", so that no key reaches past its first segment, the one a
+// store's policy scopes.
+func isStorePath(key string) bool {
+	for s := range strings.SplitSeq(key, "/") {
+		if s == "" || s == "." || s == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// connectionLevels: the level of the context each connection is given at
+// (Inputs.Context), by name: the lowest level that gives it, a lower
+// level's connection being taken whole (contextLayers), which the
+// resolver scopes a secretRef.remoteKey by (storeSecret). A layer that
+// values cannot hold gives none: the layers failed before (valuesLayers).
+func connectionLevels(layers []ContextLayer) map[string]uint {
+	levels := map[string]uint{}
+	for _, l := range layers {
+		v, err := value.Normalize(l.Values)
+		if err != nil {
+			continue
+		}
+		for name := range value.AsMap(value.AsMap(v)["connections"]) {
+			if lv, ok := levels[name]; !ok || l.Level < lv {
+				levels[name] = l.Level
+			}
+		}
+	}
+	return levels
 }
 
 // addTransfer: x recorded, unless a transfer of its Secret is already: two

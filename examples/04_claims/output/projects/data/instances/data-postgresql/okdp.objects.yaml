@@ -189,6 +189,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: data-postgresql
@@ -211,6 +212,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: data-postgresql
@@ -233,6 +235,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Database
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: data-postgresql
@@ -269,17 +272,17 @@ spec:
     - match:
         remoteRef:
           property: password
-          remoteKey: okdp.demo.analytics
+          remoteKey: data/demo.analytics
         secretKey: password
     - match:
         remoteRef:
           property: username
-          remoteKey: okdp.demo.analytics
+          remoteKey: data/demo.analytics
         secretKey: username
-  deletionPolicy: None
+  deletionPolicy: Delete
   refreshInterval: 1h
   secretStoreRefs:
-    - kind: ClusterSecretStore
+    - kind: SecretStore
       name: okdp-secrets
   selector:
     secret:
@@ -303,17 +306,17 @@ spec:
     - match:
         remoteRef:
           property: password
-          remoteKey: okdp.demo.app.database
+          remoteKey: data/demo.app.database
         secretKey: password
     - match:
         remoteRef:
           property: username
-          remoteKey: okdp.demo.app.database
+          remoteKey: data/demo.app.database
         secretKey: username
-  deletionPolicy: None
+  deletionPolicy: Delete
   refreshInterval: 1h
   secretStoreRefs:
-    - kind: ClusterSecretStore
+    - kind: SecretStore
       name: okdp-secrets
   selector:
     secret:
@@ -337,17 +340,17 @@ spec:
     - match:
         remoteRef:
           property: password
-          remoteKey: okdp.demo.metrics.database
+          remoteKey: data/demo.metrics.database
         secretKey: password
     - match:
         remoteRef:
           property: username
-          remoteKey: okdp.demo.metrics.database
+          remoteKey: data/demo.metrics.database
         secretKey: username
-  deletionPolicy: None
+  deletionPolicy: Delete
   refreshInterval: 1h
   secretStoreRefs:
-    - kind: ClusterSecretStore
+    - kind: SecretStore
       name: okdp-secrets
   selector:
     secret:

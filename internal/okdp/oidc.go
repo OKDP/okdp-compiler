@@ -16,6 +16,7 @@ import (
 	_ "embed"
 	"fmt"
 	"maps"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 
@@ -87,7 +88,8 @@ func oidcFunctions(inst *instance) []cel.EnvOption {
 
 // oidcClients: the clients of the mapping's oidcClients section, checked
 // against mappingSchema (runMapping), then in every mode (one main client
-// at most, unique names), and, in dcr mode, the values of the oidc-dcr
+// at most, unique names, a secret given named <release>-...), and, in dcr
+// mode, the values of the oidc-dcr
 // chart of each: chart -> values, from dcrTemplate. The platform must then
 // register anonymously, at its registrationUrl, and no two clients write
 // one Secret.
@@ -110,6 +112,11 @@ func oidcClients(session *compile.Session, inst *instance, section []any) ([]oid
 			return nil, nil, fmt.Errorf("%s: %s has the same name: client names must be unique", c.where, other)
 		}
 		seen[c.name] = c.where
+		// The Job's Role writes the Secret: one of the release's, never
+		// another Secret of the namespace (another instance's credentials).
+		if s := value.Str(spec["secret"]); s != "" && !strings.HasPrefix(s, inst.release+"-") {
+			return nil, nil, fmt.Errorf("%s: secret %q: the Secret the client is written to is one of the release's, its name starts with %q", c.where, s, inst.release+"-")
+		}
 		c.fullname = fullname(inst.release, c.chart)
 		clients = append(clients, c)
 	}

@@ -129,7 +129,7 @@
             },
             "provisioning": {
               "type": "object",
-              "description": "The classes of the claims, by contract, as Kubernetes' storage classes: each class the provider of its claims and what it fixes of their request, one of them the default class, of the claims that name neither a class nor a provider. A claim names a class (class), or its provider (provider), or takes the default class; one that names neither, without a default class, is refused. The platform gives its classes and the default (platform.yaml); a project adds classes of its own (project.yaml), and the default of a contract the platform leaves without one, and changes none of the platform's: a class and a default are each taken whole. Never an instance.",
+              "description": "The classes of the claims, by contract, as Kubernetes' storage classes: each class the provider of its claims and what it fixes of their request, one of them the default class, of the claims that name neither a class nor a provider. A claim names a class (class), or its provider (provider), or takes the default class; one that names neither, without a default class, is refused. The platform gives its classes and the default (platform.yaml); a project adds classes of its own (project.yaml), and the default of a contract the platform leaves without one, and changes none of the platform's: a class and a default are each taken whole. The platform's classes route every namespace to their providers; a project's reaches a provider of another namespace with its consent only, the claimers of the provider's instance.yaml, else of its package's provisions, listing the project. Never an instance.",
               "additionalProperties": {
                 "type": "object",
                 "description": "The classes of a contract.",
@@ -152,7 +152,7 @@
                         "properties": {
                           "provider": {
                             "type": "string",
-                            "description": "The instance that provisions the claims of the class: <namespace>/<name>, or <name> of the claimer's namespace, the name the instance's name or its release."
+                            "description": "The instance that provisions the claims of the class: <namespace>/<name>, or <name> of the claimer's namespace, the name the instance's name or its release. Of another namespace than the claimer's, it serves a class of the platform's (level 0), and a project's only when its claimers list the claimer's namespace, or *."
                           },
                           "request": {
                             "type": "object",
@@ -169,7 +169,21 @@
               "type": "object",
               "description": "The platform's secret store: where secrets go between namespaces, and where connections may keep their credentials.",
               "properties": {
-                "store": {"type": "string", "description": "The ClusterSecretStore of External Secrets the credentials of a claim bound across namespaces go through: its provider pushes them (a PushSecret), its claimers read them (an ExternalSecret), under the key okdp.<claimers' namespace>.<claim ID>, a property per secret field of the contract. Required by such a claim whose output has a secretRef. A connection whose secretRef is {remoteKey: <key>} keeps its credentials there, under that key: each instance that references it reads them (an ExternalSecret) into a Secret of its namespace, <release>.<connection>-credentials. Required by such a connection."}
+                "store": {"type": "string", "description": "The name of the secret store of External Secrets the credentials of a claim bound across namespaces go through: its provider pushes them (a PushSecret, deleted from the store with the claim), its claimers read them (an ExternalSecret), under the key <provider's namespace>/<claim ID>, the ID starting with the claimers' namespace, a property per secret field of the contract: a path-based store (OpenBao, Vault, a cloud secret manager) scopes a writer by the first segment and a reader by the first label of the second; the platform's own keys are under platform/, a namespace no project may have. Required by such a claim whose output has a secretRef. A connection whose secretRef is {remoteKey: <key>} keeps its credentials there, under that key: each instance that references it reads them (an ExternalSecret) into a Secret of its namespace, <release>.<connection>-credentials. Required by such a connection."},
+                "provider": {"type": "object", "description": "The provider of the store, External Secrets' SecretStore spec.provider, verbatim (vault: an OpenBao or Vault server, its KV v2 mount, its Kubernetes auth, whose serviceAccountRef names serviceAccount). Set, the store is a SecretStore of that name in each project's namespace, which the targets write with the ServiceAccount serviceAccount, and the PushSecrets and ExternalSecrets reference it (kind SecretStore): the store's policy scopes each namespace by the identity it authenticates with. Unset, the store is a ClusterSecretStore of that name the platform created, one identity for every namespace: one trust domain."},
+                "serviceAccount": {"type": "string", "default": "okdp-secrets", "description": "With provider: the ServiceAccount of each project's namespace the store authenticates with, the one provider's serviceAccountRef names."},
+                "refreshInterval": {"type": "string", "default": "1h", "description": "How often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it (refreshInterval, a duration): rotated credentials reach their claimers within it."}
+              }
+            },
+            "policy": {
+              "type": "object",
+              "description": "The platform's policy: what the projects may deploy, and which projects are the platform's own.",
+              "properties": {
+                "privileged": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "The namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value, as the other projects may not; the targets give their releases the engine's own identity, the other projects' one confined to their namespace (Result.Privileged)."
+                }
               }
             }
           }

@@ -212,7 +212,8 @@ var pgDef = func() *Definition {
 		"replicas": {"type": "integer", "default": 1},
 		"fail": {"type": "boolean", "default": false}}}`)}
 	d := withFiles(files)
-	d.Package.Provisions = []string{"server"}
+	// Any namespace may claim of an instance of it (tree.consent).
+	d.Package.Provisions = []Provision{{Contract: "server", Claimers: []string{"*"}}}
 	d.Okdp = []byte(`
 errors:
   - {$if: '${{ values.fail }}', $value: it fails}
@@ -233,7 +234,7 @@ var pgSharedDef = func() *Definition {
 // otherDef: pgDef, a package that provisions other connections.
 var otherDef = func() *Definition {
 	d := *pgDef
-	d.Package.Provisions = []string{"other"}
+	d.Package.Provisions = []Provision{{Contract: "other", Claimers: []string{"*"}}}
 	return &d
 }()
 
@@ -643,6 +644,121 @@ dbs.us: claim (server): the request does not meet the contract's claim schema (x
 	}
 }
 
+// TestCompileAllConsent: a provider serves the claims of another
+// namespace through a class of the platform's, or with its consent, in
+// every order: of a package that lists no claimers, the platform's
+// default class and a class of the platform's named bind; a class of the
+// project's, named or the default one, a provider named and a named
+// claim's provider are refused, unless the provider is of the claimer's
+// namespace; the claimers of the instance (Inputs.Claimers) bind the
+// namespaces they list, or any ("*"), and replace those of its package,
+// none when empty; a package's claimers (provisions) bind those it lists.
+func TestCompileAllConsent(t *testing.T) {
+	closedDef := *pgDef
+	closedDef.Package.Provisions = []Provision{{Contract: "server"}}
+	demoDef := *pgDef
+	demoDef.Package.Provisions = []Provision{{Contract: "server", Claimers: []string{"demo"}}}
+	pg := func(d *Definition, namespace, name string, claimers []string) Instance {
+		inst := claimInstance(d, namespace, name, M{})
+		inst.Inputs.Claimers = claimers
+		return inst
+	}
+	closed := pg(&closedDef, "data", "pg", nil)
+	app := func(name string, db any) Instance { return claimInstance(appDef, "demo", name, M{"db": db}) }
+	// The platform's classes, standard the default, and a class of the
+	// project's, large, each of data/pg.
+	classes := func(inst Instance) Instance {
+		inst = withClasses(inst, 0, M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg"}}})
+		return withClasses(inst, 1, M{"classes": M{"large": M{"provider": "data/pg"}}})
+	}
+	refused := func(field, id, by, list string) string {
+		return fmt.Sprintf("error: %s: claim %q (server): of data/pg%s, another namespace: demo is not one of its claimers (claimers of instance data/pg: %s): the provider lists the namespaces that may claim of it (claimers of its instance.yaml, else of its package's provisions), or the platform routes them through a class of platform.yaml", field, id, by, list)
+	}
+	for name, tc := range map[string]struct {
+		instances []Instance
+		want      map[string]string
+	}{
+		"the platform's classes": {
+			[]Instance{classes(app("demo-a", M{})), classes(app("demo-b", M{"class": "standard"})), closed},
+			map[string]string{
+				"demo/demo-a": "depends on data/pg demo.demo-a.db; bound db demo.demo-a.db data/pg class standard named=false",
+				"demo/demo-b": "depends on data/pg demo.demo-b.db; bound db demo.demo-b.db data/pg class standard named=true",
+				"data/pg":     `provides demo.demo-a.db demo.demo-a.db.data {"tier":"a"}; provides demo.demo-b.db demo.demo-b.db.data {"tier":"a"}`,
+			},
+		},
+		"without consent": {
+			[]Instance{
+				classes(app("demo-a", M{"class": "large"})),
+				withClasses(app("demo-b", M{}), 1, M{"default": "large", "classes": M{"large": M{"provider": "data/pg"}}}),
+				app("demo-c", M{"provider": "data/pg"}),
+				withClaims(classes(app("demo-d", "s")), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}),
+				withClaims(classes(claimInstance(appDef, "demo", "demo-e", M{})), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}),
+				closed,
+			},
+			map[string]string{
+				"demo/demo-a": refused("db", "demo.demo-a.db", `, the provider of class "large"`, "none, its package's"),
+				"demo/demo-b": refused("db", "demo.demo-b.db", `, the provider of the default class "large"`, "none, its package's"),
+				"demo/demo-c": refused("db", "demo.demo-c.db", "", "none, its package's"),
+				"demo/demo-d": refused("claims.s", "demo.s", "", "none, its package's"),
+				"demo/demo-e": refused("claims.s", "demo.s", "", "none, its package's"),
+				"data/pg":     "",
+			},
+		},
+		"of the claimer's namespace": {
+			[]Instance{app("demo-a", M{"provider": "pg"}), withClasses(app("demo-b", M{"class": "large"}), 1, M{"classes": M{"large": M{"provider": "pg"}}}), pg(&closedDef, "demo", "pg", nil)},
+			map[string]string{
+				"demo/demo-a": "depends on /pg demo.demo-a.db; bound db demo.demo-a.db demo/pg named=true",
+				"demo/demo-b": "depends on /pg demo.demo-b.db; bound db demo.demo-b.db demo/pg class large named=true",
+				"demo/pg":     `provides demo.demo-a.db demo.demo-a.db.demo {"tier":"a"}; provides demo.demo-b.db demo.demo-b.db.demo {"tier":"a"}`,
+			},
+		},
+		"the instance's claimers": {
+			[]Instance{classes(app("demo-a", M{"class": "large"})), app("demo-b", M{"provider": "data/pg"}), pg(&closedDef, "data", "pg", []string{"reports", "demo"})},
+			map[string]string{
+				"demo/demo-a": "depends on data/pg demo.demo-a.db; bound db demo.demo-a.db data/pg class large named=true",
+				"demo/demo-b": "depends on data/pg demo.demo-b.db; bound db demo.demo-b.db data/pg named=true",
+				"data/pg":     `provides demo.demo-a.db demo.demo-a.db.data {"tier":"a"}; provides demo.demo-b.db demo.demo-b.db.data {"tier":"a"}`,
+			},
+		},
+		"any namespace": {
+			[]Instance{app("demo-a", M{"provider": "data/pg"}), pg(&closedDef, "data", "pg", []string{"*"})},
+			map[string]string{
+				"demo/demo-a": "depends on data/pg demo.demo-a.db; bound db demo.demo-a.db data/pg named=true",
+				"data/pg":     `provides demo.demo-a.db demo.demo-a.db.data {"tier":"a"}`,
+			},
+		},
+		"other claimers": {
+			[]Instance{app("demo-a", M{"provider": "data/pg"}), pg(&closedDef, "data", "pg", []string{"reports"})},
+			map[string]string{
+				"demo/demo-a": refused("db", "demo.demo-a.db", "", "reports"),
+				"data/pg":     "",
+			},
+		},
+		"the package's claimers": {
+			[]Instance{app("demo-a", M{"provider": "data/pg"}), pg(&demoDef, "data", "pg", nil)},
+			map[string]string{
+				"demo/demo-a": "depends on data/pg demo.demo-a.db; bound db demo.demo-a.db data/pg named=true",
+				"data/pg":     `provides demo.demo-a.db demo.demo-a.db.data {"tier":"a"}`,
+			},
+		},
+		"the instance's over the package's": {
+			[]Instance{app("demo-a", M{"provider": "data/pg"}), pg(&demoDef, "data", "pg", []string{})},
+			map[string]string{
+				"demo/demo-a": refused("db", "demo.demo-a.db", "", "none"),
+				"data/pg":     "",
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, order := range permutations(tc.instances) {
+				if got := claimOutcomes(order); !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf("got  %q\nwant %q", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 // TestCompileAllProviderNames: a provider, a claim's, a class's or a named
 // claim's, names an instance of its namespace by its name or by its
 // release, in every order: by name, qualified or of the claimer's
@@ -755,10 +871,13 @@ func TestClaimID(t *testing.T) {
 }
 
 // TestCompileAllCredentials: the credentials of a claim of another
-// namespace go through the platform's secret store: the provider pushes
-// its Secret (PushSecret), the claimer reads a copy of its own
-// (ExternalSecret); none within a namespace; without the store, the
-// provider refused, and so its claimer.
+// namespace go through the platform's secret store, under <provider
+// namespace>/<id>: the provider pushes its Secret (PushSecret, deleted
+// from the store with the claim), the claimer reads a copy of its own
+// (ExternalSecret), both through the ClusterSecretStore, or the
+// SecretStore of their namespace when the platform gives the store's
+// provider, at the platform's refresh interval; none within a namespace;
+// without the store, the provider refused, and so its claimer.
 func TestCompileAllCredentials(t *testing.T) {
 	contracts := fstest.MapFS{"server.schema.json": {Data: []byte(`{"properties": {"host": {"type": "string"}, "password": {"type": "string", "x-okdp-secret": true}}, "required": ["host"]}`)}}
 	d := *pgDef
@@ -797,8 +916,13 @@ provides:
 	}{
 		"across namespaces": {
 			"store", "data",
-			"PushSecret data/demo.demo-app.db map[data:[map[match:map[remoteRef:map[property:password remoteKey:okdp.demo.demo-app.db] secretKey:password]]] deletionPolicy:None refreshInterval:1h secretStoreRefs:[map[kind:ClusterSecretStore name:okdp-secrets]] selector:map[secret:map[name:demo.demo-app.db-credentials]] updatePolicy:Replace]",
-			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials map[data:[map[remoteRef:map[key:okdp.demo.demo-app.db property:password] secretKey:password]] refreshInterval:1h secretStoreRef:map[kind:ClusterSecretStore name:okdp-secrets] target:map[creationPolicy:Owner name:demo-app-demo.demo-app.db-credentials template:map[metadata:map[labels:map[app.kubernetes.io/instance:demo-app app.kubernetes.io/managed-by:Helm app.kubernetes.io/name:demo app.kubernetes.io/part-of:okdp okdp.io/credentials-server:true okdp.io/instance:demo-app okdp.io/service:demo]]]]] labelled true true",
+			"PushSecret data/demo.demo-app.db map[data:[map[match:map[remoteRef:map[property:password remoteKey:data/demo.demo-app.db] secretKey:password]]] deletionPolicy:Delete refreshInterval:1h secretStoreRefs:[map[kind:ClusterSecretStore name:okdp-secrets]] selector:map[secret:map[name:demo.demo-app.db-credentials]] updatePolicy:Replace]",
+			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials map[data:[map[remoteRef:map[key:data/demo.demo-app.db property:password] secretKey:password]] refreshInterval:1h secretStoreRef:map[kind:ClusterSecretStore name:okdp-secrets] target:map[creationPolicy:Owner name:demo-app-demo.demo-app.db-credentials template:map[metadata:map[labels:map[app.kubernetes.io/instance:demo-app app.kubernetes.io/managed-by:Helm app.kubernetes.io/name:demo app.kubernetes.io/part-of:okdp okdp.io/credentials-server:true okdp.io/instance:demo-app okdp.io/service:demo]]]]] labelled true true",
+		},
+		"a SecretStore of each namespace": {
+			"provider", "data",
+			"PushSecret data/demo.demo-app.db map[data:[map[match:map[remoteRef:map[property:password remoteKey:data/demo.demo-app.db] secretKey:password]]] deletionPolicy:Delete refreshInterval:30m secretStoreRefs:[map[kind:SecretStore name:okdp-secrets]] selector:map[secret:map[name:demo.demo-app.db-credentials]] updatePolicy:Replace]",
+			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials map[data:[map[remoteRef:map[key:data/demo.demo-app.db property:password] secretKey:password]] refreshInterval:30m secretStoreRef:map[kind:SecretStore name:okdp-secrets] target:map[creationPolicy:Owner name:demo-app-demo.demo-app.db-credentials template:map[metadata:map[labels:map[app.kubernetes.io/instance:demo-app app.kubernetes.io/managed-by:Helm app.kubernetes.io/name:demo app.kubernetes.io/part-of:okdp okdp.io/credentials-server:true okdp.io/instance:demo-app okdp.io/service:demo]]]]] labelled true true",
 		},
 		"one namespace": {"store", "demo", "", ""},
 		"no store": {
@@ -809,8 +933,11 @@ provides:
 	} {
 		t.Run(name, func(t *testing.T) {
 			var global M
-			if tc.global != "" {
+			switch tc.global {
+			case "store":
 				global = store
+			case "provider":
+				global = M{"okdp": M{"secrets": M{"store": "okdp-secrets", "refreshInterval": "30m", "provider": M{"vault": M{"server": "http://openbao.openbao.svc:8200", "path": "okdp", "version": "v2"}}}}}
 			}
 			out := CompileAll(context.Background(), []Instance{
 				with(claimInstance(&d, tc.namespace, "pg", M{}), global),

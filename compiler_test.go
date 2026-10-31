@@ -210,7 +210,8 @@ func TestTreeNames(t *testing.T) {
 
 // TestCompileTree: the tree of the claims example compiled: its graph,
 // the claims bound to its provider, each with its claimer and what the
-// provider granted it.
+// provider granted it, and the namespaces it lets claim of it, its
+// instance.yaml's claimers.
 func TestCompileTree(t *testing.T) {
 	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
 	if err != nil {
@@ -223,6 +224,9 @@ func TestCompileTree(t *testing.T) {
 	pg := tree.Instance("data", "postgresql")
 	if pg == nil || pg.Release() != "data-postgresql" || !slices.Contains(pg.Provisions(), "database-server") {
 		t.Fatalf("the provider: %+v", pg)
+	}
+	if got := pg.Claimers("database-server"); !slices.Equal(got, []string{"demo"}) {
+		t.Errorf("claimers: got %q, want demo", got)
 	}
 	var claims []string
 	for _, p := range pg.Provided {

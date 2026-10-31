@@ -5,3 +5,9 @@
 # to.
 service: postgresql
 version: 1.0.0
+# The namespaces whose instances may claim of it from another namespace
+# by naming it, or through a class of their project's (large): its
+# consent, over its package's (provisions), which lists none. A class of
+# the platform's (standard) needs none: the platform routes every
+# namespace to its provider.
+claimers: [demo]

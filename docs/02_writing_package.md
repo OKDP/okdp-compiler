@@ -591,6 +591,12 @@ the provider's.
 The compiler carries the credentials of a claim of another namespace
 through the platform's secret store ([credentials across
 namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)).
+An instance serves such a claim through a class of the platform's, or
+with its consent: the namespaces its `instance.yaml` lists
+(`claimers`), else those of the package's entry, `{contract:
+database-server, claimers: ['*']}` for a server every project may claim
+of; none by default
+([providers](specs/01_inputs_outputs.md#providers)).
 
 ### 7. Compile, render and check
 
@@ -818,8 +824,7 @@ External Secrets Operator generators, generated once in the cluster.
 # okdp.yaml
 vars:
   keep:                     # outlive the release: the database they encrypt does
-    helm.sh/resource-policy: keep
-    argocd.argoproj.io/sync-options: Delete=false
+    helm.sh/resource-policy: keep   # Argo CD's Prune=false,Delete=false added
 objects:
   - $spread: >-
       ${{ okdpGeneratedSecret({'name': okdpFullname('internal'), 'annotations': keep,
@@ -829,6 +834,11 @@ objects:
       ${{ platform.oidc.enabled ? [] : okdpGeneratedSecret({'name': okdpFullname('admin'),
           'keys': [{'key': 'password', 'length': 24}]}) }}
 ```
+
+Helm and Flux keep what `helm.sh/resource-policy: keep` marks; the
+compiler adds Argo CD's equivalents, `argocd.argoproj.io/sync-options:
+Prune=false,Delete=false`, to each such object it writes ([the objects
+file](specs/01_inputs_outputs.md#the-objects-file)).
 
 Point the upstream chart at the Secret (`*SecretName`, `existingSecret`) and
 protect that path: the chart's own templates would draw a new value on every

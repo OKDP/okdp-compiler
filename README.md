@@ -152,7 +152,10 @@ tree gives, `platform.yaml` at level 0, its project's `project.yaml` at
 level 1, its own `connections.yaml` at level 2, then its values,
 `config.yaml`; with what the others of its namespace publish, compiled
 after them; each claim bound to its provider, `<project>/<instance>` or
-`<project>/<release>`; their dependencies checked; written for
+`<project>/<release>`, one of another project through a class of
+`platform.yaml`, or with its consent, the `claimers` of its
+`instance.yaml` ([providers](docs/specs/01_inputs_outputs.md#providers));
+their dependencies checked; written for
 `--target`: `helm` (the default), each instance's umbrella chart, `flux`
 with its HelmRelease or `argocd` with its Application
 ([`--repository`](docs/01_usage.md#--repository)):
@@ -178,10 +181,13 @@ and defaulted by
 the classes of the claims among them (`global.okdp.provisioning`: the
 platform's, with the default class, and a project's own,
 [classes](docs/specs/01_inputs_outputs.md#classes)), and the platform's
-secret store (`global.okdp.secrets.store`), through which the credentials
-of claims cross namespaces and where a connection may keep its own,
-`secretRef: {remoteKey: <key>}`, read into a Secret of each referencing
-instance's namespace
+secret store (`global.okdp.secrets`: its name, its provider for a
+SecretStore of each namespace), through which the credentials of claims
+cross namespaces, under `<provider namespace>/<claim ID>`, keys a
+path-based store scopes per namespace ([what the store must
+enforce](docs/specs/01_inputs_outputs.md#what-the-store-must-enforce)),
+and where a connection may keep its own, `secretRef: {remoteKey:
+<key>}`, read into a Secret of each referencing instance's namespace
 ([connections](docs/specs/01_inputs_outputs.md#connections)).
 An instance's `config.yaml` that sets `connections` or `claims`, or
 `global` but for the keys the package's parameter schema declares under
@@ -238,7 +244,7 @@ A compile reads no chart: `--charts` without `--check` fails
 | `examples/01_minimal/` | the smallest package with a mapping, `hello`: one chart, a mapping that sets three of its values and the instance's usage; no platform values, none needed |
 | `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`), its database a claim; `demo-db`, the database server the claim binds to, a minimal package, `db`, that provisions a database for each claim |
 | `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, level 1), each with connections, the instance's own connections (`connections.yaml`, level 2) and its values (`config.yaml`), two claims of a database among its references, one of its own, one the project's named claim; the instances it depends on, `demo-db`, their provider, and `demo-alerts`, whose output it references, minimal packages, `db` and `alerts`; its chart cache in `.charts/`, for `--check --charts` |
-| `examples/04_claims/` | claims: a database server, `postgresql` in the project `data`, the provider of the platform's default class (`global.okdp.provisioning`) and of the project's class `large`, each naming it `data/postgresql`, that provisions a database for each claim bound to it; an application, `app`, whose database is a claim by default, a PostgreSQL one with credentials (`require`): `demo-app` claims one of its own by default, `demo-metrics` one it writes out (`config.yaml`: a class and a request, a size and extensions), `demo-reports` and `demo-dashboards` reference one the project declares (`project.yaml`, a named claim of the class `large`); the contract's two sides, what a claim requests (`x-okdp-claim`: a size, extensions) and what the provider publishes, its `okdp.info.yaml` showing what it granted; the platform's secret store, the credentials crossing namespaces |
+| `examples/04_claims/` | claims: a database server, `postgresql` in the project `data`, the provider of the platform's default class (`global.okdp.provisioning`) and of the project's class `large`, each naming it `data/postgresql`, the latter with its consent (`claimers: [demo]` of its `instance.yaml`), that provisions a database for each claim bound to it; an application, `app`, whose database is a claim by default, a PostgreSQL one with credentials (`require`): `demo-app` claims one of its own by default, `demo-metrics` one it writes out (`config.yaml`: a class and a request, a size and extensions), `demo-reports` and `demo-dashboards` reference one the project declares (`project.yaml`, a named claim of the class `large`); the contract's two sides, what a claim requests (`x-okdp-claim`: a size, extensions) and what the provider publishes, its `okdp.info.yaml` showing what it granted; the platform's secret store, the credentials crossing namespaces |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
 | `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, stdout and stderr |
 | `testdata/targets/` | the files of each target for three instances (`go test ./internal/target -update`) |

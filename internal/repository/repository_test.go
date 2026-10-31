@@ -16,7 +16,8 @@ func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 
 // whole: a tree in one repository: the platform, a contract, a package
 // in two versions, two projects, demo's with its file and its description,
-// two instances, one with its connections and values.
+// two instances, one with its connections and values; other's, an
+// instance with its claimers.
 var whole = fstest.MapFS{
 	"platform.yaml":                              file("global: {okdp: {ingress: {suffix: example.org}}}\n"),
 	"contracts/database.schema.json":             file(`{"properties": {"host": {"type": "string"}}}`),
@@ -28,7 +29,7 @@ var whole = fstest.MapFS{
 	"projects/demo/instances/a/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
 	"projects/demo/instances/a/connections.yaml": file("connections: {ext: {contract: database, host: h}}\n"),
 	"projects/demo/instances/a/config.yaml":      file("replicas: 2\n"),
-	"projects/other/instances/c/instance.yaml":   file("service: app\nversion: 2.0.0\n"),
+	"projects/other/instances/c/instance.yaml":   file("service: app\nversion: 2.0.0\nclaimers: [demo, '*']\n"),
 }
 
 // split: a part of whole: the files whose path starts with one of
@@ -46,7 +47,7 @@ func split(prefixes ...string) fstest.MapFS {
 }
 
 // summary: what Load gives, by instance: its namespace and release, its
-// name, its package, its layers.
+// name, its package, its layers, its claimers when it has some.
 func summary(t *testing.T, instances []okdp.Instance) []string {
 	t.Helper()
 	var got []string
@@ -62,6 +63,9 @@ func summary(t *testing.T, instances []okdp.Instance) []string {
 		if _, err := in.Contracts.Open("database.schema.json"); err != nil {
 			s += " no contract"
 		}
+		if in.Claimers != nil {
+			s += " claimers " + strings.Join(in.Claimers, ",")
+		}
 		got = append(got, s)
 	}
 	return got
@@ -69,14 +73,15 @@ func summary(t *testing.T, instances []okdp.Instance) []string {
 
 // TestLoad: the instances of a tree, by project then instance, each with
 // its release, <project>-<instance>, its name, the instance's directory
-// name, its package, one Definition per version, and its layers by level,
-// the project's without its description; the same tree split into
+// name, its package, one Definition per version, its layers by level,
+// the project's without its description, and its claimers, of its
+// instance file, nil without; the same tree split into
 // repositories, in any order.
 func TestLoad(t *testing.T) {
 	want := []string{
 		"demo/demo-a (a) app-1.0.0 global@0 claims,global@1 connections@2 replicas",
 		"demo/demo-b (b) app-1.0.0 global@0 claims,global@1",
-		"other/other-c (c) app-2.0.0 global@0",
+		"other/other-c (c) app-2.0.0 global@0 claimers demo,*",
 	}
 	instances, err := Load([]Repository{{"db", whole}})
 	if err != nil {
@@ -109,7 +114,8 @@ func TestLoad(t *testing.T) {
 // catalog lacks, a package that fails, once, a values file that is not,
 // an instance's connections file that holds more than connections, the
 // platform's file that declares claims, a project's description that is
-// not a string.
+// not a string, an instance's claimer that is no namespace name nor "*",
+// or listed twice.
 func TestLoadErrors(t *testing.T) {
 	_, err := Load([]Repository{
 		{"b", fstest.MapFS{
@@ -147,6 +153,8 @@ project "demo" is in the repositories a and b`
 		"projects/demo/instances/h/instance.yaml":    file("service: app\nversion: ../1.0.0\n"),
 		"projects/demo/instances/i/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
 		"projects/demo/instances/i/connections.yaml": file("connections: {}\nglobal: {okdp: {}}\n"),
+		"projects/demo/instances/j/instance.yaml":    file("service: app\nversion: 1.0.0\nclaimers: [demo, Demo]\n"),
+		"projects/demo/instances/k/instance.yaml":    file("service: app\nversion: 1.0.0\nclaimers: ['*', '*']\n"),
 		"projects/bad/project.yaml":                  file("description: {text: d}\n"),
 	}}})
 	for _, w := range []string{
@@ -159,6 +167,8 @@ project "demo" is in the repositories a and b`
 		`db/projects/demo/instances/h/instance.yaml: version "../1.0.0" of service "app" is not in db/catalog/app`,
 		"db/projects/demo/instances/i/connections.yaml: global: the instance's own connections only (connections): the rest of the context is the platform's or the project's",
 		"db/projects/bad/project.yaml: description: a string, the project's description",
+		`db/projects/demo/instances/j/instance.yaml: claimers[1]: "Demo" is not a namespace name, nor "*"`,
+		"db/projects/demo/instances/k/instance.yaml: claimers: * is listed twice",
 	} {
 		if err == nil || !strings.Contains(err.Error(), w) {
 			t.Errorf("got %v\nwant it to hold %s", err, w)

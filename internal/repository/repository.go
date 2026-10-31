@@ -36,7 +36,7 @@ const (
 	ProjectFile        = "project.yaml"     // a project's values, context level 1
 	ProjectDescription = "description"      // ProjectFile's key describing the project, a string: no value of the context
 	InstancesDir       = "instances"        // <project>/instances/<instance>/, the release <project>-<instance>
-	InstanceFile       = "instance.yaml"    // {service, version}: the instance's package
+	InstanceFile       = "instance.yaml"    // {service, version, claimers}: the instance's package, and the namespaces that may claim of it
 	ConnectionsFile    = "connections.yaml" // the instance's own connections, context level 2
 	ConfigFile         = "config.yaml"      // the instance's values
 )
@@ -70,8 +70,10 @@ type tree struct {
 // claims among it, without its ProjectDescription, and ConnectionsFile at
 // 2, connections only, and the values, ConfigFile, each when present; the
 // name, the instance's directory name, the release, ReleaseName of the
-// project and the name, and the namespace, the project's. Every problem
-// at once, each naming its repository and path; a package that fails once.
+// project and the name, and the namespace, the project's; the claimers
+// of its InstanceFile, the namespaces that may claim of it across
+// namespaces (Inputs.Claimers). Every problem at once, each naming its
+// repository and path; a package that fails once.
 func Load(repos []Repository) ([]okdp.Instance, error) {
 	t, err := index(repos)
 	if err != nil {
@@ -115,14 +117,19 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 }
 
 // instance: the instance name of project, in repo, the context layers
-// below its own. Without its Definition when its package failed for an
-// instance before it.
+// below its own: its InstanceFile, {service, version}, the package, and
+// claimers, optional, the namespaces whose instances may claim of it
+// across namespaces, each a namespace name or "*", once
+// (okdp.CheckClaimers): Inputs.Claimers, nil when absent, the package's
+// then. Without its Definition when its package failed for an instance
+// before it.
 func (t *tree) instance(repo Repository, project, name string, layers []okdp.ContextLayer) (okdp.Instance, error) {
 	dir := path.Join(ProjectsDir, project, InstancesDir, name)
 	file := path.Join(dir, InstanceFile)
 	var pkg struct {
-		Service string `yaml:"service"`
-		Version string `yaml:"version"`
+		Service  string   `yaml:"service"`
+		Version  string   `yaml:"version"`
+		Claimers []string `yaml:"claimers"`
 	}
 	b, err := fs.ReadFile(repo.FS, file)
 	if err == nil {
@@ -132,6 +139,9 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 	}
 	if err == nil && (pkg.Service == "" || pkg.Version == "") {
 		err = errors.New("service and version are required")
+	}
+	if err == nil {
+		err = okdp.CheckClaimers("claimers", pkg.Claimers)
 	}
 	if err != nil {
 		return okdp.Instance{}, fmt.Errorf("%s: %w", where(repo, file), unwrapPath(err))
@@ -157,7 +167,7 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 	if err != nil {
 		return okdp.Instance{}, err
 	}
-	in := okdp.Inputs{Contracts: t.contracts, Context: append(layers, connections...), Release: ReleaseName(project, name), Namespace: project}
+	in := okdp.Inputs{Contracts: t.contracts, Context: append(layers, connections...), Release: ReleaseName(project, name), Namespace: project, Claimers: pkg.Claimers}
 	for _, l := range values {
 		in.Values = append(in.Values, l.Values)
 	}

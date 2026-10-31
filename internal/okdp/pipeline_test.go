@@ -204,6 +204,7 @@ func TestCompileErrors(t *testing.T) {
 		"long release":    {Inputs{Charts: charts, Contracts: contracts, Release: strings.Repeat("a", 54), Namespace: "demo"}, `Inputs.Release "aaaa`},
 		"namespace":       {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 		"long namespace":  {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
+		"platform":        {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
 		"name":            {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {

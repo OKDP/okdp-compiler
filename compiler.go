@@ -108,7 +108,10 @@ type (
 	// or <name> of the claimer's namespace; its outputs that name none
 	// and its claims' IDs are named after it (Inputs.Name). LoadRepository
 	// names each after its directory; a caller that leaves Name empty
-	// names it by its release only.
+	// names it by its release only. A provider serves the claims of
+	// another namespace through a class of the platform's, or those of the
+	// namespaces it lists (Instance.Claimers: Inputs.Claimers, its
+	// instance.yaml's, else its package's provisions').
 	Instance = okdp.Instance
 	// Outcome: the compile of one instance of CompileAll: its result, nil
 	// when it is refused, and why; the claims of its references, bound.
@@ -299,7 +302,9 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // to the instance that provisions its contract, the one it names or the
 // provider of its class, the one it names or the default one of the
 // claimer's context (Outcome.Claims), named by its name (Instance.Name)
-// or its release, a name of two instances refused; each instance after
+// or its release, a name of two instances refused, one of another
+// namespace through a class of the platform's or with its consent
+// (Instance.Claimers); each instance after
 // the instances of its namespace whose outputs it references and the
 // providers of its claims, with what they publish (Inputs.Name,
 // Published, Claims and Bindings, set by CompileAll). Two instances of a

@@ -27,7 +27,8 @@ stderr '^db: claim \(server\): it names no class, and the context sets no defaul
 # A requirement the default class's provider does not meet: the claimer
 # is refused, its claim not moved to the provider that meets it; nothing
 # written. Named, that provider binds it, and so does a class of the
-# project's, named.
+# project's, named: of another namespace, with its consent, its
+# instance.yaml listing the project among its claimers.
 status 1 okdp-compile --repository $WORK/lib --repository $WORK/platform --repository $WORK/tree --repository $WORK/second --repository $WORK/strict -o $WORK/strict-out
 stderr '^error: reports/reports-strict: db \(claim "reports.strict.db" of data/data-pg\): the connection does not meet the package''s requirement \(x-okdp-connection-ref.require\); data/data-pg is the provider of the default class standard of server connections \(global.okdp.provisioning.server.default\): name a class whose provider meets it \(class\), or change the default:$'
 stderr '^- at ''/host'': ''data-pg-rw.data.svc'' does not match pattern ''\^data2-pg2-''$'
@@ -36,6 +37,21 @@ status 0 okdp-compile --repository $WORK/lib --repository $WORK/platform --repos
 stderr '^reports/reports-strict: db: claim reports.strict.db \(server\) bound to data2/data2-pg2$'
 status 0 okdp-compile --repository $WORK/lib --repository $WORK/platform --repository $WORK/tree --repository $WORK/second --repository $WORK/classes -o $WORK/classes-out
 stderr '^reports/reports-strict: db: claim reports.strict.db \(server\) bound to data2/data2-pg2, class second$'
+
+# Without its consent, a provider of another namespace serves no claim
+# that names it, nor one of a class of the claimer's project: the claim is
+# refused, the provider's claimers said, its instance.yaml's, else its
+# package's provisions'; nothing written. The platform's classes need
+# none (data/data-pg, above). A package's claimers bind the namespaces
+# they list, unless its instance lists its own.
+status 1 okdp-compile --repository $WORK/lib --repository $WORK/platform --repository $WORK/tree --repository $WORK/closed --repository $WORK/named -o $WORK/closed-out
+stderr '^error: reports/reports-strict: db: claim "reports.strict.db" \(server\): of data2/data2-pg2, another namespace: reports is not one of its claimers \(claimers of instance data2/data2-pg2: none, its package''s\): the provider lists the namespaces that may claim of it \(claimers of its instance.yaml, else of its package''s provisions\), or the platform routes them through a class of platform.yaml$'
+! exists $WORK/closed-out
+status 1 okdp-compile --repository $WORK/lib --repository $WORK/platform --repository $WORK/tree --repository $WORK/others --repository $WORK/classes -o $WORK/others-out
+stderr '^error: reports/reports-strict: db: claim "reports.strict.db" \(server\): of data2/data2-pg2, the provider of class "second", another namespace: reports is not one of its claimers \(claimers of instance data2/data2-pg2: demo\): the provider lists'
+! exists $WORK/others-out
+status 0 okdp-compile --repository $WORK/lib --repository $WORK/platform --repository $WORK/tree --repository $WORK/open --repository $WORK/named -o $WORK/open-out
+stderr '^reports/reports-strict: db: claim reports.strict.db \(server\) bound to data2/data2-pg2$'
 
 # A request the contract's claim schema refuses (x-okdp-claim): the
 # claimer is refused when it binds, every violation said; nothing
@@ -90,6 +106,18 @@ provisions: [server]
 provides:
   - $for: c in claims
     $each: {contract: server, name: '${{ c.id }}', values: {host: '${{ release.name }}-rw.${{ release.namespace }}.svc', name: '${{ c.id }}'}}
+-- lib/catalog/pgopen/1.0.0/Chart.yaml --
+apiVersion: v2
+name: pgopen
+version: 1.0.0
+dependencies:
+  - {name: postgresql, repository: https://charts.example.org, version: 1.0.0}
+-- lib/catalog/pgopen/1.0.0/okdp.yaml --
+provisions:
+  - {contract: server, claimers: [reports]}
+provides:
+  - $for: c in claims
+    $each: {contract: server, name: '${{ c.id }}', values: {host: '${{ release.name }}-rw.${{ release.namespace }}.svc', name: '${{ c.id }}'}}
 -- lib/catalog/app/1.0.0/Chart.yaml --
 apiVersion: v2
 name: app
@@ -141,6 +169,17 @@ version: 1.0.0
 db: reports
 -- second/projects/data2/instances/pg2/instance.yaml --
 service: pg
+version: 1.0.0
+claimers: [reports]
+-- closed/projects/data2/instances/pg2/instance.yaml --
+service: pg
+version: 1.0.0
+-- others/projects/data2/instances/pg2/instance.yaml --
+service: pgopen
+version: 1.0.0
+claimers: [demo]
+-- open/projects/data2/instances/pg2/instance.yaml --
+service: pgopen
 version: 1.0.0
 -- strict/projects/reports/instances/strict/instance.yaml --
 service: strict

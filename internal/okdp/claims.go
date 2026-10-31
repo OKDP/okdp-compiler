@@ -170,17 +170,43 @@ func providerName(s, namespace string) (string, string, bool) {
 }
 
 // checkProvisions: the contracts a package provisions (okdp.yaml's
-// provisions), each a contract name, once.
-func checkProvisions(provisions []string) error {
-	for i, c := range provisions {
+// provisions), each a contract name, once, its claimers of the form
+// CheckClaimers reads.
+func checkProvisions(provisions []Provision) error {
+	for i, p := range provisions {
 		switch {
-		case !chart.IsFileName(c):
-			return fmt.Errorf("okdp.yaml: provisions[%d]: %q is not a contract name", i, c)
-		case slices.Index(provisions, c) < i:
-			return fmt.Errorf("okdp.yaml: provisions: %s is listed twice", c)
+		case !chart.IsFileName(p.Contract):
+			return fmt.Errorf("okdp.yaml: provisions[%d]: %q is not a contract name", i, p.Contract)
+		case slices.IndexFunc(provisions, func(o Provision) bool { return o.Contract == p.Contract }) < i:
+			return fmt.Errorf("okdp.yaml: provisions: %s is listed twice", p.Contract)
+		}
+		if err := CheckClaimers(fmt.Sprintf("okdp.yaml: provisions[%d] (%s): claimers", i, p.Contract), p.Claimers); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// CheckClaimers: claimers, the namespaces whose instances may claim of a
+// provider across namespaces (Inputs.Claimers, a provisions entry's), at
+// name in the message: each a namespace name, a DNS-1123 label, or "*",
+// any namespace, once; the first that is not.
+func CheckClaimers(name string, claimers []string) error {
+	for i, c := range claimers {
+		switch {
+		case c != "*" && !chart.IsDNSLabel(c):
+			return fmt.Errorf("%s[%d]: %q is not a namespace name, nor \"*\"", name, i, c)
+		case slices.Index(claimers, c) < i:
+			return fmt.Errorf("%s: %s is listed twice", name, c)
+		}
+	}
+	return nil
+}
+
+// consents: whether claimers, those of a provider, let the instances of
+// namespace claim of it: it is listed, or "*" is.
+func consents(claimers []string, namespace string) bool {
+	return slices.Contains(claimers, "*") || slices.Contains(claimers, namespace)
 }
 
 // checkClaims: the claims bound to an instance of svc: each a claim ID
@@ -246,12 +272,30 @@ type claimRef struct {
 }
 
 // instanceClaims: what CompileAll binds of an instance (claimsOf): the
-// claims of its references, the named claims of its context, and the
-// classes its context defines, global.okdp.provisioning.
+// claims of its references, the named claims of its context, the classes
+// its context defines, global.okdp.provisioning, and those of them the
+// platform defines, at level 0.
 type instanceClaims struct {
-	refs    []claimRef
-	named   map[string]ClaimSpec
-	classes M // by contract: {default, classes: {<name>: {provider, request}}}, of the form the platform schema checks
+	refs     []claimRef
+	named    map[string]ClaimSpec
+	classes  M // by contract: {default, classes: {<name>: {provider, request}}}, of the form the platform schema checks
+	platform M // the same, of the layers of level 0 alone (platformClasses)
+}
+
+// platformClasses: global.okdp.provisioning of the layers of level 0 of
+// layers, merged: the platform's classes, which route every namespace to
+// their provider, with its consent given (tree.consent). A layer that
+// values cannot hold gives none: the layers failed before (valuesLayers).
+func platformClasses(layers []ContextLayer) M {
+	out := M{}
+	for _, l := range layers {
+		v, err := value.Normalize(l.Values)
+		if l.Level != 0 || err != nil {
+			continue
+		}
+		out = value.Merge(out, value.AsMap(value.Dig(value.AsMap(v), "global.okdp.provisioning")))
+	}
+	return out
 }
 
 // claimsOf: the claims of the references of an instance of def, in
@@ -301,7 +345,7 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 		}
 		return v
 	})
-	return instanceClaims{out, named, value.AsMap(value.Dig(values, "global.okdp.provisioning"))}
+	return instanceClaims{out, named, value.AsMap(value.Dig(values, "global.okdp.provisioning")), platformClasses(in.Context)}
 }
 
 // claimID: the ID of a claim of the reference at field of the instance

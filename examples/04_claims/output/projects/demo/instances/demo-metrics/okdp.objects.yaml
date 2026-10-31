@@ -15,16 +15,16 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: okdp.demo.metrics.database
+        key: data/demo.metrics.database
         property: password
       secretKey: password
     - remoteRef:
-        key: okdp.demo.metrics.database
+        key: data/demo.metrics.database
         property: username
       secretKey: username
   refreshInterval: 1h
   secretStoreRef:
-    kind: ClusterSecretStore
+    kind: SecretStore
     name: okdp-secrets
   target:
     creationPolicy: Owner

@@ -229,17 +229,21 @@ func TestResolveTemplate(t *testing.T) {
 // field; the connections given at level 0, the platform's, with the
 // platform's secret store when store is set.
 func storeCtx(values, connections M, store bool) (*instance, error) {
+	return storeCtxAt(values, connections, 0, store)
+}
+
+// storeCtxAt: storeCtx, the connections a context layer of level.
+func storeCtxAt(values, connections M, level uint, store bool) (*instance, error) {
 	ch := maps.Clone(pkg)
 	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
 		"s3": {"type": "string", "x-okdp-connection-ref": {"contract": "s3", "require": {"required": ["secretRef"]}}},
 		"backup": {"type": "string", "x-okdp-connection-ref": {"contract": "s3"}},
 		"queue": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
 	in := inputs(values)
-	platform := M{"connections": connections}
 	if store {
-		platform["global"] = M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}
+		in.Context = append(in.Context, ContextLayer{Values: M{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}}})
 	}
-	in.Context = append(in.Context, ContextLayer{Values: platform})
+	in.Context = append(in.Context, ContextLayer{Level: level, Values: M{"connections": connections}})
 	in.Contracts = fstest.MapFS{
 		"s3.schema.json": {Data: []byte(`{"properties": {"bucket": {"type": "string"},
 			"secretKey": {"type": "string", "x-okdp-secret": true}, "accessKey": {"type": "string", "x-okdp-secret": true}}}`)},
@@ -275,36 +279,59 @@ func TestResolveFromStore(t *testing.T) {
 	}) || value.AsMap(value.Dig(es, "metadata.labels"))["okdp.io/credentials-s3"] != "true" || value.Str(value.Dig(es, "spec.secretStoreRef.name")) != "okdp-secrets" {
 		t.Errorf("ExternalSecret %#v", es)
 	}
+	// Above level 0, a key under the instance's namespace.
+	for _, level := range []uint{1, 2} {
+		inst, err := storeCtxAt(M{"s3": "lake"}, M{"lake": M{"contract": "s3", "bucket": "b", "secretRef": M{"remoteKey": "demo/lake/eu"}}}, level, true)
+		if err != nil {
+			t.Fatalf("level %d: %v", level, err)
+		}
+		if x := []transfer{{secret: "demo-app.lake-credentials", key: "demo/lake/eu", contract: "s3", fields: []string{"accessKey", "secretKey"}}}; !reflect.DeepEqual(inst.transfers, x) {
+			t.Errorf("level %d: transfers %#v, want %#v", level, inst.transfers, x)
+		}
+	}
 }
 
 // TestResolveFromStoreErrors: a secretRef.remoteKey refused, the first
 // error of its reference: with a name; not a string, or empty; "{{" in
 // it, the platform's level being reviewed; without the platform's secret
 // store; a connection's name its Secret cannot take; a contract without
-// secret field.
+// secret field; a key that is no path of the store, at any level; above
+// level 0, a key outside the instance's namespace: another namespace's,
+// the platform's, or its namespace's name alone.
 func TestResolveFromStoreErrors(t *testing.T) {
 	lake := func(ref any) M { return M{"lake": M{"contract": "s3", "secretRef": ref}} }
+	scoped := func(key string, level uint) string {
+		return fmt.Sprintf(`s3: connection "lake": secretRef.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under "demo/", its namespace; the platform's keys are read through the platform's connections (level 0)`, key, level)
+	}
 	for name, tc := range map[string]struct {
 		values, connections M
+		level               uint
 		store               bool
 		want                string
 	}{
-		"with a name":  {M{"s3": "lake"}, lake(M{"remoteKey": "k", "name": "lake-credentials"}), true, `s3: connection "lake": secretRef: name or remoteKey, not both`},
-		"not a string": {M{"s3": "lake"}, lake(M{"remoteKey": 5}), true, `s3: connection "lake": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got 5`},
-		"empty":        {M{"s3": "lake"}, lake(M{"remoteKey": ""}), true, `s3: connection "lake": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got ""`},
-		"a template":   {M{"s3": "lake"}, lake(M{"remoteKey": "{{ .Values.key }}"}), true, `s3 (connection "lake"): field "secretRef.remoteKey": the value contains "{{"`},
-		"no store":     {M{"s3": "lake"}, lake(M{"remoteKey": "k"}), false, `s3: connection "lake": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set`},
+		"with a name":  {M{"s3": "lake"}, lake(M{"remoteKey": "k", "name": "lake-credentials"}), 0, true, `s3: connection "lake": secretRef: name or remoteKey, not both`},
+		"not a string": {M{"s3": "lake"}, lake(M{"remoteKey": 5}), 0, true, `s3: connection "lake": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got 5`},
+		"empty":        {M{"s3": "lake"}, lake(M{"remoteKey": ""}), 0, true, `s3: connection "lake": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got ""`},
+		"a template":   {M{"s3": "lake"}, lake(M{"remoteKey": "{{ .Values.key }}"}), 0, true, `s3 (connection "lake"): field "secretRef.remoteKey": the value contains "{{"`},
+		"no store":     {M{"s3": "lake"}, lake(M{"remoteKey": "k"}), 0, false, `s3: connection "lake": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set`},
 		"its name": {
-			M{"s3": "Lake_1"}, M{"Lake_1": M{"contract": "s3", "secretRef": M{"remoteKey": "k"}}}, true,
+			M{"s3": "Lake_1"}, M{"Lake_1": M{"contract": "s3", "secretRef": M{"remoteKey": "k"}}}, 0, true,
 			`s3: connection "Lake_1": secretRef.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials`,
 		},
 		"no secret field": {
-			M{"queue": "mq"}, M{"mq": M{"contract": "queue", "secretRef": M{"remoteKey": "k"}}}, true,
+			M{"queue": "mq"}, M{"mq": M{"contract": "queue", "secretRef": M{"remoteKey": "k"}}}, 0, true,
 			`queue: connection "mq": secretRef.remoteKey: the queue contract has no secret field (x-okdp-secret): there are no credentials to read`,
 		},
+		"an empty segment":  {M{"s3": "lake"}, lake(M{"remoteKey": "platform//lake"}), 0, true, `s3: connection "lake": secretRef.remoteKey "platform//lake": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."`},
+		"a dot segment":     {M{"s3": "lake"}, lake(M{"remoteKey": "demo/../data/demo.app.db"}), 2, true, `s3: connection "lake": secretRef.remoteKey "demo/../data/demo.app.db": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."`},
+		"a trailing slash":  {M{"s3": "lake"}, lake(M{"remoteKey": "demo/"}), 2, true, `s3: connection "lake": secretRef.remoteKey "demo/": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."`},
+		"another namespace": {M{"s3": "lake"}, lake(M{"remoteKey": "data/demo.app.db"}), 2, true, scoped("data/demo.app.db", 2)},
+		"the platform's":    {M{"s3": "lake"}, lake(M{"remoteKey": "platform/lake"}), 1, true, scoped("platform/lake", 1)},
+		"its namespace":     {M{"s3": "lake"}, lake(M{"remoteKey": "demo"}), 2, true, scoped("demo", 2)},
+		"a prefix of it":    {M{"s3": "lake"}, lake(M{"remoteKey": "demo-x/lake"}), 2, true, scoped("demo-x/lake", 2)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := storeCtx(tc.values, tc.connections, tc.store); err == nil || err.Error() != tc.want {
+			if _, err := storeCtxAt(tc.values, tc.connections, tc.level, tc.store); err == nil || err.Error() != tc.want {
 				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})

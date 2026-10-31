@@ -100,7 +100,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		return nil, err
 	}
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
+	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
 	if r.walk(schema.Doc, params, ""); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {

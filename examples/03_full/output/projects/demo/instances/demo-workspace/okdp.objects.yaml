@@ -148,6 +148,7 @@ apiVersion: generators.external-secrets.io/v1alpha1
 kind: Password
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -169,6 +170,7 @@ apiVersion: generators.external-secrets.io/v1alpha1
 kind: Password
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -190,6 +192,7 @@ apiVersion: generators.external-secrets.io/v1alpha1
 kind: Password
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -211,6 +214,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -319,11 +323,11 @@ metadata:
 spec:
   data:
     - remoteRef:
-        key: platform.datalake
+        key: platform/datalake
         property: accessKey
       secretKey: accessKey
     - remoteRef:
-        key: platform.datalake
+        key: platform/datalake
         property: secretKey
       secretKey: secretKey
   refreshInterval: 1h

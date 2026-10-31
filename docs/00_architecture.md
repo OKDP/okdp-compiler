@@ -416,7 +416,7 @@ neither knows OKDP.
 | | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults read (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile, `{}` when missing (`ReadParameterSchema`); `Parameters`, `connections` and `claims` apart | `values.go`, `schema.go`; read by `okdp` (`context.go`: the parameters, the platform schema) |
 | | `merge.go` | stages 9 and 10 (`FinalValues`: `keyValues`, then `checkKey` with a chart cache), the instance's upstream values, `protect` and `append`; `NoTemplate`, the `{{` check | `cache.go`, `values.go`, `schema.go`, `paths.go`; `NoTemplate` also by `okdp` (`layers.go`, `connections.go`) |
 | `okdp` | `doc.go` | the package doc | |
-| | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the values file's name, the package's files, the warnings of its load); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` |
+| | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the values file's name, the package's files, the warnings of its load); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`, `provisions`, each a `Provision`, a contract and its claimers, read from its name or `{contract, claimers}`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` |
 | | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; the values file, `values.cel.yaml` or `values.yaml` (both refused), a `values.yaml` checked for expressions and `$`-keys, a warning (`holdsExpressions`); the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, no `claims` at level 0, no `{{` above it) then the instance's, normalized (`value.Normalize`); `global`, `connections` and `claims` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
@@ -424,6 +424,7 @@ neither knows OKDP.
 | | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection, a named claim's or a claim template's output of `Inputs.Bindings`, or an output of `Inputs.Published` (`resolver`: `resolve`, then one resolution per source, `resolveNamed`, `resolveClaim`, `resolveExternal`, its contract's fields apart from its own keys (`connectionFields`), as written (`Connection`, `ParseConnection`, `MarshalYAML`), `resolveOutput`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use, its claim schema with it (`readContract`, `x-okdp-internal` refused), and the checks of values against one (`fields`, `complete`, `check`), of a claim's request against its claim schema (`contract.request`); what a reference requires (`requirement`, `require`): compiled (`readRequirement`), those of the parameter schema at stage 1, with the request each fixes (`requirements`), its fields against the contract (`contract.requires`), the connection against it (`requirement.check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
+| | `keep.go` | the objects Helm keeps (`helm.sh/resource-policy: keep`, `kept`) given Argo CD's sync options alike, `Prune=false` and `Delete=false`, merged with theirs (`keepSynced`) | `pipeline.go`, once the objects are assembled |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
 | | `generated-secret.cel.yaml` | the objects of `okdpGeneratedSecret`, on arguments the mapping schema checked: a template in the mapping language, embedded (`//go:embed`, `secretTemplate`): the Password generators and the ExternalSecret, their names, the defaults applied as Helm's `default` does, the `{{` of static keys escaped, the keys of one generator name refused | evaluated by `generatedSecret` (`mapping.go`), for the CEL function and `provides.go` |
 | | `oidc.go` | stage 6: the `oidcClients` checks across clients, the modes, the names of the client charts, objects and Secrets (`clientSecret`, `oidcClientSecret`), the client charts as the compiler's own (`clientCharts`), `DcrSource` | evaluates `oidc-dcr.cel.yaml` in the compile's session (`evalTemplate`); used by `context.go` and `pipeline.go` |
@@ -431,9 +432,9 @@ neither knows OKDP.
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `provides.go` | stage 7: `Info`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`) | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
-| | `claims.go` | `Claim`, a connection claimed of a provider's instance; `Binding`, the provider a reference's claim is bound to; a claim as written, a claim template or a named claim, its request among it (`ClaimSpec`, `parseClaim`), the named claims of the context (`namedClaims`), one of them as written, what it holds even when it fails (`ParseClaim`), those of an instance's parameters and context, a template's request merged over the package's (`claimsOf`), its ID (`claimID`); the provider a claim or a class names (`providerName`); the classes of the context, `global.okdp.provisioning`, read from the merged values of `claimsOf` (`instanceClaims`); `provisions` checked (`checkProvisions`), the claims bound to an instance checked (`checkClaims`), their outputs found among the provided ones (`claimed`), what the mapping sees of them (`claimsScope`) | `service.go` (`Service.Provisions`), `pipeline.go` (before the context, after stage 7), `context.go` (`claims`) |
+| | `claims.go` | `Claim`, a connection claimed of a provider's instance; `Binding`, the provider a reference's claim is bound to; a claim as written, a claim template or a named claim, its request among it (`ClaimSpec`, `parseClaim`), the named claims of the context (`namedClaims`), one of them as written, what it holds even when it fails (`ParseClaim`), those of an instance's parameters and context, a template's request merged over the package's (`claimsOf`), its ID (`claimID`); the provider a claim or a class names (`providerName`); the classes of the context, `global.okdp.provisioning`, read from the merged values of `claimsOf`, and the platform's, of level 0 (`instanceClaims`, `platformClasses`); `provisions` checked (`checkProvisions`), and the claimers of a provider (`CheckClaimers`, `consents`), the claims bound to an instance checked (`checkClaims`), their outputs found among the provided ones (`claimed`), what the mapping sees of them (`claimsScope`) | `service.go` (`Service.Provisions`), `pipeline.go` (before the context, after stage 7), `context.go` (`claims`) |
 | | `transfer.go` | the credentials of claims across namespaces, through the platform's secret store, and those of the connections kept in it (`secretRef.remoteKey`): the key of a claim's credentials (`storeKey`), the PushSecrets of the provider's namespace (`pushSecrets`), the ExternalSecrets of the claimer's and of a connection's referrer (`pullSecret`), the credentials a reference needs read (`transfer`) | `connections.go` (`resolveClaim`, `storeSecret`), `pipeline.go` |
-| | `namespace.go` | `Instance`, `Outcome`, `Bound`, `CompileAll`: each claim bound to its provider, the one it names or the provider of its class, the one it names or the default one of its context, the named claims of a namespace once, declared alike, each request, what its class fixes under it, checked against the contract's claim schema, its defaults applied (`tree.bind`, `tree.provider`, `choice`, `tree.request`), then the instances of the tree compiled together, each published to its namespace (`tree.compileAll`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks, of its namespace or of its claims' providers), the outputs two instances of a namespace publish refused, and what resolved through them compiled again (`refuseShared`), the claimers of a provider refused, of any namespace, compiled again (`refuseClaimers`); the instances that do not compile named in the refusals for an output (`tree.notes`, `notCompiled`) | `Compile`, `missingOutputs` (`connections.go`), `claimsOf`, `claimID` (`claims.go`) |
+| | `namespace.go` | `Instance`, `Outcome`, `Bound`, `CompileAll`: each claim bound to its provider, the one it names or the provider of its class, the one it names or the default one of its context, the named claims of a namespace once, declared alike, each request, what its class fixes under it, checked against the contract's claim schema, its defaults applied (`tree.bind`, `tree.provider`, `choice`, `tree.request`), a provider of another namespace through a class of the platform's or with its consent (`tree.consent`, `Instance.Claimers`), then the instances of the tree compiled together, each published to its namespace (`tree.compileAll`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks, of its namespace or of its claims' providers), the outputs two instances of a namespace publish refused, and what resolved through them compiled again (`refuseShared`), the claimers of a provider refused, of any namespace, compiled again (`refuseClaimers`); the instances that do not compile named in the refusals for an output (`tree.notes`, `notCompiled`) | `Compile`, `missingOutputs` (`connections.go`), `claimsOf`, `claimID` (`claims.go`) |
 | `repository` | `repository.go` | the tree of a deployment, in one or more repositories: `Repository`, `Load`: the owner of each part, every conflict at once (`index`), then each instance (`instance`): its package, loaded once (`definition`), its context layers (`platform.yaml` without claims, its `connections.yaml`, connections only) and values; the names of the tree | `okdp.LoadDefinition`, `chart.ParseValues` |
 | | `catalog.go` | the catalog of the repositories, as `Load` indexes it: `LoadCatalog`, `Catalog`, its services and their versions, highest first (`sortVersions`), a package (`packageDir`, shared with `definition`), the contracts; `ErrNotInCatalog` | `index`, `chart.CompareVersions` |
 | `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
@@ -731,10 +732,17 @@ stand between a claim and its provider, as StorageClasses between a claim
 and its driver: the platform defines its classes and the default, a
 project adds its own at its level and changes none of the platform's, so
 that a claimer that wants another provider names a class of its project,
-never an instance of another project, and the platform moves a class to
-another provider without touching a claim. The binding is printed, the
-compiled output's diff showing any move. Claims and their bindings are
-computed, never stored: the tree stays the only source.
+and the platform moves a class to another provider without touching a
+claim. A provider of another namespace serves a claim with its consent
+(`consent`): the platform gives it for its classes, which route every
+namespace to their providers; a claim that names a provider, or a class
+of its project's, binds one of another project only when the provider
+lists the claimer's namespace among its claimers (`instance.yaml`,
+`Inputs.Claimers`, else its package's `provisions`). A project reaches
+no other project's database, nor its credentials, by naming its
+provider: the provider's owner decides who claims of it. The binding is
+printed, the compiled output's diff showing any move. Claims and their
+bindings are computed, never stored: the tree stays the only source.
 
 The model is Kubernetes' claims of storage: `{}` is a claim template, as
 a StatefulSet's `volumeClaimTemplates`, a claim of the reference's own; a
@@ -840,8 +848,10 @@ caller's, filled from the pinned references. The compiler enforces:
 | Upstream schemas | stage 10, with a chart cache | an upstream chart's rules fail the check, not the deployment |
 | Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart a check holds the values to is the chart the deployer renders |
 | Declared charts only | `addOwnCharts`, `chart.FinalValues` | the values file cannot give values to a chart that `Chart.yaml` does not declare, nor replace a client chart with one of its own: their keys are the compiler's, checked in one place, and their charts the platform's |
-| Credentials across namespaces | `pushSecrets`, `pullSecret` | the compiler writes the keys of the platform's secret store (`okdp.<id>`, the ID starting with the claimers' namespace) and cannot enforce who reads them: with a backend without path policies (External Secrets' Kubernetes provider) every namespace the store admits can read every key, so the store is for one trust domain; a policy per namespace on `okdp.<namespace>.*` (Vault, a cloud secret manager) is what separates them. A package's `objects` may reference the store too, reviewed with the package, and a connection of a project or an instance names the key its instances read (`secretRef.remoteKey`), which only the store's policy limits ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
-| OAuth client charts | `clientCharts`, `addOwnCharts` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials |
+| Credentials across namespaces | `pushSecrets`, `pullSecret`, `storeKey` | the compiler writes the keys of the platform's secret store, `<provider namespace>/<id>`, the ID starting with the claimers' namespace, and the platform's under `platform/`, a namespace no project may have, and cannot enforce who reads them: the layout lets a path-based store (OpenBao, Vault, a cloud secret manager) scope each namespace's identity, the SecretStore of its namespace with `secrets.provider`, with one policy: write its own segment, read `+/<namespace>.*` and `platform/*`. Without a provider, a ClusterSecretStore is one identity for every namespace, one trust domain; a backend without paths (External Secrets' Kubernetes provider) cannot hold the keys of the claims across namespaces. A key goes with its claim (`deletionPolicy: Delete`). A package's `objects` may reference the store too, reviewed with the package ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
+| Claims across namespaces | `tree.consent`, `Instance.Claimers` | a claim's ID starts with its claimers' namespace and its credentials cross through the store, but a claim that names its provider, or a class of its project's, would otherwise reach any provider of any project: the provider of another namespace serves it only when it lists the claimer's namespace among its claimers (its `instance.yaml`, `Inputs.Claimers`, else its package's `provisions`), or `*`; the platform's classes (level 0, reviewed, which no level above changes) route every namespace to their providers, the platform consenting for them ([providers](specs/01_inputs_outputs.md#providers)) |
+| Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a `connections.yaml` cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
+| OAuth client charts | `clientCharts`, `addOwnCharts`, `oidcClients` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials; a package's `secret` of a client names one of the release's, `<release>-...`, so that the Job's Role writes no other instance's Secret |
 
 What an expression computes is bounded only on request: a caller that
 compiles packages it does not review passes a context (cancelled between
@@ -952,7 +962,9 @@ same values without one (`TestFinalValuesCheck`).
 package, with or without a chart cache: schemas, upstream values,
 `protect` and `append`, objects, in no chart, and the platform's charts
 (`TestObjects`), dependencies, one upstream chart for two keys
-(`TestSharedSource`), the warnings of a check (`TestCheckWarnings`).
+(`TestSharedSource`), the warnings of a check (`TestCheckWarnings`);
+`internal/okdp/keep_test.go` the objects Helm keeps, given Argo CD's
+sync options once, theirs kept (`TestKeepSynced`, `TestCompileKeep`).
 `internal/okdp/layers_test.go` covers the context's and the instance's
 layers: what an instance may set of `global` (`TestValuesLayers`), what a
 level may add, and the lower levels' values it may not change, whatever
@@ -973,13 +985,14 @@ diamond and of a namespace apart, the dependencies deduplicated and sorted
 for one not reported (`TestErrors`, `TestNotProvided`).
 `internal/repository/repository_test.go` reads a tree whole and split into
 repositories, in any order, the same instances, each named after its
-directory (`TestLoad`), and every problem at once: the parts in two
-repositories, a contract that differs, an instance without its package,
-a package that fails, once (`TestLoadErrors`).
+directory, with its claimers (`TestLoad`), and every problem at once:
+the parts in two repositories, a contract that differs, an instance
+without its package, a package that fails, once, a claimer that is no
+namespace name (`TestLoadErrors`).
 `internal/okdp/claims_test.go` covers both sides of a claim in one
 compile: a provider's mapping reading its claims and publishing their
-outputs, the claims it refuses (`TestClaims`,
-`TestClaimsErrors`, `TestProvisions`); a claim resolved through its
+outputs, the claims it refuses (`TestClaims`, `TestClaimsErrors`,
+`TestProvisions`, `TestInputsClaimers`); a claim resolved through its
 binding, across namespaces or not, and every claim refused
 (`TestResolveClaim`, `TestResolveClaimErrors`), a requirement its provider
 does not meet, the default one said (`TestResolveClaimRequirement`).
@@ -992,13 +1005,18 @@ claim schema, a provider named, the default class, a class named, one a
 project adds, one with a request, none, a class that is not one, a default
 class that is not one, a class whose provider provisions nothing, a class
 and a provider, a provider that fails, a requirement the default class's
-provider does not meet; `TestCompileAllProviderNames` the instance a
-provider names, by its name or its release, and a name of two instances
-refused; `TestClaimID` the IDs; `TestNamedClaimsErrors` the declarations
-refused. `internal/okdp/connections_test.go` covers what a reference
-requires: met, not met by an external connection or an output, a
-field of no connection, a requirement that is no JSON Schema in the draft
-of the parameter schema (`TestResolveRequirement`, `TestRequirements`).
+provider does not meet; `TestCompileAllConsent` a provider of another
+namespace, through the platform's classes, refused without its consent,
+of a class of the project's, named or the default, of a provider named,
+of a named claim, bound with it, the instance's claimers or its
+package's, the instance's replacing the package's;
+`TestCompileAllProviderNames` the instance a provider names, by its name
+or its release, and a name of two instances refused; `TestClaimID` the
+IDs; `TestNamedClaimsErrors` the declarations refused.
+`internal/okdp/connections_test.go` covers what a reference requires:
+met, not met by an external connection or an output, a field of no
+connection, a requirement that is no JSON Schema in the draft of the
+parameter schema (`TestResolveRequirement`, `TestRequirements`).
 `internal/target/target_test.go` compiles three instances in two
 namespaces and writes them with each target, compared with
 `testdata/targets/<target>/` (`go test ./internal/target -update` rewrites
@@ -1037,7 +1055,8 @@ package of its own), `--check` and its checks against a chart cache
 (`check.txtar`), the examples' trees and their dependencies
 (`compile.txtar`), a compile error (`errors.txtar`), claims bound and
 their providers across namespaces, a requirement the default provider does
-not meet (`claims.txtar`), a tree compiled whole (`repository.txtar`: two
+not meet, a provider of another project with its consent or without
+(`claims.txtar`), a tree compiled whole (`repository.txtar`: two
 repositories, each target, `--check`, a stale instance removed, a cycle of
 outputs), one script per concern. The public package is tested through the
 example in the root package: `example_test.go` holds the Go programs of
@@ -1151,8 +1170,10 @@ requests a size and extensions (`x-okdp-claim`), the package pgvector of
 its own claims, `analytics` postgis, and the provider publishes what it
 granted. The platform defines the default class of `database-server`
 connections, the project a class of its own, `large`, which fixes the size
-of `analytics`; and the platform's secret store: the provider pushes each
-claim's credentials, each claimer reads its copy.
+of `analytics`; and the platform's secret store, an OpenBao mount the
+targets write a SecretStore of in each namespace: the provider pushes
+each claim's credentials under its namespace, each claimer reads its
+copy.
 
 `TestExample` (`examples_test.go`) reads each example's tree
 (`LoadRepository`, its `input/db/` one repository), compiles its

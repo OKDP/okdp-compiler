@@ -184,7 +184,11 @@ func (ti *Instance) Provisions() []string {
 	if ti.Definition == nil {
 		return nil
 	}
-	return ti.Definition.Package.Provisions
+	var out []string
+	for _, p := range ti.Definition.Package.Provisions {
+		out = append(out, p.Contract)
+	}
+	return out
 }
 
 // Instance: the instance name of namespace, nil when the tree has none.

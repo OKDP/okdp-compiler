@@ -56,7 +56,7 @@ connections:
     secretRef: {name: platform-db-credentials}
   # The shared object store (storage: datalake), which OKDP neither
   # deploys nor manages: its credentials are in the platform's secret store,
-  # under the key platform.datalake, accessKey and secretKey its
+  # under the key platform/datalake, accessKey and secretKey its
   # properties. Each instance that references it gets an ExternalSecret
   # that reads them into a Secret of its namespace, and the connection's
   # secretRef names it: demo-workspace.datalake-credentials.
@@ -65,4 +65,4 @@ connections:
     endpoint: https://s3.eu-west-1.amazonaws.com
     region: eu-west-1
     bucket: okdp-datalake
-    secretRef: {remoteKey: platform.datalake}
+    secretRef: {remoteKey: platform/datalake}

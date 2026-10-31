@@ -447,15 +447,20 @@ db/
   projects/<project>/                    a namespace (Inputs.Namespace)
     project.yaml                         optional: the context, level 1; its description
     instances/<instance>/                the release <project>-<instance> (Inputs.Release)
-      instance.yaml                      {service: <name>, version: <version>}: which package
+      instance.yaml                      {service: <name>, version: <version>}: which package; claimers
       connections.yaml                   optional: the context, level 2
       config.yaml                        optional: the instance values (Inputs.Values)
 .charts/                                 --check --charts <dir>
 output/projects/<project>/instances/<project>-<instance>/   -o <dir>
 ```
 
-- `instance.yaml` holds `service` and `version`, nothing else: the
-  instance's package is `catalog/<service>/<version>/`.
+- `instance.yaml` holds `service` and `version`, the instance's package,
+  `catalog/<service>/<version>/`, and, optional, `claimers`, nothing
+  else: the namespaces whose instances may claim of it, a provider, from
+  another namespace, by naming it or through a class of their project's
+  (`claimers: [demo]`, `["*"]` for any; absent, its package's,
+  `provisions`, none by default), a class of `platform.yaml` needing none
+  ([providers](specs/01_inputs_outputs.md#providers)).
 - The context has a file per level
   ([levels](specs/01_inputs_outputs.md#levels)): 0 `platform.yaml`, the
   platform values (`global.okdp`, the classes of the claims and their
@@ -472,7 +477,9 @@ output/projects/<project>/instances/<project>-<instance>/   -o <dir>
   only: `platform.yaml` declares none. A connection's credentials are in a
   Secret of the instance's namespace, `secretRef: {name: <secret>}`, or in
   the platform's secret store, `secretRef: {remoteKey: <key>}`, which the
-  compiler reads into one ([credentials in the platform's secret
+  compiler reads into one, a key under `<project>/` for a project's or
+  an instance's connection, the platform's under `platform/`
+  ([credentials in the platform's secret
   store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
 - `project.yaml` may describe its project, `description: <text>`, a
   string: the project's own, which is no value of the context, and which
@@ -800,7 +807,10 @@ holds, to read it back.
   A provider, a claim's or a class's, is `<namespace>/<name>` or `<name>`
   of the claimer's namespace, the name an instance's or its release; one
   that names two instances, the release of one and the name of the other,
-  is refused ([providers](specs/01_inputs_outputs.md#providers)).
+  is refused, and so is one of another namespace, named or a project's
+  class's, whose claimers (`Inputs.Claimers`, else its package's,
+  `Instance.Claimers(contract)`) do not list the claimer's namespace
+  ([providers](specs/01_inputs_outputs.md#providers)).
 - `compiler.NewGraph(results)` is the deployment graph of the results of
   `CompileAll`: each release waits for the releases of its namespace its
   references point to. It checks every dependency, the release exists and
@@ -830,8 +840,9 @@ holds, to read it back.
   deploy (`Err`), the claims bound to it as a provider, by ID
   (`Provided`, each a `compiler.ProvidedClaim`, the `Bound` claim and
   its `Claimer`), what it granted a claim (`Granted(id)`, the output it
-  publishes for it) and the contracts its package provisions
-  (`Provisions`); the tree's `Graph`, nil when it has a problem,
+  publishes for it), the contracts its package provisions
+  (`Provisions`) and the namespaces that may claim of it
+  (`Claimers(contract)`); the tree's `Graph`, nil when it has a problem,
   `Instance(namespace, name)`, `Release(namespace, release)`, and
   `Problems()`, `<namespace>/<name>: <why>` per instance that does not
   deploy.
@@ -983,8 +994,12 @@ the platform's secret store, are `okdp.objects.yaml`, a
 multi-document stream the umbrella renders as written, in the instance's
 release ([the objects file](specs/01_inputs_outputs.md#the-objects-file),
 [why](03_okdp_objects.md#how-it-reaches-the-cluster)): deployed with the
-upstream charts, pruned with them. A deployer that does not render the
-umbrella applies the file as it is.
+upstream charts, pruned with them, but those Helm keeps
+(`helm.sh/resource-policy: keep`, a claim's database), which carry Argo
+CD's equivalents too, `argocd.argoproj.io/sync-options:
+Prune=false,Delete=false`: Argo CD renders with `helm template` and
+reads no Helm annotation. A deployer that does not render the umbrella
+applies the file as it is.
 
 **What the instance publishes.** `okdp.info.yaml`
 ([the info file](specs/01_inputs_outputs.md#the-info-file)), in
@@ -1014,7 +1029,7 @@ usage error with status 2.
 |---|---|---|
 | `--repository is required` | no tree | give its repositories |
 | `--check writes nothing: no --output (-o)`, `--charts is read by --check only: a compile reads no chart` | `-o` given with `--check`, `--charts` without it | drop one of them ([`--check`](#--check)) |
-| `Inputs.Release "demo-Demo_App": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`, `Inputs.Namespace "<name>": a namespace name, ...` | an instance's or a project's directory is not a name Kubernetes and Helm accept, or the release they make, `<project>-<instance>`, is longer than 53 characters | rename it ([repository layout](#repository-layout), [inputs](specs/01_inputs_outputs.md)) |
+| `Inputs.Release "demo-Demo_App": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`, `Inputs.Namespace "<name>": a namespace name, ...`, `Inputs.Namespace "platform": the namespace is reserved: ...` | an instance's or a project's directory is not a name Kubernetes and Helm accept, or the release they make, `<project>-<instance>`, is longer than 53 characters; a project named `platform`, the segment of the platform's keys of the secret store | rename it ([repository layout](#repository-layout), [inputs](specs/01_inputs_outputs.md)) |
 | `app: stat charts.example.org/app-1.8.0/app: not a directory` | `--charts`, with `--check`, names a file: it fails at the first chart read from it | fix the path |
 | `unexpected argument "b": every input is a flag (--repository before each directory)` | an argument that is not a flag, here a second directory after one `--repository`; exit status 2, nothing compiled | one `--repository` per directory |
 | `--output (-o) is required` | no output directory | give one: the command writes the tree there |
@@ -1053,7 +1068,8 @@ usage error with status 2.
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database: connection "shared-db": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set` | a connection whose credentials are in the platform's secret store (`secretRef: {remoteKey: <key>}`), and the platform names no store | set `global.okdp.secrets.store` in `platform.yaml`, or give the Secret of the instance's namespace, `secretRef: {name: <secret>}` ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
-| `database: connection "shared-db": secretRef: name or remoteKey, not both`, `... secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got 5`, `... secretRef.remoteKey: the connection's name is not a DNS-1123 label: ...`, `... secretRef.remoteKey: the queue contract has no secret field (x-okdp-secret): ...` | a `secretRef` with both a Secret and a key of the store; a key that is not a string, or empty; a connection named so that its Secret, `<release>.<name>-credentials`, cannot be; a contract without credentials | one of them; the key, a string; rename the connection; drop `secretRef` |
+| `database: connection "shared-db": secretRef: name or remoteKey, not both`, `... secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got 5`, `... secretRef.remoteKey: the connection's name is not a DNS-1123 label: ...`, `... secretRef.remoteKey: the queue contract has no secret field (x-okdp-secret): ...`, `... secretRef.remoteKey "demo//shared-db": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."` | a `secretRef` with both a Secret and a key of the store; a key that is not a string, or empty; a connection named so that its Secret, `<release>.<name>-credentials`, cannot be; a contract without credentials; a key that is no path of the store | one of them; the key, a string; rename the connection; drop `secretRef`; a path, `<segment>/<segment>` |
+| `storage: connection "stolen": secretRef.remoteKey "finance/finance.ledger.database": a key of the platform's secret store a project may not read: a connection above level 0 (level 2) names a key under "demo/", its namespace; the platform's keys are read through the platform's connections (level 0)` | a connection of `project.yaml` (level 1) or `connections.yaml` (level 2) keeps its credentials in the platform's secret store under a key outside its namespace's segment: another namespace's claim, the platform's keys (`testdata/cli/secrets.txtar`) | a key under `<project>/`, which the namespace's PushSecrets write and an administrator of the store fills; reference the platform's connection for the platform's keys ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): the fields violate the database contract:` then `- at '/engine': value must be one of 'postgresql', 'mysql'`, `- at '/port': got string, want integer` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
 | `<field>: "<name>" is not a connection, nor an output of an instance of the namespace` | the name is not in `connections`, nor an output of that contract another instance of the namespace publishes (`(demo-pg publishes it with contract "database", "s3" is expected)`: one of another contract) | add the connection under `connections` of a context file (`connections.yaml` for the instance's own), or the instance that publishes the output to the tree ([resolution](specs/01_inputs_outputs.md#resolution)) |
@@ -1112,6 +1128,7 @@ the cause or the fix is not in the message:
 | `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/context/0/dcr-without-registration-url.yaml`) | set it in the platform values |
 | `Chart.yaml: dependencies[1] (oidc-dcr): the chart of oidcClients[0] is added by the compiler: remove it` | `Chart.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; give the dependency another key (`alias`), or rename the client, when it is another chart |
 | `values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it` | the values file computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
+| `oidcClients[0] (console): secret "console-creds": the Secret the client is written to is one of the release's, its name starts with "demo-webapp-"` | a client's `secret` names a Secret of the namespace that is not the release's: its Job's Role would write another instance's Secret | name it after the release, `${{ release.name }}-console`, or drop `secret` for the default, `oidcClientSecret(<name>)` |
 | `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0` | with `--check --charts`, `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 
 ### Repositories and the graph
@@ -1141,6 +1158,8 @@ of the targets' options are in
 | `error: demo/demo-app: db: claim (database-server): demo/demo-a names more than one instance, demo-a (its release) and demo-demo-a (its name): the claim would not know which` (`class "fast": ...`) | the provider, the claim's or its class's, is the release of the instance `a` and the name of the instance `demo-a`, both of the project `demo` | name the one meant otherwise, `demo/a` or `demo/demo-demo-a`, or rename one of them ([providers](specs/01_inputs_outputs.md#providers)) |
 | `error: demo/demo-app: db: claim: request.size: set by the class large (global.okdp.provisioning.database-server.classes.large): remove it, or name another class` | the claim requests a key its class fixes, in its `request` or its package's | remove it, or name a class that does not fix it |
 | `error: demo/demo-app: db: claim: class or provider, not both` | the claim names both | name one |
+| `error: demo/demo-app: db: claim "demo.app.db" (database-server): of data/data-pg, the provider of class "large", another namespace: demo is not one of its claimers (claimers of instance data/data-pg: none, its package's): ...` (`of data/data-pg, another namespace` for a provider named, `claims.<name>: ...` for a named claim) | the provider, of another project, is named by the claim or by a class of the project's, and does not consent: its `instance.yaml`'s `claimers`, else its package's (`provisions`), do not list the project | list the project in the provider's `claimers`, `claimers: [demo]` in its `instance.yaml`, or have the platform add a class of its own in `platform.yaml` and name it ([providers](specs/01_inputs_outputs.md#providers)) |
+| `db/projects/data/instances/pg/instance.yaml: claimers[0]: "Demo" is not a namespace name, nor "*"` (`claimers: demo is listed twice`) | an instance's claimer that is not a project's name nor `*`, or listed twice | list each project once, by its name, or `"*"` |
 | `context layer 2 (level 1): global.okdp.provisioning.database-server.default is set at level 0 (Inputs.Context): ...` (`...classes.standard is set at level 0`) | a project changes the platform's default class, or one of its classes | add a class of the project's own and name it ([levels](specs/01_inputs_outputs.md#levels)) |
 | `error: demo/demo-b: db: claim "reports" has contract "s3", "database-server" is expected` | the reference names a named claim of the project of another contract | name a claim of its contract, or declare one ([claims](specs/01_inputs_outputs.md#claims)) |
 | `error: demo/demo-b: db: "reports" is a claim: the reference takes none (x-okdp-connection-ref's provision)` | the reference names a named claim, and its package does not let it take claims | name a connection or an output |
@@ -1148,4 +1167,5 @@ of the targets' options are in
 | `error: demo/demo-app: database: claim (s3): request: the contract declares no claim schema (x-okdp-claim): a claim requests nothing of it` | a claim requests something of a contract that declares no claim schema | remove the request, or add the claim schema to the contract |
 | `db/platform.yaml: claims: a project's (project.yaml)` | the platform's values declare named claims | declare them in the `project.yaml` of the project whose instances reference them |
 | `error: demo/demo-b: claims.reports: claim: unknown key "share": contract, class, provider and request only` (`contract is required, ...`, `a connection of that name too (connections.reports)`) | a named claim of `project.yaml` not of the form, every instance of the project refused | fix the declaration ([claims](specs/01_inputs_outputs.md#claims)) |
-| `error: data/data-pg: claim "demo.app.db" (database-server): claimed of namespace demo: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` | a claim across namespaces, its credentials in the provider's namespace | set the platform's ClusterSecretStore ([credentials across namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)) |
+| `error: data/data-pg: claim "demo.app.db" (database-server): claimed of namespace demo: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` | a claim across namespaces, its credentials in the provider's namespace | set the platform's secret store, `global.okdp.secrets.store`, with its `provider` for a SecretStore of each namespace ([credentials across namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces), [what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
+| `error: platform/platform-x: Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` | a project named `platform`: its namespace would own the platform's keys of the secret store | rename the project |

@@ -31,6 +31,19 @@ type Instance struct {
 // name: the name of the instance, its release when it has none.
 func (i Instance) name() string { return cmp.Or(i.Name, i.Inputs.Release) }
 
+// Claimers: the namespaces whose instances may claim connections of
+// contract of the instance, a provider, from another namespace, by naming
+// it or through a class of their project's (CompileAll; a class of the
+// platform's, level 0, needs none): Inputs.Claimers, else the claimers of
+// its package's provisions entry of contract; "*" any namespace; nil
+// none.
+func (i Instance) Claimers(contract string) []string {
+	if i.Inputs.Claimers != nil || i.Definition == nil {
+		return i.Inputs.Claimers
+	}
+	return i.Definition.Package.claimers(contract)
+}
+
 // Outcome: the compile of one instance of CompileAll: its result, nil
 // when it is refused, and why; the claims of its references, bound.
 type Outcome struct {
@@ -52,7 +65,8 @@ type Bound struct {
 // CompileAll compiles instances together. Each claim of a reference is
 // bound to the instance that provisions its contract, the one it names or
 // the provider of its class, the one it names or the default one of the
-// claimer's context, global.okdp.provisioning (bind): the provider gets it
+// claimer's context, global.okdp.provisioning (bind), one of another
+// namespace with its consent (consent): the provider gets it
 // (Inputs.Claims), its claimer the binding (Inputs.Bindings). Each instance
 // is compiled after the instances of its namespace whose outputs it
 // references and the providers of its claims, with what they publish
@@ -234,7 +248,8 @@ func (t *tree) notes(idx []int) {
 }
 
 // bind: the claims of the instances idx (claimsOf), each bound to the
-// instance of idx that provisions its contract (provider): its provider
+// instance of idx that provisions its contract (provider), with its
+// consent when it is of another namespace (consent): its provider
 // gets it, deduplicated, by ID (claims), its claimer the binding
 // (bindings, Outcome.Claims). A claim template that binds to none refuses
 // its instance, which is not compiled, nor are its other claims given to
@@ -248,8 +263,8 @@ func (t *tree) bind(idx []int) []int {
 	provisioning := map[string][]int{} // the instances that provision a contract, by contract
 	t.names = map[[2]string][]int{}
 	for _, i := range idx {
-		for _, c := range t.all[i].Definition.Package.Provisions {
-			provisioning[c] = append(provisioning[c], i)
+		for _, p := range t.all[i].Definition.Package.Provisions {
+			provisioning[p.Contract] = append(provisioning[p.Contract], i)
 		}
 		in := t.all[i].Inputs
 		for _, n := range slices.Compact([]string{in.Release, t.all[i].name()}) {
@@ -280,10 +295,11 @@ func (t *tree) bind(idx []int) []int {
 	rank := map[int]map[string]int{}            // an instance's references' fields, to their position in parameter path order
 	decls := map[string]map[string][]declared{} // by namespace and name
 	classes := map[int]M{}                      // an instance's, by contract
+	platform := map[int]M{}                     // the platform's among them, by contract
 	for _, i := range idx {
 		in := t.all[i].Inputs
 		c := claimsOf(t.all[i].Definition, in)
-		classes[i] = c.classes
+		classes[i], platform[i] = c.classes, c.platform
 		rank[i] = map[string]int{}
 		for k, ref := range c.refs {
 			rank[i][ref.field] = k
@@ -307,6 +323,9 @@ func (t *tree) bind(idx []int) []int {
 			}
 			fields[id] = ref.field
 			ch, err := t.provider(c.classes, in.Namespace, i, ref.field, ref.contract, ref.spec, provisioning[ref.contract])
+			if err == nil {
+				err = t.consent(in.Namespace, ref.field, ref.contract, id, ref.spec, ch, c.platform)
+			}
 			request, rerr := t.request(in, ref.field, ref.contract, ref.spec.Request, ch)
 			if err = errors.Join(err, rerr); err != nil {
 				errs[i] = append(errs[i], refused{ref.field, err})
@@ -334,6 +353,9 @@ func (t *tree) bind(idx []int) []int {
 			}
 			spec, in := ds[0].spec, t.all[ds[0].instance].Inputs
 			ch, err := t.provider(classes[ds[0].instance], ns, -1, where, spec.Contract, spec, provisioning[spec.Contract])
+			if err == nil {
+				err = t.consent(ns, where, spec.Contract, claimID(ns, "", "", name), spec, ch, platform[ds[0].instance])
+			}
 			request, rerr := t.request(in, where, spec.Contract, spec.Request, ch)
 			if err = errors.Join(err, rerr); err != nil {
 				for _, d := range ds {
@@ -508,6 +530,42 @@ func (t *tree) provider(classes M, namespace string, self int, field, contract s
 	}
 	ch.provider = candidates[k]
 	return ch, nil
+}
+
+// consent: nil when the claim id of contract, of the instances of
+// namespace, at field, may be bound to the provider of ch
+// (tree.provider): an instance of namespace; or, of another namespace,
+// the provider of a class of the platform's (platform, the classes of
+// level 0 by contract, which no level above changes: the platform routes
+// every namespace to it), or one whose claimers (Instance.Claimers) list
+// namespace, or "*". Else the error, naming the claim, the provider, the
+// class when the claim is bound through one, the claimers' namespace and
+// the provider's claimers, its instance's or its package's.
+func (t *tree) consent(namespace, field, contract, id string, spec ClaimSpec, ch choice, platform M) error {
+	p := t.all[ch.provider]
+	if p.Inputs.Namespace == namespace {
+		return nil
+	}
+	by := ""
+	if spec.Provider == "" {
+		if _, ok := value.AsMap(value.AsMap(platform[contract])["classes"])[ch.class]; ok {
+			return nil
+		}
+		by = fmt.Sprintf(", the provider of class %q", ch.class)
+		if spec.Class == "" {
+			by = fmt.Sprintf(", the provider of the default class %q", ch.class)
+		}
+	}
+	claimers := p.Claimers(contract)
+	if consents(claimers, namespace) {
+		return nil
+	}
+	provider := path.Join(p.Inputs.Namespace, p.Inputs.Release)
+	list := cmp.Or(strings.Join(claimers, ", "), "none")
+	if p.Inputs.Claimers == nil {
+		list += ", its package's"
+	}
+	return fmt.Errorf("%s: claim %q (%s): of %s%s, another namespace: %s is not one of its claimers (claimers of instance %s: %s): the provider lists the namespaces that may claim of it (claimers of its instance.yaml, else of its package's provisions), or the platform routes them through a class of platform.yaml", field, id, contract, provider, by, namespace, provider, list)
 }
 
 // matched: the instances matches, that the provider name n names, in
