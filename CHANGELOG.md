@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0](https://github.com/OKDP/okdp-compiler/compare/v0.5.0...v0.6.0) (2026-10-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* an instance's connections.yaml holds its connections only
+* no naming conventions, a provider publishes its connections
+* okdp-compile compiles trees only, its single-instance mode removed
+
+### Features
+
+* a connection reference requires what it needs of the connection ([93bf529](https://github.com/OKDP/okdp-compiler/commit/93bf52995836525f917961b534cb8aa23e93e8bd))
+* an instance's connections.yaml holds its connections only ([cca53be](https://github.com/OKDP/okdp-compiler/commit/cca53be8c85b81b5ee176cf148668e5619cae638))
+* claims, a provider provisions the connections the instances claim, by class ([4c2af7d](https://github.com/OKDP/okdp-compiler/commit/4c2af7d7638303f229b7fcf84f1c039308b8788e))
+* no naming conventions, a provider publishes its connections ([a0975e2](https://github.com/OKDP/okdp-compiler/commit/a0975e2aee282fe11d066c471fb3ca15172cdb9f))
+* okdp-compile compiles trees only, its single-instance mode removed ([eea6883](https://github.com/OKDP/okdp-compiler/commit/eea6883939e71e8140b1b06bd7da3058c4401b2c))
+
 ## [0.5.0](https://github.com/OKDP/okdp-compiler/compare/v0.4.0...v0.5.0) (2026-10-26)
 
 
