@@ -10,6 +10,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
@@ -664,5 +666,32 @@ func TestMissingOutputs(t *testing.T) {
 				t.Errorf("missing outputs: got %v, want %v", got, tc.missing)
 			}
 		})
+	}
+}
+
+// TestParseConnection: an external connection as written, its own keys
+// apart from the contract's fields, and back.
+func TestParseConnection(t *testing.T) {
+	c := ParseConnection("lake", M{"contract": "database", "description": "The lake", "host": "h", "port": 5432.0, "secretRef": M{"remoteKey": "demo/lake"}})
+	want := Connection{Name: "lake", Contract: "database", Description: "The lake", Values: M{"host": "h", "port": 5432.0}, RemoteKey: "demo/lake"}
+	if !reflect.DeepEqual(c, want) {
+		t.Errorf("got %+v, want %+v", c, want)
+	}
+	b, err := yaml.Marshal(map[string]Connection{"lake": c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), "lake:\n    contract: database\n    description: The lake\n    secretRef:\n        remoteKey: demo/lake\n    host: h\n    port: 5432\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if c := ParseConnection("x", "not a map"); c.Name != "x" || c.Contract != "" || len(c.Values) != 0 {
+		t.Errorf("not a map: got %+v", c)
+	}
+	b, err = yaml.Marshal(Connection{Contract: "s3", SecretRef: "creds", Values: M{"bucket": "b", "contract": "other"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), "contract: s3\nsecretRef:\n    name: creds\nbucket: b\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

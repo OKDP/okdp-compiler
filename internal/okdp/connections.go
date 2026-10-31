@@ -32,7 +32,7 @@ import (
 type resolver struct {
 	contracts fs.FS                // Inputs.Contracts
 	conns     M                    // the external connections
-	claims    map[string]claimSpec // the named claims of the context (namedClaims)
+	claims    map[string]ClaimSpec // the named claims of the context (namedClaims)
 	classes   M                    // global.okdp.provisioning, by contract: the default class of a claim that names none
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
@@ -139,7 +139,7 @@ func (r *resolver) reference(ref M, v any, path string) any {
 			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v))
 			break
 		}
-		var claim *claimSpec
+		var claim *ClaimSpec
 		if claim, err = parseClaim(t, path, false); err == nil {
 			c, err = r.resolve("", contract, path, claim, req, true)
 		}
@@ -184,7 +184,7 @@ type resolved struct {
 // all of them (requirement.check), then "{{" in what it resolves to
 // (chart.NoTemplate). A reference to an instance that resolves is
 // recorded (deps), field naming it, ref the output.
-func (r *resolver) resolve(ref, contract, field string, claim *claimSpec, req *requirement, provision bool) (M, error) {
+func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *requirement, provision bool) (M, error) {
 	c, err := readContract(r.contracts, contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
@@ -243,7 +243,7 @@ func (r *resolver) resolve(ref, contract, field string, claim *claimSpec, req *r
 
 // resolveNamed: the named claim ref, declared as spec, a claim of the
 // contract c, when the reference takes claims (provision).
-func (r *resolver) resolveNamed(c *contract, ref, field string, spec claimSpec, provision bool) (*resolved, error) {
+func (r *resolver) resolveNamed(c *contract, ref, field string, spec ClaimSpec, provision bool) (*resolved, error) {
 	switch {
 	case !provision:
 		return nil, fmt.Errorf("%s: %q is a claim: the reference takes none (x-okdp-connection-ref's provision)", field, ref)
@@ -256,7 +256,7 @@ func (r *resolver) resolveNamed(c *contract, ref, field string, spec claimSpec, 
 // resolveClaim: the claim at field, as written (claim), to the output its
 // binding gives, its credentials a copy of the instance's own when the
 // provider is of another namespace.
-func (r *resolver) resolveClaim(c *contract, ref, field string, claim *claimSpec) (*resolved, error) {
+func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec) (*resolved, error) {
 	contract := c.name
 	b, ok := r.bindings[field]
 	if !ok {
@@ -309,17 +309,7 @@ func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*res
 		return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(conn["contract"]), c.name)
 	}
 	var secretRef M
-	_, hasSecretRef := conn["secretRef"]
-	for k, v := range conn {
-		switch k {
-		case "contract", "description":
-		// Credentials are only referenced, never inlined.
-		case "secretRef":
-			secretRef = value.AsMap(v)
-		default:
-			x.values[k] = v
-		}
-	}
+	x.values, secretRef = connectionFields(conn)
 	if err := c.fields(x.values, fmt.Sprintf("%s: connection %q", field, ref)); err != nil {
 		return nil, err
 	}
@@ -330,10 +320,85 @@ func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*res
 			return nil, err
 		}
 		x.secretRef = M{"name": name}
-	case hasSecretRef:
+	case secretRef != nil:
 		x.secretRef = M{"name": secretRef["name"]}
 	}
 	return x, nil
+}
+
+// connectionFields: the fields of the contract that the external
+// connection conn holds, its keys but contract, description and
+// secretRef, and its secretRef, nil when it has none: credentials are
+// only referenced, never inlined.
+func connectionFields(conn M) (fields, secretRef M) {
+	fields = M{}
+	for k, v := range conn {
+		switch k {
+		case "contract", "description":
+		case "secretRef":
+			secretRef = value.AsMap(v)
+		default:
+			fields[k] = v
+		}
+	}
+	return fields, secretRef
+}
+
+// Connection: an external connection, connections.<name> of the context
+// (the platform's, a project's, an instance's), as written: the contract
+// it is of, a description, the contract's fields, and where its secret
+// fields are (secretRef): the Secret of the namespace of each instance
+// that references it (SecretRef, its name), or a key of the platform's
+// secret store, global.okdp.secrets.store (RemoteKey).
+type Connection struct {
+	Name        string         // its key in connections
+	Contract    string         // contract
+	Description string         // description, "" when none
+	Values      map[string]any // its other keys, the contract's fields, not the secret ones
+	SecretRef   string         // secretRef.name, "" when none
+	RemoteKey   string         // secretRef.remoteKey, "" when none
+}
+
+// ParseConnection: the connection name, v, as written in connections; what
+// it holds is checked by the compile of each instance that references it
+// (resolveExternal).
+func ParseConnection(name string, v any) Connection {
+	conn := value.AsMap(v)
+	fields, secretRef := connectionFields(conn)
+	return Connection{
+		Name:        name,
+		Contract:    value.Str(conn["contract"]),
+		Description: value.Str(conn["description"]),
+		Values:      fields,
+		SecretRef:   value.Str(secretRef["name"]),
+		RemoteKey:   value.Str(secretRef["remoteKey"]),
+	}
+}
+
+// MarshalYAML: the connection as written in connections.<name>, its own
+// keys first, contract, description and secretRef, then the contract's
+// fields, sorted, for a YAML encoder of the yaml.v3 family.
+func (c Connection) MarshalYAML() (any, error) {
+	type ref struct {
+		Name      string `yaml:"name,omitempty"`
+		RemoteKey string `yaml:"remoteKey,omitempty"`
+	}
+	entry := struct {
+		Contract    string `yaml:"contract"`
+		Description string `yaml:"description,omitempty"`
+		SecretRef   *ref   `yaml:"secretRef,omitempty"`
+		Fields      M      `yaml:",inline"`
+	}{Contract: c.Contract, Description: c.Description}
+	if c.SecretRef != "" || c.RemoteKey != "" {
+		entry.SecretRef = &ref{Name: c.SecretRef, RemoteKey: c.RemoteKey}
+	}
+	entry.Fields = M{}
+	for k, v := range c.Values {
+		if k != "contract" && k != "description" && k != "secretRef" {
+			entry.Fields[k] = v
+		}
+	}
+	return entry, nil
 }
 
 // storeSecret: the Secret of the instance's namespace the credentials of

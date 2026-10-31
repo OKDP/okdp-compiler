@@ -748,13 +748,38 @@ holds, to read it back.
   its outputs that name none and of its claims' IDs
   ([repository layout](#repository-layout)); every problem at once, each
   naming its repository and path.
+- `compiler.LoadCatalog(repos)` is the catalog of the same repositories,
+  as `LoadRepository` reads it, for a caller that lists the packages
+  (a console's menu): `Services()`, each a `compiler.CatalogService`
+  (`Name`, `Repository`, `Versions`: the directories of
+  `catalog/<service>/`, highest first, the SemVer ones by precedence),
+  `Service(name)`, `Package(service, version)`, the files of
+  `catalog/<service>/<version>/`, and `Contracts()`, every
+  `contracts/<contract>.schema.json`. A service or a version no
+  repository has is an error wrapping `compiler.ErrNotInCatalog`; a
+  service in two repositories, or a contract that differs between two,
+  fails `LoadCatalog` as it fails `LoadRepository`.
+- `compiler.ParseConnection(name, v)` and `compiler.ParseClaim(name, v)`
+  read an entry of `connections` and of `claims` as written, for a caller
+  that lists or edits them (a control plane): a `compiler.Connection`
+  (`Name`, `Contract`, `Description`, `Values`, the contract's fields,
+  `SecretRef`, the Secret its secret fields are in, or `RemoteKey`, their
+  key in the platform's secret store), which marshals to YAML as it is
+  written, `contract`, `description` and `secretRef` first, then its
+  fields, sorted; a `compiler.ClaimSpec` (`Name`, `Contract`, `Class`,
+  `Provider`, `Request`), its tags the keys it is written with, and why
+  the compile refuses it, if it does, the claim holding what the entry
+  does all the same. A connection is checked by the compile of the
+  instances that reference it.
 - The names of the tree are constants, those of the [repository
   layout](#repository-layout): `compiler.PlatformFile`, `ContractsDir`,
   `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`,
   `InstanceFile`, `ConnectionsFile` and `ConfigFile`, and the key of a
   project's description, `ProjectDescription`;
   `compiler.ReleaseName(project, instance)` is the release of an instance
-  of the tree, `<project>-<instance>`; `compiler.ProjectDir(namespace)` and
+  of the tree, `<project>-<instance>`; `compiler.IsName(name)` whether a
+  name may be a project's, an instance's, a connection's or a named
+  claim's, a DNS-1123 label; `compiler.ProjectDir(namespace)` and
   `compiler.InstanceDir(namespace, release)` are where a target writes the
   files of a namespace, `projects/<namespace>`, and of an instance,
   `projects/<namespace>/instances/<release>`. A caller that writes a tree
@@ -791,6 +816,31 @@ holds, to read it back.
   and the root's, `projects/kustomization.yaml`; `compiler.ArgoCD{RepoURL,
   Revision, PathPrefix}`, with each instance's Application, its sync wave
   from the graph ([targets](specs/01_inputs_outputs.md#targets)).
+- `compiler.CompileTree(ctx, instances, charts)` is `CompileAll`, then
+  `NewGraph` of the instances that compile, for a caller that reads a
+  compiled tree (a control plane). With `charts`, a
+  `compiler.ChartSource`, a chart cache that fetches what it lacks
+  (`Ensure(ctx, refs)`), the upstream charts the compile names
+  (`Result.Charts`, the OAuth clients' among them) are fetched, then the
+  instances compiled again with them (`Inputs.Charts`), their final
+  values checked; a chart that cannot be fetched leaves them unchecked,
+  `Tree.ChartsErr` saying why. It is a `compiler.Tree`, its `Instances`
+  in their order, each a `compiler.TreeInstance`, the `Instance` with its `Outcome`, the
+  problem of the graph at its release (`GraphErr`), why it does not
+  deploy (`Err`), the claims bound to it as a provider, by ID
+  (`Provided`, each a `compiler.ProvidedClaim`, the `Bound` claim and
+  its `Claimer`), what it granted a claim (`Granted(id)`, the output it
+  publishes for it) and the contracts its package provisions
+  (`Provisions`); the tree's `Graph`, nil when it has a problem,
+  `Instance(namespace, name)`, `Release(namespace, release)`, and
+  `Problems()`, `<namespace>/<name>: <why>` per instance that does not
+  deploy.
+- `compiler.CheckReleases(results)` is what the Flux and Argo CD targets
+  refuse of the release names, their objects sharing one namespace: a
+  `*compiler.ReleaseError` (`Release`, `Namespaces`) per release in two
+  namespaces or more, which a control plane checks before it adds an
+  instance (`a-b/c` and `a/b-c` are both `a-b-c`); their `Files` wrap
+  it.
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
   the first document of the file), for `Inputs.Context` and
   `Inputs.Values`. A layer built in Go may hold other types than
@@ -828,7 +878,8 @@ holds, to read it back.
   values can make an expression iterate over them. The example costs under
   1000, the OAuth client's template most of it (`ExampleCompile_server`).
 - Errors are messages for the user, returned as they are; the package
-  defines no error types. A message carries its context: the file, the
+  defines no error types, but `ErrNotInCatalog`, which a missing package
+  wraps, and `*ReleaseError`, which the Flux and Argo CD targets wrap. A message carries its context: the file, the
   parameter path, the chart key, the mapping section (see
   [troubleshooting](#troubleshooting)).
 

@@ -170,13 +170,9 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 // instance's; that of the package's load, its own, the first time only:
 // nil and no error after.
 func (t *tree) definition(service, version string) (*okdp.Definition, error) {
-	repo, ok := t.services[service]
-	if !ok {
-		return nil, fmt.Errorf("service %q is in the catalog of no repository", service)
-	}
-	dir := path.Join(CatalogDir, service, version)
-	if _, err := fs.Stat(repo.FS, dir); err != nil || !chart.IsFileName(version) {
-		return nil, fmt.Errorf("version %q of service %q is not in %s", version, service, where(*repo, path.Join(CatalogDir, service)))
+	repo, dir, err := t.packageDir(service, version)
+	if err != nil {
+		return nil, err
 	}
 	key := [2]string{service, version}
 	if def, loaded := t.packages[key]; loaded {

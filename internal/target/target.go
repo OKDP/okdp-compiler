@@ -60,20 +60,49 @@ func CheckQuoted(field, s string) error {
 	return nil
 }
 
-// UniqueReleases: nil when no release name is in two namespaces of
-// results: objects, named after the releases, share one namespace. Else an
-// error per release, in name order.
-func UniqueReleases(results []*okdp.Result, objects string) error {
+// ReleaseError: a release name in two namespaces or more, which the
+// deployer targets refuse (Releases): their objects, named after the
+// releases, share one namespace.
+type ReleaseError struct {
+	Release    string
+	Namespaces []string // in name order
+}
+
+func (e *ReleaseError) Error() string {
+	ns := make([]string, len(e.Namespaces))
+	for i, n := range e.Namespaces {
+		ns[i] = fmt.Sprintf("%q", n)
+	}
+	return fmt.Sprintf("release %q is in namespaces %s and %s", e.Release, strings.Join(ns[:len(ns)-1], ", "), ns[len(ns)-1])
+}
+
+// Releases: nil when no release name is in two namespaces of results:
+// else a *ReleaseError per release, in name order.
+func Releases(results []*okdp.Result) error {
 	namespaces := map[string][]string{}
 	for _, res := range results {
-		namespaces[res.Release] = append(namespaces[res.Release], fmt.Sprintf("%q", res.Namespace))
+		namespaces[res.Release] = append(namespaces[res.Release], res.Namespace)
 	}
 	var errs []error
 	for _, release := range slices.Sorted(maps.Keys(namespaces)) {
 		if ns := namespaces[release]; len(ns) > 1 {
 			slices.Sort(ns)
-			errs = append(errs, fmt.Errorf("release %q is in namespaces %s and %s: %s need distinct names", release, strings.Join(ns[:len(ns)-1], ", "), ns[len(ns)-1], objects))
+			errs = append(errs, &ReleaseError{Release: release, Namespaces: ns})
 		}
+	}
+	return errors.Join(errs...)
+}
+
+// UniqueReleases: Releases, each error naming objects, the objects of a
+// target named after the releases, which share one namespace.
+func UniqueReleases(results []*okdp.Result, objects string) error {
+	err := Releases(results)
+	if err == nil {
+		return nil
+	}
+	var errs []error
+	for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
+		errs = append(errs, fmt.Errorf("%w: %s need distinct names", e, objects))
 	}
 	return errors.Join(errs...)
 }

@@ -269,7 +269,7 @@ func (t *tree) bind(idx []int) []int {
 	}
 	type declared struct {
 		instance int
-		spec     claimSpec
+		spec     ClaimSpec
 	}
 	var claims []bound
 	var toNamed []bound // the references to a named claim, its provider not known yet
@@ -452,7 +452,7 @@ func provisioningKey(contract string) string { return value.Key("global.okdp.pro
 // that is none, no default, a provider that is not of the form, that
 // names no instance, or more than one, or one that is no candidate, or the
 // instance itself, fail.
-func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec claimSpec, candidates []int) (choice, error) {
+func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec ClaimSpec, candidates []int) (choice, error) {
 	where := fmt.Sprintf("%s: claim (%s)", field, contract)
 	key := provisioningKey(contract)
 	ch := choice{provider: -1, class: spec.Class, named: spec.Class != "" || spec.Provider != ""}

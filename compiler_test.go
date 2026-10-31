@@ -3,6 +3,7 @@ package compiler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -143,8 +144,9 @@ func TestLayers(t *testing.T) {
 		return seen
 	}
 	for pkg, unknown := range map[string][]string{
-		"internal/okdp":    {"internal/graph", "internal/target"},
-		"internal/graph":   {"internal/target"},
+		"internal/okdp":    {"internal/graph", "internal/target", "internal/tree"},
+		"internal/graph":   {"internal/target", "internal/tree"},
+		"internal/tree":    {"internal/target", "internal/repository"},
 		"internal/compile": {"internal/okdp", "internal/chart"},
 		"internal/chart":   {"internal/okdp", "internal/compile"},
 	} {
@@ -203,5 +205,89 @@ func TestTreeNames(t *testing.T) {
 	dir := compiler.InstanceDir("demo", in.Release)
 	if _, ok := files[path.Join(dir, "Chart.yaml")]; !ok || dir != path.Join(compiler.ProjectDir("demo"), "instances", "demo-web") || compiler.ProjectDir("demo") != "projects/demo" {
 		t.Errorf("files %q, want the umbrella chart in %s", slices.Sorted(maps.Keys(files)), dir)
+	}
+}
+
+// TestCompileTree: the tree of the claims example compiled: its graph,
+// the claims bound to its provider, each with its claimer and what the
+// provider granted it.
+func TestCompileTree(t *testing.T) {
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := compiler.CompileTree(t.Context(), instances, nil)
+	if tree.Graph == nil || tree.Problems() != nil {
+		t.Fatalf("problems: %q", tree.Problems())
+	}
+	pg := tree.Instance("data", "postgresql")
+	if pg == nil || pg.Release() != "data-postgresql" || !slices.Contains(pg.Provisions(), "database-server") {
+		t.Fatalf("the provider: %+v", pg)
+	}
+	var claims []string
+	for _, p := range pg.Provided {
+		if pg.Granted(p.ID) == nil {
+			t.Errorf("%s: granted nothing", p.ID)
+		}
+		claims = append(claims, p.ID+" by "+p.Claimer.Namespace()+"/"+p.Claimer.Name)
+	}
+	if want := []string{"demo.analytics by demo/dashboards", "demo.analytics by demo/reports", "demo.app.database by demo/app", "demo.metrics.database by demo/metrics"}; !reflect.DeepEqual(claims, want) {
+		t.Errorf("claims: got %q, want %q", claims, want)
+	}
+}
+
+// charts: a ChartSource that records what it is asked, and answers fsys,
+// or err.
+type charts struct {
+	refs []compiler.ChartRef
+	fsys fs.FS
+	err  error
+}
+
+func (c *charts) Ensure(_ context.Context, refs []compiler.ChartRef) (fs.FS, error) {
+	c.refs = refs
+	return c.fsys, c.err
+}
+
+// TestCompileTreeCharts: the charts the compile names fetched once each,
+// then the values checked against them; unchecked, and why, when one
+// cannot be fetched.
+func TestCompileTreeCharts(t *testing.T) {
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	away := &charts{err: errors.New("the registry is away")}
+	tree := compiler.CompileTree(t.Context(), instances, away)
+	if !errors.Is(tree.ChartsErr, away.err) || tree.Problems() != nil || tree.Graph == nil {
+		t.Errorf("unchecked: ChartsErr %v, problems %q", tree.ChartsErr, tree.Problems())
+	}
+	if len(away.refs) == 0 || len(slices.Compact(slices.Clone(away.refs))) != len(away.refs) {
+		t.Errorf("refs: %v", away.refs)
+	}
+	empty := &charts{fsys: fstest.MapFS{}}
+	tree = compiler.CompileTree(t.Context(), instances, empty)
+	if tree.ChartsErr != nil || tree.Problems() == nil {
+		t.Errorf("checked against a cache without the charts: ChartsErr %v, no problem", tree.ChartsErr)
+	}
+	if !reflect.DeepEqual(empty.refs, away.refs) {
+		t.Errorf("refs: %v, then %v", away.refs, empty.refs)
+	}
+	for _, inst := range instances {
+		if inst.Inputs.Charts != nil {
+			t.Fatal("the instances given were changed")
+		}
+	}
+}
+
+// TestIsName: a DNS-1123 label, 63 characters at most.
+func TestIsName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"demo": true, "demo-app": true, "a1": true, strings.Repeat("a", 63): true,
+		"": false, "Demo": false, "-demo": false, "demo-": false, "de_mo": false, "a.b": false, "..": false, "a/b": false, strings.Repeat("a", 64): false,
+	} {
+		if got := compiler.IsName(name); got != want {
+			t.Errorf("%q: got %v", name, got)
+		}
 	}
 }

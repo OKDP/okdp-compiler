@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -292,5 +294,43 @@ func TestResolveClaimErrors(t *testing.T) {
 				t.Errorf("missing outputs: %v %v", waits, m)
 			}
 		})
+	}
+}
+
+// TestParseClaim: a named claim as written, what it holds even when it
+// fails.
+func TestParseClaim(t *testing.T) {
+	c, err := ParseClaim("vectors", M{"contract": "database", "class": "huge", "request": M{"size": "5Gi"}})
+	if want := (ClaimSpec{Name: "vectors", Contract: "database", Class: "huge", Request: M{"size": "5Gi"}}); err != nil || !reflect.DeepEqual(c, want) {
+		t.Errorf("got %+v, %v, want %+v", c, err, want)
+	}
+	b, err := yaml.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), "contract: database\nclass: huge\nrequest:\n    size: 5Gi\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	for name, tc := range map[string]struct {
+		name string
+		v    any
+		want string
+	}{
+		"no contract": {"a", M{"class": "huge"}, "claims.a: claim: contract is required"},
+		"both":        {"a", M{"contract": "database", "class": "huge", "provider": "pg"}, "claims.a: claim: class or provider, not both"},
+		"not a label": {"A", M{"contract": "database"}, "claims.A: claim: its name is a DNS-1123 label"},
+		"not a map":   {"a", "database", "claims.a: a claim, an object"},
+		"an unknown":  {"a", M{"contract": "database", "size": 1.0}, `claims.a: claim: unknown key "size"`},
+	} {
+		c, err := ParseClaim(tc.name, tc.v)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+		if c.Name != tc.name {
+			t.Errorf("%s: got the name %q", name, c.Name)
+		}
+	}
+	if c, _ := ParseClaim("a", M{"class": "huge"}); c.Class != "huge" {
+		t.Errorf("a claim that fails keeps what it holds: got %+v", c)
 	}
 }

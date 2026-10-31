@@ -3,6 +3,7 @@
 package chart
 
 import (
+	"cmp"
 	"fmt"
 	"io/fs"
 	"path"
@@ -26,6 +27,80 @@ var chartVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+
 // IsVersion: v is a pinned chart version, SemVer as Helm requires it.
 func IsVersion(v string) bool {
 	return chartVersion.MatchString(v)
+}
+
+// CompareVersions: -1, 0 or +1 as a precedes, equals or follows b in
+// SemVer precedence (semver.org, 11), each a version IsVersion accepts:
+// the build metadata ignored, a pre-release before its release, its
+// identifiers compared one by one, numbers by value, below the others,
+// compared in ASCII order.
+func CompareVersions(a, b string) int {
+	pa, pb := splitVersion(a), splitVersion(b)
+	for i := range 3 {
+		if c := compareNumbers(pa.core[i], pb.core[i]); c != 0 {
+			return c
+		}
+	}
+	switch {
+	case pa.pre == nil && pb.pre == nil:
+		return 0
+	case pa.pre == nil:
+		return 1
+	case pb.pre == nil:
+		return -1
+	}
+	for i := 0; i < len(pa.pre) && i < len(pb.pre); i++ {
+		x, y := pa.pre[i], pb.pre[i]
+		nx, ny := isNumber(x), isNumber(y)
+		var c int
+		switch {
+		case nx && ny:
+			c = compareNumbers(x, y)
+		case nx:
+			c = -1
+		case ny:
+			c = 1
+		default:
+			c = strings.Compare(x, y)
+		}
+		if c != 0 {
+			return c
+		}
+	}
+	return cmp.Compare(len(pa.pre), len(pb.pre))
+}
+
+// version: a version IsVersion accepts: its major, minor and patch, its
+// pre-release identifiers, nil when none.
+type version struct {
+	core [3]string
+	pre  []string
+}
+
+// splitVersion: v, a version IsVersion accepts, in its parts.
+func splitVersion(v string) version {
+	v, _, _ = strings.Cut(strings.TrimPrefix(v, "v"), "+")
+	core, pre, hasPre := strings.Cut(v, "-")
+	var out version
+	copy(out.core[:], strings.SplitN(core, ".", 3))
+	if hasPre {
+		out.pre = strings.Split(pre, ".")
+	}
+	return out
+}
+
+// isNumber: s is a numeric identifier, digits only.
+func isNumber(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
+// compareNumbers: two numeric identifiers by value, of any length.
+func compareNumbers(a, b string) int {
+	a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+	if c := cmp.Compare(len(a), len(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
 }
 
 // Check: a repository URL that names a directory of the chart cache
