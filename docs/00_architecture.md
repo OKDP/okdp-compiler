@@ -873,32 +873,39 @@ repository; the contracts, the platform's charts and the platform values
 with the platform. The context's layers above level 0 (a project's), from
 their owners, and the instance's layers and files are input, from a
 console user or a GitOps pull request. The chart cache of a check is the
-caller's, filled from the pinned references. The compiler enforces:
+caller's, filled from the pinned references. The [threat
+model](04_threat_model.md) takes these boundaries by author, with what
+the compiler cannot enforce. The compiler enforces:
 
-| Boundary | Where | Reason |
-|---|---|---|
-| Context values | `valuesLayers`, `contextLayers`, stage 1 | `global` comes from the package's defaults and the context's layers (`Inputs.Context`), level 0 the platform's: a higher level (a project's) only adds to the lower levels, never changing a value they set, a connection they give, a named claim, a class or a default class (each taken whole): a project adds classes, it moves none of the platform's claims to another provider; and of `global.okdp`, the platform's settings, a higher level sets `provisioning` only, no other key, known to the compiler or not, set by the platform or not (`platformOnly`): a project cannot name the chart its OAuth clients are rendered with (`charts`), where they register (`oidc`), the secret store (`secrets`), nor make itself privileged (`policy`); its own settings go beside `okdp` (`global.project`); an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`, no `connections`, an instance's own being a context layer of a level of their own, and no `claims`, a project's, as is what a level adds above the platform's. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the chart its OAuth clients are rendered with (`charts`), the platform's policy (`policy`), and every chart receives `global` (`imageRegistry`) |
-| Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses |
-| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below |
-| Credentials never inlined | `contract.fields`, from `resolve` and `provided` | an external connection and a provided output carry contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and `okdp.info.yaml` are not secret |
-| No credentials in clear | `credentialsSecret`, `checkPlainSecrets`, stage 8 | a `provides` `secret` without `generate`, and a Secret of the objects with `data` or `stringData`, are refused unless the caller sets `Inputs.AllowPlainSecrets`: the objects file is committed to the deployments repository, readable by whoever reads it, and its Secrets' values would be credentials in clear there and in the release's manifests; they are generated in the cluster (`okdpGeneratedSecret`) or read from the platform's secret store |
-| Contracts | `resolve`, `provided` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`contract.check`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows |
-| Provider and consumers agree | `output`, `provided` | a reference reads what its provider publishes, never a value computed from a name: an output checked against its contract when provided, and again as the consumer reads it |
-| Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map |
-| Upstream policy | `upstreamCheck`, from `applyUpstream` | whatever its package accepts, an instance of a project that is not privileged (`global.okdp.policy.privileged`) sets, at any depth of its upstream values, no key of a pod's privileges, security context, identity, containers or objects (`deniedKeys`, and the platform's `policy.upstream.deny`), nor `runAsUser: 0` nor `runAsNonRoot: false`, in a string that reads as YAML too (charts render some with `tpl`); and with `policy.upstream.registries`, its images come from those registries: `upstream: true` would otherwise let a project's instance run a privileged pod, mount the node's disk, take another ServiceAccount or pull any image. The package's values are reviewed with it, not checked; a privilege a chart grants from keys of other names (`rbac.create`) is the platform's to deny by name, and Pod Security Admission and the engine's identity are the second line |
-| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the context's layers above level 0 and of the instance's layers (parameters, `global`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read |
-| Upstream schemas | stage 10, with a chart cache | an upstream chart's rules fail the check, not the deployment |
-| Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart a check holds the values to is the chart the deployer renders; and a repository over `https://` or `oci://`, never `http://`: a chart fetched in clear could be swapped on the way, by a check and by the deployer |
-| Declared charts only | `addOwnCharts`, `chart.FinalValues` | the values file cannot give values to a chart that `Chart.yaml` does not declare, nor replace a client chart with one of its own: their keys are the compiler's, checked in one place, and their charts the platform's |
-| Credentials across namespaces | `pushSecrets`, `pullSecret`, `storeKey` | the compiler writes the keys of the platform's secret store, `<provider namespace>/<id>`, the ID starting with the claimers' namespace, and the platform's under `platform/`, a namespace no project may have, and cannot enforce who reads them: the layout lets a path-based store (OpenBao, Vault, a cloud secret manager) scope each namespace's identity, the SecretStore of its namespace with `secrets.provider`, with one policy: write its own segment, read `+/<namespace>.*` and `platform/*`. Without a provider, a ClusterSecretStore is one identity for every namespace, one trust domain; a backend without paths (External Secrets' Kubernetes provider) cannot hold the keys of the claims across namespaces. A key goes with its claim (`deletionPolicy: Delete`). A package's `objects` may reference the store too, reviewed with the package ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
-| Claims across namespaces | `tree.consent`, `Instance.Claimers` | a claim's ID starts with its claimers' namespace and its credentials cross through the store, but a claim that names its provider, or a class of its project's, would otherwise reach any provider of any project: the provider of another namespace serves it only when it lists the claimer's namespace among its claimers (its `instance.yaml`, `Inputs.Claimers`, else its package's `provisions`), or `*`; the platform's classes (level 0, reviewed, which no level above changes) route every namespace to their providers, the platform consenting for them ([providers](specs/01_inputs_outputs.md#providers)) |
-| Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a `connections.yaml` cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
-| Objects in the namespace | `checkObjects`, stage 8 | an instance of a project that is not privileged (`global.okdp.policy.privileged`) installs no cluster-scoped object (`clusterScoped`: Kubernetes' own kinds and the operators', by API group and kind) and writes no other namespace, whatever the source of the object (the objects section, a generated Secret's `namespace`, the credentials Secrets, the transfers), the items of a `List` included: a package's `objects` reach the cluster as written, and a project's instance could otherwise grant itself a ClusterRole or write a Secret of another project. A kind the compiler does not know is assumed namespaced: the engine's identity, confined to the namespace, is the second line |
-| OAuth client charts | `clientCharts`, `addOwnCharts`, `oidcClients` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials; a package's `secret` of a client names one of the release's, `<release>-...`, so that the Job's Role writes no other instance's Secret |
-| Redacted messages | `value.Short`, `value.ShortAt`, `chart.Validate` (`redactCauses`) | an error is printed to whoever runs the compile, logged by CI and by a server, copied into an issue: a schema violation of a sensitive value (`value.Sensitive`: its key, or the list's it is in, `password`, `passwd`, `secret`, `token`, `apikey`, `api_key`, `accesskey`, `secretkey`, `credential`, `privatekey`, `clientsecret`, case-insensitive, a plural's `s` left out, or a key ending with `Password`, `Secret`, `Token` or `Key`) prints `<redacted>` in place of the value, as does a value a message prints (`value.Short`) for those of its keys; a message that names a sensitive key's value by itself prints it with `value.ShortAt` (a connection reference, a named claim or a claim's key that is not of its type: `reference`, `parseClaim`, `ParseClaim`), but a store key, `remoteKey`, which names credentials and holds none. A key that does not say what it holds is not recognized: the parameter schema's names are the package's |
-| Writing the output (CLI) | `checkOutput`, `writeTree` | the command removes from `<output>/projects/` what it does not write: a `projects/` without its mark, `projects/.okdp-compile`, is refused but with `--force`, so that a wrong `-o` deletes nothing; every file is written through an `os.Root` of the output, so that a symbolic link committed in an output repository cannot make the command write out of it |
-| Reading the tree (CLI) | `openDir` (`cmd/okdp-compile/dirfs.go`) | a repository is a contributor's: a symbolic link in it would make the command read a file outside it (a runner's credential) into an instance's values, a FIFO block it, a huge file exhaust it; links are refused wherever they point, non-regular files refused, a file bounded to 4 MiB and a directory's files to 64 MiB together ([Everything through fs.FS](#everything-through-fsfs)) |
-| Project identity | `target.Projects`, the flux and argocd targets' project manifests | an instance's chart is rendered by the engine, with every object it holds: the deployer targets install each project's releases with an identity confined to its namespace (Flux, a ServiceAccount bound to a Role of the namespace, impersonated by helm-controller; Argo CD, an AppProject destined to the namespace, without cluster-scoped resources), so that a chart which writes another namespace or a ClusterRole is refused by the API server, not by the compiler, which does not read the charts. The platform's own projects (`global.okdp.policy.privileged`, `Result.Privileged`) keep the engine's identity. The Namespace carries the Pod Security Admission labels (baseline enforced, privileged for the platform's own), and both engines' marks that keep it when its project goes (Flux's prune label, Argo CD's `Delete=false`), the same file whatever the target, as the secret store: one tree holds both targets' files. Network isolation is the platform's |
+| Boundary | Where | Reason | Fixture |
+|---|---|---|---|
+| Context values | `valuesLayers`, `contextLayers`, stage 1 | `global` comes from the package's defaults and the context's layers (`Inputs.Context`), level 0 the platform's: a higher level (a project's) only adds to the lower levels, never changing a value they set, a connection they give, a named claim, a class or a default class (each taken whole): a project adds classes, it moves none of the platform's claims to another provider; and of `global.okdp`, the platform's settings, a higher level sets `provisioning` only, no other key, known to the compiler or not, set by the platform or not (`platformOnly`): a project cannot name the chart its OAuth clients are rendered with (`charts`), where they register (`oidc`), the secret store (`secrets`), nor make itself privileged (`policy`); its own settings go beside `okdp` (`global.project`); an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`, no `connections`, an instance's own being a context layer of a level of their own, and no `claims`, a project's, as is what a level adds above the platform's. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the chart its OAuth clients are rendered with (`charts`), the platform's policy (`policy`), and every chart receives `global` (`imageRegistry`) | `testdata/context/1/sets-platform-*.yaml`, `sets-unknown-platform-key.yaml`, `redefines-platform-*.yaml`; `testdata/instance-sets-*.yaml` |
+| Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses | `testdata/schema-violation.yaml` |
+| Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below | `TestResolveErrors` |
+| Credentials never inlined | `contract.fields`, from `resolve` and `provided` | an external connection and a provided output carry contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and `okdp.info.yaml` are not secret | `testdata/context/2/secret-in-connection.yaml` |
+| No credentials in clear | `credentialsSecret`, `checkPlainSecrets`, stage 8 | a `provides` `secret` without `generate`, and a Secret of the objects with `data` or `stringData`, are refused unless the caller sets `Inputs.AllowPlainSecrets`: the objects file is committed to the deployments repository, readable by whoever reads it, and its Secrets' values would be credentials in clear there and in the release's manifests; they are generated in the cluster (`okdpGeneratedSecret`) or read from the platform's secret store | `testdata/cli/plain-secrets.txtar` |
+| Contracts | `resolve`, `provided` | a reference to a connection of another contract fails; an external connection and a provided output hold only fields of their contract, its required ones, no secret field, and values its schema accepts (`contract.check`: types, `enum`, `pattern`...): a consumer reads a `port` that is a number, an `engine` it knows | `testdata/context/2/wrong-contract.yaml`, `unknown-field.yaml`, `connection-types.yaml` |
+| Provider and consumers agree | `output`, `provided` | a reference reads what its provider publishes, never a value computed from a name: an output checked against its contract when provided, and again as the consumer reads it | `TestProvidesTypes`, `TestCompileAll` |
+| Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map | `testdata/protected-upstream.yaml`, `protected-annotation.yaml` |
+| Upstream policy | `upstreamCheck`, from `applyUpstream` | whatever its package accepts, an instance of a project that is not privileged (`global.okdp.policy.privileged`) sets, at any depth of its upstream values, no key of a pod's privileges, security context, identity, containers or objects (`deniedKeys`, and the platform's `policy.upstream.deny`), nor `runAsUser: 0` nor `runAsNonRoot: false`, in a string that reads as YAML too (charts render some with `tpl`); and with `policy.upstream.registries`, its images come from those registries: `upstream: true` would otherwise let a project's instance run a privileged pod, mount the node's disk, take another ServiceAccount or pull any image. The package's values are reviewed with it, not checked; a privilege a chart grants from keys of other names (`rbac.create`) is the platform's to deny by name, and Pod Security Admission and the engine's identity are the second line | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml`, `testdata/context/0/unlisted-registry.yaml` |
+| No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the context's layers above level 0 and of the instance's layers (parameters, `global`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read | `testdata/template-code.yaml`, `testdata/context/1/template-code.yaml` |
+| Upstream schemas | stage 10, with a chart cache | an upstream chart's rules fail the check, not the deployment | `testdata/cli/check.txtar` |
+| Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart a check holds the values to is the chart the deployer renders; and a repository over `https://` or `oci://`, never `http://`: a chart fetched in clear could be swapped on the way, by a check and by the deployer | `testdata/cli/chart-sources.txtar`, `testdata/context/0/http-chart-repository.yaml` |
+| Declared charts only | `addOwnCharts`, `chart.FinalValues` | the values file cannot give values to a chart that `Chart.yaml` does not declare, nor replace a client chart with one of its own: their keys are the compiler's, checked in one place, and their charts the platform's | `TestDcrCompile` |
+| Credentials across namespaces | `pushSecrets`, `pullSecret`, `storeKey` | the compiler writes the keys of the platform's secret store, `<provider namespace>/<id>`, the ID starting with the claimers' namespace, and the platform's under `platform/`, a namespace no project may have, and cannot enforce who reads them: the layout lets a path-based store (OpenBao, Vault, a cloud secret manager) scope each namespace's identity, the SecretStore of its namespace with `secrets.provider`, with one policy: write its own segment, read `+/<namespace>.*` and `platform/*`. Without a provider, a ClusterSecretStore is one identity for every namespace, one trust domain; a backend without paths (External Secrets' Kubernetes provider) cannot hold the keys of the claims across namespaces. A key goes with its claim (`deletionPolicy: Delete`). A package's `objects` may reference the store too, reviewed with the package ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) | `examples/04_claims` (its PushSecrets and ExternalSecrets) |
+| Reserved namespace | `Compile` | the namespace `platform` is no project's: `platform/` holds the platform's keys of the store, which a path-based store lets every namespace read and its own namespace write ([what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) | `testdata/cli/secrets.txtar` |
+| Claims across namespaces | `tree.consent`, `Instance.Claimers` | a claim's ID starts with its claimers' namespace and its credentials cross through the store, but a claim that names its provider, or a class of its project's, would otherwise reach any provider of any project: the provider of another namespace serves it only when it lists the claimer's namespace among its claimers (its `instance.yaml`, `Inputs.Claimers`, else its package's `provisions`), or `*`; the platform's classes (level 0, reviewed, which no level above changes) route every namespace to their providers, the platform consenting for them ([providers](specs/01_inputs_outputs.md#providers)) | `testdata/cli/claims.txtar` |
+| Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a `connections.yaml` cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) | `testdata/context/1/remote-key-of-the-platform.yaml`, `testdata/context/2/remote-key-of-another-namespace.yaml` |
+| Objects in the namespace | `checkObjects`, stage 8 | an instance of a project that is not privileged (`global.okdp.policy.privileged`) installs no cluster-scoped object (`clusterScoped`: Kubernetes' own kinds and the operators', by API group and kind) and writes no other namespace, whatever the source of the object (the objects section, a generated Secret's `namespace`, the credentials Secrets, the transfers), the items of a `List` included: a package's `objects` reach the cluster as written, and a project's instance could otherwise grant itself a ClusterRole or write a Secret of another project. A kind the compiler does not know is assumed namespaced: the engine's identity, confined to the namespace, is the second line | `testdata/cli/policy.txtar` |
+| Privileged projects | `privileged`, `Result.Privileged`, `platformOnly` | the platform's own projects (`global.okdp.policy.privileged`: cert-manager, an operator) install cluster-scoped objects, write other namespaces, set any upstream value and run with the engine's own identity, Pod Security `privileged`: only level 0 names them, a project's `policy` refused, so that no project makes itself one | `testdata/context/1/sets-platform-policy.yaml` |
+| OAuth client charts | `clientCharts`, `addOwnCharts`, `oidcClients` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials; a package's `secret` of a client names one of the release's, `<release>-...`, so that the Job's Role writes no other instance's Secret | `testdata/cli/oidc.txtar` |
+| Redacted messages | `value.Short`, `value.ShortAt`, `chart.Validate` (`redactCauses`) | an error is printed to whoever runs the compile, logged by CI and by a server, copied into an issue: a schema violation of a sensitive value (`value.Sensitive`: its key, or the list's it is in, `password`, `passwd`, `secret`, `token`, `apikey`, `api_key`, `accesskey`, `secretkey`, `credential`, `privatekey`, `clientsecret`, case-insensitive, a plural's `s` left out, or a key ending with `Password`, `Secret`, `Token` or `Key`) prints `<redacted>` in place of the value, as does a value a message prints (`value.Short`) for those of its keys; a message that names a sensitive key's value by itself prints it with `value.ShortAt` (a connection reference, a named claim or a claim's key that is not of its type: `reference`, `parseClaim`, `ParseClaim`), but a store key, `remoteKey`, which names credentials and holds none. A key that does not say what it holds is not recognized: the parameter schema's names are the package's | `testdata/cli/errors.txtar` |
+| Writing the output (CLI) | `checkOutput`, `writeTree` | the command removes from `<output>/projects/` what it does not write: a `projects/` without its mark, `projects/.okdp-compile`, is refused but with `--force`, so that a wrong `-o` deletes nothing; every file is written through an `os.Root` of the output, so that a symbolic link committed in an output repository cannot make the command write out of it | `testdata/cli/output.txtar` |
+| Reading the tree (CLI) | `openDir` (`cmd/okdp-compile/dirfs.go`) | a repository is a contributor's: a symbolic link in it would make the command read a file outside it (a runner's credential) into an instance's values, a FIFO block it, a huge file exhaust it; links are refused wherever they point, non-regular files refused, a file bounded to 4 MiB and a directory's files to 64 MiB together ([Everything through fs.FS](#everything-through-fsfs)) | `testdata/cli/symlink.txtar` |
+| Project identity | `target.Projects`, the flux and argocd targets' project manifests | an instance's chart is rendered by the engine, with every object it holds: the deployer targets install each project's releases with an identity confined to its namespace (Flux, a ServiceAccount bound to a Role of the namespace, impersonated by helm-controller; Argo CD, an AppProject destined to the namespace, without cluster-scoped resources), so that a chart which writes another namespace or a ClusterRole is refused by the API server, not by the compiler, which does not read the charts. The platform's own projects (`global.okdp.policy.privileged`, `Result.Privileged`) keep the engine's identity. The Namespace carries the Pod Security Admission labels (baseline enforced, privileged for the platform's own), and both engines' marks that keep it when its project goes (Flux's prune label, Argo CD's `Delete=false`), the same file whatever the target, as the secret store: one tree holds both targets' files. Network isolation is the platform's | `testdata/targets/<target>/projects/<namespace>/project/` (`TestTargets`) |
+| Objects Helm keeps | `keepSynced`, stage 8 | an object annotated `helm.sh/resource-policy: keep` (a claim's database) gets Argo CD's sync options `Prune=false,Delete=false`: Argo CD reads no Helm annotation, and would delete it, its data with it, when the render drops it or its Application goes | `TestCompileKeep` |
+| Bounded compile | `compile.Session`, `Inputs.CostLimit`; `--cost-limit`, `--timeout` | a package's expressions, and the instance values that make them iterate, run within a total CEL cost per instance, what a host function builds counted, and a context the compile checks between stages and inside comprehensions (below) | `testdata/cli/limits.txtar` |
+| One project's failure (CLI) | `compileTree`, `--partial` | a refused instance fails its project, not the tree: the projects whose instances all compile are written, the others' output kept as it was, so that a project's input does not hold back every deployment | `testdata/cli/partial.txtar` |
 
 What an expression computes is bounded only on request: a caller that
 compiles packages it does not review passes a context (cancelled between
@@ -1002,7 +1009,8 @@ in the branches no evaluation takes too (`TestMistakes`: directives,
 unknown sections, expressions that do not compile), the cost limit and
 cancellation of a session over compiled programs (`TestSession`), and
 functions of the CEL libraries at their pinned versions (`TestLibraries`).
-`internal/chart/spec_test.go` covers the source checks (`TestRefCheck`)
+`internal/chart/metadata_test.go` covers the source checks
+(`TestMetadataCheck`), `internal/chart/spec_test.go` the upstream specs
 and the charts of a package, `internal/chart/cache_test.go` the chart
 cache, a chart unpacked under its repository's directory, with subcharts,
 not at the root nor as an archive (`TestChartCache`), and the repository's
@@ -1134,16 +1142,21 @@ package of its own), `--check` and its checks against a chart cache
 their providers across namespaces, a requirement the default provider does
 not meet, a provider of another project with its consent or without
 (`claims.txtar`), the platform's policy (`policy.txtar`: a cluster-scoped
-object refused, written for a privileged project, a Secret in clear
-refused), a tree compiled whole (`repository.txtar`: two
+object refused, written for a privileged project, an object of another
+namespace refused), the platform's secret store (`secrets.txtar`: a key
+of another namespace refused, a project's and the platform's read, the
+namespace `platform` refused), the Secret of an OAuth client
+(`oidc.txtar`), the chart sources (`chart-sources.txtar`: `http://`, a
+range), a tree compiled whole (`repository.txtar`: two
 repositories, each target, `--check`, a stale instance removed, a cycle of
 outputs), the bounds of a compile (`limits.txtar`: `--cost-limit`, what a
 host function builds counted, and `--timeout`), a symbolic link in a
 repository (`symlink.txtar`), the output's mark and `--force`
 (`output.txtar`), `--report`, its JSON compared with a golden file
 (`report.txtar`), a refusal that fails its project and not the tree
-(`partial.txtar`), credentials in clear and `--allow-plain-secrets`
-(`plain-secrets.txtar`), one script per concern.
+(`partial.txtar`), credentials in clear, of the objects and of
+`provides`, and `--allow-plain-secrets` (`plain-secrets.txtar`), one
+script per concern.
 The public package is tested through the example in the root package:
 `example_test.go` holds the Go programs of
 README.md and [usage](01_usage.md#go-library) as examples, with their
@@ -1167,9 +1180,11 @@ property on any input; `go test ./...` runs the seeds only:
 
 One at a time, a package at a time:
 `go test -run='^$' -fuzz=FuzzScan -fuzztime=60s ./internal/compile`;
-`make fuzz` runs each in turn, `FUZZTIME` (30s) each. An
-input that fails is written to the package's `testdata/fuzz/`: once fixed,
-it becomes a case of the unit test, and the file is removed.
+`make fuzz` runs each in turn, `FUZZTIME` (30s) each, and
+`.github/workflows/fuzz.yml` every night, 60s each. An input that fails
+is written to the package's `testdata/fuzz/` (the nightly run uploads
+it): once fixed, it becomes a case of the unit test, and the file is
+removed.
 
 ### Example
 
@@ -1288,26 +1303,35 @@ instance case in place of its `config.yaml`, a context case as a context
 layer of its directory's level after `platform.yaml` and without
 `config.yaml`, and expects an error containing the message. The instance
 cases cover the example's `errors` rule on replicas without a
-database, the protected upstream paths, a parameter schema violation, and
-an instance that sets `global` (`instance-sets-global.yaml`) or
-`connections` (`instance-sets-connections.yaml`), and upstream values
-the platform's policy denies, a key of a pod's privileges, in the values
-or in a string read as YAML (`denied-upstream.yaml`,
-`denied-upstream-text.yaml`); the level 0
-cases, a missing platform value and a platform file that deletes the
+database, the protected upstream paths, a parameter schema violation, an
+instance that sets `global` (`instance-sets-global.yaml`), `connections`
+(`instance-sets-connections.yaml`) or `claims`
+(`instance-sets-claims.yaml`), template code (`template-code.yaml`), and
+upstream values the platform's policy denies, a key of a pod's
+privileges, in the values or in a string read as YAML
+(`denied-upstream.yaml`, `denied-upstream-text.yaml`); the level 0
+cases, a missing platform value, a platform file that deletes the
 registration URL of the OAuth clients in `dcr` mode
-(`dcr-without-registration-url.yaml`), an image of none of the platform's
-registries (`unlisted-registry.yaml`); the level 1 cases,
-a project that gives a field of a platform connection
+(`dcr-without-registration-url.yaml`), a platform chart over `http://`
+(`http-chart-repository.yaml`), an image of none of the platform's
+registries (`unlisted-registry.yaml`); the level 1 cases, a project that
+gives a field of a platform connection
 (`redefines-platform-connection.yaml`), changes the platform's default
-class (`redefines-platform-class.yaml`) or sets a platform setting,
-`global.okdp` but `provisioning`, a key the platform leaves unset included
-(`sets-platform-*.yaml`, `sets-unknown-platform-key.yaml`); the level 2
-cases, the connection
+class (`redefines-platform-class.yaml`), sets a platform setting,
+`global.okdp` but `provisioning`, a key the platform leaves unset
+included (`sets-platform-*.yaml`, one per key the compiler reads,
+`charts`, `oidc`, `ingress`, `tls`, `proxy`, `secrets`, `policy`;
+`sets-unknown-platform-key.yaml`), holds template code
+(`template-code.yaml`) or reads a key of the platform's in its store
+(`remote-key-of-the-platform.yaml`); the level 2 cases, the connection
 checks (wrong contract, unknown field, secret field, the contract's
 types), a connection's credentials in the platform's secret store without
-the store or with a Secret's name too (`remote-key-*.yaml`), and the
-example's requirement of a connection with `secretRef`.
+the store, with a Secret's name too, under a key that is no path or of
+another namespace (`remote-key-*.yaml`), and the example's requirement of
+a connection with `secretRef`. Each boundary of the [threat
+model](04_threat_model.md) has one case that must fail, here or in
+`testdata/cli/` (the fixture of each [security
+boundary](#security-boundaries)).
 
 ### Continuous integration
 
@@ -1326,6 +1350,28 @@ without noise. Dependabot (`.github/dependabot.yml`) proposes the updates
 weekly: the library's modules (`deps:`), golangci-lint and the actions
 (`ci:`). `.github/workflows/helm-fixtures.yml` regenerates the
 [Helm fixtures](#helm-fixtures) on the pull requests that touch them.
+
+Every action is pinned by its commit, its tag in a comment, and every
+tool a workflow runs by its version (golangci-lint, goreleaser, cosign,
+syft), but govulncheck, which its action installs at its latest. The
+`govulncheck` job of `ci.yml` (golang/govulncheck-action) fails on a
+known vulnerability the code reaches, of a module or of the standard
+library of the Go of `go.mod`, the one the release binaries are built
+with: it is fixed by raising the module, or `go.mod`'s `go` line.
+`.github/workflows/fuzz.yml` runs the [fuzz tests](#fuzz-tests) every
+night and on demand (`make fuzz FUZZTIME=60s`), the failing inputs
+uploaded as an artifact.
+
+A release is built by goreleaser in `release-please.yml`, without a
+module cache another run could have written: an SPDX SBOM of each
+archive (syft, `sboms`), the checksums file signed keyless with cosign
+(`signs`: `cosign sign-blob --bundle`, the job's OIDC token its
+identity, `id-token: write`; cosign 3 writes the signature and the
+certificate in the Sigstore bundle only, no longer apart), and the build
+provenance of each archive attested (actions/attest-build-provenance,
+`attestations: write`): [release archives](01_usage.md#release-archives)
+verifies them. `SECURITY.md` says how to report a vulnerability, the
+versions supported and the disclosure.
 
 ## Limitations
 

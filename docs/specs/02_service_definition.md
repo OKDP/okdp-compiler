@@ -134,7 +134,8 @@ values file decides what is rendered, and each chart's values are its
 key's.
 
 Each dependency is checked when the file is loaded, the first failing
-check reported; `<i>` is its position in the list, from 0, `<key>` its
+check reported (`testdata/cli/chart-sources.txtar`: `http://`, a
+range); `<i>` is its position in the list, from 0, `<key>` its
 key:
 
 | Case | Error |

@@ -14,13 +14,11 @@ status 0 okdp-compile --repository $WORK/priv -o $WORK/files
 grep 'kind: ClusterRole' $WORK/files/projects/infra/instances/infra-web/okdp.objects.yaml
 rm $WORK/files
 
-# No credentials in clear, whatever the project: a Secret of the objects
-# section with values is refused, nothing written. They are generated in
-# the cluster (okdpGeneratedSecret) or read from the platform's secret
-# store.
-status 1 okdp-compile --repository $WORK/plain -o $WORK/files
+# An object of another namespace, whatever its kind: an ExternalSecret
+# there would read that namespace's keys with its SecretStore's identity.
+status 1 okdp-compile --repository $WORK/other -o $WORK/files
 ! stdout .
-cmp stderr $WORK/plain-secret.txt
+cmp stderr $WORK/other-namespace.txt
 ! exists $WORK/files
 
 -- cluster-role.txt --
@@ -60,20 +58,23 @@ objects:
 -- priv/projects/infra/instances/web/instance.yaml --
 service: web
 version: 1.0.0
--- plain-secret.txt --
-error: demo/demo-web: web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it
--- plain/catalog/web/1.0.0/Chart.yaml --
+-- other-namespace.txt --
+error: demo/demo-web: web: objects: ExternalSecret/demo-web-ledger: namespace finance, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them
+-- other/catalog/web/1.0.0/Chart.yaml --
 apiVersion: v2
 name: web
 version: 1.0.0
 dependencies:
   - {name: web, repository: https://charts.example.org, version: 1.0.0}
--- plain/catalog/web/1.0.0/okdp.yaml --
+-- other/catalog/web/1.0.0/okdp.yaml --
 objects:
-  - apiVersion: v1
-    kind: Secret
-    metadata: {name: '${{ release.name }}-token', labels: '${{ labels }}'}
-    stringData: {token: changeme}
--- plain/projects/demo/instances/web/instance.yaml --
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata: {name: '${{ release.name }}-ledger', namespace: finance, labels: '${{ labels }}'}
+    spec:
+      secretStoreRef: {name: okdp-secrets, kind: SecretStore}
+      target: {name: ledger}
+      data: [{secretKey: password, remoteRef: {key: finance/ledger, property: password}}]
+-- other/projects/demo/instances/web/instance.yaml --
 service: web
 version: 1.0.0

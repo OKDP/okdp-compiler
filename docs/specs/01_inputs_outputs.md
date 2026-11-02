@@ -34,7 +34,7 @@ empty one fails as another:
 |---|---|
 | a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
 | a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
-| the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce)) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
+| the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce); `testdata/cli/secrets.txtar`) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
 | an instance name that is set and not a DNS-1123 label | `Inputs.Name "<name>": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 
 Paths in an `fs.FS` are relative to its root.
@@ -635,6 +635,7 @@ label, a contract without secret field, a key that is no path, or one
 outside the namespace above level 0 refuse the reference, after the
 fields of the connection ([connection errors](#connection-errors);
 `testdata/context/2/remote-key-of-another-namespace.yaml`,
+`testdata/context/1/remote-key-of-the-platform.yaml`,
 `testdata/cli/secrets.txtar`).
 
 ### What a reference requires
@@ -1066,7 +1067,8 @@ which its packages' mappings read, go under `global` beside `okdp`
 after the check against the lower levels
 (`testdata/context/1/sets-platform-charts.yaml`, `sets-platform-oidc.yaml`,
 `sets-platform-policy.yaml`, `sets-platform-secrets.yaml`,
-`sets-platform-ingress.yaml`, `sets-unknown-platform-key.yaml`):
+`sets-platform-ingress.yaml`, `sets-platform-tls.yaml`,
+`sets-platform-proxy.yaml`, `sets-unknown-platform-key.yaml`):
 
 ```
 context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
@@ -1075,7 +1077,8 @@ context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only 
 Only level 0 is reviewed with the platform: above it, as in an
 instance layer, no key or string of a layer may contain `{{`
 ([Layers](#layers)), the first one found by path reported,
-`context layer 3 (level 1): connections.team-db.host: the value contains "{{"`.
+`context layer 3 (level 1): connections.team-db.host: the value contains "{{"`
+(`testdata/context/1/template-code.yaml`).
 The layers are checked in merge order, each normalized ([values
 files](#values-files)), then against the lower levels, then for the
 platform's settings, then for `{{`.
@@ -1303,7 +1306,7 @@ upstream charts pass their values to `tpl`, where template code could call
 normalized as it is merged, before the [schema check](#schema-check); the
 first `{{` in path order (keys sorted, items in order) fails, the layer
 numbered from 1 and the path written as in [protect](#protect) errors, a
-list item `[<i>]`:
+list item `[<i>]` (`testdata/template-code.yaml`):
 
 ```
 values layer 1: database: the value contains "{{"
@@ -1697,7 +1700,8 @@ follow, and two clients may not write one Secret
 Secret is the release's, the default names above and a `secret` given
 alike: its name starts with `<release>-`, checked in every mode, so
 that the Job, whose Role writes it, cannot overwrite another Secret of
-the namespace, another instance's credentials.
+the namespace, another instance's credentials
+(`testdata/cli/oidc.txtar`).
 
 A client chart is no dependency of `Chart.yaml`, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
@@ -1861,7 +1865,8 @@ in the release's manifests. They are generated in the cluster
 (`secretRef`: an operator's, an upstream chart's, an ExternalSecret
 reading the platform's secret store). `Inputs.AllowPlainSecrets` accepts
 a plain Secret, for a caller that knows its repository private, and the
-[objects section](#objects-section)'s alike.
+[objects section](#objects-section)'s alike
+(`testdata/cli/plain-secrets.txtar`).
 
 A generated Secret is what `okdpGeneratedSecret` renders
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key
@@ -1965,7 +1970,7 @@ checked:
 
 ```
 web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
-web: objects: Secret/token: namespace kube-system, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them
+web: objects: ExternalSecret/demo-web-ledger: namespace finance, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them
 ```
 
 Whatever the project, no Secret (`v1`) of `Objects`, nor of the items of
@@ -1980,7 +1985,7 @@ store](#credentials-in-the-platforms-secret-store)), never written to the
 deployments repository. A Secret with only `metadata` and `type` (a
 ServiceAccount token's, which Kubernetes fills) passes. The first
 refused, in the order of `Objects`, fails, named `Secret/<name>`, `data`
-before `stringData` (`testdata/cli/policy.txtar`):
+before `stringData` (`testdata/cli/plain-secrets.txtar`):
 
 ```
 web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it

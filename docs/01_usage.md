@@ -22,20 +22,41 @@ Each GitHub release attaches the binaries of its version, built by
 goreleaser (`.goreleaser.yaml`): `okdp-compile_<version>_<os>_<arch>.tar.gz`,
 a `.zip` for `windows`, for `<os>` `linux`, `darwin` or `windows` and
 `<arch>` `amd64` or `arm64`, each holding `okdp-compile` (`.exe` on
-Windows), `LICENSE` and `README.md`, and
-`okdp-compile_<version>_checksums.txt`, their SHA-256 sums. `<version>` is
-the tag without its `v`. From
-[the releases](https://github.com/OKDP/okdp-compiler/releases):
+Windows), `LICENSE` and `README.md`; an SPDX SBOM of each archive,
+`<archive>.sbom.json` (syft); and
+`okdp-compile_<version>_checksums.txt`, the SHA-256 sums of them all,
+signed keyless with cosign by the release workflow,
+`okdp-compile_<version>_checksums.txt.sigstore.json`, the Sigstore bundle
+of its signature, the workflow's certificate and its transparency log
+entry. The build provenance of each archive is attested too (SLSA,
+GitHub's artifact attestations). `<version>` is the tag without its `v`.
+From [the releases](https://github.com/OKDP/okdp-compiler/releases):
 
 ```bash
 version=X.Y.Z os=linux arch=amd64
 url=https://github.com/OKDP/okdp-compiler/releases/download/v$version
 curl -fsSLO "$url/okdp-compile_${version}_${os}_${arch}.tar.gz"
 curl -fsSLO "$url/okdp-compile_${version}_checksums.txt"
+curl -fsSLO "$url/okdp-compile_${version}_checksums.txt.sigstore.json"
+# The checksums, signed by the release workflow of OKDP/okdp-compiler on main
+cosign verify-blob \
+  --bundle "okdp-compile_${version}_checksums.txt.sigstore.json" \
+  --certificate-identity "https://github.com/OKDP/okdp-compiler/.github/workflows/release-please.yml@refs/heads/main" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  "okdp-compile_${version}_checksums.txt"
+# The archive, by its checksum
 sha256sum --ignore-missing -c "okdp-compile_${version}_checksums.txt"
+# Its provenance: built by that workflow from that repository
+gh attestation verify "okdp-compile_${version}_${os}_${arch}.tar.gz" --repo OKDP/okdp-compiler
 tar -xzf "okdp-compile_${version}_${os}_${arch}.tar.gz" okdp-compile
 ./okdp-compile --version    # X.Y.Z
 ```
+
+`cosign verify-blob` needs cosign 2.4 or later (the Sigstore bundle),
+`gh attestation verify` the GitHub CLI; either alone is a verification:
+the signature proves the checksums are the release workflow's, the
+attestation that the archive was built by it. The releases before the
+signature was added have their checksums only.
 
 ### `go install`
 
@@ -43,7 +64,7 @@ tar -xzf "okdp-compile_${version}_${os}_${arch}.tar.gz" okdp-compile
 go install github.com/okdp/okdp-compiler/cmd/okdp-compile@vX.Y.Z
 ```
 
-builds a release with Go 1.27 or later and installs it in `$GOBIN`
+builds a release with Go 1.27.3 or later and installs it in `$GOBIN`
 (`$(go env GOPATH)/bin` by default); `--version` prints `dev`, the version
 being set by the `-ldflags` of the release archives and `make build`. The go
 command finds the module by its path, `github.com/okdp/okdp-compiler`
@@ -52,7 +73,7 @@ release.
 
 ### From a checkout
 
-Go 1.27 or later (`go 1.27.0` in `go.mod`):
+Go 1.27.3 or later (`go 1.27.3` in `go.mod`):
 
 ```bash
 make build                  # bin/okdp-compile

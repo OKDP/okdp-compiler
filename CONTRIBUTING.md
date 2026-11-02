@@ -4,7 +4,7 @@ Issues and pull requests are welcome.
 
 ## Requirements
 
-- Go 1.27 or later (`go 1.27.0` in `go.mod`). `go test ./...` runs
+- Go 1.27.3 or later (`go 1.27.3` in `go.mod`). `go test ./...` runs
   offline: nothing else is needed to build, test and lint.
 - golangci-lint is pinned in a separate modfile, `tools/go.mod`, and run
   with `go tool -modfile=tools/go.mod golangci-lint`: nothing to install.
@@ -46,6 +46,12 @@ regenerates the Helm fixtures and fails on a diff.
   example: the first line is `# error: <message>`, the message the compile
   must report (`TestExampleErrors`,
   [failure cases](docs/00_architecture.md#failure-cases)).
+- A boundary of the [threat model](docs/04_threat_model.md), what an
+  author may not do, has one case that must fail: a `testdata/` case
+  when the example can show it, else a script of `testdata/cli/`. A new
+  check gets its case, its row in the threat model and in the [security
+  boundaries](docs/00_architecture.md#security-boundaries), named in
+  both.
 - The outputs of each example of `examples/`, a repository tree
   (`<example>/output/projects/<project>/instances/<release>/`), are
   compared byte for byte with a compile of the instance of its `input/db/`

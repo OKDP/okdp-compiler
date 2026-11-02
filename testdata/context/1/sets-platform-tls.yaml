@@ -1,0 +1,10 @@
+# error: context layer 2 (level 1): global.okdp.tls: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A project's file (project.yaml) that adds a TLS setting the platform
+# leaves unset (platform.yaml sets the ClusterIssuer and the CA bundle,
+# which no level above changes), one a package's mapping may read: the
+# settings of global.okdp are the platform's, whether it sets them or not,
+# those the compiler reads and the others.
+global:
+  okdp:
+    tls:
+      insecureSkipVerify: true

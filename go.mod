@@ -1,6 +1,6 @@
 module github.com/okdp/okdp-compiler
 
-go 1.27.0
+go 1.27.3
 
 require (
 	cel.dev/cel-go v0.32.0
