@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKDP platform values",
-  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, project...) but certificateIssuers, a former setting, refused (false): its selfSigned.name is tls.clusterIssuer. Every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value.",
+  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, a key the mappings read...) but certificateIssuers, a former setting, refused (false): its selfSigned.name is tls.clusterIssuer. Every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value. The whole of global.okdp is the platform's, level 0's: a layer above it, a project's (project.yaml), sets provisioning, its classes, and no other key, described here or not, whether the platform sets it or not; a project's own settings go under global beside okdp (global.project).",
   "type": "object",
   "properties": {
     "global": {
@@ -9,6 +9,7 @@
       "properties": {
         "okdp": {
           "type": "object",
+          "description": "The platform's settings: level 0's, every key of it but provisioning, which a project adds its classes to.",
           "properties": {
             "ingress": {
               "type": "object",
@@ -48,7 +49,7 @@
                   "type": "object",
                   "description": "The chart of the OAuth clients in dcr mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the compiler writes. Absent: oci://quay.io/adaltas, oidc-dcr, 0.5.0.",
                   "properties": {
-                    "repository": {"type": "string", "description": "The URL of the chart repository: https://, http:// or oci://."},
+                    "repository": {"type": "string", "description": "The URL of the chart repository: https:// or oci://; http://, the chart fetched in clear, is refused."},
                     "chart": {"type": "string", "description": "The name of the chart in the repository."},
                     "version": {"type": "string", "description": "A pinned version (1.2.3), not a range."}
                   }
@@ -177,12 +178,30 @@
             },
             "policy": {
               "type": "object",
-              "description": "The platform's policy: what the projects may deploy, and which projects are the platform's own.",
+              "additionalProperties": false,
+              "description": "The platform's policy: what the projects may deploy, and which projects are the platform's own. Another key is refused: a misspelt one would leave the projects unconstrained.",
               "properties": {
                 "privileged": {
                   "type": "array",
                   "items": {"type": "string"},
-                  "description": "The namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value, as the other projects may not; the targets give their releases the engine's own identity, the other projects' one confined to their namespace (Result.Privileged)."
+                  "description": "The namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value, as the other projects may not: the compile refuses their objects of a cluster-scoped kind or of another namespace; the targets give their releases the engine's own identity, the other projects' one confined to their namespace (Result.Privileged)."
+                },
+                "upstream": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "What the upstream values of the other projects' instances (upstream.<key> of their values, their context's layers included) may set, whatever their package's upstream and protect: no key of a pod's privileges, identity, containers or objects, at any depth, to any value (privileged, hostPath, hostNetwork, hostPID, hostIPC, hostPort, allowPrivilegeEscalation, capabilities, seccompProfile, sysctls, securityContext, podSecurityContext, containerSecurityContext, serviceAccountName, serviceAccount, automountServiceAccountToken, extraContainers, sidecars, initContainers, extraInitContainers, extraObjects, extraDeploy, extraManifests), no runAsUser 0 nor runAsNonRoot false, a string that reads as YAML checked as values; the scheduling keys (nodeSelector, tolerations, affinity) stay free. A privileged project's are not checked.",
+                  "properties": {
+                    "deny": {
+                      "type": "array",
+                      "items": {"type": "string", "minLength": 1},
+                      "description": "Key names the upstream values set nowhere, at any depth, to any value, beside the compiler's (rbac, a chart's extra RBAC rules...)."
+                    },
+                    "registries": {
+                      "type": "array",
+                      "items": {"type": "string", "pattern": "^[^\\s/:@]+(:[0-9]+)?(/[^\\s/:@]+)*$"},
+                      "description": "The registries the images of the upstream values come from, each a host, its port and a path prefix optional (registry.example.org, mirror.example.org:5000/okdp): every image string, and the reference a registry and a repository string make (<registry>/<repository>, the computed one of either the instance does not set; an image map's name without repository), starts with one of them, followed by its end, a / or, after a path, a : or @ (a tag, a digest); an image, a registry or a repository null, the chart's default, is refused. Absent: the images are not checked; []: none may be set."
+                    }
+                  }
                 }
               }
             }

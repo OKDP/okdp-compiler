@@ -115,7 +115,7 @@ okdp-compile --version
 | `--output`, `-o` | required, refused with `--check` | the output directory: under `projects/<namespace>/instances/<release>/`, each instance's umbrella chart, its values, OKDP's own objects and what it publishes, and the files of `--target` ([`--output`](#--output)) |
 | `--check` | | compile and check, write nothing: the errors and warnings, no `--output` ([`--check`](#--check)) |
 | `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
-| `--target` | `helm` | what is written: `helm`, each instance's umbrella chart; `flux`, with its HelmRelease and the Kustomizations; `argocd`, with its Application ([targets](specs/01_inputs_outputs.md#targets)) |
+| `--target` | `helm` | what is written: `helm`, each instance's umbrella chart; `flux`, with its HelmRelease, the Kustomizations and each project's manifests; `argocd`, with its Application and each project's manifests ([targets](specs/01_inputs_outputs.md#targets)) |
 | `--path-prefix` | the root | `--target flux` and `argocd`: the path of the output directory in the repository the deployer reads |
 | `--flux-source` | `flux-system/okdp-gitops` | `--target flux`: the GitRepository of that repository, `<namespace>/<name>` |
 | `--repo-url` | required by `--target argocd` | `--target argocd`: the repository Argo CD reads the output directory from |
@@ -176,8 +176,25 @@ demo/demo-workspace: depends on demo-alerts (http alerts, notifications.webhook)
 | `--target` | Writes, besides each instance's umbrella chart | Options |
 |---|---|---|
 | `helm` (the default) | nothing | none |
-| `flux` | each instance's `helmrelease.yaml` and `kustomization.yaml`, each namespace's `kustomization.yaml`, and `projects/kustomization.yaml`, the namespaces' directories, what a Flux Kustomization of `projects/` syncs | `--path-prefix`; `--flux-source` |
-| `argocd` | each instance's `application.yaml` | `--repo-url`, required; `--revision`; `--path-prefix` |
+| `flux` | each instance's `helmrelease.yaml` and `kustomization.yaml`, each namespace's `project/` and `kustomization.yaml`, and `projects/kustomization.yaml`, the namespaces' directories, what a Flux Kustomization of `projects/` syncs | `--path-prefix`; `--flux-source` |
+| `argocd` | each instance's `application.yaml`, each namespace's `project/` | `--repo-url`, required; `--revision`; `--path-prefix` |
+
+Each namespace's `project/` holds the project's own manifests: its
+Namespace, with its Pod Security Admission labels, kept by both engines
+when the project goes, the platform's secret store in it when the
+platform names a provider
+(`global.okdp.secrets.provider`), and the identity its releases are
+installed with, confined to its namespace: `flux`, a ServiceAccount,
+`project-<namespace>`, bound to a Role of the namespace, which each
+HelmRelease names; `argocd`, the AppProject `project-<namespace>` its
+Applications are in, destined to the namespace alone. A project of
+`global.okdp.policy.privileged`, one of the platform's own, keeps the
+engine's identity (the HelmRelease names no ServiceAccount, the
+AppProject admits every namespace and cluster-scoped resource). The
+platform's entry point applies them before the instances ([the project's
+manifests](specs/01_inputs_outputs.md#the-projects-manifests)). The
+files both targets write are the same, so that one tree holds both:
+`namespace.yaml` and `secret-store.yaml` of `project/` among them.
 
 An option of another target is refused. What the deployer sets up once,
 and what sync waves order, is in [targets](specs/01_inputs_outputs.md#targets).
@@ -888,6 +905,13 @@ holds, to read it back.
   server compiling packages it does not review sets one, as an instance's
   values can make an expression iterate over them. The example costs under
   1000, the OAuth client's template most of it (`ExampleCompile_server`).
+- `Inputs.AllowPlainSecrets` accepts credentials in clear: a `provides`
+  `secret` without `generate`, a plain Secret of its `stringData`, and a
+  Secret of the `objects` section with `data` or `stringData`. Unset,
+  they fail the compile: the objects file is written to the deployments
+  repository, so credentials are generated in the cluster or read from
+  the platform's secret store
+  ([credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
 - Errors are messages for the user, returned as they are; the package
   defines no error types, but `ErrNotInCatalog`, which a missing package
   wraps, and `*ReleaseError`, which the Flux and Argo CD targets wrap. A message carries its context: the file, the
@@ -935,10 +959,16 @@ releases it waits for, and the Kustomizations, the root's of the
 namespaces among them (`Flux`), or its Argo CD Application and sync wave
 (`ArgoCD`), from the [deployment
 graph](specs/01_inputs_outputs.md#the-deployment-graph), in okdp-gitops'
-format ([targets](specs/01_inputs_outputs.md#targets)): the files of a
-target are all an engine needs of the compiled tree, a Flux Kustomization
-of `projects/`, or an Argo CD Application that applies the Applications of
-`projects/`.
+format ([targets](specs/01_inputs_outputs.md#targets)); and, for each
+project, its own manifests, `projects/<namespace>/project/`: its
+Namespace, the platform's secret store in it, and the identity its
+releases are installed with, confined to its namespace unless the project
+is one of the platform's own ([the project's
+manifests](specs/01_inputs_outputs.md#the-projects-manifests)). The files
+of a target are all an engine needs of the compiled tree, a Flux
+Kustomization of `projects/`, or an Argo CD Application that applies the
+Applications of `projects/` and an ApplicationSet over the projects'
+manifests.
 
 [okdp-gitops](https://github.com/OKDP/okdp-gitops) compiles a whole
 deployments repository with this library, every instance of it
@@ -1041,7 +1071,8 @@ usage error with status 2.
 | `Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` | a dependency key (its `alias`, else its `name`) that is not a DNS label: `../app`, an upper case letter, `_` or `.` | give it an `alias` that is one, and rename the key in `okdp.yaml` and the values file ([chart keys](specs/02_service_definition.md#chart-keys)) |
 | `Chart.yaml: dependencies[2] (api): the key of dependencies[1] too: give one of them an alias` | two dependencies of one key: a chart rendered twice, one of them without its alias | an alias each ([recipe](02_writing_package.md#render-a-chart-twice)) |
 | `Chart.yaml: dependencies[0].name is required` | a dependency without its chart's name | name the published chart that renders it ([dependencies](specs/02_service_definition.md#dependencies)) |
-| `Chart.yaml: dependencies[0].repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `Chart.yaml: dependencies[0].name "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `http://`, `oci://`) or whose host and path are no directory of the chart cache (`https://`, `https://x/../y`), a name that is not a chart's name | fix the dependency ([dependencies](specs/02_service_definition.md#dependencies)) |
+| `Chart.yaml: dependencies[0].repository "charts.example.org": the URL of a chart repository (https://... or oci://...)`, `Chart.yaml: dependencies[0].name "a/b": the name of a chart of the repository` | a repository that is not a URL (`https://`, `oci://`) or whose host and path are no directory of the chart cache (`https://`, `https://x/../y`), a name that is not a chart's name | fix the dependency ([dependencies](specs/02_service_definition.md#dependencies)) |
+| `Chart.yaml: dependencies[0].repository "http://charts.example.org": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)`, `global.okdp.charts.oidcDcr.repository "http://...": ...` | a dependency, or a platform chart, of an `http://` repository: the chart would be fetched in clear, by a check and by the deployer | an `https://` or `oci://` repository: a mirror, with TLS ([dependencies](specs/02_service_definition.md#dependencies), [platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 | `Chart.yaml: dependencies[0].version "^1.8": a pinned chart version (1.2.3), not a range` | a version range | pin the version |
 | `okdp.yaml: yaml: unmarshal errors:` then `line 3: field requires not found in type okdp.Package` | a key `okdp.yaml` does not define, here a misspelt `require`; one line per unknown key | fix the name ([okdp.yaml](specs/02_service_definition.md#okdpyaml)) |
 | `okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)`, `okdp.yaml: name: the name, version and charts are Chart.yaml's` | a key of the former package format | the values in `values.cel.yaml`, without the `output:` wrapper; the name, version and charts in `Chart.yaml` ([service definition](specs/02_service_definition.md)) |
@@ -1057,6 +1088,7 @@ usage error with status 2.
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
 | `global.okdp.ingress.className is required. It is a context value: the platform's or a project's (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | set the key in `platform.yaml` ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context file, the second (`Inputs.Context[1]`), `project.yaml` at level 1, sets a value a file of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the file: a level only adds keys and connections; change the value in the lower level's files ([levels](specs/01_inputs_outputs.md#levels)) |
+| `context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp` | a context file above level 0, `project.yaml`, sets a key of `global.okdp` other than `provisioning`, one the compiler reads or not, one the platform sets or leaves unset (a key it sets fails before, `is set at level 0`), or `global.okdp` to a non-map | set it in `platform.yaml`, the platform's; a project's own settings, which the mappings read, go beside `okdp`: `global.project` ([levels](specs/01_inputs_outputs.md#levels)) |
 | `values layer 1: global.okdp is set by the context (Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance file, the first, second... values layer (`Inputs.Values[0]`, `[1]`...), its `config.yaml` first, sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values in `platform.yaml`; a package lets instances set a key of `global` by declaring it in `config.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level` | an instance's `config.yaml` sets `connections`, to any value | give the instance's own connections in its `connections.yaml`, a context file of its level; a connection of a lower level is not changed ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `values layer 1: database: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance's `config.yaml`, in a key or a value under any key: parameters, upstream values; `context layer <n> (level <l>): ...` in a context file above level 0 (`project.yaml`, `connections.yaml`); the platform's files, level 0, are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
@@ -1064,6 +1096,10 @@ usage error with status 2.
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | with `--check --charts`, the final values, over the chart's defaults, violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
 | `warning: upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; ...` | with `--check --charts`, the instance appends to a list (`append`) the chart's defaults hold items of that the package's list leaves out: Helm replaces the chart's list with the final one | restate the items to keep in the package's values of the key, its defaults or values file ([append](specs/01_inputs_outputs.md#append)) |
+| `web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them` | the package writes an object of a cluster-scoped kind (its `objects` section, `<kind>/<name>`), and the instance's project is not one of the platform's own | a namespaced object; for the platform's own projects (cert-manager, an operator...), list the namespace in `global.okdp.policy.privileged` of `platform.yaml` ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: objects: Secret/token: namespace kube-system, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them` | an object of the package, or a generated Secret (`okdpGeneratedSecret`'s `namespace`), names another namespace than the instance's | the instance's namespace (`release.namespace`), or leave `namespace` out; the platform's own projects write other namespaces ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: output "store": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it` | an output of `provides` has a `secret` of `stringData` alone: its credentials would be written in clear to the deployments repository | `generate` the secret keys, `stringData` for the others; or point `secretRef` at a Secret an operator, the chart or an ExternalSecret writes; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)) |
+| `web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it` | a Secret of the package's `objects` holds values, `data` or `stringData` | `okdpGeneratedSecret`, or an ExternalSecret of the platform's secret store; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([objects section](specs/01_inputs_outputs.md#objects-section)) |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
@@ -1082,6 +1118,8 @@ usage error with status 2.
 | `config.schema.json: properties.database: x-okdp-connection-ref: require: a JSON Schema, an object, got true`, `... require: "file:///require.schema.json#" is not valid against metaschema: ...` | the package's requirement is no JSON Schema, whether the instance sets the reference or not | fix the package's `config.schema.json` |
 | several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, in parameter path order (keys sorted at each level), with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
 | `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `okdp.yaml` protects (`upstream.<key>.protect`, and always `global`) | remove the value; set it through the parameters when the package offers one |
+| `app: upstream.app.podSecurityContext: podSecurityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them`; `... runAsUser 0, root, is denied ...`; `app: upstream.app.extraVolumes, read as YAML: [0].hostPath: ...` | the upstream values of an instance of a project that is not privileged set, at any depth, a key of a pod's privileges, identity, containers or objects, or one of `global.okdp.policy.upstream.deny` (`(global.okdp.policy.upstream.deny)`), whatever the package's `protect`; in a string that reads as YAML too | remove the value; set it through the parameters when the package offers one; for the platform's own projects, list the namespace in `global.okdp.policy.privileged` of `platform.yaml` ([upstream policy](specs/01_inputs_outputs.md#upstream-policy)) |
+| `app: upstream.app.image.repository: image docker.io/evil/app is not from a registry of global.okdp.policy.upstream.registries (registry.example.org): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them` | with the platform's registries, an image of the upstream values (an `image` string, a `registry` and a `repository` with the computed ones, a `null`) comes from none of them | pull the image through one of them (the platform's mirror), or add the registry to `global.okdp.policy.upstream.registries` ([upstream policy](specs/01_inputs_outputs.md#upstream-policy)) |
 | `app: upstream.app.podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in upstream values the platform's values or the package's defaults give (in an instance's, its values file fails before: `values layer <n>: ...`) | remove it |
 | `app: upstream.app.env must be a list` | a path of `append` given as a non-list | give a list |
 | `context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:` then `- at '/global/okdp/oidc': got boolean, want object`, `- at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'` | a platform setting the compiler reads, or a map on the way to it, of another type (`oidc: false`, `proxy: <url>`, a list for a string), or not among its values; it would otherwise read as not set. Every violation is listed | fix the platform values against `platform.schema.json`; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |

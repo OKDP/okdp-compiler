@@ -1,0 +1,79 @@
+# The platform's policy: an instance of a project that is not privileged
+# (global.okdp.policy.privileged) installs no cluster-scoped object and
+# writes no other namespace. The compile is refused, nothing written.
+status 1 okdp-compile --repository $WORK/tree -o $WORK/files
+! stdout .
+cmp stderr $WORK/cluster-role.txt
+! exists $WORK/files
+
+# The same package in a privileged project, the platform's own: its objects
+# are written as computed.
+status 0 okdp-compile --repository $WORK/priv -o $WORK/files
+! stdout .
+! stderr .
+grep 'kind: ClusterRole' $WORK/files/projects/infra/instances/infra-web/okdp.objects.yaml
+rm $WORK/files
+
+# No credentials in clear, whatever the project: a Secret of the objects
+# section with values is refused, nothing written. They are generated in
+# the cluster (okdpGeneratedSecret) or read from the platform's secret
+# store.
+status 1 okdp-compile --repository $WORK/plain -o $WORK/files
+! stdout .
+cmp stderr $WORK/plain-secret.txt
+! exists $WORK/files
+
+-- cluster-role.txt --
+error: demo/demo-web: web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
+-- tree/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- tree/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: '${{ release.name }}-reader', labels: '${{ labels }}'}
+    rules: [{apiGroups: [''], resources: [nodes], verbs: [get, list]}]
+-- tree/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- priv/platform.yaml --
+global:
+  okdp:
+    policy:
+      privileged: [infra]
+-- priv/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- priv/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: '${{ release.name }}-reader', labels: '${{ labels }}'}
+    rules: [{apiGroups: [''], resources: [nodes], verbs: [get, list]}]
+-- priv/projects/infra/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- plain-secret.txt --
+error: demo/demo-web: web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it
+-- plain/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- plain/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: v1
+    kind: Secret
+    metadata: {name: '${{ release.name }}-token', labels: '${{ labels }}'}
+    stringData: {token: changeme}
+-- plain/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0

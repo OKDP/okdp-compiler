@@ -1,10 +1,12 @@
 // Package target: the output formats of compiled instances (Target), and
 // what they share: where their files are (ProjectsDir, ProjectDir,
-// InstanceDir), the mark of a generated file (Generated), the checks of
-// their options.
+// InstanceDir, ProjectManifests), the mark of a generated file
+// (Generated), the manifests of a project the deployer targets both write
+// (Namespace, SecretStore), the checks of their options.
 package target
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,6 +14,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
@@ -39,6 +43,140 @@ func ProjectDir(namespace string) string { return path.Join(ProjectsDir, namespa
 // umbrella chart, in every target.
 func InstanceDir(namespace, release string) string {
 	return path.Join(ProjectDir(namespace), "instances", release)
+}
+
+// ProjectManifestsDir: project, the directory of a project's own manifests
+// in its ProjectDir, which the deployer targets write for every project
+// that has an instance: its Namespace (NamespaceFile), the platform's
+// secret store in it (SecretStoreFile), and the identity of its releases;
+// what the platform's entry point applies, before the instances.
+const ProjectManifestsDir = "project"
+
+// The files of ProjectManifestsDir the deployer targets share, the same
+// whatever the target: one tree may hold the files of both.
+const (
+	// NamespaceFile: the project's Namespace (Namespace).
+	NamespaceFile = "namespace.yaml"
+	// SecretStoreFile: the platform's secret store in the project's
+	// namespace, with its ServiceAccount (SecretStore); written when the
+	// platform names a provider (Result.SecretStore).
+	SecretStoreFile = "secret-store.yaml"
+)
+
+// ProjectManifests: projects/<namespace>/project, a project's own
+// manifests.
+func ProjectManifests(namespace string) string {
+	return path.Join(ProjectDir(namespace), ProjectManifestsDir)
+}
+
+// Project: a project of the results, what its manifests are written from:
+// its namespace, whether it is one of the platform's own (Result.Privileged
+// of any of its results), and the platform's secret store, as the results
+// give it (the first Result.SecretStore of the namespace that is set).
+type Project struct {
+	Namespace   string
+	Privileged  bool
+	SecretStore *okdp.SecretStore
+}
+
+// Projects: the projects of results, one per namespace that has a result,
+// in namespace order.
+func Projects(results []*okdp.Result) []Project {
+	byNamespace := map[string]*Project{}
+	for _, res := range results {
+		p, ok := byNamespace[res.Namespace]
+		if !ok {
+			p = &Project{Namespace: res.Namespace}
+			byNamespace[res.Namespace] = p
+		}
+		p.Privileged = p.Privileged || res.Privileged
+		if p.SecretStore == nil {
+			p.SecretStore = res.SecretStore
+		}
+	}
+	var out []Project
+	for _, ns := range slices.Sorted(maps.Keys(byNamespace)) {
+		out = append(out, *byNamespace[ns])
+	}
+	return out
+}
+
+// ProjectLabel: the label of every object a target writes for a project,
+// okdp.io/project: <namespace>.
+const ProjectLabel = "okdp.io/project"
+
+// Namespace: the NamespaceFile of p, not marked, the same whatever the
+// target: one tree may hold the files of both, which must agree. The
+// Namespace, labelled ProjectLabel, with the Pod Security Admission labels
+// of its project: baseline enforced, restricted audited and warned of;
+// privileged enforced for one of the platform's own projects. And kept by
+// both engines when its project is gone, its volumes with it, until an
+// administrator deletes it: Flux's label kustomize.toolkit.fluxcd.io/prune:
+// disabled, Argo CD's annotation argocd.argoproj.io/sync-options:
+// Delete=false.
+func Namespace(p Project) []byte {
+	var l Lines
+	l.Add("apiVersion: v1")
+	l.Add("kind: Namespace")
+	l.Add("metadata:")
+	l.Add("  name: %q", p.Namespace)
+	l.Add("  labels:")
+	l.Add("    %s: %q", ProjectLabel, p.Namespace)
+	l.Add("    kustomize.toolkit.fluxcd.io/prune: disabled")
+	if p.Privileged {
+		l.Add("    pod-security.kubernetes.io/enforce: privileged")
+	} else {
+		l.Add("    pod-security.kubernetes.io/enforce: baseline")
+		l.Add("    pod-security.kubernetes.io/audit: restricted")
+		l.Add("    pod-security.kubernetes.io/warn: restricted")
+	}
+	l.Add("  annotations:")
+	l.Add("    argocd.argoproj.io/sync-options: Delete=false")
+	return []byte(l.String())
+}
+
+// metadata: the metadata of an object SecretStore encodes.
+type metadata struct {
+	Name      string            `yaml:"name"`
+	Namespace string            `yaml:"namespace"`
+	Labels    map[string]string `yaml:"labels"`
+}
+
+// object: an object SecretStore encodes, its keys in this order.
+type object struct {
+	APIVersion string   `yaml:"apiVersion"`
+	Kind       string   `yaml:"kind"`
+	Metadata   metadata `yaml:"metadata"`
+	Automount  *bool    `yaml:"automountServiceAccountToken,omitempty"`
+	Spec       any      `yaml:"spec,omitempty"`
+}
+
+// SecretStore: the SecretStoreFile of p, not marked, nil when the platform
+// names no provider (p.SecretStore nil): in the project's namespace, the
+// ServiceAccount the store authenticates with (its token is not mounted:
+// External Secrets requests one) and the SecretStore of the platform's
+// name, its provider as the platform writes it, both labelled
+// ProjectLabel. Encoded, not written line by line: the store's name and
+// its provider are the platform's own text.
+func SecretStore(p Project) ([]byte, error) {
+	s := p.SecretStore
+	if s == nil {
+		return nil, nil
+	}
+	labels := map[string]string{ProjectLabel: p.Namespace}
+	automount := false
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	for _, o := range []object{
+		{APIVersion: "v1", Kind: "ServiceAccount", Metadata: metadata{s.ServiceAccount, p.Namespace, labels}, Automount: &automount},
+		{APIVersion: "external-secrets.io/v1", Kind: "SecretStore", Metadata: metadata{s.Name, p.Namespace, labels}, Spec: map[string]any{"provider": s.Provider}},
+	} {
+		if err := enc.Encode(o); err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", p.Namespace, SecretStoreFile, err)
+		}
+	}
+	return buf.Bytes(), nil
 }
 
 // CheckPrefix: nil when prefix, the path of the tree in the repository a

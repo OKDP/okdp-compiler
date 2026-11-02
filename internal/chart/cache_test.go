@@ -8,13 +8,14 @@ import (
 )
 
 // TestRefCacheDir: a repository's directory of the chart cache, a path
-// inside it or none.
+// inside it or none; none for http://, a chart in clear.
 func TestRefCacheDir(t *testing.T) {
 	for repository, want := range map[string]string{
 		"oci://quay.io/adaltas":             "quay.io/adaltas",
 		"oci://quay.io/adaltas/":            "quay.io/adaltas",
 		"https://charts.example.org":        "charts.example.org",
-		"http://localhost:8080/charts/":     "localhost:8080/charts",
+		"https://localhost:8080/charts/":    "localhost:8080/charts",
+		"http://localhost:8080/charts/":     "",
 		"https://":                          "",
 		"https:///charts":                   "",
 		"https://charts.example.org//x":     "",

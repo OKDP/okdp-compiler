@@ -2,7 +2,7 @@
 # A key of the platform's secret store that is no path: an empty segment
 # (a "." or ".." segment, a leading or trailing "/" alike): a key reaches
 # past its first segment, the one a store's policy scopes, in no way.
-global: {okdp: {secrets: {store: okdp-secrets}}}
+platform: {global: {okdp: {secrets: {store: okdp-secrets}}}}
 database: shared-db
 connections:
   shared-db:

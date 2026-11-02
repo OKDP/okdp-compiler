@@ -36,6 +36,13 @@ type Inputs struct {
 	Claimers  []string           // the namespaces whose instances may claim of the instance, a provider, from another namespace, by naming it or through a class of their project's (CompileAll; a class of the platform's, level 0, needs none): namespace names, once each, or "*", any; nil: the claimers of its package's provisions entry of the claim's contract, none by default (Instance.Claimers); LoadRepository's, its instance.yaml's
 	Bindings  map[string]Binding // the provider each claim of a reference is bound to, by parameter path, and the output it publishes for it (CompileAll sets them); nil: no claim resolves
 	CostLimit uint64             // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
+	// AllowPlainSecrets: credentials written in clear accepted, a
+	// provides secret without generate (a plain Secret of its stringData)
+	// and a Secret of the objects with data or stringData; false, they
+	// fail the compile: credentials are generated in the cluster
+	// (generate, okdpGeneratedSecret) or read from the platform's secret
+	// store, never written to the deployments repository.
+	AllowPlainSecrets bool
 }
 
 // ContextLayer: a values layer of the context (Inputs.Context), see
@@ -96,8 +103,9 @@ type Result struct {
 	SecretStore *SecretStore
 	// Privileged: the namespace is one of the platform's own projects,
 	// global.okdp.policy.privileged: its instances install cluster-scoped
-	// objects, write other namespaces and set any upstream value; a target
-	// gives its releases the engine's own identity, the other projects' one
+	// objects, write other namespaces and set any upstream value, which the
+	// compile refuses the other projects' (checkObjects); a target gives
+	// its releases the engine's own identity, the other projects' one
 	// confined to their namespace.
 	Privileged bool
 }
@@ -165,7 +173,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	}
 	// 7. Provides: the outputs, checked against the contracts, and their
 	// credentials Secrets; an output for each claim (claimed).
-	outputs, credentials, err := provided(session, inst, in.Contracts, value.AsList(res["provides"]))
+	outputs, credentials, err := provided(session, inst, in.Contracts, value.AsList(res["provides"]), in.AllowPlainSecrets)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +188,11 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// then those of the credentials of claims across namespaces: pushed for
 	// the claims of another namespace, read for its own of another; and
 	// read for its connections whose credentials are in the platform's
-	// secret store. Then the sync options of Argo CD of those Helm keeps.
+	// secret store. Then the platform's policy over them all: those of a
+	// project that is not privileged stay in its namespace, none
+	// cluster-scoped (checkObjects); no Secret of credentials in clear,
+	// unless allowed (checkPlainSecrets); then the sync options of Argo CD
+	// of those Helm keeps.
 	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
@@ -188,6 +200,16 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	out.Objects = append(out.Objects, pushes...)
 	for _, x := range inst.transfers {
 		out.Objects = append(out.Objects, pullSecret(inst, x))
+	}
+	if !out.Privileged {
+		if err := checkObjects(svc.Name, in.Namespace, out.Objects); err != nil {
+			return nil, err
+		}
+	}
+	if !in.AllowPlainSecrets {
+		if err := checkPlainSecrets(svc.Name, out.Objects); err != nil {
+			return nil, err
+		}
 	}
 	// Whatever wrote it, an object Helm keeps is kept by Argo CD alike.
 	keepSynced(out.Objects)
@@ -207,7 +229,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// Then the final values of each chart rendered; with a chart cache,
 	// checked against its upstream chart (10. Upstream charts).
 	var warnings []string
-	if out.Values, out.Charts, warnings, err = chart.FinalValues(in.Charts, def.Files, specs, def.valuesName(), output, inst.values); err != nil {
+	if out.Values, out.Charts, warnings, err = chart.FinalValues(in.Charts, def.Files, specs, def.valuesName(), output, inst.values, upstreamCheck(inst.okdp, in.Namespace, out.Privileged)); err != nil {
 		return nil, err
 	}
 	out.Warnings = append(out.Warnings, warnings...)

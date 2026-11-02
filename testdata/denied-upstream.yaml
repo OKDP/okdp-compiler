@@ -1,0 +1,10 @@
+# error: app: upstream.app.podSecurityContext: podSecurityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+# A key of a pod's privileges, which the package's protect does not name:
+# the platform denies it to the upstream values of its projects' instances
+# whatever the package accepts; demo is not one of the platform's own.
+upstream:
+  app:
+    resources:
+      limits: {memory: 512Mi}
+    podSecurityContext:
+      runAsUser: 0

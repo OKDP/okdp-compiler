@@ -99,10 +99,14 @@ reach the cluster with the upstream charts: `Write` gives them as a YAML
 stream, `okdp.objects.yaml`, which the umbrella's own template renders as
 written, in the instance's release
 ([the objects file](docs/specs/01_inputs_outputs.md#the-objects-file),
-[OKDP's own objects](docs/03_okdp_objects.md)). `res.Info`, what the
-instance publishes, its URL, its usage and the connections it provides,
-stays in git, `okdp.info.yaml`, for a control plane or a console to
-read ([the info file](docs/specs/01_inputs_outputs.md#the-info-file)).
+[OKDP's own objects](docs/03_okdp_objects.md)); none holds credentials
+in clear, a Secret with values, a `provides` secret without `generate`,
+unless the caller sets `Inputs.AllowPlainSecrets`
+([credentials Secrets](docs/specs/01_inputs_outputs.md#credentials-secrets)).
+`res.Info`, what the instance publishes, its URL, its usage and the
+connections it provides, stays in git, `okdp.info.yaml`, for a control
+plane or a console to read
+([the info file](docs/specs/01_inputs_outputs.md#the-info-file)).
 
 ## Mapping
 
@@ -157,8 +161,12 @@ after them; each claim bound to its provider, `<project>/<instance>` or
 `instance.yaml` ([providers](docs/specs/01_inputs_outputs.md#providers));
 their dependencies checked; written for
 `--target`: `helm` (the default), each instance's umbrella chart, `flux`
-with its HelmRelease or `argocd` with its Application
-([`--repository`](docs/01_usage.md#--repository)):
+with its HelmRelease or `argocd` with its Application, and, for both,
+each project's own manifests, `projects/<project>/project/`: its
+Namespace, the platform's secret store in it, and the identity its
+releases are installed with, confined to its namespace
+([`--repository`](docs/01_usage.md#--repository),
+[targets](docs/specs/01_inputs_outputs.md#targets)):
 
 ```bash
 make build    # bin/okdp-compile
@@ -188,13 +196,23 @@ path-based store scopes per namespace ([what the store must
 enforce](docs/specs/01_inputs_outputs.md#what-the-store-must-enforce)),
 and where a connection may keep its own, `secretRef: {remoteKey:
 <key>}`, read into a Secret of each referencing instance's namespace
-([connections](docs/specs/01_inputs_outputs.md#connections)).
+([connections](docs/specs/01_inputs_outputs.md#connections)), and the
+platform's policy (`global.okdp.policy`): its own projects, `privileged`,
+the only ones whose instances install cluster-scoped objects, write
+other namespaces and set any upstream value, the others' objects refused
+([objects section](docs/specs/01_inputs_outputs.md#objects-section)),
+and their upstream values denied the keys of a pod's privileges,
+identity, containers or objects, their images held to the platform's
+registries, `upstream.registries`
+([upstream policy](docs/specs/01_inputs_outputs.md#upstream-policy)).
 An instance's `config.yaml` that sets `connections` or `claims`, or
 `global` but for the keys the package's parameter schema declares under
 it, fails
 ([context values](docs/specs/01_inputs_outputs.md#context-values)); a
 context file that changes a value of a lower level, one of its
-connections, named claims or classes, or its default class, fails
+connections, named claims or classes, or its default class, fails, and so
+does a project's `project.yaml` that sets a platform setting, anything of
+`global.okdp` but its classes, `provisioning`
 ([levels](docs/specs/01_inputs_outputs.md#levels)).
 
 `-o <dir>` (`--output`), required, writes each instance as one chart, for

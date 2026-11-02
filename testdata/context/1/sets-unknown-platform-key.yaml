@@ -1,0 +1,11 @@
+# error: context layer 2 (level 1): global.okdp.project: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A project's file (project.yaml) that keeps its own settings under
+# global.okdp, a key the compiler does not read: global.okdp is the
+# platform's whole, known keys and unknown. A project's settings, which its
+# packages' mappings read, go under global beside okdp (global.project, as
+# examples/03_full/input/db/projects/demo/project.yaml does).
+global:
+  okdp:
+    project:
+      name: demo
+      costCenter: cc-4217

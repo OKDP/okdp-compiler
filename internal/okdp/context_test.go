@@ -196,14 +196,20 @@ func TestContextErrors(t *testing.T) {
 }
 
 // TestContextValues: the parameters the mapping sees, without global and
-// connections, and the merged values left as written.
+// connections; global as written, the platform's okdp and a project's own
+// keys beside it; and the merged values left as written.
 func TestContextValues(t *testing.T) {
-	inst, err := newInstance(pkg, inputs(M{"replicas": float64(2), "connections": M{}}), defService)
+	in := inputs(M{"replicas": float64(2), "connections": M{}})
+	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"global": M{"project": M{"name": "demo"}}}})
+	inst, err := newInstance(pkg, in, defService)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := (M{"replicas": float64(2)}); !reflect.DeepEqual(inst.scope["values"], want) {
 		t.Errorf("values in the context: %#v", inst.scope["values"])
+	}
+	if want := (M{"okdp": M{"ingress": M{"suffix": "example.org"}}, "project": M{"name": "demo"}}); !reflect.DeepEqual(inst.scope["global"], want) {
+		t.Errorf("global in the context: %#v", inst.scope["global"])
 	}
 	for _, k := range []string{"global", "connections"} {
 		if _, ok := inst.values[k]; !ok {

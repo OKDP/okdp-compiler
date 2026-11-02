@@ -5,9 +5,12 @@
 # (connections.yaml, config.yaml) may change a value set here.
 
 global:
-  # A key of global outside okdp: every chart receives global, the mapping
-  # does not see it (its global is global.okdp only).
+  # A key of global outside okdp: every chart receives global, and the
+  # mapping sees it as written (global.imageRegistry); a project adds its
+  # own beside it (global.project, project.yaml).
   imageRegistry: registry.example.org
+  # The platform's settings: level 0 only, a project adds its classes
+  # (provisioning) and nothing else of global.okdp.
   okdp:
     ingress:
       suffix: okdp.example.org

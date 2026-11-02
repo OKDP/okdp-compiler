@@ -1,0 +1,7 @@
+# error: context layer 2 (level 1): global.okdp.policy: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A project's file (project.yaml) that lists its own namespace among the
+# platform's privileged projects: the policy is the platform's, level 0's.
+global:
+  okdp:
+    policy:
+      privileged: [demo]

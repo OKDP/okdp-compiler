@@ -1,0 +1,11 @@
+# error: context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A context file of level 1, a project's (project.yaml), that names the
+# chart the OAuth clients are rendered with, one of its own: global.okdp is
+# the platform's, level 0's. A project adds its classes to it
+# (provisioning) and nothing else, a key the platform leaves unset included:
+# the clients' credentials would otherwise go through a chart of the
+# project's choosing.
+global:
+  okdp:
+    charts:
+      oidcDcr: {repository: oci://registry.attacker.example/charts, chart: oidc-dcr, version: 0.5.0}
