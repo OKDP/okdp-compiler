@@ -2,7 +2,7 @@
 app:
   database:
     credentials: demo-dashboards-demo.analytics-credentials
-    url: postgresql://postgresql-rw.data.svc:5432/demo_analytics
+    url: postgresql://data-postgresql-rw.data.svc:5432/demo_analytics
   global:
     okdp:
       provisioning:
@@ -16,4 +16,15 @@ app:
               provider: data/postgresql
           default: standard
       secrets:
+        provider:
+          vault:
+            auth:
+              kubernetes:
+                mountPath: kubernetes
+                role: okdp
+                serviceAccountRef:
+                  name: okdp-secrets
+            path: okdp
+            server: http://openbao.openbao.svc:8200
+            version: v2
         store: okdp-secrets

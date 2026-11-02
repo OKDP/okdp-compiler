@@ -1,0 +1,5 @@
+# The instance's package: catalog/hello/1.0.0/. The release is
+# demo-hello, <project>-<instance>, the project's directory the namespace,
+# demo.
+service: hello
+version: 1.0.0

@@ -53,12 +53,12 @@ var errReported = errors.New("reported")
 func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository; every instance of the tree compiled together, each with what the others of its namespace publish, after them, each claim bound to its provider, the dependencies checked, written for --target under <output>/projects/, which the command owns", func(s string) error { o.repositories = append(o.repositories, s); return nil })
+	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository; every instance of the tree, projects/<project>/instances/<instance>/, the release <project>-<instance> of the namespace <project>, compiled together, each with what the others of its namespace publish, after them, each claim bound to its provider, the dependencies checked, written for --target under <output>/projects/, which the command owns", func(s string) error { o.repositories = append(o.repositories, s); return nil })
 	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
 	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme; the final values, over each chart's defaults, checked against its values.schema.json, and an instance list appended to that leaves out items of the chart's default list warned of (default $OKDP_CHARTS with --check)")
-	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, each instance's umbrella chart, Chart.yaml, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when it has any, "+compiler.InfoFile+", what it publishes, when it publishes something, and the files of --target; then the dependencies printed on stderr, one line each: <namespace>/<release>: depends on <instance> (<contract>, <field>)")
+	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, each instance's umbrella chart, Chart.yaml, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when it has any, "+compiler.InfoFile+", what it publishes, when it publishes something, and the files of --target; then the dependencies printed on stderr, one line each: <namespace>/<release>: depends on <instance> (<contract> <output>, <field>)")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
-	flag.StringVar(&o.target, "target", "", "what is written: helm (the default), each instance's umbrella chart; flux, with its HelmRelease, waiting for the releases it depends on, and the Kustomizations; argocd, with its Application and its sync wave")
+	flag.StringVar(&o.target, "target", "", "what is written: helm (the default), each instance's umbrella chart; flux, with its HelmRelease, waiting for the releases it depends on, and the Kustomizations, each project's and the root's, projects/kustomization.yaml; argocd, with its Application and its sync wave")
 	flag.StringVar(&o.pathPrefix, "path-prefix", "", "--target flux and argocd: the path of <output> in the repository the deployer reads (default its root)")
 	flag.StringVar(&o.fluxSource, "flux-source", "", "--target flux: the GitRepository of that repository, <namespace>/<name> (default "+compiler.DefaultFluxSource+")")
 	flag.StringVar(&o.repoURL, "repo-url", "", "--target argocd, required: the repository Argo CD reads <output> from")
@@ -95,9 +95,9 @@ func main() {
 // <namespace>/<release>: <warning>, in their order; then their graph (compiler.NewGraph), each of its errors
 // printed, error: <namespace>/<release>: <error>; then the files of the
 // target, written under the output directory (writeTree), and the
-// dependencies, <namespace>/<release>: depends on <instance> (<contract>,
-// <field>), the output after the contract when it is not named after the
-// instance, <namespace>/<instance> for one of another namespace. Every
+// dependencies, <namespace>/<release>: depends on <instance> (<contract>
+// <output>, <field>), <namespace>/<instance> for one of another
+// namespace. Every
 // option is checked first, the target's too; nothing is written when
 // anything fails, nor with --check.
 func run(o options) error {
@@ -179,14 +179,11 @@ func run(o options) error {
 	}
 	for _, res := range results {
 		for _, d := range res.Dependencies {
-			contract, instance := d.Contract, d.Instance
-			if d.Output != d.Instance {
-				contract += " " + d.Output
-			}
+			instance := d.Instance
 			if d.Namespace != "" {
 				instance = d.Namespace + "/" + instance
 			}
-			fmt.Fprintf(os.Stderr, "%s/%s: depends on %s (%s, %s)\n", res.Namespace, res.Release, instance, contract, d.Field)
+			fmt.Fprintf(os.Stderr, "%s/%s: depends on %s (%s %s, %s)\n", res.Namespace, res.Release, instance, d.Contract, d.Output, d.Field)
 		}
 	}
 	return nil

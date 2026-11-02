@@ -1,9 +1,9 @@
 // Package flux: the flux target: the umbrella chart of each instance, with
 // the Flux HelmRelease that installs it, waiting for the releases its
 // instance depends on (dependsOn), and the Kustomization of its values
-// ConfigMap; a Kustomization per project. The format is okdp-gitops',
-// byte for byte but for the mark of the first line, so that it can write
-// its package instances with Instance and Project.
+// ConfigMap; a Kustomization per project, and the root's, of the
+// projects: all a Flux Kustomization of the path projects/ syncs. The
+// format is okdp-gitops', which commits the files as they are.
 package flux
 
 import (
@@ -25,7 +25,8 @@ const (
 	HelmReleaseFile = "helmrelease.yaml"
 	// KustomizationFile: an instance's Kustomization, its HelmRelease and
 	// its values ConfigMap, in its directory; a project's, its instances'
-	// directories, in the project's.
+	// directories, in the project's; the root's, the projects'
+	// directories, in target.ProjectsDir.
 	KustomizationFile = "kustomization.yaml"
 )
 
@@ -44,10 +45,12 @@ type Target struct {
 
 // Files: the helm target's files, then, in each instance's
 // target.InstanceDir, its HelmReleaseFile and KustomizationFile
-// (Instance), and in each project's target.ProjectDir, its
-// KustomizationFile (Project), each marked generated (target.Generated).
-// The options are checked first; two releases of one name in two
-// namespaces are refused: their HelmReleases share ReleasesNamespace.
+// (Instance), in each project's target.ProjectDir, its KustomizationFile
+// (Project), and in target.ProjectsDir the root's (Projects), even
+// without results, so that a Kustomization of the path syncs an empty
+// tree; each marked generated (target.Generated). The options are checked
+// first; two releases of one name in two namespaces are refused: their
+// HelmReleases share ReleasesNamespace.
 func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte, error) {
 	if err := t.check(); err != nil {
 		return nil, err
@@ -71,9 +74,12 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 		}
 		instances[res.Namespace] = append(instances[res.Namespace], path.Join("instances", res.Release))
 	}
+	var namespaces []string
 	for ns, dirs := range instances {
 		files[path.Join(target.ProjectDir(ns), KustomizationFile)] = append([]byte(target.Generated), Project(dirs)...)
+		namespaces = append(namespaces, ns)
 	}
+	files[path.Join(target.ProjectsDir, KustomizationFile)] = append([]byte(target.Generated), Projects(namespaces)...)
 	return files, nil
 }
 
@@ -170,7 +176,16 @@ func (t Target) Instance(namespace, release, dir string, dependsOn []string) map
 
 // Project: the KustomizationFile of a project, not marked: the
 // directories of its instances, relative to the project's, sorted.
-func Project(dirs []string) []byte {
+func Project(dirs []string) []byte { return kustomization(dirs) }
+
+// Projects: the root KustomizationFile, in target.ProjectsDir, not marked:
+// the directories of the projects, their namespaces, sorted; an empty list
+// when none.
+func Projects(namespaces []string) []byte { return kustomization(namespaces) }
+
+// kustomization: a Kustomization of the directories dirs, sorted, its
+// resources in ReleasesNamespace.
+func kustomization(dirs []string) []byte {
 	var k target.Lines
 	k.Add("apiVersion: kustomize.config.k8s.io/v1beta1")
 	k.Add("kind: Kustomization")

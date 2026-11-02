@@ -1,10 +1,17 @@
 # The platform values: the classes of database-server connections, as
 # Kubernetes' storage classes (global.okdp.provisioning), standard the
 # default, the class of the claims that name neither a class nor a
-# provider, its provider the instance they bind to; and the secret store
+# provider, its provider the instance they bind to, <project>/<instance>
+# (data/postgresql, the release data-postgresql); and the secret store
 # the credentials of a claim cross namespaces through
-# (global.okdp.secrets.store), a ClusterSecretStore of External Secrets:
-# the databases are in the namespace data, their claimers in demo.
+# (global.okdp.secrets): the databases are in the namespace data, their
+# claimers in demo. An OpenBao server, its KV v2 mount okdp, which the
+# ServiceAccount okdp-secrets of each project's namespace authenticates
+# to (provider: External Secrets' SecretStore spec.provider, verbatim):
+# the targets write a SecretStore named okdp-secrets in each namespace,
+# the PushSecrets and ExternalSecrets reference it, and the store's
+# policy scopes each namespace by the identity it authenticates with
+# (docs/specs/01_inputs_outputs.md, what the store must enforce).
 global:
   okdp:
     provisioning:
@@ -14,3 +21,13 @@ global:
           standard: {provider: data/postgresql}
     secrets:
       store: okdp-secrets
+      provider:
+        vault:
+          server: http://openbao.openbao.svc:8200
+          path: okdp
+          version: v2
+          auth:
+            kubernetes:
+              mountPath: kubernetes
+              role: okdp
+              serviceAccountRef: {name: okdp-secrets}

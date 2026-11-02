@@ -43,9 +43,9 @@ func provideCompile(provides string) (*Result, error) {
 }
 
 // TestProvides: what the instance publishes, its url and usage trimmed,
-// its outputs completed, named after the release unless named (a contract
-// without a naming convention), their secretRef; no object without a
-// secret.
+// its outputs completed, named after the instance unless named, its
+// release when it has no name (a contract without a naming convention),
+// their secretRef; no object without a secret.
 func TestProvides(t *testing.T) {
 	res, err := provideCompile(`
   - contract: http
@@ -67,6 +67,14 @@ func TestProvides(t *testing.T) {
 	}
 	if res.Objects != nil {
 		t.Errorf("objects: %#v", res.Objects)
+	}
+	// Named after the instance when it has a name (Inputs.Name).
+	d := *def
+	d.Okdp = []byte("provides:\n  - {contract: http, values: {url: https://demo-app.example.org}}\n")
+	in := inputs()
+	in.Contracts, in.Name = httpContract, "app"
+	if res, err := Compile(context.Background(), &d, in); err != nil || res.Info.Provides[0].Name != "app" {
+		t.Errorf("Inputs.Name: got %v, %v, want an output named app", res, err)
 	}
 }
 

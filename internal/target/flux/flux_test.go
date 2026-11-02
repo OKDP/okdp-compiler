@@ -119,7 +119,7 @@ configMapGenerator:
 }
 
 // TestProject: the Kustomization of a project, its instances' directories
-// sorted, none an empty list.
+// sorted, none an empty list; the root's, the projects' directories.
 func TestProject(t *testing.T) {
 	want := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: okdp-releases\nresources:\n  - instances/a\n  - instances/b\n"
 	if got := Project([]string{"instances/b", "instances/a"}); string(got) != want {
@@ -129,11 +129,16 @@ func TestProject(t *testing.T) {
 	if got := Project(nil); string(got) != want {
 		t.Errorf("none:\n%s", got)
 	}
+	want = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nnamespace: okdp-releases\nresources:\n  - data\n  - demo\n"
+	if got := Projects([]string{"demo", "data"}); string(got) != want {
+		t.Errorf("the root:\n%s", got)
+	}
 }
 
 // TestFiles: the files of the helm target, then each instance's
 // HelmRelease, waiting for the releases it depends on, of any namespace,
-// and Kustomization, a project's, each marked generated.
+// and Kustomization, a project's and the root's, each marked generated;
+// the root's alone, without results.
 func TestFiles(t *testing.T) {
 	db := &okdp.Result{Namespace: "data", Release: "demo-db", Service: "db", Version: "1.0.0", Info: okdp.Info{Provides: []okdp.Output{{Name: "demo-db", Contract: "database"}}}}
 	web := &okdp.Result{Namespace: "demo", Release: "demo-web", Service: "web", Version: "1.0.0", Dependencies: []okdp.Dependency{{Instance: "demo-db", Namespace: "data", Contract: "database", Field: "database", Output: "demo-db"}}}
@@ -149,13 +154,13 @@ func TestFiles(t *testing.T) {
 	for _, p := range []string{
 		"projects/data/kustomization.yaml", "projects/data/instances/demo-db/helmrelease.yaml", "projects/data/instances/demo-db/kustomization.yaml",
 		"projects/demo/kustomization.yaml", "projects/demo/instances/demo-web/helmrelease.yaml", "projects/demo/instances/demo-web/kustomization.yaml",
-		"projects/demo/instances/demo-web/instance.values.yaml",
+		"projects/demo/instances/demo-web/instance.values.yaml", "projects/kustomization.yaml",
 	} {
 		if _, ok := files[p]; !ok {
 			t.Errorf("%s is not written", p)
 		}
 	}
-	for _, p := range []string{"projects/demo/instances/demo-web/helmrelease.yaml", "projects/demo/kustomization.yaml"} {
+	for _, p := range []string{"projects/demo/instances/demo-web/helmrelease.yaml", "projects/demo/kustomization.yaml", "projects/kustomization.yaml"} {
 		if !strings.HasPrefix(string(files[p]), target.Generated) {
 			t.Errorf("%s is not marked generated", p)
 		}
@@ -169,6 +174,12 @@ func TestFiles(t *testing.T) {
 	}
 	if got := string(files["projects/demo/kustomization.yaml"]); !strings.HasSuffix(got, "resources:\n  - instances/demo-web\n") {
 		t.Errorf("the project's Kustomization:\n%s", got)
+	}
+	if got := string(files["projects/kustomization.yaml"]); !strings.HasSuffix(got, "resources:\n  - data\n  - demo\n") {
+		t.Errorf("the root Kustomization:\n%s", got)
+	}
+	if none, err := (Target{}).Files(nil, nil); err != nil || len(none) != 1 || !strings.HasSuffix(string(none["projects/kustomization.yaml"]), "resources: []\n") {
+		t.Errorf("no results: %v %q", err, none)
 	}
 	// Two releases of one name in two namespaces.
 	twice := []*okdp.Result{{Namespace: "a", Release: "x"}, {Namespace: "b", Release: "x"}}

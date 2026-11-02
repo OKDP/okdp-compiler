@@ -29,11 +29,11 @@ cmp $WORK/echo/projects/demo/instances/demo-echo/instance.values.yaml examples/0
 ! exists $WORK/echo/projects/demo/instances/demo-echo/okdp.info.yaml
 
 -- webapp.txt --
-demo/demo-webapp: database: claim demo.demo-webapp.database (database) bound to demo/demo-db, the default class standard
-demo/demo-webapp: depends on demo-db (database demo.demo-webapp.database, database)
+demo/demo-webapp: database: claim demo.webapp.database (database) bound to demo/demo-db, the default class standard
+demo/demo-webapp: depends on demo-db (database demo.webapp.database, database)
 -- workspace.txt --
 demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
-demo/demo-workspace: database: claim demo.demo-workspace.database (database) bound to demo/demo-db, the default class standard
+demo/demo-workspace: database: claim demo.workspace.database (database) bound to demo/demo-db, the default class standard
 demo/demo-workspace: depends on demo-db (database demo.marketing, catalogs[1].database)
-demo/demo-workspace: depends on demo-db (database demo.demo-workspace.database, database)
-demo/demo-workspace: depends on demo-alerts (http, notifications.webhook)
+demo/demo-workspace: depends on demo-db (database demo.workspace.database, database)
+demo/demo-workspace: depends on demo-alerts (http alerts, notifications.webhook)

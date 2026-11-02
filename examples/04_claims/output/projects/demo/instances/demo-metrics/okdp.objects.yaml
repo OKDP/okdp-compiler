@@ -10,25 +10,25 @@ metadata:
     okdp.io/credentials-database-server: "true"
     okdp.io/instance: demo-metrics
     okdp.io/service: app
-  name: demo-metrics-demo.demo-metrics.database-credentials
+  name: demo-metrics-demo.metrics.database-credentials
   namespace: demo
 spec:
   data:
     - remoteRef:
-        key: okdp.demo.demo-metrics.database
+        key: data/demo.metrics.database
         property: password
       secretKey: password
     - remoteRef:
-        key: okdp.demo.demo-metrics.database
+        key: data/demo.metrics.database
         property: username
       secretKey: username
   refreshInterval: 1h
   secretStoreRef:
-    kind: ClusterSecretStore
+    kind: SecretStore
     name: okdp-secrets
   target:
     creationPolicy: Owner
-    name: demo-metrics-demo.demo-metrics.database-credentials
+    name: demo-metrics-demo.metrics.database-credentials
     template:
       metadata:
         labels:

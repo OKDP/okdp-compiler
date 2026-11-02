@@ -47,7 +47,7 @@ regenerates the Helm fixtures and fails on a diff.
   must report (`TestExampleErrors`,
   [failure cases](docs/00_architecture.md#failure-cases)).
 - The outputs of each example of `examples/`, a repository tree
-  (`<example>/output/projects/<project>/instances/<instance>/`), are
+  (`<example>/output/projects/<project>/instances/<release>/`), are
   compared byte for byte with a compile of the instance of its `input/db/`
   (`TestExample`).
   A change that changes the output runs `make example` and commits the diff:

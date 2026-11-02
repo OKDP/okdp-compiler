@@ -179,7 +179,7 @@ with the mapping, the package keys skipped ([sections](#sections)).
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `defaults` | map: key → path | `{}` | OKDP's defaults for a dependency: [defaults](#defaults). |
 | `upstream` | `true`, `false`, or a map: key → `true`, `false` or `{protect, append}` | `false` | The instance upstream values each dependency accepts: [upstream](#upstream). |
-| `provisions` | list of contracts | `[]` | The contracts the package provisions connections of, one per claim bound to an instance: [provisions](#provisions). |
+| `provisions` | list of contracts, each its name or `{contract, claimers}` | `[]` | The contracts the package provisions connections of, one per claim bound to an instance, and the namespaces that may claim of its instances from another namespace: [provisions](#provisions). |
 | `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` | | | The sections of the mapping, not read when the file is loaded: [sections](#sections). |
 
 Absent, or empty, `okdp.yaml` is a package with no requirements, no catalog
@@ -316,7 +316,7 @@ provider of the class it names or of the default class of its contract
 Each instance gets the claims bound to it (`Inputs.Claims`), the mapping's
 `claims` ([context](#context)), and publishes, for each, an output of its
 contract named its `id` ([provides](#provides)), a Kubernetes name,
-DNS-1123 labels joined by dots (`demo.demo-app.db`,
+DNS-1123 labels joined by dots (`demo.app.db`,
 [claims](01_inputs_outputs.md#claims)): an object name, a Secret name or a
 label value takes it as it is, a SQL name replaces its dots and dashes,
 what it grants of the claim's `request` among its values
@@ -337,15 +337,41 @@ The data of a claim's connection outlives the claim: once no instance
 claims it (a claim template's reference gone, a named claim no longer
 declared by its project), its output and the objects the mapping writes
 for it are gone from the compile, and the package keeps what they held (a
-database's reclaim policy, `helm.sh/resource-policy: keep`): an operator
-removes it. An entry is a contract's name, a file name of the contracts;
-one listed twice, or one that is not a name, fails when the package is
-loaded:
+database's reclaim policy, `helm.sh/resource-policy: keep`, which the
+compiler gives Argo CD's equivalents, `argocd.argoproj.io/sync-options:
+Prune=false,Delete=false`, [the objects
+file](01_inputs_outputs.md#the-objects-file)): an operator removes it.
+
+An instance of the package serves the claims of its own namespace, and
+of the platform's classes, which route every namespace to it; a claim
+of another namespace that names it, or a class of its project's, only
+with its consent: its instance's `claimers`
+(`instance.yaml`, `Inputs.Claimers`), else the `claimers` of the entry
+of the claim's contract, the namespaces whose instances may claim of it,
+`*` for any, none by default
+([providers](01_inputs_outputs.md#providers)). A package meant to serve
+every project, a platform's database server, lists `*`; one whose
+instances serve their own project lists none:
+
+```yaml
+provisions:
+  - {contract: database-server, claimers: ['*']}
+  - s3                       # the instances' own claimers only
+```
+
+An entry is a contract's name, a file name of the contracts, or
+`{contract, claimers}`, each claimer a namespace name, a DNS-1123
+label, or `*`; a contract listed twice, a claimer listed twice, one that
+is not a name, or another key, fails when the package is loaded:
 
 | Case | Error |
 |---|---|
 | an entry that is not a file name (empty, `.`, `..`, a `/` or `\`) | `okdp.yaml: provisions[<i>]: "<entry>" is not a contract name` |
 | an entry listed twice | `okdp.yaml: provisions: <contract> is listed twice` |
+| a claimer that is neither a namespace name nor `*` | `okdp.yaml: provisions[<i>] (<contract>): claimers[<k>]: "<claimer>" is not a namespace name, nor "*"` |
+| a claimer listed twice | `okdp.yaml: provisions[<i>] (<contract>): claimers: <claimer> is listed twice` |
+| another key than `contract` and `claimers` | `okdp.yaml: provisions (line <n>): unknown key "<key>": contract and claimers only` |
+| an entry that is neither a name nor a map | `okdp.yaml: provisions (line <n>): an entry is a contract name, or {contract, claimers}` |
 
 ## values.cel.yaml
 
@@ -473,7 +499,7 @@ dependsOn: [database-server, object-store, ingress]
 require:                               # global.okdp.<path>, each set and not empty
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
   - oidc.issuerUri
 defaults:                              # OKDP's defaults, over the chart's values.yaml
   api: api.defaults.yaml
@@ -688,7 +714,7 @@ set: another value, a null included, fails rather than is printed as text,
 
 ```yaml
 provides:
-  - contract: iceberg-catalog                 # published under the release name
+  - contract: iceberg-catalog                 # named after the instance
     values:
       uri: ${{ apiUrl }}/api/catalog
       realm: ${{ str(values.realm) }}
@@ -704,14 +730,14 @@ A list of outputs, the connections the instance publishes, in
 `Result.Info` and `okdp.info.yaml`
 ([the info file](01_inputs_outputs.md#the-info-file)). What
 another instance of the namespace references: an output, by its `name`,
-the release's by default, when its compile is given what this one
-publishes (`Inputs.Published`, `CompileAll`)
+the instance's by default (`Inputs.Name`), when its compile is given
+what this one publishes (`Inputs.Published`, `CompileAll`)
 ([resolution](01_inputs_outputs.md#resolution)). Each item:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
-| `name` | string | the release name | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
+| `name` | string | the instance's name (`Inputs.Name`, the release when it is empty) | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
 | `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
@@ -795,8 +821,8 @@ registers its own by OIDC Dynamic Client Registration, per
 | `clientName` | string | `<release>-<namespace>`, then `-<name>` for a named client | Its name at the identity provider. |
 | `public` | boolean | `false` | A public client (a browser application), without a client secret. |
 | `request` | map | `{}` | Fields of the registration request (snake_case, as OIDC Dynamic Client Registration names them): they override the computed ones. |
-| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to. |
-| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts. |
+| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to, one of the release's: its name starts with `<release>-` (`${{ release.name }}-console`). |
+| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts; the platform's default is its CA bundle, `global.okdp.tls.caBundleSecret`, `""` (none) when unset. |
 
 A key left out by `$if` is not set, a null one is refused by its type,
 and `""` takes the default of a string key. Only `dcr` mode uses the
@@ -806,12 +832,15 @@ keys; how they become the values of the client's chart:
 Every mode checks the clients, after the mapping: each client is a map,
 its `name` of the form above, of these keys only, each of its type,
 `grantTypes` given and not empty ([sections](#evaluation-order)); then one
-client at most has no name, and names are unique. In `dcr` mode, no two
-clients write one Secret. As soon as the mapping declares a client, its
-chart key belongs to the compiler: `Chart.yaml` may not list it, nor the
-values file compute it (`Chart.yaml: dependencies[<i>] (<key>): the chart
-of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>:
-the chart of <client> is compiled from oidcClients: remove it`). Only
+client at most has no name, names are unique, and a `secret` given is
+the release's, `<release>-...`: the Job's Role writes it, and would
+write another Secret of the namespace, another instance's credentials.
+In `dcr` mode, no two clients write one Secret. As soon as the mapping
+declares a client, its chart key belongs to the compiler: `Chart.yaml`
+may not list it, nor the values file compute it (`Chart.yaml:
+dependencies[<i>] (<key>): the chart of <client> is added by the
+compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is
+compiled from oidcClients: remove it`). Only
 `dcr` mode checks against the oidc-dcr chart, in the chart cache of a
 check ([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
 check stops the compile ([compile errors](#compile-errors)).
@@ -982,9 +1011,9 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 
 | Variable | Value |
 |---|---|
-| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
+| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied, its `caSecret` `global.okdp.tls.caBundleSecret` (else `""`) when it sets none ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
 | `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
-| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
+| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.tls.clusterIssuer>}`, the platform's ClusterIssuer, `""` when unset, and `global.okdp.ingress.annotations` over it, the ingress controller's. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 
 The settings these are derived from are checked against the platform
@@ -1127,6 +1156,7 @@ Other errors of the mapping:
 | `values.cel.yaml: <key>: not a dependency of Chart.yaml` | a key of the [values file](#valuescelyaml) |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
+| `<client>: secret "<secret>": the Secret the client is written to is one of the release's, its name starts with "<release>-"` | a client's `secret` that does not start with the release and a `-`, in every mode |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
 | `Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it` | a client's chart key, `oidc-dcr` or `<name>-oidc-dcr`, a dependency of `Chart.yaml` or a key of the values file |
 | `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |

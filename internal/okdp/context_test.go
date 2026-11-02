@@ -22,9 +22,11 @@ func platformCtx(t *testing.T, okdp M) (M, error) {
 	return value.AsMap(inst.scope["platform"]), nil
 }
 
-// TestPlatformDefaults: OIDC defaults to an existing client, no proxy.
+// TestPlatformDefaults: OIDC defaults to an existing client, no proxy, the
+// oidc-dcr Jobs without a CA bundle; the ingress annotations name the
+// platform's ClusterIssuer.
 func TestPlatformDefaults(t *testing.T) {
-	p, err := platformCtx(t, M{"certificateIssuers": M{"selfSigned": M{"name": "ca"}}})
+	p, err := platformCtx(t, M{"tls": M{"clusterIssuer": "ca"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +36,7 @@ func TestPlatformDefaults(t *testing.T) {
 			"scope":              "openid profile email groups",
 			"clientProvisioning": "existing",
 			"existing":           true,
-			"dcr":                M{"enabled": false, "caSecret": "certs-bundle", "ttlSeconds": float64(30), "backoffLimit": float64(6)},
+			"dcr":                M{"enabled": false, "caSecret": "", "ttlSeconds": float64(30), "backoffLimit": float64(6)},
 		},
 		"oidcClientSecret":   "creds-demo-app-oauth2",
 		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": "ca"},
@@ -42,6 +44,26 @@ func TestPlatformDefaults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("got  %#v\nwant %#v", p, want)
+	}
+}
+
+// TestPlatformIngressAnnotations: the platform's ingress annotations,
+// those of its controller, merged over the ClusterIssuer's; a value that is
+// not a string refused.
+func TestPlatformIngressAnnotations(t *testing.T) {
+	p, err := platformCtx(t, M{"tls": M{"clusterIssuer": "ca"}, "ingress": M{"annotations": M{
+		"traefik.ingress.kubernetes.io/router.middlewares": "okdp-auth@kubernetescrd",
+		"cert-manager.io/cluster-issuer":                   "acme",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := M{"cert-manager.io/cluster-issuer": "acme", "traefik.ingress.kubernetes.io/router.middlewares": "okdp-auth@kubernetescrd"}
+	if !reflect.DeepEqual(p["ingressAnnotations"], want) {
+		t.Errorf("got  %#v\nwant %#v", p["ingressAnnotations"], want)
+	}
+	if _, err := platformCtx(t, M{"ingress": M{"annotations": M{"a": 1}}}); err == nil || !strings.Contains(err.Error(), "/global/okdp/ingress/annotations/a") {
+		t.Errorf("a number: got %v", err)
 	}
 }
 
@@ -79,17 +101,25 @@ func TestPlatformDisabled(t *testing.T) {
 }
 
 // TestPlatformDcrSettings: the settings of the oidc-dcr Jobs
-// (global.okdp.oidc.dcr), defaults applied, the image passed as written.
+// (global.okdp.oidc.dcr), defaults applied, the image passed as written;
+// their CA bundle the platform's (tls.caBundleSecret) unless they set
+// theirs, "" for none.
 func TestPlatformDcrSettings(t *testing.T) {
-	defaults := M{"caSecret": "certs-bundle", "ttlSeconds": float64(30), "backoffLimit": float64(6)}
-	for name, tc := range map[string]struct{ dcr, want M }{
-		"defaults":  {M{"registrationUrl": "u"}, M{"registrationUrl": "u"}},
-		"empty":     {M{"caSecret": ""}, M{"caSecret": ""}},
-		"set":       {M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}},
-		"camelCase": {M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}},
+	defaults := M{"caSecret": "", "ttlSeconds": float64(30), "backoffLimit": float64(6)}
+	bundle := M{"caBundleSecret": "certs-bundle"}
+	for name, tc := range map[string]struct{ tls, dcr, want M }{
+		"defaults":          {nil, M{"registrationUrl": "u"}, M{"registrationUrl": "u"}},
+		"the platform's CA": {bundle, M{}, M{"caSecret": "certs-bundle"}},
+		"empty":             {bundle, M{"caSecret": ""}, M{"caSecret": ""}},
+		"set":               {bundle, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}},
+		"camelCase":         {nil, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			p, err := platformCtx(t, M{"oidc": M{"clientProvisioning": "dcr", "dcr": tc.dcr}})
+			okdp := M{"oidc": M{"clientProvisioning": "dcr", "dcr": tc.dcr}}
+			if tc.tls != nil {
+				okdp["tls"] = tc.tls
+			}
+			p, err := platformCtx(t, okdp)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,6 +149,8 @@ func TestPlatformSchema(t *testing.T) {
 			"- at '/global/okdp/oidc/dcr/backoffLimit': minimum: got -1, want 0\n- at '/global/okdp/oidc/dcr/caSecret': got boolean, want string\n- at '/global/okdp/oidc/dcr/image': got string, want object\n- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer\n- at '/global/okdp/oidc/dcr/waitTtlSeconds': got number, want integer"},
 		"image": {M{"okdp": M{"oidc": M{"dcr": M{"image": M{"tag": "1", "pull_policy": "Never"}}}}},
 			"- at '/global/okdp/oidc/dcr/image/pull_policy': false schema"},
+		"tls": {M{"okdp": M{"tls": M{"clusterIssuer": true, "caBundleSecret": nil}, "certificateIssuers": M{"selfSigned": M{"name": "ca"}}}},
+			"- at '/global/okdp/certificateIssuers': false schema\n- at '/global/okdp/tls': validation failed\n  - at '/global/okdp/tls/caBundleSecret': got null, want string\n  - at '/global/okdp/tls/clusterIssuer': got boolean, want string"},
 		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "oidcDCR": M{}, "dcr": nil}}},
 			"- at '/global/okdp/charts': additional properties 'dcr', 'objects', 'oidcDCR' not allowed\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
 		"classes": {M{"okdp": M{"provisioning": M{

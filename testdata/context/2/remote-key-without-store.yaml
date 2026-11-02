@@ -1,0 +1,11 @@
+# error: database: connection "shared-db": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set
+# A connection whose credentials are in the platform's secret store
+# (secretRef: {remoteKey}), on a platform that names no store
+# (examples/02_advanced/input/db/platform.yaml).
+database: shared-db
+connections:
+  shared-db:
+    contract: database
+    host: db.example.org
+    dbName: webapp
+    secretRef: {remoteKey: platform.shared-db}

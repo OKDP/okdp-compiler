@@ -2,11 +2,13 @@ package target_test
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -145,5 +147,34 @@ func TestOptions(t *testing.T) {
 				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestReleases: a *ReleaseError per release in two namespaces or more,
+// which each deployer target wraps.
+func TestReleases(t *testing.T) {
+	results := []*okdp.Result{{Release: "demo-db", Namespace: "demo"}, {Release: "demo-db", Namespace: "data"}, {Release: "a-b", Namespace: "a"}, {Release: "a-b", Namespace: "x"}, {Release: "a-b", Namespace: "b"}, {Release: "one", Namespace: "a"}}
+	err := target.Releases(results)
+	var got []target.ReleaseError
+	for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
+		var re *target.ReleaseError
+		if !errors.As(e, &re) {
+			t.Fatalf("%v: not a *ReleaseError", e)
+		}
+		got = append(got, *re)
+	}
+	want := []target.ReleaseError{{Release: "a-b", Namespaces: []string{"a", "b", "x"}}, {Release: "demo-db", Namespaces: []string{"data", "demo"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if want := `release "a-b" is in namespaces "a", "b" and "x"`; got[0].Error() != want {
+		t.Errorf("got %q, want %q", got[0].Error(), want)
+	}
+	if err := target.Releases(results[2:3]); err != nil {
+		t.Errorf("one release: %v", err)
+	}
+	_, err = (flux.Target{}).Files(results[:2], nil)
+	if re := (*target.ReleaseError)(nil); !errors.As(err, &re) || re.Release != "demo-db" {
+		t.Errorf("flux: got %v, want a *ReleaseError", err)
 	}
 }

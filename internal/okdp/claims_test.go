@@ -3,11 +3,14 @@ package okdp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/value"
 )
@@ -16,7 +19,7 @@ import (
 // per claim, its URL after the claim and the namespace that claims it.
 func provisioner(provides string) (*Definition, Inputs) {
 	d := *def
-	d.Package.Provisions = []string{"api"}
+	d.Package.Provisions = []Provision{{Contract: "api"}}
 	d.Okdp = []byte("provides:\n" + provides)
 	in := inputs()
 	in.Contracts = httpContract
@@ -96,16 +99,31 @@ claim "demo.b" (api): provides publishes no api output of that name`
 	}
 }
 
-// TestProvisions: provisions in okdp.yaml, a list of contracts; one that
-// is no file name, or listed twice, fails when the package is loaded.
+// TestProvisions: provisions in okdp.yaml, a list of contracts, each its
+// name or {contract, claimers}; one that is no file name, or listed
+// twice, a claimer that is no namespace name nor "*", or listed twice,
+// fail when the package is loaded, and so does another key or form.
 func TestProvisions(t *testing.T) {
-	if p, err := decodePackage([]byte("provisions: [database-server, s3]\n")); err != nil || !reflect.DeepEqual(p.Provisions, []string{"database-server", "s3"}) {
+	p, err := decodePackage([]byte("provisions: [database-server, {contract: s3, claimers: [demo, '*']}, {contract: api}]\n"))
+	want := []Provision{{Contract: "database-server"}, {Contract: "s3", Claimers: []string{"demo", "*"}}, {Contract: "api"}}
+	if err != nil || !reflect.DeepEqual(p.Provisions, want) {
 		t.Errorf("got %#v (%v)", p.Provisions, err)
 	}
+	if got := p.claimers("s3"); !reflect.DeepEqual(got, []string{"demo", "*"}) {
+		t.Errorf("claimers of s3: got %q", got)
+	}
+	if got := p.claimers("database-server"); got != nil {
+		t.Errorf("claimers of database-server: got %q", got)
+	}
 	for list, want := range map[string]string{
-		"[a/b]":    `okdp.yaml: provisions[0]: "a/b" is not a contract name`,
-		"[s3, '']": `okdp.yaml: provisions[1]: "" is not a contract name`,
-		"[s3, s3]": "okdp.yaml: provisions: s3 is listed twice",
+		"[a/b]":                                  `okdp.yaml: provisions[0]: "a/b" is not a contract name`,
+		"[s3, '']":                               `okdp.yaml: provisions[1]: "" is not a contract name`,
+		"[s3, s3]":                               "okdp.yaml: provisions: s3 is listed twice",
+		"[s3, {contract: s3, claimers: [a]}]":    "okdp.yaml: provisions: s3 is listed twice",
+		"[{claimers: [a]}]":                      `okdp.yaml: provisions[0]: "" is not a contract name`,
+		"[{contract: s3, claimers: [Demo]}]":     `okdp.yaml: provisions[0] (s3): claimers[0]: "Demo" is not a namespace name, nor "*"`,
+		"[{contract: s3, claimers: [a, a]}]":     "okdp.yaml: provisions[0] (s3): claimers: a is listed twice",
+		"[{contract: s3, claimers: ['*', '*']}]": `okdp.yaml: provisions[0] (s3): claimers: * is listed twice`,
 	} {
 		d := *def
 		p, err := decodePackage([]byte("provisions: " + list + "\n"))
@@ -115,6 +133,32 @@ func TestProvisions(t *testing.T) {
 		d.Package.Provisions = p.Provisions
 		if _, err := d.service(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: got %v, want %s", list, err, want)
+		}
+	}
+	for list, want := range map[string]string{
+		"[{contract: s3, size: 1}]":     `okdp.yaml: provisions (line 1): unknown key "size": contract and claimers only`,
+		"[[s3]]":                        "okdp.yaml: provisions (line 1): an entry is a contract name, or {contract, claimers}",
+		"[{contract: s3, claimers: a}]": "okdp.yaml: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into []string",
+	} {
+		if _, err := decodePackage([]byte("provisions: " + list + "\n")); err == nil || err.Error() != want {
+			t.Errorf("%s: got %v, want %s", list, err, want)
+		}
+	}
+}
+
+// TestInputsClaimers: Inputs.Claimers, each a namespace name or "*", once:
+// another fails the compile.
+func TestInputsClaimers(t *testing.T) {
+	for claimers, want := range map[string]string{
+		"demo,*":    "",
+		"demo,Demo": `Inputs.Claimers[1]: "Demo" is not a namespace name, nor "*"`,
+		"demo,demo": "Inputs.Claimers: demo is listed twice",
+	} {
+		in := inputs()
+		in.Claimers = strings.Split(claimers, ",")
+		_, err := Compile(context.Background(), def, in)
+		if got := fmt.Sprint(err); want == "" && err != nil || want != "" && got != want {
+			t.Errorf("%s: got %v, want %q", claimers, err, want)
 		}
 	}
 }
@@ -159,7 +203,7 @@ func TestResolveClaim(t *testing.T) {
 			"data", "demo-app-demo.demo-app.db-credentials",
 			M{"ref": "demo.demo-app.db", "contract": "server", "source": "claim", "instance": "demo-pg", "namespace": "data"},
 			[]Dependency{{Instance: "demo-pg", Namespace: "data", Contract: "server", Field: "db", Output: "demo.demo-app.db"}},
-			[]transfer{{secret: "demo-app-demo.demo-app.db-credentials", key: "okdp.demo.demo-app.db", contract: "server", fields: []string{"password"}}},
+			[]transfer{{secret: "demo-app-demo.demo-app.db-credentials", key: "data/demo.demo-app.db", contract: "server", fields: []string{"password"}}},
 		},
 		"its namespace": {
 			"demo", "demo.demo-app.db-credentials",
@@ -233,7 +277,7 @@ claims.a: a claim, an object, got "server"
 claims.b: claim: unknown key "size": contract, class, provider and request only
 claims.c: claim: contract is required, the contract of the connection it claims
 claims.d: claim: contract "a/b" is not a contract name
-claims.e: claim: provider "a/b/c": <release> or <namespace>/<release>
+claims.e: claim: provider "a/b/c": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>
 claims.main-db: a connection of that name too (connections.main-db)`
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
@@ -266,7 +310,7 @@ func TestResolveClaimErrors(t *testing.T) {
 		},
 		"no claim":   {M{"main": M{}}, nil, "main: a connection reference must be a string, got map[string]interface {}{}"},
 		"a key":      {M{"db": M{"size": "1Gi"}}, nil, `db: claim: unknown key "size": class, provider and request only`},
-		"a provider": {M{"db": M{"provider": "a/b/c"}}, nil, `db: claim: provider "a/b/c": <release> or <namespace>/<release>`},
+		"a provider": {M{"db": M{"provider": "a/b/c"}}, nil, `db: claim: provider "a/b/c": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>`},
 		"a value":    {M{"db": M{"provider": 1}}, nil, "db: claim: provider must be a string, got 1"},
 		"a request":  {M{"db": M{"request": "5Gi"}}, nil, `db: claim: request must be an object, got "5Gi"`},
 		"a named claim of another contract": {
@@ -292,5 +336,43 @@ func TestResolveClaimErrors(t *testing.T) {
 				t.Errorf("missing outputs: %v %v", waits, m)
 			}
 		})
+	}
+}
+
+// TestParseClaim: a named claim as written, what it holds even when it
+// fails.
+func TestParseClaim(t *testing.T) {
+	c, err := ParseClaim("vectors", M{"contract": "database", "class": "huge", "request": M{"size": "5Gi"}})
+	if want := (ClaimSpec{Name: "vectors", Contract: "database", Class: "huge", Request: M{"size": "5Gi"}}); err != nil || !reflect.DeepEqual(c, want) {
+		t.Errorf("got %+v, %v, want %+v", c, err, want)
+	}
+	b, err := yaml.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(b), "contract: database\nclass: huge\nrequest:\n    size: 5Gi\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	for name, tc := range map[string]struct {
+		name string
+		v    any
+		want string
+	}{
+		"no contract": {"a", M{"class": "huge"}, "claims.a: claim: contract is required"},
+		"both":        {"a", M{"contract": "database", "class": "huge", "provider": "pg"}, "claims.a: claim: class or provider, not both"},
+		"not a label": {"A", M{"contract": "database"}, "claims.A: claim: its name is a DNS-1123 label"},
+		"not a map":   {"a", "database", "claims.a: a claim, an object"},
+		"an unknown":  {"a", M{"contract": "database", "size": 1.0}, `claims.a: claim: unknown key "size"`},
+	} {
+		c, err := ParseClaim(tc.name, tc.v)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+		if c.Name != tc.name {
+			t.Errorf("%s: got the name %q", name, c.Name)
+		}
+	}
+	if c, _ := ParseClaim("a", M{"class": "huge"}); c.Class != "huge" {
+		t.Errorf("a claim that fails keeps what it holds: got %+v", c)
 	}
 }
