@@ -21,6 +21,7 @@ and of what it produces. The flags that pass these inputs to the binary are in
 | The claims bound to the instance, a provider | `Inputs.Claims` (`[]Claim`) | no; `CompileAll` sets them | [Claims](#claims) |
 | The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; a tree's instance's, its `instance.yaml`'s `claimers` | [Providers](#providers) |
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
+| Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret, of a `provides` `secret` or of the objects, fails | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
 The names are checked before anything is read: the release is a release
@@ -33,7 +34,7 @@ empty one fails as another:
 |---|---|
 | a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
 | a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
-| the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce)) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
+| the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce); `testdata/cli/secrets.txtar`) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
 | an instance name that is set and not a DNS-1123 label | `Inputs.Name "<name>": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 
 Paths in an `fs.FS` are relative to its root.
@@ -164,12 +165,13 @@ same, checked. Each chart is unpacked under its repository's directory, as
 ```
 
 `<repository>` is the source's `repository` without its scheme (`oci://`,
-`https://`, `http://`) and a trailing `/`: its host, port and path.
+`https://`) and a trailing `/`: its host, port and path.
 `oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.5.0
-`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`; `http://localhost:8080/charts` is
-`localhost:8080/charts/`. A repository whose host and path are no
+`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`; `https://localhost:8080/charts`
+is `localhost:8080/charts/`. A repository whose host and path are no
 directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
-refused, with or without a chart cache
+refused, with or without a chart cache, and so is an `http://` one, the
+chart fetched in clear
 ([dependencies](02_service_definition.md#dependencies),
 [platform charts](#platform-charts)). Two repositories that differ only by
 their scheme share a directory.
@@ -633,6 +635,7 @@ label, a contract without secret field, a key that is no path, or one
 outside the namespace above level 0 refuse the reference, after the
 fields of the connection ([connection errors](#connection-errors);
 `testdata/context/2/remote-key-of-another-namespace.yaml`,
+`testdata/context/1/remote-key-of-the-platform.yaml`,
 `testdata/cli/secrets.txtar`).
 
 ### What a reference requires
@@ -938,9 +941,12 @@ global:
 lower ones ([Levels](#levels)); `global.okdp` decides the instance's host,
 where its OAuth clients register and the chart they are rendered with, and
 every chart receives `global` ([merge precedence](#merge-precedence)).
-`global.okdp` holds the platform's settings, whatever the level that sets
-them: [Requirements](#requirements) to [OAuth client
-settings](#oauth-client-settings). An instance layer that sets `global`
+`global.okdp` holds the platform's settings, level 0's,
+[Requirements](#requirements) to [OAuth client
+settings](#oauth-client-settings) and the keys the mappings read: a
+project adds its classes to it, `global.okdp.provisioning`, and nothing
+else ([Levels](#levels)); its own settings go beside `okdp`,
+`global.project`. An instance layer that sets `global`
 fails before the parameter schema is checked, naming the layer by its
 position in `Inputs.Values`, from 1 (a tree's `config.yaml` the first),
 and the first key of `global` it may not set, in key order; `global` set
@@ -1001,9 +1007,9 @@ context layer 1 (level 0): claims: a project's, of level 1 or above
 
 `ContextLayer.Level`: 0, the platform's;
 1, typically a project's, the namespace of its instances: what it adds to
-the platform values for each of them, its settings under `global`
-(`global.okdp.project`, which the mapping reads and the compiler does not;
-a key of `global` its charts read, `storageClass`), its connections,
+the platform values for each of them, its settings under `global`, beside
+`okdp` (`global.project`, which the mapping reads and the compiler does
+not; a key of `global` its charts read, `storageClass`), its connections,
 which its instances reference by name as the platform's, its named
 claims (`claims`), which they reference by name too ([claims](#claims)),
 and its classes beside the platform's (`global.okdp.provisioning`,
@@ -1043,15 +1049,39 @@ context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Con
 context layer 2 (level 1): global.okdp.provisioning.database.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 ```
 
-Maps merge: a level adds keys beside a lower one's (`global.okdp.project`
-beside `global.okdp.ingress`). The package's [defaults](#defaults) are not
+Maps merge: a level adds keys beside a lower one's (`global.project`
+beside `global.okdp`). The package's [defaults](#defaults) are not
 a level: a layer of any level overrides a default under `global`, as level
-0's does. Only level 0 is reviewed with the platform: above it, as in an
+0's does.
+
+`global.okdp` is the platform's, level 0's: a layer above level 0 sets
+`provisioning` only, its classes and the default class of a contract the
+platform leaves without one ([classes](#classes)), and no other key of
+it, one the compiler reads (`charts`, `oidc`, `secrets`, `policy`...) or
+one it does not, whether the platform sets it or not; nor `global.okdp`
+itself to anything but a map. A project cannot name the chart its OAuth
+clients are rendered with, where they register, the secret store its
+credentials go through, nor make itself privileged; its own settings,
+which its packages' mappings read, go under `global` beside `okdp`
+(`global.project`). The layer fails at the first such key, in key order,
+after the check against the lower levels
+(`testdata/context/1/sets-platform-charts.yaml`, `sets-platform-oidc.yaml`,
+`sets-platform-policy.yaml`, `sets-platform-secrets.yaml`,
+`sets-platform-ingress.yaml`, `sets-platform-tls.yaml`,
+`sets-platform-proxy.yaml`, `sets-unknown-platform-key.yaml`):
+
+```
+context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+```
+
+Only level 0 is reviewed with the platform: above it, as in an
 instance layer, no key or string of a layer may contain `{{`
 ([Layers](#layers)), the first one found by path reported,
-`context layer 3 (level 1): connections.team-db.host: the value contains "{{"`.
+`context layer 3 (level 1): connections.team-db.host: the value contains "{{"`
+(`testdata/context/1/template-code.yaml`).
 The layers are checked in merge order, each normalized ([values
-files](#values-files)), then against the lower levels, then for `{{`.
+files](#values-files)), then against the lower levels, then for the
+platform's settings, then for `{{`.
 
 The instance's layers come last: an instance sets no key of `global` but
 those its parameter schema declares, over the context's values, no
@@ -1062,8 +1092,7 @@ those its parameter schema declares, over the context's values, no
 # after platform.yaml at level 0
 global:
   storageClass: fast-ssd
-  okdp:
-    project: {name: demo, costCenter: cc-4217, nodePool: analytics}
+  project: {name: demo, costCenter: cc-4217, nodePool: analytics}
 connections:
   demo-warehouse:
     contract: database
@@ -1109,7 +1138,9 @@ platform schema the compiler embeds,
 [`internal/okdp/platform.schema.json`](../../internal/okdp/platform.schema.json):
 their types, their defaults and, in its `description`s, what each means.
 It is the platform authors' reference; an editor can check a platform
-values file against it.
+values file against it. Every key of `global.okdp`, described there or
+not, is the platform's, set at level 0: a project's layer sets
+`provisioning` only ([Levels](#levels)).
 
 | `global.okdp` | Used for |
 |---|---|
@@ -1126,7 +1157,9 @@ values file against it.
 | `secrets.store` | the name of the secret store the credentials of claims across namespaces go through, under `<provider namespace>/<id>` ([credentials across namespaces](#credentials-across-namespaces)), and where a connection may keep its own, the platform's under `platform/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) |
 | `secrets.provider`, `secrets.serviceAccount` | set, the store is a SecretStore in each project's namespace, `provider` its spec verbatim (External Secrets' `spec.provider`), authenticating with the ServiceAccount `serviceAccount` of the namespace, which the [targets](#targets) write (`Result.SecretStore`), and which the PushSecrets and ExternalSecrets reference (`kind: SecretStore`); unset, a ClusterSecretStore of the platform's, one identity for every namespace |
 | `secrets.refreshInterval` | `1h` by default: how often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it |
-| `policy.privileged` | the namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
+| `policy.privileged` | the namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to the [upstream policy](#upstream-policy); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
+| `policy.upstream.deny` | key names the upstream values of the other projects' instances set nowhere, beside the compiler's ([upstream policy](#upstream-policy)) |
+| `policy.upstream.registries` | the registries the images of the other projects' upstream values come from, each a host, its port and a path prefix optional; unset, the images are not checked ([upstream policy](#upstream-policy)) |
 
 Every compile checks `global` against the schema, in every mode, before
 the [connections](#connections) and the [requirements](#requirements), and
@@ -1175,10 +1208,13 @@ leave the default in place); each chart a map, its `repository`, `chart`
 and `version` strings (its other keys are ignored). Then, after the
 [connections](#connections) and the [requirements](#requirements), before
 the mapping, each is checked as a source, `oidcDcr` when set, in every
-mode: a repository URL (`https://`, `http://` or `oci://`), the name of a
-chart, a pinned version. The first violation is reported, in this order:
+mode: a repository URL (`https://` or `oci://`; `http://`, the chart
+fetched in clear, is refused), the name of a chart, a pinned version. The
+first violation is reported, in this order
+(`testdata/context/0/http-chart-repository.yaml`):
 
 ```
+global.okdp.charts.oidcDcr.repository "http://charts.example.org/mirror": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)
 global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository (https://... or oci://...)
 global.okdp.charts.oidcDcr.version "1.x": a pinned chart version (1.2.3), not a range
 ```
@@ -1270,7 +1306,7 @@ upstream charts pass their values to `tpl`, where template code could call
 normalized as it is merged, before the [schema check](#schema-check); the
 first `{{` in path order (keys sorted, items in order) fails, the layer
 numbered from 1 and the path written as in [protect](#protect) errors, a
-list item `[<i>]`:
+list item `[<i>]` (`testdata/template-code.yaml`):
 
 ```
 values layer 1: database: the value contains "{{"
@@ -1319,6 +1355,10 @@ precedence](#merge-precedence)):
   the layer ([Layers](#layers), [Levels](#levels)); this check covers
   those of the package's defaults and of the platform's layers, level 0;
 - [protect](#protect): `global` and the protected paths are refused;
+- [upstream policy](#upstream-policy): for a project that is not
+  privileged, the keys of a pod's privileges, identity, containers or
+  objects are refused, and the images come from the platform's
+  registries;
 - [append](#append): the listed lists are appended to.
 
 ### protect
@@ -1345,7 +1385,70 @@ app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot
 
 A path listed in both `protect` and `append` is accepted when the
 definition loads; `protect` is checked first, so upstream values setting
-it fail.
+it fail. Whatever `protect` names, the [upstream
+policy](#upstream-policy) applies too: a package does not open what the
+platform denies.
+
+### Upstream policy
+
+The platform's rules over the upstream values of an instance of a
+project that is not privileged (`global.okdp.policy.privileged`, [fields
+the compiler reads](#fields-the-compiler-reads)), whatever its package's
+`upstream` and `protect`, after `protect`: the package's own values, its
+defaults and values file, are not checked, being reviewed with it. The
+upstream values are `upstream.<key>` of the instance's merged values, its
+context's layers included. A privileged project's are not checked: the
+platform's own projects set any upstream value.
+
+A key named, at any depth, in a map or in a list's items, one of a pod's
+privileges, security context, identity, containers or objects, is
+refused, whatever its value: `privileged`, `hostPath`, `hostNetwork`,
+`hostPID`, `hostIPC`, `hostPort`, `allowPrivilegeEscalation`,
+`capabilities`, `seccompProfile`, `sysctls`, `securityContext`,
+`podSecurityContext`, `containerSecurityContext`, `serviceAccountName`,
+`serviceAccount`, `automountServiceAccountToken`, `extraContainers`,
+`sidecars`, `initContainers`, `extraInitContainers`, `extraObjects`,
+`extraDeploy`, `extraManifests`, and those of
+`global.okdp.policy.upstream.deny`; so are `runAsUser: 0`, root, and
+`runAsNonRoot: false`. The scheduling keys, `nodeSelector`,
+`tolerations` and `affinity`, stay free. A string that holds a `:` and
+reads as YAML values, a map or a list, each of its documents, is checked
+as values too: some charts render a string value as YAML (`tpl`,
+Bitnami's `tplvalues.render`), a list of volumes written as text.
+
+With `global.okdp.policy.upstream.registries`, every image of the
+upstream values comes from one of them: an `image` string, and the
+reference a `registry` and a `repository` string make, either set by the
+instance, the other the computed one (OKDP's defaults and the mapping's),
+`<registry>/<repository>`, the repository alone without registry; an
+`image` map's `name` is its repository where it has none (Zero to
+JupyterHub's). The reference starts with an entry, then ends, goes on
+with `/` or, after an entry with a path, with `:` or `@` (a tag, a
+digest): `mirror.example.org/okdp` admits
+`mirror.example.org/okdp/app:1.0`, not `mirror.example.org/okdp-x/app`
+nor `mirror.example.org:5000/okdp/app`. An `image`, a `registry` or a
+`repository` set to `null` leaves the chart's default, which the compile
+does not read: it is refused. Unset, the images are not checked; `[]`,
+none may be set. The chart's defaults are not checked: a package whose
+chart pulls from elsewhere sets the platform's registry in its values.
+
+The first refused, in path order (a map's images, then its keys
+sorted, a list's items in order), fails, the path and the key named (`testdata/denied-upstream.yaml`,
+`testdata/denied-upstream-text.yaml`,
+`testdata/context/0/unlisted-registry.yaml`):
+
+```
+app: upstream.app.podSecurityContext: podSecurityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+app: upstream.app.extraVolumes, read as YAML: [0].hostPath: hostPath is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+app: upstream.app.image.repository: image docker.io/evil/app is not from a registry of global.okdp.policy.upstream.registries (registry.example.org, mirror.example.org/okdp): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them
+```
+
+A key the lists do not name, a chart's own spelling of a privilege
+(`rbac.create`, a chart's extra RBAC rules), is the platform's to add to
+`global.okdp.policy.upstream.deny`; and a privilege a chart grants from
+keys of other names is out of the compiler's reach: Pod Security
+Admission and the engine's identity, confined to the namespace
+([targets](#targets)), are the second line.
 
 ### append
 
@@ -1375,6 +1478,8 @@ come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
 |---|---|
 | a template (in values an instance layer or a context layer above level 0 gives, the layer fails before: [Layers](#layers), [Levels](#levels)) | `<key>: <at>: the value contains "{{"`, `<key>: <at>: the key contains "{{"`; `<key>: <at>: cannot be checked for "{{": <type> is not a values type` |
 | a protected path | `<key>: <at>: <protected> is set by the platform and cannot be changed` |
+| a denied key, of a project that is not privileged ([upstream policy](#upstream-policy)) | `<key>: <at>: <name> is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), <namespace> is not one of them`; `(global.okdp.policy.upstream.deny)` for the platform's; `runAsUser 0, root, is denied...`, `runAsNonRoot false is denied...`; in a string read as YAML, `<at>, read as YAML: <path>: ...` |
+| an image of none of the platform's registries | `<key>: <at>: image <reference> is not from a registry of global.okdp.policy.upstream.registries (<registries>): the platform's projects pull from any (global.okdp.policy.privileged), <namespace> is not one of them`; `image null, the chart's default,` for a `null` |
 | an appended path, not a list | `<key>: <at> must be a list` |
 
 ## Merge precedence
@@ -1595,7 +1700,8 @@ follow, and two clients may not write one Secret
 Secret is the release's, the default names above and a `secret` given
 alike: its name starts with `<release>-`, checked in every mode, so
 that the Job, whose Role writes it, cannot overwrite another Secret of
-the namespace, another instance's credentials.
+the namespace, another instance's credentials
+(`testdata/cli/oidc.txtar`).
 
 A client chart is no dependency of `Chart.yaml`, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
@@ -1748,9 +1854,19 @@ store](#credentials-in-the-platforms-secret-store)). They are first in
 
 | `secret` | Objects |
 |---|---|
-| `{stringData: {...}}` | a `v1` `Secret`, `type: Opaque`, `stringData` as given (strings); labels: the labels and the credentials label |
+| `{stringData: {...}}` | with `Inputs.AllowPlainSecrets` only, a `v1` `Secret`, `type: Opaque`, `stringData` as given (strings); labels: the labels and the credentials label. Without it, error: `<service>: output "<name>": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it` |
 | `{generate: [<keys>], stringData: {...}}` | per key, a `generators.external-secrets.io/v1alpha1` `Password` named `<secret>-<key>`; then the `external-secrets.io/v1` `ExternalSecret` `<secret>` writing the Secret: the generated keys and the static `stringData` ones (`stringData` optional; strings, numbers or booleans, written as text) |
 | neither, in a non-empty `secret` | error: `<service>: output "<name>": secret needs stringData or generate` (`<service>`: `name` of `Chart.yaml`) |
+
+Credentials are never written in clear: the objects file is in the
+deployments repository, which every reader of the repository reads, and
+in the release's manifests. They are generated in the cluster
+(`generate`), or the output points at a Secret another object writes
+(`secretRef`: an operator's, an upstream chart's, an ExternalSecret
+reading the platform's secret store). `Inputs.AllowPlainSecrets` accepts
+a plain Secret, for a caller that knows its repository private, and the
+[objects section](#objects-section)'s alike
+(`testdata/cli/plain-secrets.txtar`).
 
 A generated Secret is what `okdpGeneratedSecret` renders
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key
@@ -1770,12 +1886,14 @@ provides:
   - contract: s3
     name: store-b
     values: {apiUrl: https://b.example.org}
-    secret: {stringData: {accessKey: ak, secretKey: sk}}
+    secret: {stringData: {accessKey: ak, secretKey: sk}}  # AllowPlainSecrets
 ```
 
-`Objects`: `Password/store-a-s3-credentials-accesskey`,
+`Objects`, with `Inputs.AllowPlainSecrets`:
+`Password/store-a-s3-credentials-accesskey`,
 `Password/store-a-s3-credentials-secretkey`,
-`ExternalSecret/store-a-s3-credentials`, `Secret/store-b-s3-credentials`.
+`ExternalSecret/store-a-s3-credentials`, `Secret/store-b-s3-credentials`;
+without it, store-b fails the compile.
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -1814,6 +1932,64 @@ The mapping's `objects`, after the credentials Secrets, in order, as
 computed: the compiler adds no namespace, label or name. Each is a whole
 manifest, with a `kind` and a `metadata.name`
 ([objects](02_service_definition.md#objects)).
+
+The platform's policy over `Objects` whole, every source (the credentials
+Secrets, the objects section, the generated Secrets, the PushSecrets and
+ExternalSecrets), once assembled: an instance of a project that is not
+privileged (`global.okdp.policy.privileged`, [fields the compiler
+reads](#fields-the-compiler-reads)) installs no cluster-scoped object and
+writes no other namespace than its own. An object whose
+`metadata.namespace` is set (not `null`, not `""`) to another namespace
+than `Inputs.Namespace` is refused, and so is one of a cluster-scoped
+kind, by its API group and kind: Kubernetes' own (`Namespace`, `Node`,
+`PersistentVolume`, `StorageClass`, `CSIDriver`, `CSINode`,
+`VolumeAttachment`, `VolumeAttributesClass`, `ClusterRole`,
+`ClusterRoleBinding`, `CustomResourceDefinition`,
+`ValidatingWebhookConfiguration`, `MutatingWebhookConfiguration`,
+`ValidatingAdmissionPolicy`, `ValidatingAdmissionPolicyBinding`,
+`MutatingAdmissionPolicy`, `MutatingAdmissionPolicyBinding`,
+`PriorityClass`, `IngressClass`, `IPAddress`, `ServiceCIDR`,
+`RuntimeClass`, `APIService`, `CertificateSigningRequest`,
+`ClusterTrustBundle`, `FlowSchema`, `PriorityLevelConfiguration`,
+`PodSecurityPolicy`, `DeviceClass`, `ResourceSlice`,
+`VolumeSnapshotClass`, `VolumeSnapshotContent`, `GatewayClass`) and the
+operators' (`ClusterSecretStore`, `ClusterExternalSecret`,
+`ClusterPushSecret`, `ClusterGenerator`, `ClusterIssuer`,
+trust-manager's `Bundle`, Kyverno's `ClusterPolicy` and
+`ClusterCleanupPolicy`, Gatekeeper's `ConstraintTemplate`, KEDA's
+`ClusterTriggerAuthentication`, `CiliumClusterwideNetworkPolicy`,
+Calico's `GlobalNetworkPolicy`, OpenShift's `SecurityContextConstraints`
+and `ClusterResourceQuota`, `ClusterWorkflowTemplate`). An object that
+holds `items` (a `List`, which Helm installs item by item) has each item
+checked alike. A kind the compiler does not know, without a namespace, is
+assumed namespaced: the engine's identity, confined to the namespace, is
+the second line ([targets](#targets)). The first refused object, in the
+order of `Objects`, fails the compile, named `<kind>/<name>`
+(`testdata/cli/policy.txtar`); a privileged project's instance is not
+checked:
+
+```
+web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
+web: objects: ExternalSecret/demo-web-ledger: namespace finance, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them
+```
+
+Whatever the project, no Secret (`v1`) of `Objects`, nor of the items of
+a `List`, holds values in clear, a non-empty `data` or `stringData`,
+unless the caller allows it (`Inputs.AllowPlainSecrets`): credentials are
+generated in the cluster
+([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), whose
+objects are a `Password` per key and an `ExternalSecret`) or read from
+the platform's secret store (an `ExternalSecret`,
+[credentials in the platform's secret
+store](#credentials-in-the-platforms-secret-store)), never written to the
+deployments repository. A Secret with only `metadata` and `type` (a
+ServiceAccount token's, which Kubernetes fills) passes. The first
+refused, in the order of `Objects`, fails, named `Secret/<name>`, `data`
+before `stringData` (`testdata/cli/plain-secrets.txtar`):
+
+```
+web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it
+```
 
 ### The objects file
 
@@ -2208,7 +2384,13 @@ umbrella chart, the files of `Write`, in its directory:
 projects/
   kustomization.yaml          flux: the directories of the namespaces
   <namespace>/
-    kustomization.yaml        flux: the directories of the instances
+    kustomization.yaml        flux: the instances' directories, and project
+    project/                  flux, argocd: the project's own manifests
+      namespace.yaml          the Namespace, with its Pod Security labels
+      secret-store.yaml       the platform's secret store in it
+      service-account.yaml    flux: the identity of its releases
+      kustomization.yaml      flux: these files
+      appproject.yaml         argocd: the AppProject of its Applications
     instances/<release>/      every target: the umbrella chart (Write)
       helmrelease.yaml        flux: the HelmRelease
       kustomization.yaml      flux: the HelmRelease and its values ConfigMap
@@ -2218,8 +2400,8 @@ projects/
 | Target | Options (its fields) | Files besides the umbrella charts |
 |---|---|---|
 | `compiler.Helm` | none | none: each instance installs with Helm, as one release, its dependencies built first ([rendering with Helm](../01_usage.md#rendering-with-helm)), after those it waits for |
-| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
-| `compiler.ArgoCD` | `RepoURL`, the repository of the tree, required; `Revision` (`HEAD`); `PathPrefix` | per instance, `application.yaml` |
+| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root); `Keep`, namespaces the root lists without a result, projects whose directories the output keeps as they are (`okdp-compile --partial`) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
+| `compiler.ArgoCD` | `RepoURL`, the repository of the tree, required; `Revision` (`HEAD`); `PathPrefix` | per instance, `application.yaml`; per namespace, `project/` |
 
 The files of the flux and argocd targets are marked generated on their
 first line (`# Code generated by okdp-compile. DO NOT EDIT.`). They are
@@ -2230,41 +2412,94 @@ writes none of its own.
 The HelmRelease (`flux`): in `okdp-releases`, named after the release,
 labelled `okdp.io/project: <namespace>` and `okdp.io/instance:
 <release>`; `releaseName` the release, `targetNamespace` and
-`storageNamespace` the namespace; the chart
+`storageNamespace` the namespace; `serviceAccountName:
+project-<namespace>`, the project's identity, unless the project is one
+of the platform's own (`Result.Privileged`), whose releases keep
+helm-controller's; the chart
 `./<PathPrefix>/projects/<namespace>/instances/<release>` of the
 GitRepository `Source`, `reconcileStrategy: Revision`: rebuilt at every
 revision, its version, the package's, not changing when a dependency's
 does; `dependsOn`, the releases it waits for (`Graph.DependsOn`), absent
 when none; its values from the ConfigMap `values-<release>`, key
 `instance.values.yaml`, user values; a 15 minutes timeout, the namespace
-created at install, retried on failure every 2 minutes, an upgrade rolled
-back after 3 retries, drift detection enabled. Its `kustomization.yaml`,
-in `okdp-releases`: the HelmRelease, and the ConfigMap generated from
-`instance.values.yaml`, without a name suffix, labelled
-`reconcile.fluxcd.io/watch: Enabled`, a change of values reconciling the
-HelmRelease. A namespace's `kustomization.yaml`: the directories of its
-instances, `instances/<release>`, sorted. The root's,
-`projects/kustomization.yaml`: the directories of the namespaces,
-sorted, `resources: []` when there is none, written even without
-instance, so that a tree emptied syncs, its releases pruned; its
-namespace `okdp-releases`, as the others'.
+not created at install (the project's manifests hold it), retried on
+failure every 2 minutes, an upgrade rolled back after 3 retries, drift
+detection enabled. Its `kustomization.yaml`, in `okdp-releases`: the
+HelmRelease, and the ConfigMap generated from `instance.values.yaml`,
+without a name suffix, labelled `reconcile.fluxcd.io/watch: Enabled`, a
+change of values reconciling the HelmRelease. A namespace's
+`kustomization.yaml`: the directories of its instances,
+`instances/<release>`, and `project`, sorted. The root's,
+`projects/kustomization.yaml`: the directories of the namespaces, those
+of `Keep` among them, sorted, `resources: []` when there is none,
+written even without instance, so that a tree emptied syncs, its
+releases pruned. Neither sets a `namespace`, which kustomize would set
+on every resource of every directory under it, moving a project's
+manifests out of its namespace: each manifest carries its own.
 
 The Application (`argocd`): in `argocd`, named after the release,
 labelled as the HelmRelease; its sync wave,
 `argocd.argoproj.io/sync-wave: "<wave>"` (`Graph.Wave`), server-side
-diff, the resources finalizer; `project: project-<namespace>`; its source
-the chart `<PathPrefix>/projects/<namespace>/instances/<release>` of
-`RepoURL` at `Revision`, released as the release with
-`instance.values.yaml`; destined to the namespace of the cluster; the
-CA bundles of webhooks and conversion webhooks ignored; synced
-automatically, pruned and self-healed, server-side, retried forever with
-a backoff from 10 seconds to 5 minutes. Pruning is Argo CD's: an
+diff, the resources finalizer; `project: project-<namespace>`, the
+project's AppProject; its source the chart
+`<PathPrefix>/projects/<namespace>/instances/<release>` of `RepoURL` at
+`Revision`, released as the release with `instance.values.yaml`; destined
+to the namespace of the cluster; the CA bundles of webhooks and
+conversion webhooks ignored; synced automatically, pruned and
+self-healed, server-side, retried forever with a backoff from 10 seconds
+to 5 minutes. Pruning is Argo CD's: an
 object the render no longer holds is deleted, and so is every object of
 an Application deleted, its finalizer cascading, where Helm and Flux
 keep those annotated `helm.sh/resource-policy: keep`; Argo CD keeps them
 alike through their sync options, `Prune=false` and `Delete=false`, which
 the compiler adds to the objects it writes ([the objects
 file](#the-objects-file)).
+
+### The project's manifests
+
+Both deployer targets write, for every project that has an instance, its
+own manifests in `projects/<namespace>/project/`
+(`compiler.ProjectManifestsDir`), each labelled `okdp.io/project:
+<namespace>`. They are the project's boundary: its instances are
+installed with an identity confined to its namespace, unless the project
+is one of the platform's own (`global.okdp.policy.privileged`,
+`Result.Privileged`: cert-manager, ingress-nginx, an operator), whose
+instances install cluster-scoped objects and write other namespaces with
+the engine's own identity.
+
+| File | Content |
+|---|---|
+| `namespace.yaml` | the Namespace, with the [Pod Security Admission](https://kubernetes.io/docs/concepts/security/pod-security-admission/) labels `pod-security.kubernetes.io/enforce: baseline`, `audit: restricted` and `warn: restricted`; `enforce: privileged` for one of the platform's own projects. Kept by both engines when its project goes, its volumes with it, until an administrator deletes it: labelled `kustomize.toolkit.fluxcd.io/prune: disabled` (Flux) and annotated `argocd.argoproj.io/sync-options: Delete=false` (Argo CD), whatever the target |
+| `secret-store.yaml` | when the platform names the provider of its secret store (`global.okdp.secrets.provider`, `Result.SecretStore`): the ServiceAccount `global.okdp.secrets.serviceAccount` (`okdp-secrets`), its token not mounted (External Secrets requests one), and the `SecretStore` named `global.okdp.secrets.store` (`external-secrets.io/v1`), its `spec.provider` as the platform writes it, both in the namespace |
+| `service-account.yaml` | `flux`, a project that is not one of the platform's own: the ServiceAccount `project-<namespace>` in `okdp-releases`, which helm-controller impersonates for the project's releases (`serviceAccountName`), the Role `okdp-project` in the namespace, every verb on every resource of every API group (the boundary is the namespace, not the kinds), and its RoleBinding: a cluster-scoped object, or one of another namespace, is refused by the API server |
+| `kustomization.yaml` | `flux`: these files, without a `namespace`: each carries its own |
+| `appproject.yaml` | `argocd`: the AppProject `project-<namespace>` in `argocd`, `sourceRepos` the `RepoURL`, its destination the namespace of `https://kubernetes.default.svc` and `clusterResourceWhitelist: []`, no cluster-scoped resource; for one of the platform's own projects, every namespace (`"*"`) and every cluster-scoped resource (`{group: "*", kind: "*"}`); a `description` |
+
+One tree, two engines: a caller may write the files of both deployer
+targets into one tree (okdp-gitops does), each engine reading its own.
+Every file both write is byte for byte the same, the umbrella charts and,
+in `project/`, `namespace.yaml` and `secret-store.yaml` (a caller
+refuses a path the two write differently); only `appproject.yaml` is
+Argo CD's, and `kustomization.yaml` and `service-account.yaml` Flux's.
+
+The platform's entry point applies them before the instances: Flux
+through the root Kustomization, which lists each project's directory,
+whose `kustomization.yaml` lists `project` with the instances (Flux
+applies a Kustomization's Namespaces first, and a HelmRelease whose
+ServiceAccount or Role is not there yet fails its install and retries);
+Argo CD with an ApplicationSet whose git generator finds the directories
+`<PathPrefix>/projects/*/project`, one Application each under the entry
+point's own AppProject, which admits Namespaces, AppProjects in `argocd`
+and the secret store, as the Applications of the instances are under the
+project's. Its source is a directory, `directory: {include:
+'{namespace.yaml,secret-store.yaml,appproject.yaml}'}`: in a tree that
+holds the Flux files too, Argo CD would otherwise build the directory
+with its `kustomization.yaml`, which lists no AppProject and Flux's
+identity (an instance's Application is a Helm source, which its
+directory's Flux files do not change). The Namespace must exist before
+an instance syncs: an Application whose namespace does not exist yet
+fails its sync and retries. Network isolation is not the compiler's: no
+NetworkPolicy is written, the platform's own applies.
 
 The HelmReleases share `okdp-releases`, the Applications `argocd`: their
 names, the releases', must be unique across the namespaces. What a
@@ -2278,9 +2513,11 @@ deployer sets up once is not generated:
   `<PathPrefix>/projects`, `directory: {recurse: true, include:
   '*/instances/*/application.yaml'}`, which needs no file of the target's
   but the Applications (an ApplicationSet's git generator finds the
-  namespaces alike, the directories `<PathPrefix>/projects/*`); an
-  AppProject `project-<namespace>` per namespace; and the health of an
-  Application in `argocd-cm`
+  namespaces alike, the directories `<PathPrefix>/projects/*`); the
+  ApplicationSet of the projects' manifests, over
+  `<PathPrefix>/projects/*/project`, a directory source of its three files,
+  and the AppProject it is under; and
+  the health of an Application in `argocd-cm`
   (`resource.customizations.health.argoproj.io_Application`, its status's
   health): Argo CD assesses none by default, and a sync wave then does
   not wait for the previous one.

@@ -103,6 +103,7 @@ func TestProvidesErrors(t *testing.T) {
 		"secret field":     {"  - {contract: http, values: {url: u, token: t}}\n", `"token" is a secret field`},
 		"required field":   {"  - {contract: api, name: other, values: {}}\n", `field "url" is required by the api contract`},
 		"empty secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
+		"plain secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n", `demo: output "other": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: https://demo-app.example.org}}\n", `two http outputs are named "demo-app"`},
 		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"b\"\ntwo api outputs are named \"a\""},
 		"a naming convention": {
@@ -158,9 +159,14 @@ func TestProvidesTypes(t *testing.T) {
 }
 
 // TestProvidesSecret: an output with a secret gets a secretRef, and its
-// credentials Secret is an object.
+// credentials Secret is an object: a plain one when the caller allows it
+// (Inputs.AllowPlainSecrets), a generated one.
 func TestProvidesSecret(t *testing.T) {
-	res, err := provideCompile("  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
+	d := *def
+	d.Okdp = []byte("provides:\n  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
+	in := inputs()
+	in.Contracts, in.AllowPlainSecrets = httpContract, true
+	res, err := Compile(context.Background(), &d, in)
 	if err != nil {
 		t.Fatal(err)
 	}

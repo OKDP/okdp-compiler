@@ -495,8 +495,12 @@ The `$each` of a `$for` splices a list the same way, once per element
 ## Cost and cancellation
 
 Every expression the directives evaluate counts in the compile's CEL cost,
-an expression in a `$for` once per element: once the total passes
-`Inputs.CostLimit` (checked after each expression), the compile fails with
+an expression in a `$for` once per element, and a host function what it
+builds: a call costs 1, a tenth of its argument's size and the bytes of
+the string it returns (`toJson`, `toYaml`, `quote` of a large value), as
+CEL's own `join` does. Once the total passes `Inputs.CostLimit` (checked
+after each expression; `--cost-limit` of `okdp-compile`, 50000000 by
+default), the compile fails with
 `the expressions of the compile exceed its CEL cost limit (<n>)`
 ([usage](../01_usage.md)). The context of `Compile` is checked
 before each expression and every 100 iterations of a comprehension. The

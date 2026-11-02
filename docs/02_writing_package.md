@@ -306,6 +306,12 @@ upstream:
   `true`, `false` or `{protect, append}`
   ([upstream](specs/02_service_definition.md#upstream)). Leave out
   a chart an instance has no reason to set (the webapp's `metrics`).
+  Whatever it accepts, the platform denies its projects' instances the
+  keys of a pod's privileges, identity, containers and objects
+  (`securityContext`, `hostPath`, `serviceAccount`, `sidecars`,
+  `extraObjects`...) and may hold their images to its registries ([upstream
+  policy](specs/01_inputs_outputs.md#upstream-policy)): a parameter is
+  the way to offer one of them, the package reviewed with it.
 - `protect` refuses instance values on a path, under it, or a non-map on the
   way to it ([protect](specs/01_inputs_outputs.md#protect)).
   Protect what the platform relies on:
@@ -507,10 +513,16 @@ provides:
         - {key: secretKey, length: 40, symbols: 0}
 ```
 
-`secret` (`generate` or `stringData`): the compiler renders the credentials
-Secret (rustfs). `secretRef` alone: an operator or an upstream chart creates
-it (cnpg-postgresql). Neither: consumers bring their own identity
-(seaweedfs). An output never points at a Secret nobody creates.
+`secret` (`generate`, with `stringData` for the keys that are not
+secret): the compiler renders the credentials Secret, generated in the
+cluster (rustfs); a `stringData` alone, credentials in clear in the
+deployments repository, fails unless the caller sets
+`Inputs.AllowPlainSecrets`, and so does a Secret of `objects` with
+`data` or `stringData` ([credentials
+Secrets](specs/01_inputs_outputs.md#credentials-secrets)). `secretRef`
+alone: an operator or an upstream chart creates it (cnpg-postgresql).
+Neither: consumers bring their own identity (seaweedfs). An output never
+points at a Secret nobody creates.
 
 A consumer may instead claim a connection, and let the instance that
 provisions its contract create it ([claims](specs/01_inputs_outputs.md#claims)):

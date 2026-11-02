@@ -40,10 +40,23 @@ func tree(t *testing.T, dir string) map[string]string {
 	return files
 }
 
+// output: the files the command wrote under dir, path -> content, its
+// markerFile checked and left out: the files of the target.
+func output(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := tree(t, dir)
+	if got := files[filepath.FromSlash(markerFile)]; got != marker {
+		t.Errorf("%s: %q", markerFile, got)
+	}
+	delete(files, filepath.FromSlash(markerFile))
+	return files
+}
+
 // TestRun: the tree of each example, its input/db/, compiled into a
-// directory holding a stale instance: it holds the example's output, the
-// stale instance removed; the full example's tree split into three
-// repositories, in either order, gives the same.
+// directory the command wrote before, holding a stale instance: it holds
+// the example's output and the marker, the stale instance removed; the
+// full example's tree split into three repositories, in either order,
+// gives the same.
 func TestRun(t *testing.T) {
 	examples := filepath.Join("..", "..", "examples")
 	for _, example := range []string{"00_passthrough", "01_minimal", "02_advanced", "03_full", "04_claims"} {
@@ -53,13 +66,13 @@ func TestRun(t *testing.T) {
 			if err := os.MkdirAll(stale, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(stale, "Chart.yaml"), []byte("stale: true\n"), 0o644); err != nil {
+			if err := errors.Join(os.WriteFile(filepath.Join(stale, "Chart.yaml"), []byte("stale: true\n"), 0o644), os.WriteFile(filepath.Join(dir, filepath.FromSlash(markerFile)), []byte(marker), 0o644)); err != nil {
 				t.Fatal(err)
 			}
 			if err := run(options{repositories: []string{filepath.Join(examples, example, "input", "db")}, output: dir}); err != nil {
 				t.Fatal(err)
 			}
-			if got, want := tree(t, dir), tree(t, filepath.Join(examples, example, "output")); !maps.Equal(got, want) {
+			if got, want := output(t, dir), tree(t, filepath.Join(examples, example, "output")); !maps.Equal(got, want) {
 				t.Errorf("got %v, want the example's output: %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 			}
 		})
@@ -92,7 +105,7 @@ func TestRun(t *testing.T) {
 		if err := run(options{repositories: repos, output: dir}); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := tree(t, dir), tree(t, filepath.Join(examples, "03_full", "output")); !maps.Equal(got, want) {
+		if got, want := output(t, dir), tree(t, filepath.Join(examples, "03_full", "output")); !maps.Equal(got, want) {
 			t.Errorf("%v: got %v", order, slices.Sorted(maps.Keys(got)))
 		}
 	}
@@ -110,6 +123,7 @@ func TestRunErrors(t *testing.T) {
 	}{
 		"no repository":  {func(o *options) { o.repositories = nil }, "--repository is required"},
 		"check output":   {func(o *options) { o.check = true }, "--check writes nothing: no --output (-o)"},
+		"check force":    {func(o *options) { o.check, o.output, o.force = true, "", true }, "--check writes nothing: no --force"},
 		"charts":         {func(o *options) { o.charts = filepath.Join("..", "..", "examples", "03_full", ".charts") }, "--charts is read by --check only: a compile reads no chart"},
 		"no output":      {func(o *options) { o.output = "" }, "--output (-o) is required"},
 		"target":         {func(o *options) { o.target = "kustomize" }, `--target "kustomize": helm, flux or argocd`},
@@ -136,6 +150,45 @@ func TestRunErrors(t *testing.T) {
 				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
 			}
 		})
+	}
+}
+
+// TestWriteTree: the files written through the output directory, a
+// symbolic link where a file goes replaced, not written through, and one
+// that leads out of the directory refused; what the command does not write
+// under projects/ removed, a link itself, not what it points to.
+func TestWriteTree(t *testing.T) {
+	dir, outside := t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "secret")
+	if err := os.WriteFile(secret, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, map[string]string{"projects/demo/instances/a/x.yaml": "old\n"})
+	for link, target := range map[string]string{"projects/demo/instances/a/Chart.yaml": secret, "projects/demo/instances/a/stale": secret} {
+		if err := os.Symlink(target, filepath.Join(dir, filepath.FromSlash(link))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string][]byte{"projects/demo/instances/a/Chart.yaml": []byte("new\n"), markerFile: []byte(marker)}
+	if err := writeTree(dir, files, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tree(t, dir), map[string]string{filepath.FromSlash("projects/demo/instances/a/Chart.yaml"): "new\n", filepath.FromSlash(markerFile): marker}; !maps.Equal(got, want) {
+		t.Errorf("got %v", got)
+	}
+	if b, err := os.ReadFile(secret); err != nil || string(b) != "keep\n" {
+		t.Errorf("the file a link pointed to: %q, %v", b, err)
+	}
+	// A directory that leads out of the output: refused, nothing written
+	// out of it.
+	if err := os.Symlink(outside, filepath.Join(dir, "projects", "data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTree(dir, map[string][]byte{"projects/data/secret": []byte("overwritten\n")}, nil); err == nil {
+		t.Error("written through a link out of the output")
+	}
+	if b, err := os.ReadFile(secret); err != nil || string(b) != "keep\n" {
+		t.Errorf("out of the output: %q, %v", b, err)
 	}
 }
 

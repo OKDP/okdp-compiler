@@ -1,0 +1,9 @@
+# error: context layer 2 (level 1): global.okdp.oidc: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A project's file (project.yaml) that sets a setting of the identity
+# provider the platform leaves unset, the scope its OAuth clients register:
+# global.okdp.oidc is the platform's, whether the platform sets the key or
+# not.
+global:
+  okdp:
+    oidc:
+      scope: openid profile email groups admin

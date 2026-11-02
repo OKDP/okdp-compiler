@@ -6,27 +6,32 @@
 # A level adds, it changes nothing a lower level sets: a key platform.yaml
 # sets (global.okdp.ingress.suffix, global.imageRegistry), the same value
 # included, or a connection it gives (platform-db, datalake), even by a field
-# platform.yaml leaves out, fails the compile:
+# platform.yaml leaves out, fails the compile; and global.okdp is the
+# platform's: a project adds its classes to it (provisioning) and nothing
+# else, a key platform.yaml leaves unset included:
 #
 #   global: {okdp: {ingress: {suffix: demo.example.org}}}
 #   connections: {platform-db: {port: 5433}}
+#   global: {okdp: {charts: {oidcDcr: {repository: oci://x, chart: oidc-dcr, version: 0.5.0}}}}
 #
 #   context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 #   context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
+#   context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
 
 # The project's description: its own, a string, no value of the context,
 # which no instance receives (compiler.ProjectDescription).
 description: The analytics of the demo team
 global:
   storageClass: fast-ssd               # every chart receives global
+  # The project's own settings, beside okdp, the platform's: read by the
+  # mapping (global.?project in okdp.yaml), which the compiler does not:
+  # labels, node pool, ingress allowlist.
+  project:
+    name: demo
+    costCenter: cc-4217
+    nodePool: analytics
+    allowedSourceRanges: [10.20.0.0/16, 192.168.10.0/24]
   okdp:
-    # Read by the mapping, which the compiler does not: labels, node pool,
-    # ingress allowlist (global.okdp.?project in okdp.yaml).
-    project:
-      name: demo
-      costCenter: cc-4217
-      nodePool: analytics
-      allowedSourceRanges: [10.20.0.0/16, 192.168.10.0/24]
     # The project's classes of database connections, of which the
     # platform defines none, and their default, which the platform does not
     # set: the class of the claims that name neither a class nor a

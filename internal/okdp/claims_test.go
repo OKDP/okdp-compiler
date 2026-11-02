@@ -261,7 +261,8 @@ func TestResolveClaimRequirement(t *testing.T) {
 // TestNamedClaimsErrors: the named claims of the context, every problem
 // at once, in name order: a name that is no DNS-1123 label, a claim that
 // is no object, a key of no claim, no contract, one that is no contract
-// name, a provider not of the form, a connection's name; claims not a map.
+// name, a provider not of the form, a connection's name, a value of a
+// sensitive name not printed; claims not a map.
 func TestNamedClaimsErrors(t *testing.T) {
 	_, _, err := claimCtx(M{"claims": M{
 		"Reports": M{"contract": "server"},
@@ -271,6 +272,7 @@ func TestNamedClaimsErrors(t *testing.T) {
 		"d":       M{"contract": "a/b"},
 		"e":       M{"contract": "server", "provider": "a/b/c"},
 		"main-db": M{"contract": "database"},
+		"token":   "hunter2",
 	}, "connections": M{"main-db": M{"contract": "database", "host": "h"}}}, nil)
 	want := `claims.Reports: claim: its name is a DNS-1123 label
 claims.a: a claim, an object, got "server"
@@ -278,7 +280,8 @@ claims.b: claim: unknown key "size": contract, class, provider and request only
 claims.c: claim: contract is required, the contract of the connection it claims
 claims.d: claim: contract "a/b" is not a contract name
 claims.e: claim: provider "a/b/c": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>
-claims.main-db: a connection of that name too (connections.main-db)`
+claims.main-db: a connection of that name too (connections.main-db)
+claims.token: a claim, an object, got <redacted>`
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
 	}

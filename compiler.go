@@ -282,6 +282,16 @@ func InstanceDir(namespace, release string) string {
 	return target.InstanceDir(namespace, release)
 }
 
+// ProjectManifestsDir: projects/<namespace>/project, where the flux and
+// argocd targets write a project's own manifests, for every project that
+// has an instance: its Namespace, the platform's secret store in it, and
+// the identity its releases are confined to its namespace with
+// (docs/specs/01_inputs_outputs.md, targets); what the platform's entry
+// point applies before the instances.
+func ProjectManifestsDir(namespace string) string {
+	return target.ProjectManifests(namespace)
+}
+
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
 // okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
 // has them, checked; each compile reads its other files. A values.yaml

@@ -1,13 +1,16 @@
 // Package flux: the flux target: the umbrella chart of each instance, with
 // the Flux HelmRelease that installs it, waiting for the releases its
 // instance depends on (dependsOn), and the Kustomization of its values
-// ConfigMap; a Kustomization per project, and the root's, of the
-// projects: all a Flux Kustomization of the path projects/ syncs. The
-// format is okdp-gitops', which commits the files as they are.
+// ConfigMap; each project's own manifests, its Namespace, the platform's
+// secret store in it and the identity its releases are installed with; a
+// Kustomization per project, and the root's, of the projects: all a Flux
+// Kustomization of the path projects/ syncs. The format is okdp-gitops',
+// which commits the files as they are.
 package flux
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -24,33 +27,51 @@ const (
 	// HelmReleaseFile: an instance's HelmRelease, in its directory.
 	HelmReleaseFile = "helmrelease.yaml"
 	// KustomizationFile: an instance's Kustomization, its HelmRelease and
-	// its values ConfigMap, in its directory; a project's, its instances'
-	// directories, in the project's; the root's, the projects'
-	// directories, in target.ProjectsDir.
+	// its values ConfigMap, in its directory; a project's manifests', in
+	// its target.ProjectManifestsDir; a project's, its instances'
+	// directories and its manifests', in the project's; the root's, the
+	// projects' directories, in target.ProjectsDir.
 	KustomizationFile = "kustomization.yaml"
+	// ServiceAccountFile: the identity of a project's releases, in its
+	// target.ProjectManifestsDir (ServiceAccount); not written for one of
+	// the platform's own projects, whose releases keep helm-controller's.
+	ServiceAccountFile = "service-account.yaml"
 )
 
 // ReleasesNamespace: the namespace of the HelmReleases and of their values
 // ConfigMaps, okdp-gitops': their names, the releases', must be unique.
 const ReleasesNamespace = "okdp-releases"
 
+// RoleName: okdp-project, the Role of a project's namespace its releases
+// are installed with, and its RoleBinding.
+const RoleName = "okdp-project"
+
+// ServiceAccountName: project-<namespace>, the ServiceAccount of
+// ReleasesNamespace helm-controller impersonates for the releases of a
+// project, bound to RoleName of its namespace.
+func ServiceAccountName(namespace string) string { return "project-" + namespace }
+
 // DefaultSource: the GitRepository of the tree, okdp-gitops'.
 const DefaultSource = "flux-system/okdp-gitops"
 
 // Target: the flux target.
 type Target struct {
-	Source     string // the GitRepository the HelmReleases read the charts from, <namespace>/<name>; DefaultSource when empty
-	PathPrefix string // the path of the tree in that repository, "" its root
+	Source     string   // the GitRepository the HelmReleases read the charts from, <namespace>/<name>; DefaultSource when empty
+	PathPrefix string   // the path of the tree in that repository, "" its root
+	Keep       []string // namespaces the root Kustomization lists though no result is given: projects whose directories the output keeps as they are, not written (okdp-compile --partial)
 }
 
 // Files: the helm target's files, then, in each instance's
 // target.InstanceDir, its HelmReleaseFile and KustomizationFile
-// (Instance), in each project's target.ProjectDir, its KustomizationFile
-// (Project), and in target.ProjectsDir the root's (Projects), even
-// without results, so that a Kustomization of the path syncs an empty
-// tree; each marked generated (target.Generated). The options are checked
-// first; two releases of one name in two namespaces are refused: their
-// HelmReleases share ReleasesNamespace.
+// (Instance); in each project's target.ProjectManifests, its manifests
+// (ProjectManifests) and their KustomizationFile; in each project's
+// target.ProjectDir, its KustomizationFile (Project), and in
+// target.ProjectsDir the root's (Projects), the namespaces of Keep among
+// them, even without results, so that a Kustomization of the path syncs an
+// empty tree; each marked generated
+// (target.Generated). The options are checked first; two releases of one
+// name in two namespaces are refused: their HelmReleases share
+// ReleasesNamespace.
 func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte, error) {
 	if err := t.check(); err != nil {
 		return nil, err
@@ -69,24 +90,120 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 		for _, n := range g.DependsOn(graph.Node{Namespace: res.Namespace, Release: res.Release}) {
 			dependsOn = append(dependsOn, n.Release)
 		}
-		for name, data := range t.Instance(res.Namespace, res.Release, path.Join(t.PathPrefix, dir), dependsOn) {
+		for name, data := range t.Instance(res.Namespace, res.Release, path.Join(t.PathPrefix, dir), dependsOn, res.Privileged) {
 			files[path.Join(dir, name)] = append([]byte(target.Generated), data...)
 		}
 		instances[res.Namespace] = append(instances[res.Namespace], path.Join("instances", res.Release))
 	}
 	var namespaces []string
-	for ns, dirs := range instances {
-		files[path.Join(target.ProjectDir(ns), KustomizationFile)] = append([]byte(target.Generated), Project(dirs)...)
-		namespaces = append(namespaces, ns)
+	for _, p := range target.Projects(results) {
+		manifests, err := ProjectManifests(p)
+		if err != nil {
+			return nil, err
+		}
+		for name, data := range manifests {
+			files[path.Join(target.ProjectManifests(p.Namespace), name)] = append([]byte(target.Generated), data...)
+		}
+		dirs := slices.Concat(instances[p.Namespace], []string{target.ProjectManifestsDir})
+		files[path.Join(target.ProjectDir(p.Namespace), KustomizationFile)] = append([]byte(target.Generated), Project(dirs)...)
+		namespaces = append(namespaces, p.Namespace)
+	}
+	for _, ns := range t.Keep {
+		if !slices.Contains(namespaces, ns) {
+			namespaces = append(namespaces, ns)
+		}
 	}
 	files[path.Join(target.ProjectsDir, KustomizationFile)] = append([]byte(target.Generated), Projects(namespaces)...)
 	return files, nil
+}
+
+// ProjectManifests: the files of a project's target.ProjectManifestsDir,
+// not marked: target.NamespaceFile, the Namespace (target.Namespace);
+// target.SecretStoreFile, the platform's secret store in it, when the
+// platform names a provider (target.SecretStore), both as the argocd
+// target writes them; Flux's own, ServiceAccountFile, for
+// a project that is not one of the platform's own (ServiceAccount); and
+// their KustomizationFile, which sets no namespace: each manifest carries
+// its own, the Namespace none.
+func ProjectManifests(p target.Project) (map[string][]byte, error) {
+	files := map[string][]byte{target.NamespaceFile: target.Namespace(p)}
+	store, err := target.SecretStore(p)
+	if err != nil {
+		return nil, err
+	}
+	if store != nil {
+		files[target.SecretStoreFile] = store
+	}
+	if !p.Privileged {
+		files[ServiceAccountFile] = ServiceAccount(p.Namespace)
+	}
+	var k target.Lines
+	k.Add("apiVersion: kustomize.config.k8s.io/v1beta1")
+	k.Add("kind: Kustomization")
+	k.Add("resources:")
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		k.Add("  - %s", name)
+	}
+	files[KustomizationFile] = []byte(k.String())
+	return files, nil
+}
+
+// ServiceAccount: the ServiceAccountFile of a project, not marked: the
+// ServiceAccount ServiceAccountName of ReleasesNamespace, which
+// helm-controller impersonates for the project's releases (Instance), the
+// Role RoleName of the project's namespace, every verb on every resource
+// of the namespace (the boundary is the namespace, not the kinds), and
+// the RoleBinding of the one to the other: a cluster-scoped object, or
+// one of another namespace, is refused by the API server.
+func ServiceAccount(namespace string) []byte {
+	var l target.Lines
+	l.Add("apiVersion: v1")
+	l.Add("kind: ServiceAccount")
+	l.Add("metadata:")
+	l.Add("  name: %q", ServiceAccountName(namespace))
+	l.Add("  namespace: %s", ReleasesNamespace)
+	l.Add("  labels:")
+	l.Add("    %s: %q", target.ProjectLabel, namespace)
+	l.Add("---")
+	l.Add("apiVersion: rbac.authorization.k8s.io/v1")
+	l.Add("kind: Role")
+	l.Add("metadata:")
+	l.Add("  name: %s", RoleName)
+	l.Add("  namespace: %q", namespace)
+	l.Add("  labels:")
+	l.Add("    %s: %q", target.ProjectLabel, namespace)
+	l.Add("rules:")
+	l.Add("  - apiGroups: [\"*\"]")
+	l.Add("    resources: [\"*\"]")
+	l.Add("    verbs: [\"*\"]")
+	l.Add("---")
+	l.Add("apiVersion: rbac.authorization.k8s.io/v1")
+	l.Add("kind: RoleBinding")
+	l.Add("metadata:")
+	l.Add("  name: %s", RoleName)
+	l.Add("  namespace: %q", namespace)
+	l.Add("  labels:")
+	l.Add("    %s: %q", target.ProjectLabel, namespace)
+	l.Add("roleRef:")
+	l.Add("  apiGroup: rbac.authorization.k8s.io")
+	l.Add("  kind: Role")
+	l.Add("  name: %s", RoleName)
+	l.Add("subjects:")
+	l.Add("  - kind: ServiceAccount")
+	l.Add("    name: %q", ServiceAccountName(namespace))
+	l.Add("    namespace: %s", ReleasesNamespace)
+	return []byte(l.String())
 }
 
 // check: the options.
 func (t Target) check() error {
 	if ns, name, ok := strings.Cut(t.source(), "/"); !ok || !chart.IsDNSLabel(ns) || !chart.IsDNSLabel(name) {
 		return fmt.Errorf("Flux.Source %q: the GitRepository of the tree, <namespace>/<name>", t.Source)
+	}
+	for _, ns := range t.Keep {
+		if !chart.IsDNSLabel(ns) {
+			return fmt.Errorf("Flux.Keep %q: a namespace, a DNS label", ns)
+		}
 	}
 	return target.CheckPrefix("Flux.PathPrefix", t.PathPrefix)
 }
@@ -103,10 +220,14 @@ func (t Target) source() string {
 // KustomizationFile, not marked: the HelmRelease of the umbrella chart of
 // dir, its directory in the repository, its path prefix included, built at
 // every revision, its values from the ConfigMap values-<release>, waiting
-// for the releases dependsOn, sorted; the Kustomization of the
-// HelmRelease and of that ConfigMap, of the chart's
-// helm.ValuesFile. The options are those Files checks.
-func (t Target) Instance(namespace, release, dir string, dependsOn []string) map[string][]byte {
+// for the releases dependsOn, sorted, installed as the project's
+// ServiceAccountName (serviceAccountName) unless privileged, a release of
+// one of the platform's own projects, which keeps helm-controller's own
+// identity; the namespace is not created at install: the project's
+// manifests hold it (ProjectManifests). Then the Kustomization of the
+// HelmRelease and of that ConfigMap, of the chart's helm.ValuesFile. The
+// options are those Files checks.
+func (t Target) Instance(namespace, release, dir string, dependsOn []string, privileged bool) map[string][]byte {
 	sourceNamespace, sourceName, _ := strings.Cut(t.source(), "/")
 	values := "values-" + release
 	var hr target.Lines
@@ -117,13 +238,16 @@ func (t Target) Instance(namespace, release, dir string, dependsOn []string) map
 	hr.Add("  name: %q", release)
 	hr.Add("  namespace: %s", ReleasesNamespace)
 	hr.Add("  labels:")
-	hr.Add("    okdp.io/project: %q", namespace)
+	hr.Add("    %s: %q", target.ProjectLabel, namespace)
 	hr.Add("    okdp.io/instance: %q", release)
 	hr.Add("spec:")
 	hr.Add("  interval: 10m")
 	hr.Add("  releaseName: %q", release)
 	hr.Add("  targetNamespace: %q", namespace)
 	hr.Add("  storageNamespace: %q", namespace)
+	if !privileged {
+		hr.Add("  serviceAccountName: %q", ServiceAccountName(namespace))
+	}
 	// The umbrella of the directory, built at every revision: its version,
 	// the package's, does not change when its dependencies do.
 	hr.Add("  chart:")
@@ -142,7 +266,7 @@ func (t Target) Instance(namespace, release, dir string, dependsOn []string) map
 	}
 	hr.Add("  timeout: 15m")
 	hr.Add("  install:")
-	hr.Add("    createNamespace: true")
+	hr.Add("    createNamespace: false")
 	hr.Add("    strategy:")
 	hr.Add("      name: RetryOnFailure")
 	hr.Add("      retryInterval: 2m")
@@ -175,7 +299,8 @@ func (t Target) Instance(namespace, release, dir string, dependsOn []string) map
 }
 
 // Project: the KustomizationFile of a project, not marked: the
-// directories of its instances, relative to the project's, sorted.
+// directories of its instances and of its manifests, relative to the
+// project's, sorted.
 func Project(dirs []string) []byte { return kustomization(dirs) }
 
 // Projects: the root KustomizationFile, in target.ProjectsDir, not marked:
@@ -183,13 +308,15 @@ func Project(dirs []string) []byte { return kustomization(dirs) }
 // when none.
 func Projects(namespaces []string) []byte { return kustomization(namespaces) }
 
-// kustomization: a Kustomization of the directories dirs, sorted, its
-// resources in ReleasesNamespace.
+// kustomization: a Kustomization of the directories dirs, sorted. It sets
+// no namespace, which kustomize would set on every resource of every
+// directory under it, moving a project's manifests out of its namespace:
+// each manifest carries its own, an instance's Kustomization
+// ReleasesNamespace for its HelmRelease and its ConfigMap.
 func kustomization(dirs []string) []byte {
 	var k target.Lines
 	k.Add("apiVersion: kustomize.config.k8s.io/v1beta1")
 	k.Add("kind: Kustomization")
-	k.Add("namespace: %s", ReleasesNamespace)
 	if len(dirs) == 0 {
 		k.Add("resources: []")
 	} else {

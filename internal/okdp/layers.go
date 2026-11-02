@@ -2,16 +2,19 @@
 // level, then the instance's (Inputs.Values), Go values of any type read as
 // Helm values (value.Normalize). global is the context's: global.okdp (the
 // instance's host, where its OAuth clients register, the chart its objects
-// are rendered with) and what every chart receives as global
-// (chart.FinalValues). Level 0 is the platform's; each level above adds to
-// those below it, it changes none of their values: no value they set, no
-// connection they give, no claim they declare, no class they define, nor
-// the default class they set. An instance sets only the
-// keys of global its package's parameter schema declares, never okdp, no
-// connections, its own being a context layer of its level, and no claims,
-// its project's (level 1 or above, never the platform's). None but level 0 gives template
-// code: the platform's layers and the package's schema defaults are
-// reviewed, the higher levels' and the instance's are input.
+// are rendered with, the platform's policy) and what every chart receives
+// as global (chart.FinalValues). Level 0 is the platform's; each level
+// above adds to those below it, it changes none of their values: no value
+// they set, no connection they give, no claim they declare, no class they
+// define, nor the default class they set; and of global.okdp, the
+// platform's settings, it sets provisioning only, its classes: every other
+// key of global.okdp, known to the compiler or not, is level 0's. An
+// instance sets only the keys of global its package's parameter schema
+// declares, never okdp, no connections, its own being a context layer of
+// its level, and no claims, its project's (level 1 or above, never the
+// platform's). None but level 0 gives template code: the platform's layers
+// and the package's schema defaults are reviewed, the higher levels' and
+// the instance's are input.
 
 package okdp
 
@@ -81,7 +84,10 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 // (connections.<name>, claims.<name>,
 // global.okdp.provisioning.<contract>.classes.<name>,
 // global.okdp.provisioning.<contract>.default, taken whole), or a parent of
-// either set to anything but a map (chart.Overlap).
+// either set to anything but a map (chart.Overlap). Above level 0, a layer
+// sets nothing of global.okdp but provisioning (platformOnly): the other
+// keys, those the compiler reads (charts, oidc, policy...) and the others,
+// are the platform's, level 0's, whether level 0 sets them or not.
 // Level 0 declares no claims: they are a project's. Above level 0, no
 // template code (chart.NoTemplate): only the platform's level is
 // reviewed.
@@ -114,6 +120,11 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 				return nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
 			}
 		}
+		if l.Level > 0 {
+			if k := platformOnly(layer); k != "" {
+				return nil, fmt.Errorf("%s: %s: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp", name, k)
+			}
+		}
 		if _, set := layer["claims"]; set && l.Level == 0 {
 			return nil, fmt.Errorf("%s: claims: a project's, of level 1 or above", name)
 		}
@@ -126,4 +137,30 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 		out = append(out, layer)
 	}
 	return out, nil
+}
+
+// platformOnly: the first path of layer, a context layer above level 0,
+// that sets a platform setting, in path order: global.okdp itself, to
+// anything but a map, or a key of it but provisioning, the classes a
+// project adds; "" when it sets none. The settings of global.okdp are the
+// platform's, level 0's, those the compiler reads (charts, the chart the
+// OAuth clients are rendered with; oidc, where they register; policy, the
+// privileged projects; secrets, the store) and those it does not, which
+// the mappings read: a project adds none, whether the platform sets them
+// or not.
+func platformOnly(layer M) string {
+	okdp, set := value.AsMap(layer["global"])["okdp"]
+	if !set {
+		return ""
+	}
+	m, isMap := okdp.(M)
+	if !isMap {
+		return "global.okdp"
+	}
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if k != "provisioning" {
+			return value.Key("global.okdp", k)
+		}
+	}
+	return ""
 }

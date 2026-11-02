@@ -7,7 +7,8 @@
 //
 // The instance's upstream values are upstream.<chart> of its values: the
 // mapping sees them as written (values.upstream.<chart>), and they are
-// applied with their checks after it (FinalValues).
+// applied with their checks after it (FinalValues), the package's
+// (protect) and the caller's (UpstreamCheck: the platform's policy).
 package chart
 
 import (
@@ -36,7 +37,9 @@ import (
 // same with or without it. pkg: the package (its defaults files). file: the
 // values file the output is read from, for the errors of its keys. values:
 // the instance's merged values (their global, and their upstream values).
-func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M) (map[string]map[string]any, map[string]Ref, []string, error) {
+// check: what the caller refuses of the upstream values of every key,
+// beside its protect paths (UpstreamCheck); nil, nothing.
+func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (map[string]map[string]any, map[string]Ref, []string, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
 	var warnings []string
@@ -49,7 +52,7 @@ func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M)
 		if !ok {
 			return nil, nil, nil, fmt.Errorf("%s: %s: not a dependency of Chart.yaml", file, key)
 		}
-		f, appended, err := keyValues(pkg, key, spec, value.AsMap(output[key]), values)
+		f, appended, err := keyValues(pkg, key, spec, value.AsMap(output[key]), values, check)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
@@ -84,8 +87,8 @@ func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M)
 //
 // The paths of the instance's lists appended to (append) are returned with
 // them, for checkKey. files: the package. values: the instance's merged
-// values.
-func keyValues(files fs.FS, key string, spec Spec, computed M, values M) (M, [][]string, error) {
+// values. check: the caller's check of the upstream values (UpstreamCheck).
+func keyValues(files fs.FS, key string, spec Spec, computed M, values M, check UpstreamCheck) (M, [][]string, error) {
 	// OKDP's defaults for this chart, then what the mapping computed.
 	okdpDefaults := M{}
 	if spec.Defaults != "" {
@@ -96,14 +99,14 @@ func keyValues(files fs.FS, key string, spec Spec, computed M, values M) (M, [][
 	}
 	out := merged(okdpDefaults, computed)
 	// Last, the instance's upstream values (upstream.<chart>), when the chart
-	// accepts them, checked ("{{", protect, append). The mapping has seen
-	// them; these checks are what the platform enforces whatever the mapping
-	// does with them.
+	// accepts them, checked ("{{", protect, the caller's check, append). The
+	// mapping has seen them; these checks are what the platform enforces
+	// whatever the mapping does with them.
 	var appended [][]string
 	if spec.Upstream {
 		user := value.AsMap(value.AsMap(values["upstream"])[key])
 		var err error
-		if appended, err = applyUpstream(out, user, source{chart: key}, spec.Protect, spec.Append); err != nil {
+		if appended, err = applyUpstream(out, user, source{chart: key}, spec.Protect, spec.Append, check); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -191,10 +194,18 @@ func (s source) at(p string) string {
 	return "upstream." + s.chart + "." + p
 }
 
+// UpstreamCheck: what a caller refuses of the instance's upstream values
+// of a chart, user, whatever the package's protect paths: the platform's
+// policy. values: the computed values they are applied over (OKDP's
+// defaults and the mapping's), which it does not change; at names a path of
+// user in the messages (upstream.<key>.<path>, Key and Index paths). Its
+// error fails the compile.
+type UpstreamCheck func(user, values M, at func(p string) string) error
+
 // applyUpstream: one source of instance upstream values over the computed
-// ones, after the {{ and protect checks; the paths of the lists appended
-// to (mergeUpstream).
-func applyUpstream(values, user M, src source, protect, appendPaths []string) ([][]string, error) {
+// ones, after the {{ and protect checks, then check's (nil: none); the
+// paths of the lists appended to (mergeUpstream).
+func applyUpstream(values, user M, src source, protect, appendPaths []string, check UpstreamCheck) ([][]string, error) {
 	if len(user) == 0 {
 		return nil, nil
 	}
@@ -213,6 +224,11 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string) ([
 		}
 		if at := protectedAt(user, segs); at != nil {
 			return nil, fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(formatPath(at)), p)
+		}
+	}
+	if check != nil {
+		if err := check(user, values, src.at); err != nil {
+			return nil, err
 		}
 	}
 	return mergeUpstream(values, user, src, appendPaths)

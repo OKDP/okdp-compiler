@@ -56,10 +56,11 @@ func published(info M, outputs []Output) Info {
 // first error is reported, every required field not
 // set at once (contract.complete), every violation of the contract's types
 // at once (contract.check). An output given a `secret` ({generate,
-// stringData} or {stringData}) gets its credentials Secret, named after its
-// secretRef (default <name>-<contract>-credentials). Then two outputs of one
-// contract and name fail (twice).
-func provided(session *compile.Session, inst *instance, contracts fs.FS, provides []any) ([]Output, []M, error) {
+// stringData}, or {stringData} when plain, Inputs.AllowPlainSecrets, is
+// true) gets its credentials Secret, named after its secretRef (default
+// <name>-<contract>-credentials). Then two outputs of one contract and name
+// fail (twice).
+func provided(session *compile.Session, inst *instance, contracts fs.FS, provides []any, plain bool) ([]Output, []M, error) {
 	var outputs []Output
 	var credentials []M
 	for _, x := range provides {
@@ -97,7 +98,7 @@ func provided(session *compile.Session, inst *instance, contracts fs.FS, provide
 		outputs = append(outputs, o)
 		// The credentials Secret, when the mapping describes it.
 		if value.Truthy(secret) {
-			objs, err := credentialsSecret(session, inst, contract, out, o.SecretRef.Name, secret)
+			objs, err := credentialsSecret(session, inst, contract, out, o.SecretRef.Name, secret, plain)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -136,9 +137,11 @@ func twice(outputs []Output) error {
 // credentialsSecret: the credentials Secret of an output published with a
 // `secret`: {generate: [keys], stringData} as a generated Secret
 // (generatedSecret, in the compile's session), {stringData} as a plain
-// Secret; both labelled okdp.io/credentials-<contract>, in the namespace of
-// the instance inst.
-func credentialsSecret(session *compile.Session, inst *instance, contract, output, name string, secret M) ([]any, error) {
+// Secret when plain (Inputs.AllowPlainSecrets), refused otherwise: its
+// values would be written in clear to the deployments repository; both
+// labelled okdp.io/credentials-<contract>, in the namespace of the
+// instance inst.
+func credentialsSecret(session *compile.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
 	label := "okdp.io/credentials-" + contract
 	if value.Truthy(secret["generate"]) {
 		return generatedSecret(session, inst, M{
@@ -150,6 +153,9 @@ func credentialsSecret(session *compile.Session, inst *instance, contract, outpu
 	}
 	if !value.Truthy(secret["stringData"]) {
 		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", inst.svc.Name, output)
+	}
+	if !plain {
+		return nil, fmt.Errorf("%s: output %q: secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it", inst.svc.Name, output)
 	}
 	l := labels(inst.svc.Name, inst.release, "", false)
 	l[label] = "true"

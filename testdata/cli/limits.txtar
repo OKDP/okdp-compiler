@@ -1,0 +1,42 @@
+# --cost-limit: the CEL cost each instance's expressions may use, its
+# mapping's and the compiler's templates', what a host function builds
+# counted (quote of a long text); past it, the instance is refused,
+# nothing written; 0, no limit; the default bounds it.
+status 1 okdp-compile --repository $WORK/tree -o $WORK/files --cost-limit 100
+! stdout .
+stderr '^error: demo/demo-echo: values.cel.yaml: app: text: \$\{\{ quote\(values.text\) \}\}: the expressions of the compile exceed its CEL cost limit \(100\)$'
+! exists $WORK/files
+status 0 okdp-compile --repository $WORK/tree -o $WORK/files --cost-limit 1000
+exists $WORK/files/projects/demo/instances/demo-echo/instance.values.yaml
+status 0 okdp-compile --repository $WORK/tree --check --cost-limit 0
+status 0 okdp-compile --repository $WORK/tree --check
+
+# --timeout: the whole compile; past it, nothing written; 0, no limit.
+status 1 okdp-compile --repository $WORK/tree -o $WORK/late --timeout 1ns
+! stdout .
+stderr '^error: the compile takes longer than --timeout 1ns: nothing written$'
+! exists $WORK/late
+status 0 okdp-compile --repository $WORK/tree --check --timeout 0
+
+# Not a number, not a duration: a usage error.
+status 2 okdp-compile --repository $WORK/tree --check --cost-limit many
+stderr 'invalid value "many" for flag -cost-limit'
+status 2 okdp-compile --repository $WORK/tree --check --timeout 10
+stderr 'invalid value "10" for flag -timeout'
+
+-- tree/catalog/echo/1.0.0/Chart.yaml --
+apiVersion: v2
+name: echo
+version: 1.0.0
+dependencies:
+  - {name: echo, alias: app, repository: https://charts.example.org, version: 1.0.0}
+-- tree/catalog/echo/1.0.0/config.schema.json --
+{"properties": {"text": {"type": "string", "default": ""}}}
+-- tree/catalog/echo/1.0.0/values.cel.yaml --
+app:
+  text: ${{ quote(values.text) }}
+-- tree/projects/demo/instances/echo/instance.yaml --
+service: echo
+version: 1.0.0
+-- tree/projects/demo/instances/echo/config.yaml --
+text: "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"

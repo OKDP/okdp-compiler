@@ -33,13 +33,6 @@ postgresql:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -55,4 +48,11 @@ postgresql:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd

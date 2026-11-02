@@ -39,7 +39,13 @@ order:
   enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
 
 An instance with neither has no objects file: its umbrella is the
-upstream charts alone.
+upstream charts alone. Unless the project is one of the platform's own
+(`global.okdp.policy.privileged`), every object stays in the instance's
+namespace and none is of a cluster-scoped kind: the compile refuses them
+([objects section](specs/01_inputs_outputs.md#objects-section)). And no
+Secret holds values in clear, unless the caller allows it
+(`Inputs.AllowPlainSecrets`): the objects file is in the deployments
+repository.
 
 The `objects` section carries real weight: on 2026-10-12, 15 of the 24
 packages of the `okdp-compiler` branches of platform-charts and

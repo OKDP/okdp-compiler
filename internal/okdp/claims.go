@@ -68,10 +68,10 @@ func parseClaim(m M, path string, named bool) (*ClaimSpec, error) {
 			return nil, fmt.Errorf("%s: claim: unknown key %q: %s", path, k, allowed)
 		}
 		if _, ok := m[k].(M); k == "request" && !ok && m[k] != nil {
-			return nil, fmt.Errorf("%s: claim: request must be an object, got %s", path, value.Short(m[k]))
+			return nil, fmt.Errorf("%s: claim: request must be an object, got %s", path, value.ShortAt(k, m[k]))
 		}
 		if _, ok := m[k].(string); k != "request" && !ok && m[k] != nil {
-			return nil, fmt.Errorf("%s: claim: %s must be a string, got %s", path, k, value.Short(m[k]))
+			return nil, fmt.Errorf("%s: claim: %s must be a string, got %s", path, k, value.ShortAt(k, m[k]))
 		}
 	}
 	c := &ClaimSpec{Contract: value.Str(m["contract"]), Class: value.Str(m["class"]), Provider: value.Str(m["provider"])}
@@ -104,7 +104,7 @@ func namedClaims(values M) (map[string]ClaimSpec, error) {
 	}
 	m, ok := v.(M)
 	if !ok {
-		return nil, fmt.Errorf("claims: the named claims, by name, got %s", value.Short(v))
+		return nil, fmt.Errorf("claims: the named claims, by name, got %s", value.ShortAt("claims", v))
 	}
 	conns := value.AsMap(values["connections"])
 	out := map[string]ClaimSpec{}
@@ -143,7 +143,7 @@ func ParseClaim(name string, v any) (ClaimSpec, error) {
 	case !chart.IsDNSLabel(name):
 		return c, fmt.Errorf("%s: claim: its name is a DNS-1123 label", where)
 	case !ok:
-		return c, fmt.Errorf("%s: a claim, an object, got %s", where, value.Short(v))
+		return c, fmt.Errorf("%s: a claim, an object, got %s", where, value.ShortAt(name, v))
 	}
 	parsed, err := parseClaim(decl, where, true)
 	if err != nil {
@@ -325,7 +325,7 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 		return instanceClaims{}
 	}
 	var out []claimRef
-	refs(schema.Doc, value.Copy(values), "", func(ref M, v any, path string) any {
+	refs(schema.Doc, value.Copy(values), "", "", func(ref M, v any, path, _ string) any {
 		if !value.Truthy(ref["provision"]) {
 			return v
 		}

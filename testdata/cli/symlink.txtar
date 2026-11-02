@@ -1,0 +1,49 @@
+# A symbolic link in a repository is not followed: the file it is, or a
+# directory on its path, refused, named; a directory that holds one
+# refused when listed. Status 1, nothing written.
+symlink $WORK/tree/projects/demo/instances/web/config.yaml -> $WORK/secret.yaml
+status 1 okdp-compile --repository $WORK/tree -o $WORK/files
+! stdout .
+stderr '^error: .*tree/projects/demo/instances/web/config.yaml: a symbolic link, not followed$'
+! exists $WORK/files
+rm $WORK/tree/projects/demo/instances/web/config.yaml
+status 0 okdp-compile --repository $WORK/tree --check
+
+symlink $WORK/tree/projects/data -> $WORK/tree/projects/demo
+status 1 okdp-compile --repository $WORK/tree --check
+stderr '^error: .*tree/projects: projects/data: a symbolic link, not followed$'
+rm $WORK/tree/projects/data
+
+symlink $WORK/tree/catalog/web/1.0.0/values.yaml -> $WORK/secret.yaml
+status 1 okdp-compile --repository $WORK/tree --check
+stderr 'values.yaml: a symbolic link, not followed'
+rm $WORK/tree/catalog/web/1.0.0/values.yaml
+
+# A package's version directory: the link named, not a version missing.
+symlink $WORK/tree/catalog/web/2.0.0 -> $WORK/tree/catalog/web/1.0.0
+cp $WORK/tree/projects/demo/instances/web/instance.yaml $WORK/web.yaml
+cp $WORK/web2.yaml $WORK/tree/projects/demo/instances/web/instance.yaml
+status 1 okdp-compile --repository $WORK/tree --check
+stderr '^error: .*instance.yaml: version "2.0.0" of service "web": .*tree/catalog/web/2.0.0: a symbolic link, not followed$'
+! stderr 'is not in'
+cp $WORK/web.yaml $WORK/tree/projects/demo/instances/web/instance.yaml
+rm $WORK/tree/catalog/web/2.0.0
+
+# The repository itself may be a link: the user names it.
+symlink $WORK/link -> $WORK/tree
+status 0 okdp-compile --repository $WORK/link --check
+
+-- secret.yaml --
+token: s3cr3t
+-- web2.yaml --
+service: web
+version: 2.0.0
+-- tree/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- tree/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0

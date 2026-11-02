@@ -86,41 +86,43 @@ type Dependency struct {
 // refs: v, at path, of the schema s, each value carrying an
 // x-okdp-connection-ref (ref) replaced by what visit gives for it, in path
 // order (keys sorted, items in order), at its parameter path (value.Key,
-// value.Index: a key with a dot in brackets). The keys the schema does not
-// declare are left as they are.
-func refs(s M, v any, path string, visit func(ref M, v any, path string) any) any {
+// value.Index: a key with a dot in brackets) and under its key, an item's
+// its list's, the key of a message's value.ShortAt. The keys the schema
+// does not declare are left as they are.
+func refs(s M, v any, path, key string, visit func(ref M, v any, path, key string) any) any {
 	if ref, ok := s["x-okdp-connection-ref"].(M); ok {
-		return visit(ref, v, path)
+		return visit(ref, v, path, key)
 	}
 	switch t := v.(type) {
 	case M:
 		props := value.AsMap(s["properties"])
 		for _, k := range slices.Sorted(maps.Keys(props)) {
 			if x, ok := t[k]; ok {
-				t[k] = refs(value.AsMap(props[k]), x, value.Key(path, k), visit)
+				t[k] = refs(value.AsMap(props[k]), x, value.Key(path, k), k, visit)
 			}
 		}
 	case []any:
 		// A list: the same, with the item schema.
 		for i, x := range t {
-			t[i] = refs(value.AsMap(s["items"]), x, value.Index(path, i), visit)
+			t[i] = refs(value.AsMap(s["items"]), x, value.Index(path, i), key, visit)
 		}
 	}
 	return v
 }
 
-// walk: v, at path, of the schema s, with every reference replaced by the
-// resolved connection (refs, reference). The error of a reference that
-// does not resolve is recorded (errs).
-func (r *resolver) walk(s M, v any, path string) any { return refs(s, v, path, r.reference) }
+// walk: v, the parameters, of the schema s, with every reference replaced
+// by the resolved connection (refs, reference). The error of a reference
+// that does not resolve is recorded (errs).
+func (r *resolver) walk(s M, v any) any { return refs(s, v, "", "", r.reference) }
 
-// reference: v, the value of a reference ref at path, resolved. Null or
-// empty means not set; a string is a connection's name, or a named
+// reference: v, the value of a reference ref at path, under key, resolved.
+// Null or empty means not set; a string is a connection's name, or a named
 // claim's; an object a claim template (parseClaim), when the reference
-// takes them (provision). Another value
-// would reach the mapping unresolved, past the contract. What it resolves
-// to meets its requirement, require (readRequirement).
-func (r *resolver) reference(ref M, v any, path string) any {
+// takes them (provision). Another value would reach the mapping
+// unresolved, past the contract: refused, its value printed as a
+// sensitive key's is (value.ShortAt). What it resolves to meets its
+// requirement, require (readRequirement).
+func (r *resolver) reference(ref M, v any, path, key string) any {
 	if v == nil || v == "" {
 		return v
 	}
@@ -137,7 +139,7 @@ func (r *resolver) reference(ref M, v any, path string) any {
 		c, err = r.resolve(t, contract, path, nil, req, provision)
 	case M:
 		if !provision {
-			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v))
+			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 			break
 		}
 		var claim *ClaimSpec
@@ -145,7 +147,7 @@ func (r *resolver) reference(ref M, v any, path string) any {
 			c, err = r.resolve("", contract, path, claim, req, true)
 		}
 	default:
-		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v))
+		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 	}
 	if err != nil {
 		r.errs = append(r.errs, err)
@@ -428,6 +430,9 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	case secretRef["name"] != nil:
 		return "", fmt.Errorf("%s: name or remoteKey, not both", where)
 	case !ok || key == "":
+		// A key of the store names credentials, it holds none: printed as
+		// the messages below print it (value.Short, not ShortAt, which
+		// reads remoteKey as an API key).
 		return "", fmt.Errorf("%s.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got %s", where, value.Short(secretRef["remoteKey"]))
 	}
 	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
@@ -654,7 +659,7 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 	if claim, set := d["x-okdp-claim"]; set {
 		cd, ok := claim.(map[string]any)
 		if !ok {
-			return nil, fail(fmt.Sprintf("x-okdp-claim: a JSON Schema, an object, got %s", value.Short(m["x-okdp-claim"])))
+			return nil, fail(fmt.Sprintf("x-okdp-claim: a JSON Schema, an object, got %s", value.ShortAt("x-okdp-claim", m["x-okdp-claim"])))
 		}
 		cd = maps.Clone(cd)
 		if _, ok := cd["$schema"]; !ok && d["$schema"] != nil {
@@ -717,7 +722,7 @@ func readRequirement(ref M, draft any) (*requirement, error) {
 	}
 	doc, ok := v.(M)
 	if !ok {
-		return nil, fmt.Errorf("require: a JSON Schema, an object, got %s", value.Short(v))
+		return nil, fmt.Errorf("require: a JSON Schema, an object, got %s", value.ShortAt("require", v))
 	}
 	doc = value.AsMap(value.Copy(doc))
 	if _, ok := doc["$schema"]; !ok && draft != nil {
@@ -747,7 +752,7 @@ func requirements(s M) error {
 			}
 			if r, set := ref["request"]; set && r != nil {
 				if _, ok := r.(M); !ok {
-					errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: request: an object, got %s", at, value.Short(r)))
+					errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: request: an object, got %s", at, value.ShortAt("request", r)))
 				}
 			}
 			return

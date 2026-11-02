@@ -1,0 +1,14 @@
+# error: database: connection "datalake": secretRef.remoteKey "platform/datalake": a key of the platform's secret store a project may not read: a connection above level 0 (level 1) names a key under "demo/", its namespace; the platform's keys are read through the platform's connections (level 0)
+# A project's connection (project.yaml, level 1) whose credentials are the
+# platform's, under platform/: the platform's keys are read through the
+# platform's connections, reviewed with it, never named by a project,
+# whatever the store's policy allows. The store, platform.yaml's, is
+# given under platform, a layer of level 0 of the test.
+platform: {global: {okdp: {secrets: {store: okdp-secrets}}}}
+database: datalake
+connections:
+  datalake:
+    contract: database
+    host: datalake.okdp.example.org
+    dbName: lake
+    secretRef: {remoteKey: platform/datalake}

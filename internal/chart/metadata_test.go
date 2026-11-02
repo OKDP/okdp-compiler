@@ -101,6 +101,7 @@ func TestMetadataCheck(t *testing.T) {
 		"long key":       {chart(with(func(d *Dependency) { d.Alias = strings.Repeat("a", 64) })), `Chart.yaml: dependencies[0] (aaaa`},
 		"duplicate":      {chart(app, with(func(d *Dependency) { d.Name = "other" }), with(func(d *Dependency) { d.Name, d.Alias = "workspace", "app" })), "Chart.yaml: dependencies[2] (app): the key of dependencies[0] too: give one of them an alias"},
 		"file://":        {chart(with(func(d *Dependency) { d.Repository = "file://../x" })), `Chart.yaml: dependencies[0].repository "file://../x": the URL of a chart repository (https://... or oci://...)`},
+		"http://":        {chart(with(func(d *Dependency) { d.Repository = "http://charts.example.org" })), `Chart.yaml: dependencies[0].repository "http://charts.example.org": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)`},
 		"@repo":          {chart(with(func(d *Dependency) { d.Repository = "@stable" })), `Chart.yaml: dependencies[0].repository "@stable": the URL of a chart repository`},
 		"no host":        {chart(with(func(d *Dependency) { d.Repository = "oci://" })), `Chart.yaml: dependencies[0].repository "oci://": the URL of a chart repository`},
 		"out of a cache": {chart(with(func(d *Dependency) { d.Repository = "https://x/../y" })), `Chart.yaml: dependencies[0].repository "https://x/../y": the URL of a chart repository`},

@@ -67,11 +67,12 @@ type instance struct {
 // order.
 //
 // The merged values stay as the user wrote them. The mapping sees release
-// (name, namespace), values (the resolved parameters), global (global.okdp,
-// as written), platform (what the compiler derives from it: oidc, the
-// Secret of the main OAuth client, the ingress annotations, the proxy
-// environment), and the package: service (name, version), labels and
-// selectorLabels (without component).
+// (name, namespace), values (the resolved parameters), global (as written:
+// global.okdp, the platform's settings, and the other keys of global, a
+// project's own settings among them), platform (what the compiler derives
+// from global.okdp: oidc, the Secret of the main OAuth client, the ingress
+// annotations, the proxy environment), and the package: service (name,
+// version), labels and selectorLabels (without component).
 func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	schema, values, err := parameters(files, in, svc)
 	if err != nil {
@@ -101,7 +102,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	}
 	params := value.AsMap(value.Copy(values))
 	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
-	if r.walk(schema.Doc, params, ""); r.errs != nil {
+	if r.walk(schema.Doc, params); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
 			err = &missingOutputs{outputs: r.missing, err: err}
@@ -130,7 +131,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		"release":        M{"name": in.Release, "namespace": in.Namespace},
 		"values":         params,
 		"claims":         claimsScope(in.Claims),
-		"global":         M{"okdp": value.Copy(inst.okdp)}, // the platform values, as written
+		"global":         value.AsMap(value.Copy(values["global"])), // the platform's and the project's settings, as written
 		"platform": M{
 			"oidc": oidc,
 			// The Secret that holds the service's main OAuth client:

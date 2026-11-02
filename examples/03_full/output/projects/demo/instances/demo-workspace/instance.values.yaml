@@ -152,13 +152,6 @@ api:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -174,6 +167,13 @@ api:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: IfNotPresent
@@ -253,13 +253,6 @@ automation-oidc-dcr:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -275,6 +268,13 @@ automation-oidc-dcr:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: Always
@@ -334,13 +334,6 @@ console-oidc-dcr:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -356,6 +349,13 @@ console-oidc-dcr:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: Always
@@ -423,13 +423,6 @@ gateway:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -445,6 +438,13 @@ gateway:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   headers:
     X-Workspace-Cost-Center: cc-4217
@@ -485,13 +485,6 @@ metrics:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -507,6 +500,13 @@ metrics:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   interval: 15s
   labels:
@@ -558,13 +558,6 @@ oidc-dcr:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -580,6 +573,13 @@ oidc-dcr:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: Always
@@ -728,13 +728,6 @@ scheduler:
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -750,6 +743,13 @@ scheduler:
       tls:
         caBundleSecret: okdp-ca-bundle
         clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     tag: 3.2.0

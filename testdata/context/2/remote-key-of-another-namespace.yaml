@@ -4,9 +4,9 @@
 # of another namespace, the one the provider cnpg-system pushed for the
 # claim finance.ledger.database: a connection above level 0 reads its
 # namespace's keys only, demo/... here (a project's project.yaml, level 1,
-# alike). The store is set here for the compile: a tree's connections.yaml
-# holds connections only, the store being platform.yaml's.
-global: {okdp: {secrets: {store: okdp-secrets}}}
+# alike). The store, platform.yaml's, is given under platform, a level-0
+# layer of the test: a tree's connections.yaml holds connections only.
+platform: {global: {okdp: {secrets: {store: okdp-secrets}}}}
 database: stolen
 connections:
   stolen:
