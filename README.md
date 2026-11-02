@@ -226,11 +226,13 @@ its key, given to Helm with `-f` ([`--output`](docs/01_usage.md#--output),
 written (`templates/okdp.yaml`), when the instance has any, and
 `okdp.info.yaml`, what the instance publishes, when it publishes
 something. The directory is created if needed; the command owns its
-`projects/`, removing what it does not write; a tree that fails writes
-nothing. The instances the connection references point to are printed on
-stderr, one line each, `<namespace>/<release>: depends on <instance>
-(<contract> <output>, <field>)`; the deployment graph orders the
-releases with them ([GitOps](docs/01_usage.md#gitops)).
+`projects/`, which it marks, `projects/.okdp-compile`, removing what it
+does not write; a `projects/` it did not write, without the mark, is
+refused but with `--force`; a tree that fails writes nothing. The
+instances the connection references point to are printed on stderr, one
+line each, `<namespace>/<release>: depends on <instance> (<contract>
+<output>, <field>)`; the deployment graph orders the releases with them
+([GitOps](docs/01_usage.md#gitops)).
 
 `--check`, without `-o`, compiles and writes nothing: what fails a compile
 fails it, its warnings printed. With it, `--charts <dir>` (`$OKDP_CHARTS`),
@@ -239,7 +241,24 @@ its defaults, they must meet its `values.schema.json`, as Helm checks them
 when it renders; an instance list appended to (`append`) that leaves out
 items of the chart's default list is warned of, Helm replacing that list.
 A compile reads no chart: `--charts` without `--check` fails
-([`--check`](docs/01_usage.md#--check)).
+([`--check`](docs/01_usage.md#--check)). `--report <file>` (`-` for
+stdout) writes what the compile gives as JSON, with `--check` too and
+when it fails: each instance, its status (`compiled`, `refused`,
+`skipped`), its error, warnings, dependencies, claims and charts, and the
+tree's errors ([`--report`](docs/01_usage.md#--report)). `--partial`
+writes the projects whose instances all compile and keeps what the
+output holds of the others, failing all the same
+([`--partial`](docs/01_usage.md#--partial)).
+
+What a package computes is bounded: `--cost-limit` (50000000, 0 for
+none), the CEL cost of each instance's expressions, what a host function
+builds counted, past which the instance is refused, and `--timeout` (10m,
+0 for none), the whole compile, past which nothing is written ([command
+line](docs/01_usage.md#command-line)). What the command reads is too: a
+symbolic link in a repository or the chart cache is not followed but
+refused, a file over 4 MiB, or a directory's files over 64 MiB together,
+refused. Credentials written in clear fail the compile, but with
+`--allow-plain-secrets`, for a deployments repository that is private.
 
 ## Layout
 
@@ -264,7 +283,7 @@ A compile reads no chart: `--charts` without `--check` fails
 | `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, level 1), each with connections, the instance's own connections (`connections.yaml`, level 2) and its values (`config.yaml`), two claims of a database among its references, one of its own, one the project's named claim; the instances it depends on, `demo-db`, their provider, and `demo-alerts`, whose output it references, minimal packages, `db` and `alerts`; its chart cache in `.charts/`, for `--check --charts` |
 | `examples/04_claims/` | claims: a database server, `postgresql` in the project `data`, the provider of the platform's default class (`global.okdp.provisioning`) and of the project's class `large`, each naming it `data/postgresql`, the latter with its consent (`claimers: [demo]` of its `instance.yaml`), that provisions a database for each claim bound to it; an application, `app`, whose database is a claim by default, a PostgreSQL one with credentials (`require`): `demo-app` claims one of its own by default, `demo-metrics` one it writes out (`config.yaml`: a class and a request, a size and extensions), `demo-reports` and `demo-dashboards` reference one the project declares (`project.yaml`, a named claim of the class `large`); the contract's two sides, what a claim requests (`x-okdp-claim`: a size, extensions) and what the provider publishes, its `okdp.info.yaml` showing what it granted; the platform's secret store, the credentials crossing namespaces |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
-| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, stdout and stderr |
+| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, the limits, symbolic links, the output's mark, the report, `--partial`, `--allow-plain-secrets`, stdout and stderr |
 | `testdata/targets/` | the files of each target for three instances (`go test ./internal/target -update`) |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
 | `docs/` | the documentation |

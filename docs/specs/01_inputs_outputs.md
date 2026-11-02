@@ -2395,7 +2395,7 @@ projects/
 | Target | Options (its fields) | Files besides the umbrella charts |
 |---|---|---|
 | `compiler.Helm` | none | none: each instance installs with Helm, as one release, its dependencies built first ([rendering with Helm](../01_usage.md#rendering-with-helm)), after those it waits for |
-| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
+| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root); `Keep`, namespaces the root lists without a result, projects whose directories the output keeps as they are (`okdp-compile --partial`) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
 | `compiler.ArgoCD` | `RepoURL`, the repository of the tree, required; `Revision` (`HEAD`); `PathPrefix` | per instance, `application.yaml`; per namespace, `project/` |
 
 The files of the flux and argocd targets are marked generated on their
@@ -2425,12 +2425,12 @@ without a name suffix, labelled `reconcile.fluxcd.io/watch: Enabled`, a
 change of values reconciling the HelmRelease. A namespace's
 `kustomization.yaml`: the directories of its instances,
 `instances/<release>`, and `project`, sorted. The root's,
-`projects/kustomization.yaml`: the directories of the namespaces, sorted,
-`resources: []` when there is none, written even without instance, so
-that a tree emptied syncs, its releases pruned. Neither sets a
-`namespace`, which kustomize would set on every resource of every
-directory under it, moving a project's manifests out of its namespace:
-each manifest carries its own.
+`projects/kustomization.yaml`: the directories of the namespaces, those
+of `Keep` among them, sorted, `resources: []` when there is none,
+written even without instance, so that a tree emptied syncs, its
+releases pruned. Neither sets a `namespace`, which kustomize would set
+on every resource of every directory under it, moving a project's
+manifests out of its namespace: each manifest carries its own.
 
 The Application (`argocd`): in `argocd`, named after the release,
 labelled as the HelmRelease; its sync wave,

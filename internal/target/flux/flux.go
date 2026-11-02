@@ -56,8 +56,9 @@ const DefaultSource = "flux-system/okdp-gitops"
 
 // Target: the flux target.
 type Target struct {
-	Source     string // the GitRepository the HelmReleases read the charts from, <namespace>/<name>; DefaultSource when empty
-	PathPrefix string // the path of the tree in that repository, "" its root
+	Source     string   // the GitRepository the HelmReleases read the charts from, <namespace>/<name>; DefaultSource when empty
+	PathPrefix string   // the path of the tree in that repository, "" its root
+	Keep       []string // namespaces the root Kustomization lists though no result is given: projects whose directories the output keeps as they are, not written (okdp-compile --partial)
 }
 
 // Files: the helm target's files, then, in each instance's
@@ -65,8 +66,9 @@ type Target struct {
 // (Instance); in each project's target.ProjectManifests, its manifests
 // (ProjectManifests) and their KustomizationFile; in each project's
 // target.ProjectDir, its KustomizationFile (Project), and in
-// target.ProjectsDir the root's (Projects), even without results, so that
-// a Kustomization of the path syncs an empty tree; each marked generated
+// target.ProjectsDir the root's (Projects), the namespaces of Keep among
+// them, even without results, so that a Kustomization of the path syncs an
+// empty tree; each marked generated
 // (target.Generated). The options are checked first; two releases of one
 // name in two namespaces are refused: their HelmReleases share
 // ReleasesNamespace.
@@ -105,6 +107,11 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 		dirs := slices.Concat(instances[p.Namespace], []string{target.ProjectManifestsDir})
 		files[path.Join(target.ProjectDir(p.Namespace), KustomizationFile)] = append([]byte(target.Generated), Project(dirs)...)
 		namespaces = append(namespaces, p.Namespace)
+	}
+	for _, ns := range t.Keep {
+		if !slices.Contains(namespaces, ns) {
+			namespaces = append(namespaces, ns)
+		}
 	}
 	files[path.Join(target.ProjectsDir, KustomizationFile)] = append([]byte(target.Generated), Projects(namespaces)...)
 	return files, nil
@@ -192,6 +199,11 @@ func ServiceAccount(namespace string) []byte {
 func (t Target) check() error {
 	if ns, name, ok := strings.Cut(t.source(), "/"); !ok || !chart.IsDNSLabel(ns) || !chart.IsDNSLabel(name) {
 		return fmt.Errorf("Flux.Source %q: the GitRepository of the tree, <namespace>/<name>", t.Source)
+	}
+	for _, ns := range t.Keep {
+		if !chart.IsDNSLabel(ns) {
+			return fmt.Errorf("Flux.Keep %q: a namespace, a DNS label", ns)
+		}
 	}
 	return target.CheckPrefix("Flux.PathPrefix", t.PathPrefix)
 }

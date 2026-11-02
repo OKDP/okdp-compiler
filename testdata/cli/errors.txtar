@@ -5,6 +5,11 @@ status 1 okdp-compile --repository $WORK/tree -o $WORK/files
 cmp stderr $WORK/schema-violation.txt
 ! exists $WORK/files
 
+# A violation of a sensitive value: <redacted> in its place.
+status 1 okdp-compile --repository $WORK/secret -o $WORK/files
+cmp stderr $WORK/redacted.txt
+! stderr 'hunter 2'
+
 # No repository: status 1.
 status 1 okdp-compile -o $WORK/files
 stderr '^error: --repository is required$'
@@ -13,6 +18,24 @@ stderr '^error: --repository is required$'
 error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
 web:
 - at '/replicas': minimum: got 0, want 1
+-- redacted.txt --
+error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
+web:
+- at '/auth/password': <redacted> does not match pattern '^[^ ]{12,}$'
+-- secret/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- secret/catalog/web/1.0.0/config.schema.json --
+{"properties": {"auth": {"properties": {"password": {"type": "string", "pattern": "^[^ ]{12,}$"}}}}}
+-- secret/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- secret/projects/demo/instances/web/config.yaml --
+auth:
+  password: hunter 2
 -- tree/catalog/web/1.0.0/Chart.yaml --
 apiVersion: v2
 name: web

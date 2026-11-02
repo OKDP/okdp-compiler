@@ -10,7 +10,8 @@ import (
 )
 
 // TestCheck: the options, the GitRepository of the tree, <namespace>/<name>
-// (DefaultSource when empty), and the path of the tree in it.
+// (DefaultSource when empty), the path of the tree in it, and the
+// namespaces of the projects kept.
 func TestCheck(t *testing.T) {
 	for name, tc := range map[string]struct {
 		target Target
@@ -24,6 +25,8 @@ func TestCheck(t *testing.T) {
 		"an absolute prefix":  {Target{PathPrefix: "/deploy"}, `Flux.PathPrefix "/deploy": the path of the tree in the repository, relative, without an empty, . or .. segment`},
 		"a dot prefix":        {Target{PathPrefix: "."}, `Flux.PathPrefix ".": the path of the tree in the repository, relative, without an empty, . or .. segment`},
 		"a dotdot prefix":     {Target{PathPrefix: "a/../b"}, `Flux.PathPrefix "a/../b": the path of the tree in the repository, relative, without an empty, . or .. segment`},
+		"projects kept":       {Target{Keep: []string{"demo", "data"}}, ""},
+		"a kept path":         {Target{Keep: []string{"../x"}}, `Flux.Keep "../x": a namespace, a DNS label`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var got string
@@ -268,6 +271,20 @@ func TestFiles(t *testing.T) {
 	}
 	if none, err := (Target{}).Files(nil, nil); err != nil || len(none) != 1 || !strings.HasSuffix(string(none["projects/kustomization.yaml"]), "resources: []\n") {
 		t.Errorf("no results: %v %q", err, none)
+	}
+	// Projects kept as the output has them: listed by the root, once, no
+	// file of theirs written.
+	kept, err := Target{Keep: []string{"other", "demo"}}.Files(results, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(kept["projects/kustomization.yaml"]); !strings.HasSuffix(got, "resources:\n  - data\n  - demo\n  - other\n") {
+		t.Errorf("the root Kustomization, projects kept:\n%s", got)
+	}
+	for p := range kept {
+		if strings.HasPrefix(p, "projects/other/") {
+			t.Errorf("%s is written", p)
+		}
 	}
 	// Two releases of one name in two namespaces.
 	twice := []*okdp.Result{{Namespace: "a", Release: "x"}, {Namespace: "b", Release: "x"}}

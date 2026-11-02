@@ -3,9 +3,10 @@
 # references two outputs of demo-pg, a database and a server:
 # listed first, it is compiled after demo-pg all the same. Its dependencies
 # on stderr, after its namespace and release; a stale instance of the
-# output directory removed.
+# output directory, which the command wrote (its marker), removed.
 mkdir $WORK/out/projects/demo/instances/demo-gone
 cp $WORK/stale.yaml $WORK/out/projects/demo/instances/demo-gone/Chart.yaml
+cp $WORK/stale.yaml $WORK/out/projects/.okdp-compile
 status 0 okdp-compile --repository $WORK/lib --repository $WORK/demo -o $WORK/out
 ! stdout .
 cmp stderr $WORK/depends.txt

@@ -36,15 +36,21 @@ func (t *tree) repo(service string) (*Repository, error) {
 // packageDir: the package of version of service,
 // catalog/<service>/<version>/, and its repository, the service's; an
 // error wrapping ErrNotInCatalog when that repository has no such
-// directory.
+// directory. The directory that cannot be read for another reason (a
+// symbolic link the caller's fs.FS refuses) gives its own error, naming
+// it.
 func (t *tree) packageDir(service, version string) (*Repository, string, error) {
 	repo, err := t.repo(service)
 	if err != nil {
 		return nil, "", err
 	}
 	dir := path.Join(CatalogDir, service, version)
-	if info, err := fs.Stat(repo.FS, dir); err != nil || !info.IsDir() || !chart.IsFileName(version) {
+	info, err := fs.Stat(repo.FS, dir)
+	switch {
+	case !chart.IsFileName(version) || errors.Is(err, fs.ErrNotExist) || err == nil && !info.IsDir():
 		return nil, "", &notInCatalog{fmt.Sprintf("version %q of service %q is not in %s", version, service, where(*repo, path.Join(CatalogDir, service)))}
+	case err != nil:
+		return nil, "", fmt.Errorf("version %q of service %q: %s: %w", version, service, where(*repo, dir), unwrapPath(err))
 	}
 	return repo, dir, nil
 }

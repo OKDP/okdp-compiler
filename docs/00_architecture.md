@@ -414,13 +414,14 @@ neither knows OKDP.
 
 | Package | File | Owns | Relations |
 |---|---|---|---|
-| `value` | `value.go` | the data model (`M`) and its helpers: `Normalize` (a round trip through `encoding/json/v2`), `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` | every package |
+| `value` | `value.go` | the data model (`M`) and its helpers: `Normalize` (a round trip through `encoding/json/v2`), `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` (a value for a message, its sensitive keys redacted) | every package |
+| | `redact.go` | what a message does not print: `Sensitive`, a key whose value may be a credential (`password`, `token`, `clientSecret`, `apiKey`, a key ending with one, or with `Key`), `SensitivePath`, the key of a path, a list item's its list's, `Redact`, a value with those of its sensitive keys `Redacted` (`<redacted>`), `ShortAt`, a value of a key for a message | `Short`; `chart.Validate` |
 | | `path.go` | the path of a value, as messages write it (`Key`, `Index`): plain keys joined by dots, a key that is empty or holds a special character in brackets, the form of the `protect` paths | `formatPath` and `NoTemplate` (`chart`); the parameter paths of the connections and `Dependency.Field`, the fields of the contract violations (`okdp`) |
 | `compile` | `cel.go` | the mapping language: `Session` (`NewSession`), what the evaluations of one compile share: its context, its CEL cost limit, the caller's host functions and the CEL environments built with them; documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) as ordered YAML 1.2 data, evaluated with the names of their sections: loaded, `vars` and `errors` evaluated, then the sections (`Session.Eval`, a `Doc`: their values, and the keys each writes, `Written`); an expression compiled once to a program in the CEL environment of its names, built once per set of names (`compile`), run under the session's context, its cost counted (`run`, `exec`); `toData`, a CEL value as data, as cel-go converts it to JSON | registers the functions of `functions.go`, then the caller's |
 | | `tree.go` | a document compiled into a tree of typed nodes (`builder`: text, list, plain map, `$if` with its `$else`, `$for` in a map and in a list item, `$spread`, `vars` and `$vars` bindings), which is its check: the top-level keys of each file, `vars`, `errors` and each section given by one file, the keys each section writes at its top level (`literals`), each directive of its place (`check`), `$for` with its keys, every expression compiled in its scope, in every branch; the evaluation, a method per node type | `Session.Eval` |
-| | `functions.go` | `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`), each the Go code of the Helm or sprig function; `Unary`, the binding of a host function, its argument as data (`toData`), and `Func`, a host function of one argument bound with it | `encoding/json`, `sigs.k8s.io/yaml` |
+| | `functions.go` | `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`), each the Go code of the Helm or sprig function; `Unary`, the binding of a host function, its argument as data (`toData`), and `Func`, a host function of one argument bound with it, a CEL library whose programs count its calls (`hostCost`: 1, a tenth of its argument's size, the bytes of the string it returns) | `encoding/json`, `sigs.k8s.io/yaml` |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
-| | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
+| | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report), the value of a sensitive key not printed (`redactCauses`: a pattern, a format, a numeric bound, `<redacted>` in its place); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`); SemVer precedence (`CompareVersions`); the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`) | the dependencies of `metadata.go`, the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`); the chart keys (`metadata.go`, `spec.go`); the release, the namespace and an internal reference (`okdp`) |
 | | `cache.go` | the chart cache of stage 10 (`chartCache`: `<repository>/<chart>-<version>/<chart>/`, `readEntry`) | `merge.go` |
 | | `metadata.go` | `Chart.yaml`: `Metadata`, Helm's fields in Helm's order, the order `Write` writes them in; `Dependency`, its key (`Key`: the alias, else the name) and its upstream chart (`Ref`); `Maintainer`; `ReadMetadata`, the strict reader of one YAML document, and `Metadata.Check`: `apiVersion: v2`, a name, a SemVer version, an application chart, each dependency's name, key (a DNS label, unique), repository and pinned version, Helm's `condition`, `tags`, `enabled` and `import-values` refused | `ref.go` (`Ref.Check`, `IsDNSLabel`, `IsVersion`); read by `LoadDefinition`, `compiler.ChartMetadata`; written back by `helm.Write` |
@@ -456,7 +457,7 @@ neither knows OKDP.
 | `target` | `target.go` | `Target`, an output format, `Files` of the results and their graph; what the targets share: `ProjectsDir`, `ProjectDir`, `InstanceDir` (`projects/<namespace>/instances/<release>`), `ProjectManifests` (`projects/<namespace>/project`, `ProjectManifestsDir`), `Generated`, the mark of a generated file, `Lines`, a file built line by line; the manifests of a project both deployer targets write (`Projects`, a `Project` per namespace, privileged when one of its results is; `Namespace`, with its Pod Security Admission labels and both engines' marks that keep it, `NamespaceFile`, the same for both targets; `SecretStore`, the platform's secret store in it, `SecretStoreFile`; `ProjectLabel`); the checks of their options (`CheckPrefix`, `CheckQuoted`) and of the release names their objects share a namespace with (`Releases`, a `ReleaseError` per release, which `UniqueReleases` names the objects of) | `graph.Graph`, `okdp.Result` |
 | `target/helm` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
 | | `target.go` | `Target`, the helm target: the files of `Write` of each result, in its `InstanceDir` | `umbrella.go`, `target` |
-| `target/flux` | `flux.go` | the flux target (`Target`: `Source`, `PathPrefix`): the helm target's files, an instance's HelmRelease and Kustomization (`Instance`), a project's manifests (`ProjectManifests`: its Namespace, the secret store, the ServiceAccount `project-<namespace>` its HelmReleases name, bound to the Role `okdp-project` of the namespace, `ServiceAccount`, and their Kustomization), a namespace's Kustomization (`Project`), the root's, of the namespaces' directories (`Projects`), okdp-gitops' format | `target/helm`, `target`, `graph.DependsOn`; `chart.IsDNSLabel` |
+| `target/flux` | `flux.go` | the flux target (`Target`: `Source`, `PathPrefix`, `Keep`, the projects the root lists without a result): the helm target's files, an instance's HelmRelease and Kustomization (`Instance`), a project's manifests (`ProjectManifests`: its Namespace, the secret store, the ServiceAccount `project-<namespace>` its HelmReleases name, bound to the Role `okdp-project` of the namespace, `ServiceAccount`, and their Kustomization), a namespace's Kustomization (`Project`), the root's, of the namespaces' directories (`Projects`), okdp-gitops' format | `target/helm`, `target`, `graph.DependsOn`; `chart.IsDNSLabel` |
 | `target/argocd` | `argocd.go` | the argocd target (`Target`: `RepoURL`, `Revision`, `PathPrefix`): the helm target's files, an instance's Application (`Application`), a project's manifests (`ProjectManifests`: its Namespace, kept when the project goes, the secret store, the AppProject `project-<namespace>` of its Applications, `AppProject`), okdp-gitops' format: an Application of `projects/` applies the Applications, an ApplicationSet over `projects/*/project` the projects' manifests | `target/helm`, `target`, `graph.Wave` |
 | `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `LoadCatalog`, `ParseConnection`, `ParseClaim`, `CompileAll`, `CompileTree`, `CheckReleases`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Claim`, `Connection`, `ClaimSpec`, `Instance`, `Outcome`, `Repository`, `Catalog`, `CatalogService`, `Graph`, `GraphNode`, `GraphError`, `Tree`, `TreeInstance`, `ProvidedClaim`, `Target`, `Helm`, `Flux`, `ArgoCD`, `ReleaseError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`); the names of the tree (`PlatformFile`, `ContractsDir`, `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`, `InstanceFile`, `ConnectionsFile`, `ConfigFile`), its release rule (`ReleaseName`), its names (`IsName`) and the directories of a target's files (`ProjectDir`, `InstanceDir`, `ProjectManifestsDir`) | wraps `okdp`, `repository`, `graph`, `tree`, the targets, `chart` |
 
@@ -478,18 +479,26 @@ for the provider check; one OAuth client Secret name (`clientSecret`) for
 CEL session per compile for the mapping and the compiler's templates.
 `cmd/okdp-compile/main.go` is a thin caller of the public package that
 chains the stages (`run`): the tree of its `--repository` directories
-(`os.DirFS`, `compiler.LoadRepository`), `compiler.CompileAll`,
+(`openDir`, no symbolic link followed, the files bounded;
+`compiler.LoadRepository`), `compiler.CompileAll`,
 `compiler.NewGraph`, the files of the target `--target` names
 (`newTarget`, its options checked before the tree is read), written under
-`-o`, whose `projects/` it owns (`writeTree`); each binding, refusal,
-problem of the graph, warning and dependency printed on stderr after its
-`<namespace>/<release>` ([`--repository`](01_usage.md#--repository)). A
-tree is its only input: an instance is compiled with the others of its
-tree, its claims bound, never alone. Its own rules are the disk's: every
-input is a flag (an argument that is not one would end Go's flag parsing,
-and is refused), and every output is built before any is written, into the
-output directory (`-o`), created if needed, and the directories of their
-paths ([command line](01_usage.md#command-line)).
+`-o`, whose `projects/` it owns and marks, `projects/.okdp-compile`,
+refusing one it did not write but with `--force` (`checkOutput`), each
+file written through an `os.Root` of it (`writeTree`), with `--partial`
+the projects that compile only, those of the refused instances kept as
+the output has them; each binding, refusal, problem of the graph,
+warning and dependency printed on stderr after its
+`<namespace>/<release>` ([`--repository`](01_usage.md#--repository)),
+and with `--report`, the same as JSON (`report.go`: each instance, its
+status, error, claims, dependencies and charts, from its `Outcome` and
+`Result`, the problems of the graph at their releases, the tree's
+errors). A tree is its only input: an instance is compiled with the
+others of its tree, its claims bound, never alone. Its own rules are the
+disk's: every input is a flag (an argument that is not one would end
+Go's flag parsing, and is refused), and every output is built before any
+is written, into the output directory (`-o`), created if needed, and the
+directories of their paths ([command line](01_usage.md#command-line)).
 
 ## Design decisions
 
@@ -676,11 +685,13 @@ platform values, with a default (`DcrSource`)
   Secret template once per Secret, and opens its own CEL session
   (`compile.NewSession`), whose host functions and environments serve its
   mapping and templates, never another compile's (a session is
-  not safe for concurrent use). The package-level variables are read-only:
-  tables, a regular expression, the embedded templates. A `Definition` can
-  be shared between goroutines, and is not changed: the client charts are
-  added to a copy of its charts
-  (`TestConcurrentCompile` races it under `go test -race`). A compile
+  not safe for concurrent use), and which counts their CEL cost, what the
+  host functions build included, under the caller's limit. The
+  package-level variables are read-only: tables, a regular expression,
+  the embedded templates. A `Definition` can be shared between
+  goroutines, and is not changed: the client charts are added to a copy
+  of its charts (`TestConcurrentCompile` races it under `go test
+  -race`). A compile
   reads no upstream chart; a check reads each from the chart cache once,
   however many keys it renders. Caching across compiles, if any, is the
   caller's: a chart cache keyed by pinned versions never goes stale.
@@ -829,16 +840,29 @@ chart cache of a check are `fs.FS`, the values layers are
 in-memory maps, the compiler's templates are in the binary.
 
 - A server compiles from a git tree or an `embed.FS`, tests
-  from `fstest.MapFS`, the CLI from `os.DirFS`; the contracts from any of
-  them, an `embed.FS` of the contract schemas included.
+  from `fstest.MapFS`, the CLI from a directory (`openDir`); the contracts
+  from any of them, an `embed.FS` of the contract schemas included.
 - The paths written in `okdp.yaml` (`defaults`) are cleaned and opened
   inside the package, and an `fs.FS` path cannot contain `..`: a package
   cannot read outside itself. A chart cache entry,
   `<repository>/<chart>-<version>`, is named by a checked source or
   platform chart (a repository whose host and path are an `fs.ValidPath`
   without `\`, a chart name without `/`, `.` or `..`, a pinned version), so
-  it stays inside the cache. The CLI uses
-  `os.DirFS`, which still follows symbolic links.
+  it stays inside the cache.
+- The CLI reads each `--repository` and the `--charts` cache through
+  `openDir` (`cmd/okdp-compile/dirfs.go`), not `os.DirFS`, which follows
+  symbolic links: a symbolic link is refused, opened, on the path of a
+  file or listed in a directory (each element of the path checked with
+  `Lstat`, the file then opened through an `os.Root`, which cannot leave
+  the directory, and checked to be the file checked), so that a tree
+  cannot make the command read a file outside it (`/etc`, a credential
+  of the runner) into an instance's values; a file that is neither
+  regular nor a directory (a FIFO, which would block) is refused; a
+  regular file over 4 MiB is refused, and so is a new one once the files
+  read of a directory pass 64 MiB together (`maxFileSize`, `maxDirSize`),
+  a file that grows once checked failing its read (`TestDirFS`,
+  `TestDirFSBounds`, `symlink.txtar`). The directory itself may be a
+  link: the user names it.
 - A schema `$ref` to a file, a URL or a `urn:` fails the compile instead of
   being fetched (a `jsonschema.SchemeURLLoader` of no scheme).
 
@@ -871,6 +895,9 @@ caller's, filled from the pinned references. The compiler enforces:
 | Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a `connections.yaml` cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | Objects in the namespace | `checkObjects`, stage 8 | an instance of a project that is not privileged (`global.okdp.policy.privileged`) installs no cluster-scoped object (`clusterScoped`: Kubernetes' own kinds and the operators', by API group and kind) and writes no other namespace, whatever the source of the object (the objects section, a generated Secret's `namespace`, the credentials Secrets, the transfers), the items of a `List` included: a package's `objects` reach the cluster as written, and a project's instance could otherwise grant itself a ClusterRole or write a Secret of another project. A kind the compiler does not know is assumed namespaced: the engine's identity, confined to the namespace, is the second line |
 | OAuth client charts | `clientCharts`, `addOwnCharts`, `oidcClients` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials; a package's `secret` of a client names one of the release's, `<release>-...`, so that the Job's Role writes no other instance's Secret |
+| Redacted messages | `value.Short`, `value.ShortAt`, `chart.Validate` (`redactCauses`) | an error is printed to whoever runs the compile, logged by CI and by a server, copied into an issue: a schema violation of a sensitive value (`value.Sensitive`: its key, or the list's it is in, `password`, `passwd`, `secret`, `token`, `apikey`, `api_key`, `accesskey`, `secretkey`, `credential`, `privatekey`, `clientsecret`, case-insensitive, a plural's `s` left out, or a key ending with `Password`, `Secret`, `Token` or `Key`) prints `<redacted>` in place of the value, as does a value a message prints (`value.Short`) for those of its keys; a message that names a sensitive key's value by itself prints it with `value.ShortAt` (a connection reference, a named claim or a claim's key that is not of its type: `reference`, `parseClaim`, `ParseClaim`), but a store key, `remoteKey`, which names credentials and holds none. A key that does not say what it holds is not recognized: the parameter schema's names are the package's |
+| Writing the output (CLI) | `checkOutput`, `writeTree` | the command removes from `<output>/projects/` what it does not write: a `projects/` without its mark, `projects/.okdp-compile`, is refused but with `--force`, so that a wrong `-o` deletes nothing; every file is written through an `os.Root` of the output, so that a symbolic link committed in an output repository cannot make the command write out of it |
+| Reading the tree (CLI) | `openDir` (`cmd/okdp-compile/dirfs.go`) | a repository is a contributor's: a symbolic link in it would make the command read a file outside it (a runner's credential) into an instance's values, a FIFO block it, a huge file exhaust it; links are refused wherever they point, non-regular files refused, a file bounded to 4 MiB and a directory's files to 64 MiB together ([Everything through fs.FS](#everything-through-fsfs)) |
 | Project identity | `target.Projects`, the flux and argocd targets' project manifests | an instance's chart is rendered by the engine, with every object it holds: the deployer targets install each project's releases with an identity confined to its namespace (Flux, a ServiceAccount bound to a Role of the namespace, impersonated by helm-controller; Argo CD, an AppProject destined to the namespace, without cluster-scoped resources), so that a chart which writes another namespace or a ClusterRole is refused by the API server, not by the compiler, which does not read the charts. The platform's own projects (`global.okdp.policy.privileged`, `Result.Privileged`) keep the engine's identity. The Namespace carries the Pod Security Admission labels (baseline enforced, privileged for the platform's own), and both engines' marks that keep it when its project goes (Flux's prune label, Argo CD's `Delete=false`), the same file whatever the target, as the secret store: one tree holds both targets' files. Network isolation is the platform's |
 
 What an expression computes is bounded only on request: a caller that
@@ -878,7 +905,12 @@ compiles packages it does not review passes a context (cancelled between
 the stages and inside comprehensions) and a total CEL cost
 (`Compile`, `Inputs.CostLimit`), both held by the compile's session
 (`compile.Session`), the cost counted across the mapping and the
-compiler's templates; the CLI sets none.
+compiler's templates, and what each host function builds counted in it
+(`compile.Func`, `hostCost`: a call that writes a large string from a
+large value pays for the bytes, as CEL's own `join` does). The CLI sets
+both: `--cost-limit`, 50000000 per instance as okdp-gitops, and
+`--timeout`, 10 minutes for the whole compile, past which nothing is
+written.
 
 Not decided by the compiler: which layers are the platform's. What the
 caller gives at level 0 of `Inputs.Context` (`platform.yaml`) is trusted
@@ -1008,7 +1040,9 @@ repositories, in any order, the same instances, each named after its
 directory, with its claimers (`TestLoad`), and every problem at once:
 the parts in two repositories, a contract that differs, an instance
 without its package, a package that fails, once, a claimer that is no
-namespace name (`TestLoadErrors`).
+namespace name (`TestLoadErrors`); `catalog_test.go` the catalog of two
+repositories (`TestCatalog`), a version directory its `fs.FS` refuses
+named, not missing (`TestCatalogUnreadable`).
 `internal/okdp/claims_test.go` covers both sides of a claim in one
 compile: a provider's mapping reading its claims and publishing their
 outputs, the claims it refuses (`TestClaims`, `TestClaimsErrors`,
@@ -1083,7 +1117,13 @@ file. `cmd/okdp-compile/main_test.go` runs the command line on the
 examples' trees, each written over a stale instance, which it removes, the
 full example split into three repositories too (`TestRun`); the refused
 options, nothing written (`TestRunErrors`), nor by `--check`
-(`TestRunCheck`); and, with `testscript`, the scripts of `testdata/cli/`
+(`TestRunCheck`), the report's instances and the problems of the graph
+at their releases (`TestReportGraph`), the files written through the
+output, a symbolic
+link in it replaced or refused (`TestWriteTree`); `dirfs_test.go` the
+directories it reads, a symbolic
+link refused, the files bounded (`TestDirFS`, `TestDirFSBounds`); and,
+with `testscript`, the scripts of `testdata/cli/`
 (`TestScript`), which run the binary as a process from the repository
 root: its exit statuses (0, 1 for an error, 2 for a usage error),
 `$OKDP_CHARTS` and the flag that overrides it (`env.txtar`), what it
@@ -1093,16 +1133,22 @@ package of its own), `--check` and its checks against a chart cache
 (`compile.txtar`), a compile error (`errors.txtar`), claims bound and
 their providers across namespaces, a requirement the default provider does
 not meet, a provider of another project with its consent or without
-(`claims.txtar`), a tree compiled whole (`repository.txtar`: two
+(`claims.txtar`), the platform's policy (`policy.txtar`: a cluster-scoped
+object refused, written for a privileged project, a Secret in clear
+refused), a tree compiled whole (`repository.txtar`: two
 repositories, each target, `--check`, a stale instance removed, a cycle of
-outputs), the platform's policy (`policy.txtar`: a cluster-scoped object
-refused, written for a privileged project, a Secret in clear refused),
-one script per concern. The
-public package is tested through the example in the root package:
-`example_test.go` holds the Go programs of README.md and
-[usage](01_usage.md#go-library) as examples, with their output, and
-`TestDocPrograms` checks that the documentation shows those programs and
-outputs; `ExampleCompile_server` cancels a compile and bounds
+outputs), the bounds of a compile (`limits.txtar`: `--cost-limit`, what a
+host function builds counted, and `--timeout`), a symbolic link in a
+repository (`symlink.txtar`), the output's mark and `--force`
+(`output.txtar`), `--report`, its JSON compared with a golden file
+(`report.txtar`), a refusal that fails its project and not the tree
+(`partial.txtar`), credentials in clear and `--allow-plain-secrets`
+(`plain-secrets.txtar`), one script per concern.
+The public package is tested through the example in the root package:
+`example_test.go` holds the Go programs of
+README.md and [usage](01_usage.md#go-library) as examples, with their
+output, and `TestDocPrograms` checks that the documentation shows those
+programs and outputs; `ExampleCompile_server` cancels a compile and bounds
 its cost; `compiler_test.go` compiles the example in its `dcr` mode and in
 `existing` mode from goroutines sharing one `Definition` and the same
 values layers (`TestConcurrentCompile`, meaningful under `go test -race`).

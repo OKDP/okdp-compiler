@@ -186,6 +186,25 @@ untyped: a connection reference must be a string, got map[string]interface {}{"h
 	}
 }
 
+// TestResolveRedacted: a reference that is not a string, under a
+// sensitive key or in a list of one, its value not printed
+// (value.ShortAt): a credential written in place of a connection's name.
+func TestResolveRedacted(t *testing.T) {
+	ch := maps.Clone(pkg)
+	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+		"adminToken": {"x-okdp-connection-ref": {"contract": "database"}},
+		"apiKeys": {"items": {"x-okdp-connection-ref": {"contract": "database"}}},
+		"main": {"x-okdp-connection-ref": {"contract": "database"}}}}`)}
+	in := inputs(M{"adminToken": 1234.0, "apiKeys": []any{true}, "main": M{"password": "hunter2"}})
+	in.Contracts = dbContract
+	want := `adminToken: a connection reference must be a string, got <redacted>
+apiKeys[0]: a connection reference must be a string, got <redacted>
+main: a connection reference must be a string, got map[string]interface {}{"password":"<redacted>"}`
+	if _, err := newInstance(ch, in, defService); err == nil || err.Error() != want {
+		t.Errorf("got %v\nwant %s", err, want)
+	}
+}
+
 // TestResolveTypes: the fields of an external connection, completed,
 // against the contract's types: every violation at once, one line each,
 // in parameter path order then by field path. The secret field, required, is not

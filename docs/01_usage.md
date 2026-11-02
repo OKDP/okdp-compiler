@@ -105,7 +105,11 @@ okdp-compile --repository <dir> [--repository <dir>]... -o <dir>
              [--target helm|flux|argocd] [--path-prefix <path>]
              [--flux-source <namespace>/<name>]
              [--repo-url <url>] [--revision <revision>]
-okdp-compile --check [--charts <dir>] --repository <dir> [--repository <dir>]...
+             [--cost-limit <n>] [--timeout <duration>] [--force]
+             [--report <file>|-] [--partial] [--allow-plain-secrets]
+okdp-compile --check [--charts <dir>] [--report <file>|-]
+             [--allow-plain-secrets]
+             --repository <dir> [--repository <dir>]...
 okdp-compile --version
 ```
 
@@ -120,6 +124,12 @@ okdp-compile --version
 | `--flux-source` | `flux-system/okdp-gitops` | `--target flux`: the GitRepository of that repository, `<namespace>/<name>` |
 | `--repo-url` | required by `--target argocd` | `--target argocd`: the repository Argo CD reads the output directory from |
 | `--revision` | `HEAD` | `--target argocd`: its revision |
+| `--cost-limit` | `50000000` | the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', what a host function builds counted (`Inputs.CostLimit`): past it, the instance is refused, `the expressions of the compile exceed its CEL cost limit (n)`; `0`, no limit |
+| `--report` | | write a JSON report of the compile to the file, or to stdout for `-`, even with `--check` and when the compile fails: each instance, its status, error, warnings, dependencies, claims and charts, and the tree's errors ([`--report`](#--report)); refused inside a `--repository` or `<output>/projects/` |
+| `--partial` | | write the projects whose instances all compile, and keep what the output holds of the others, status 1 all the same ([`--partial`](#--partial)); refused with `--check` |
+| `--force` | | write into an `<output>/projects/` that holds files but no `projects/.okdp-compile`, which the command did not write, removing from it every file it does not write ([`--output`](#--output)); refused with `--check` |
+| `--allow-plain-secrets` | | accept credentials written in clear (`Inputs.AllowPlainSecrets` of every instance): a `provides` `secret` without `generate`, a Secret of the `objects` section with `data` or `stringData`; without it they fail the compile, the output being committed to the deployments repository |
+| `--timeout` | `10m` | how long the compile may take, every instance together, a Go duration (`90s`, `1h`): past it, `the compile takes longer than --timeout <duration>: nothing written`; `0`, no limit |
 | `--version` | | print the version and exit |
 
 Flags take one or two dashes, and every input is a flag: an argument that
@@ -128,6 +138,18 @@ ignored (a directory without its `--repository`). The directories of
 `--repository` and `--charts` must exist. Every output is built before any
 is written: anything that fails writes nothing; an error while writing may
 leave some of the files written.
+
+What the command reads of those directories is bounded. A symbolic link
+under one is not followed: the file it is, a file whose path goes
+through it, a package's version directory (not reported missing), or a
+directory listed that holds it fails, named,
+`<repository>/<path>: a symbolic link, not followed`, wherever it points
+(the directory itself may be a link). A file that is neither regular nor
+a directory (a FIFO, a device) fails, `not a regular file nor a
+directory: not read`; so does a file over 4 MiB, `<n> bytes, over the 4
+MiB a file read may hold`, and a new one once the files read of one
+directory pass 64 MiB together, `the files read of --repository <dir>
+pass 64 MiB together`.
 
 ### `--repository`
 
@@ -297,6 +319,19 @@ removed, and the directories left empty. So `-o` and each `--repository`
 must not contain one another, nor a `--repository` another. Nothing else
 of the directory is read, removed or checked.
 
+The command marks the directory it owns, `projects/.okdp-compile`, and
+refuses one it did not write: a `projects/` that holds files but not the
+mark (a directory of another tool, a wrong `-o`) fails before anything
+is compiled, nothing removed, `<output>/projects/ exists and was not
+written by okdp-compile (no projects/.okdp-compile): choose an empty
+output, or remove it yourself`. `--force` writes over it, the mark then
+written; so does an output written by a version without the mark, once.
+A `projects/` that is a symbolic link fails, even with `--force`. Every
+file is written through an `os.Root` of the directory: a symbolic link
+where a file goes is replaced, not written through, and one on the path
+that leads out of the directory fails the write; a link removed is the
+link, not what it points to.
+
 Once the files are written, the command prints on stderr, after the
 warnings, the `Result.Dependencies` of each instance: one line per
 connection reference to another instance, by parameter path,
@@ -350,12 +385,73 @@ api (workspace-3.2.0):
 - at '/env/26/name': 'bad-name' does not match pattern '^[A-Za-z_][A-Za-z0-9_]*$'
 ```
 
+### `--report`
+
+`--report <file>` writes what the compile gives as JSON, for a CI job, a
+bot that comments a pull request or a dashboard: `-` writes it to
+stdout, which the command prints nothing else on. It is written with
+`--check` too, and when the compile fails (the exit status is the
+same), but not when `--report` itself is refused; the messages on stderr
+are unchanged.
+
+| Key | |
+|---|---|
+| `instances` | every instance of the tree, in the order of its repositories' projects and instances |
+| `instances[].namespace`, `instance`, `release` | the project, the instance's name, its release |
+| `instances[].service`, `version` | its package |
+| `instances[].privileged` | its project is one of the platform's own (`global.okdp.policy.privileged`); `false` when refused |
+| `instances[].status` | `compiled`; `refused`, its compile failed or the deployment graph has a problem at its release; `skipped`, not compiled, the compile stopped (`--timeout`), or, with `--partial`, compiled but not written, another instance of its project refused |
+| `instances[].error` | why it is refused, the message stderr prints after `error: <namespace>/<release>: `; `""` when it is not |
+| `instances[].warnings` | its warnings (`Result.Warnings`) |
+| `instances[].dependencies` | the instances it depends on, `{instance, namespace, contract, field, output}` (`Result.Dependencies`, `namespace` when another) |
+| `instances[].claims` | each claim of its references bound to its provider, `{field, id, contract, provider: {namespace, release}, class}`, `class` `""` when the claim names its provider |
+| `instances[].charts` | the upstream charts it renders, by key, `{key, repository, chart, version}` (`Result.Charts`) |
+| `errors` | what fails that is no instance's: an option, a repository, the target, the output, `--timeout` |
+| `written` | the files were written under `-o`, those of some projects only with `--partial` |
+
+The lists are empty, never `null`. An instance whose compile succeeded
+but which is not written, another being refused, is `compiled`: whether
+the tree was written is `written`.
+
+```console
+$ bin/okdp-compile --check --report - --repository examples/02_advanced/input/db | jq -c '.instances[] | [.release, .status, .claims[].id]'
+["demo-db","compiled"]
+["demo-webapp","compiled","demo.webapp.database"]
+```
+
+### `--partial`
+
+Without it, one refused instance writes nothing: every project waits for
+it. With `--partial`, a refusal fails its project, not the tree: the
+projects whose instances all compile, and at whose releases the
+deployment graph has no problem, are written; the others are not, what
+the output holds of them kept as it is (their last good output, still
+deployed), each printed after the refusals:
+
+```text
+error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
+web:
+- at '/replicas': minimum: got 0, want 1
+error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is
+```
+
+An instance of another project that depends on one of a project not
+written fails its own project in turn (the graph has a problem at its
+release), round after round. With `--target flux`, the root
+`kustomization.yaml` still lists a project kept, when the output holds
+its `kustomization.yaml`, which Flux would prune otherwise
+(`Flux.Keep`); with `argocd`, the Applications of a project kept stay
+where they are. The command exits with status 1 all the same: what was
+refused is to be fixed. A failure of the tree writes nothing, as without
+`--partial`: an option, a repository, the target's files (a release name
+two namespaces share), `--timeout`.
+
 ### Exit status and errors
 
 | Status | When |
 |---|---|
 | 0 | compiled, or checked (`--check`), each binding and warning on stderr, then, the files written, each dependency, as [`--repository`](#--repository) prints them; `--version`, `--help` |
-| 1 | any error: `error: <message>` on stderr, one per refused instance and per problem of the graph, `error: <namespace>/<release>: <message>` |
+| 1 | any error: `error: <message>` on stderr, one per refused instance and per problem of the graph, `error: <namespace>/<release>: <message>`; with `--partial`, one per project not written too, `error: <namespace>: not written, ...`, the others written |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
 A message is a whole report and may span several lines: every schema
@@ -367,6 +463,21 @@ $ bin/okdp-compile --repository tree -o out
 error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
 web:
 - at '/replicas': minimum: got 0, want 1
+```
+
+A message does not print the value of a sensitive key: a schema violation
+of a password, a token, a client secret, an API key, a key whose name
+ends with `Password`, `Secret`, `Token` or `Key`, or of an item of a list
+of one, prints `<redacted>` in its place, and so does a value a message
+quotes for those of its keys, or whole when it is one's: a connection
+reference or a named claim of such a name that is not of its type
+(`value.Sensitive`,
+[security boundaries](00_architecture.md#security-boundaries)):
+
+```text
+error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
+web:
+- at '/auth/password': <redacted> does not match pattern '^[^ ]{12,}$'
 ```
 
 A warning (`Result.Warnings`) does not fail the compile: it is printed
@@ -901,10 +1012,15 @@ holds, to read it back.
   the total passes it, the compile fails with
   `the expressions of the compile exceed its CEL cost limit (n)`. The
   total is checked after each expression, which may itself cost up to the
-  limit: a compile can pass the limit by one expression's cost. A
-  server compiling packages it does not review sets one, as an instance's
-  values can make an expression iterate over them. The example costs under
-  1000, the OAuth client's template most of it (`ExampleCompile_server`).
+  limit: a compile can pass the limit by one expression's cost. A host
+  function counts what it builds, as CEL's own string functions do: a
+  call costs 1, a tenth of its argument's size, and the bytes of the
+  string it returns (`toJson`, `toPrettyJson`, `toYaml`, `quote`, `str`;
+  `join` is CEL's). A server compiling packages it does not review sets
+  one, as an instance's values can make an expression iterate over them;
+  okdp-gitops and `okdp-compile` set 50000000 (`--cost-limit`). The
+  example costs under 1000, the OAuth client's template most of it
+  (`ExampleCompile_server`).
 - `Inputs.AllowPlainSecrets` accepts credentials in clear: a `provides`
   `secret` without `generate`, a plain Secret of its `stringData`, and a
   Secret of the `objects` section with `data` or `stringData`. Unset,
@@ -944,7 +1060,9 @@ The emitted files can be committed and checked against the commit, as
 `go test .` checks the example's outputs: `git status
 --porcelain` lists the changed, removed and new files, where
 `git diff --exit-code` misses a new, untracked file (those of a new
-instance).
+instance). The mark of the output, `compiled/projects/.okdp-compile`, is
+committed with them; a `compiled/` written by a version without it takes
+`--force` once ([`--output`](#--output)).
 
 ### GitOps
 

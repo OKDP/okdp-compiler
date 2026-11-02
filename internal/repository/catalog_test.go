@@ -86,6 +86,35 @@ func TestCatalogErrors(t *testing.T) {
 	}
 }
 
+// refusingFS: an fs.FS that refuses to open name, as the CLI's refuses a
+// symbolic link.
+type refusingFS struct {
+	fs.FS
+	name string
+}
+
+func (f refusingFS) Open(name string) (fs.File, error) {
+	if name == f.name {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: errors.New("a symbolic link, not followed")}
+	}
+	return f.FS.Open(name)
+}
+
+// TestCatalogUnreadable: a version directory its repository's fs.FS
+// refuses (the CLI's, a symbolic link) gives that error, named, not
+// ErrNotInCatalog: the version is there.
+func TestCatalogUnreadable(t *testing.T) {
+	c, err := LoadCatalog([]Repository{{Name: "charts", FS: refusingFS{fstest.MapFS{"catalog/web/1.0.0/Chart.yaml": file("name: web\n")}, "catalog/web/1.0.0"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.Package("web", "1.0.0")
+	want := `version "1.0.0" of service "web": charts/catalog/web/1.0.0: a symbolic link, not followed`
+	if err == nil || errors.Is(err, ErrNotInCatalog) || err.Error() != want {
+		t.Errorf("got %v, want %s", err, want)
+	}
+}
+
 // TestSortVersions: SemVer by precedence, highest first, then the others.
 func TestSortVersions(t *testing.T) {
 	versions := []string{"1.0.0", "not-semver", "10.0.0", "2.0.0-1.0.0", "2.0.0", "2.0.0-1.0.2", "another"}

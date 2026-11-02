@@ -5,11 +5,15 @@ package chart
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
+	"golang.org/x/text/message"
+
+	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // schemaURL: where a schema is compiled, for its $ref to itself.
@@ -37,6 +41,8 @@ func checkSchema(name string, b []byte, values M) (string, error) {
 //   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
 //
 // The violations are sorted by path: Helm's order varies between runs.
+// The value of a sensitive key (value.SensitivePath) is not printed:
+// <redacted> in its place (redactCauses).
 func Validate(name string, sch *jsonschema.Schema, v any) (string, error) {
 	verr := sch.Validate(v)
 	if verr == nil {
@@ -47,6 +53,7 @@ func Validate(name string, sch *jsonschema.Schema, v any) (string, error) {
 		return "", fmt.Errorf("%s: %w", name, verr)
 	}
 	sortCauses(ve)
+	redactCauses(ve)
 	// The first line names the schema: "jsonschema validation failed with
 	// '<url>#<pointer>'".
 	msg := ve.Error()
@@ -90,6 +97,61 @@ func sortCauses(e *jsonschema.ValidationError) {
 		}
 		return strings.Compare(a.Error(), b.Error())
 	})
+}
+
+// redactCauses: at every level of e, a violation of a sensitive value
+// (value.SensitivePath of its location) whose message prints the value (a
+// pattern, a format, a numeric bound) printing value.Redacted instead
+// (redacted).
+func redactCauses(e *jsonschema.ValidationError) {
+	if value.SensitivePath(e.InstanceLocation) {
+		switch e.ErrorKind.(type) {
+		case *kind.Pattern, *kind.Format, *kind.Minimum, *kind.Maximum, *kind.ExclusiveMinimum, *kind.ExclusiveMaximum, *kind.MultipleOf:
+			e.ErrorKind = redacted{e.ErrorKind}
+		}
+	}
+	for _, c := range e.Causes {
+		redactCauses(c)
+	}
+}
+
+// redacted: a violation whose value is not printed, its message the
+// kind's with value.Redacted for the value it got; for a format, without
+// the format's error either, which may quote the value.
+type redacted struct{ jsonschema.ErrorKind }
+
+// LocalizedString: the message of the kind, value.Redacted in place of
+// the value.
+func (r redacted) LocalizedString(p *message.Printer) string {
+	bound := func(keyword string, want *big.Rat) string {
+		f, _ := want.Float64()
+		return p.Sprintf("%s: got %s, want %v", keyword, value.Redacted, f)
+	}
+	switch k := r.ErrorKind.(type) {
+	case *kind.Pattern:
+		return p.Sprintf("%s does not match pattern %s", value.Redacted, quote(k.Want))
+	case *kind.Format:
+		return p.Sprintf("%s is not valid %s", value.Redacted, k.Want)
+	case *kind.Minimum:
+		return bound("minimum", k.Want)
+	case *kind.Maximum:
+		return bound("maximum", k.Want)
+	case *kind.ExclusiveMinimum:
+		return bound("exclusiveMinimum", k.Want)
+	case *kind.ExclusiveMaximum:
+		return bound("exclusiveMaximum", k.Want)
+	case *kind.MultipleOf:
+		return bound("multipleOf", k.Want)
+	}
+	return r.ErrorKind.LocalizedString(p)
+}
+
+// quote: s as the validator quotes it in a message, '...'.
+func quote(s string) string {
+	s = fmt.Sprintf("%q", s)
+	s = strings.ReplaceAll(s, `\"`, `"`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return "'" + s[1:len(s)-1] + "'"
 }
 
 // schemaError: the violations of the values of each chart, as Helm reports
