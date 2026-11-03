@@ -134,7 +134,7 @@ api:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -147,7 +147,7 @@ api:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
@@ -235,7 +235,7 @@ automation-oidc-dcr:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -248,7 +248,7 @@ automation-oidc-dcr:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
@@ -280,7 +280,7 @@ automation-oidc-dcr:
     pullPolicy: Always
     registry: registry.example.org
     repository: mirror/oidc-dcr-job
-    tag: 0.5.0
+    tag: 0.6.0
   mapping:
     keyMapping:
       client_id: .client_id
@@ -316,7 +316,7 @@ console-oidc-dcr:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -329,7 +329,7 @@ console-oidc-dcr:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
@@ -361,7 +361,7 @@ console-oidc-dcr:
     pullPolicy: Always
     registry: registry.example.org
     repository: mirror/oidc-dcr-job
-    tag: 0.5.0
+    tag: 0.6.0
   mapping:
     keyMapping:
       client_id: .client_id
@@ -405,7 +405,7 @@ gateway:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -418,7 +418,7 @@ gateway:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
@@ -467,7 +467,7 @@ metrics:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -480,7 +480,7 @@ metrics:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
@@ -540,7 +540,7 @@ oidc-dcr:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -553,7 +553,7 @@ oidc-dcr:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
@@ -585,7 +585,7 @@ oidc-dcr:
     pullPolicy: Always
     registry: registry.example.org
     repository: mirror/oidc-dcr-job
-    tag: 0.5.0
+    tag: 0.6.0
   mapping:
     keyMapping:
       client_id: .client_id
@@ -710,7 +710,7 @@ scheduler:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -723,7 +723,7 @@ scheduler:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120

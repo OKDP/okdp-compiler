@@ -166,8 +166,8 @@ same, checked. Each chart is unpacked under its repository's directory, as
 
 `<repository>` is the source's `repository` without its scheme (`oci://`,
 `https://`) and a trailing `/`: its host, port and path.
-`oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.5.0
-`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`; `https://localhost:8080/charts`
+`oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.6.0
+`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`; `https://localhost:8080/charts`
 is `localhost:8080/charts/`. A repository whose host and path are no
 directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
 refused, with or without a chart cache, and so is an `http://` one, the
@@ -199,7 +199,7 @@ it renders is compiled: the oidc-dcr chart in `dcr` mode with a client.
 full example's charts unpacked, their `values.yaml` and the workspace
 chart's `values.schema.json` only: enough to check, not to render
 (`charts.example.org/workspace-3.2.0/workspace/`,
-`registry.example.org/mirror/oidc-dcr-0.5.0/oidc-dcr/`...).
+`registry.example.org/mirror/oidc-dcr-0.6.0/oidc-dcr/`...).
 
 A chart its directory does not hold, even when the cache holds its archive
 or the chart elsewhere, fails with the command that downloads it there,
@@ -207,7 +207,7 @@ prefixed with the chart key; a file that does not read, with its path:
 
 ```
 app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0
-oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0
+oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0
 app: charts.example.org/app-1.8.0/app/values.yaml: cannot unmarshal yaml document: ...
 ```
 
@@ -1199,7 +1199,7 @@ compiler adds itself, each an upstream chart, checked as a dependency of
 
 | Key | Renders |
 |---|---|
-| `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` when unset |
+| `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.6.0, which the embedded template writes; oidc-dcr 0.6.0 of `oci://quay.io/adaltas` when unset |
 
 Their form is checked with the other [settings the compiler
 reads](#fields-the-compiler-reads), against the platform schema: `charts`
@@ -1645,7 +1645,7 @@ type ChartRef struct {
 | Compiled chart | `Result.Charts[<key>]` |
 |---|---|
 | a dependency of `Chart.yaml` | its `repository`, its `name` as `Chart`, its `version` ([dependencies](02_service_definition.md#dependencies)) |
-| the chart of an OAuth client | `global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 of `oci://quay.io/adaltas` by default ([Platform charts](#platform-charts)) |
+| the chart of an OAuth client | `global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 of `oci://quay.io/adaltas` by default ([Platform charts](#platform-charts)) |
 
 The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
@@ -1661,7 +1661,7 @@ app:
 oidc-dcr:
   repository: oci://quay.io/adaltas
   chart: oidc-dcr
-  version: 0.5.0
+  version: 0.6.0
 ```
 
 Everything else is keyed by the key
@@ -1677,7 +1677,7 @@ by default, and `clientProvisioning: dcr`), the compiler adds one chart per
 OAuth client of the mapping's `oidcClients` section
 ([oidcClients](02_service_definition.md#oidcclients)), rendered by the
 platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`,
-`oci://quay.io/adaltas` `oidc-dcr` 0.5.0 by default:
+`oci://quay.io/adaltas` `oidc-dcr` 0.6.0 by default:
 [Platform charts](#platform-charts)): its Job, a pre-install/pre-upgrade
 hook, registers the client anonymously at the platform's `registrationUrl`
 and writes it to a Secret. In `existing` mode, or with OIDC disabled, no
@@ -1728,7 +1728,7 @@ The client keys, their types and defaults:
 maps over the chart's defaults: its default `mapping.keyMapping` entries
 stay, so the Secret also holds `registration_client_uri` and
 `registration_access_token` of the registration response (oidc-dcr
-0.5.0). The example's final values in `dcr` mode ([Example](#example)),
+0.6.0). The example's final values in `dcr` mode ([Example](#example)),
 with the platform's settings above (its `platform.yaml`), trimmed:
 
 ```yaml
@@ -2172,7 +2172,7 @@ dependencies:
     version: 1.8.0
   - name: oidc-dcr
     repository: oci://quay.io/adaltas
-    version: 0.5.0
+    version: 0.6.0
 ```
 
 `instance.values.yaml`, annotated: the values of `app` and those of the

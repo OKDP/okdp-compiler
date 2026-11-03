@@ -261,7 +261,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    shared by the mapping and the compiler's templates. It reads the
    platform's charts, `global.okdp.charts` (`platformCharts`,
    `internal/okdp/objects.go`), their form checked at stage 2: `oidcDcr`,
-   the chart of the OAuth clients, `DcrSource` (oidc-dcr 0.5.0) by default,
+   the chart of the OAuth clients, `DcrSource` (oidc-dcr 0.6.0) by default,
    checked as a source is ([Platform
    charts](specs/01_inputs_outputs.md#platform-charts)).
 5. **Mapping** (`runMapping`, `internal/okdp/mapping.go`, on
@@ -1482,9 +1482,9 @@ versions supported and the disclosure.
 - **A client chart's values are the template's.** A package sets the client
   keys, the platform the Job settings; a client chart takes no OKDP defaults
   and no instance upstream values. The template writes the values of
-  oidc-dcr >= 0.5.0 (camelCase); the version the platform names
-  (`global.okdp.charts.oidcDcr`) is not checked against it (its
-  `values.schema.json` is applied by a check, when it has one).
+  oidc-dcr >= 0.6.0 (camelCase, registrationToken); the version the
+  platform names (`global.okdp.charts.oidcDcr`) is not checked against it
+  (its `values.schema.json` is applied by a check, when it has one).
 
 ## Extension points
 

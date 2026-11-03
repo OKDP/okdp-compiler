@@ -293,7 +293,7 @@ func TestDcrErrors(t *testing.T) {
 // them.
 func TestDcrCompile(t *testing.T) {
 	ch := maps.Clone(charts)
-	ch["quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
+	ch["quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	okdpYAML := `
 vars:
@@ -373,7 +373,7 @@ app:
 	}{
 		"in values":        {"oidc-dcr: {}", true, app, ch, "values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it"},
 		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: DcrSource.Repository, Version: DcrSource.Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
-		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0"},
+		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := compile(tc.output, tc.existing, tc.deps, tc.files, M{"replicas": 2})
@@ -385,7 +385,7 @@ app:
 	// The platform may name another oidc-dcr chart, a mirror.
 	mirror := chart.Ref{Repository: "oci://mirror.example.org/adaltas", Chart: "oidc-dcr", Version: "0.5.1"}
 	mirrored := maps.Clone(charts)
-	mirrored["mirror.example.org/adaltas/oidc-dcr-0.5.1/oidc-dcr/values.yaml"] = ch["quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/values.yaml"]
+	mirrored["mirror.example.org/adaltas/oidc-dcr-0.5.1/oidc-dcr/values.yaml"] = ch["quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml"]
 	res, err := compile("", false, app, mirrored, M{"replicas": 1, "global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": mirror.Repository, "chart": mirror.Chart, "version": mirror.Version}}}}})
 	if err != nil || res.Charts["oidc-dcr"] != mirror {
 		t.Errorf("global.okdp.charts.oidcDcr: %v %#v", err, res)

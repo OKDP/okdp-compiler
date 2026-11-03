@@ -20,11 +20,11 @@ dependencies:
   - name: oidc-dcr
     alias: automation-oidc-dcr
     repository: oci://registry.example.org/mirror
-    version: 0.5.0
+    version: 0.6.0
   - name: oidc-dcr
     alias: console-oidc-dcr
     repository: oci://registry.example.org/mirror
-    version: 0.5.0
+    version: 0.6.0
   - name: oidc-dcr
     repository: oci://registry.example.org/mirror
-    version: 0.5.0
+    version: 0.6.0

@@ -51,7 +51,7 @@ func archive(t *testing.T, files map[string]string) []byte {
 // cache refused.
 func TestChartDirIsTheCompilersLayout(t *testing.T) {
 	for ref, want := range map[compiler.ChartRef]string{
-		{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.5.0"}:   "quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr",
+		{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.6.0"}:   "quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr",
 		{Repository: "https://charts.example.org/", Chart: "app", Version: "1.8.0"}:  "charts.example.org/app-1.8.0/app",
 		{Repository: "http://localhost:8080/charts", Chart: "app", Version: "1.0.0"}: "localhost:8080/charts/app-1.0.0/app",
 	} {

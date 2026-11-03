@@ -99,7 +99,7 @@ compile reads no chart. A check (`Inputs.Charts`, `okdp-compile --check
 --charts`) reads the chart's `values.yaml` and `values.schema.json`, from a
 chart cache the caller fills with `helm pull --untar`, each chart unpacked
 under its repository's directory, the URL without its scheme
-(`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`): the final values, over the
+(`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`): the final values, over the
 chart's defaults, must meet its schema
 ([chart cache](docs/specs/01_inputs_outputs.md#chart-cache)). `res.Charts`
 maps every compiled key to the upstream chart that renders it
@@ -141,7 +141,7 @@ The OAuth clients are provisioned by the platform
 (`global.okdp.oidc.clientProvisioning: existing`, the default) or registered
 by each service (`dcr`): in `dcr` mode, OIDC enabled, the compiler adds one
 chart per client, rendered by the oidc-dcr chart
-(`global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 by default), its values
+(`global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 by default), its values
 computed by an embedded template in the mapping language,
 [`internal/okdp/oidc-dcr.cel.yaml`](internal/okdp/oidc-dcr.cel.yaml)
 ([oidcClients](docs/specs/02_service_definition.md#oidcclients), [their

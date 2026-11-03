@@ -124,7 +124,7 @@ func ExampleCompile() {
 	// charts: 2 outputs: 1
 	// replicaCount: 2
 	// app: https://charts.example.org app 1.8.0
-	// oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
+	// oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.6.0
 	// dependency: database -> demo-db (database)
 }
 

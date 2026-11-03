@@ -1,5 +1,5 @@
 # The values of the oidc-dcr chart (oci://quay.io/adaltas/oidc-dcr,
-# >= 0.5.0, camelCase values) for one OAuth client of a mapping's
+# >= 0.6.0, camelCase values, registrationToken) for one OAuth client of a mapping's
 # oidcClients section, in dcr mode (global.okdp.oidc.clientProvisioning:
 # dcr): the chart's Job, a pre-install/pre-upgrade hook, registers the client
 # by anonymous dynamic client registration and writes it to a Secret.
@@ -33,6 +33,13 @@ vars:
 
 values:
   registrationUrl: ${{ dcr.registrationUrl }}
+  # With initialAccessToken, the Job authenticates to the registration endpoint
+  # with a bearer token read from a Secret of the namespace: its name from
+  # dcr.tokenSecret (default okdp-dcr-token), key token.
+  registrationToken:
+    $if: ${{ dcr.authMethod == 'initialAccessToken' }}
+    secretName: ${{ dcr.?tokenSecret.orValue('okdp-dcr-token') }}
+    secretKey: token
   # The registration request: the snake_case fields of the OIDC Dynamic
   # Client Registration standard. The client's request overrides any field.
   request:

@@ -67,11 +67,11 @@ dependencies:
     version: 1.0.0
   - name: oidc-dcr
     repository: oci://quay.io/adaltas
-    version: 0.5.0
+    version: 0.6.0
   - name: oidc-dcr
     alias: zeta-oidc-dcr
     repository: oci://quay.io/adaltas
-    version: 0.5.0
+    version: 0.6.0
 maintainers:
   - name: OKDP
     email: okdp@example.org

@@ -102,7 +102,7 @@ stderr 'is inside .*out/projects: the command reads or owns it$'
           "key": "oidc-dcr",
           "repository": "oci://quay.io/adaltas",
           "chart": "oidc-dcr",
-          "version": "0.5.0"
+          "version": "0.6.0"
         }
       ]
     }

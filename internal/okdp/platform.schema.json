@@ -47,7 +47,7 @@
               "properties": {
                 "oidcDcr": {
                   "type": "object",
-                  "description": "The chart of the OAuth clients in dcr mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the compiler writes. Absent: oci://quay.io/adaltas, oidc-dcr, 0.5.0.",
+                  "description": "The chart of the OAuth clients in dcr mode: an oidc-dcr chart that takes the values of oidc-dcr 0.6.0, which the compiler writes. Absent: oci://quay.io/adaltas, oidc-dcr, 0.6.0.",
                   "properties": {
                     "repository": {"type": "string", "description": "The URL of the chart repository: https:// or oci://; http://, the chart fetched in clear, is refused."},
                     "chart": {"type": "string", "description": "The name of the chart in the repository."},
@@ -87,7 +87,11 @@
                       "description": "The registration endpoint the Jobs register the clients at (registrationUrl). Required, a non-empty string, in dcr mode when a service declares a client: checked then only."
                     },
                     "authMethod": {
-                      "description": "How the Jobs authenticate to the registration endpoint: anonymous, the only method OKDP supports. Required in dcr mode when a service declares a client: checked then only."
+                      "description": "How the Jobs authenticate to the registration endpoint: anonymous (no token) or initialAccessToken (a bearer token read from a Secret of each namespace, dcr.tokenSecret, key token). Required in dcr mode when a service declares a client: checked then only."
+                    },
+                    "tokenSecret": {
+                      "type": "string",
+                      "description": "The Secret of each namespace that holds the initial access token for DCR (key token), when authMethod is initialAccessToken. Default: okdp-dcr-token."
                     },
                     "image": {
                       "type": "object",

@@ -139,7 +139,7 @@ okdp-compile --version
 | `--repository` | required | a repository of the tree, its directory, repeatable: any part of the [tree](#repository-layout), each part in one repository; every instance of the tree compiled together ([`--repository`](#--repository)) |
 | `--output`, `-o` | required, refused with `--check` | the output directory: under `projects/<namespace>/instances/<release>/`, each instance's umbrella chart, its values, OKDP's own objects and what it publishes, and the files of `--target`; every symbolic link under its `projects/` removed first, nothing written through one ([`--output`](#--output)) |
 | `--check` | | compile and check, write nothing: the errors and warnings, no `--output` ([`--check`](#--check)) |
-| `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
+| `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
 | `--target` | `helm` | what is written: `helm`, each instance's umbrella chart; `flux`, with its HelmRelease, the Kustomizations and each project's manifests; `argocd`, with its Application and each project's manifests ([targets](specs/01_inputs_outputs.md#targets)) |
 | `--path-prefix` | the root | `--target flux` and `argocd`: the path of the output directory in the repository the deployer reads |
 | `--flux-source` | `flux-system/okdp-gitops` | `--target flux`: the GitRepository of that repository, `<namespace>/<name>` |
@@ -302,7 +302,7 @@ dependencies:
     version: 1.8.0
   - name: oidc-dcr
     repository: oci://quay.io/adaltas
-    version: 0.5.0
+    version: 0.6.0
 $ cat out/projects/demo/instances/demo-webapp/okdp.info.yaml
 url: https://demo-webapp.okdp.example.org
 usage: |
@@ -798,7 +798,7 @@ func main() {
 charts: 2 outputs: 1
 replicaCount: 2
 app: https://charts.example.org app 1.8.0
-oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.5.0
+oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.6.0
 dependency: database -> demo-db (database)
 ```
 
@@ -1107,7 +1107,7 @@ holds, to read it back.
   package's in `Result.Chart`.
 - `oidc-dcr` is the chart key of a service's main
   [OAuth client](specs/01_inputs_outputs.md#oauth-client-charts), and the
-  suffix of the others; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` is the
+  suffix of the others; oidc-dcr 0.6.0 of `oci://quay.io/adaltas` is the
   chart they are rendered by unless the platform names another
   ([platform charts](specs/01_inputs_outputs.md#platform-charts)): the
   chart the chart cache of a check needs for a `dcr` platform.
@@ -1399,7 +1399,7 @@ the cause or the fix is not in the message:
 | `Chart.yaml: dependencies[1] (oidc-dcr): the chart of oidcClients[0] is added by the compiler: remove it` | `Chart.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; give the dependency another key (`alias`), or rename the client, when it is another chart |
 | `values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it` | the values file computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
 | `oidcClients[0] (console): secret "console-creds": the Secret the client is written to is one of the release's, its name starts with "demo-webapp-"` | a client's `secret` names a Secret of the namespace that is not the release's: its Job's Role would write another instance's Secret | name it after the release, `${{ release.name }}-console`, or drop `secret` for the default, `oidcClientSecret(<name>)` |
-| `oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0` | with `--check --charts`, `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
+| `oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0` | with `--check --charts`, `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 
 ### Repositories and the graph
 
