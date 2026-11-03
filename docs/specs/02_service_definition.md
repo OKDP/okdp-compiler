@@ -801,8 +801,14 @@ a Secret without these keys, before the contract checks, a null too.
 
 The Secret is named after `secretRef.name` when given, else
 `<name>-<contract>-credentials`, which then becomes the output's
-`secretRef`. Without `secret` (or with `secret: {}`), no Secret is
-rendered and the output has a `secretRef` only when the mapping gives one.
+`secretRef`: a Secret's name, a DNS-1123 subdomain (labels joined by dots,
+as a claim's ID: `${{ c.id }}-credentials`), 253 characters at most, else
+the compile fails (`secretRef.name "<name>": not a Secret's name, ...`). A
+claimer of another namespace reads a copy, `<release>-<name>`, which no
+other object of its namespace may write ([compiling instances
+together](01_inputs_outputs.md#compiling-instances-together)). Without
+`secret` (or with `secret: {}`), no Secret is rendered and the output has
+a `secretRef` only when the mapping gives one.
 A `secret` with neither a non-empty `generate` nor a non-empty
 `stringData` fails with `<service>: output "<name>": secret needs
 stringData or generate` (`<service>`: the `name` of `Chart.yaml`). The

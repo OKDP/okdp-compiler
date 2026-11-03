@@ -73,6 +73,8 @@ type Bound struct {
 // (Inputs.Published, set by CompileAll). An output two instances of a
 // namespace publish refuses both, and the instances whose references
 // resolved to it, or whose claims are bound to one of them, of any namespace.
+// Two objects that write one Secret of a namespace refuse the instances
+// that hold them (refuseSecretTargets), and those that depend on them.
 // Outcomes in the order of instances, which changes none
 // of them. Whether they deploy together is the graph's (graph.New).
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
@@ -108,6 +110,7 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	for _, ns := range slices.Sorted(maps.Keys(byNamespace)) {
 		refuseShared(byNamespace[ns], t.out, t.compile)
 	}
+	t.refuseSecretTargets(idx)
 	t.refuseClaimers(idx)
 	t.notes(idx)
 	return t.out
@@ -649,7 +652,109 @@ func refuseShared(idx []int, out []Outcome, compile func(int) error) {
 	}
 }
 
-// refuseClaimers: step 5 of CompileAll, for the instances idx. A provider
+// secretTarget: what an object of OKDP writes that another object of its
+// namespace must not: a Secret (kind "Secret", or "push" a key of the
+// secret store), of the namespace ns, named name.
+type secretTarget struct{ ns, kind, name string }
+
+// secretTargets: what the object o of an instance of namespace ns writes:
+// a v1 Secret its own name; an ExternalSecret the Secret of
+// spec.target.name, its own name when unset, unless its creationPolicy
+// is None; a PushSecret each key (remoteKey, and its property) of the
+// store it pushes.
+func secretTargets(ns string, o M) []secretTarget {
+	ns = cmp.Or(value.Str(value.Dig(o, "metadata.namespace")), ns)
+	name := value.Str(value.Dig(o, "metadata.name"))
+	group := apiGroup(value.Str(o["apiVersion"]))
+	switch kind := value.Str(o["kind"]); {
+	case group == "" && kind == "Secret":
+		return []secretTarget{{ns, "Secret", name}}
+	case group == "external-secrets.io" && kind == "ExternalSecret":
+		if value.Str(value.Dig(o, "spec.target.creationPolicy")) == "None" {
+			return nil
+		}
+		return []secretTarget{{ns, "Secret", cmp.Or(value.Str(value.Dig(o, "spec.target.name")), name)}}
+	case group == "external-secrets.io" && kind == "PushSecret":
+		var out []secretTarget
+		for _, d := range value.AsList(value.Dig(o, "spec.data")) {
+			ref := value.AsMap(value.Dig(value.AsMap(d), "match.remoteRef"))
+			key := value.Str(ref["remoteKey"])
+			if p := value.Str(ref["property"]); p != "" {
+				key += " (property " + p + ")"
+			}
+			out = append(out, secretTarget{ns, "push", key})
+		}
+		return out
+	}
+	return nil
+}
+
+// refuseSecretTargets: step 5 of CompileAll, for the instances idx. Two
+// objects that write one Secret of a namespace (secretTargets), of one
+// instance or of two, overwrite each other's credentials: each instance
+// that holds one is refused, its error naming the objects and the
+// instances, and no longer published: refuseClaimers then compiles again
+// those that reference its outputs, which fail. A provider's
+// secretRef.name, which names its claimers' copies (<release>-<name>),
+// could otherwise forge the Secret of a connection of another instance
+// (<release>.<connection>-credentials).
+func (t *tree) refuseSecretTargets(idx []int) {
+	out := t.out
+	type writer struct {
+		release, object string
+	}
+	writers := map[secretTarget][]writer{}
+	for _, i := range idx {
+		res := out[i].Result
+		if res == nil {
+			continue
+		}
+		for _, o := range res.Objects {
+			for _, x := range secretTargets(res.Namespace, o) {
+				w := writer{res.Release, value.Str(o["kind"]) + " " + value.Str(value.Dig(o, "metadata.name"))}
+				writers[x] = append(writers[x], w)
+			}
+		}
+	}
+	for _, i := range idx {
+		res := out[i].Result
+		if res == nil {
+			continue
+		}
+		var errs []error
+		seen := map[secretTarget]bool{}
+		for _, o := range res.Objects {
+			for _, x := range secretTargets(res.Namespace, o) {
+				if len(writers[x]) < 2 || seen[x] {
+					continue
+				}
+				seen[x] = true
+				count := map[string]int{}
+				for _, w := range writers[x] {
+					count[fmt.Sprintf("%s of %s", w.object, w.release)]++
+				}
+				var each []string
+				for _, w := range slices.Sorted(maps.Keys(count)) {
+					if n := count[w]; n > 1 {
+						w += fmt.Sprintf(" (%d times)", n)
+					}
+					each = append(each, w)
+				}
+				what := fmt.Sprintf("Secret %q", x.name)
+				if x.kind == "push" {
+					what = fmt.Sprintf("the key %s of the secret store", x.name)
+				}
+				errs = append(errs, fmt.Errorf("%s of namespace %s is written by %s: two objects may not write one Secret", what, x.ns, strings.Join(each, " and ")))
+			}
+		}
+		if errs != nil {
+			out[i] = Outcome{Err: errors.Join(errs...), Claims: out[i].Claims}
+			delete(t.published[res.Namespace], res.Release)
+		}
+	}
+}
+
+// refuseClaimers: step 6 of CompileAll, for the instances idx. A provider
 // refused by refuseShared stays published, so that a claimer of another
 // namespace was compiled with an output of a provider that is refused: each
 // successful instance with a dependency on a refused instance is compiled

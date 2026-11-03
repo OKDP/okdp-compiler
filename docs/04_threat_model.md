@@ -145,7 +145,9 @@ which an instance's list replaces.
 | may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `chart.FinalValues` | `TestDcrCompile` |
 | may not | an OAuth client's Secret that is not the release's, `<release>-...` | `oidc.go: oidcClients` | `testdata/cli/oidc.txtar` |
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
-| may not | expressions past the cost limit, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions` | `testdata/cli/limits.txtar` |
+| may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
+| may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store | `namespace.go: tree.refuseSecretTargets` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
+| may not | expressions past the cost limit, a host function's call counted by the bytes it reads and writes, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions`, `hostCost` | `testdata/cli/limits.txtar`, `TestHostCostBytes` |
 
 ## The engines
 
@@ -263,7 +265,8 @@ the tree it reads:
 - **The namespace is the boundary, not the instance.** The instances of
   a project share its namespace and its identity: a release reads the
   Secrets of the others; a provider's namespace holds the credentials of
-  every claim it serves.
+  every claim it serves. Two of OKDP's objects that write one Secret of
+  a namespace are refused, not a Secret an upstream chart renders.
 - **The store's policy.** The compiler writes the keys; it cannot check
   that the store scopes them. A ClusterSecretStore, without
   `secrets.provider`, is one trust domain. A Kubernetes namespace named

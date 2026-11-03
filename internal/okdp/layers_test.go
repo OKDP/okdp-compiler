@@ -19,7 +19,7 @@ import (
 func TestValuesLayers(t *testing.T) {
 	files := maps.Clone(pkg)
 	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
-		"global": {"properties": {"imageRegistry": {"type": "string"}, "okdp": {"type": "object"}}}}}`)}
+		"global": {"properties": {"imageRegistry": {"type": "string"}}}}}`)}
 	platform := ContextLayer{Values: map[string]any{"global": M{"imageRegistry": "platform.example.org"}}}
 	for name, tc := range map[string]struct {
 		instance []map[string]any

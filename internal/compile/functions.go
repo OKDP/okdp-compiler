@@ -2,9 +2,8 @@
 // each deterministic and hermetic: str and first, and each the Go code of
 // the Helm template function it reproduces (testdata/helm/functions holds
 // what `helm template` prints for the same inputs). A caller adds its own
-// (NewSession). Each counts in the session's CEL cost, under a limit, as
-// CEL counts its own string functions (hostCost): what it builds is paid
-// for.
+// (NewSession). Each counts in the session's CEL cost, under a limit, the
+// bytes of what it reads and of what it builds (hostCost).
 package compile
 
 import (
@@ -12,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -45,14 +45,21 @@ func Unary[T any](f func(any) (T, error)) cel.OverloadOpt {
 // <name>_dyn; its cost, under a limit, hostCost.
 func Func[T any](name string, out *cel.Type, f func(any) (T, error)) cel.EnvOption {
 	id := name + "_dyn"
-	return cel.Lib(hostLib{fn: cel.Function(name, cel.Overload(id, []*cel.Type{cel.DynType}, out, Unary(f))), id: id})
+	return Costed(cel.Function(name, cel.Overload(id, []*cel.Type{cel.DynType}, out, Unary(f))), id)
 }
 
-// hostLib: a host function, its overload id, as a CEL library: the
-// function, and the cost tracker its programs count its calls with.
+// Costed: the host function fn, a cel.Function of a caller, the calls of
+// its overloads ids counted with hostCost under a limit, as Func's: a
+// caller's function bound with Unary converts its whole argument too.
+func Costed(fn cel.EnvOption, ids ...string) cel.EnvOption {
+	return cel.Lib(hostLib{fn: fn, ids: ids})
+}
+
+// hostLib: a host function, the ids of its overloads, as a CEL library:
+// the function, and the cost tracker its programs count its calls with.
 type hostLib struct {
-	fn cel.EnvOption
-	id string
+	fn  cel.EnvOption
+	ids []string
 }
 
 // CompileOptions: the function.
@@ -61,30 +68,75 @@ func (l hostLib) CompileOptions() []cel.EnvOption { return []cel.EnvOption{l.fn}
 // ProgramOptions: its calls counted with hostCost, when the program
 // tracks its cost (a session under a limit, NewSession).
 func (l hostLib) ProgramOptions() []cel.ProgramOption {
-	return []cel.ProgramOption{cel.CostTrackerOptions(interpreter.OverloadCostTracker(l.id, hostCost))}
+	opts := make([]interpreter.CostTrackerOption, len(l.ids))
+	for i, id := range l.ids {
+		opts[i] = interpreter.OverloadCostTracker(id, hostCost)
+	}
+	return []cel.ProgramOption{cel.CostTrackerOptions(opts...)}
 }
 
-// hostCost: the CEL cost of a call of a host function, as CEL counts its
-// own string functions (ext.Strings' join, replace): 1, the call, plus a
-// tenth of the size of its argument (a string's characters, a list's or a
-// map's entries: its traversal), plus the bytes of its result when a
-// string (what it builds: toJson, toYaml, quote of a large value). An
-// expression that only calls functions would otherwise cost 1 a call,
-// whatever it writes.
+// hostCost: the CEL cost of a call of a host function: 1, the call, plus
+// the bytes of its arguments, about as many as their serialisation
+// (byteSize), plus the bytes of its result when a string (what it builds:
+// toJson, toYaml, quote of a large value). A host function converts its
+// whole argument to data (Unary, toData) and most serialise it (str,
+// sha256, toJson, toYaml, quote): its work is linear in the argument's
+// bytes, which a map's or a list's entry count does not bound (a map of
+// one key, a string of a megabyte). It pays a unit a byte, ten times what
+// CEL's own string functions pay a character (ext.Strings' join,
+// replace), whose work is a scan, not a conversion.
 func hostCost(args []ref.Val, result ref.Val) *uint64 {
-	var size uint64
+	total := uint64(1)
 	for _, a := range args {
-		if s, ok := a.(traits.Sizer); ok {
-			if n, ok := s.Size().(types.Int); ok && n > 0 {
-				size += uint64(n)
-			}
-		}
+		total = addSat(total, byteSize(a))
 	}
-	total := 1 + (size+9)/10
 	if s, ok := result.(types.String); ok {
-		total += uint64(len(s))
+		total = addSat(total, uint64(len(s)))
 	}
 	return &total
+}
+
+// scalarSize: what byteSize counts for a value that is neither a string,
+// bytes, a map nor a list (a number, a boolean, null, a timestamp): about
+// the bytes of a number's text.
+const scalarSize = 8
+
+// byteSize: about the bytes of v serialised, walked once: a string's or
+// bytes' length, a map's keys and values and 2 an entry (": ", ", "), a
+// list's elements and 1 each, 2 a map's or a list's brackets, scalarSize
+// for any other value.
+func byteSize(v ref.Val) uint64 {
+	switch t := v.(type) {
+	case types.String:
+		return uint64(len(t))
+	case types.Bytes:
+		return uint64(len(t))
+	case traits.Mapper:
+		n := uint64(2)
+		for it := t.Iterator(); it.HasNext() == types.True; {
+			k := it.Next()
+			n = addSat(n, addSat(byteSize(k), 2))
+			if e, ok := t.Find(k); ok {
+				n = addSat(n, byteSize(e))
+			}
+		}
+		return n
+	case traits.Lister:
+		n := uint64(2)
+		for it := t.Iterator(); it.HasNext() == types.True; {
+			n = addSat(n, addSat(byteSize(it.Next()), 1))
+		}
+		return n
+	}
+	return scalarSize
+}
+
+// addSat: a + b, at most the largest uint64.
+func addSat(a, b uint64) uint64 {
+	if s := a + b; s >= a {
+		return s
+	}
+	return math.MaxUint64
 }
 
 // hostFunctions: str (value.Str), first (the first item of a list that is

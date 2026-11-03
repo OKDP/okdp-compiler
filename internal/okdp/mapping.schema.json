@@ -30,8 +30,8 @@
           "values": {"type": "object", "description": "The contract's fields."},
           "secretRef": {
             "type": "object",
-            "description": "The Secret holding the secret fields: {} is not set; only name is kept. Absent, the Secret of secret, <name>-<contract>-credentials.",
-            "properties": {"name": {"type": "string", "minLength": 1}},
+            "description": "The Secret holding the secret fields: {} is not set; only name is kept. Absent, the Secret of secret, <name>-<contract>-credentials. A claimer of another namespace reads a copy, <release>-<name>, which no other object of its namespace may write (CompileAll).",
+            "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "description": "A Secret's name, a DNS-1123 subdomain: DNS-1123 labels (lowercase letters, digits and -, a letter or digit at each end) joined by dots, as a claim's ID."}},
             "if": {"minProperties": 1},
             "then": {"required": ["name"]}
           },

@@ -145,7 +145,7 @@ okdp-compile --version
 | `--flux-source` | `flux-system/okdp-gitops` | `--target flux`: the GitRepository of that repository, `<namespace>/<name>` |
 | `--repo-url` | required by `--target argocd` | `--target argocd`: the repository Argo CD reads the output directory from |
 | `--revision` | `HEAD` | `--target argocd`: its revision |
-| `--cost-limit` | `50000000` | the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', what a host function builds counted (`Inputs.CostLimit`): past it, the instance is refused, `the expressions of the compile exceed its CEL cost limit (n)`; `0`, no limit |
+| `--cost-limit` | `50000000` | the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', what a host function reads and builds counted (`Inputs.CostLimit`): past it, the instance is refused, `the expressions of the compile exceed its CEL cost limit (n)`; `0`, no limit |
 | `--report` | | write a JSON report of the compile to the file, or to stdout for `-`, even with `--check` and when the compile fails: each instance, its status, error, warnings, dependencies, claims and charts, and the tree's errors ([`--report`](#--report)); refused inside a `--repository` or `<output>/projects/` |
 | `--partial` | | write the projects whose instances all compile, and keep what the output holds of the others, status 1 all the same ([`--partial`](#--partial)); refused with `--check` |
 | `--force` | | write into an `<output>/projects/` that holds files but no `projects/.okdp-compile`, which the command did not write, removing from it every file it does not write ([`--output`](#--output)); refused with `--check` |
@@ -1126,13 +1126,17 @@ holds, to read it back.
   `the expressions of the compile exceed its CEL cost limit (n)`. The
   total is checked after each expression, which may itself cost up to the
   limit: a compile can pass the limit by one expression's cost. A host
-  function counts what it builds, as CEL's own string functions do: a
-  call costs 1, a tenth of its argument's size, and the bytes of the
-  string it returns (`toJson`, `toPrettyJson`, `toYaml`, `quote`, `str`;
-  `join` is CEL's). A server compiling packages it does not review sets
-  one, as an instance's values can make an expression iterate over them;
-  okdp-gitops and `okdp-compile` set 50000000 (`--cost-limit`). The
-  example costs under 1000, the OAuth client's template most of it
+  function counts what it reads and what it builds: a call costs 1, a
+  unit a byte of its argument, about its serialisation (a string's
+  bytes, a map's keys and values, a list's elements), and the bytes of
+  the string it returns (`sha256`, `toJson`, `toPrettyJson`, `toYaml`,
+  `quote`, `str`, `first` and OKDP's own; `join` is CEL's): it converts
+  its whole argument, which a map's entry count does not measure. A
+  server compiling packages it does not review sets one, as an
+  instance's values can make an expression iterate over them;
+  okdp-gitops and `okdp-compile` set 50000000 (`--cost-limit`), about
+  50 MB that host functions read or write. The example costs under
+  1000, the OAuth client's template most of it
   (`ExampleCompile_server`).
 - `Inputs.AllowPlainSecrets` accepts credentials in clear: a `provides`
   `secret` without `generate`, a plain Secret of its `stringData`, and a
@@ -1422,6 +1426,7 @@ of the targets' options are in
 | `db/projects/demo/instances/web/instance.yaml: service "web" is in the catalog of no repository`, `version "2.0.0" of service "web" is not in db/catalog/web` | the instance names a package no repository has | add it to a catalog, or fix `instance.yaml` |
 | `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none; instances that reference each other's outputs are both refused so | fix that instance; make one of two references a connection file's: it waits for nothing |
 | `error: demo/demo-p: provides "x" (server): demo-q publishes an output of that contract and name too, ...` | two instances of the namespace publish one output | name one of them otherwise: a reference must find one |
+| `error: demo/demo-app: Secret "demo-app-x.yy-credentials" of namespace demo is written by ExternalSecret demo-app-x.yy-credentials of demo-app and ExternalSecret demo-app-x.yy-credentials of demo-app-x: two objects may not write one Secret` | two objects of the namespace, of one instance or two, write one Secret: here a claimer's copy of a provider's credentials, `<release>-<secretRef.name>`, and another instance's connection, `<release>.<connection>-credentials` (`testdata/cli/secrets.txtar`) | rename one: the provider's `secretRef.name`, an instance, a connection or an object |
 | `error: demo/demo-app: db: claim (database-server): it names no class, and the context sets no default one, global.okdp.provisioning.database-server.default (Inputs.Context): the classes are fast, standard` | a claim that names neither a class nor a provider, and neither `platform.yaml` nor the project's `project.yaml` sets a default class; `no class of database-server connections is defined (...)` when none is; `claims.<name>: ...` for a named claim, every instance of its project refused | set one, `global: {okdp: {provisioning: {database-server: {default: standard, classes: {standard: {provider: data/pg}}}}}}`, or name a class: `db: {class: fast}` ([classes](specs/01_inputs_outputs.md#classes)) |
 | `error: demo/demo-app: db: claim (database-server): class "nvme" is not a class of database-server connections (global.okdp.provisioning.database-server.classes): fast, standard` (`the default class "nvme" (...default) is not a class ...`) | the claim, or the default, names a class the context does not define | name one of those, or define it |
 | `error: demo/demo-app: db: claim (database-server): the default class "standard": data/pg is no instance that provisions database-server connections` (`class "fast": ...`, `data/pg is no instance ...` for a provider the claim names) | the class's provider names no instance of its namespace, by name or release, or one whose package does not provision the contract | fix the class's provider, `<project>/<instance>` or `<project>/<release>`, or add the instance |

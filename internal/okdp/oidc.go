@@ -81,8 +81,8 @@ func clientSecret(release, namespace string, dcr bool, name string) string {
 func oidcFunctions(inst *instance) []cel.EnvOption {
 	release, ns, dcr := inst.release, inst.namespace, inst.dcr
 	return []cel.EnvOption{
-		cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))),
+		compile.Costed(cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))), "oidcClientSecret_dyn"),
 	}
 }
 

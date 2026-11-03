@@ -2324,6 +2324,16 @@ output it lacks. In the order of the instances:
    of an instance refused since, or whose claim's provider is refused, of
    any namespace, are compiled again: each gets the error a compile after
    every provider gives. A provider refused gives its claims no output.
+5. Two objects of a namespace that write one Secret, of one instance or
+   of two, refuse the instances that hold them, each: a v1 `Secret`, an
+   `ExternalSecret`'s `spec.target.name` (its own name when unset; none
+   with `creationPolicy: None`), a `PushSecret`'s key of the store and
+   property. They would overwrite each other's credentials: a provider's
+   `secretRef.name` names its claimers' copies, `<release>-<secret>`,
+   which could otherwise be the Secret of another instance's connection,
+   `<release>.<connection>-credentials`. The instances that reference
+   their outputs, or whose claims they provide, are compiled again, as
+   in step 4. The objects an upstream chart renders are not read.
 
 An instance is compiled once when it comes after the instances whose
 outputs it references, twice when it comes before: the outcomes are the
@@ -2338,6 +2348,7 @@ instance that exists and provides it, is the
 |---|---|
 | a release given twice in a namespace, each time | `release "<release>" is given twice in namespace "<namespace>"` |
 | an output another instance of the namespace publishes too | `provides "<name>" (<contract>): <instance> publishes an output of that contract and name too, a reference to it would not know which`; `<instance>, <instance> publish`, several |
+| two objects that write one Secret of a namespace, each instance that holds one | `Secret "<name>" of namespace <namespace> is written by <kind> <object> of <release> and <kind> <object> of <release>: two objects may not write one Secret`, every writer in order, ` (<n> times)` after one written several times; `the key <key> (property <property>) of the secret store of namespace <namespace> is written by ...` for PushSecrets |
 | a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order, a provider of another namespace `<namespace>/<release>` |
 
 ## The deployment graph

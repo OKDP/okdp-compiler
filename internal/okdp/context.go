@@ -83,7 +83,9 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		return nil, err
 	}
 	inst := &instance{release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values}
-	inst.okdp = value.AsMap(value.AsMap(values["global"])["okdp"])
+	// The platform's settings come from the validated context, not from the
+	// coalesced parameters: a package schema's defaults do not reach them.
+	inst.okdp = value.AsMap(value.Dig(settings, "global.okdp"))
 	oidc := value.AsMap(value.Dig(settings, "global.okdp.oidc"))
 	mode := value.Str(oidc["clientProvisioning"])
 	inst.dcr = value.Truthy(oidc["enabled"]) && mode == "dcr"
