@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"maps"
 	"reflect"
 	"slices"
@@ -176,5 +177,57 @@ project "demo" is in the repositories a and b`
 	}
 	if err != nil && strings.Count(err.Error(), "its Chart.yaml is other") != 1 {
 		t.Errorf("the package's error more than once: %v", err)
+	}
+}
+
+// TestError: the problems of a tree that does not load, an *Error, one
+// per problem, a report of several lines one of them; the errors they are
+// of unwrapped; those a change adds.
+func TestError(t *testing.T) {
+	_, err := Load([]Repository{{"db", fstest.MapFS{
+		"catalog/app/1.0.0/Chart.yaml":            file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
+		"projects/demo/instances/a/instance.yaml": file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
+		"projects/demo/instances/b/instance.yaml": file("service: nope\nversion: 1.0.0\n"),
+	}}})
+	le, ok := errors.AsType[*Error](err)
+	if !ok {
+		t.Fatalf("%v: not an *Error", err)
+	}
+	if len(le.Problems) != 2 || !strings.HasPrefix(le.Problems[0], "db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found in type struct") ||
+		le.Problems[1] != `db/projects/demo/instances/b/instance.yaml: service "nope" is in the catalog of no repository` || err.Error() != strings.Join(le.Problems, "\n") {
+		t.Errorf("problems: %q", le.Problems)
+	}
+	want := le.Problems
+	if !errors.Is(err, ErrNotInCatalog) {
+		t.Error("a service the catalog lacks: not ErrNotInCatalog")
+	}
+	before := &Error{Problems: want[:1]}
+	if got := Added(before, le); !reflect.DeepEqual(got, want[1:]) {
+		t.Errorf("added: %q", got)
+	}
+	if got := Added(nil, le); !reflect.DeepEqual(got, want) {
+		t.Errorf("added to none: %q", got)
+	}
+	if got := Added(le, le); got != nil {
+		t.Errorf("added nothing: %q", got)
+	}
+}
+
+// TestParseInstance: an instance's file as written, its claimers absent
+// (nil), none (empty) or listed; a key it does not know refused.
+func TestParseInstance(t *testing.T) {
+	for raw, want := range map[string]InstanceSpec{
+		"service: app\nversion: 1.0.0\n":                        {Service: "app", Version: "1.0.0"},
+		"service: app\nversion: 1.0.0\nclaimers: []\n":          {Service: "app", Version: "1.0.0", Claimers: []string{}},
+		"service: app\nversion: 1.0.0\nclaimers: [demo, '*']\n": {Service: "app", Version: "1.0.0", Claimers: []string{"demo", "*"}},
+		"": {},
+	} {
+		got, err := ParseInstance([]byte(raw))
+		if err != nil || !reflect.DeepEqual(got, want) || (got.Claimers == nil) != (want.Claimers == nil) {
+			t.Errorf("%q: %#v %v, want %#v", raw, got, err, want)
+		}
+	}
+	if _, err := ParseInstance([]byte("service: app\nname: x\n")); err == nil || !strings.Contains(err.Error(), "field name not found") {
+		t.Errorf("an unknown key: %v", err)
 	}
 }

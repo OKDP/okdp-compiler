@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"path"
@@ -77,7 +78,7 @@ type tree struct {
 func Load(repos []Repository) ([]okdp.Instance, error) {
 	t, err := index(repos)
 	if err != nil {
-		return nil, err
+		return nil, newError([]error{err})
 	}
 	var errs []error
 	var platform []okdp.ContextLayer
@@ -110,7 +111,7 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 			instances = append(instances, inst)
 		}
 	}
-	if err := errors.Join(errs...); err != nil {
+	if err := newError(errs); err != nil {
 		return nil, err
 	}
 	return instances, nil
@@ -126,16 +127,10 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 func (t *tree) instance(repo Repository, project, name string, layers []okdp.ContextLayer) (okdp.Instance, error) {
 	dir := path.Join(ProjectsDir, project, InstancesDir, name)
 	file := path.Join(dir, InstanceFile)
-	var pkg struct {
-		Service  string   `yaml:"service"`
-		Version  string   `yaml:"version"`
-		Claimers []string `yaml:"claimers"`
-	}
+	var pkg InstanceSpec
 	b, err := fs.ReadFile(repo.FS, file)
 	if err == nil {
-		dec := yaml.NewDecoder(bytes.NewReader(b))
-		dec.KnownFields(true)
-		err = dec.Decode(&pkg)
+		pkg, err = ParseInstance(b)
 	}
 	if err == nil && (pkg.Service == "" || pkg.Version == "") {
 		err = errors.New("service and version are required")
@@ -172,6 +167,35 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 		in.Values = append(in.Values, l.Values)
 	}
 	return okdp.Instance{Definition: def, Inputs: in, Name: name}, nil
+}
+
+// InstanceSpec: an instance's InstanceFile, as written: its package,
+// catalog/<service>/<version>/, and its claimers, the namespaces whose
+// instances may claim of it from another namespace (namespace names, or
+// "*"): nil when absent, its package's then; empty for none (claimers:
+// []).
+type InstanceSpec struct {
+	Service  string   `yaml:"service"`
+	Version  string   `yaml:"version"`
+	Claimers []string `yaml:"claimers"`
+}
+
+// ParseInstance: an InstanceFile, its first document, strictly: a key
+// that is none of InstanceSpec's refused. What Load checks after it
+// (service and version required, the claimers) is the compile's.
+func ParseInstance(b []byte) (InstanceSpec, error) {
+	// Anonymous, so that a message names no Go type ("in type struct").
+	var spec struct {
+		Service  string   `yaml:"service"`
+		Version  string   `yaml:"version"`
+		Claimers []string `yaml:"claimers"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(&spec); err != nil && !errors.Is(err, io.EOF) {
+		return InstanceSpec{}, err
+	}
+	return InstanceSpec(spec), nil
 }
 
 // definition: the package of version of service, catalog/<service>/<version>/

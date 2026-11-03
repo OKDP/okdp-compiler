@@ -30,6 +30,10 @@
 // their releases, the dependencies checked, and a Target writes them for
 // a deployer.
 //
+// Build is the compile of a tree as a CLI or a control plane asks for it,
+// TreeFiles its output for one or more targets, the projects that do not
+// deploy kept as a previous output holds them (Partial).
+//
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
 // git tree without touching the disk.
@@ -37,10 +41,13 @@
 // This package is the public API; the implementation is under internal/:
 // OKDP's rules and the order of the stages (okdp), the tree of a
 // deployment read (repository), the deployment graph of compiled
-// instances (graph), the formats compiled instances are written in
-// (target: helm, the umbrella of Write, flux, argocd), the mapping
-// language (compile), what the compiler reproduces of Helm (chart), and
-// the values they share (value).
+// instances (graph), a tree compiled and the projects of it kept (tree),
+// the formats compiled instances are written in (target: helm, the
+// umbrella of Write, flux, argocd), the output of a tree for its targets
+// (output), the mapping language (compile), what the compiler reproduces
+// of Helm (chart), and the values they share (value). Beside it, package
+// treeedit edits the files of a tree as written, package chartcache
+// fetches the upstream charts of a check (a ChartSource).
 package compiler
 
 import (
@@ -50,6 +57,7 @@ import (
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/internal/output"
 	"github.com/okdp/okdp-compiler/internal/repository"
 	"github.com/okdp/okdp-compiler/internal/target"
 	"github.com/okdp/okdp-compiler/internal/target/argocd"
@@ -176,6 +184,33 @@ type (
 	// Flux and ArgoCD targets refuse (CheckReleases): their objects, named
 	// after the releases, share one namespace.
 	ReleaseError = target.ReleaseError
+	// LoadError: the problems of a tree that does not load (LoadRepository,
+	// Build), each naming its repository and path, one problem a whole
+	// message (Problems); Error gives them one per line, Unwrap the errors
+	// they are of (errors.Is ErrNotInCatalog).
+	LoadError = repository.Error
+	// KeptProject: a project of a tree whose output is not written
+	// (Partial, TreeFiles), and why: Problems, an instance each,
+	// <namespace>/<instance>: <why>, and Instances, the instances of the
+	// problems.
+	KeptProject = tree.Kept
+	// KeptInstance: an instance of a KeptProject that does not deploy, and
+	// why (Err): refused, a problem of the graph at its release, its
+	// release name another namespace's too (TreeFiles: an Err wrapping a
+	// *ReleaseError), or a release of a kept project it depends on
+	// (Depends).
+	KeptInstance = tree.KeptInstance
+	// ArgoSource: the repository and revision Argo CD reads a tree from
+	// (ReadArgoRoot), ArgoCD.RepoURL and ArgoCD.Revision.
+	ArgoSource = argocd.Source
+	// Published: what a compiled instance publishes, read back from a
+	// target's output (ReadPublished): its release, its package, the name
+	// and version of its Chart.yaml, and its InfoFile.
+	Published = helm.Published
+	// Compiled: an instance's umbrella chart, read back from a target's
+	// output (ReadCompiled): what it publishes, its Chart.yaml as written,
+	// its UmbrellaValues.
+	Compiled = helm.Compiled
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
@@ -349,9 +384,122 @@ func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) 
 // repository (platform.yaml, catalog/<service>/, projects/<project>/), a
 // contract in several with the same bytes, so that the order of repos
 // changes nothing. Every problem at once, each naming its repository and
-// path.
+// path: a *LoadError.
 func LoadRepository(repos []Repository) ([]Instance, error) {
 	return repository.Load(repos)
+}
+
+// AddedProblems: the problems of after that before has not, in after's
+// order; every one of after's when before is nil: what a change of a tree
+// that does not load added to why.
+func AddedProblems(before, after *LoadError) []string {
+	return repository.Added(before, after)
+}
+
+// BuildOptions: what Build sets on each instance of a tree, and the chart
+// cache of its checks.
+type BuildOptions struct {
+	// CostLimit: Inputs.CostLimit of each instance, 0 for none.
+	CostLimit uint64
+	// AllowPlainSecrets: Inputs.AllowPlainSecrets of each instance.
+	AllowPlainSecrets bool
+	// Charts: the chart cache CompileTree checks the final values against
+	// (StaticCharts, a cache that fetches what it lacks); nil, unchecked.
+	Charts ChartSource
+}
+
+// Build: the tree repos make together (LoadRepository), each instance
+// with the options' CostLimit and AllowPlainSecrets, compiled
+// (CompileTree, with opts.Charts), cancelled with ctx: what okdp-compile
+// and okdp-gitops compile. A tree that does not load is a *LoadError,
+// every problem listed; an instance refused is the tree's answer
+// (TreeInstance.Err), not an error.
+func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, error) {
+	instances, err := LoadRepository(repos)
+	if err != nil {
+		return nil, err
+	}
+	for i := range instances {
+		instances[i].Inputs.CostLimit = opts.CostLimit
+		instances[i].Inputs.AllowPlainSecrets = opts.AllowPlainSecrets
+	}
+	return CompileTree(ctx, instances, opts.Charts), nil
+}
+
+// StaticCharts: a chart cache filled already, fsys (each chart unpacked
+// with helm pull --untar, as Inputs.Charts reads it), which fetches
+// nothing: CompileTree sets it on every instance at once and compiles
+// them once, a chart it lacks failing the check of the instance that
+// names it (okdp-compile --check --charts).
+func StaticCharts(fsys fs.FS) ChartSource { return tree.Dir{FS: fsys} }
+
+// Partial: the projects of t written and those kept. results are the
+// compiled instances of the projects written, g their graph; kept the
+// others, by namespace: the project of an instance refused, then, round
+// after round, of an instance at which the graph of the projects not kept
+// yet has a problem of its own (a cycle, a release that does not provide
+// what is referenced), or that depends on a release of a kept project
+// (Result.Dependencies), compiled with what that release publishes now,
+// which is not deployed: <namespace>/<instance>: it depends on
+// <namespace>/<release>, of the project <namespace>, whose output is
+// kept. g is nil only when the graph has a problem at no instance of t.
+func Partial(t *Tree) (results []*Result, g *Graph, kept []KeptProject) {
+	return tree.Partial(t)
+}
+
+// TreeFiles: the output of t, path -> content: the files each of targets
+// writes for the projects Partial writes, merged (a path two targets write
+// differently fails it); for each project kept, the files previous, the
+// output written before (nil: none), holds under its ProjectDir, as they
+// are, and kept says why. A Flux target lists in its root Kustomization
+// (Flux.Keep) each kept project whose kustomization.yaml previous holds:
+// the Flux Kustomization of projects/ would prune it otherwise. For a Flux
+// or an Argo CD target, whose objects share one namespace, a release name
+// two namespaces of t share (CheckReleases), compiled or not, keeps the
+// projects of it too, each instance of it that compiled a KeptInstance
+// whose Err wraps a *ReleaseError, and, round after round, those that
+// depend on a release of them, the others written; then every release of
+// the projects written and of the kept projects' output is in one
+// namespace, else an error wrapping a *ReleaseError per release: one
+// release name is never written twice. Bytes only: the caller writes
+// them, and removes what it wrote before that they do not hold but the
+// kept projects' directories.
+func TreeFiles(t *Tree, targets []Target, previous fs.FS) (files map[string][]byte, kept []KeptProject, err error) {
+	return output.Files(t, targets, previous)
+}
+
+// Regressions: the instances of after that do not deploy
+// (TreeInstance.Err) though they did in before, matched by namespace and
+// name, in after's order: what a change from before to after broke.
+func Regressions(before, after *Tree) []*TreeInstance {
+	return tree.Regressions(before, after)
+}
+
+// ReleaseTaken: the compiled instance of t, of another namespace than
+// namespace, whose release the compiled instance name of namespace has
+// too (CheckReleases: a-b/c and a/b-c are both a-b-c), nil when none.
+func ReleaseTaken(t *Tree, namespace, name string) *TreeInstance {
+	return output.ReleaseTaken(t, namespace, name)
+}
+
+// ReadArgoRoot: the ArgoSource of an Argo CD entry point, raw, a YAML
+// stream written by hand: the spec.source of its first Application that
+// has a repoURL, its targetRevision HEAD when it has none.
+func ReadArgoRoot(raw []byte) (*ArgoSource, error) { return argocd.ReadRoot(raw) }
+
+// ReadPublished: what the compiled instances of namespace publish in
+// output, a tree a target wrote (projects/ at its root): each InstanceDir
+// that holds a Chart.yaml, by release; none when output has no instance
+// of namespace.
+func ReadPublished(output fs.FS, namespace string) ([]Published, error) {
+	return helm.ReadPublished(output, namespace)
+}
+
+// ReadCompiled: the umbrella chart of the instance of release of
+// namespace in output, a tree a target wrote; an error wrapping
+// fs.ErrNotExist when it has no Chart.yaml there (not compiled yet).
+func ReadCompiled(output fs.FS, namespace, release string) (*Compiled, error) {
+	return helm.ReadCompiled(output, namespace, release)
 }
 
 // ParseConnection: the external connection name of connections, v, as

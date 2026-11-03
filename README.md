@@ -60,6 +60,17 @@ whose outputs it references, with what they publish as `Published`.
 and a target writes them for a deployer: the umbrella chart of each
 (`compiler.Helm`), with its Flux HelmRelease (`compiler.Flux`) or its
 Argo CD Application (`compiler.ArgoCD`).
+`compiler.Build` is the compile of a tree as both command lines run it,
+`LoadRepository` then `CompileTree` (`compiler.LoadError`, every problem
+of a tree that does not load), `compiler.TreeFiles` its output for one or
+more targets, the projects that do not deploy kept as the output written
+before holds them (`compiler.Partial`, the rule of `okdp-compile
+--partial`); the control plane checks a change with
+`compiler.Regressions` and `compiler.ReleaseTaken`, and reads an output
+back with `compiler.ReadCompiled` and `compiler.ReadPublished`. Package
+`treeedit` edits the files of a tree as written, their comments kept;
+package `chartcache` keeps a chart cache that pulls the upstream charts
+of a check, OCI or https ([Go library](docs/01_usage.md#go-library)).
 `compiler.Compile` compiles one instance, given its inputs, as
 `CompileAll` does each; it keeps no state between calls and is safe for
 concurrent use. Any `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree,
@@ -252,8 +263,8 @@ when it fails: each instance, its status (`compiled`, `refused`,
 `skipped`), its error, warnings, dependencies, claims and charts, and the
 tree's errors ([`--report`](docs/01_usage.md#--report)). `--partial`
 writes the projects whose instances all compile and keeps what the
-output holds of the others, failing all the same
-([`--partial`](docs/01_usage.md#--partial)).
+output holds of the others, and of two projects that share a release
+name, failing all the same ([`--partial`](docs/01_usage.md#--partial)).
 
 What a package computes is bounded: `--cost-limit` (50000000, 0 for
 none), the CEL cost of each instance's expressions, what a host function
@@ -269,10 +280,14 @@ refused. Credentials written in clear fail the compile, but with
 
 | Path | Description |
 |---|---|
-| `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, the targets, `Write`... |
+| `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, `Build`, `Partial`, `TreeFiles`, the targets, `Write`, the readers of an output... |
+| `treeedit/` | the files of a tree as written, for a caller that edits the tree: `instance.yaml`, the values files, an entry of `connections` or `claims`, a project's description, a document merged key by key, each edited in place |
+| `chartcache/` | a chart cache that pulls the upstream charts from their repositories (OCI, https), a `compiler.ChartSource`: the control plane's and okdp-gitops' |
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, claims, classes and providers, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages, `CompileAll` |
-| `internal/repository/` | the tree of a deployment, in one or more repositories, read as the instances `CompileAll` compiles |
+| `internal/repository/` | the tree of a deployment, in one or more repositories, read as the instances `CompileAll` compiles; the problems of one that does not load |
+| `internal/tree/` | a tree compiled (`CompileTree`), its instances read as a caller asks of them; its projects written and kept (`Partial`) |
+| `internal/output/` | the output of a tree for its targets (`TreeFiles`): the projects kept as a previous output holds them, those of a release name two projects share too, the releases of the output in one namespace |
 | `internal/graph/` | the deployment graph of compiled instances: their dependencies checked, what each release waits for, its sync wave |
 | `internal/target/` | the output formats of compiled instances (`Target`), what they share: the tree, `projects/<namespace>/instances/<release>/` |
 | `internal/target/flux/`, `internal/target/argocd/` | the flux and argocd targets: the umbrella charts with each instance's HelmRelease and Kustomizations, or its Application, okdp-gitops' format |
@@ -280,7 +295,8 @@ refused. Credentials written in clear fail the compile, but with
 | `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
 | `internal/value/` | the values every package shares, and their helpers |
-| `cmd/okdp-compile/main.go` | binary entrypoint: flags, and the files written to disk |
+| `internal/dirfs/` | a directory as an `fs.FS`, bounded, no symbolic link followed: what the CLI reads, and the chart cache of `chartcache` |
+| `cmd/okdp-compile/main.go` | binary entrypoint: flags, the tree read bounded (`openDir`, `internal/dirfs`), `compiler.Build`, `compiler.TreeFiles`, and the files written to disk |
 | `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the packages in `catalog/<service>/<version>/`, the instances of the project `demo` in `projects/demo/instances/<instance>/`), what `-o <dir>` writes for each instance in `output/projects/demo/instances/demo-<instance>/`, its release, checked by `go test` ([example](docs/00_architecture.md#example)) |
 | `examples/00_passthrough/` | a package that computes nothing, `echo`: `Chart.yaml`, one chart, and a plain `values.yaml`, the chart's values the platform sets; no `okdp.yaml`, no parameter, no instance values |
 | `examples/01_minimal/` | the smallest package with a mapping, `hello`: one chart, a mapping that sets three of its values and the instance's usage; no platform values, none needed |
@@ -288,7 +304,7 @@ refused. Credentials written in clear fail the compile, but with
 | `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, level 1), each with connections, the instance's own connections (`connections.yaml`, level 2) and its values (`config.yaml`), two claims of a database among its references, one of its own, one the project's named claim; the instances it depends on, `demo-db`, their provider, and `demo-alerts`, whose output it references, minimal packages, `db` and `alerts`; its chart cache in `.charts/`, for `--check --charts` |
 | `examples/04_claims/` | claims: a database server, `postgresql` in the project `data`, the provider of the platform's default class (`global.okdp.provisioning`) and of the project's class `large`, each naming it `data/postgresql`, the latter with its consent (`claimers: [demo]` of its `instance.yaml`), that provisions a database for each claim bound to it; an application, `app`, whose database is a claim by default, a PostgreSQL one with credentials (`require`): `demo-app` claims one of its own by default, `demo-metrics` one it writes out (`config.yaml`: a class and a request, a size and extensions), `demo-reports` and `demo-dashboards` reference one the project declares (`project.yaml`, a named claim of the class `large`); the contract's two sides, what a claim requests (`x-okdp-claim`: a size, extensions) and what the provider publishes, its `okdp.info.yaml` showing what it granted; the platform's secret store, the credentials crossing namespaces |
 | `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
-| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, the limits, symbolic links, the output's mark, the report, `--partial`, `--allow-plain-secrets`, the platform's policy, the secret store's keys, an OAuth client's Secret, the chart sources, stdout and stderr; with `testdata/`, a case that must fail per boundary of the [threat model](docs/04_threat_model.md) |
+| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, the limits, symbolic links, the output's mark, the report, `--partial` and the projects it keeps, `--allow-plain-secrets`, the platform's policy, the secret store's keys, an OAuth client's Secret, the chart sources, stdout and stderr; with `testdata/`, a case that must fail per boundary of the [threat model](docs/04_threat_model.md) |
 | `testdata/targets/` | the files of each target for three instances (`go test ./internal/target -update`) |
 | `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
 | `docs/` | the documentation |

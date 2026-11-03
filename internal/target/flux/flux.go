@@ -42,6 +42,11 @@ const (
 // ConfigMaps, okdp-gitops': their names, the releases', must be unique.
 const ReleasesNamespace = "okdp-releases"
 
+// ReleaseObjects: the objects of the target named after the releases,
+// which share ReleasesNamespace: what a release in two namespaces makes
+// clash (target.UniqueReleases).
+const ReleaseObjects = "the HelmReleases of " + ReleasesNamespace
+
 // RoleName: okdp-project, the Role of a project's namespace its releases
 // are installed with, and its RoleBinding.
 const RoleName = "okdp-project"
@@ -76,7 +81,7 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 	if err := t.check(); err != nil {
 		return nil, err
 	}
-	if err := target.UniqueReleases(results, "the HelmReleases of "+ReleasesNamespace); err != nil {
+	if err := target.UniqueReleases(results, ReleaseObjects); err != nil {
 		return nil, err
 	}
 	files, err := helm.Target{}.Files(results, g)

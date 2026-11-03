@@ -1,4 +1,8 @@
-package main
+// Package dirfs: the files under a directory as an fs.FS, bounded and
+// with no symbolic link followed: what okdp-compile reads of a repository,
+// the chart cache or the output, and the chart cache of package
+// chartcache gives a compile (Cache.FS).
+package dirfs
 
 import (
 	"errors"
@@ -9,20 +13,21 @@ import (
 	"sync"
 )
 
-// The bounds of what the command reads of a directory (dirFS): a file at
-// most maxFileSize bytes, the files read of one directory, each counted
-// once, at most maxDirSize together. A tree's files are YAML and JSON
+// The bounds of what is read of a directory (FS): a file at most
+// MaxFileSize bytes, the files read of one directory, each counted once,
+// at most MaxDirSize together. A tree's files are YAML and JSON
 // documents, an upstream chart's in the cache its values and schema.
 const (
-	maxFileSize = 4 << 20
-	maxDirSize  = 64 << 20
+	MaxFileSize = 4 << 20
+	MaxDirSize  = 64 << 20
 )
 
-// errSymlink: what a symbolic link under a directory read gives: it is
+// ErrSymlink: what a symbolic link under a directory read gives: it is
 // not followed, wherever it points.
-var errSymlink = errors.New("a symbolic link, not followed")
+var ErrSymlink = errors.New("a symbolic link, not followed")
 
-// dirFS: the files under a directory of --repository or --charts, as
+// FS: the files under a directory (of --repository, --charts, a chart
+// cache), as
 // os.DirFS gives them, but bounded: a symbolic link is refused, opened,
 // listed in a directory or on the path of a file (each element of the
 // path checked with Lstat, then the file opened through an os.Root, which
@@ -32,9 +37,9 @@ var errSymlink = errors.New("a symbolic link, not followed")
 // the files opened pass dirCap together. A Stat goes through Open (fs.Stat),
 // its file counted. Safe for concurrent use. The directory itself may be a
 // link: the user names it.
-type dirFS struct {
+type FS struct {
 	root    *os.Root
-	flag    string // --repository <dir>, --charts <dir>: what messages name
+	label   string // --repository <dir>, --charts <dir>: what messages name
 	fileCap int64
 	dirCap  int64
 
@@ -43,25 +48,26 @@ type dirFS struct {
 	total int64            // their sizes
 }
 
-// openDir: the dirFS of dir, given as flag (--repository, --charts), its
-// bounds maxFileSize and maxDirSize. Close releases it.
-func openDir(flag, dir string) (*dirFS, error) {
+// New: the FS of dir, which messages name as label (--repository,
+// --charts, the chart cache), its bounds MaxFileSize and MaxDirSize.
+// Close releases it.
+func New(label, dir string) (*FS, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", flag, err)
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
-	return &dirFS{root: root, flag: flag + " " + dir, fileCap: maxFileSize, dirCap: maxDirSize, sizes: map[string]int64{}}, nil
+	return &FS{root: root, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}}, nil
 }
 
 // Close: the directory released, its files opened readable until each is
 // closed; an error closing a directory only read is of no use.
-func (d *dirFS) Close() { _ = d.root.Close() }
+func (d *FS) Close() { _ = d.root.Close() }
 
 // Open: the file name, a path fs.ValidPath accepts, if neither it nor a
 // directory on its path is a symbolic link, and it is a directory or a
 // regular file within the bounds. An error is an *fs.PathError of name,
 // fs.ErrNotExist for a file that does not exist.
-func (d *dirFS) Open(name string) (fs.File, error) {
+func (d *FS) Open(name string) (fs.File, error) {
 	fail := func(err error) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
@@ -96,7 +102,7 @@ func (d *dirFS) Open(name string) (fs.File, error) {
 // lstat: the information of name, after each directory on its path, none
 // of them, nor name, a symbolic link: its error the element's, without its
 // path but for an element of the path that is not name.
-func (d *dirFS) lstat(name string) (fs.FileInfo, error) {
+func (d *FS) lstat(name string) (fs.FileInfo, error) {
 	if name == "." {
 		return d.root.Lstat(".")
 	}
@@ -117,9 +123,9 @@ func (d *dirFS) lstat(name string) (fs.FileInfo, error) {
 		}
 		if info.Mode()&fs.ModeSymlink != 0 {
 			if elem != name {
-				return nil, fmt.Errorf("%s: %w", elem, errSymlink)
+				return nil, fmt.Errorf("%s: %w", elem, ErrSymlink)
 			}
-			return nil, errSymlink
+			return nil, ErrSymlink
 		}
 	}
 	return info, nil
@@ -128,7 +134,7 @@ func (d *dirFS) lstat(name string) (fs.FileInfo, error) {
 // count: nil when a regular file of size bytes may be read: within
 // fileCap, and, unless it was opened before, the files opened with it
 // within dirCap.
-func (d *dirFS) count(name string, size int64) error {
+func (d *FS) count(name string, size int64) error {
 	if size > d.fileCap {
 		return fmt.Errorf("%d bytes, over the %s a file read may hold", size, mib(d.fileCap))
 	}
@@ -138,7 +144,7 @@ func (d *dirFS) count(name string, size int64) error {
 		return nil
 	}
 	if d.total+size > d.dirCap {
-		return fmt.Errorf("the files read of %s pass %s together", d.flag, mib(d.dirCap))
+		return fmt.Errorf("the files read of %s pass %s together", d.label, mib(d.dirCap))
 	}
 	d.sizes[name] = size
 	d.total += size
@@ -153,7 +159,7 @@ func mib(n int64) string {
 	return fmt.Sprintf("%d bytes", n)
 }
 
-// file: a file of a dirFS: what fs.File and fs.ReadDirFile need of an
+// file: a file of an FS: what fs.File and fs.ReadDirFile need of an
 // *os.File, and no more (no WriterTo, which io.Copy would read past Read
 // with): its reads bounded, a file grown past fileCap since it was
 // checked failing; its directory entries, a symbolic link among them
@@ -192,7 +198,7 @@ func (f *file) ReadDir(n int) ([]fs.DirEntry, error) {
 			if f.name != "." {
 				p = f.name + "/" + p
 			}
-			return nil, &fs.PathError{Op: "readdir", Path: f.name, Err: fmt.Errorf("%s: %w", p, errSymlink)}
+			return nil, &fs.PathError{Op: "readdir", Path: f.name, Err: fmt.Errorf("%s: %w", p, ErrSymlink)}
 		}
 	}
 	return entries, err

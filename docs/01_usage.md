@@ -137,7 +137,7 @@ okdp-compile --version
 | Flag | Default | |
 |---|---|---|
 | `--repository` | required | a repository of the tree, its directory, repeatable: any part of the [tree](#repository-layout), each part in one repository; every instance of the tree compiled together ([`--repository`](#--repository)) |
-| `--output`, `-o` | required, refused with `--check` | the output directory: under `projects/<namespace>/instances/<release>/`, each instance's umbrella chart, its values, OKDP's own objects and what it publishes, and the files of `--target` ([`--output`](#--output)) |
+| `--output`, `-o` | required, refused with `--check` | the output directory: under `projects/<namespace>/instances/<release>/`, each instance's umbrella chart, its values, OKDP's own objects and what it publishes, and the files of `--target`; every symbolic link under its `projects/` removed first, nothing written through one ([`--output`](#--output)) |
 | `--check` | | compile and check, write nothing: the errors and warnings, no `--output` ([`--check`](#--check)) |
 | `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
 | `--target` | `helm` | what is written: `helm`, each instance's umbrella chart; `flux`, with its HelmRelease, the Kustomizations and each project's manifests; `argocd`, with its Application and each project's manifests ([targets](specs/01_inputs_outputs.md#targets)) |
@@ -348,10 +348,12 @@ written by okdp-compile (no projects/.okdp-compile): choose an empty
 output, or remove it yourself`. `--force` writes over it, the mark then
 written; so does an output written by a version without the mark, once.
 A `projects/` that is a symbolic link fails, even with `--force`. Every
-file is written through an `os.Root` of the directory: a symbolic link
-where a file goes is replaced, not written through, and one on the path
-that leads out of the directory fails the write; a link removed is the
-link, not what it points to.
+symbolic link under `projects/`, at any depth, a file's or a
+directory's, wherever it points, is removed before a file is written:
+the link, not what it points to; a project's files then land in a
+directory of their own, never through a link, even one that stays in
+the output. Every file is written through an `os.Root` of the directory
+besides: nothing leads a file out of it.
 
 Once the files are written, the command prints on stderr, after the
 warnings, the `Result.Dependencies` of each instance: one line per
@@ -421,7 +423,7 @@ are unchanged.
 | `instances[].namespace`, `instance`, `release` | the project, the instance's name, its release |
 | `instances[].service`, `version` | its package |
 | `instances[].privileged` | its project is one of the platform's own (`global.okdp.policy.privileged`); `false` when refused |
-| `instances[].status` | `compiled`; `refused`, its compile failed or the deployment graph has a problem at its release; `skipped`, not compiled, the compile stopped (`--timeout`), or, with `--partial`, compiled but not written, another instance of its project refused |
+| `instances[].status` | `compiled`; `refused`, its compile failed, the deployment graph has a problem at its release, or an instance of another project has its release name (`--target flux`, `argocd`); `skipped`, not compiled, the compile stopped (`--timeout`), or, with `--partial`, compiled but not written, another instance of its project refused |
 | `instances[].error` | why it is refused, the message stderr prints after `error: <namespace>/<release>: `; `""` when it is not |
 | `instances[].warnings` | its warnings (`Result.Warnings`) |
 | `instances[].dependencies` | the instances it depends on, `{instance, namespace, contract, field, output}` (`Result.Dependencies`, `namespace` when another) |
@@ -456,23 +458,51 @@ web:
 error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is
 ```
 
-An instance of another project that depends on one of a project not
-written fails its own project in turn (the graph has a problem at its
-release), round after round. With `--target flux`, the root
+An instance of another project that depends on a release of a project
+not written, a connection reference or a claim, fails its own project in
+turn, round after round, said so, its report status `skipped`: it
+compiled, with what that release publishes now, which is not deployed:
+
+```text
+error: demo/demo-app: it depends on data/data-pg, of the project data, whose output is kept
+```
+
+A problem of the graph of its own (a cycle, a release that does not
+provide what is referenced) fails its project with that problem, its
+status `refused`. So does a release name two projects share, `demo/app-x`
+and `demo-app/x` both `demo-app-x`, with `--target flux` and `argocd`,
+whose objects share a namespace: both projects fail, the others are
+written; one that the output does not hold yet writes nothing.
+
+```text
+error: demo/demo-app-x: release "demo-app-x" is in namespaces "demo" and "demo-app": the HelmReleases of okdp-releases need distinct names
+error: demo-app/demo-app-x: release "demo-app-x" is in namespaces "demo" and "demo-app": the HelmReleases of okdp-releases need distinct names
+error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is
+error: demo-app: not written, an instance of it refused (--partial): out/projects/demo-app/ kept as it is
+```
+
+Without `--partial`, the same release name fails the command, each
+instance of it printed, nothing written. The rule is the library's,
+`compiler.Partial`, the files and the release names `compiler.TreeFiles`
+([Go library](#go-library)). With `--target flux`, the root
 `kustomization.yaml` still lists a project kept, when the output holds
 its `kustomization.yaml`, which Flux would prune otherwise
 (`Flux.Keep`); with `argocd`, the Applications of a project kept stay
-where they are. The command exits with status 1 all the same: what was
-refused is to be fixed. A failure of the tree writes nothing, as without
-`--partial`: an option, a repository, the target's files (a release name
-two namespaces share), `--timeout`.
+where they are. The output of the projects kept is read as the
+repositories are, bounded, no symbolic link followed: a link in it fails
+the command, nothing written. The command exits with status 1 all the
+same: what was refused is to be fixed. A failure of the tree writes
+nothing, as without `--partial`: an option, a repository, the target's
+files, a release the output of a project kept holds and a project
+written has too in another namespace, or the output of two projects kept
+(`--target flux` and `argocd`), `--timeout`.
 
 ### Exit status and errors
 
 | Status | When |
 |---|---|
 | 0 | compiled, or checked (`--check`), each binding and warning on stderr, then, the files written, each dependency, as [`--repository`](#--repository) prints them; `--version`, `--help` |
-| 1 | any error: `error: <message>` on stderr, one per refused instance and per problem of the graph, `error: <namespace>/<release>: <message>`; with `--partial`, one per project not written too, `error: <namespace>: not written, ...`, the others written |
+| 1 | any error: `error: <message>` on stderr, one per refused instance, per problem of the graph and per instance of a release name two projects share, `error: <namespace>/<release>: <message>`; with `--partial`, one per project not written too, `error: <namespace>: not written, ...`, the others written |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
 A message is a whole report and may span several lines: every schema
@@ -995,6 +1025,68 @@ holds, to read it back.
   `Instance(namespace, name)`, `Release(namespace, release)`, and
   `Problems()`, `<namespace>/<name>: <why>` per instance that does not
   deploy.
+- `compiler.Build(ctx, repos, compiler.BuildOptions{CostLimit,
+  AllowPlainSecrets, Charts})` is the compile of a tree as `okdp-compile`
+  and okdp-gitops run it: `LoadRepository`, the options on each
+  instance, `CompileTree`. A tree that does not load is a
+  `*compiler.LoadError`, `Problems` one per problem (a report of several
+  lines one of them), which `LoadRepository` returns too;
+  `compiler.AddedProblems(before, after)` the problems a change added.
+  `compiler.StaticCharts(fsys)` is a chart cache filled already, which
+  fetches nothing: the instances compiled once with it (`okdp-compile
+  --check --charts`); package `chartcache` keeps one that pulls what it
+  lacks from the charts' repositories, OCI or https (`chartcache.NewCache`,
+  `NewRepositoryPuller`), the control plane's and okdp-gitops': an OCI
+  chart layer verified against its manifest's digest before it is
+  unpacked, a pull that fails leaving no directory of the chart; an
+  https chart repository's archive and redirects https too, plain http
+  only on the hosts given to `NewRepositoryPuller` (`InsecureHosts`),
+  never from https; the archive's `Chart.yaml` the chart and version
+  named; `Cache.File` reads one of `chartcache.Files` only, and
+  `Cache.FS` follows no symbolic link and bounds what it reads, as
+  `okdp-compile` reads `--charts`.
+- `compiler.Partial(tree)` is what `--partial` writes: the results of
+  the projects written and their graph, and the projects kept, each a
+  `compiler.KeptProject` (`Namespace`; `Problems`, `<namespace>/<instance>:
+  <why>`; `Instances`, each a `compiler.KeptInstance`, its `Err`, and
+  `Depends` for one that compiled but depends on a release of a project
+  kept). `compiler.TreeFiles(tree, targets, previous)` is the output of a
+  tree for one or more targets, path -> content: the files of the
+  projects written, merged (a path two targets write differently fails
+  it), the files of the projects kept as `previous`, the output written
+  before (`fs.FS`, `nil` for none), holds them under
+  `projects/<namespace>/`, the Flux target's `Keep` set for those whose
+  `kustomization.yaml` it holds; and the projects kept, those of
+  `compiler.Partial` and, for the Flux and Argo CD targets, those of a
+  release name two projects of the tree share, its instances each a
+  `KeptInstance` whose `Err` wraps a `compiler.ReleaseError`, and those
+  that depend on them; a release of the kept output that a project
+  written, or another kept output, has too fails it. Bytes only, the
+  caller writes them.
+- `compiler.Regressions(before, after)` are the instances that deployed
+  in a tree before a change and do not after;
+  `compiler.ReleaseTaken(tree, namespace, name)` the instance of another
+  namespace whose release an instance has too: what a control plane
+  checks a write with.
+- The readers of an output: `compiler.ReadArgoRoot(raw)`, the
+  `compiler.ArgoSource` (`RepoURL`, `Revision`, `HEAD` by default) of an
+  Argo CD entry point, the first `Application` with a `spec.source`;
+  `compiler.ReadPublished(output, namespace)`, what each compiled
+  instance of a namespace publishes (`compiler.Published`: its release,
+  its package, its `okdp.info.yaml`); `compiler.ReadCompiled(output,
+  namespace, release)`, an instance's umbrella chart
+  (`compiler.Compiled`: its `Chart.yaml` as written, its values),
+  `fs.ErrNotExist` before it is compiled.
+- Package `treeedit` reads and writes the files of a tree as written,
+  for a caller that edits the tree (a control plane): `ParseInstance` and
+  `EncodeInstance` (`instance.yaml`, its `claimers` absent, none or
+  listed, each kept apart), `EncodeValues`, `DecodeValues` (as the
+  compile reads a values file, every number a `float64`), `MarshalYAML`,
+  `RoundTrip`; `EditEntry` (an entry of `connections` or `claims`),
+  `EditKey`, `WriteDescription` and `ReadDescription` (the
+  `description` of `project.yaml`), `MergeDocument` (a document merged
+  key by key): each in place, the file's head, comments and other keys
+  kept.
 - `compiler.CheckReleases(results)` is what the Flux and Argo CD targets
   refuse of the release names, their objects sharing one namespace: a
   `*compiler.ReleaseError` (`Release`, `Namespaces`) per release in two
@@ -1051,7 +1143,8 @@ holds, to read it back.
   ([credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
 - Errors are messages for the user, returned as they are; the package
   defines no error types, but `ErrNotInCatalog`, which a missing package
-  wraps, and `*ReleaseError`, which the Flux and Argo CD targets wrap. A message carries its context: the file, the
+  wraps, `*LoadError`, the problems of a tree that does not load, and
+  `*ReleaseError`, which the Flux and Argo CD targets wrap. A message carries its context: the file, the
   parameter path, the chart key, the mapping section (see
   [troubleshooting](#troubleshooting)).
 

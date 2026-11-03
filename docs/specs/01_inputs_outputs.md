@@ -2400,7 +2400,7 @@ projects/
 | Target | Options (its fields) | Files besides the umbrella charts |
 |---|---|---|
 | `compiler.Helm` | none | none: each instance installs with Helm, as one release, its dependencies built first ([rendering with Helm](../01_usage.md#rendering-with-helm)), after those it waits for |
-| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root); `Keep`, namespaces the root lists without a result, projects whose directories the output keeps as they are (`okdp-compile --partial`) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
+| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root); `Keep`, namespaces the root lists without a result, projects whose directories the output keeps as they are (`okdp-compile --partial`; `compiler.TreeFiles` sets it for each project kept whose `kustomization.yaml` the previous output holds) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
 | `compiler.ArgoCD` | `RepoURL`, the repository of the tree, required; `Revision` (`HEAD`); `PathPrefix` | per instance, `application.yaml`; per namespace, `project/` |
 
 The files of the flux and argocd targets are marked generated on their
@@ -2534,7 +2534,7 @@ every reconcile.
 | a `PathPrefix` that is absolute, `.`, or has an empty, `.` or `..` segment | `Flux.PathPrefix "<prefix>": the path of the tree in the repository, relative, without an empty, . or .. segment`; `ArgoCD.PathPrefix` alike |
 | no `RepoURL` | `ArgoCD.RepoURL is required` |
 | a `RepoURL` or `Revision` with a quote, a backslash or a newline | `ArgoCD.RepoURL "<url>": holds a quote, a backslash or a newline`; `ArgoCD.Revision` alike |
-| one release name in two namespaces | `release "<release>" is in namespaces "<a>" and "<b>": the HelmReleases of okdp-releases need distinct names` (flux); `the Applications of argocd need distinct names` (argocd) |
+| one release name in two namespaces | `release "<release>" is in namespaces "<a>" and "<b>": the HelmReleases of okdp-releases need distinct names` (flux); `the Applications of argocd need distinct names` (argocd); `compiler.TreeFiles` keeps the projects of it instead, each instance its error (`KeptInstance.Err`) |
 
 ## Claims
 
