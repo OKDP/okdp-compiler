@@ -238,7 +238,10 @@ chart is reached through `upstream.<chart>`, without a parameter.
   schema declares under it (`"global": {"properties": {"imageRegistry":
   ...}}`), never `okdp`, is one an instance may set, and every chart
   receives it
-  ([context values](specs/01_inputs_outputs.md#context-values)).
+  ([context values](specs/01_inputs_outputs.md#context-values)). A
+  schema that declares `global.okdp`, or gives it a default (`"global":
+  {"default": {"okdp": ...}}`), is refused: the platform's settings come
+  from the context alone.
 - `connections` is not a parameter: the context gives the connections, an
   instance's own in a context file of its level, and the schema does not
   declare it; a declaration has no effect

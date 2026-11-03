@@ -190,8 +190,14 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    `internal/okdp/platform.schema.json` (`platformSchema`, parsed once per
    process by `chart.ParseSchema`): their types, the maps on the way to
    them, `clientProvisioning`'s values, the oidc-dcr Jobs' whole numbers,
-   the keys of `charts`, the defaults. `schemaValues` checks the
-   merged `global` against it as the parameters are checked
+   the keys of `charts`, the defaults. The settings are read from the
+   context's layers alone, never from the parameters, which a package
+   schema's defaults reach (`contextLayers`, `parameters`): level 0's
+   `global.okdp`, merged, then the `provisioning` of each layer above;
+   no other key of a higher level is read, whatever the checks let
+   through, and `global.okdp` of the parameters is replaced by that view
+   as written. `platformSettings` checks it against the schema as the
+   parameters are checked
    (`Schema.Values`), every violation at once under a heading that names
    the platform values: a value of another type fails rather than reads as
    not set ([fields the compiler
@@ -199,8 +205,10 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    are read as Helm reads them in a chart's values: a `null` deletes the
    setting's default, and is refused by its type where there is none; an
    empty string is a value.
-   `global.okdp` stays as written for the mapping (`instance.okdp`); OIDC
-   is derived from the checked copy (`platform.oidc`): the client
+   The mapping sees `global.okdp` as the context wrote it (`global`); the
+   compiler reads the checked copy (`instance.okdp`: the privileged
+   projects, the store, the upstream policy, the platform charts, the
+   classes). OIDC is derived from it (`platform.oidc`): the client
    provisioning mode in effect
    (`existing`, `dcr`); `registrationUrl` and `authMethod` are left to stage 6
    ([OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings)).
@@ -261,7 +269,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    shared by the mapping and the compiler's templates. It reads the
    platform's charts, `global.okdp.charts` (`platformCharts`,
    `internal/okdp/objects.go`), their form checked at stage 2: `oidcDcr`,
-   the chart of the OAuth clients, `DcrSource` (oidc-dcr 0.5.0) by default,
+   the chart of the OAuth clients, `DcrSource` (oidc-dcr 0.6.0) by default,
    checked as a source is ([Platform
    charts](specs/01_inputs_outputs.md#platform-charts)).
 5. **Mapping** (`runMapping`, `internal/okdp/mapping.go`, on
@@ -402,12 +410,17 @@ item `[i]`.
 
 The module's root is the public package, `compiler`: it gives callers the
 types they name, as aliases, and wraps the functions of `okdp`, `graph`,
-`tree`, the targets and `chart`. Under `internal/`, the packages each
-import only those below them: `cmd/okdp-compile` -> `compiler` ->
-`repository`, `tree` -> `graph`, and `target/flux` and `target/argocd` ->
-`target/helm` -> `target` -> `graph` -> `okdp` -> `compile` and `chart`
--> `value`: the compile knows no tree, no graph and no target, the graph
-no target, the compiled tree no target (`TestLayers`).
+`tree`, `output`, the targets and `chart`. Under `internal/`, the
+packages each import only those below them: `cmd/okdp-compile` ->
+`compiler` -> `repository`, `output` -> `tree` -> `graph`, and `output`
+-> `target/flux` and `target/argocd` -> `target/helm` -> `target` ->
+`graph` -> `okdp` -> `compile` and `chart` -> `value`: the compile knows
+no tree, no graph and no target, the graph no target, the compiled tree
+no target, the output no repository (`TestLayers`). Beside `compiler`,
+two public packages: `treeedit`, the files of a tree as written, for a
+caller that edits it (-> `repository`, `chart`), and `chartcache`, a
+chart cache that pulls the upstream charts (-> `compiler`); okdp-gitops
+and the control plane call them, `okdp-compile` neither.
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -419,7 +432,7 @@ neither knows OKDP.
 | | `path.go` | the path of a value, as messages write it (`Key`, `Index`): plain keys joined by dots, a key that is empty or holds a special character in brackets, the form of the `protect` paths | `formatPath` and `NoTemplate` (`chart`); the parameter paths of the connections and `Dependency.Field`, the fields of the contract violations (`okdp`) |
 | `compile` | `cel.go` | the mapping language: `Session` (`NewSession`), what the evaluations of one compile share: its context, its CEL cost limit, the caller's host functions and the CEL environments built with them; documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) as ordered YAML 1.2 data, evaluated with the names of their sections: loaded, `vars` and `errors` evaluated, then the sections (`Session.Eval`, a `Doc`: their values, and the keys each writes, `Written`); an expression compiled once to a program in the CEL environment of its names, built once per set of names (`compile`), run under the session's context, its cost counted (`run`, `exec`); `toData`, a CEL value as data, as cel-go converts it to JSON | registers the functions of `functions.go`, then the caller's |
 | | `tree.go` | a document compiled into a tree of typed nodes (`builder`: text, list, plain map, `$if` with its `$else`, `$for` in a map and in a list item, `$spread`, `vars` and `$vars` bindings), which is its check: the top-level keys of each file, `vars`, `errors` and each section given by one file, the keys each section writes at its top level (`literals`), each directive of its place (`check`), `$for` with its keys, every expression compiled in its scope, in every branch; the evaluation, a method per node type | `Session.Eval` |
-| | `functions.go` | `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`), each the Go code of the Helm or sprig function; `Unary`, the binding of a host function, its argument as data (`toData`), and `Func`, a host function of one argument bound with it, a CEL library whose programs count its calls (`hostCost`: 1, a tenth of its argument's size, the bytes of the string it returns) | `encoding/json`, `sigs.k8s.io/yaml` |
+| | `functions.go` | `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`), each the Go code of the Helm or sprig function; `Unary`, the binding of a host function, its argument as data (`toData`), `Func`, a host function of one argument bound with it, a CEL library whose programs count its calls (`hostCost`: 1, the bytes of its argument, about its serialisation, walked once (`byteSize`), the bytes of the string it returns), and `Costed`, a caller's function counted alike | `encoding/json`, `sigs.k8s.io/yaml` |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report), the value of a sensitive key not printed (`redactCauses`: a pattern, a format, a numeric bound, `<redacted>` in its place); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check and its repository's directory of the chart cache (`cacheDir`); SemVer precedence (`CompareVersions`); the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`) | the dependencies of `metadata.go`, the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`); the chart keys (`metadata.go`, `spec.go`); the release, the namespace and an internal reference (`okdp`) |
@@ -433,8 +446,8 @@ neither knows OKDP.
 | | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the values file's name, the package's files, the warnings of its load); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`, `provisions`, each a `Provision`, a contract and its claimers, read from its name or `{contract, claimers}`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` |
 | | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; the values file, `values.cel.yaml` or `values.yaml` (both refused), a `values.yaml` checked for expressions and `$`-keys, a warning (`holdsExpressions`); the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each, the platform requirements (stage 4), the compile's CEL session, the dependencies rendered (`rendered`, stage 9) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
-| | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, nothing of `global.okdp` but `provisioning` above level 0 (`platformOnly`), no `claims` at level 0, no `{{` above it) then the instance's, normalized (`value.Normalize`); `global`, `connections` and `claims` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
-| | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` checked against the embedded `platform.schema.json`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
+| | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, nothing of `global.okdp` but `provisioning` above level 0 (`platformOnly`), no `claims` at level 0, no `{{` above it; the context's `global.okdp`, level 0's and the classes above it) then the instance's, normalized (`value.Normalize`); `global`, `connections` and `claims` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
+| | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` of the context's layers alone, `contextLayers`, checked against the embedded `platform.schema.json`, `platformSettings`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
 | | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection, a named claim's or a claim template's output of `Inputs.Bindings`, or an output of `Inputs.Published` (`resolver`: `resolve`, then one resolution per source, `resolveNamed`, `resolveClaim`, `resolveExternal`, its contract's fields apart from its own keys (`connectionFields`), as written (`Connection`, `ParseConnection`, `MarshalYAML`), `resolveOutput`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled at each use, its claim schema with it (`readContract`, `x-okdp-internal` refused), and the checks of values against one (`fields`, `complete`, `check`), of a claim's request against its claim schema (`contract.request`); what a reference requires (`requirement`, `require`): compiled (`readRequirement`), those of the parameter schema at stage 1, with the request each fixes (`requirements`), its fields against the contract (`contract.requires`), the connection against it (`requirement.check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
 | | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
@@ -448,18 +461,25 @@ neither knows OKDP.
 | | `objects.go` | the compiler's own charts (`ownChart`), the OAuth clients', their keys checked once, in `Chart.yaml` and the values file (`listed`), and their charts added to the dependencies' (`addOwnCharts`, stage 9); the platform's charts, of the form the platform schema checks, each checked as a source (`platformCharts`, stage 4) | `chart.Ref`; `DcrSource` and `clientCharts` (`oidc.go`) |
 | | `claims.go` | `Claim`, a connection claimed of a provider's instance; `Binding`, the provider a reference's claim is bound to; a claim as written, a claim template or a named claim, its request among it (`ClaimSpec`, `parseClaim`), the named claims of the context (`namedClaims`), one of them as written, what it holds even when it fails (`ParseClaim`), those of an instance's parameters and context, a template's request merged over the package's (`claimsOf`), its ID (`claimID`); the provider a claim or a class names (`providerName`); the classes of the context, `global.okdp.provisioning`, read from the merged values of `claimsOf`, and the platform's, of level 0 (`instanceClaims`, `platformClasses`); `provisions` checked (`checkProvisions`), and the claimers of a provider (`CheckClaimers`, `consents`), the claims bound to an instance checked (`checkClaims`), their outputs found among the provided ones (`claimed`), what the mapping sees of them (`claimsScope`) | `service.go` (`Service.Provisions`), `pipeline.go` (before the context, after stage 7), `context.go` (`claims`) |
 | | `transfer.go` | the credentials of claims across namespaces, through the platform's secret store, and those of the connections kept in it (`secretRef.remoteKey`): the key of a claim's credentials (`storeKey`), the PushSecrets of the provider's namespace (`pushSecrets`), the ExternalSecrets of the claimer's and of a connection's referrer (`pullSecret`), the credentials a reference needs read (`transfer`) | `connections.go` (`resolveClaim`, `storeSecret`), `pipeline.go` |
-| | `namespace.go` | `Instance`, `Outcome`, `Bound`, `CompileAll`: each claim bound to its provider, the one it names or the provider of its class, the one it names or the default one of its context, the named claims of a namespace once, declared alike, each request, what its class fixes under it, checked against the contract's claim schema, its defaults applied (`tree.bind`, `tree.provider`, `choice`, `tree.request`), a provider of another namespace through a class of the platform's or with its consent (`tree.consent`, `Instance.Claimers`), then the instances of the tree compiled together, each published to its namespace (`tree.compileAll`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks, of its namespace or of its claims' providers), the outputs two instances of a namespace publish refused, and what resolved through them compiled again (`refuseShared`), the claimers of a provider refused, of any namespace, compiled again (`refuseClaimers`); the instances that do not compile named in the refusals for an output (`tree.notes`, `notCompiled`) | `Compile`, `missingOutputs` (`connections.go`), `claimsOf`, `claimID` (`claims.go`) |
+| | `namespace.go` | `Instance`, `Outcome`, `Bound`, `CompileAll`: each claim bound to its provider, the one it names or the provider of its class, the one it names or the default one of its context, the named claims of a namespace once, declared alike, each request, what its class fixes under it, checked against the contract's claim schema, its defaults applied (`tree.bind`, `tree.provider`, `choice`, `tree.request`), a provider of another namespace through a class of the platform's or with its consent (`tree.consent`, `Instance.Claimers`), then the instances of the tree compiled together, each published to its namespace (`tree.compileAll`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks, of its namespace or of its claims' providers), the outputs two instances of a namespace publish refused, and what resolved through them compiled again (`refuseShared`), two objects of a namespace that write one Secret refused (`tree.refuseSecretTargets`, `secretTargets`), the claimers of a provider refused, of any namespace, compiled again (`refuseClaimers`); the instances that do not compile named in the refusals for an output (`tree.notes`, `notCompiled`) | `Compile`, `missingOutputs` (`connections.go`), `claimsOf`, `claimID` (`claims.go`) |
 | | `policy.go` | the platform's policy, `global.okdp.policy`: the platform's own projects (`privileged`, `Result.Privileged`), the objects of the others' instances checked (`checkObjects`, stage 8): in their namespace, none of a well-known cluster-scoped kind (`clusterScoped`, by API group and kind, `apiGroup`); and their upstream values (`upstreamCheck`, a `chart.UpstreamCheck`, stage 9): no denied key at any depth, in a string read as YAML too (`deniedKeys`, `policy.upstream.deny`, `upstreamRules.check`, `key`), their images from the platform's registries (`policy.upstream.registries`, `upstreamRules.image`); in every project, no Secret of the objects with values in clear unless `Inputs.AllowPlainSecrets` (`checkPlainSecrets`, stage 8) | called by `pipeline.go`; `chart.FinalValues` |
-| `repository` | `repository.go` | the tree of a deployment, in one or more repositories: `Repository`, `Load`: the owner of each part, every conflict at once (`index`), then each instance (`instance`): its package, loaded once (`definition`), its context layers (`platform.yaml` without claims, its `connections.yaml`, connections only) and values; the names of the tree | `okdp.LoadDefinition`, `chart.ParseValues` |
+| `repository` | `repository.go` | the tree of a deployment, in one or more repositories: `Repository`, `Load`: the owner of each part, every conflict at once (`index`), then each instance (`instance`): its `instance.yaml`, read strictly (`InstanceSpec`, `ParseInstance`, its `claimers` nil when absent, empty for none), its package, loaded once (`definition`), its context layers (`platform.yaml` without claims, its `connections.yaml`, connections only) and values; the names of the tree | `okdp.LoadDefinition`, `chart.ParseValues` |
+| | `error.go` | `Error`, the problems of a tree that does not load, one per problem, the joined errors of `Load` listed one by one (`newError`), the errors they are of unwrapped; `Added`, the problems one has that another has not | `Load` |
 | | `catalog.go` | the catalog of the repositories, as `Load` indexes it: `LoadCatalog`, `Catalog`, its services and their versions, highest first (`sortVersions`), a package (`packageDir`, shared with `definition`), the contracts; `ErrNotInCatalog` | `index`, `chart.CompareVersions` |
 | `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
-| `tree` | `tree.go` | a tree's instances compiled together and read as a caller asks of them: `Compile` (`okdp.CompileAll`, again with the charts a `ChartSource` fetched, `refs`, their values then checked, else `ChartsErr`; then `graph.New`), each problem of the graph at its instance (`Instance.GraphErr`), the claims bound to each provider (`Provided`), what it granted each (`Granted`), why an instance does not deploy (`Err`, `Problems`) | `okdp.CompileAll`, `graph.New`, `chart.Ref` |
+| `tree` | `tree.go` | a tree's instances compiled together and read as a caller asks of them: `Compile` (`okdp.CompileAll`, again with the charts a `ChartSource` fetched, `refs`, their values then checked, else `ChartsErr`; a `Dir`, a cache filled already, set at once, compiled once; then `graph.New`), each problem of the graph at its instance (`Instance.GraphErr`, `atInstances`), the claims bound to each provider (`Provided`), what it granted each (`Granted`), why an instance does not deploy (`Err`, `Problems`) | `okdp.CompileAll`, `graph.New`, `chart.Ref` |
+| | `partial.go` | the projects of a tree written and kept (`Partial`, `Kept`, `KeptInstance`): those of the refused instances and of the instances a caller keeps too (`PartialWith`), then, round after round, of an instance at which the graph of what is left has a problem of its own (its dependencies on kept projects left out), or that depends on a release of a kept project (`dependsOnKept`), until the graph of what is left has none; `Regressions`, the instances a change broke | `graph.New` |
+| `output` | `output.go` | the output of a tree for its targets (`Files`): `tree.PartialWith`, the instances of a release name two namespaces of the tree share kept too for the Flux and Argo CD targets (`taken`, `releaseObjects`), the files of each target for the projects written, merged, those of the kept projects read from the previous output (`read`), the Flux target's `Keep` of those whose `kustomization.yaml` it holds, every release of the projects written and of the kept output in one namespace for those targets (`unique`, `instanceOf`); `ReleaseTaken`, the instance of another namespace of a release | `tree`, `target`, `target/flux`, `target/argocd` |
 | `target` | `target.go` | `Target`, an output format, `Files` of the results and their graph; what the targets share: `ProjectsDir`, `ProjectDir`, `InstanceDir` (`projects/<namespace>/instances/<release>`), `ProjectManifests` (`projects/<namespace>/project`, `ProjectManifestsDir`), `Generated`, the mark of a generated file, `Lines`, a file built line by line; the manifests of a project both deployer targets write (`Projects`, a `Project` per namespace, privileged when one of its results is; `Namespace`, with its Pod Security Admission labels and both engines' marks that keep it, `NamespaceFile`, the same for both targets; `SecretStore`, the platform's secret store in it, `SecretStoreFile`; `ProjectLabel`); the checks of their options (`CheckPrefix`, `CheckQuoted`) and of the release names their objects share a namespace with (`Releases`, a `ReleaseError` per release, which `UniqueReleases` names the objects of) | `graph.Graph`, `okdp.Result` |
 | `target/helm` | `umbrella.go` | what a compile is written as, path -> content: `Write`, the one entry point, which takes a `Result` as `Compile` returns it: the instance as one chart (`-o`), `Chart.yaml`, the package's (`Result.Chart`), its metadata kept, its dependencies the compiled keys (the rendered dependencies in `Chart.yaml` order, as written, then the OAuth client charts by key, from the index), `instance.values.yaml` (`ValuesFile`); when there are objects, `Result.Objects` as a YAML stream, `okdp.objects.yaml` (`ObjectsFile`), and the template that includes it as written, `templates/okdp.yaml` (`ObjectsTemplate`); and when the instance publishes something, `Result.Info`, `okdp.info.yaml` (`InfoFile`) | `okdp.Result`; `chart.Metadata` |
 | | `target.go` | `Target`, the helm target: the files of `Write` of each result, in its `InstanceDir` | `umbrella.go`, `target` |
-| `target/flux` | `flux.go` | the flux target (`Target`: `Source`, `PathPrefix`, `Keep`, the projects the root lists without a result): the helm target's files, an instance's HelmRelease and Kustomization (`Instance`), a project's manifests (`ProjectManifests`: its Namespace, the secret store, the ServiceAccount `project-<namespace>` its HelmReleases name, bound to the Role `okdp-project` of the namespace, `ServiceAccount`, and their Kustomization), a namespace's Kustomization (`Project`), the root's, of the namespaces' directories (`Projects`), okdp-gitops' format | `target/helm`, `target`, `graph.DependsOn`; `chart.IsDNSLabel` |
-| `target/argocd` | `argocd.go` | the argocd target (`Target`: `RepoURL`, `Revision`, `PathPrefix`): the helm target's files, an instance's Application (`Application`), a project's manifests (`ProjectManifests`: its Namespace, kept when the project goes, the secret store, the AppProject `project-<namespace>` of its Applications, `AppProject`), okdp-gitops' format: an Application of `projects/` applies the Applications, an ApplicationSet over `projects/*/project` the projects' manifests | `target/helm`, `target`, `graph.Wave` |
-| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `LoadCatalog`, `ParseConnection`, `ParseClaim`, `CompileAll`, `CompileTree`, `CheckReleases`, `NewGraph`, `Write`, `ParseValues`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Claim`, `Connection`, `ClaimSpec`, `Instance`, `Outcome`, `Repository`, `Catalog`, `CatalogService`, `Graph`, `GraphNode`, `GraphError`, `Tree`, `TreeInstance`, `ProvidedClaim`, `Target`, `Helm`, `Flux`, `ArgoCD`, `ReleaseError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`); the names of the tree (`PlatformFile`, `ContractsDir`, `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`, `InstanceFile`, `ConnectionsFile`, `ConfigFile`), its release rule (`ReleaseName`), its names (`IsName`) and the directories of a target's files (`ProjectDir`, `InstanceDir`, `ProjectManifestsDir`) | wraps `okdp`, `repository`, `graph`, `tree`, the targets, `chart` |
+| | `read.go` | what `Write` wrote, read back from an output: `ReadPublished`, what each compiled instance of a namespace publishes (`Published`: its release, its package, its `InfoFile`), `ReadCompiled`, an instance's umbrella chart (`Compiled`: its `Chart.yaml` as written, its values, `chart.ParseValues`) | `chart.ParseValues`, `target.InstanceDir` |
+| `target/flux` | `flux.go` | the flux target (`Target`: `Source`, `PathPrefix`, `Keep`, the projects the root lists without a result; `ReleaseObjects`, its objects named after the releases): the helm target's files, an instance's HelmRelease and Kustomization (`Instance`), a project's manifests (`ProjectManifests`: its Namespace, the secret store, the ServiceAccount `project-<namespace>` its HelmReleases name, bound to the Role `okdp-project` of the namespace, `ServiceAccount`, and their Kustomization), a namespace's Kustomization (`Project`), the root's, of the namespaces' directories (`Projects`), okdp-gitops' format | `target/helm`, `target`, `graph.DependsOn`; `chart.IsDNSLabel` |
+| `target/argocd` | `argocd.go` | the argocd target (`Target`: `RepoURL`, `Revision`, `PathPrefix`; `ReleaseObjects`): the helm target's files, an instance's Application (`Application`), a project's manifests (`ProjectManifests`: its Namespace, kept when the project goes, the secret store, the AppProject `project-<namespace>` of its Applications, `AppProject`), okdp-gitops' format: an Application of `projects/` applies the Applications, an ApplicationSet over `projects/*/project` the projects' manifests | `target/helm`, `target`, `graph.Wave` |
+| | `root.go` | an Argo CD entry point read (`ReadRoot`): the `Source` of its first `Application` with a `spec.source`, `HEAD` without a revision | |
+| `compiler` | `compiler.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `LoadCatalog`, `ParseConnection`, `ParseClaim`, `CompileAll`, `CompileTree`, `Build` (`BuildOptions`), `StaticCharts`, `Partial`, `TreeFiles`, `Regressions`, `AddedProblems`, `ReleaseTaken`, `CheckReleases`, `NewGraph`, `Write`, `ParseValues`, `ReadArgoRoot`, `ReadPublished`, `ReadCompiled`; aliases of the types a caller names (`Definition`, `Inputs`, `ContextLayer`, `Result`, `Info`, `Output`, `Dependency`, `Claim`, `Connection`, `ClaimSpec`, `Instance`, `Outcome`, `Repository`, `Catalog`, `CatalogService`, `Graph`, `GraphNode`, `GraphError`, `Tree`, `TreeInstance`, `ProvidedClaim`, `LoadError`, `KeptProject`, `KeptInstance`, `Target`, `Helm`, `Flux`, `ArgoCD`, `ArgoSource`, `Published`, `Compiled`, `ReleaseError`, `ChartRef`, `ChartMetadata`); the names of the files of `Write` (`UmbrellaValues`, `InfoFile`, `ObjectsFile`, `ObjectsTemplate`); the names of the tree (`PlatformFile`, `ContractsDir`, `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`, `InstanceFile`, `ConnectionsFile`, `ConfigFile`), its release rule (`ReleaseName`), its names (`IsName`) and the directories of a target's files (`ProjectDir`, `InstanceDir`, `ProjectManifestsDir`) | wraps `okdp`, `repository`, `graph`, `tree`, the targets, `chart` |
+| `treeedit` | `treeedit.go`, `nodes.go` | the files of a tree as written, for a caller that edits the tree: `instance.yaml` (`ParseInstance`, `repository.ParseInstance`, `EncodeInstance`), the values files (`EncodeValues`, `DecodeValues` as the compile reads them, `RoundTrip`, `MarshalYAML`), an entry of a top-level key (`EditEntry`), a key (`EditKey`), the project's description (`ReadDescription`, `WriteDescription`), a document merged key by key (`MergeDocument`), each edited as YAML nodes, the file's head (`splitHead`), comments and other keys kept | `repository`, `chart.ParseValues` |
+| `chartcache` | `cache.go`, `oci.go` | a chart cache that pulls the charts it lacks (`Cache`, a `compiler.ChartSource`: `Ensure`, `File`, `Get`, one pull per chart at a time, a failure not tried again for a minute), from an OCI registry, the layer verified against its manifest's digest, or the `index.yaml` of an https chart repository, the archive and every redirect https but on `InsecureHosts`, none from https to http (`RepositoryPuller`), unpacked in the layout `Inputs.Charts` reads, `Chart.yaml`, `values.yaml` and `values.schema.json` only, the `Chart.yaml` of the chart and version named, each directory 0755, bounded (`MaxChartSize`, `MaxUncompressedSize`, `MaxFileSize`, `FetchTimeout`); `File` one of `Files`; `FS` through `internal/dirfs` | `compiler`, `internal/dirfs` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
 reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
@@ -479,15 +499,18 @@ for the provider check; one OAuth client Secret name (`clientSecret`) for
 CEL session per compile for the mapping and the compiler's templates.
 `cmd/okdp-compile/main.go` is a thin caller of the public package that
 chains the stages (`run`): the tree of its `--repository` directories
-(`openDir`, no symbolic link followed, the files bounded;
-`compiler.LoadRepository`), `compiler.CompileAll`,
-`compiler.NewGraph`, the files of the target `--target` names
-(`newTarget`, its options checked before the tree is read), written under
-`-o`, whose `projects/` it owns and marks, `projects/.okdp-compile`,
-refusing one it did not write but with `--force` (`checkOutput`), each
-file written through an `os.Root` of it (`writeTree`), with `--partial`
-the projects that compile only, those of the refused instances kept as
-the output has them; each binding, refusal, problem of the graph,
+(`openDir`, no symbolic link followed, the files bounded), compiled
+(`compiler.Build`, the chart cache of `--check --charts` a
+`compiler.StaticCharts`), the files of the target `--target` names
+(`newTarget`, its options checked before the tree is read;
+`compiler.TreeFiles`), written under `-o`, whose `projects/` it owns and
+marks, `projects/.okdp-compile`, refusing one it did not write but with
+`--force` (`checkOutput`), every symbolic link under its `projects/`
+removed first, each file written through an `os.Root` of it
+(`writeTree`), with `--partial` the projects `compiler.TreeFiles` writes
+only, those it keeps left as the output has them, read through
+`openDir` of `-o`, nothing written without it when it keeps one (a
+release name two projects share); each binding, refusal, problem of the graph,
 warning and dependency printed on stderr after its
 `<namespace>/<release>` ([`--repository`](01_usage.md#--repository)),
 and with `--report`, the same as JSON (`report.go`: each instance, its
@@ -850,7 +873,7 @@ in-memory maps, the compiler's templates are in the binary.
   without `\`, a chart name without `/`, `.` or `..`, a pinned version), so
   it stays inside the cache.
 - The CLI reads each `--repository` and the `--charts` cache through
-  `openDir` (`cmd/okdp-compile/dirfs.go`), not `os.DirFS`, which follows
+  `openDir` (`internal/dirfs`), not `os.DirFS`, which follows
   symbolic links: a symbolic link is refused, opened, on the path of a
   file or listed in a directory (each element of the path checked with
   `Lstat`, the file then opened through an `os.Root`, which cannot leave
@@ -859,10 +882,11 @@ in-memory maps, the compiler's templates are in the binary.
   of the runner) into an instance's values; a file that is neither
   regular nor a directory (a FIFO, which would block) is refused; a
   regular file over 4 MiB is refused, and so is a new one once the files
-  read of a directory pass 64 MiB together (`maxFileSize`, `maxDirSize`),
+  read of a directory pass 64 MiB together (`MaxFileSize`, `MaxDirSize`),
   a file that grows once checked failing its read (`TestDirFS`,
   `TestDirFSBounds`, `symlink.txtar`). The directory itself may be a
-  link: the user names it.
+  link: the user names it. `chartcache.Cache.FS`, which okdp-gitops
+  gives a compile, reads the cache the same way (`TestFSFollowsNoLink`).
 - A schema `$ref` to a file, a URL or a `urn:` fails the compile instead of
   being fetched (a `jsonschema.SchemeURLLoader` of no scheme).
 
@@ -879,7 +903,7 @@ the compiler cannot enforce. The compiler enforces:
 
 | Boundary | Where | Reason | Fixture |
 |---|---|---|---|
-| Context values | `valuesLayers`, `contextLayers`, stage 1 | `global` comes from the package's defaults and the context's layers (`Inputs.Context`), level 0 the platform's: a higher level (a project's) only adds to the lower levels, never changing a value they set, a connection they give, a named claim, a class or a default class (each taken whole): a project adds classes, it moves none of the platform's claims to another provider; and of `global.okdp`, the platform's settings, a higher level sets `provisioning` only, no other key, known to the compiler or not, set by the platform or not (`platformOnly`): a project cannot name the chart its OAuth clients are rendered with (`charts`), where they register (`oidc`), the secret store (`secrets`), nor make itself privileged (`policy`); its own settings go beside `okdp` (`global.project`); an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`, no `connections`, an instance's own being a context layer of a level of their own, and no `claims`, a project's, as is what a level adds above the platform's. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the chart its OAuth clients are rendered with (`charts`), the platform's policy (`policy`), and every chart receives `global` (`imageRegistry`) | `testdata/context/1/sets-platform-*.yaml`, `sets-unknown-platform-key.yaml`, `redefines-platform-*.yaml`; `testdata/instance-sets-*.yaml` |
+| Context values | `valuesLayers`, `contextLayers`, stage 1 | `global` comes from the package's defaults and the context's layers (`Inputs.Context`), level 0 the platform's: a higher level (a project's) only adds to the lower levels, never changing a value they set, a connection they give, a named claim, a class or a default class (each taken whole): a project adds classes, it moves none of the platform's claims to another provider; and of `global.okdp`, the platform's settings, a higher level sets `provisioning` only, no other key, known to the compiler or not, set by the platform or not (`platformOnly`), and the compiler reads them of the context's layers alone, never of the parameters: a package's `config.schema.json` that declares `global.okdp` or gives it a default (`properties.global.default`) is refused (`chart.ReadParameterSchema`): a project cannot name the chart its OAuth clients are rendered with (`charts`), where they register (`oidc`), the secret store (`secrets`), nor make itself privileged (`policy`); its own settings go beside `okdp` (`global.project`); an instance layer sets only the keys of `global` the parameter schema declares, never `okdp`, no `connections`, an instance's own being a context layer of a level of their own, and no `claims`, a project's, as is what a level adds above the platform's. `global.okdp` holds the instance's host (`ingress.suffix`), where its OAuth clients register (`oidc.dcr.registrationUrl`), the chart its OAuth clients are rendered with (`charts`), the platform's policy (`policy`), and every chart receives `global` (`imageRegistry`) | `testdata/context/1/sets-platform-*.yaml`, `sets-unknown-platform-key.yaml`, `redefines-platform-*.yaml`; `testdata/instance-sets-*.yaml`; `testdata/cli/policy.txtar` (`schema-okdp`, `schema-default`), `TestPlatformFromContext` |
 | Parameters valid before use | stage 1, before the requirements and the mapping | the schema is the one place for a parameter rule (a pattern guarding a value a Job pastes into a script); the mapping never sees a value it refuses | `testdata/schema-violation.yaml` |
 | Connection references | `walk`, `resolve` | a reference is a string, `null` or `""` (not set): a map would reach the mapping as a connection, past its contract and the checks below | `TestResolveErrors` |
 | Credentials never inlined | `contract.fields`, from `resolve` and `provided` | an external connection and a provided output carry contract fields only, never an `x-okdp-secret` field: credentials are referenced by Secret name (`secretRef`), since values and `okdp.info.yaml` are not secret | `testdata/context/2/secret-in-connection.yaml` |
@@ -893,6 +917,7 @@ the compiler cannot enforce. The compiler enforces:
 | Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart a check holds the values to is the chart the deployer renders; and a repository over `https://` or `oci://`, never `http://`: a chart fetched in clear could be swapped on the way, by a check and by the deployer | `testdata/cli/chart-sources.txtar`, `testdata/context/0/http-chart-repository.yaml` |
 | Declared charts only | `addOwnCharts`, `chart.FinalValues` | the values file cannot give values to a chart that `Chart.yaml` does not declare, nor replace a client chart with one of its own: their keys are the compiler's, checked in one place, and their charts the platform's | `TestDcrCompile` |
 | Credentials across namespaces | `pushSecrets`, `pullSecret`, `storeKey` | the compiler writes the keys of the platform's secret store, `<provider namespace>/<id>`, the ID starting with the claimers' namespace, and the platform's under `platform/`, a namespace no project may have, and cannot enforce who reads them: the layout lets a path-based store (OpenBao, Vault, a cloud secret manager) scope each namespace's identity, the SecretStore of its namespace with `secrets.provider`, with one policy: write its own segment, read `+/<namespace>.*` and `platform/*`. Without a provider, a ClusterSecretStore is one identity for every namespace, one trust domain; a backend without paths (External Secrets' Kubernetes provider) cannot hold the keys of the claims across namespaces. A key goes with its claim (`deletionPolicy: Delete`). A package's `objects` may reference the store too, reviewed with the package ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) | `examples/04_claims` (its PushSecrets and ExternalSecrets) |
+| One writer per Secret | `tree.refuseSecretTargets`, `isSecretName`, `mapping.schema.json` | two of OKDP's objects of a namespace, of one instance or of two, that write one Secret (a v1 Secret, an ExternalSecret's target) or one key of the store (a PushSecret's) refuse the instances that hold them: they would overwrite each other's credentials, and a provider's `secretRef.name`, a DNS-1123 subdomain, names its claimers' copies, `<release>-<name>`, which could otherwise be another instance's connection Secret, `<release>.<connection>-credentials` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
 | Reserved namespace | `Compile` | the namespace `platform` is no project's: `platform/` holds the platform's keys of the store, which a path-based store lets every namespace read and its own namespace write ([what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) | `testdata/cli/secrets.txtar` |
 | Claims across namespaces | `tree.consent`, `Instance.Claimers` | a claim's ID starts with its claimers' namespace and its credentials cross through the store, but a claim that names its provider, or a class of its project's, would otherwise reach any provider of any project: the provider of another namespace serves it only when it lists the claimer's namespace among its claimers (its `instance.yaml`, `Inputs.Claimers`, else its package's `provisions`), or `*`; the platform's classes (level 0, reviewed, which no level above changes) route every namespace to their providers, the platform consenting for them ([providers](specs/01_inputs_outputs.md#providers)) | `testdata/cli/claims.txtar` |
 | Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a `connections.yaml` cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) | `testdata/context/1/remote-key-of-the-platform.yaml`, `testdata/context/2/remote-key-of-another-namespace.yaml` |
@@ -900,24 +925,24 @@ the compiler cannot enforce. The compiler enforces:
 | Privileged projects | `privileged`, `Result.Privileged`, `platformOnly` | the platform's own projects (`global.okdp.policy.privileged`: cert-manager, an operator) install cluster-scoped objects, write other namespaces, set any upstream value and run with the engine's own identity, Pod Security `privileged`: only level 0 names them, a project's `policy` refused, so that no project makes itself one | `testdata/context/1/sets-platform-policy.yaml` |
 | OAuth client charts | `clientCharts`, `addOwnCharts`, `oidcClients` | no OKDP defaults, no instance upstream values: the Job that registers a client and writes its Secret is computed by the compiler, from the client keys, the release and the platform's settings, so an instance cannot change where a client is registered or which Secret receives its credentials; a package's `secret` of a client names one of the release's, `<release>-...`, so that the Job's Role writes no other instance's Secret | `testdata/cli/oidc.txtar` |
 | Redacted messages | `value.Short`, `value.ShortAt`, `chart.Validate` (`redactCauses`) | an error is printed to whoever runs the compile, logged by CI and by a server, copied into an issue: a schema violation of a sensitive value (`value.Sensitive`: its key, or the list's it is in, `password`, `passwd`, `secret`, `token`, `apikey`, `api_key`, `accesskey`, `secretkey`, `credential`, `privatekey`, `clientsecret`, case-insensitive, a plural's `s` left out, or a key ending with `Password`, `Secret`, `Token` or `Key`) prints `<redacted>` in place of the value, as does a value a message prints (`value.Short`) for those of its keys; a message that names a sensitive key's value by itself prints it with `value.ShortAt` (a connection reference, a named claim or a claim's key that is not of its type: `reference`, `parseClaim`, `ParseClaim`), but a store key, `remoteKey`, which names credentials and holds none. A key that does not say what it holds is not recognized: the parameter schema's names are the package's | `testdata/cli/errors.txtar` |
-| Writing the output (CLI) | `checkOutput`, `writeTree` | the command removes from `<output>/projects/` what it does not write: a `projects/` without its mark, `projects/.okdp-compile`, is refused but with `--force`, so that a wrong `-o` deletes nothing; every file is written through an `os.Root` of the output, so that a symbolic link committed in an output repository cannot make the command write out of it | `testdata/cli/output.txtar` |
-| Reading the tree (CLI) | `openDir` (`cmd/okdp-compile/dirfs.go`) | a repository is a contributor's: a symbolic link in it would make the command read a file outside it (a runner's credential) into an instance's values, a FIFO block it, a huge file exhaust it; links are refused wherever they point, non-regular files refused, a file bounded to 4 MiB and a directory's files to 64 MiB together ([Everything through fs.FS](#everything-through-fsfs)) | `testdata/cli/symlink.txtar` |
+| Writing the output (CLI) | `checkOutput`, `writeTree` | the command removes from `<output>/projects/` what it does not write: a `projects/` without its mark, `projects/.okdp-compile`, is refused but with `--force`, so that a wrong `-o` deletes nothing; every symbolic link under `projects/` is removed before a file is written and every file is written through an `os.Root` of the output, so that a symbolic link committed in an output repository cannot make the command write out of it, nor a project's files elsewhere in it | `testdata/cli/output.txtar` |
+| Reading the tree (CLI) | `openDir` (`internal/dirfs`) | a repository is a contributor's: a symbolic link in it would make the command read a file outside it (a runner's credential) into an instance's values, a FIFO block it, a huge file exhaust it; links are refused wherever they point, non-regular files refused, a file bounded to 4 MiB and a directory's files to 64 MiB together ([Everything through fs.FS](#everything-through-fsfs)) | `testdata/cli/symlink.txtar` |
 | Project identity | `target.Projects`, the flux and argocd targets' project manifests | an instance's chart is rendered by the engine, with every object it holds: the deployer targets install each project's releases with an identity confined to its namespace (Flux, a ServiceAccount bound to a Role of the namespace, impersonated by helm-controller; Argo CD, an AppProject destined to the namespace, without cluster-scoped resources), so that a chart which writes another namespace or a ClusterRole is refused by the API server, not by the compiler, which does not read the charts. The platform's own projects (`global.okdp.policy.privileged`, `Result.Privileged`) keep the engine's identity. The Namespace carries the Pod Security Admission labels (baseline enforced, privileged for the platform's own), and both engines' marks that keep it when its project goes (Flux's prune label, Argo CD's `Delete=false`), the same file whatever the target, as the secret store: one tree holds both targets' files. Network isolation is the platform's | `testdata/targets/<target>/projects/<namespace>/project/` (`TestTargets`) |
 | Objects Helm keeps | `keepSynced`, stage 8 | an object annotated `helm.sh/resource-policy: keep` (a claim's database) gets Argo CD's sync options `Prune=false,Delete=false`: Argo CD reads no Helm annotation, and would delete it, its data with it, when the render drops it or its Application goes | `TestCompileKeep` |
-| Bounded compile | `compile.Session`, `Inputs.CostLimit`; `--cost-limit`, `--timeout` | a package's expressions, and the instance values that make them iterate, run within a total CEL cost per instance, what a host function builds counted, and a context the compile checks between stages and inside comprehensions (below) | `testdata/cli/limits.txtar` |
-| One project's failure (CLI) | `compileTree`, `--partial` | a refused instance fails its project, not the tree: the projects whose instances all compile are written, the others' output kept as it was, so that a project's input does not hold back every deployment | `testdata/cli/partial.txtar` |
+| Bounded compile | `compile.Session`, `Inputs.CostLimit`; `--cost-limit`, `--timeout` | a package's expressions, and the instance values that make them iterate, run within a total CEL cost per instance, what a host function reads and builds counted, and a context the compile checks between stages and inside comprehensions (below) | `testdata/cli/limits.txtar` |
+| One project's failure (CLI) | `compiler.Partial`, `compiler.TreeFiles`, `--partial` | a refused instance fails its project, not the tree, and a release name two projects share fails those two: the projects whose instances all compile are written, the others' output kept as it was, so that a project's input does not hold back every deployment; the kept output read as a repository is, no symbolic link followed, its releases checked against those written | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar` |
 
 What an expression computes is bounded only on request: a caller that
 compiles packages it does not review passes a context (cancelled between
-the stages and inside comprehensions) and a total CEL cost
-(`Compile`, `Inputs.CostLimit`), both held by the compile's session
+the stages and inside comprehensions) and a total CEL cost (`Compile`,
+`Inputs.CostLimit`), both held by the compile's session
 (`compile.Session`), the cost counted across the mapping and the
-compiler's templates, and what each host function builds counted in it
-(`compile.Func`, `hostCost`: a call that writes a large string from a
-large value pays for the bytes, as CEL's own `join` does). The CLI sets
-both: `--cost-limit`, 50000000 per instance as okdp-gitops, and
-`--timeout`, 10 minutes for the whole compile, past which nothing is
-written.
+compiler's templates, and what each host function reads and builds
+counted in it (`compile.Func`, `compile.Costed`, `hostCost`: a call pays
+the bytes of its argument, which it converts whole, and of the string it
+writes, a map of one key of a megabyte a megabyte). The CLI sets both:
+`--cost-limit`, 50000000 per instance as okdp-gitops, and `--timeout`,
+10 minutes for the whole compile, past which nothing is written.
 
 Not decided by the compiler: which layers are the platform's. What the
 caller gives at level 0 of `Inputs.Context` (`platform.yaml`) is trusted
@@ -1048,7 +1073,10 @@ repositories, in any order, the same instances, each named after its
 directory, with its claimers (`TestLoad`), and every problem at once:
 the parts in two repositories, a contract that differs, an instance
 without its package, a package that fails, once, a claimer that is no
-namespace name (`TestLoadErrors`); `catalog_test.go` the catalog of two
+namespace name (`TestLoadErrors`), an `Error` of one problem each, a
+report of several lines one of them, those a change adds (`TestError`),
+an instance's file, its claimers absent, none or listed
+(`TestParseInstance`); `catalog_test.go` the catalog of two
 repositories (`TestCatalog`), a version directory its `fs.FS` refuses
 named, not missing (`TestCatalogUnreadable`).
 `internal/okdp/claims_test.go` covers both sides of a claim in one
@@ -1091,9 +1119,36 @@ argocd targets test their own units, small and literal: the options
 (`TestCheck`), a HelmRelease with and without `dependsOn`, privileged or
 not, a project's Kustomization, a project's manifests, an Application's
 wave and revision, and the files of two namespaces (`TestInstance`,
-`TestProject`, `TestProjectManifests`, `TestApplication`, `TestFiles`).
+`TestProject`, `TestProjectManifests`, `TestApplication`, `TestFiles`),
+an entry point's source (`TestReadRoot`); `internal/target/helm/read_test.go`
+the files of `Write` read back (`TestReadCompiled`).
+`internal/tree/partial_test.go` keeps the projects of a tree: refused,
+depending on a kept project round after round, a cycle, a release that
+does not exist (`TestPartial`); the instances a change broke
+(`TestRegressions`); a chart cache filled already (`TestDir`).
+`internal/output/output_test.go` writes a tree with projects kept as a
+previous output holds them, listed or not in the root Kustomization
+(`TestFiles`), a release of the kept output refused for the Flux and
+Argo CD targets only (`TestFilesReleases`), a release of two projects
+keeping both, and those that depend on them, the rest written
+(`TestAReleaseCollisionKeepsItsProjects`), two targets writing a file
+differently (`TestFilesMerge`), and finds a release taken
+(`TestReleaseTaken`). `treeedit/treeedit_test.go` edits the files of a
+tree as written (`TestDescriptionKeepsTheRest`, `TestInstance`,
+`TestValues`, `TestEditEntry`, `TestMergeDocument`);
+`chartcache/cache_test.go` pulls a chart from an https repository into the
+cache, its files only, once (`TestTheCacheUnpacksTheChartsOfTheirRepositories`,
+`TestChartDirIsTheCompilersLayout`, `TestUnpackRefusesAnOversizedFile`);
+`chartcache/oci_test.go` from a fake OCI registry, a layer that is not
+the one its digest names refused, no directory left
+(`TestPullOCIVerifiesTheLayer`); an archive of another chart or version
+refused (`TestTheChartIsTheOneNamed`), a file not among `Files`
+(`TestFileIsOneOfFiles`), a symbolic link in the cache
+(`TestFSFollowsNoLink`), plain http but on an insecure host and a
+redirect from https to http (`TestIndexIsHTTPS`).
 `compiler_test.go` checks which packages each stage imports
-(`TestLayers`). `internal/okdp/mapping_test.go` covers OKDP's sections and
+(`TestLayers`), and a tree built, or refused with every problem
+(`TestBuild`). `internal/okdp/mapping_test.go` covers OKDP's sections and
 functions, `internal/okdp/provides_test.go` what the instance publishes:
 the outputs against their contracts, the credentials Secrets, a plain one
 refused unless allowed.
@@ -1127,9 +1182,9 @@ full example split into three repositories too (`TestRun`); the refused
 options, nothing written (`TestRunErrors`), nor by `--check`
 (`TestRunCheck`), the report's instances and the problems of the graph
 at their releases (`TestReportGraph`), the files written through the
-output, a symbolic
-link in it replaced or refused (`TestWriteTree`); `dirfs_test.go` the
-directories it reads, a symbolic
+output, every symbolic link under `projects/` removed first, a
+`projects/` that is one refused (`TestWriteTree`);
+`internal/dirfs/dirfs_test.go` the directories it reads, a symbolic
 link refused, the files bounded (`TestDirFS`, `TestDirFSBounds`); and,
 with `testscript`, the scripts of `testdata/cli/`
 (`TestScript`), which run the binary as a process from the repository
@@ -1145,16 +1200,19 @@ not meet, a provider of another project with its consent or without
 object refused, written for a privileged project, an object of another
 namespace refused), the platform's secret store (`secrets.txtar`: a key
 of another namespace refused, a project's and the platform's read, the
-namespace `platform` refused), the Secret of an OAuth client
-(`oidc.txtar`), the chart sources (`chart-sources.txtar`: `http://`, a
-range), a tree compiled whole (`repository.txtar`: two
-repositories, each target, `--check`, a stale instance removed, a cycle of
-outputs), the bounds of a compile (`limits.txtar`: `--cost-limit`, what a
-host function builds counted, and `--timeout`), a symbolic link in a
-repository (`symlink.txtar`), the output's mark and `--force`
+namespace `platform` refused, a provider's Secret name that makes a
+claimer's copy another instance's connection Secret refused), the
+Secret of an OAuth client (`oidc.txtar`), the chart sources
+(`chart-sources.txtar`: `http://`, a range), a tree compiled whole
+(`repository.txtar`: two repositories, each target, `--check`, a stale
+instance removed, a cycle of outputs), the bounds of a compile
+(`limits.txtar`: `--cost-limit`, what a host function builds counted,
+and `--timeout`), a symbolic link in a repository (`symlink.txtar`), the
+output's mark and `--force`
 (`output.txtar`), `--report`, its JSON compared with a golden file
 (`report.txtar`), a refusal that fails its project and not the tree
-(`partial.txtar`), credentials in clear, of the objects and of
+(`partial.txtar`), a project kept for a dependency, the kept output's
+releases and symbolic links (`kept.txtar`), credentials in clear, of the objects and of
 `provides`, and `--allow-plain-secrets` (`plain-secrets.txtar`), one
 script per concern.
 The public package is tested through the example in the root package:
@@ -1409,7 +1467,9 @@ versions supported and the disclosure.
   --charts`), else by Helm when it renders.
 - **One chart cache directory per repository URL without its scheme.**
   `oci://x/charts` and `https://x/charts` share `x/charts/`
-  ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
+  ([chart cache](specs/01_inputs_outputs.md#chart-cache)); a chart is
+  pulled once, by version, with no digest pinned nor expiry: the cache
+  directory is the platform's, trusted as its writers are.
 - **Schema references** resolve within the schema only:
   [Everything through fs.FS](#everything-through-fsfs).
 - **Connection references** are found through `properties` and `items` of
@@ -1433,9 +1493,9 @@ versions supported and the disclosure.
 - **A client chart's values are the template's.** A package sets the client
   keys, the platform the Job settings; a client chart takes no OKDP defaults
   and no instance upstream values. The template writes the values of
-  oidc-dcr >= 0.5.0 (camelCase); the version the platform names
-  (`global.okdp.charts.oidcDcr`) is not checked against it (its
-  `values.schema.json` is applied by a check, when it has one).
+  oidc-dcr >= 0.6.0 (camelCase, registrationToken); the version the
+  platform names (`global.okdp.charts.oidcDcr`) is not checked against it
+  (its `values.schema.json` is applied by a check, when it has one).
 
 ## Extension points
 

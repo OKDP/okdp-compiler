@@ -29,48 +29,49 @@ import (
 )
 
 // valuesLayers: the layers of in, the context's (contextLayers), then the
-// instance's, as values (normalized), for chart.Parameters. Each instance
+// instance's, as values (normalized), for chart.Parameters, and the
+// context's global.okdp (contextLayers). Each instance
 // layer in turn: one that sets global fails, but for the keys the parameter
 // schema (chart.Schema.Doc) declares under it (properties.global.properties),
 // okdp excepted; then one that sets connections, then claims, to any
 // value; then one with "{{" in a key or a string, anywhere
 // (chart.NoTemplate).
-func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
-	layers, err := contextLayers(in.Context)
+func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
+	layers, platform, err := contextLayers(in.Context)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	declared := value.AsMap(value.Dig(schema, "properties.global.properties"))
 	for i, l := range in.Values {
 		name := fmt.Sprintf("values layer %d", i+1)
 		v, err := value.Normalize(l)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+			return nil, nil, fmt.Errorf("%s: %w", name, err)
 		}
 		layer := value.AsMap(v)
 		g, isMap := layer["global"].(M)
 		if _, set := layer["global"]; set && !isMap {
-			return nil, fmt.Errorf("%s: global is set by the context (Inputs.Context)", name)
+			return nil, nil, fmt.Errorf("%s: global is set by the context (Inputs.Context)", name)
 		}
 		for _, k := range slices.Sorted(maps.Keys(g)) {
 			if _, ok := declared[k]; !ok || k == "okdp" {
-				return nil, fmt.Errorf("%s: global.%s is set by the context (Inputs.Context)", name, k)
+				return nil, nil, fmt.Errorf("%s: global.%s is set by the context (Inputs.Context)", name, k)
 			}
 		}
 		if _, set := layer["connections"]; set {
-			return nil, fmt.Errorf("%s: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level", name)
+			return nil, nil, fmt.Errorf("%s: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level", name)
 		}
 		if _, set := layer["claims"]; set {
-			return nil, fmt.Errorf("%s: claims are declared by the context (Inputs.Context): a project's, of level 1 or above", name)
+			return nil, nil, fmt.Errorf("%s: claims are declared by the context (Inputs.Context): a project's, of level 1 or above", name)
 		}
 		// No template code in what the instance gives, whatever key it is
 		// under: parameters, upstream values (chart.NoTemplate).
 		if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		layers = append(layers, layer)
 	}
-	return layers, nil
+	return layers, platform, nil
 }
 
 // contextLayers: the context's layers as values (normalized), in a copy,
@@ -91,7 +92,14 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, error) {
 // Level 0 declares no claims: they are a project's. Above level 0, no
 // template code (chart.NoTemplate): only the platform's level is
 // reviewed.
-func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
+//
+// And the context's global.okdp, {global: {okdp: ...}} ({} when no layer
+// sets it), built from these layers alone, never from the parameters (a
+// package schema's defaults do not reach it): level 0's global.okdp, its
+// layers merged in order, then global.okdp.provisioning of each layer
+// above, merged in the same order; no other key of a higher level is read,
+// whatever the checks above let through.
+func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
 	order := make([]int, len(layers))
 	for i := range order {
 		order[i] = i
@@ -103,13 +111,14 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 			class && keys[0] == "global" && keys[1] == "okdp" && keys[2] == "provisioning"
 	}
 	var out []map[string]any
+	platform := M{}           // the context's global.okdp, under global
 	var levels []ContextLayer // the values each level set so far, merged, lowest first
 	for _, i := range order {
 		l := layers[i]
 		name := fmt.Sprintf("context layer %d (level %d)", i+1, l.Level)
 		v, err := value.Normalize(l.Values)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+			return nil, nil, fmt.Errorf("%s: %w", name, err)
 		}
 		layer := value.AsMap(v)
 		if n := len(levels); n == 0 || levels[n-1].Level != l.Level {
@@ -117,26 +126,35 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, error) {
 		}
 		for _, lower := range levels[:len(levels)-1] {
 			if p := chart.Overlap(lower.Values, layer, whole); p != "" {
-				return nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
+				return nil, nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
 			}
 		}
 		if l.Level > 0 {
 			if k := platformOnly(layer); k != "" {
-				return nil, fmt.Errorf("%s: %s: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp", name, k)
+				return nil, nil, fmt.Errorf("%s: %s: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp", name, k)
 			}
 		}
 		if _, set := layer["claims"]; set && l.Level == 0 {
-			return nil, fmt.Errorf("%s: claims: a project's, of level 1 or above", name)
+			return nil, nil, fmt.Errorf("%s: claims: a project's, of level 1 or above", name)
 		}
 		if l.Level > 0 {
 			if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		levels[len(levels)-1].Values = value.Merge(levels[len(levels)-1].Values, layer)
 		out = append(out, layer)
+		okdp, set := value.AsMap(layer["global"])["okdp"]
+		switch {
+		case set && l.Level == 0:
+			platform = value.Merge(platform, M{"global": M{"okdp": okdp}})
+		case set:
+			if p, set := value.AsMap(okdp)["provisioning"]; set {
+				platform = value.Merge(platform, M{"global": M{"okdp": M{"provisioning": p}}})
+			}
+		}
 	}
-	return out, nil
+	return out, platform, nil
 }
 
 // platformOnly: the first path of layer, a context layer above level 0,

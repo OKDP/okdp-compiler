@@ -19,7 +19,6 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/dirfs"
 )
 
 // version: set at build time (-ldflags "-X main.version=..."): make build,
@@ -75,7 +75,7 @@ func main() {
 	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository; every instance of the tree, projects/<project>/instances/<instance>/, the release <project>-<instance> of the namespace <project>, compiled together, each with what the others of its namespace publish, after them, each claim bound to its provider, the dependencies checked, written for --target under <output>/projects/, which the command owns", func(s string) error { o.repositories = append(o.repositories, s); return nil })
 	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
 	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme; the final values, over each chart's defaults, checked against its values.schema.json, and an instance list appended to that leaves out items of the chart's default list warned of (default $OKDP_CHARTS with --check)")
-	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, each instance's umbrella chart, Chart.yaml, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when it has any, "+compiler.InfoFile+", what it publishes, when it publishes something, and the files of --target; then the dependencies printed on stderr, one line each: <namespace>/<release>: depends on <instance> (<contract> <output>, <field>)")
+	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, each instance's umbrella chart, Chart.yaml, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when it has any, "+compiler.InfoFile+", what it publishes, when it publishes something, and the files of --target, every symbolic link under <output>/projects/ removed first, nothing written through one; then the dependencies printed on stderr, one line each: <namespace>/<release>: depends on <instance> (<contract> <output>, <field>)")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.StringVar(&o.target, "target", "", "what is written: helm (the default), each instance's umbrella chart; flux, with its HelmRelease, waiting for the releases it depends on, and the Kustomizations, each project's and the root's, projects/kustomization.yaml; argocd, with its Application and its sync wave; both with each project's manifests, projects/<namespace>/project/, its Namespace, the platform's secret store in it and the identity its releases are confined to the namespace with")
 	flag.StringVar(&o.pathPrefix, "path-prefix", "", "--target flux and argocd: the path of <output> in the repository the deployer reads (default its root)")
@@ -86,7 +86,7 @@ func main() {
 	flag.DurationVar(&o.timeout, "timeout", defaultTimeout, "how long the compile may take, every instance together, past which nothing is written; 0: no limit")
 	flag.StringVar(&o.report, "report", "", "write a JSON report, to the file, or stdout for -, even with --check and when the compile fails: each instance, its namespace, instance, release, service, version, privileged, status (compiled, refused or skipped), error, warnings, dependencies, claims and charts, and the tree's errors")
 	flag.BoolVar(&o.allowPlainSecrets, "allow-plain-secrets", false, "accept credentials written in clear (Inputs.AllowPlainSecrets of every instance): a provides secret without generate, a Secret of the objects with data or stringData; refused without it, the output being committed to the deployments repository")
-	flag.BoolVar(&o.partial, "partial", false, "write the projects whose instances all compile, each refusal printed, and keep what <output> holds of the others; status 1 all the same; a failure of the tree (an option, a repository, the target) writes nothing")
+	flag.BoolVar(&o.partial, "partial", false, "write the projects whose instances all compile, each refusal printed, and keep what <output> holds of the others, and of the projects of a release name two namespaces share (--target flux and argocd); status 1 all the same; a failure of the tree (an option, a repository, the target) writes nothing")
 	flag.BoolVar(&o.force, "force", false, "write into an <output>/projects/ that okdp-compile did not write (no "+markerFile+"), removing from it every file it does not write")
 	flag.Parse()
 	if o.check && o.charts == "" {
@@ -148,33 +148,38 @@ func checkReport(o options) error {
 	return nil
 }
 
-// compileTree: every instance of the tree the repositories make together
-// (compiler.LoadRepository), the chart cache set with --check --charts,
-// each directory read bounded, no symbolic link followed (openDir),
-// compiled together (compiler.CompileAll), each within --cost-limit and
-// with --allow-plain-secrets (Inputs.AllowPlainSecrets), all within
-// --timeout (past it, an error, nothing printed of the instances);
-// each claim's binding printed, <namespace>/<release>: <field>: claim <id>
-// (<contract>) bound to <namespace>/<release>, then ", class <class>" for
-// the class it names, ", the default class <class>" when it names none,
-// nothing when it names its provider, then each refusal, error:
-// <namespace>/<release>: <error>, each warning, warning:
-// <namespace>/<release>: <warning>, in their order; then their graph
-// (compiler.NewGraph), each of its errors printed, error:
-// <namespace>/<release>: <error>; then the files of the target and
-// markerFile, written under the output directory (writeTree), whose
-// projects/ the command wrote before, unless --force (checkOutput), and
-// the dependencies, <namespace>/<release>: depends on <instance>
-// (<contract> <output>, <field>), <namespace>/<instance> for one of
-// another namespace. Every option is checked first, the target's and the
-// output's too; nothing is written when anything fails, nor with --check;
-// but with --partial, the projects whose instances all compile, and at
-// whose releases the graph has no problem, are written, those of the
-// others kept as the output has them (writeTree's keep, the flux target's
-// Keep), each printed, error: <namespace>: not written, ...; and the
-// command fails all the same. Each instance is recorded in rep as its
-// compile ends, the problems of the graph at their instances, and whether
-// the files were written.
+// compileTree: the tree the repositories make together
+// (compiler.Build), each directory read bounded, no symbolic link
+// followed (openDir), each instance within --cost-limit and with
+// --allow-plain-secrets, the chart cache of --check --charts set
+// (compiler.StaticCharts), all within --timeout (past it, an error,
+// nothing printed of the instances); each claim's binding printed,
+// <namespace>/<release>: <field>: claim <id> (<contract>) bound to
+// <namespace>/<release>, then ", class <class>" for the class it names,
+// ", the default class <class>" when it names none, nothing when it names
+// its provider, then each refusal, error: <namespace>/<release>: <error>,
+// each warning, warning: <namespace>/<release>: <warning>, in their
+// order; then each problem of the graph, error: <namespace>/<release>:
+// <error>; then the files of the target and markerFile
+// (compiler.TreeFiles), written under the output directory (writeTree),
+// whose projects/ the command wrote before, unless --force
+// (checkOutput), and the dependencies, <namespace>/<release>: depends on
+// <instance> (<contract> <output>, <field>), <namespace>/<instance> for
+// one of another namespace. Every option is checked first, the target's
+// and the output's too; nothing is written when anything fails, nor with
+// --check; a release name two namespaces share (--target flux and
+// argocd), error: <namespace>/<release>: release ... need distinct
+// names, an instance each, fails it too; but with --partial, the projects
+// compiler.TreeFiles writes are, those it keeps left as the output has
+// them (writeTree's keep), read through openDir for the target's files of
+// them (the root Kustomization's entry, the releases they hold), each
+// printed, error: <namespace>: not written, ..., after the problems that
+// keep them, a refusal, a problem of the graph of its own, a release name
+// two namespaces share, or error: <namespace>/<release>: it depends on
+// <namespace>/<release>, of the project <namespace>, whose output is
+// kept; and the command fails all the same. Each instance is recorded in
+// rep as its compile ends, the problems of the graph and the shared
+// release names at their instances, and whether the files were written.
 func compileTree(o options, rep *report) error {
 	switch {
 	case o.repositories == nil:
@@ -209,23 +214,14 @@ func compileTree(o options, rep *report) error {
 		defer fsys.Close()
 		repos = append(repos, compiler.Repository{Name: dir, FS: fsys})
 	}
-	instances, err := compiler.LoadRepository(repos)
-	if err != nil {
-		return err
-	}
-	var charts fs.FS
+	var charts compiler.ChartSource
 	if o.charts != "" {
 		fsys, err := openDir("--charts", o.charts)
 		if err != nil {
 			return err
 		}
 		defer fsys.Close()
-		charts = fsys
-	}
-	for i := range instances {
-		instances[i].Inputs.CostLimit = o.costLimit
-		instances[i].Inputs.AllowPlainSecrets = o.allowPlainSecrets
-		instances[i].Inputs.Charts = charts
+		charts = compiler.StaticCharts(fsys)
 	}
 	ctx := context.Background()
 	if o.timeout > 0 {
@@ -233,18 +229,21 @@ func compileTree(o options, rep *report) error {
 		ctx, cancel = context.WithTimeout(ctx, o.timeout)
 		defer cancel()
 	}
-	outcomes := compiler.CompileAll(ctx, instances)
+	t, err := compiler.Build(ctx, repos, compiler.BuildOptions{CostLimit: o.costLimit, AllowPlainSecrets: o.allowPlainSecrets, Charts: charts})
+	if err != nil {
+		return err
+	}
 	if ctx.Err() != nil {
-		for _, in := range instances {
-			rep.skip(in)
+		for _, ti := range t.Instances {
+			rep.skip(ti.Instance)
 		}
 		return fmt.Errorf("the compile takes longer than --timeout %s: nothing written", o.timeout)
 	}
 	refused := false
-	var results []*compiler.Result
-	for i, out := range outcomes {
-		rep.add(instances[i], out)
-		node := instances[i].Inputs.Namespace + "/" + instances[i].Inputs.Release
+	for _, ti := range t.Instances {
+		out := ti.Outcome
+		rep.add(ti.Instance, out)
+		node := ti.Namespace() + "/" + ti.Release()
 		for _, b := range out.Claims {
 			how := ""
 			switch {
@@ -264,63 +263,55 @@ func compileTree(o options, rep *report) error {
 		for _, w := range out.Result.Warnings {
 			fmt.Fprintf(os.Stderr, "warning: %s: %s\n", node, w)
 		}
-		results = append(results, out.Result)
 	}
-	if refused && !o.partial {
-		return errReported
-	}
-	// --partial: the projects of the refused instances are not written,
-	// nor those the graph then has a problem at, round after round.
-	failing := map[string]bool{}
-	for i, out := range outcomes {
-		if out.Err != nil {
-			failing[instances[i].Inputs.Namespace] = true
+	if !o.partial {
+		if refused {
+			return errReported
 		}
-	}
-	var g *compiler.Graph
-	printed := map[string]bool{}
-	for {
-		var kept []*compiler.Result
-		for _, res := range results {
-			if !failing[res.Namespace] {
-				kept = append(kept, res)
-			}
+		for _, ti := range t.Instances {
+			graphErrors(ti, ti.GraphErr, rep)
 		}
-		var err error
-		if g, err = compiler.NewGraph(kept); err == nil {
-			results = kept
-			break
-		}
-		more := false
-		for _, e := range unjoin(err) {
-			if !printed[e.Error()] {
-				printed[e.Error()] = true
-				fmt.Fprintln(os.Stderr, "error:", e)
-				rep.graphError(e)
-			}
-			if ge, ok := errors.AsType[*compiler.GraphError](e); ok && o.partial && !failing[ge.Node.Namespace] {
-				failing[ge.Node.Namespace], more = true, true
-			}
-		}
-		if !more {
+		if t.Graph == nil {
 			return errReported
 		}
 	}
-	keep := slices.Sorted(maps.Keys(failing))
-	if f, ok := tg.(compiler.Flux); ok {
-		// The root Kustomization lists a project kept, when the output
-		// holds its Kustomization: the Flux Kustomization of projects/
-		// would prune it otherwise.
-		for _, ns := range keep {
-			if info, err := os.Stat(filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)), "kustomization.yaml")); err == nil && info.Mode().IsRegular() {
-				f.Keep = append(f.Keep, ns)
+	// The projects kept (compiler.TreeFiles: --partial's, and those of a
+	// release name two namespaces share), why each, but the refusals
+	// printed; the output read with --partial only, nothing written
+	// without it.
+	var previous fs.FS
+	if o.partial {
+		fsys, err := openDir("--output", o.output)
+		switch {
+		case err == nil:
+			defer fsys.Close()
+			previous = fsys
+		case !errors.Is(err, fs.ErrNotExist):
+			return err
+		}
+	}
+	files, kept, err := compiler.TreeFiles(t, []compiler.Target{tg}, previous)
+	if err != nil {
+		return err
+	}
+	var keep []string
+	for _, k := range kept {
+		keep = append(keep, k.Namespace)
+		for _, ki := range k.Instances {
+			switch {
+			case ki.Outcome.Err != nil, ki.Depends && !o.partial:
+			case ki.Depends:
+				fmt.Fprintf(os.Stderr, "error: %s/%s: %v\n", ki.Namespace(), ki.Release(), ki.Err)
+			default:
+				graphErrors(ki.Instance, ki.Err, rep)
 			}
 		}
-		tg = f
 	}
-	files, err := tg.Files(results, g)
-	if err != nil || o.check {
-		return err
+	switch {
+	case !o.partial && len(kept) > 0:
+		return errReported
+	case o.check:
+		return nil
 	}
 	files[markerFile] = []byte(marker)
 	if err := writeTree(o.output, files, keep); err != nil {
@@ -331,7 +322,11 @@ func compileTree(o options, rep *report) error {
 		fmt.Fprintf(os.Stderr, "error: %s: not written, an instance of it refused (--partial): %s kept as it is\n", ns, filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)))+string(filepath.Separator))
 		rep.notWritten(ns)
 	}
-	for _, res := range results {
+	for _, ti := range t.Instances {
+		res := ti.Outcome.Result
+		if res == nil || slices.Contains(keep, res.Namespace) {
+			continue
+		}
 		for _, d := range res.Dependencies {
 			instance := d.Instance
 			if d.Namespace != "" {
@@ -344,6 +339,25 @@ func compileTree(o options, rep *report) error {
 		return errReported
 	}
 	return nil
+}
+
+// openDir: the files under dir, given as flag (--repository, --charts,
+// --output), as dirfs.New reads them: a symbolic link refused wherever
+// it points, a file that is neither regular nor a directory refused, a
+// file over 4 MiB, or the files read over 64 MiB together, refused.
+func openDir(flag, dir string) (*dirfs.FS, error) { return dirfs.New(flag, dir) }
+
+// graphErrors: err, the problems of the graph at the release of ti, each
+// printed, error: <namespace>/<release>: <error>, and recorded in rep.
+func graphErrors(ti *compiler.TreeInstance, err error, rep *report) {
+	if err == nil {
+		return
+	}
+	for _, e := range unjoin(err) {
+		ge := &compiler.GraphError{Node: compiler.GraphNode{Namespace: ti.Namespace(), Release: ti.Release()}, Err: e}
+		fmt.Fprintln(os.Stderr, "error:", ge)
+		rep.graphError(ge)
+	}
 }
 
 // unjoin: the errors errors.Join joined, err alone otherwise.
@@ -473,11 +487,14 @@ func checkOutput(o options) error {
 
 // writeTree: files into dir, created if needed, with the directories of
 // their paths, each written through an os.Root of dir: no symbolic link
-// leads a file out of it, and one where a file goes is replaced; then every
-// file under dir/projects/ that is not one of them removed, a link itself
-// and not what it points to, and the directories left empty: the command
-// owns projects/; but the directories of the projects of keep, not
-// written (--partial), which stay as they are.
+// leads a file out of it. Before any file is written, every symbolic link
+// under dir/projects/, at any depth, is removed (removeLinks): the link
+// itself, not what it points to, so that no file of the command lands
+// through one, even in dir; a projects/ that is a link is refused. Then
+// every file under dir/projects/ that is not one of files removed, and
+// the directories left empty: the command owns projects/; but the
+// directories of the projects of keep, not written (--partial), which
+// stay as they are.
 func writeTree(dir string, files map[string][]byte, keep []string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -487,6 +504,9 @@ func writeTree(dir string, files map[string][]byte, keep []string) error {
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	if err := removeLinks(root, "projects"); err != nil {
+		return err
+	}
 	for name, b := range files {
 		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
 			return err
@@ -528,4 +548,30 @@ func writeTree(dir string, files map[string][]byte, keep []string) error {
 		}
 	}
 	return nil
+}
+
+// removeLinks: every symbolic link under dir of root removed, at any
+// depth, the link and not what it points to; none when dir does not
+// exist; an error when dir itself is a link or not a directory.
+func removeLinks(root *os.Root, dir string) error {
+	info, err := root.Lstat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symbolic link: the command writes no file through one", dir)
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	return fs.WalkDir(root.FS(), dir, func(p string, e fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case e.Type()&fs.ModeSymlink != 0:
+			return root.Remove(p)
+		}
+		return nil
+	})
 }

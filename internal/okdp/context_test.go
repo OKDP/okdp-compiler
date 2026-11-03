@@ -1,7 +1,9 @@
 package okdp
 
 import (
+	"encoding/json"
 	"maps"
+	"math/rand/v2"
 	"reflect"
 	"strings"
 	"testing"
@@ -235,5 +237,127 @@ func TestContextUpstream(t *testing.T) {
 	}
 	if got := value.AsMap(inst.scope["values"])["upstream"]; !reflect.DeepEqual(got, up) {
 		t.Errorf("values.upstream:\n got %#v\nwant %#v", got, up)
+	}
+}
+
+// TestPlatformFromContext: whatever defaults a package's schema gives
+// global, in any shape, the platform's settings an instance reads are its
+// context's, level 0's and the provisioning classes of the levels above:
+// the instance's (inst.okdp) are those of that view, its defaults applied,
+// and global.okdp of the mapping's global and of the parameters is that
+// view as written; a schema whose defaults give global.okdp is refused, as
+// one that declares it.
+func TestPlatformFromContext(t *testing.T) {
+	okdpDefault := M{"policy": M{"privileged": []any{"demo"}}, "secrets": M{"store": "evil"}, "charts": M{"oidcDcr": M{"repository": "oci://evil.example.org"}}}
+	shapes := []any{
+		M{"type": "object", "default": M{"okdp": okdpDefault}},
+		M{"default": M{"okdp": nil}},
+		M{"default": M{"okdp": M{"provisioning": M{"pg": M{"default": "evil"}}}}},
+		M{"default": M{"imageRegistry": "r.example.org"}},
+		M{"default": "x"},
+		M{"default": nil},
+		M{"default": []any{M{"okdp": okdpDefault}}},
+		M{"properties": M{"okdp": M{"default": okdpDefault}}},
+		M{"properties": M{"okdp": M{"properties": M{"policy": M{"default": M{"privileged": []any{"demo"}}}}}}},
+		M{"properties": M{"imageRegistry": M{"default": "r.example.org"}}},
+		M{"properties": M{"x": M{"default": M{"okdp": okdpDefault}}}},
+		M{"allOf": []any{M{"properties": M{"okdp": M{"default": okdpDefault}}}}},
+	}
+	// And random shapes: defaults of global or of a key of it, okdp among
+	// them, maps of these keys, okdp among them, to any value.
+	rnd := rand.New(rand.NewPCG(1, 2))
+	var gen func(depth int) any
+	gen = func(depth int) any {
+		switch n := rnd.IntN(6); {
+		case n == 0 || depth > 3:
+			return []any{"demo", float64(rnd.IntN(3)), nil, true}[rnd.IntN(4)]
+		case n == 1:
+			return []any{gen(depth + 1)}
+		default:
+			m := M{}
+			for range rnd.IntN(4) {
+				m[[]string{"okdp", "default", "properties", "policy", "privileged", "secrets", "provisioning", "global"}[rnd.IntN(8)]] = gen(depth + 1)
+			}
+			return m
+		}
+	}
+	for range 300 {
+		key := []string{"okdp", "x"}[rnd.IntN(2)]
+		shapes = append(shapes, M{"default": gen(0)}, M{"properties": M{key: M{"default": gen(0)}}})
+	}
+	contexts := [][]ContextLayer{
+		{{Values: platformValues}},
+		{{Values: platformValues}, {Values: map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"infra"}}}}}}},
+		{{Values: platformValues}, {Level: 1, Values: map[string]any{"global": M{"project": "demo", "okdp": M{"provisioning": M{"pg": M{"classes": M{"small": M{"provider": "demo/pg"}}}}}}}}},
+		{{Level: 1, Values: map[string]any{"global": M{"project": "demo"}}}},
+	}
+	refusals := 0
+	for i, shape := range shapes {
+		doc, err := json.Marshal(M{"type": "object", "properties": M{"global": shape}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := maps.Clone(pkg)
+		files["config.schema.json"] = &fstest.MapFile{Data: doc}
+		for j, ctx := range contexts {
+			in := inputs()
+			in.Context = ctx
+			inst, err := newInstance(files, in, defService)
+			if err != nil {
+				if !strings.Contains(err.Error(), "config.schema.json: global.okdp is the platform's settings") {
+					t.Errorf("shape %d %s, context %d: %v", i, doc, j, err)
+				}
+				refusals++
+				continue
+			}
+			// The view, of the context's layers alone: level 0's
+			// global.okdp, the provisioning of the levels above.
+			view := M{}
+			for _, l := range ctx {
+				okdp, set := value.AsMap(l.Values["global"])["okdp"]
+				switch {
+				case set && l.Level == 0:
+					view = value.Merge(view, M{"global": M{"okdp": okdp}})
+				case set:
+					view = value.Merge(view, M{"global": M{"okdp": M{"provisioning": value.AsMap(okdp)["provisioning"]}}})
+				}
+			}
+			want, err := platformSettings(view)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// oidc gets what newInstance derives of it (existing,
+			// dcr.enabled, dcr.caSecret): compared without them.
+			got := value.AsMap(value.Copy(inst.okdp))
+			if oidc, ok := got["oidc"].(M); ok {
+				delete(oidc, "existing")
+				delete(value.AsMap(oidc["dcr"]), "enabled")
+				delete(value.AsMap(oidc["dcr"]), "caSecret")
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("shape %d %s, context %d: the platform's settings\n got %#v\nwant %#v", i, doc, j, inst.okdp, want)
+			}
+			written, set := value.AsMap(view["global"])["okdp"]
+			for name, g := range map[string]M{"the mapping's global": value.AsMap(inst.scope["global"]), "the parameters' global": value.AsMap(inst.values["global"])} {
+				if got, has := g["okdp"]; has != set || !reflect.DeepEqual(got, written) {
+					t.Errorf("shape %d %s, context %d: global.okdp of %s\n got %#v\nwant %#v", i, doc, j, name, got, written)
+				}
+			}
+			if privileged(inst.okdp, "demo") || storeName(inst.okdp) == "evil" {
+				t.Errorf("shape %d %s, context %d: a package schema's default reached the platform's policy", i, doc, j)
+			}
+		}
+	}
+	if refusals == 0 {
+		t.Error("no shape refused")
+	}
+	for _, shape := range shapes[:3] {
+		doc, _ := json.Marshal(M{"properties": M{"global": shape}})
+		if _, err := chart.ParseSchema("x", doc); err != nil {
+			continue
+		}
+		if _, err := chart.ReadParameterSchema(fstest.MapFS{"config.schema.json": {Data: doc}}); err == nil || !strings.Contains(err.Error(), "a package schema gives it no default (properties.global.default)") {
+			t.Errorf("%s: got %v, want the default of global.okdp refused", doc, err)
+		}
 	}
 }

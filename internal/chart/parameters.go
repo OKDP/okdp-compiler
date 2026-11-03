@@ -40,7 +40,14 @@ type Schema struct {
 // ReadParameterSchema: the parameter schema of pkg (config.schema.json),
 // read as ParseSchema reads a schema; a missing one is the empty schema
 // ({}): no defaults, any values, no key of global declared. Any other read
-// error fails with the error of the file system.
+// error fails with the error of the file system. A schema that declares
+// properties.global.properties.okdp is refused, and one whose defaults
+// give global.okdp (properties.global.default, a map with the key okdp):
+// global.okdp is the platform's settings, given by the context
+// (Inputs.Context), and a package declares nothing under it nor gives it
+// a default. The platform's settings are read from the context alone,
+// whatever the parameters hold: the refusal tells the package's author
+// rather than leave a default unread.
 func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	b, err := fs.ReadFile(pkg, parameterSchema)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -49,7 +56,17 @@ func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseSchema(parameterSchema, b)
+	s, err := ParseSchema(parameterSchema, b)
+	if err != nil {
+		return nil, err
+	}
+	if value.Dig(s.Doc, "properties.global.properties.okdp") != nil {
+		return nil, fmt.Errorf("%s: global.okdp is the platform's settings: a package schema declares nothing under it", parameterSchema)
+	}
+	if _, set := value.AsMap(s.defaults["global"])["okdp"]; set {
+		return nil, fmt.Errorf("%s: global.okdp is the platform's settings: a package schema gives it no default (properties.global.default)", parameterSchema)
+	}
+	return s, nil
 }
 
 // ParseSchema: the values schema b, read from the file name, decoded once

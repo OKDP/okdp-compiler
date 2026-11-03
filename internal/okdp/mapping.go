@@ -101,24 +101,25 @@ func runMapping(session *compile.Session, scope M, srcs ...compile.Source) (res 
 // okdpLabels and okdpSelectorLabels (labels.go), oidcClientSecret
 // (oidc.go). They read only what the documents of a compile see alike (the
 // release, its namespace, the service, the OAuth client mode): the mapping
-// and the compiler's templates share them.
+// and the compiler's templates share them. Each call counts in the
+// session's cost as the compiler's own host functions (compile.Costed).
 func functions(inst *instance, session **compile.Session) []cel.EnvOption {
 	release := inst.release
 	opts := []cel.EnvOption{
 		// okdpFullname, not fullname: mappings bind their own `fullname`.
-		cel.Function("okdpFullname",
+		compile.Costed(cel.Function("okdpFullname",
 			cel.Overload("okdpFullname_void", []*cel.Type{}, cel.StringType,
 				cel.FunctionBinding(func(...ref.Val) ref.Val { return types.String(fullname(release, "")) })),
 			cel.Overload("okdpFullname_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-				compile.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))),
-		cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
+				compile.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
+		compile.Costed(cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
 			compile.Unary(func(v any) (any, error) {
 				args, err := schemaValues(mappingSchema, "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
 				if err != nil {
 					return nil, err
 				}
 				return generatedSecret(*session, inst, value.AsMap(args["okdpGeneratedSecret"]))
-			}))),
+			}))), "okdpGeneratedSecret_map"),
 	}
 	opts = append(opts, labelFunctions(inst.svc.Name, release)...)
 	return append(opts, oidcFunctions(inst)...)

@@ -33,6 +33,11 @@ const (
 // the Applications' names, the releases', must be unique.
 const Namespace = "argocd"
 
+// ReleaseObjects: the objects of the target named after the releases,
+// which share Namespace: what a release in two namespaces makes clash
+// (target.UniqueReleases).
+const ReleaseObjects = "the Applications of " + Namespace
+
 // ProjectName: project-<namespace>, the AppProject of a project, which
 // its Applications are in.
 func ProjectName(namespace string) string { return "project-" + namespace }
@@ -59,7 +64,7 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 	if err := t.check(); err != nil {
 		return nil, err
 	}
-	if err := target.UniqueReleases(results, "the Applications of "+Namespace); err != nil {
+	if err := target.UniqueReleases(results, ReleaseObjects); err != nil {
 		return nil, err
 	}
 	files, err := helm.Target{}.Files(results, g)

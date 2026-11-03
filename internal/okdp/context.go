@@ -28,7 +28,7 @@ type instance struct {
 	name               string       // Inputs.Name, the release when it is empty
 	svc                *Service     // the package: Chart.yaml's name and version
 	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
-	okdp               M            // global.okdp as written, as the mapping sees it, checked against platform.schema.json
+	okdp               M            // the platform's settings: the context's global.okdp (contextLayers), checked against platform.schema.json, its defaults applied
 	oidc               M            // platform.oidc: global.okdp.oidc, its defaults applied, its mode derived
 	dcr                bool         // platform.oidc.dcr.enabled: OIDC enabled, the OAuth clients registered by DCR
 	deps               []Dependency // the instances the connection references point to, of the namespace or, for a claim, of its provider's, by parameter path
@@ -47,9 +47,12 @@ type instance struct {
 // valuesLayers), merged in order as -f files, coalesced over the schema's
 // defaults, checked against it, connections apart (chart.Parameters).
 //
-// 2. Platform context: global.okdp checked against platformSchema, its
-// defaults applied (schemaValues): a value of another type is refused
-// rather than read as not set, oidc: false would leave OIDC enabled. The
+// 2. Platform context: global.okdp of the context's layers alone
+// (contextLayers: level 0's, the provisioning classes of the levels
+// above), never of the parameters, which a package schema's defaults
+// reach; checked against platformSchema, its defaults applied
+// (platformSettings): a value of another type is refused rather than read
+// as not set, oidc: false would leave OIDC enabled. The
 // OIDC settings are derived from them: the client provisioning mode in
 // effect (existing or dcr), and the CA bundle of the oidc-dcr Jobs,
 // tls.caBundleSecret unless oidc.dcr.caSecret is set.
@@ -74,17 +77,15 @@ type instance struct {
 // annotations, the proxy environment), and the package: service (name,
 // version), labels and selectorLabels (without component).
 func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
-	schema, values, err := parameters(files, in, svc)
+	schema, values, settings, err := parameters(files, in, svc)
 	if err != nil {
 		return nil, err
 	}
-	settings, err := schemaValues(platformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", M{"global": value.Copy(values["global"])})
-	if err != nil {
-		return nil, err
-	}
-	inst := &instance{release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values}
-	inst.okdp = value.AsMap(value.AsMap(values["global"])["okdp"])
-	oidc := value.AsMap(value.Dig(settings, "global.okdp.oidc"))
+	// The platform's settings come from the context's layers alone
+	// (contextLayers), never from the parameters: a package schema's
+	// defaults do not reach them.
+	inst := &instance{release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values, okdp: settings}
+	oidc := value.AsMap(settings["oidc"])
 	mode := value.Str(oidc["clientProvisioning"])
 	inst.dcr = value.Truthy(oidc["enabled"]) && mode == "dcr"
 	dcr := value.AsMap(oidc["dcr"])
@@ -92,7 +93,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	// The CA bundle the oidc-dcr Jobs trust: the platform's, tls.caBundleSecret,
 	// unless dcr sets its own; "" for none.
 	if _, set := dcr["caSecret"]; !set {
-		dcr["caSecret"] = value.Str(value.Dig(settings, "global.okdp.tls.caBundleSecret"))
+		dcr["caSecret"] = value.Str(value.Dig(settings, "tls.caBundleSecret"))
 	}
 	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
 	inst.oidc = oidc
@@ -157,24 +158,54 @@ func ingressAnnotations(okdp M) M {
 
 // parameters: stage 1, the parameter schema of the package's files, the
 // requirements of its connection references compiled (requirements), and
-// the parameters: the values layers merged over its defaults, checked.
-func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, error) {
+// the parameters: the values layers merged over its defaults, checked;
+// and the platform's settings, the context's global.okdp
+// (contextLayers), {global: {okdp: ...}}, checked against platformSchema,
+// its defaults applied (platformSettings). global.okdp of the parameters
+// is the context's, as written, whatever the package's schema gives: the
+// mapping and the charts read the platform's settings, never a package's.
+func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	schema, err := chart.ReadParameterSchema(files)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := requirements(schema.Doc); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	layers, err := valuesLayers(schema.Doc, in)
+	layers, platform, err := valuesLayers(schema.Doc, in)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	values, err := chart.Parameters(schema, svc.Name, layers)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return schema, values, nil
+	g, _ := values["global"].(M)
+	switch okdp, set := value.AsMap(platform["global"])["okdp"]; {
+	case set && g == nil:
+		values["global"] = M{"okdp": value.Copy(okdp)}
+	case set:
+		g["okdp"] = value.Copy(okdp)
+	case g != nil:
+		delete(g, "okdp")
+	}
+	settings, err := platformSettings(platform)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return schema, values, settings, nil
+}
+
+// platformSettings: the platform's settings, global.okdp of platform, the
+// context's (contextLayers), checked against platformSchema, its defaults
+// applied: a value of another type is refused rather than read as not set
+// (oidc: false would leave OIDC enabled).
+func platformSettings(platform M) (M, error) {
+	settings, err := schemaValues(platformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
+	if err != nil {
+		return nil, err
+	}
+	return value.AsMap(value.Dig(settings, "global.okdp")), nil
 }
 
 // platformSchemaFile: the schema of the platform values the compiler reads

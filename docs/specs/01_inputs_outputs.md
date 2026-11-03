@@ -166,8 +166,8 @@ same, checked. Each chart is unpacked under its repository's directory, as
 
 `<repository>` is the source's `repository` without its scheme (`oci://`,
 `https://`) and a trailing `/`: its host, port and path.
-`oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.5.0
-`quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/`; `https://localhost:8080/charts`
+`oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.6.0
+`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`; `https://localhost:8080/charts`
 is `localhost:8080/charts/`. A repository whose host and path are no
 directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
 refused, with or without a chart cache, and so is an `http://` one, the
@@ -199,7 +199,7 @@ it renders is compiled: the oidc-dcr chart in `dcr` mode with a client.
 full example's charts unpacked, their `values.yaml` and the workspace
 chart's `values.schema.json` only: enough to check, not to render
 (`charts.example.org/workspace-3.2.0/workspace/`,
-`registry.example.org/mirror/oidc-dcr-0.5.0/oidc-dcr/`...).
+`registry.example.org/mirror/oidc-dcr-0.6.0/oidc-dcr/`...).
 
 A chart its directory does not hold, even when the cache holds its archive
 or the chart elsewhere, fails with the command that downloads it there,
@@ -207,7 +207,7 @@ prefixed with the chart key; a file that does not read, with its path:
 
 ```
 app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0
-oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0
+oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0
 app: charts.example.org/app-1.8.0/app/values.yaml: cannot unmarshal yaml document: ...
 ```
 
@@ -243,7 +243,13 @@ gives `replicas: 1`, `metrics: {enabled: false, interval: 30s}` and
 `upstream: {}`. A default under `global` (`properties.global.properties`)
 is one of a context value: the context's layers, of any level, override
 it, and the key it declares an instance may set ([Context
-values](#context-values)). The `default` of an `x-*` keyword, of `enum`,
+values](#context-values)). None is of `global.okdp`, the platform's
+settings: a schema that declares `properties.global.properties.okdp`,
+or whose `properties.global.default` has the key `okdp`, is refused
+(`config.schema.json: global.okdp is the platform's settings: ...`);
+the compiler reads them of the context's layers alone, and gives the
+mapping and the charts the context's `global.okdp`, whatever the
+parameters hold. The `default` of an `x-*` keyword, of `enum`,
 `const` or `examples` is not read, nor `x-ui-condition`: unlike a
 [contract's](#completion), a parameter's default holds whatever the other
 values.
@@ -1199,7 +1205,7 @@ compiler adds itself, each an upstream chart, checked as a dependency of
 
 | Key | Renders |
 |---|---|
-| `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.5.0, which the embedded template writes; oidc-dcr 0.5.0 of `oci://quay.io/adaltas` when unset |
+| `oidcDcr` | the [OAuth client charts](#oauth-client-charts), in `dcr` mode: an oidc-dcr chart that takes the values of oidc-dcr 0.6.0, which the embedded template writes; oidc-dcr 0.6.0 of `oci://quay.io/adaltas` when unset |
 
 Their form is checked with the other [settings the compiler
 reads](#fields-the-compiler-reads), against the platform schema: `charts`
@@ -1645,7 +1651,7 @@ type ChartRef struct {
 | Compiled chart | `Result.Charts[<key>]` |
 |---|---|
 | a dependency of `Chart.yaml` | its `repository`, its `name` as `Chart`, its `version` ([dependencies](02_service_definition.md#dependencies)) |
-| the chart of an OAuth client | `global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 of `oci://quay.io/adaltas` by default ([Platform charts](#platform-charts)) |
+| the chart of an OAuth client | `global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 of `oci://quay.io/adaltas` by default ([Platform charts](#platform-charts)) |
 
 The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
@@ -1661,7 +1667,7 @@ app:
 oidc-dcr:
   repository: oci://quay.io/adaltas
   chart: oidc-dcr
-  version: 0.5.0
+  version: 0.6.0
 ```
 
 Everything else is keyed by the key
@@ -1677,7 +1683,7 @@ by default, and `clientProvisioning: dcr`), the compiler adds one chart per
 OAuth client of the mapping's `oidcClients` section
 ([oidcClients](02_service_definition.md#oidcclients)), rendered by the
 platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`,
-`oci://quay.io/adaltas` `oidc-dcr` 0.5.0 by default:
+`oci://quay.io/adaltas` `oidc-dcr` 0.6.0 by default:
 [Platform charts](#platform-charts)): its Job, a pre-install/pre-upgrade
 hook, registers the client anonymously at the platform's `registrationUrl`
 and writes it to a Secret. In `existing` mode, or with OIDC disabled, no
@@ -1728,7 +1734,7 @@ The client keys, their types and defaults:
 maps over the chart's defaults: its default `mapping.keyMapping` entries
 stay, so the Secret also holds `registration_client_uri` and
 `registration_access_token` of the registration response (oidc-dcr
-0.5.0). The example's final values in `dcr` mode ([Example](#example)),
+0.6.0). The example's final values in `dcr` mode ([Example](#example)),
 with the platform's settings above (its `platform.yaml`), trimmed:
 
 ```yaml
@@ -2172,7 +2178,7 @@ dependencies:
     version: 1.8.0
   - name: oidc-dcr
     repository: oci://quay.io/adaltas
-    version: 0.5.0
+    version: 0.6.0
 ```
 
 `instance.values.yaml`, annotated: the values of `app` and those of the
@@ -2324,6 +2330,16 @@ output it lacks. In the order of the instances:
    of an instance refused since, or whose claim's provider is refused, of
    any namespace, are compiled again: each gets the error a compile after
    every provider gives. A provider refused gives its claims no output.
+5. Two objects of a namespace that write one Secret, of one instance or
+   of two, refuse the instances that hold them, each: a v1 `Secret`, an
+   `ExternalSecret`'s `spec.target.name` (its own name when unset; none
+   with `creationPolicy: None`), a `PushSecret`'s key of the store and
+   property. They would overwrite each other's credentials: a provider's
+   `secretRef.name` names its claimers' copies, `<release>-<secret>`,
+   which could otherwise be the Secret of another instance's connection,
+   `<release>.<connection>-credentials`. The instances that reference
+   their outputs, or whose claims they provide, are compiled again, as
+   in step 4. The objects an upstream chart renders are not read.
 
 An instance is compiled once when it comes after the instances whose
 outputs it references, twice when it comes before: the outcomes are the
@@ -2338,6 +2354,7 @@ instance that exists and provides it, is the
 |---|---|
 | a release given twice in a namespace, each time | `release "<release>" is given twice in namespace "<namespace>"` |
 | an output another instance of the namespace publishes too | `provides "<name>" (<contract>): <instance> publishes an output of that contract and name too, a reference to it would not know which`; `<instance>, <instance> publish`, several |
+| two objects that write one Secret of a namespace, each instance that holds one | `Secret "<name>" of namespace <namespace> is written by <kind> <object> of <release> and <kind> <object> of <release>: two objects may not write one Secret`, every writer in order, ` (<n> times)` after one written several times; `the key <key> (property <property>) of the secret store of namespace <namespace> is written by ...` for PushSecrets |
 | a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order, a provider of another namespace `<namespace>/<release>` |
 
 ## The deployment graph
@@ -2400,7 +2417,7 @@ projects/
 | Target | Options (its fields) | Files besides the umbrella charts |
 |---|---|---|
 | `compiler.Helm` | none | none: each instance installs with Helm, as one release, its dependencies built first ([rendering with Helm](../01_usage.md#rendering-with-helm)), after those it waits for |
-| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root); `Keep`, namespaces the root lists without a result, projects whose directories the output keeps as they are (`okdp-compile --partial`) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
+| `compiler.Flux` | `Source`, the GitRepository of the tree, `<namespace>/<name>` (`flux-system/okdp-gitops`); `PathPrefix`, the tree's path in its repository (`""`, its root); `Keep`, namespaces the root lists without a result, projects whose directories the output keeps as they are (`okdp-compile --partial`; `compiler.TreeFiles` sets it for each project kept whose `kustomization.yaml` the previous output holds) | per instance, `helmrelease.yaml` and `kustomization.yaml`; per namespace, `project/` ([the project's manifests](#the-projects-manifests)) and `kustomization.yaml`; `projects/kustomization.yaml`, the root's |
 | `compiler.ArgoCD` | `RepoURL`, the repository of the tree, required; `Revision` (`HEAD`); `PathPrefix` | per instance, `application.yaml`; per namespace, `project/` |
 
 The files of the flux and argocd targets are marked generated on their
@@ -2534,7 +2551,7 @@ every reconcile.
 | a `PathPrefix` that is absolute, `.`, or has an empty, `.` or `..` segment | `Flux.PathPrefix "<prefix>": the path of the tree in the repository, relative, without an empty, . or .. segment`; `ArgoCD.PathPrefix` alike |
 | no `RepoURL` | `ArgoCD.RepoURL is required` |
 | a `RepoURL` or `Revision` with a quote, a backslash or a newline | `ArgoCD.RepoURL "<url>": holds a quote, a backslash or a newline`; `ArgoCD.Revision` alike |
-| one release name in two namespaces | `release "<release>" is in namespaces "<a>" and "<b>": the HelmReleases of okdp-releases need distinct names` (flux); `the Applications of argocd need distinct names` (argocd) |
+| one release name in two namespaces | `release "<release>" is in namespaces "<a>" and "<b>": the HelmReleases of okdp-releases need distinct names` (flux); `the Applications of argocd need distinct names` (argocd); `compiler.TreeFiles` keeps the projects of it instead, each instance its error (`KeptInstance.Err`) |
 
 ## Claims
 

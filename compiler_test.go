@@ -147,6 +147,7 @@ func TestLayers(t *testing.T) {
 		"internal/okdp":    {"internal/graph", "internal/target", "internal/tree"},
 		"internal/graph":   {"internal/target", "internal/tree"},
 		"internal/tree":    {"internal/target", "internal/repository"},
+		"internal/output":  {"internal/repository"},
 		"internal/compile": {"internal/okdp", "internal/chart"},
 		"internal/chart":   {"internal/okdp", "internal/compile"},
 	} {
@@ -293,5 +294,32 @@ func TestIsName(t *testing.T) {
 		if got := compiler.IsName(name); got != want {
 			t.Errorf("%q: got %v", name, got)
 		}
+	}
+}
+
+// TestBuild: a tree loaded and compiled with the options on each
+// instance; one that does not load, a *LoadError of every problem, the
+// errors it is of unwrapped.
+func TestBuild(t *testing.T) {
+	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}}
+	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{CostLimit: 1_000_000, AllowPlainSecrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := tr.Problems(); problems != nil || tr.Graph == nil {
+		t.Fatalf("problems: %q", problems)
+	}
+	for _, ti := range tr.Instances {
+		if ti.Inputs.CostLimit != 1_000_000 || !ti.Inputs.AllowPlainSecrets {
+			t.Errorf("%s/%s: %+v", ti.Namespace(), ti.Name, ti.Inputs)
+		}
+	}
+	_, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
+		"projects/demo/instances/a/instance.yaml": {Data: []byte("service: nope\nversion: 1.0.0\n")},
+		"platform.yaml": {Data: []byte("global: [\n")},
+	}}}, compiler.BuildOptions{})
+	le, ok := errors.AsType[*compiler.LoadError](err)
+	if !ok || len(le.Problems) != 2 || !errors.Is(err, compiler.ErrNotInCatalog) {
+		t.Errorf("a tree that does not load: %#v", err)
 	}
 }

@@ -49,7 +49,7 @@ type Instance struct {
 	Outcome okdp.Outcome
 	// GraphErr is the problem of the deployment graph at its release, nil
 	// when none: a dependency on a release that does not provide what is
-	// referenced, a cycle.
+	// referenced, a cycle; several joined once (errors.Join), each its own.
 	GraphErr error
 	// Provided are the claims bound to it, its package provisioning their
 	// contract, by ID, each with the instance that claims it.
@@ -63,6 +63,15 @@ type Provided struct {
 	Claimer *Instance
 }
 
+// Dir: a chart cache filled already, a directory of unpacked charts
+// (helm pull --untar), which fetches nothing: Compile sets it on every
+// instance at once, and compiles them once.
+type Dir struct{ FS fs.FS }
+
+// Ensure: the directory as it is: a chart it lacks fails the check of
+// the instance that names it.
+func (d Dir) Ensure(context.Context, []chart.Ref) (fs.FS, error) { return d.FS, nil }
+
 // Compile: instances compiled together (okdp.CompileAll), then the graph
 // of those that compile, its problems at their releases, and the claims
 // bound to each provider. With charts, the upstream charts the compile
@@ -70,8 +79,12 @@ type Provided struct {
 // OAuth clients' among them) are fetched, then the instances compiled
 // again with them (Inputs.Charts), their final values checked against
 // the charts' defaults and schemas; a chart that cannot be fetched leaves
-// the values unchecked (Tree.ChartsErr). instances are not changed.
+// the values unchecked (Tree.ChartsErr). A Dir is set at once, the
+// instances compiled once. instances are not changed.
 func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource) *Tree {
+	if d, ok := charts.(Dir); ok {
+		return build(withCharts(instances, d.FS), okdp.CompileAll(ctx, withCharts(instances, d.FS)))
+	}
 	outcomes := okdp.CompileAll(ctx, instances)
 	if charts == nil {
 		return build(instances, outcomes)
@@ -82,11 +95,17 @@ func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource)
 		t.ChartsErr = err
 		return t
 	}
+	checked := withCharts(instances, cache)
+	return build(checked, okdp.CompileAll(ctx, checked))
+}
+
+// withCharts: a copy of instances, each with the chart cache charts.
+func withCharts(instances []okdp.Instance, charts fs.FS) []okdp.Instance {
 	checked := slices.Clone(instances)
 	for i := range checked {
-		checked[i].Inputs.Charts = cache
+		checked[i].Inputs.Charts = charts
 	}
-	return build(checked, okdp.CompileAll(ctx, checked))
+	return checked
 }
 
 // refs: the upstream charts of the instances compiled, once each, in the
@@ -118,12 +137,8 @@ func build(instances []okdp.Instance, outcomes []okdp.Outcome) *Tree {
 	}
 	g, err := graph.New(results)
 	if err != nil {
-		for _, e := range unjoin(err) {
-			if ge, ok := errors.AsType[*graph.Error](e); ok {
-				if ti := t.Release(ge.Node.Namespace, ge.Node.Release); ti != nil {
-					ti.GraphErr = errors.Join(ti.GraphErr, ge.Err)
-				}
-			}
+		for ti, errs := range atInstances(t, err) {
+			ti.GraphErr = errors.Join(errs...)
 		}
 	} else {
 		t.Graph = g
@@ -139,6 +154,21 @@ func build(instances []okdp.Instance, outcomes []okdp.Outcome) *Tree {
 		slices.SortStableFunc(ti.Provided, func(a, b Provided) int { return strings.Compare(a.ID, b.ID) })
 	}
 	return t
+}
+
+// atInstances: the problems of the graph, err of graph.New, at the
+// instances of their releases, each instance's in their order; those at
+// no instance of t left out.
+func atInstances(t *Tree, err error) map[*Instance][]error {
+	out := map[*Instance][]error{}
+	for _, e := range unjoin(err) {
+		if ge, ok := errors.AsType[*graph.Error](e); ok {
+			if ti := t.Release(ge.Node.Namespace, ge.Node.Release); ti != nil {
+				out[ti] = append(out[ti], ge.Err)
+			}
+		}
+	}
+	return out
 }
 
 // unjoin: the errors errors.Join joined, err alone otherwise.

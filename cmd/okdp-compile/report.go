@@ -16,12 +16,14 @@ const (
 	// statusCompiled: compiled, and the deployment graph has no problem at
 	// its release.
 	statusCompiled = "compiled"
-	// statusRefused: its compile failed, or the graph has a problem at its
-	// release: instanceReport.Error says why.
+	// statusRefused: its compile failed, the graph has a problem at its
+	// release, or an instance of another namespace has its release name
+	// (--target flux, argocd): instanceReport.Error says why.
 	statusRefused = "refused"
 	// statusSkipped: not compiled, the compile stopped before it was done
-	// (--timeout); or, with --partial, compiled but not written, another
-	// instance of its project refused.
+	// (--timeout); or, with --partial, compiled but not written, its
+	// project kept (compiler.TreeFiles): another instance of it refused,
+	// or it depends on a release of a project kept.
 	statusSkipped = "skipped"
 )
 
@@ -128,9 +130,9 @@ func (r *report) instance(in compiler.Instance) *instanceReport {
 	return ir
 }
 
-// graphError: a problem of the deployment graph, the instance of its
-// release refused, its error joined to any other; a tree error when no
-// instance has the release.
+// graphError: a problem of the deployment graph, or a release name two
+// namespaces share, the instance of its release refused, its error
+// joined to any other; a tree error when no instance has the release.
 func (r *report) graphError(err error) {
 	if ge, ok := errors.AsType[*compiler.GraphError](err); ok {
 		for _, ir := range r.Instances {

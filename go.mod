@@ -4,11 +4,15 @@ go 1.27.3
 
 require (
 	cel.dev/cel-go v0.32.0
+	github.com/opencontainers/go-digest v1.0.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sync v0.24.0
 	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.12
+	oras.land/oras-go/v2 v2.7.0
 	sigs.k8s.io/yaml v1.6.0
 )
 

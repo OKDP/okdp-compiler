@@ -73,6 +73,22 @@ var clusterScoped = func() map[string]bool {
 	return out
 }()
 
+// engineGroups: the API groups of the deployer engines' custom resources,
+// which a project that is not privileged may not install: a HelmRelease, a
+// GitRepository, a Kustomization or an Application in the project's
+// namespace lets it drive the engine with the engine's own identity. The
+// platform's lockdown of the engines (--no-cross-namespace-refs,
+// --default-service-account, Argo CD's application.namespaces) is the
+// second line.
+var engineGroups = map[string]bool{
+	"helm.toolkit.fluxcd.io":         true,
+	"kustomize.toolkit.fluxcd.io":    true,
+	"source.toolkit.fluxcd.io":       true,
+	"notification.toolkit.fluxcd.io": true,
+	"image.toolkit.fluxcd.io":        true,
+	"argoproj.io":                    true,
+}
+
 // apiGroup: the group of an apiVersion, "" for the core group (v1).
 func apiGroup(apiVersion string) string {
 	group, _, ok := strings.Cut(apiVersion, "/")
@@ -96,8 +112,12 @@ func checkObjects(svc, namespace string, objects []M) error {
 	for _, o := range objects {
 		meta := value.AsMap(o["metadata"])
 		id := value.Str(o["kind"]) + "/" + value.Str(meta["name"])
-		if version := value.Str(o["apiVersion"]); clusterScoped[apiGroup(version)+"/"+value.Str(o["kind"])] {
+		version := value.Str(o["apiVersion"])
+		if clusterScoped[apiGroup(version)+"/"+value.Str(o["kind"])] {
 			return fmt.Errorf("%s: objects: %s: a cluster-scoped kind (%s): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), %s is not one of them", svc, id, version, namespace)
+		}
+		if group := apiGroup(version); engineGroups[group] {
+			return fmt.Errorf("%s: objects: %s: an object of the deployer's kinds (%s) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), %s is not one of them", svc, id, version, namespace)
 		}
 		if ns, set := meta["namespace"]; set && ns != nil && ns != "" && ns != namespace {
 			return fmt.Errorf("%s: objects: %s: namespace %s, not the instance's (%s): the platform's projects write other namespaces (global.okdp.policy.privileged), %s is not one of them", svc, id, value.Str(ns), namespace, namespace)

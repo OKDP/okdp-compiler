@@ -304,8 +304,8 @@ func platformClasses(layers []ContextLayer) M {
 // package fixes (x-okdp-connection-ref's request), and each name of a
 // named claim of its contract that is no connection; the named claims of
 // its context (namedClaims); and its classes, global.okdp.provisioning of
-// the same merged values, the context's (valuesLayers: never the
-// instance's).
+// the platform's settings, the context's layers (contextLayers: never the
+// instance's, nor the package schema's defaults).
 // None when the parameters, the platform values (platformSchema) or a
 // claim fail: the compile says why.
 func claimsOf(def *Definition, in Inputs) instanceClaims {
@@ -313,15 +313,12 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 	if err != nil {
 		return instanceClaims{}
 	}
-	schema, values, err := parameters(def.Files, in, svc)
+	schema, values, settings, err := parameters(def.Files, in, svc)
 	if err != nil {
 		return instanceClaims{}
 	}
 	named, err := namedClaims(values)
 	if err != nil {
-		return instanceClaims{}
-	}
-	if _, err := schemaValues(platformSchema, "", M{"global": value.Copy(values["global"])}); err != nil {
 		return instanceClaims{}
 	}
 	var out []claimRef
@@ -345,7 +342,7 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 		}
 		return v
 	})
-	return instanceClaims{out, named, value.AsMap(value.Dig(values, "global.okdp.provisioning")), platformClasses(in.Context)}
+	return instanceClaims{out, named, value.AsMap(settings["provisioning"]), platformClasses(in.Context)}
 }
 
 // claimID: the ID of a claim of the reference at field of the instance

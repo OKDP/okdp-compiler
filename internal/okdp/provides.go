@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"strings"
 
 	"github.com/okdp/okdp-compiler/internal/compile"
@@ -38,6 +39,13 @@ type SecretRef struct {
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 }
 
+// secretName: a DNS-1123 subdomain, DNS-1123 labels joined by dots.
+var secretName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+
+// isSecretName: s names a Secret, as Kubernetes does: a DNS-1123
+// subdomain, 253 characters at most (secretName).
+func isSecretName(s string) bool { return len(s) <= 253 && secretName.MatchString(s) }
+
 // published: what the instance publishes, its instance section info, of
 // the form the mapping schema checks (runMapping), and outputs (provided).
 func published(info M, outputs []Output) Info {
@@ -58,8 +66,8 @@ func published(info M, outputs []Output) Info {
 // at once (contract.check). An output given a `secret` ({generate,
 // stringData}, or {stringData} when plain, Inputs.AllowPlainSecrets, is
 // true) gets its credentials Secret, named after its secretRef (default
-// <name>-<contract>-credentials). Then two outputs of one contract and name
-// fail (twice).
+// <name>-<contract>-credentials), a DNS-1123 subdomain (isSecretName).
+// Then two outputs of one contract and name fail (twice).
 func provided(session *compile.Session, inst *instance, contracts fs.FS, provides []any, plain bool) ([]Output, []M, error) {
 	var outputs []Output
 	var credentials []M
@@ -94,6 +102,9 @@ func provided(session *compile.Session, inst *instance, contracts fs.FS, provide
 			o.SecretRef = &SecretRef{Name: value.Str(ref["name"])}
 		} else if value.Truthy(secret) {
 			o.SecretRef = &SecretRef{Name: out + "-" + contract + "-credentials"}
+		}
+		if o.SecretRef != nil && !isSecretName(o.SecretRef.Name) {
+			return nil, nil, fmt.Errorf("%s: secretRef.name %q: not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most", where, o.SecretRef.Name)
 		}
 		outputs = append(outputs, o)
 		// The credentials Secret, when the mapping describes it.

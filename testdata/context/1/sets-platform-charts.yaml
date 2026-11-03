@@ -8,4 +8,4 @@
 global:
   okdp:
     charts:
-      oidcDcr: {repository: oci://registry.attacker.example/charts, chart: oidc-dcr, version: 0.5.0}
+      oidcDcr: {repository: oci://registry.attacker.example/charts, chart: oidc-dcr, version: 0.6.0}

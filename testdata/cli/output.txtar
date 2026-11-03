@@ -21,6 +21,22 @@ status 0 okdp-compile --repository examples/01_minimal/input/db -o $WORK/out
 ! exists $WORK/out/projects/demo/stale.yaml
 exists $WORK/out/README.md
 
+# A symbolic link under projects/, at any depth, in the output or out of
+# it: removed before anything is written, the link and not what it points
+# to; the project written in a directory of its own, nothing through it.
+rm $WORK/out/projects/demo
+mkdir $WORK/out/elsewhere
+symlink $WORK/out/projects/demo -> ../elsewhere
+status 0 okdp-compile --repository examples/01_minimal/input/db -o $WORK/out
+exists $WORK/out/projects/demo/instances/demo-hello/Chart.yaml
+! exists $WORK/out/elsewhere/instances
+rm $WORK/out/projects/demo/instances
+symlink $WORK/out/projects/demo/instances -> $WORK/outside
+status 0 okdp-compile --repository examples/01_minimal/input/db -o $WORK/out
+exists $WORK/out/projects/demo/instances/demo-hello/Chart.yaml
+! exists $WORK/outside/demo-hello
+exists $WORK/outside/keep.txt
+
 # An empty projects/, or none: nothing to remove.
 mkdir $WORK/empty/projects
 status 0 okdp-compile --repository examples/01_minimal/input/db -o $WORK/empty
@@ -42,6 +58,8 @@ Not the command's.
 -- out/README.md --
 The output repository's own file.
 -- linked/README.md --
+-- outside/keep.txt --
+Not the command's either.
 -- marker.txt --
 okdp-compile writes projects/ and removes from it every file it does not
 write. Remove this file, and it refuses to write here without --force.

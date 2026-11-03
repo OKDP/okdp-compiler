@@ -137,6 +137,7 @@ which an instance's list replaces.
 | may | its own values, template code included, not held to the upstream policy | not checked | |
 | may | objects of any namespaced kind in the instance's namespace, an ExternalSecret or a PushSecret of any key of the store among them | not checked: the store's policy | |
 | may | consent for its instances to serve other namespaces (`provisions[].claimers`), unless an instance lists its own | `namespace.go: Instance.Claimers` | `testdata/cli/claims.txtar` |
+| may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the context's layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: contextLayers`, `context.go: parameters` | `testdata/cli/policy.txtar` (`schema-okdp`, `schema-default`), `TestPlatformFromContext` |
 | may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (an ExternalSecret of another namespace) |
 | may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (a ClusterRole) |
 | may not | a Secret of the objects with `data` or `stringData`, unless the caller allows it | `policy.go: checkPlainSecrets` | `testdata/cli/plain-secrets.txtar` (an objects' Secret) |
@@ -145,7 +146,9 @@ which an instance's list replaces.
 | may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `chart.FinalValues` | `TestDcrCompile` |
 | may not | an OAuth client's Secret that is not the release's, `<release>-...` | `oidc.go: oidcClients` | `testdata/cli/oidc.txtar` |
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
-| may not | expressions past the cost limit, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions` | `testdata/cli/limits.txtar` |
+| may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
+| may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store | `namespace.go: tree.refuseSecretTargets` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
+| may not | expressions past the cost limit, a host function's call counted by the bytes it reads and writes, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions`, `hostCost` | `testdata/cli/limits.txtar`, `TestHostCostBytes` |
 
 ## The engines
 
@@ -205,16 +208,33 @@ and sent to the host of the deployments repositories only. It reads the
 tree without following a symbolic link, bounded, and bounds each
 compile's CEL cost.
 
+The chart cache it fills, package `chartcache`, the control plane's too,
+is read for the checks and the console's defaults, never deployed; what
+it pulls is bounded and must be the chart the instance names:
+
+| | Rule | Enforced by | Fixture |
+|---|---|---|---|
+| may not | have the cache keep an archive other than the layer an OCI manifest names (a registry, a mirror or a proxy serving another one) | `chartcache/oci.go: pullOCI`, the layer read whole and verified against its size and digest before it is unpacked | `TestPullOCIVerifiesTheLayer` |
+| may not | have a chart pulled over plain http, from a repository, an archive the index names or a redirect, but on a host of `InsecureHosts`, nor redirected from https to http | `RepositoryPuller.check`, `checkRedirect` | `TestIndexIsHTTPS` |
+| may not | have the cache keep an archive of another chart or version than the one named (an index entry, a tag) | `chartcache/cache.go: checkChart` | `TestTheChartIsTheOneNamed` |
+| may not | read a file of the cache other than a chart's `Files`, or through a symbolic link, from the console (`File`) or a compile (`FS`) | `Cache.File`, `Cache.FS` (`internal/dirfs`) | `TestFileIsOneOfFiles`, `TestFSFollowsNoLink` |
+
+The cache directory is the platform's: a chart is pulled once, by
+version, with no digest pinned nor expiry, each directory readable by
+every user (0755) of a volume the jobs share; whoever writes the volume
+chooses what the checks and the console read.
+
 `okdp-compile`, run in a CI job of its own, holds the same lines against
 the tree it reads:
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may not | make it read a file out of a repository (a symbolic link), block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/dirfs.go: openDir`, `dirFS.Open` | `testdata/cli/symlink.txtar`, `TestDirFSBounds` |
+| may not | make it read a file out of a repository (a symbolic link), block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openDir`, `internal/dirfs: FS.Open` | `testdata/cli/symlink.txtar`, `TestDirFSBounds` |
 | may not | make it run without end | `--cost-limit`, `--timeout` (`compile.Session`) | `testdata/cli/limits.txtar` |
-| may not | make it delete an output it did not write, or write through a symbolic link of the output | `main.go: checkOutput`, `writeTree` | `testdata/cli/output.txtar`, `TestWriteTree` |
+| may not | make it delete an output it did not write, or write through a symbolic link of the output, at any depth under `projects/`, in the output or out of it (every link there removed before a file is written) | `main.go: checkOutput`, `writeTree`, `removeLinks` | `testdata/cli/output.txtar`, `TestWriteTree` |
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Validate` | `testdata/cli/errors.txtar` |
-| may not | have one project's failure keep the others from deploying (`--partial`) | `main.go: compileTree` | `testdata/cli/partial.txtar` |
+| may not | have one project's failure keep the others from deploying (`--partial`), a release name it shares with another project among them | `compiler.Partial` (`internal/tree/partial.go`), `compiler.TreeFiles` (`internal/output`) | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `TestAReleaseCollisionKeepsItsProjects` |
+| may not | make `--partial` read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | `openDir` of `--output`, `compiler.TreeFiles` | `testdata/cli/kept.txtar` |
 
 ## What the compiler cannot enforce
 
@@ -246,7 +266,8 @@ the tree it reads:
 - **The namespace is the boundary, not the instance.** The instances of
   a project share its namespace and its identity: a release reads the
   Secrets of the others; a provider's namespace holds the credentials of
-  every claim it serves.
+  every claim it serves. Two of OKDP's objects that write one Secret of
+  a namespace are refused, not a Secret an upstream chart renders.
 - **The store's policy.** The compiler writes the keys; it cannot check
   that the store scopes them. A ClusterSecretStore, without
   `secrets.provider`, is one trust domain. A Kubernetes namespace named

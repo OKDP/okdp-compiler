@@ -801,8 +801,14 @@ a Secret without these keys, before the contract checks, a null too.
 
 The Secret is named after `secretRef.name` when given, else
 `<name>-<contract>-credentials`, which then becomes the output's
-`secretRef`. Without `secret` (or with `secret: {}`), no Secret is
-rendered and the output has a `secretRef` only when the mapping gives one.
+`secretRef`: a Secret's name, a DNS-1123 subdomain (labels joined by dots,
+as a claim's ID: `${{ c.id }}-credentials`), 253 characters at most, else
+the compile fails (`secretRef.name "<name>": not a Secret's name, ...`). A
+claimer of another namespace reads a copy, `<release>-<name>`, which no
+other object of its namespace may write ([compiling instances
+together](01_inputs_outputs.md#compiling-instances-together)). Without
+`secret` (or with `secret: {}`), no Secret is rendered and the output has
+a `secretRef` only when the mapping gives one.
 A `secret` with neither a non-empty `generate` nor a non-empty
 `stringData` fails with `<service>: output "<name>": secret needs
 stringData or generate` (`<service>`: the `name` of `Chart.yaml`). The
@@ -832,7 +838,7 @@ registers its own by OIDC Dynamic Client Registration, per
 
 | Mode | The compiler |
 |---|---|
-| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, rendered by the platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 by default: [platform charts](01_inputs_outputs.md#platform-charts)): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
+| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, rendered by the platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 by default: [platform charts](01_inputs_outputs.md#platform-charts)): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
 | otherwise (`existing`, or `platform.oidc.enabled` false) | adds no chart: the platform provides each client's Secret |
 
 | Key | Type | Default | Meaning |

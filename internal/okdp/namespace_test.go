@@ -952,3 +952,100 @@ provides:
 		})
 	}
 }
+
+// writerDef: nodeDef, whose instances also write the objects of writes.
+var writerDef = func() *Definition {
+	files := maps.Clone(pkg)
+	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+		"replicas": {"type": "integer", "default": 1},
+		"uses": {"type": "array", "default": [], "items": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}}},
+		"publishes": {"type": "array", "default": [], "items": {"type": "string"}},
+		"writes": {"type": "array", "default": []}}}`)}
+	d := withFiles(files)
+	d.Okdp = []byte(`
+objects:
+  - {$for: w in values.writes, $each: '${{ w }}'}
+provides:
+  - $for: n in values.publishes
+    $each: {contract: server, name: '${{ n }}', values: {host: '${{ n }}'}}
+`)
+	return d
+}()
+
+// TestCompileAllSecretTargets: two objects of a namespace that write one
+// Secret, of one instance or of two, refuse the instances that hold them,
+// each error naming every writer, and those that reference their
+// outputs: a v1 Secret, an ExternalSecret's target (its name when it has
+// none, none with creationPolicy None), a PushSecret's key of the store
+// and property. Another namespace's Secret of the name is another.
+func TestCompileAllSecretTargets(t *testing.T) {
+	writer := func(ns, name string, values M) Instance {
+		inst := node(name, values)
+		inst.Definition, inst.Inputs.Namespace, inst.Inputs.Release = writerDef, ns, ns+"-"+name
+		return inst
+	}
+	es := func(name, target, policy string) M {
+		spec := M{"secretStoreRef": M{"name": "okdp-secrets"}}
+		if target != "" {
+			spec["target"] = M{"name": target, "creationPolicy": policy}
+		}
+		return M{"apiVersion": "external-secrets.io/v1", "kind": "ExternalSecret", "metadata": M{"name": name}, "spec": spec}
+	}
+	secret := func(name string) M {
+		return M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": name}, "type": "Opaque"}
+	}
+	push := func(name, key, property string) M {
+		return M{"apiVersion": "external-secrets.io/v1alpha1", "kind": "PushSecret", "metadata": M{"name": name},
+			"spec": M{"selector": M{"secret": M{"name": "s"}}, "data": []any{M{"match": M{"secretKey": "k", "remoteRef": M{"remoteKey": key, "property": property}}}}}}
+	}
+	for name, tc := range map[string]struct {
+		instances []Instance
+		want      map[string]string
+	}{
+		"two instances": {
+			[]Instance{
+				writer("demo", "a", M{"writes": []any{es("es-a", "s", "Owner")}, "publishes": []any{"a"}}),
+				writer("demo", "b", M{"writes": []any{secret("s")}}),
+				writer("demo", "c", M{"writes": []any{es("es-c", "s", "None")}}),
+				writer("demo", "d", M{"uses": []any{"a"}}),
+				writer("other", "a", M{"writes": []any{secret("s")}}),
+			},
+			map[string]string{
+				"demo-a":  `error: Secret "s" of namespace demo is written by ExternalSecret es-a of demo-a and Secret s of demo-b: two objects may not write one Secret`,
+				"demo-b":  `error: Secret "s" of namespace demo is written by ExternalSecret es-a of demo-a and Secret s of demo-b: two objects may not write one Secret`,
+				"demo-c":  "",
+				"demo-d":  `error: uses[0]: "a" is not a connection, nor an output of an instance of the namespace (demo-a, demo-b do not compile either: what they publish is unknown)`,
+				"other-a": "",
+			},
+		},
+		"one instance": {
+			[]Instance{writer("demo", "a", M{"writes": []any{es("x", "s", "Owner"), es("s", "", ""), es("y", "t", "Merge")}})},
+			map[string]string{"demo-a": `error: Secret "s" of namespace demo is written by ExternalSecret s of demo-a and ExternalSecret x of demo-a: two objects may not write one Secret`},
+		},
+		"one object twice": {
+			[]Instance{writer("demo", "a", M{"writes": []any{secret("s")}}), writer("demo", "b", M{"writes": []any{secret("s"), secret("s")}})},
+			map[string]string{
+				"demo-a": `error: Secret "s" of namespace demo is written by Secret s of demo-a and Secret s of demo-b (2 times): two objects may not write one Secret`,
+				"demo-b": `error: Secret "s" of namespace demo is written by Secret s of demo-a and Secret s of demo-b (2 times): two objects may not write one Secret`,
+			},
+		},
+		"a key of the store": {
+			[]Instance{
+				writer("demo", "a", M{"writes": []any{push("p", "demo/k", "password"), push("q", "demo/k", "username")}}),
+				writer("demo", "b", M{"writes": []any{push("p", "demo/k", "password")}}),
+			},
+			map[string]string{
+				"demo-a": `error: the key demo/k (property password) of the secret store of namespace demo is written by PushSecret p of demo-a and PushSecret p of demo-b: two objects may not write one Secret`,
+				"demo-b": `error: the key demo/k (property password) of the secret store of namespace demo is written by PushSecret p of demo-a and PushSecret p of demo-b: two objects may not write one Secret`,
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, order := range permutations(tc.instances) {
+				if got := outcomes(order); !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf("got  %v\nwant %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

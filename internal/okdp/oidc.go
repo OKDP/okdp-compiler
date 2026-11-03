@@ -33,7 +33,7 @@ const DcrChart = "oidc-dcr"
 // DcrSource: the chart that registers an OAuth client by dynamic client
 // registration, the version whose values the embedded template writes: the
 // default of global.okdp.charts.oidcDcr.
-var DcrSource = chart.Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.5.0"}
+var DcrSource = chart.Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.6.0"}
 
 // dcrTemplate: the oidc-dcr values of one client (the mapping language).
 //
@@ -81,8 +81,8 @@ func clientSecret(release, namespace string, dcr bool, name string) string {
 func oidcFunctions(inst *instance) []cel.EnvOption {
 	release, ns, dcr := inst.release, inst.namespace, inst.dcr
 	return []cel.EnvOption{
-		cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))),
+		compile.Costed(cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))), "oidcClientSecret_dyn"),
 	}
 }
 
@@ -124,9 +124,15 @@ func oidcClients(session *compile.Session, inst *instance, section []any) ([]oid
 		return clients, nil, nil
 	}
 	dcr := value.AsMap(inst.oidc["dcr"])
-	// OKDP only registers anonymously.
-	if value.Str(dcr["authMethod"]) != "anonymous" {
-		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.authMethod %q is not supported: OKDP registers its OAuth clients anonymously", value.Str(dcr["authMethod"]))
+	switch value.Str(dcr["authMethod"]) {
+	case "anonymous":
+		// No token needed: the registration endpoint accepts anonymous requests.
+	case "initialAccessToken":
+		// The oidc-dcr Job reads an initial access token from a Secret of the
+		// namespace (dcr.tokenSecret, default okdp-dcr-token, key token), which
+		// the platform mints per namespace and writes to the secret store.
+	default:
+		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.authMethod %q is not supported: anonymous or initialAccessToken", value.Str(dcr["authMethod"]))
 	}
 	if u, ok := dcr["registrationUrl"].(string); !ok || u == "" {
 		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at")

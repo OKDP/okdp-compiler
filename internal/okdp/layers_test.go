@@ -19,7 +19,7 @@ import (
 func TestValuesLayers(t *testing.T) {
 	files := maps.Clone(pkg)
 	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
-		"global": {"properties": {"imageRegistry": {"type": "string"}, "okdp": {"type": "object"}}}}}`)}
+		"global": {"properties": {"imageRegistry": {"type": "string"}}}}}`)}
 	platform := ContextLayer{Values: map[string]any{"global": M{"imageRegistry": "platform.example.org"}}}
 	for name, tc := range map[string]struct {
 		instance []map[string]any
@@ -97,7 +97,7 @@ func TestContextLevels(t *testing.T) {
 		"a project's claim":                {[]ContextLayer{at(1, map[string]any{"claims": M{"reports": M{"contract": "database"}}}), at(2, map[string]any{"claims": M{"reports": M{"provider": "data/pg"}}})}, "context layer 4 (level 2): claims.reports is set at level 1"},
 		"a value of no layer":              {[]ContextLayer{at(1, map[string]any{"replicas": 3})}, ""},
 		"a value of no platform":           {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"className": "nginx"}}}})}, "context layer 3 (level 1): global.okdp.ingress: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp"},
-		"a platform chart":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"s3": M{"classes": M{}}}, "charts": M{"oidcDcr": M{"repository": "oci://attacker.example/x", "chart": "oidc-dcr", "version": "0.5.0"}}}}})}, "context layer 3 (level 1): global.okdp.charts: a platform setting, level 0 only"},
+		"a platform chart":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"s3": M{"classes": M{}}}, "charts": M{"oidcDcr": M{"repository": "oci://attacker.example/x", "chart": "oidc-dcr", "version": "0.6.0"}}}}})}, "context layer 3 (level 1): global.okdp.charts: a platform setting, level 0 only"},
 		"the privileged projects":          {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}})}, "context layer 3 (level 1): global.okdp.policy: a platform setting, level 0 only"},
 		"a key the compiler does not read": {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"project": M{"name": "demo"}}}})}, "context layer 3 (level 1): global.okdp.project: a platform setting, level 0 only"},
 		"a setting of a higher level":      {[]ContextLayer{at(2, map[string]any{"global": M{"okdp": M{"proxy": M{"noProxy": ".svc"}}}})}, "context layer 3 (level 2): global.okdp.proxy: a platform setting, level 0 only"},
