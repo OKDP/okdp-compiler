@@ -1,10 +1,10 @@
 // Package output: the output of a compiled tree for its deployers, the
 // files of one or more targets, the projects that do not deploy kept as
-// a previous output holds them (tree.Partial), those of a release name
-// two namespaces share too, every release of the output in one namespace
-// for the targets whose objects share one; the release an instance would
-// take of another's. A caller writes the files
-// (the CLI to a directory, okdp-gitops to Git).
+// a previous output holds them (tree.Partial), their platform's part of
+// today's settings, those of a release name two namespaces share too,
+// every release of the output in one namespace for the targets whose
+// objects share one; the release an instance would take of another's. A
+// caller writes the files (the CLI to a directory, okdp-gitops to Git).
 package output
 
 import (
@@ -27,8 +27,14 @@ import (
 // writes for the projects tree.Partial writes, merged, a path two
 // targets write differently an error; for each project kept, the files
 // previous, the output written before (nil: none), holds under its
-// target.ProjectDir, as they are. A Flux target lists in the root
-// Kustomization (flux.Target.Keep) each kept project whose
+// target.ProjectDir, its instances' as they are, but its platform's part,
+// which each target that is a target.Keeper writes of today's settings
+// (rederive, tree.Kept.Rederived): its manifests (its Namespace, its
+// identity, the roles of its groups, the control plane's) and its
+// instances' identity (a Flux HelmRelease's ServiceAccount), so that a
+// privilege revoked, a role taken back, a policy tightened, do not
+// survive in a project kept by an instance refused. A Flux target lists
+// in the root Kustomization (flux.Target.Keep) each kept project whose
 // kustomization.yaml previous holds: the entry the root reads, which the
 // Flux Kustomization of projects/ would prune otherwise. For a Flux or
 // an Argo CD target, whose objects share one namespace, a release name
@@ -61,7 +67,7 @@ func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]
 	for _, res := range results {
 		releases[[2]string{res.Namespace, res.Release}] = true
 	}
-	for _, k := range kept {
+	for i, k := range kept {
 		files, err := read(previous, target.ProjectDir(k.Namespace))
 		if err != nil {
 			return nil, nil, fmt.Errorf("the output of the project kept %s: %w", k.Namespace, err)
@@ -73,6 +79,10 @@ func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]
 			if release, ok := instanceOf(k.Namespace, p); ok {
 				releases[[2]string{k.Namespace, release}] = true
 			}
+		}
+		files, kept[i].Rederived, err = rederive(t, targets, k.Namespace, files)
+		if err != nil {
+			return nil, nil, fmt.Errorf("the project kept %s: %w", k.Namespace, err)
 		}
 		maps.Copy(kepts, files)
 	}
@@ -105,6 +115,69 @@ func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]
 	}
 	maps.Copy(out, kepts)
 	return out, kept, nil
+}
+
+// rederive: the files of the project kept namespace of t, previous those
+// the output written before holds of it (none: none written), its
+// platform's part of today's settings (D-5): the project as its context
+// decides it now (okdp.ProjectOf of its first instance: privileged or
+// not, its secret store, the roles of its groups, the control plane),
+// written by each of targets that is a target.Keeper (Kept), a path two
+// write differently an error, in place of every file previous holds under
+// its target.ProjectManifests, its instances' files kept as they are but
+// those Kept gives; previous as it is when no target is a Keeper. A
+// privilege revoked, a role taken back, a tightened policy, reach the
+// kept project's namespace and identity at once, whatever its instances:
+// the instances kept are applied with today's identity, which refuses
+// what they hold that it no longer allows. An access the compile refuses
+// gives no group a role; the platform's settings refused fail it. And
+// the paths written of today's settings, in path order.
+func rederive(t *tree.Tree, targets []target.Target, namespace string, previous map[string][]byte) (files map[string][]byte, rederived []string, err error) {
+	var keepers []target.Keeper
+	for _, tg := range targets {
+		if k, ok := tg.(target.Keeper); ok {
+			keepers = append(keepers, k)
+		}
+	}
+	if len(previous) == 0 || len(keepers) == 0 {
+		return previous, nil, nil
+	}
+	var p target.Project
+	for _, ti := range t.Instances {
+		if ti.Namespace() != namespace {
+			continue
+		}
+		var err error
+		if p, err = okdp.ProjectOf(ti.Inputs); err != nil && !errors.As(err, new(*okdp.AccessError)) {
+			return nil, nil, fmt.Errorf("its manifests of today's settings: %w", err)
+		}
+		break
+	}
+	if p.Namespace == "" {
+		return previous, nil, nil
+	}
+	written := map[string][]byte{}
+	for _, k := range keepers {
+		files, err := k.Kept(p, previous)
+		if err != nil {
+			return nil, nil, err
+		}
+		for f, b := range files {
+			if prev, ok := written[f]; ok && string(prev) != string(b) {
+				return nil, nil, fmt.Errorf("%s: two targets write it differently", f)
+			}
+			written[f] = b
+		}
+	}
+	out := map[string][]byte{}
+	manifests := target.ProjectManifests(namespace) + "/"
+	for f, b := range previous {
+		if !strings.HasPrefix(f, manifests) {
+			out[f] = b
+		}
+	}
+	maps.Copy(out, written)
+	return out, slices.Sorted(maps.Keys(written)), nil
 }
 
 // releaseObjects: the objects of tg named after the releases, which share

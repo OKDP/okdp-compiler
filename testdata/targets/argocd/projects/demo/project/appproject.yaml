@@ -14,3 +14,31 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: "demo"
   clusterResourceWhitelist: []
+  roles:
+    - name: viewer
+      description: "The project's viewers (project.yaml access)"
+      policies:
+        - p, proj:project-demo:viewer, applications, get, project-demo/*, allow
+      groups:
+        - "analysts"
+        - "auditors"
+    - name: editor
+      description: "The project's editors (project.yaml access)"
+      policies:
+        - p, proj:project-demo:editor, applications, get, project-demo/*, allow
+        - p, proj:project-demo:editor, applications, sync, project-demo/*, allow
+        - p, proj:project-demo:editor, applications, action/*, project-demo/*, allow
+        - p, proj:project-demo:editor, logs, get, project-demo/*, allow
+      groups:
+        - "okdp-project-demo"
+    - name: admin
+      description: "The project's admins (project.yaml access)"
+      policies:
+        - p, proj:project-demo:admin, applications, get, project-demo/*, allow
+        - p, proj:project-demo:admin, applications, sync, project-demo/*, allow
+        - p, proj:project-demo:admin, applications, action/*, project-demo/*, allow
+        - p, proj:project-demo:admin, logs, get, project-demo/*, allow
+        - p, proj:project-demo:admin, applications, delete, project-demo/*, allow
+        - p, proj:project-demo:admin, applications, override, project-demo/*, allow
+      groups:
+        - "demo-leads"

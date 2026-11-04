@@ -6,6 +6,7 @@ import (
 	"path"
 
 	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/repository"
 )
 
 // Reader: a tree as a caller holds it, a checkout, a Git tree, a store's
@@ -43,13 +44,16 @@ var ErrNotFound = errors.New("not found in the deployments repository")
 var ErrExists = errors.New("already exists in the deployments repository")
 
 // The files of the tree beside compiler.PlatformFile that a program
-// keeping the tree in Git reads, which the compile does not
-// (compiler.LoadRepository ignores them).
+// keeping the tree in Git reads: ProjectsFile, which the compile does not
+// read (compiler.LoadRepository ignores it), and CatalogsFile, which it
+// checks.
 const (
 	// CatalogsFile lists the catalog repositories a compile fetches,
 	// repositories: [{name, url, ref}] (CatalogRepositories), and the
-	// console's menu of their services (categories, ReadCatalog).
-	CatalogsFile = "catalogs.yaml"
+	// console's menu of their services (categories, ReadCatalog), which
+	// the compile checks when a repository of the tree holds it
+	// (ParseCatalogs, CheckCatalogs).
+	CatalogsFile = repository.CatalogsFile
 	// ProjectsFile lists the projects of a tree whose projects each have
 	// a repository of their own: projects: [{name}] (ProjectsList).
 	ProjectsFile = "projects.yaml"

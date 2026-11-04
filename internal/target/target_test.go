@@ -45,12 +45,20 @@ var packages = map[string]fstest.MapFS{
 	},
 }
 
-// platform: the platform's values: data is one of its own projects, and
-// its secret store has a provider, a SecretStore of each project.
+// platform: the platform's values: data is one of its own projects, its
+// secret store has a provider, a SecretStore of each project, the API
+// server prefixes the groups with oidc:, and the control plane's identity
+// is okdp-system/okdp-control-plane-server.
 var platform = map[string]any{"global": map[string]any{"okdp": map[string]any{
-	"policy":  map[string]any{"privileged": []any{"data"}},
-	"secrets": map[string]any{"store": "platform", "provider": map[string]any{"vault": map[string]any{"server": "https://vault.example.org", "path": "okdp", "auth": map[string]any{"kubernetes": map[string]any{"mountPath": "kubernetes", "role": "okdp", "serviceAccountRef": map[string]any{"name": "okdp-secrets"}}}}}},
+	"access":       map[string]any{"admins": []any{"platform_admin"}, "groupPrefix": "oidc:"},
+	"controlPlane": map[string]any{"serviceAccount": map[string]any{"namespace": "okdp-system", "name": "okdp-control-plane-server"}},
+	"policy":       map[string]any{"privileged": []any{"data"}},
+	"secrets":      map[string]any{"store": "platform", "provider": map[string]any{"vault": map[string]any{"server": "https://vault.example.org", "path": "okdp", "auth": map[string]any{"kubernetes": map[string]any{"mountPath": "kubernetes", "role": "okdp", "serviceAccountRef": map[string]any{"name": "okdp-secrets"}}}}}},
 }}}
+
+// demoProject: the file of the project demo: the roles of its groups, its
+// default group an editor among them; data's gives none, the default.
+var demoProject = map[string]any{"access": map[string]any{"okdp-project-demo": "editor", "demo-leads": "admin", "auditors": "viewer", "analysts": "viewer"}}
 
 // compiled: three instances, compiled with platform, and their graph:
 // demo-web, which waits for demo-db, in namespace demo; data-db alone in
@@ -62,7 +70,11 @@ func compiled(t *testing.T) ([]*okdp.Result, *graph.Graph) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return okdp.Instance{Definition: def, Inputs: okdp.Inputs{Contracts: contracts, Context: []okdp.ContextLayer{{Values: platform}}, Values: []map[string]any{values}, Release: release, Namespace: namespace}}
+		layers := []okdp.ContextLayer{{Values: platform}}
+		if namespace == "demo" {
+			layers = append(layers, okdp.ContextLayer{Level: 1, Values: demoProject})
+		}
+		return okdp.Instance{Definition: def, Inputs: okdp.Inputs{Contracts: contracts, Context: layers, Values: []map[string]any{values}, Release: release, Namespace: namespace}}
 	}
 	var results []*okdp.Result
 	for _, o := range okdp.CompileAll(context.Background(), []okdp.Instance{
@@ -346,5 +358,106 @@ func TestOwnNamespaces(t *testing.T) {
 		if !slices.Contains(okdp.EngineNamespaces(), ns) {
 			t.Errorf("%s: a target's namespace the compile does not reserve (okdp.EngineNamespaces)", ns)
 		}
+	}
+}
+
+// TestAccess: the RoleBindings of a project's groups, a role's groups in
+// name order, prefixed; none, and no AppProject role, when no group has
+// a role (access: {}).
+func TestAccess(t *testing.T) {
+	p := target.Project{Namespace: "demo", Access: okdp.Access{Groups: map[string]okdp.Role{"b": okdp.RoleAdmin, "a": okdp.RoleAdmin}, GroupPrefix: "oidc:"}}
+	got := string(target.Access(p))
+	if !strings.Contains(got, "name: okdp-access-admin\n") || !strings.Contains(got, "kind: ClusterRole\n  name: admin\n") || strings.Index(got, `"oidc:a"`) > strings.Index(got, `"oidc:b"`) || strings.Contains(got, "---") {
+		t.Errorf("Access:\n%s", got)
+	}
+	p.Access.Groups = map[string]okdp.Role{}
+	if b := target.Access(p); b != nil {
+		t.Errorf("no group: %s", b)
+	}
+	app := string(argocd.Target{RepoURL: "https://git.example.org/o.git"}.AppProject(p))
+	if strings.Contains(app, "roles:") {
+		t.Errorf("no group: an AppProject role:\n%s", app)
+	}
+	files, err := flux.ProjectManifests(p)
+	if _, has := files[target.AccessFile]; err != nil || has || strings.Contains(string(files[flux.KustomizationFile]), target.AccessFile) {
+		t.Errorf("no group: %v %v", files, err)
+	}
+}
+
+// TestControlPlane: the control plane's Role and RoleBinding in a
+// project's namespace, privileged or not, no Secret listed; none without
+// its identity.
+func TestControlPlane(t *testing.T) {
+	p := target.Project{Namespace: "demo", ControlPlane: &okdp.ServiceAccount{Namespace: "okdp-system", Name: "okdp-control-plane-server"}}
+	got := string(target.ControlPlane(p))
+	for _, want := range []string{"kind: Role\n", "name: okdp-control-plane\n", `resources: ["secrets"]` + "\n    verbs: [\"get\", \"create\", \"update\", \"delete\"]", "kind: ServiceAccount\n    name: \"okdp-control-plane-server\"\n    namespace: \"okdp-system\""} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ControlPlane lacks %q:\n%s", want, got)
+		}
+	}
+	for _, r := range target.ControlPlaneRules {
+		if slices.Contains(r[1], "secrets") && slices.Contains(r[2], "list") || slices.Contains(r[0], "*") || slices.Contains(r[2], "*") {
+			t.Errorf("a rule too wide: %v", r)
+		}
+	}
+	p.Privileged = true
+	if files, err := flux.ProjectManifests(p); err != nil || files[target.ControlPlaneFile] == nil {
+		t.Errorf("privileged: %v %v", files, err)
+	}
+	p.ControlPlane = nil
+	if b := target.ControlPlane(p); b != nil {
+		t.Errorf("no control plane: %s", b)
+	}
+	if files, err := (argocd.Target{RepoURL: "https://git.example.org/o.git"}).ProjectManifests(p); err != nil || files[target.ControlPlaneFile] != nil {
+		t.Errorf("no control plane: %v %v", files, err)
+	}
+}
+
+// TestKept: the files a deployer target writes of a project kept, of
+// today's settings: its manifests, and the flux target's HelmReleases of
+// the instances previous holds, their dependsOn kept, their identity
+// today's.
+func TestKept(t *testing.T) {
+	p := target.Project{Namespace: "demo", Access: okdp.Access{Groups: map[string]okdp.Role{"okdp-project-demo": okdp.RoleEditor}}}
+	previous := map[string][]byte{
+		"projects/demo/instances/demo-web/helmrelease.yaml": []byte("spec:\n  dependsOn:\n    - name: demo-db\n"),
+		"projects/demo/instances/demo-web/Chart.yaml":       []byte("old\n"),
+		"projects/demo/project/namespace.yaml":              []byte("old\n"),
+	}
+	files, err := flux.Target{PathPrefix: "deploy"}.Kept(p, previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"projects/demo/instances/demo-web/helmrelease.yaml", "projects/demo/instances/demo-web/kustomization.yaml", "projects/demo/project/access.yaml", "projects/demo/project/kustomization.yaml", "projects/demo/project/namespace.yaml", "projects/demo/project/service-account.yaml"}
+	if got := slices.Sorted(maps.Keys(files)); !slices.Equal(got, want) {
+		t.Fatalf("files %v, want %v", got, want)
+	}
+	hr := string(files["projects/demo/instances/demo-web/helmrelease.yaml"])
+	if !strings.HasPrefix(hr, target.Generated) || !strings.Contains(hr, `serviceAccountName: "project-demo"`) || !strings.Contains(hr, `- name: "demo-db"`) || !strings.Contains(hr, `chart: "./deploy/projects/demo/instances/demo-web"`) {
+		t.Errorf("the HelmRelease:\n%s", hr)
+	}
+	p.Privileged = true
+	files, err = flux.Target{}.Kept(p, previous)
+	if err != nil || strings.Contains(string(files["projects/demo/instances/demo-web/helmrelease.yaml"]), "serviceAccountName") || files["projects/demo/project/service-account.yaml"] != nil {
+		t.Errorf("privileged: %v", err)
+	}
+	for name, prev := range map[string]map[string][]byte{
+		"not YAML":   {"projects/demo/instances/demo-web/helmrelease.yaml": []byte("spec: [\n")},
+		"no release": {"projects/demo/instances/Demo_Web/helmrelease.yaml": []byte("{}\n")},
+	} {
+		if _, err := (flux.Target{}).Kept(p, prev); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+	if _, err := (flux.Target{Source: "x"}).Kept(p, nil); err == nil {
+		t.Error("the options are not checked")
+	}
+	files, err = argocd.Target{RepoURL: "https://git.example.org/o.git"}.Kept(p, previous)
+	want = []string{"projects/demo/project/access.yaml", "projects/demo/project/appproject.yaml", "projects/demo/project/namespace.yaml"}
+	if got := slices.Sorted(maps.Keys(files)); err != nil || !slices.Equal(got, want) {
+		t.Errorf("argocd: %v %v", got, err)
+	}
+	if _, err := (argocd.Target{}).Kept(p, previous); err == nil {
+		t.Error("argocd: the options are not checked")
 	}
 }

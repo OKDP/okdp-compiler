@@ -38,7 +38,8 @@ func compiled(names []string, refused ...string) *tree.Tree {
 func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 
 // TestFiles: the projects written by every target, merged; a project
-// kept as the previous output holds it, listed in the root Kustomization
+// kept as the previous output holds it, its manifests and its
+// HelmReleases of today's settings, listed in the root Kustomization
 // when it holds its kustomization.yaml; none of it without a previous
 // output.
 func TestFiles(t *testing.T) {
@@ -46,7 +47,8 @@ func TestFiles(t *testing.T) {
 	previous := fstest.MapFS{
 		"projects/demo/kustomization.yaml":                 file("old demo\n"),
 		"projects/demo/instances/demo-ok/Chart.yaml":       file("old ok\n"),
-		"projects/demo/instances/demo-ok/helmrelease.yaml": file("old hr\n"),
+		"projects/demo/instances/demo-ok/helmrelease.yaml": file("spec:\n  dependsOn:\n    - name: demo-web\n"),
+		"projects/demo/project/stale.yaml":                 file("old\n"),
 		"projects/data/instances/data-db/Chart.yaml":       file("old db\n"),
 		"projects/lab/instances/lab-x/Chart.yaml":          file("old x\n"),
 	}
@@ -58,14 +60,28 @@ func TestFiles(t *testing.T) {
 		t.Fatalf("kept: %+v", kept)
 	}
 	for p, want := range map[string]string{
-		"projects/demo/kustomization.yaml":                 "old demo\n",
-		"projects/demo/instances/demo-ok/Chart.yaml":       "old ok\n",
-		"projects/demo/instances/demo-ok/helmrelease.yaml": "old hr\n",
-		"projects/lab/instances/lab-x/Chart.yaml":          "old x\n",
+		"projects/demo/kustomization.yaml":           "old demo\n",
+		"projects/demo/instances/demo-ok/Chart.yaml": "old ok\n",
+		"projects/lab/instances/lab-x/Chart.yaml":    "old x\n",
 	} {
 		if got := string(files[p]); got != want {
 			t.Errorf("%s: %q, want %q", p, got, want)
 		}
+	}
+	hr := string(files["projects/demo/instances/demo-ok/helmrelease.yaml"])
+	if !strings.HasPrefix(hr, target.Generated) || !strings.Contains(hr, `serviceAccountName: "project-demo"`) || !strings.Contains(hr, "dependsOn:\n    - name: \"demo-web\"\n") {
+		t.Errorf("the kept HelmRelease, of today's identity, its dependsOn kept:\n%s", hr)
+	}
+	for _, p := range []string{"projects/demo/project/namespace.yaml", "projects/demo/project/service-account.yaml", "projects/demo/project/appproject.yaml", "projects/demo/project/kustomization.yaml", "projects/demo/project/access.yaml"} {
+		if _, ok := files[p]; !ok {
+			t.Errorf("%s not re-derived", p)
+		}
+	}
+	if _, ok := files["projects/demo/project/stale.yaml"]; ok {
+		t.Error("a kept project's manifest of before kept")
+	}
+	if _, ok := files["projects/lab/project/namespace.yaml"]; !ok {
+		t.Error("lab's manifests not re-derived")
 	}
 	for _, p := range []string{"projects/data/instances/data-db/helmrelease.yaml", "projects/data/instances/data-db/application.yaml"} {
 		if _, ok := files[p]; !ok {
@@ -247,5 +263,38 @@ func TestReleaseTaken(t *testing.T) {
 	}
 	if got := ReleaseTaken(tr, "a", "nowhere"); got != nil {
 		t.Errorf("no instance: %v", got)
+	}
+}
+
+// TestFilesRederive: a project kept is written of today's settings: the
+// files re-derived listed (Kept.Rederived); an access refused gives no
+// group a role, the platform's settings refused fail it; with no target
+// that rewrites it (the helm target), its output as it is.
+func TestFilesRederive(t *testing.T) {
+	tr := compiled([]string{"demo/web"}, "demo/web")
+	previous := fstest.MapFS{
+		"projects/demo/kustomization.yaml":            file("old demo\n"),
+		"projects/demo/project/access.yaml":           file("old access\n"),
+		"projects/demo/instances/demo-web/Chart.yaml": file("old web\n"),
+	}
+	tr.Instances[0].Inputs.Context = []okdp.ContextLayer{{Level: 1, Values: map[string]any{"access": map[string]any{"a b": "viewer"}}}}
+	files, kept, err := Files(tr, []target.Target{flux.Target{}}, previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files["projects/demo/project/access.yaml"]; ok {
+		t.Error("an access refused: a group has a role")
+	}
+	want := []string{"projects/demo/project/kustomization.yaml", "projects/demo/project/namespace.yaml", "projects/demo/project/service-account.yaml"}
+	if len(kept) != 1 || !slices.Equal(kept[0].Rederived, want) {
+		t.Errorf("Rederived: %+v", kept)
+	}
+	files, kept, err = Files(tr, []target.Target{helm.Target{}}, previous)
+	if err != nil || string(files["projects/demo/project/access.yaml"]) != "old access\n" || kept[0].Rederived != nil {
+		t.Errorf("helm: %v %+v", err, kept)
+	}
+	tr.Instances[0].Inputs.Context = []okdp.ContextLayer{{Values: map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": "x"}}}}}
+	if _, _, err := Files(tr, []target.Target{flux.Target{}}, previous); err == nil || !strings.Contains(err.Error(), "the project kept demo: its manifests of today's settings") {
+		t.Errorf("the platform's settings refused: %v", err)
 	}
 }

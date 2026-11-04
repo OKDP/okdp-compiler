@@ -10,6 +10,7 @@ package okdp
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,7 +122,8 @@ func (r *resolver) walk(s M, v any) any { return refs(s, v, "", "", r.reference)
 // takes them (provision). Another value would reach the mapping
 // unresolved, past the contract: refused, its value printed as a
 // sensitive key's is (value.ShortAt). What it resolves to meets its
-// requirement, require (readRequirement).
+// requirement, require (readRequirement). An error is the field's
+// (FieldError).
 func (r *resolver) reference(ref M, v any, path, key string) any {
 	if v == nil || v == "" {
 		return v
@@ -130,7 +132,7 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 	// Checked with the parameter schema (requirements): it compiles.
 	req, err := readRequirement(ref, r.draft)
 	if err != nil {
-		r.errs = append(r.errs, fmt.Errorf("%s: x-okdp-connection-ref: %w", path, err))
+		r.errs = append(r.errs, atField(path, fmt.Errorf("%s: x-okdp-connection-ref: %w", path, err)))
 		return v
 	}
 	var c M
@@ -150,10 +152,92 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 	}
 	if err != nil {
-		r.errs = append(r.errs, err)
+		r.errs = append(r.errs, atField(path, err))
 		return v
 	}
 	return c
+}
+
+// declaredConnections: every connection of the context of in, of every
+// level, referenced or not, checked at its declaration (declared), with
+// its contracts, the store of its platform's settings: what CompileAll
+// checks of each instance before it binds the claims. nil when the
+// context's layers fail: the compile reports them (contextLayers).
+func declaredConnections(in Inputs) error {
+	layers, platform, err := contextLayers(in.Context)
+	if err != nil {
+		return nil //nolint:nilerr // the instance's compile reports it
+	}
+	conns := M{}
+	for _, l := range layers {
+		if c, ok := l["connections"].(M); ok {
+			conns = value.Merge(conns, c)
+		}
+	}
+	r := resolver{contracts: in.Contracts, conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), release: in.Release, namespace: in.Namespace}
+	return r.declared()
+}
+
+// CheckConnection: the connection name, conn as written in connections,
+// declared at level of the context (0 the platform's, 1 a project's, 2
+// an instance's) of namespace, checked as CompileAll checks it at its
+// declaration (declared), store the platform's secret store
+// (global.okdp.secrets.store), contracts the contracts: the error at
+// connections.<name>, nil when it holds.
+func CheckConnection(contracts fs.FS, name string, conn any, level uint, namespace, store string) error {
+	v, err := value.Normalize(conn)
+	if err != nil {
+		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
+	}
+	r := resolver{contracts: contracts, conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
+	return r.declared()
+}
+
+// declared: every connection of the context (conns), referenced or not,
+// checked at its declaration as a reference to it would check it, in
+// name order: its name a DNS-1123 label, an object of a contract,
+// readable; then as resolveExternal, complete, check and resolve check
+// it, its fields, its secretRef, its required fields, its types, "{{".
+// Every one that fails, at once, each the connection's (FieldError at
+// connections.<name>); nil when they all hold.
+func (r *resolver) declared() error {
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(r.conns)) {
+		field := value.Key("connections", name)
+		errs = append(errs, atField(field, r.declaration(name, field)))
+	}
+	return errors.Join(errs...)
+}
+
+// declaration: the connection name of the context, at field, checked
+// (declared), the transfers it would need not recorded.
+func (r *resolver) declaration(name, field string) error {
+	conn, ok := r.conns[name].(M)
+	switch {
+	case !chart.IsDNSLabel(name):
+		return fmt.Errorf("%s: a connection's name is a DNS-1123 label, lowercase letters, digits and \"-\", 63 characters at most", field)
+	case !ok:
+		return fmt.Errorf("%s: a connection, an object of its contract's fields, got %s", field, value.ShortAt(name, r.conns[name]))
+	case value.Str(conn["contract"]) == "":
+		return fmt.Errorf("%s: contract is required, the contract of the connection", field)
+	}
+	c, err := readContract(r.contracts, value.Str(conn["contract"]))
+	if err != nil {
+		return fmt.Errorf("%s: %w", field, err)
+	}
+	d := *r
+	d.transfers = nil
+	x, err := d.resolveExternal(c, name, field, conn)
+	if err != nil {
+		return err
+	}
+	if err := c.complete(x.values, x.where); err != nil {
+		return err
+	}
+	if err := c.check(x.values, x.where); err != nil {
+		return err
+	}
+	return chart.NoTemplate(x.values, func(p string) string { return fmt.Sprintf("%s: field %q", x.where, p) })
 }
 
 // resolved: what a reference resolves to before the checks every source
@@ -376,6 +460,33 @@ func ParseConnection(name string, v any) Connection {
 		SecretRef:   value.Str(secretRef["name"]),
 		RemoteKey:   value.Str(secretRef["remoteKey"]),
 	}
+}
+
+// Entry: the connection as written in connections.<name>, values: its
+// contract, its description and its secretRef when set, then the
+// contract's fields of Values, but those keys.
+func (c Connection) Entry() map[string]any {
+	out := M{}
+	for k, v := range c.Values {
+		if k != "contract" && k != "description" && k != "secretRef" {
+			out[k] = v
+		}
+	}
+	out["contract"] = c.Contract
+	if c.Description != "" {
+		out["description"] = c.Description
+	}
+	if c.SecretRef != "" || c.RemoteKey != "" {
+		ref := M{}
+		if c.SecretRef != "" {
+			ref["name"] = c.SecretRef
+		}
+		if c.RemoteKey != "" {
+			ref["remoteKey"] = c.RemoteKey
+		}
+		out["secretRef"] = ref
+	}
+	return out
 }
 
 // MarshalYAML: the connection as written in connections.<name>, its own
@@ -739,34 +850,112 @@ func readRequirement(ref M, draft any) (*requirement, error) {
 // the parameter schema s (readRequirement) and the request it fixes of its
 // claims, an object (x-okdp-connection-ref's request), whether the
 // parameters set it or not, found as refs finds the references, through
-// properties and items: every one that fails, one line each, in key order,
-// named by its place in the schema
-// (properties.catalogs.items.properties.database).
+// properties and items (schemaRefs): every one that fails, one line each,
+// in key order, named by its place in the schema
+// (properties.catalogs.items.properties.database); then each reference
+// the walk does not reach, under a combinator, a definition or
+// additionalProperties, which no compile would read.
 func requirements(s M) error {
 	var errs []error
-	var walk func(sub M, at string)
-	walk = func(sub M, at string) {
-		if ref, ok := sub["x-okdp-connection-ref"].(M); ok {
-			if _, err := readRequirement(ref, s["$schema"]); err != nil {
-				errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: %w", at, err))
+	out := schemaRefs(s, func(r ConnectionRef) {
+		if _, err := readRequirement(r.ref, s["$schema"]); err != nil {
+			errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: %w", r.Schema, err))
+		}
+		if v, set := r.ref["request"]; set && v != nil {
+			if _, ok := v.(M); !ok {
+				errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: request: an object, got %s", r.Schema, value.ShortAt("request", v)))
 			}
-			if r, set := ref["request"]; set && r != nil {
-				if _, ok := r.(M); !ok {
-					errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: request: an object, got %s", at, value.ShortAt("request", r)))
+		}
+	})
+	for _, at := range out {
+		errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref out of the compile's reach: a reference is a property reached from the root through properties and items only, not under a combinator (allOf, anyOf, oneOf), a definition ($defs, $ref) or additionalProperties", at))
+	}
+	return errors.Join(errs...)
+}
+
+// ConnectionRef: a connection reference of a parameter schema
+// (x-okdp-connection-ref), where the compile finds it (ConnectionRefs).
+type ConnectionRef struct {
+	Path      string // its parameter path, value.Key's, [] for every item of a list: catalogs[].storage
+	Schema    string // its place in the schema: properties.catalogs.items.properties.storage
+	Contract  string // the contract of the connection it takes
+	Provision bool   // a claim may take its place, a claim template or a named claim
+	Request   M      // what it fixes of its claims, nil for nothing
+	Require   M      // what it requires of the connection, a JSON Schema, nil for nothing
+	Required  bool   // its property is in its parent's required
+	Property  M      // the schema of its property, whole: its description, its default
+	ref       M
+}
+
+// ConnectionRefs: the connection references of the parameter schema s,
+// as the compile reads them (schemaRefs), in key order; the error of
+// requirements when one fails, or when s holds one the compile does not
+// reach.
+func ConnectionRefs(s M) ([]ConnectionRef, error) {
+	if err := requirements(s); err != nil {
+		return nil, err
+	}
+	var out []ConnectionRef
+	schemaRefs(s, func(r ConnectionRef) { out = append(out, r) })
+	return out, nil
+}
+
+// schemaRefs: visit each connection reference of the parameter schema s
+// the compile reads (refs), reached from the root through properties and
+// items (an object), in key order: at its parameter path, its place in
+// the schema. The places of those it does not reach, anywhere else in s,
+// sorted.
+func schemaRefs(s M, visit func(ConnectionRef)) []string {
+	var out []string
+	var walk func(sub M, at, path string, required, reach bool)
+	walk = func(sub M, at, path string, required, reach bool) {
+		if ref, ok := sub["x-okdp-connection-ref"].(M); ok && reach {
+			visit(ConnectionRef{Path: path, Schema: at, Contract: value.Str(ref["contract"]), Provision: value.Truthy(ref["provision"]), Request: value.AsMap(ref["request"]), Require: value.AsMap(ref["require"]), Required: required, Property: sub, ref: ref})
+			reach = false
+		} else if _, ok := sub["x-okdp-connection-ref"]; ok {
+			out = append(out, cmp.Or(at, "(the root)"))
+		}
+		need := map[string]bool{}
+		for _, k := range value.AsList(sub["required"]) {
+			need[value.Str(k)] = true
+		}
+		for _, k := range slices.Sorted(maps.Keys(sub)) {
+			v := sub[k]
+			next := strings.TrimPrefix(at+"."+k, ".")
+			switch {
+			case k == "x-okdp-connection-ref":
+			case k == "properties" && reach:
+				props := value.AsMap(v)
+				for _, p := range slices.Sorted(maps.Keys(props)) {
+					walk(value.AsMap(props[p]), next+"."+p, value.Key(path, p), need[p], true)
 				}
+			case k == "items" && reach:
+				if items, ok := v.(M); ok {
+					walk(items, next, path+"[]", false, true)
+				} else {
+					walkAny(v, next, func(m M, at string) { walk(m, at, "", false, false) })
+				}
+			default:
+				walkAny(v, next, func(m M, at string) { walk(m, at, "", false, false) })
 			}
-			return
-		}
-		props := value.AsMap(sub["properties"])
-		for _, k := range slices.Sorted(maps.Keys(props)) {
-			walk(value.AsMap(props[k]), strings.TrimPrefix(at+".properties."+k, "."))
-		}
-		if items, ok := sub["items"].(M); ok {
-			walk(items, strings.TrimPrefix(at+".items", "."))
 		}
 	}
-	walk(s, "")
-	return errors.Join(errs...)
+	walk(s, "", "", false, true)
+	slices.Sort(out)
+	return out
+}
+
+// walkAny: f on each object of v, a schema's value, at its place: v
+// itself, or each item of a list.
+func walkAny(v any, at string, f func(M, string)) {
+	switch t := v.(type) {
+	case M:
+		f(t, at)
+	case []any:
+		for i, x := range t {
+			walkAny(x, value.Index(at, i), f)
+		}
+	}
 }
 
 // requires: nil when req, the requirement of a reference of c at field,

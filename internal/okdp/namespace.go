@@ -75,6 +75,8 @@ type Bound struct {
 // resolved to it, or whose claims are bound to one of them, of any namespace.
 // Two objects that write one Secret of a namespace refuse the instances
 // that hold them (refuseSecretTargets), and those that depend on them.
+// An instance a connection of whose context, referenced or not, does not
+// hold at its declaration is refused first (declaredConnections).
 // Outcomes in the order of instances, which changes none
 // of them. Whether they deploy together is the graph's (graph.New).
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
@@ -93,6 +95,11 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 			// Its outputs and its claims are named after it.
 			t.out[i].Err = fmt.Errorf("instance name %q is given twice in namespace %q", inst.name(), in.Namespace)
 		default:
+			// Every connection of its context, referenced or not.
+			if err := declaredConnections(in); err != nil {
+				t.out[i].Err = err
+				continue
+			}
 			idx = append(idx, i)
 		}
 	}
@@ -420,7 +427,7 @@ func (t *tree) bind(idx []int) []int {
 			slices.SortStableFunc(errs[i], func(a, b refused) int { return cmp.Or(cmp.Compare(at(a), at(b)), strings.Compare(a.field, b.field)) })
 			joined := make([]error, len(errs[i]))
 			for k, e := range errs[i] {
-				joined[k] = e.err
+				joined[k] = atField(e.field, e.err)
 			}
 			t.out[i] = Outcome{Err: errors.Join(joined...)}
 		} else {

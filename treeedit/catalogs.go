@@ -4,62 +4,58 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strings"
 
 	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/repository"
 )
 
 // CatalogRepository is a catalog of CatalogsFile: a repository of
 // packages (catalog/<service>/<version>/, contracts/), a compile's
 // compiler.RoleCatalog, at a ref (a branch, a tag or a commit).
-type CatalogRepository struct {
-	Name string `json:"name" yaml:"name"`
-	URL  string `json:"url" yaml:"url"`
-	Ref  string `json:"ref,omitempty" yaml:"ref,omitempty"`
-}
+type CatalogRepository = repository.CatalogRepository
+
+// Catalogs is CatalogsFile, read (ParseCatalogs): its Repositories and
+// the console's menu, its Categories (MenuCategory: Title, Icon,
+// Services), each service a MenuService (Name, Description, Default,
+// Label, ExposesUI).
+type (
+	Catalogs     = repository.Catalogs
+	MenuCategory = repository.MenuCategory
+	MenuService  = repository.MenuService
+)
 
 // DefaultCatalogRef is the ref of a catalog that names none.
-const DefaultCatalogRef = "main"
+const DefaultCatalogRef = repository.DefaultCatalogRef
 
-// CatalogRepositories reads the repositories key of CatalogsFile (doc,
-// as decoded): each needs a name and a url, and the names are unique; a
-// ref defaults to DefaultCatalogRef.
+// ParseCatalogs reads CatalogsFile (doc, as decoded) strictly, as the
+// compile reads it (compiler.LoadRepository, a repository of the tree
+// that holds it): repositories, each a name and a url, the names unique,
+// a ref DefaultCatalogRef by default; categories, each a title, the
+// titles unique, its services, each a name, listed once; any other key,
+// at any level, or a value of another type, refused. Every problem at
+// once.
+func ParseCatalogs(doc map[string]any) (*Catalogs, error) { return repository.ParseCatalogs(doc) }
+
+// CatalogRepositories reads the repositories of CatalogsFile (doc, as
+// decoded), the whole file checked (ParseCatalogs).
 func CatalogRepositories(doc map[string]any) ([]CatalogRepository, error) {
-	raw, ok := doc["repositories"]
-	if !ok || raw == nil {
-		return nil, nil
+	c, err := ParseCatalogs(doc)
+	if err != nil {
+		return nil, err
 	}
-	list, ok := raw.([]any)
-	if !ok {
-		return nil, errors.New("repositories: a list of {name, url, ref}")
+	return c.Repositories, nil
+}
+
+// CheckCatalogs refuses CatalogsFile (doc, as decoded) as the compile of
+// a tree that holds it does: read strictly (ParseCatalogs), each service
+// of its menu one of catalog's (compiler.LoadCatalog of its
+// repositories), its default version one of the service's.
+func CheckCatalogs(doc map[string]any, catalog *compiler.Catalog) error {
+	c, err := ParseCatalogs(doc)
+	if err != nil {
+		return fmt.Errorf("%s: %w", CatalogsFile, err)
 	}
-	var out []CatalogRepository
-	seen := map[string]bool{}
-	for i, item := range list {
-		m, ok := item.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("repositories[%d]: a map {name, url, ref}", i)
-		}
-		r := CatalogRepository{}
-		r.Name, _ = m["name"].(string)
-		r.URL, _ = m["url"].(string)
-		r.Ref, _ = m["ref"].(string)
-		r.Name, r.URL, r.Ref = strings.TrimSpace(r.Name), strings.TrimSpace(r.URL), strings.TrimSpace(r.Ref)
-		switch {
-		case r.Name == "":
-			return nil, fmt.Errorf("repositories[%d]: name is required", i)
-		case r.URL == "":
-			return nil, fmt.Errorf("repositories[%d] (%s): url is required", i, r.Name)
-		case seen[r.Name]:
-			return nil, fmt.Errorf("repositories[%d]: two catalogs are named %q", i, r.Name)
-		}
-		if r.Ref == "" {
-			r.Ref = DefaultCatalogRef
-		}
-		seen[r.Name] = true
-		out = append(out, r)
-	}
-	return out, nil
+	return catalog.CheckMenu(c)
 }
 
 // ReadCatalogRepositories reads the catalogs of the CatalogsFile r holds
@@ -88,8 +84,8 @@ func ReadCatalog(r Reader) (map[string]any, error) {
 
 // UpdateCatalog applies change to CatalogsFile as the tree holds it, a
 // missing file empty, and writes it back merged key by key
-// (MergeDocument), its comments and the keys change leaves alone kept.
-// target names the edit (Edit.Target). change may run more than once
+// (MergeDocument), its comments and the keys change leaves alone kept;
+// a file ParseCatalogs refuses is not written. target names the edit (Edit.Target). change may run more than once
 // (Edit.Change).
 func UpdateCatalog(target string, change func(catalog map[string]any) error) Edit {
 	return Edit{Action: "update catalog", Target: target, change: func(r Reader) (*Change, error) {
@@ -106,6 +102,9 @@ func UpdateCatalog(target string, change func(catalog map[string]any) error) Edi
 		}
 		if err := change(doc); err != nil {
 			return nil, err
+		}
+		if _, err := ParseCatalogs(RoundTrip(doc)); err != nil {
+			return nil, fmt.Errorf("%s: %w", CatalogsFile, err)
 		}
 		data, err := MergeDocument(raw, doc)
 		if err != nil {

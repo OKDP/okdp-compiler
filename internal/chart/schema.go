@@ -11,6 +11,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
+	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -44,13 +45,20 @@ func checkSchema(name string, b []byte, values M) (string, error) {
 // The value of a sensitive key (value.SensitivePath) is not printed:
 // <redacted> in its place (redactCauses).
 func Validate(name string, sch *jsonschema.Schema, v any) (string, error) {
+	msg, _, err := validate(name, sch, v)
+	return msg, err
+}
+
+// validate: Validate, and the violations of its report one by one, its
+// leaves (violations).
+func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, error) {
 	verr := sch.Validate(v)
 	if verr == nil {
-		return "", nil
+		return "", nil, nil
 	}
 	var ve *jsonschema.ValidationError
 	if !errors.As(verr, &ve) {
-		return "", fmt.Errorf("%s: %w", name, verr)
+		return "", nil, fmt.Errorf("%s: %w", name, verr)
 	}
 	sortCauses(ve)
 	redactCauses(ve)
@@ -60,7 +68,37 @@ func Validate(name string, sch *jsonschema.Schema, v any) (string, error) {
 	if _, lines, ok := strings.Cut(msg, "\n"); ok {
 		msg = lines
 	}
-	return msg, nil
+	return msg, violations(ve), nil
+}
+
+// Violation: a violation of a values schema, a leaf of Validate's
+// report: where it is in the values (Location, the keys and the indexes
+// from the root, the tokens of a JSON pointer, none for the whole
+// values), and its line of the report, "at '<pointer>': <message>", as
+// redacted.
+type Violation struct {
+	Location []string
+	Message  string
+}
+
+// printer: the printer of the validator's messages, English.
+var printer = message.NewPrinter(language.English)
+
+// violations: the leaves of e, sorted and redacted, in order: each a
+// violation, the causes of a combinator (allOf, anyOf, a $ref) its
+// leaves'.
+func violations(e *jsonschema.ValidationError) []Violation {
+	if len(e.Causes) == 0 {
+		if _, root := e.ErrorKind.(*kind.Schema); root {
+			return nil
+		}
+		return []Violation{{Location: slices.Clone(e.InstanceLocation), Message: fmt.Sprintf("at %s: %s", quote(value.Pointer(e.InstanceLocation)), e.ErrorKind.LocalizedString(printer))}}
+	}
+	var out []Violation
+	for _, c := range e.Causes {
+		out = append(out, violations(c)...)
+	}
+	return out
 }
 
 // CompileSchema: the JSON schema doc (as jsonschema.UnmarshalJSON reads
@@ -153,6 +191,16 @@ func quote(s string) string {
 	s = strings.ReplaceAll(s, `'`, `\'`)
 	return "'" + s[1:len(s)-1] + "'"
 }
+
+// ValuesError: values that do not meet their schema (Parameters): the
+// error as Helm reports it, and each violation apart (Violations), for a
+// caller that maps them to the fields of a form.
+type ValuesError struct {
+	msg        string
+	Violations []Violation
+}
+
+func (e *ValuesError) Error() string { return e.msg }
 
 // schemaError: the violations of the values of each chart, as Helm reports
 // them; what is the values checked ("values", "compiled values").

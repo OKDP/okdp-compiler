@@ -108,6 +108,18 @@ type Result struct {
 	// its releases the engine's own identity, the other projects' one
 	// confined to their namespace.
 	Privileged bool
+	// Access: the roles of the project's groups, its file's access (the
+	// context at level 1, ParseAccess: okdp-project-<namespace> an
+	// editor when it gives none), and the prefix the Kubernetes API server
+	// gives the groups (global.okdp.access.groupPrefix): the targets write
+	// them as Argo CD roles of the project's AppProject and RoleBindings of
+	// its namespace.
+	Access Access
+	// ControlPlane: the control plane's identity,
+	// global.okdp.controlPlane.serviceAccount, which the targets bind in
+	// the project's namespace to what it needs there; nil when the
+	// platform has no control plane.
+	ControlPlane *ServiceAccount
 }
 
 // Compile runs the mapping of def on one instance, cancelled with ctx
@@ -143,6 +155,12 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// The platform's reserved namespaces, of its settings: a reservation
 	// wins over a privilege.
 	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
+		return nil, err
+	}
+	// The roles of the project's groups, its file's: refused, they refuse
+	// every instance of the project.
+	groups, err := projectAccess(in.Context, in.Namespace)
+	if err != nil {
 		return nil, err
 	}
 	// 4. Platform requirements: the global.okdp keys the service requires,
@@ -196,7 +214,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// cluster-scoped (checkObjects); no Secret of credentials in clear,
 	// unless allowed (checkPlainSecrets); then the sync options of Argo CD
 	// of those Helm keeps.
-	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp)}
+	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp), Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp)}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}

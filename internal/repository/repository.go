@@ -89,19 +89,27 @@ type tree struct {
 // the repository of the service, loaded once, its Chart.yaml of that name
 // and version; the contracts of every repository; the context,
 // PlatformFile at level 0, without claims, ProjectFile at 1, its named
-// claims among it, without its ProjectDescription, and ConnectionsFile at
+// claims and its access (okdp.AccessKey, which the compile reads apart)
+// among it, without its ProjectDescription, and ConnectionsFile at
 // 2, connections only, and the values, ConfigFile, each when present; the
 // name, the instance's directory name, the release, ReleaseName of the
 // project and the name, and the namespace, the project's; the claimers
 // of its InstanceFile, the namespaces that may claim of it across
-// namespaces (Inputs.Claimers). Every problem at once, each naming its
-// repository and path; a package that fails once.
+// namespaces (Inputs.Claimers). CatalogsFile, in one tree's repository
+// at most, read strictly, its menu of services of the catalogs
+// (checkCatalogs). Every problem at once, each naming its repository
+// and path; a package that fails once.
 func Load(repos []Repository) ([]okdp.Instance, error) {
 	t, err := index(repos)
 	if err != nil {
 		return nil, newError([]error{err})
 	}
 	var errs []error
+	for _, r := range repos {
+		if r.Role == RoleTree {
+			errs = append(errs, t.checkCatalogs(r)...)
+		}
+	}
 	var platform []okdp.ContextLayer
 	if t.platform != nil {
 		platform, err = readLayer(*t.platform, PlatformFile, 0)
@@ -139,7 +147,8 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 }
 
 // instance: the instance name of project, in repo, the context layers
-// below its own: its InstanceFile, {service, version}, the package, and
+// below its own: its directory, of its files only (instanceFiles); its
+// InstanceFile, {service, version}, the package, and
 // claimers, optional, the namespaces whose instances may claim of it
 // across namespaces, each a namespace name or "*", once
 // (okdp.CheckClaimers): Inputs.Claimers, nil when absent, the package's
@@ -147,6 +156,9 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 // before it.
 func (t *tree) instance(repo Repository, project, name string, layers []okdp.ContextLayer) (okdp.Instance, error) {
 	dir := path.Join(ProjectsDir, project, InstancesDir, name)
+	if err := instanceFiles(repo, dir); err != nil {
+		return okdp.Instance{}, err
+	}
 	file := path.Join(dir, InstanceFile)
 	var pkg InstanceSpec
 	b, err := fs.ReadFile(repo.FS, file)
@@ -188,6 +200,28 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 		in.Values = append(in.Values, l.Values)
 	}
 	return okdp.Instance{Definition: def, Inputs: in, Name: name}, nil
+}
+
+// instanceFiles: the entries of the instance's directory dir of repo,
+// each one of its files, InstanceFile, ConfigFile and ConnectionsFile,
+// a file: any other (a values.yaml, a directory, a hidden file) would be
+// read by no compile. Every one at once, in name order.
+func instanceFiles(repo Repository, dir string) error {
+	entries, err := fs.ReadDir(repo.FS, dir)
+	if err != nil {
+		return fmt.Errorf("%s: %w", where(repo, dir), unwrapPath(err))
+	}
+	var errs []error
+	for _, e := range entries {
+		switch e.Name() {
+		case InstanceFile, ConfigFile, ConnectionsFile:
+			if !e.IsDir() {
+				continue
+			}
+		}
+		errs = append(errs, fmt.Errorf("%s: not a file of an instance, which holds %s, %s and %s only: no compile reads it", where(repo, path.Join(dir, e.Name())), InstanceFile, ConfigFile, ConnectionsFile))
+	}
+	return errors.Join(errs...)
 }
 
 // InstanceSpec: an instance's InstanceFile, as written: its package,
@@ -295,6 +329,9 @@ func index(repos []Repository) (*tree, error) {
 				t.platform = repo
 			} else if !errors.Is(err, fs.ErrNotExist) {
 				errs = append(errs, fmt.Errorf("%s: %w", where(*repo, PlatformFile), unwrapPath(err)))
+			}
+			if _, err := fs.Stat(repo.FS, CatalogsFile); err == nil {
+				own(CatalogsFile, repo)
 			}
 		}
 		services, err := dirs(*repo, CatalogDir)

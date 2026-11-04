@@ -96,7 +96,8 @@ func parseClaim(m M, path string, named bool) (*ClaimSpec, error) {
 // namedClaims: the named claims of the merged values of an instance,
 // claims of its context (valuesLayers: never the instance's own values),
 // by name: each name a DNS-1123 label and no connection's, each claim of
-// the form parseClaim reads. Every problem, one line each, in name order.
+// the form parseClaim reads. Every problem, one line each, in name order,
+// each the claim's (FieldError).
 func namedClaims(values M) (map[string]ClaimSpec, error) {
 	v, set := values["claims"]
 	if !set {
@@ -112,12 +113,12 @@ func namedClaims(values M) (map[string]ClaimSpec, error) {
 	for _, name := range slices.Sorted(maps.Keys(m)) {
 		_, isMap := m[name].(M)
 		if _, conn := conns[name]; conn && isMap && chart.IsDNSLabel(name) {
-			errs = append(errs, fmt.Errorf("%s: a connection of that name too (%s)", value.Key("claims", name), value.Key("connections", name)))
+			errs = append(errs, atField(value.Key("claims", name), fmt.Errorf("%s: a connection of that name too (%s)", value.Key("claims", name), value.Key("connections", name))))
 			continue
 		}
 		c, err := ParseClaim(name, m[name])
 		if err != nil {
-			errs = append(errs, err)
+			errs = append(errs, atField(value.Key("claims", name), err))
 			continue
 		}
 		out[name] = c

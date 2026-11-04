@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKDP platform values",
-  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, a key the mappings read...) but certificateIssuers, a former setting, refused (false): its selfSigned.name is tls.clusterIssuer. Every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value. The whole of global.okdp is the platform's, level 0's: a layer above it, a project's (project.yaml), sets provisioning, its classes, and no other key, described here or not, whether the platform sets it or not; a project's own settings go under global beside okdp (global.project).",
+  "description": "The settings of global.okdp the OKDP compiler reads, given by the context's values layers, the platform's at level 0 (platform.yaml, Inputs.Context). Every compile checks them, in every mode, and reports every violation at once; it applies the defaults. Only the settings the compiler reads are described: any other key is allowed (ingress.className, a key the mappings read...) but certificateIssuers and serviceCatalog, former settings, refused (false): certificateIssuers' selfSigned.name is tls.clusterIssuer, serviceCatalog the menu of catalogs.yaml, beside platform.yaml. Every key reaches the mapping as written (global.okdp) and every chart (global). As in a chart's values, a null deletes a setting's default, and is refused where there is none; an empty string is a value. The whole of global.okdp is the platform's, level 0's: a layer above it, a project's (project.yaml), sets provisioning, its classes, and no other key, described here or not, whether the platform sets it or not; a project's own settings go under global beside okdp (global.project).",
   "type": "object",
   "properties": {
     "global": {
@@ -40,6 +40,7 @@
               }
             },
             "certificateIssuers": false,
+            "serviceCatalog": false,
             "charts": {
               "type": "object",
               "description": "The upstream charts that render the charts the compiler adds itself, each a repository, a chart and its version. Each is checked after the requirements as a dependency of Chart.yaml is: a repository URL, the name of a chart, a pinned version.",
@@ -178,6 +179,40 @@
                 "provider": {"type": "object", "description": "The provider of the store, External Secrets' SecretStore spec.provider, verbatim (vault: an OpenBao or Vault server, its KV v2 mount, its Kubernetes auth, whose serviceAccountRef names serviceAccount). Set, the store is a SecretStore of that name in each project's namespace, which the targets write with the ServiceAccount serviceAccount, and the PushSecrets and ExternalSecrets reference it (kind SecretStore): the store's policy scopes each namespace by the identity it authenticates with. Unset, the store is a ClusterSecretStore of that name the platform created, one identity for every namespace: one trust domain."},
                 "serviceAccount": {"type": "string", "default": "okdp-secrets", "description": "With provider: the ServiceAccount of each project's namespace the store authenticates with, the one provider's serviceAccountRef names."},
                 "refreshInterval": {"type": "string", "default": "1h", "description": "How often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it (refreshInterval, a duration): rotated credentials reach their claimers within it."}
+              }
+            },
+            "access": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Who administers the platform, and how the Kubernetes API server names the identity provider's groups. A project's people are its file's (project.yaml access: the roles of groups within the project, okdp-project-<namespace> an editor by default), which the targets write as Argo CD roles of its AppProject and RoleBindings of its namespace. Another key is refused.",
+              "properties": {
+                "admins": {
+                  "type": "array",
+                  "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$"},
+                  "description": "The groups of the platform's administrators, as the identity provider's tokens give them (groups claim): bound once, by the platform's bootstrap, to Argo CD's role:admin and to the cluster's administration; the compiler writes nothing of them, a program that mirrors the platform's authority reads them (compiler.PlatformAdmins). Absent: none."
+                },
+                "groupPrefix": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._@:#/-]*$",
+                  "description": "The prefix the Kubernetes API server gives the groups of its OIDC users (--oidc-groups-prefix, or the claimMappings of its structured authentication configuration): the RoleBindings of a project's groups name each group with it, oidc:okdp-project-demo for oidc:. Argo CD reads the groups claim as it is, without it. Absent: \"\", the groups as the tokens give them."
+                }
+              }
+            },
+            "controlPlane": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The optional control plane (okdp-control-plane-server). Absent: the platform has none, and the targets bind no identity of it. Another key is refused.",
+              "properties": {
+                "serviceAccount": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["namespace", "name"],
+                  "description": "The control plane's identity, its ServiceAccount: the targets bind it, in each project's namespace, privileged or not, to the Role okdp-control-plane, what it needs there and nothing more (docs/specs/01_inputs_outputs.md, the control plane's role); its ClusterRole keeps namespaces get and create.",
+                  "properties": {
+                    "namespace": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", "description": "Its namespace, a DNS label."},
+                    "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "maxLength": 253, "description": "Its name, a DNS subdomain."}
+                  }
+                }
               }
             },
             "policy": {

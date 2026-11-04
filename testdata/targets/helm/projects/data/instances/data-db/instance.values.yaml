@@ -2,6 +2,14 @@
 postgresql:
   global:
     okdp:
+      access:
+        admins:
+          - platform_admin
+        groupPrefix: 'oidc:'
+      controlPlane:
+        serviceAccount:
+          name: okdp-control-plane-server
+          namespace: okdp-system
       policy:
         privileged:
           - data

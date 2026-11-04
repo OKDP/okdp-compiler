@@ -98,20 +98,27 @@ func ParseSchema(name string, b []byte) (*Schema, error) {
 // chart's values.schema.json: the values, and their violations, one line
 // each with its path (Validate), "" when they hold. user is not changed.
 func (s *Schema) Values(user M) (M, string, error) {
+	values, v, _, err := s.check(user)
+	return values, v, err
+}
+
+// check: Values, and the violations one by one (validate).
+func (s *Schema) check(user M) (M, string, []Violation, error) {
 	values := coalesceValues(s.defaults, user)
-	v, err := Validate(s.name, s.root, values)
+	v, leaves, err := validate(s.name, s.root, values)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return values, v, nil
+	return values, v, leaves, nil
 }
 
 // Parameters: the values layers, normalized (value.Normalize), merged in
 // order (helm -f), coalesced over the defaults of the parameter schema and
 // checked against it (Schema.Values). Every violation is reported at once,
-// under name, as Helm reports those of a chart's values. connections and
-// claims are not parameters: kept as merged, out of the defaults and the
-// check, whatever the schema declares of them.
+// under name, as Helm reports those of a chart's values: a *ValuesError,
+// each violation apart too. connections and claims are not parameters:
+// kept as merged, out of the defaults and the check, whatever the schema
+// declares of them.
 func Parameters(schema *Schema, name string, layers []map[string]any) (M, error) {
 	user := M{}
 	for _, v := range layers {
@@ -124,12 +131,12 @@ func Parameters(schema *Schema, name string, layers []map[string]any) (M, error)
 		}
 		delete(user, k)
 	}
-	values, v, err := schema.Values(user)
+	values, v, leaves, err := schema.check(user)
 	if err != nil {
 		return nil, err
 	}
 	if v != "" {
-		return nil, schemaError("values", map[string]string{name: v})
+		return nil, &ValuesError{msg: schemaError("values", map[string]string{name: v}).Error(), Violations: leaves}
 	}
 	delete(values, "connections")
 	delete(values, "claims")

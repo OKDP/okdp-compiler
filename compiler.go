@@ -199,7 +199,8 @@ type (
 	// KeptProject: a project of a tree whose output is not written
 	// (Partial, TreeFiles), and why: Problems, an instance each,
 	// <namespace>/<instance>: <why>, and Instances, the instances of the
-	// problems.
+	// problems; Rederived, the files TreeFiles writes of it of today's
+	// settings all the same (its manifests, its instances' identity).
 	KeptProject = tree.Kept
 	// KeptInstance: an instance of a KeptProject that does not deploy, and
 	// why (Err): refused, a problem of the graph at its release, its
@@ -223,6 +224,15 @@ type (
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
 	// Result.Chart).
 	ChartMetadata = chart.Metadata
+	// Access: the roles of a project's groups and the API server's group
+	// prefix (Result.Access), what the targets write as the Argo CD roles
+	// of its AppProject and the RoleBindings of its namespace.
+	Access = okdp.Access
+	// ServiceAccount: a ServiceAccount by namespace and name: the control
+	// plane's identity (Result.ControlPlane,
+	// global.okdp.controlPlane.serviceAccount), which the targets bind in
+	// each project's namespace to the Role okdp-control-plane.
+	ServiceAccount = okdp.ServiceAccount
 )
 
 // The files Write gives besides Chart.yaml.
@@ -277,7 +287,8 @@ const (
 	// ProjectsDir: the projects, <project>/, each a namespace.
 	ProjectsDir = repository.ProjectsDir
 	// ProjectFile: a project's values, the context at level 1, in its
-	// directory.
+	// directory; its ProjectDescription and its access
+	// (ProjectAccessKey), the project's own.
 	ProjectFile = repository.ProjectFile
 	// ProjectDescription: the key of ProjectFile that describes the
 	// project, a string, which LoadRepository leaves out of the context:
@@ -346,6 +357,65 @@ func CheckProjectName(name string, platform map[string]any) error {
 	return okdp.CheckNamespace("project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
 }
 
+// AccessRole: the role of a group within a project, its project.yaml's
+// access (ProjectAccessKey): AccessViewer, AccessEditor, AccessAdmin.
+type AccessRole = okdp.Role
+
+// The roles of a project's groups, each what the one before it may do,
+// and more: what the flux and argocd targets write as the Argo CD roles of
+// the project's AppProject and the RoleBindings of its namespace to
+// Kubernetes' view, edit and admin (docs/specs/01_inputs_outputs.md,
+// access).
+const (
+	// AccessViewer: sees the project's Applications (get), and its
+	// namespace's objects but its Secrets (view).
+	AccessViewer = okdp.RoleViewer
+	// AccessEditor: a viewer who syncs the Applications, runs their
+	// actions and reads their logs, no exec; edits the namespace's
+	// objects (edit).
+	AccessEditor = okdp.RoleEditor
+	// AccessAdmin: an editor who deletes and overrides the Applications,
+	// and administers the namespace (admin).
+	AccessAdmin = okdp.RoleAdmin
+)
+
+// ProjectAccessKey: access, the key of ProjectFile that maps the
+// project's groups to their roles, which LoadRepository leaves out of the
+// context: no instance receives it.
+const ProjectAccessKey = okdp.AccessKey
+
+// DefaultProjectGroup: okdp-project-<project>, the group of a project's
+// people when its ProjectFile gives no access, an editor.
+func DefaultProjectGroup(project string) string { return okdp.DefaultGroup(project) }
+
+// IsGroupName: name may name a group of access or of
+// global.okdp.access.admins, as the identity provider's tokens give it:
+// a letter or a digit, then letters, digits, ".", "_", "@", ":" and "-",
+// 255 characters at most; no "/", the name of a Keycloak group, not its
+// path.
+func IsGroupName(name string) bool { return okdp.IsGroup(name) }
+
+// ProjectAccess: the roles of the groups of project, by group name, file
+// its ProjectFile as written (nil: none): its access, DefaultProjectGroup
+// an editor when it gives none (absent or null), no group for {}; the
+// compile's errors, every problem at once. What the targets write, for a
+// program that mirrors the project's authority (a control plane): who
+// sees, operates and administers the project, without the program.
+func ProjectAccess(file []byte, project string) (map[string]AccessRole, error) {
+	return okdp.ProjectAccess(file, project)
+}
+
+// PlatformAdmins: the groups of the platform's administrators,
+// global.okdp.access.admins of platform, its values (PlatformFile, the
+// context at level 0), checked against the platform's schema as the
+// compile checks them; none when not set. The compiler writes nothing of
+// them: the platform's bootstrap binds them once (Argo CD's role:admin,
+// the cluster's administration); for a program that mirrors the
+// platform's authority.
+func PlatformAdmins(platform map[string]any) ([]string, error) {
+	return okdp.PlatformAdmins(platform)
+}
+
 // ProjectDir: projects/<namespace>, where every target writes the files of
 // the instances of a namespace, the flux target its kustomization.yaml.
 func ProjectDir(namespace string) string { return target.ProjectDir(namespace) }
@@ -359,8 +429,10 @@ func InstanceDir(namespace, release string) string {
 
 // ProjectManifestsDir: projects/<namespace>/project, where the flux and
 // argocd targets write a project's own manifests, for every project that
-// has an instance: its Namespace, the platform's secret store in it, and
-// the identity its releases are confined to its namespace with
+// has an instance: its Namespace, the platform's secret store in it, the
+// roles of its groups (ProjectAccess), the control plane's role in it
+// (global.okdp.controlPlane), and the identity its releases are confined
+// to its namespace with
 // (docs/specs/01_inputs_outputs.md, targets); what the platform's entry
 // point applies before the instances.
 func ProjectManifestsDir(namespace string) string {
@@ -492,8 +564,16 @@ func Partial(t *Tree) (results []*Result, g *Graph, kept []KeptProject) {
 // TreeFiles: the output of t, path -> content: the files each of targets
 // writes for the projects Partial writes, merged (a path two targets write
 // differently fails it); for each project kept, the files previous, the
-// output written before (nil: none), holds under its ProjectDir, as they
-// are, and kept says why. A Flux target lists in its root Kustomization
+// output written before (nil: none), holds under its ProjectDir, its
+// instances' as they are, but what the platform decides of it, which the
+// flux and argocd targets write of today's settings (the project's
+// context: privileged or not, its secret store, the roles of its groups,
+// the control plane): its ProjectManifestsDir whole, the manifests
+// previous holds there replaced, and its instances' identity (a Flux
+// HelmRelease's serviceAccountName), each path in
+// KeptProject.Rederived; kept says why. A privilege revoked or a role
+// taken back reaches a kept project at once: its instances are applied
+// with today's identity, which refuses what it no longer allows. A Flux target lists in its root Kustomization
 // (Flux.Keep) each kept project whose kustomization.yaml previous holds:
 // the Flux Kustomization of projects/ would prune it otherwise. For a Flux
 // or an Argo CD target, whose objects share one namespace, a release name
@@ -504,8 +584,11 @@ func Partial(t *Tree) (results []*Result, g *Graph, kept []KeptProject) {
 // the projects written and of the kept projects' output is in one
 // namespace, else an error wrapping a *ReleaseError per release: one
 // release name is never written twice. Bytes only: the caller writes
-// them, and removes what it wrote before that they do not hold but the
-// kept projects' directories.
+// them, and removes what it wrote before that they do not hold, the kept
+// projects' directories included (every file of theirs it keeps is in
+// files); previous holds what it wrote last: a caller that records the
+// revision of its sources it compiled names a kept project's instances
+// as of that revision.
 func TreeFiles(t *Tree, targets []Target, previous fs.FS) (files map[string][]byte, kept []KeptProject, err error) {
 	return output.Files(t, targets, previous)
 }

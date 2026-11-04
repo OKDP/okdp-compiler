@@ -34,3 +34,60 @@ func Key(p, k string) string {
 func Index(p string, i int) string {
 	return p + "[" + strconv.Itoa(i) + "]"
 }
+
+// Split: the path p as Key and Index write it, its keys and indexes in
+// order, an index as its digits (a JSON pointer's tokens): env[2].name is
+// env, 2, name; config["spark.ui.filters"] is config, spark.ui.filters.
+// "" is none.
+func Split(p string) []string {
+	var out []string
+	for p != "" {
+		switch {
+		case strings.HasPrefix(p, `["`):
+			k, rest, ok := strings.Cut(p[2:], `"]`)
+			if !ok {
+				return append(out, p)
+			}
+			out, p = append(out, k), rest
+		case strings.HasPrefix(p, "["):
+			i, rest, ok := strings.Cut(p[1:], "]")
+			if !ok {
+				return append(out, p)
+			}
+			out, p = append(out, i), rest
+		default:
+			p = strings.TrimPrefix(p, ".")
+			end := strings.IndexAny(p, ".[")
+			if end < 0 {
+				end = len(p)
+			}
+			out, p = append(out, p[:end]), p[end:]
+		}
+	}
+	return out
+}
+
+// Join: the path of tokens, a JSON pointer's (Split), as Key and Index
+// write it, a token of digits an index.
+func Join(tokens []string) string {
+	p := ""
+	for _, t := range tokens {
+		if i, err := strconv.Atoi(t); err == nil && i >= 0 && strconv.Itoa(i) == t {
+			p = Index(p, i)
+		} else {
+			p = Key(p, t)
+		}
+	}
+	return p
+}
+
+// Pointer: the JSON pointer (RFC 6901) of tokens, each "/" and its "~"
+// and "/" escaped: /env/2/name; "" for none, the whole document.
+func Pointer(tokens []string) string {
+	var b strings.Builder
+	for _, t := range tokens {
+		b.WriteByte('/')
+		b.WriteString(strings.NewReplacer("~", "~0", "/", "~1").Replace(t))
+	}
+	return b.String()
+}

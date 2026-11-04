@@ -33,8 +33,8 @@ import (
 // context's global.okdp (contextLayers). Each instance
 // layer in turn: one that sets global fails, but for the keys the parameter
 // schema (chart.Schema.Doc) declares under it (properties.global.properties),
-// okdp excepted; then one that sets connections, then claims, to any
-// value; then one with "{{" in a key or a string, anywhere
+// okdp excepted; then one that sets connections, then claims, then
+// access, to any value; then one with "{{" in a key or a string, anywhere
 // (chart.NoTemplate).
 func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 	layers, platform, err := contextLayers(in.Context)
@@ -64,6 +64,9 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 		if _, set := layer["claims"]; set {
 			return nil, nil, fmt.Errorf("%s: claims are declared by the context (Inputs.Context): a project's, of level 1 or above", name)
 		}
+		if _, set := layer[AccessKey]; set {
+			return nil, nil, fmt.Errorf("%s: %s is the project's, its file's (the context at level 1)", name, AccessKey)
+		}
 		// No template code in what the instance gives, whatever key it is
 		// under: parameters, upstream values (chart.NoTemplate).
 		if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
@@ -89,8 +92,10 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 // sets nothing of global.okdp but provisioning (platformOnly): the other
 // keys, those the compiler reads (charts, oidc, policy...) and the others,
 // are the platform's, level 0's, whether level 0 sets them or not.
-// Level 0 declares no claims: they are a project's. Above level 0, no
-// template code (chart.NoTemplate): only the platform's level is
+// Level 0 declares no claims: they are a project's. access, the roles of
+// a project's groups, is level 1's only, and left out of the layers: it
+// is read apart (projectAccess), no instance receives it. Above level 0,
+// no template code (chart.NoTemplate): only the platform's level is
 // reviewed.
 //
 // And the context's global.okdp, {global: {okdp: ...}} ({} when no layer
@@ -137,6 +142,12 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
 		if _, set := layer["claims"]; set && l.Level == 0 {
 			return nil, nil, fmt.Errorf("%s: claims: a project's, of level 1 or above", name)
 		}
+		// The roles of the project's groups are its file's, level 1's, read
+		// apart (projectAccess): no value of the instances.
+		if _, set := layer[AccessKey]; set && l.Level != 1 {
+			return nil, nil, fmt.Errorf("%s: %s: the roles of a project's groups, its file's, of level 1 only", name, AccessKey)
+		}
+		delete(layer, AccessKey)
 		if l.Level > 0 {
 			if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
 				return nil, nil, err

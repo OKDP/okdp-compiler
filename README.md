@@ -64,9 +64,9 @@ Argo CD Application (`compiler.ArgoCD`).
 `LoadRepository` then `CompileTree` (`compiler.LoadError`, every problem
 of a tree that does not load), `compiler.TreeFiles` its output for one or
 more targets, the projects that do not deploy kept as the output written
-before holds them (`compiler.Partial`, the rule of `okdp-compile
---partial`). Package `treeedit` reads and edits a tree for a control
-plane, every rule of an edit its own: an instance, a connection, a
+before holds them, their manifests and identity of today's settings
+(`compiler.Partial`, the rule of `okdp-compile --partial`). Package
+`treeedit` reads and edits a tree for a control plane, every rule of an edit its own: an instance, a connection, a
 named claim, a project or the catalog menu created, updated or removed
 is an `Edit`, pure, its `Change` the files to write and its `Check` by
 the compile of the tree before and after it (an instance written that
@@ -74,7 +74,16 @@ does not compile, one that compiled and does not, a removal of what is
 in use, a release taken refused: `compiler.Regressions`,
 `compiler.ReleaseTaken`), `treeedit.Apply` runs it on a transaction; it
 reads an output back (`compiler.ReadCompiled`, `compiler.ReadPublished`),
-and edits the files as written, their comments kept. Package
+and edits the files as written, their comments kept; `treeedit.Validate`
+gives the compile's verdict on an edit without writing it, field by
+field (`ValidateInstance`, `ValidateClaim`, `compiler.FieldErrors`).
+A program that answers before it compiles asks the compile's rules of
+the library, none written again: the connection references of a
+schema (`compiler.ConnectionRefs`), the contracts as the compile reads
+them (`compiler.ReadContract`), a connection at its declaration
+(`compiler.CheckConnection`), the layering of values
+(`compiler.MergeValues`, `compiler.CoalesceValues`), the names of the
+claims (`compiler.NamedClaimID`, `IsClaimID`, `CheckProvider`). Package
 `chartcache` keeps a chart cache that pulls the upstream charts of a
 check, OCI or https ([Go library](docs/01_usage.md#go-library)).
 `compiler.Compile` compiles one instance, given its inputs, as
@@ -307,13 +316,14 @@ that is private.
 | Path | Description |
 |---|---|
 | `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, `Build`, `Partial`, `TreeFiles`, the targets, `Write`, the readers of an output... |
-| `treeedit/` | the reads and the edits of a tree, for a caller that edits it (a control plane): the readers (`ReadInstance`, `ListConnections`, `ListClaims`, `ListProjects`, `ReadCatalogRepositories`, `ListPublished`, `ReadCompiled`...) over a `Reader`; the edits (`CreateInstance`, `PutConnection`, `DeleteClaim`, `CreateProject`, `UpdateCatalog`...), each an `Edit` whose `Change` lists the files to write and its `Check`, the verdict of the compile of the tree before and after it (`Check.Verify`: `CompileError`, `ErrInUse`, `ErrReleaseTaken`), `Apply` running it on a `Writer`; the files as written: `instance.yaml`, the values files, an entry of `connections` or `claims`, a project's description, `projects.yaml`, a document merged key by key, each edited in place |
+| `accessors.go` | the compile's rules for a caller that answers before it writes: `FieldErrors`, `ConnectionRefs`, `ReadContract`, `CheckConnection`, `MergeValues`, `CoalesceValues`, the names of the claims |
+| `treeedit/` | the reads and the edits of a tree, for a caller that edits it (a control plane), and the verdict of the compile on an edit, field by field, without writing it (`Validate`, `ValidateInstance`, `ValidateClaim`): the readers (`ReadInstance`, `ListConnections`, `ListClaims`, `ListProjects`, `ReadCatalogRepositories`, `ListPublished`, `ReadCompiled`...) over a `Reader`; the edits (`CreateInstance`, `PutConnection`, `DeleteClaim`, `CreateProject`, `UpdateCatalog`...), each an `Edit` whose `Change` lists the files to write and its `Check`, the verdict of the compile of the tree before and after it (`Check.Verify`: `CompileError`, `ErrInUse`, `ErrReleaseTaken`), `Apply` running it on a `Writer`; the files as written: `instance.yaml`, the values files, an entry of `connections` or `claims`, a project's description, `projects.yaml`, a document merged key by key, each edited in place |
 | `chartcache/` | a chart cache that pulls the upstream charts from their repositories (OCI, https), a `compiler.ChartSource`: the control plane's and okdp-gitops' |
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, claims, classes and providers, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages, `CompileAll` |
 | `internal/repository/` | the tree of a deployment, in one or more repositories, read as the instances `CompileAll` compiles; the problems of one that does not load |
 | `internal/tree/` | a tree compiled (`CompileTree`), its instances read as a caller asks of them; its projects written and kept (`Partial`) |
-| `internal/output/` | the output of a tree for its targets (`TreeFiles`): the projects kept as a previous output holds them, those of a release name two projects share too, the releases of the output in one namespace |
+| `internal/output/` | the output of a tree for its targets (`TreeFiles`): the projects kept as a previous output holds them, their platform's part of today's settings, those of a release name two projects share too, the releases of the output in one namespace |
 | `internal/graph/` | the deployment graph of compiled instances: their dependencies checked, what each release waits for, its sync wave |
 | `internal/target/` | the output formats of compiled instances (`Target`), what they share: the tree, `projects/<namespace>/instances/<release>/` |
 | `internal/target/flux/`, `internal/target/argocd/` | the flux and argocd targets: the umbrella charts with each instance's HelmRelease and Kustomizations, or its Application, okdp-gitops' format |

@@ -618,6 +618,32 @@ func TestRequirements(t *testing.T) {
 	}
 }
 
+// TestRequirementsOutOfReach: a reference the walk of the compile does not
+// reach, under a combinator, a definition, additionalProperties or a
+// tuple's items, is refused at its place: no compile would read it.
+func TestRequirementsOutOfReach(t *testing.T) {
+	ref := `{"x-okdp-connection-ref": {"contract": "database"}}`
+	s, err := chart.ParseSchema("config.schema.json", []byte(`{
+		"$schema": "http://json-schema.org/draft-07/schema#",
+		"properties": {"a": {"anyOf": [`+ref+`]}, "t": {"items": [`+ref+`]}},
+		"additionalProperties": `+ref+`,
+		"definitions": {"db": `+ref+`}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"additionalProperties", "definitions.db", "properties.a.anyOf[0]", "properties.t.items[0]"}
+	err = requirements(s.Doc)
+	lines := strings.Split(fmt.Sprint(err), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("got %v", err)
+	}
+	for i, at := range want {
+		if !strings.HasPrefix(lines[i], "config.schema.json: "+at+": x-okdp-connection-ref out of the compile's reach") {
+			t.Errorf("line %d: %s, want %s", i, lines[i], at)
+		}
+	}
+}
+
 // TestCompleteUntilStable: a conditional default whose condition field sorts
 // after it, or is derived, applies: the defaults are applied until nothing
 // changes, whatever the order of the fields.

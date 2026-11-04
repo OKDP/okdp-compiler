@@ -1,0 +1,53 @@
+# The parts of a tree no compile would read are refused rather than left
+# unread: a stray file of an instance's directory (a values.yaml beside
+# config.yaml); a catalogs.yaml whose menu lists a service of no catalog,
+# a default version its catalog lacks. Every problem at once, the tree
+# does not load, nothing written.
+status 1 okdp-compile --repository $WORK/stray -o $WORK/files
+! stdout .
+stderr '^error: \S+/stray/catalogs.yaml: categories\[0\].services\[0\]: service "gone" is in no catalog \(catalog/gone/ of no repository\)$'
+stderr '^\S+/stray/catalogs.yaml: categories\[0\].services\[1\].default: version "2.0.0" of service "web"'
+stderr '^\S+/stray/projects/demo/instances/web/values.yaml: not a file of an instance, which holds instance.yaml, config.yaml and connections.yaml only: no compile reads it$'
+! exists $WORK/files
+
+# A connection is checked at its declaration, referenced or not: a
+# project's, which no instance references, that misses a required field
+# refuses every instance of the project, at connections.<name>; another
+# project's instances compile.
+status 1 okdp-compile --repository $WORK/conns --check
+! stdout .
+stderr '^error: demo/demo-web: connections.unused \(connection "unused"\): field "url" is required by the api contract$'
+! stderr 'other/other-web'
+
+-- stray/catalogs.yaml --
+categories:
+  - title: Web
+    services: [{name: gone}, {name: web, default: 2.0.0}]
+-- stray/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- stray/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- stray/projects/demo/instances/web/values.yaml --
+replicas: 3
+-- conns/contracts/api.schema.json --
+{"x-okdp-contract": "api", "properties": {"url": {"type": "string"}}, "required": ["url"]}
+-- conns/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- conns/projects/demo/project.yaml --
+connections:
+  unused: {contract: api}
+-- conns/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- conns/projects/other/instances/web/instance.yaml --
+service: web
+version: 1.0.0

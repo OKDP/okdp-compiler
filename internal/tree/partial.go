@@ -21,6 +21,11 @@ type Kept struct {
 	Problems []string
 	// Instances are the instances of Problems.
 	Instances []KeptInstance
+	// Rederived are the files of the project the output writes of today's
+	// settings though it is kept (output.Files): its manifests, its
+	// instances' identity, in path order; none when its output is kept
+	// whole.
+	Rederived []string
 }
 
 // KeptInstance: an instance of a kept project that does not deploy, and

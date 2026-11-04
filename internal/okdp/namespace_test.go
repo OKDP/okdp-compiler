@@ -2,6 +2,7 @@ package okdp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -1047,5 +1048,45 @@ func TestCompileAllSecretTargets(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestCompileAllDeclaredConnections: every connection of an instance's
+// context is checked at its declaration, referenced or not, each that
+// fails at connections.<name>: the instance is refused, the others of
+// another context are not.
+func TestCompileAllDeclaredConnections(t *testing.T) {
+	bad := node("a", nil)
+	bad.Inputs.Context = append(bad.Inputs.Context, ContextLayer{Level: 1, Values: M{"connections": M{
+		"Bad_Name":  M{"contract": "server", "host": "h"},
+		"no-host":   M{"contract": "server"},
+		"unknown":   M{"contract": "nothing"},
+		"field":     M{"contract": "server", "host": "h", "port": 1.0},
+		"none":      M{"host": "h"},
+		"scalar":    "x",
+		"other-key": M{"contract": "server", "host": "h", "secretRef": M{"remoteKey": "platform/x"}},
+		"good":      M{"contract": "server", "host": "h"},
+	}}})
+	good := node("b", nil)
+	good.Inputs.Namespace = "other"
+	out := CompileAll(context.Background(), []Instance{bad, good})
+	if out[1].Err != nil {
+		t.Fatalf("an instance of another context: %v", out[1].Err)
+	}
+	want := []string{
+		`connections.Bad_Name: a connection's name is a DNS-1123 label, lowercase letters, digits and "-", 63 characters at most`,
+		`connections.field: connection "field": field "port" is not part of the server contract`,
+		`connections.no-host (connection "no-host"): field "host" is required by the server contract`,
+		`connections.none: contract is required, the contract of the connection`,
+		`connections.other-key: connection "other-key": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set`,
+		`connections.scalar: a connection, an object of its contract's fields, got "x"`,
+		`connections.unknown: the nothing contract cannot be read: nothing.schema.json: file does not exist`,
+	}
+	if err := out[0].Err; err == nil || err.Error() != strings.Join(want, "\n") {
+		t.Fatalf("got\n%v\nwant\n%s", err, strings.Join(want, "\n"))
+	}
+	var fe *FieldError
+	if !errors.As(out[0].Err, &fe) || fe.Field != "connections.Bad_Name" {
+		t.Errorf("not a field's: %#v", out[0].Err)
 	}
 }

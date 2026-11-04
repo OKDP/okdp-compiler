@@ -150,7 +150,7 @@ okdp-compile --version
 | `--revision` | `HEAD` | `--target argocd`: its revision |
 | `--cost-limit` | `50000000` | the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', what a host function reads and builds counted (`Inputs.CostLimit`): past it, the instance is refused, `the expressions of the compile exceed its CEL cost limit (n)`; `0`, no limit |
 | `--report` | | write a JSON report of the compile to the file, or to stdout for `-`, even with `--check` and when the compile fails: each instance, its status, error, warnings, dependencies, claims and charts, and the tree's errors ([`--report`](#--report)); refused inside a `--repository` or `<output>/projects/` |
-| `--partial` | | write the projects whose instances all compile, and keep what the output holds of the others, status 1 all the same ([`--partial`](#--partial)); refused with `--check` |
+| `--partial` | | write the projects whose instances all compile, and keep what the output holds of the others' instances, their manifests and identity of today's settings, status 1 all the same ([`--partial`](#--partial)); refused with `--check` |
 | `--force` | | write into an `<output>/projects/` that holds files but no `projects/.okdp-compile`, which the command did not write, removing from it every file it does not write ([`--output`](#--output)); refused with `--check` |
 | `--allow-plain-secrets` | | accept credentials written in clear (`Inputs.AllowPlainSecrets` of every instance): a `provides` `secret` without `generate`, a Secret of the `objects` section with `data` or `stringData`; without it they fail the compile, the output being committed to the deployments repository |
 | `--timeout` | `10m` | how long the compile may take, every instance together, a Go duration (`90s`, `1h`): past it, `the compile takes longer than --timeout <duration>: nothing written`; `0`, no limit |
@@ -453,14 +453,24 @@ Without it, one refused instance writes nothing: every project waits for
 it. With `--partial`, a refusal fails its project, not the tree: the
 projects whose instances all compile, and at whose releases the
 deployment graph has no problem, are written; the others are not, what
-the output holds of them kept as it is (their last good output, still
-deployed), each printed after the refusals:
+the output holds of their instances kept as it is (their last good
+output, still deployed), each printed after the refusals. What the
+platform decides of a project kept is written all the same, of today's
+settings: its manifests (`project/`: its Namespace and its Pod Security
+labels, its identity, the RoleBindings of its groups and of the control
+plane, its AppProject), and, with `--target flux`, each kept instance's
+HelmRelease (its ServiceAccount, its `dependsOn` as it was), so that a
+privilege revoked, a role taken back or a policy tightened is not kept
+by a project one of whose instances is refused: its instances kept are
+applied with today's identity, which refuses what it no longer allows (a
+ClusterRole of a project no longer privileged). A manifest of before
+that today's settings do not write is removed.
 
 ```text
 error: demo/demo-web: values don't meet the specifications of the schema(s) in the following chart(s):
 web:
 - at '/replicas': minimum: got 0, want 1
-error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is
+error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is, its namespace, identity and roles of today's settings
 ```
 
 An instance of another project that depends on a release of a project
@@ -482,8 +492,8 @@ written; one that the output does not hold yet writes nothing.
 ```text
 error: demo/demo-app-x: release "demo-app-x" is in namespaces "demo" and "demo-app": the HelmReleases of okdp-releases need distinct names
 error: demo-app/demo-app-x: release "demo-app-x" is in namespaces "demo" and "demo-app": the HelmReleases of okdp-releases need distinct names
-error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is
-error: demo-app: not written, an instance of it refused (--partial): out/projects/demo-app/ kept as it is
+error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is, its namespace, identity and roles of today's settings
+error: demo-app: not written, an instance of it refused (--partial): out/projects/demo-app/ kept as it is, its namespace, identity and roles of today's settings
 ```
 
 Without `--partial`, the same release name fails the command, each
@@ -626,10 +636,11 @@ for (`db/` is an example's `input/db/`, beside its `output/`, and its
 ```text
 db/
   platform.yaml                          optional: the context, level 0 (Inputs.Context)
+  catalogs.yaml                          optional: the catalogs a caller fetches, the console's menu
   contracts/<contract>.schema.json       the contracts (Inputs.Contracts)
   catalog/<service>/<version>/           a package (Definition)
   projects/<project>/                    a namespace (Inputs.Namespace)
-    project.yaml                         optional: the context, level 1; its description
+    project.yaml                         optional: the context, level 1; its description, its access
     instances/<instance>/                the release <project>-<instance> (Inputs.Release)
       instance.yaml                      {service: <name>, version: <version>}: which package; claimers
       connections.yaml                   optional: the context, level 2
@@ -665,11 +676,43 @@ output/projects/<project>/instances/<project>-<instance>/   -o <dir>
   an instance's connection, the platform's under `platform/`
   ([credentials in the platform's secret
   store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
+- `catalogs.yaml`, beside `platform.yaml`, is the program's that fetches
+  the catalogs (okdp-gitops) and the console's: `repositories`, a list
+  of `{name, url, ref}`, each catalog's repository at a ref, `main` by
+  default (`treeedit.DefaultCatalogRef`), the names unique;
+  `categories`, the console's menu, in order, each `{title, icon,
+  services}`, the titles unique, each service `{name, description,
+  default, label, exposesUI}` of a catalog, listed once, `default` a
+  version of its catalog (none: the highest). No other key, at any
+  level: a former `serviceCatalog` wrapper, a service's `versions` (its
+  catalog's directories) or `repository`, are refused. The compile
+  checks it when a repository of the tree holds it, its services against
+  the catalogs (`treeedit.ParseCatalogs`, `treeedit.CheckCatalogs`).
 - `project.yaml` may describe its project, `description: <text>`, a
   string: the project's own, which is no value of the context, and which
   no instance receives (`compiler.ProjectDescription`).
+- `project.yaml` may give its people their roles, `access: {<group>:
+  viewer|editor|admin}`, the identity provider's groups
+  (`compiler.ProjectAccessKey`): absent, `okdp-project-<project>` is an
+  editor; `{}`, no group. No instance receives it; the flux and argocd
+  targets write it as the Argo CD roles of the project's AppProject and
+  the RoleBindings of its namespace to Kubernetes' `view`, `edit` and
+  `admin`, `platform.yaml` naming the platform's administrators
+  (`global.okdp.access.admins`) and the prefix the API server gives the
+  groups (`global.okdp.access.groupPrefix`)
+  ([access](specs/01_inputs_outputs.md#access)). Whoever writes
+  `project.yaml` sets it: in a repository of its own (the split
+  topology), its writers, the project's administrators.
 - `config.yaml` is the instance values: its parameters and upstream
-  values, no `connections`, no `claims`.
+  values, no `connections`, no `claims`. An instance's directory holds
+  `instance.yaml`, `config.yaml` and `connections.yaml` only: another
+  entry, a `values.yaml`, a directory, a hidden file, would be read by
+  no compile, and is refused, each named.
+- Every connection of the context, the platform's, a project's, an
+  instance's own, is checked at its declaration, referenced or not
+  ([connections](specs/01_inputs_outputs.md#connections)): one that
+  does not hold refuses the instances of its context, at
+  `connections.<name>`.
 - The release is `<project>-<instance>`, the project's directory name
   and the instance's joined by `-`, the namespace the project's: no field
   overrides them. `projects/demo/instances/webapp/` is the release
@@ -707,7 +750,7 @@ the flags changes nothing:
 
 | Part | Across repositories |
 |---|---|
-| `platform.yaml` | in one at most |
+| `platform.yaml`, `catalogs.yaml` | in one at most, each |
 | `catalog/<service>/` | in one: every version of a service from it |
 | `contracts/<contract>.schema.json` | in several, the same bytes in each: a catalog ships the contracts of its packages |
 | `projects/<project>/` | in one: the project's file and its instances |
@@ -991,6 +1034,16 @@ holds, to read it back.
   `projects/<namespace>/instances/<release>`. A caller that writes a tree
   (a control plane's git transactions) or reads what a target wrote names
   them so, rather than spelling the layout again.
+- The authority over projects, for a program that mirrors it (a control
+  plane): `compiler.ProjectAccess(file, project)`, the roles of the
+  groups of a project, `file` its `project.yaml` as written (nil: none),
+  a `map[string]compiler.AccessRole` (`AccessViewer`, `AccessEditor`,
+  `AccessAdmin`), the default `compiler.DefaultProjectGroup(project)`,
+  `okdp-project-<project>`, an editor, when it gives none, the compile's
+  errors; `compiler.PlatformAdmins(platform)`, the groups of the
+  platform's administrators of the values of `platform.yaml`, checked as
+  the compile checks them; `compiler.IsGroupName(name)`, whether a name
+  may be a group's ([access](specs/01_inputs_outputs.md#access)).
 - `compiler.CompileAll(ctx, instances)` compiles instances together, each
   a `compiler.Instance`, its `Definition` and its `Inputs` without
   `Name`, `Published`, `Claims` and `Bindings`, and its `Name`, which a
@@ -1075,14 +1128,21 @@ holds, to read it back.
   projects written, merged (a path two targets write differently fails
   it), the files of the projects kept as `previous`, the output written
   before (`fs.FS`, `nil` for none), holds them under
-  `projects/<namespace>/`, the Flux target's `Keep` set for those whose
-  `kustomization.yaml` it holds; and the projects kept, those of
+  `projects/<namespace>/`, but their platform's part, which the Flux and
+  Argo CD targets write of today's settings (their manifests, a Flux
+  HelmRelease's identity: `KeptProject.Rederived` lists them), the Flux
+  target's `Keep` set for those whose `kustomization.yaml` it holds; and
+  the projects kept, those of
   `compiler.Partial` and, for the Flux and Argo CD targets, those of a
   release name two projects of the tree share, its instances each a
   `KeptInstance` whose `Err` wraps a `compiler.ReleaseError`, and those
   that depend on them; a release of the kept output that a project
   written, or another kept output, has too fails it. Bytes only, the
-  caller writes them.
+  caller writes them, removing what it wrote before that they do not
+  hold, in the kept projects' directories too. A caller that records the
+  revision of the sources it compiled (okdp-gitops' `sources.yaml`)
+  names a kept project's instances as of the last one it wrote whole:
+  they are kept since then.
 - `compiler.Regressions(before, after)` are the instances that deployed
   in a tree before a change and do not after;
   `compiler.ReleaseTaken(tree, namespace, name)` the instance of another
@@ -1122,8 +1182,12 @@ holds, to read it back.
     platform's values of `r`, a `*treeedit.CompileError`),
     `CheckNewProject`; `ReadCatalogRepositories` (the `repositories` of
     `catalogs.yaml`, `CatalogRepositories`, each a `CatalogRepository`
-    `{Name, URL, Ref}`, its ref `main` by default), `ReadCatalog` (the
-    file, the console's menu), `ReadPlatformValues`; `DecodeProjects`
+    `{Name, URL, Ref}`, its ref `DefaultCatalogRef`, `main`, by default,
+    the whole file read strictly, `ParseCatalogs`, a `Catalogs` of
+    `Repositories` and `Categories`), `CheckCatalogs(doc, catalog)` (its
+    menu's services those of a `compiler.Catalog`, as the compile checks
+    it), `ReadCatalog` (the file, the console's menu),
+    `ReadPlatformValues`; `DecodeProjects`
     (`projects.yaml`: `ProjectsList`, each a `ProjectEntry`, its url,
     branch or path of a repository). Of an output a target wrote, an
     `fs.FS`: `ListPublished(r, output, project)` (a
@@ -1135,8 +1199,9 @@ holds, to read it back.
     `DeleteConnection`; `PutClaim`, `DeleteClaim`; `CreateProject(p,
     split)`, `UpdateProject`, `DeleteProject(name, split)` (`split`:
     `projects.yaml` edited, the project's repository the caller's);
-    `UpdateCatalog(target, change)`. Each refuses a name or an instance
-    it cannot write at once and is a `treeedit.Edit`: its `Action` and
+    `UpdateCatalog(target, change)` (a file `ParseCatalogs` refuses not
+    written). Each refuses a name or an instance it cannot write at once
+    and is a `treeedit.Edit`: its `Action` and
     `Target` name it (`deploy` `demo/web`, `create connection`
     `platform/pg`), and `Change(r)`, pure, is its change of the tree `r`
     holds, or an error wrapping `ErrNotFound` or `ErrExists`: a
@@ -1161,6 +1226,20 @@ holds, to read it back.
     with `compile` (the caller's, of the tree a `Reader` holds; nil:
     unchecked), the verdict. On an error the caller drops the
     transaction.
+  - The verdict without the write, for a form checked before it is
+    sent: `treeedit.Validate(r, edit, compile)` is `Apply` of the edit
+    on the tree in memory, `r` left as it is; a `*CompileError` its
+    field errors (`[]compiler.FieldError`, nil when the edit passes),
+    with the warnings, any other refusal its error (`ErrNotFound`,
+    `*ErrInUse`, `*ErrReleaseTaken`). `ValidateInstance(r, compile,
+    inst)` validates the write of an instance, its package and values,
+    an update when its directory is there, else a creation: its
+    parameters against its package's schema, its references resolved,
+    its claims bound, each problem at its parameter path, the compile's
+    rules only. `ValidateClaim(r, compile, project, claim)` validates a
+    named claim as the project's instances bind it, at `claims.<name>`;
+    a project without instance binds none of its claims, which none
+    checks.
 - The files as written, `treeedit`'s too, for a caller that edits them
   itself: `ParseInstance` and `EncodeInstance` (`instance.yaml`, its
   `claimers` absent, none or listed, each kept apart), `EncodeValues`,
@@ -1170,6 +1249,54 @@ holds, to read it back.
   `ReadDescription` (the `description` of `project.yaml`),
   `MergeDocument` (a document merged key by key): each in place, the
   file's head, comments and other keys kept.
+- The compile's rules, for a program that answers before it compiles
+  (a control plane), none of them written again:
+  - `compiler.FieldErrors(err)` reads the error of a compile, an
+    instance's (`TreeInstance.Err`) or a `*treeedit.CompileError`, as
+    the problems of its fields, each a `compiler.FieldError`: its
+    `Path` as the messages write it (`catalogs[1].storage`,
+    `claims.analytics`), its `Pointer` (RFC 6901, `/catalogs/1/storage`)
+    and the compile's `Message`. A violation of the parameter schema is
+    at its place (`at '/replicas': got string, want integer`), a
+    reference that does not resolve or a claim that does not bind at
+    its parameter path, a named claim at `claims.<name>`; any other
+    problem, and each of a tree that does not load, is the instance's,
+    `Path` `""`.
+  - `compiler.ConnectionRefs(schema)` lists the connection references
+    of a parameter schema as the compile finds them, through
+    `properties` and `items` (`compiler.ConnectionRef`: `Path`,
+    `catalogs[].storage` for every item of a list, `Schema`, its place,
+    `Contract`, `Provision`, `Request`, `Require`, `Required`, its
+    `Property` whole); the compile's error when one cannot be read or
+    is out of its reach ([declaring a
+    reference](specs/01_inputs_outputs.md#declaring-a-reference)).
+  - `compiler.ReadContract(contracts, name)` and `ReadContracts` read
+    the contracts as a compile reads them, its error when one cannot
+    be: a `compiler.ContractDescriptor`, its `Label`
+    (`x-okdp-contract`), `Title`, `Description`, its `Fields` in the
+    order of the file (`ContractField`: `Secret`, `Required`, `Default`,
+    `Derived`, `Condition`, its `Property` as written), `Required`,
+    its claim schema (`Claim`), the document (`Schema`) for the
+    keywords the compile does not read (`x-okdp-icon`,
+    `x-ui-widget`...).
+  - `compiler.MergeValues(layers...)` merges values layers as the
+    compile merges an instance's, Helm's `-f` (maps key by key, a list
+    replaced, a null kept); `compiler.CoalesceValues(values, defaults)`
+    coalesces values over a chart's defaults as Helm gives them to its
+    templates (a null deletes a default).
+  - `compiler.CheckConnection(contracts, project, c, platform)` checks
+    a connection of a project (`""`, the platform's) at its
+    declaration, as the compile of the tree checks every connection of
+    a context: its contract, its fields, none secret, its required
+    ones, its types, its `secretRef` against the store of the
+    platform's values; the compile's error, at `connections.<name>`.
+  - The names of the claims: `compiler.NamedClaimID(project, name)`,
+    `<project>.<name>`, the output its provider publishes for it;
+    `compiler.IsClaimID(name)`, a name of that form, DNS-1123 labels
+    joined by dots (which outputs of a provider are its claims' is its
+    compile's, `TreeInstance.Provided`); `compiler.CheckProvider(where,
+    provider)`, the form a claim or a class names its provider by. An
+    instance's release is `compiler.ReleaseName(project, instance)`.
 - `compiler.CheckReleases(results)` is what the Flux and Argo CD targets
   refuse of the release names, their objects sharing one namespace: a
   `*compiler.ReleaseError` (`Release`, `Namespaces`) per release in two
@@ -1444,6 +1571,7 @@ usage error with status 2.
 | `app: upstream.app.env must be a list` | a path of `append` given as a non-list | give a list |
 | `context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:` then `- at '/global/okdp/oidc': got boolean, want object`, `- at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'` | a platform setting the compiler reads, or a map on the way to it, of another type (`oidc: false`, `proxy: <url>`, a list for a string), or not among its values; it would otherwise read as not set. Every violation is listed | fix the platform values against `platform.schema.json`; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
 | `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/certificateIssuers': false schema` | the platform values set the former `certificateIssuers` | rename `certificateIssuers.selfSigned.name` to `tls.clusterIssuer`, the ClusterIssuer of the services' certificates; set `tls.caBundleSecret` to the Secret of the platform's CA bundle, if it has one ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
+| `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/serviceCatalog': false schema` | the platform values hold the former console menu | move its `categories` to `catalogs.yaml`, beside `platform.yaml` ([repository layout](#repository-layout)) |
 | `failing loading "<url>": no URLLoader registered for "<url>"` | a `config.schema.json`, or an upstream chart's `values.schema.json`, references a file, a URL or a `urn:` | inline the referenced schema |
 
 ### Mapping

@@ -15,7 +15,7 @@ status 1 okdp-compile --repository $WORK/tree -o $WORK/out --target flux
 status 1 okdp-compile --repository $WORK/tree -o $WORK/out --target flux --partial --report $WORK/report.json
 ! stdout .
 stderr '^error: demo/demo-web: values don''t meet'
-stderr '^error: demo: not written, an instance of it refused \(--partial\): .*out/projects/demo/ kept as it is$'
+stderr '^error: demo: not written, an instance of it refused \(--partial\): .*out/projects/demo/ kept as it is, its namespace, identity and roles of today''s settings$'
 grep 'replicas: 3' $WORK/out/projects/data/instances/data-db/instance.values.yaml
 cmp $WORK/out/projects/demo/instances/demo-web/instance.values.yaml $WORK/web-before.yaml
 exists $WORK/out/projects/demo/instances/demo-ok/helmrelease.yaml $WORK/out/projects/demo/project/namespace.yaml
@@ -39,6 +39,36 @@ status 1 okdp-compile --repository $WORK/tree -o $WORK/none --target flux --flux
 status 1 okdp-compile --repository $WORK/tree --check --partial
 stderr '^error: --check writes nothing: no --partial$'
 
+# A project kept is kept with today's settings (D-5): ops, privileged,
+# written; then its privilege revoked, an instance of it refused: its
+# instances kept, but its Namespace baseline, its identity confined
+# again, its kept HelmRelease impersonating it.
+cp $WORK/privileged.yaml $WORK/tree/platform.yaml
+mkdir $WORK/tree/projects/ops/instances/a
+cp $WORK/tree/projects/data/instances/db/instance.yaml $WORK/tree/projects/ops/instances/a/instance.yaml
+status 1 okdp-compile --repository $WORK/tree -o $WORK/out --target flux --partial
+grep 'enforce: privileged' $WORK/out/projects/ops/project/namespace.yaml
+! exists $WORK/out/projects/ops/project/service-account.yaml
+! grep 'serviceAccountName' $WORK/out/projects/ops/instances/ops-a/helmrelease.yaml
+cp $WORK/out/projects/ops/instances/ops-a/instance.values.yaml $WORK/a-before.yaml
+cp $WORK/revoked.yaml $WORK/tree/platform.yaml
+mkdir $WORK/tree/projects/ops/instances/b
+cp $WORK/tree/projects/data/instances/db/instance.yaml $WORK/tree/projects/ops/instances/b/instance.yaml
+cp $WORK/zero.yaml $WORK/tree/projects/ops/instances/b/config.yaml
+status 1 okdp-compile --repository $WORK/tree -o $WORK/out --target flux --partial
+stderr '^error: ops: not written, an instance of it refused \(--partial\): .*out/projects/ops/ kept as it is, its namespace, identity and roles of today''s settings$'
+grep 'enforce: baseline' $WORK/out/projects/ops/project/namespace.yaml
+! grep 'privileged' $WORK/out/projects/ops/project/namespace.yaml
+exists $WORK/out/projects/ops/project/service-account.yaml
+grep 'service-account.yaml' $WORK/out/projects/ops/project/kustomization.yaml
+grep 'serviceAccountName: "project-ops"' $WORK/out/projects/ops/instances/ops-a/helmrelease.yaml
+cmp $WORK/out/projects/ops/instances/ops-a/instance.values.yaml $WORK/a-before.yaml
+! exists $WORK/out/projects/ops/instances/ops-b
+
+-- privileged.yaml --
+global: {okdp: {policy: {privileged: [ops]}}}
+-- revoked.yaml --
+global: {okdp: {policy: {privileged: []}}}
 -- zero.yaml --
 replicas: 0
 -- three.yaml --

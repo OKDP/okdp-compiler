@@ -584,6 +584,40 @@ func TestUpdateCatalogKeepsWhatItDoesNotTouch(t *testing.T) {
 	if raw, err := ReadPlatformValues(s.tree); err != nil || !bytes.HasPrefix(raw, []byte("# The platform values:")) {
 		t.Fatalf("platform.yaml: %q %v", raw, err)
 	}
+	// A menu the compile would refuse is not written.
+	before := s.tree.files()[CatalogsFile]
+	_, err = s.apply(UpdateCatalog("app", func(doc map[string]any) error {
+		doc["categories"] = []any{map[string]any{"title": "Apps", "services": []any{map[string]any{"name": "app", "versions": []any{"1.0.0"}}}}}
+		return nil
+	}), nil)
+	if err == nil || !strings.Contains(err.Error(), "categories[0].services[0].versions: unknown key") || s.tree.files()[CatalogsFile] != before {
+		t.Fatalf("a menu refused: %v", err)
+	}
+}
+
+// The menu of catalogs.yaml is checked against the catalogs: a service
+// of none, a default version the service does not have.
+func TestCheckCatalogs(t *testing.T) {
+	catalog, err := compiler.LoadCatalog([]compiler.Repository{{Name: "test-charts", FS: os.DirFS(catalogFixture), Role: compiler.RoleCatalog}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ReadCatalog(newStore(t).tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckCatalogs(doc, catalog); err != nil {
+		t.Fatalf("the test tree's: %v", err)
+	}
+	doc["categories"] = []any{map[string]any{"title": "Apps", "services": []any{map[string]any{"name": "gone"}, map[string]any{"name": "app", "default": "2.0.0"}}}}
+	err = CheckCatalogs(doc, catalog)
+	if err == nil || !strings.Contains(err.Error(), `service "gone" is in no catalog`) || !strings.Contains(err.Error(), `categories[0].services[1].default: version "2.0.0" of service "app"`) {
+		t.Fatalf("got %v", err)
+	}
+	doc["serviceCatalog"] = map[string]any{}
+	if err := CheckCatalogs(doc, catalog); err == nil || !strings.Contains(err.Error(), "serviceCatalog: unknown key") {
+		t.Fatalf("a former key: %v", err)
+	}
 }
 
 func TestCatalogRepositories(t *testing.T) {
@@ -606,6 +640,8 @@ func TestCatalogRepositories(t *testing.T) {
 		"no name":      {"repositories": []any{map[string]any{"url": "u"}}},
 		"no url":       {"repositories": []any{map[string]any{"name": "a"}}},
 		"a name twice": {"repositories": []any{map[string]any{"name": "a", "url": "u"}, map[string]any{"name": "a", "url": "v"}}},
+		"a key":        {"repositories": []any{map[string]any{"name": "a", "url": "u", "branch": "b"}}},
+		"a menu":       {"categories": []any{map[string]any{"services": []any{}}}},
 	} {
 		if _, err := CatalogRepositories(doc); err == nil {
 			t.Errorf("%s: read", name)

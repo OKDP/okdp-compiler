@@ -158,3 +158,24 @@ func TestDig(t *testing.T) {
 		}
 	}
 }
+
+// A path splits into its keys and indexes, joins back, and is a JSON
+// pointer.
+func TestPathTokens(t *testing.T) {
+	for p, want := range map[string]string{
+		"":                           "",
+		"a":                          "/a",
+		"env[2].name":                "/env/2/name",
+		`config["spark.ui.filters"]`: "/config/spark.ui.filters",
+		`annotations["a.b/c"].x`:     "/annotations/a.b~1c/x",
+		"[0]":                        "/0",
+	} {
+		tokens := Split(p)
+		if got := Pointer(tokens); got != want {
+			t.Errorf("Pointer(Split(%q)) = %q, want %q", p, got, want)
+		}
+		if got := Join(tokens); got != p {
+			t.Errorf("Join(Split(%q)) = %q", p, got)
+		}
+	}
+}

@@ -359,6 +359,24 @@ instance's own, a layer of a level of its own, above its project's
 ([Levels](#levels)). A level adds connections, it changes none of a lower
 level's: an instance does not redefine the platform's connections.
 
+Every connection of an instance's context is checked at its declaration
+when the instances compile together (`CompileAll`), referenced or not,
+as a reference to it would check it: its name a DNS-1123 label, an
+object of a `contract` the contracts hold, then its fields, its
+`secretRef`, its `required` fields after completion, its types, `{{`
+([Checks](#checks)). Each that fails refuses the instance, every one at
+once, at `connections.<name>`, before its claims bind: a typo in a
+connection no instance references yet is reported where it is written,
+a project's refusing its project's instances, the platform's every
+instance (`compiler.CheckConnection` checks one before it is written).
+
+```
+connections.pg (connection "pg"): field "dbName" is required by the database contract
+connections.lake: connection "lake": field "region" is not part of the s3 contract
+connections.Bad_Name: a connection's name is a DNS-1123 label, lowercase letters, digits and "-", 63 characters at most
+connections.ext: contract is required, the contract of the connection
+```
+
 ```yaml
 # examples/03_full/input/db/projects/demo/instances/workspace/connections.yaml,
 # level 2: the instance's own
@@ -394,7 +412,13 @@ no reference.
 The references are found by walking the schema along the parameters, through
 `properties` (the keys present in the values) and `items` (every item of a
 list, with the one item schema). `$ref`, `allOf`, `anyOf`, `oneOf`,
-`additionalProperties` and `patternProperties` are not followed.
+`additionalProperties` and `patternProperties` are not followed: a
+reference under one of them, or under any keyword but `properties` and an
+object `items` from the root (`$defs`, `definitions`, `if`, a tuple's
+`items`), would be read by no compile, and fails stage 1, at its place:
+`config.schema.json: <place>: x-okdp-connection-ref out of the compile's
+reach: ...` (`properties.a.anyOf[0]`). `compiler.ConnectionRefs` lists
+the references of a schema as the compile finds them.
 
 | Schema | Parameters | Path |
 |---|---|---|
@@ -794,9 +818,11 @@ the name of the contract is the name of the file. A tree's are the
 `contracts/` of its repositories ([repository
 layout](../01_usage.md#repository-layout)). A contract is read by each
 reference and each `provides` item that names it: a compile that reads
-none needs no contracts, an empty file system. A file that is missing,
-cannot be read, is not JSON, not an object or not a valid JSON Schema, or
-whose claim schema is not:
+none needs no contracts, an empty file system; a compile of the
+instances together (`CompileAll`) reads the contract of every connection
+of their contexts besides ([Connections](#connections)). A file that is
+missing, cannot be read, is not JSON, not an object or not a valid JSON
+Schema, or whose claim schema is not:
 `the <contract> contract cannot be read: <contract>.schema.json: <cause>`,
 `<cause>` `file does not exist` for a contract no repository has,
 `x-okdp-claim: <cause>` for its claim schema.
@@ -1170,6 +1196,9 @@ not, is the platform's, set at level 0: a project's layer sets
 | `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
 | `policy.upstream.deny` | key names the upstream values of the other projects' instances set nowhere, beside the compiler's ([upstream policy](#upstream-policy)) |
 | `policy.upstream.registries` | the registries the images of the other projects' upstream values come from, each a host, its port and a path prefix optional; unset, the images are not checked ([upstream policy](#upstream-policy)) |
+| `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them; the compiler writes nothing of them, the platform's bootstrap binds them once, a program that mirrors the platform's authority reads them (`compiler.PlatformAdmins`) ([access](#access)) |
+| `access.groupPrefix` | `""` by default: the prefix the Kubernetes API server gives the groups of its OIDC users (`--oidc-groups-prefix`), which the RoleBindings of the projects' groups name them with ([access](#access)) |
+| `controlPlane.serviceAccount` | no default: the identity of the optional control plane, `{namespace, name}`, a DNS label and a DNS subdomain, both required; the [targets](#the-projects-manifests) bind it in each project's namespace to what it needs there (`Result.ControlPlane`); absent, the platform has no control plane, and nothing is written |
 
 Every compile checks `global` against the schema, in every mode, before
 the [connections](#connections) and the [requirements](#requirements), and
@@ -1179,9 +1208,12 @@ is not a map, rather than read as not set: `oidc: false` would leave OIDC
 enabled, `proxy: <url>` give no proxy environment. A former setting is
 refused, renamed: `certificateIssuers`, whose `selfSigned.name` is
 `tls.clusterIssuer` (`- at '/global/okdp/certificateIssuers': false
-schema`). A `null` is read as in a chart's values ([Layers and
-nulls](#layers-and-nulls)): over a default, it deletes the setting
-(`oidc.enabled: null` turns OIDC off, `platform.oidc.enabled` absent;
+schema`); `serviceCatalog`, the console's menu, now `catalogs.yaml`
+beside `platform.yaml` ([repository
+layout](../01_usage.md#repository-layout)). A `null` is read as in a
+chart's values ([Layers and nulls](#layers-and-nulls)): over a default,
+it deletes the setting (`oidc.enabled: null` turns OIDC off,
+`platform.oidc.enabled` absent;
 `oidc.clientProvisioning: null` leaves no mode); where there is no
 default, it is refused (`ingress: null`). An empty string is a value
 (`oidc.scope: ""`). The other keys of `global.okdp` are not checked, but
@@ -2300,7 +2332,9 @@ names it by, as by its release, and which names its outputs and its
 claims, its release when empty ([providers](#providers)). Two instances
 of a namespace of one release, or of one name, are refused, each:
 `release "<release>" is given twice in namespace "<namespace>"`,
-`instance name "<name>" is given twice in namespace "<namespace>"`. It
+`instance name "<name>" is given twice in namespace "<namespace>"`; so
+is an instance a connection of whose context does not hold at its
+declaration, referenced or not ([connections](#connections)). It
 gives one `compiler.Outcome` per instance, in their order: its `Result`,
 or, `nil`, why it is refused (`Err`), and its claims, bound (`Claims`).
 First each [claim](#claims) is bound to its provider, then the instances
@@ -2357,6 +2391,7 @@ instance that exists and provides it, is the
 | Case | Error |
 |---|---|
 | a release given twice in a namespace, each time | `release "<release>" is given twice in namespace "<namespace>"` |
+| a connection of its context that does not hold at its declaration, each | `connections.<name>: ...`, as a reference to it would fail ([connections](#connections)) |
 | an output another instance of the namespace publishes too | `provides "<name>" (<contract>): <instance> publishes an output of that contract and name too, a reference to it would not know which`; `<instance>, <instance> publish`, several |
 | two objects that write one Secret of a namespace, each instance that holds one | `Secret "<name>" of namespace <namespace> is written by <kind> <object> of <release> and <kind> <object> of <release>: two objects may not write one Secret`, every writer in order, ` (<n> times)` after one written several times; `the key <key> (property <property>) of the secret store of namespace <namespace> is written by ...` for PushSecrets |
 | a reference to an output nobody publishes, instances of the namespace refused | its [connection error](#connection-errors), then ` (<instance> does not compile either: what it publishes is unknown)`, or ` (<instance>, <instance> do not compile either: what they publish is unknown)`, in release order, a provider of another namespace `<namespace>/<release>` |
@@ -2409,6 +2444,8 @@ projects/
     project/                  flux, argocd: the project's own manifests
       namespace.yaml          the Namespace, with its Pod Security labels
       secret-store.yaml       the platform's secret store in it
+      access.yaml             the RoleBindings of the project's groups
+      control-plane.yaml      the control plane's Role and RoleBinding
       service-account.yaml    flux: the identity of its releases
       kustomization.yaml      flux: these files
       appproject.yaml         argocd: the AppProject of its Applications
@@ -2508,15 +2545,19 @@ the engine's own identity.
 | `namespace.yaml` | the Namespace, with the [Pod Security Admission](https://kubernetes.io/docs/concepts/security/pod-security-admission/) labels `pod-security.kubernetes.io/enforce: baseline`, `audit: restricted` and `warn: restricted`; `enforce: privileged` for one of the platform's own projects. Kept by both engines when its project goes, its volumes with it, until an administrator deletes it: labelled `kustomize.toolkit.fluxcd.io/prune: disabled` (Flux) and annotated `argocd.argoproj.io/sync-options: Delete=false` (Argo CD), whatever the target |
 | `secret-store.yaml` | when the platform names the provider of its secret store (`global.okdp.secrets.provider`, `Result.SecretStore`): the ServiceAccount `global.okdp.secrets.serviceAccount` (`okdp-secrets`), its token not mounted (External Secrets requests one), and the `SecretStore` named `global.okdp.secrets.store` (`external-secrets.io/v1`), its `spec.provider` as the platform writes it, both in the namespace |
 | `service-account.yaml` | `flux`, a project that is not one of the platform's own: the ServiceAccount `project-<namespace>` in `okdp-releases`, which helm-controller impersonates for the project's releases (`serviceAccountName`), the Role `okdp-project` in the namespace, every verb on every resource of every API group (the boundary is the namespace, not the kinds), and its RoleBinding: a cluster-scoped object, or one of another namespace, is refused by the API server |
+| `access.yaml` | when a group of the project has a role ([access](#access)): the RoleBindings `okdp-access-viewer`, `okdp-access-editor` and `okdp-access-admin` in the namespace, each of a role that has groups, to Kubernetes' aggregated ClusterRole `view`, `edit` or `admin`, its subjects the groups of the role, `kind: Group`, named `global.okdp.access.groupPrefix` and the group's name |
+| `control-plane.yaml` | when the platform names the control plane's identity (`global.okdp.controlPlane.serviceAccount`, `Result.ControlPlane`), for every project, privileged or not: the Role `okdp-control-plane` in the namespace, what okdp-control-plane-server does there and nothing more ([the control plane's role](#the-control-planes-role)), and the RoleBinding `okdp-control-plane` of the ServiceAccount to it |
 | `kustomization.yaml` | `flux`: these files, without a `namespace`: each carries its own |
-| `appproject.yaml` | `argocd`: the AppProject `project-<namespace>` in `argocd`, `sourceRepos` the `RepoURL`, its destination the namespace of `https://kubernetes.default.svc` and `clusterResourceWhitelist: []`, no cluster-scoped resource; for one of the platform's own projects, every namespace (`"*"`) and every cluster-scoped resource (`{group: "*", kind: "*"}`); a `description` |
+| `appproject.yaml` | `argocd`: the AppProject `project-<namespace>` in `argocd`, `sourceRepos` the `RepoURL`, its destination the namespace of `https://kubernetes.default.svc` and `clusterResourceWhitelist: []`, no cluster-scoped resource; for one of the platform's own projects, every namespace (`"*"`) and every cluster-scoped resource (`{group: "*", kind: "*"}`); a `description`; the `roles` of the project's groups ([access](#access)) |
 
 One tree, two engines: a caller may write the files of both deployer
 targets into one tree (okdp-gitops does), each engine reading its own.
 Every file both write is byte for byte the same, the umbrella charts and,
-in `project/`, `namespace.yaml` and `secret-store.yaml` (a caller
-refuses a path the two write differently); only `appproject.yaml` is
-Argo CD's, and `kustomization.yaml` and `service-account.yaml` Flux's.
+in `project/`, `namespace.yaml`, `secret-store.yaml`, `access.yaml` and
+`control-plane.yaml` (a caller refuses a path the two write
+differently); only
+`appproject.yaml` is Argo CD's, and `kustomization.yaml` and
+`service-account.yaml` Flux's.
 
 The platform's entry point applies them before the instances: Flux
 through the root Kustomization, which lists each project's directory,
@@ -2527,8 +2568,13 @@ Argo CD with an ApplicationSet whose git generator finds the directories
 `<PathPrefix>/projects/*/project`, one Application each under the entry
 point's own AppProject, which admits Namespaces, AppProjects in `argocd`
 and the secret store, as the Applications of the instances are under the
-project's. Its source is a directory, `directory: {include:
-'{namespace.yaml,secret-store.yaml,appproject.yaml}'}`: in a tree that
+project's, the RoleBindings of the project's groups to `view`, `edit`
+and `admin` in its namespace, and the control plane's Role and
+RoleBinding (the entry point's identity holds what they grant: the API
+server lets no one grant what it lacks). Its source is a directory,
+`directory: {include:
+'{namespace.yaml,secret-store.yaml,access.yaml,control-plane.yaml,appproject.yaml}'}`:
+in a tree that
 holds the Flux files too, Argo CD would otherwise build the directory
 with its `kustomization.yaml`, which lists no AppProject and Flux's
 identity (an instance's Application is a Helm source, which its
@@ -2551,7 +2597,7 @@ deployer sets up once is not generated:
   but the Applications (an ApplicationSet's git generator finds the
   namespaces alike, the directories `<PathPrefix>/projects/*`); the
   ApplicationSet of the projects' manifests, over
-  `<PathPrefix>/projects/*/project`, a directory source of its three files,
+  `<PathPrefix>/projects/*/project`, a directory source of its files,
   and the AppProject it is under; and
   the health of an Application in `argocd-cm`
   (`resource.customizations.health.argoproj.io_Application`, its status's
@@ -2571,6 +2617,104 @@ every reconcile.
 | no `RepoURL` | `ArgoCD.RepoURL is required` |
 | a `RepoURL` or `Revision` with a quote, a backslash or a newline | `ArgoCD.RepoURL "<url>": holds a quote, a backslash or a newline`; `ArgoCD.Revision` alike |
 | one release name in two namespaces | `release "<release>" is in namespaces "<a>" and "<b>": the HelmReleases of okdp-releases need distinct names` (flux); `the Applications of argocd need distinct names` (argocd); `compiler.TreeFiles` keeps the projects of it instead, each instance its error (`KeptInstance.Err`) |
+
+### Access
+
+Who sees, operates and administers a project is decided by the platform
+and the project, without a control plane: the identity provider's
+groups hold the people, and the targets write their roles into each
+project's manifests, which Argo CD and the API server enforce. A
+control plane, optional, mirrors the same authority (it reads it with
+`compiler.ProjectAccess` and `compiler.PlatformAdmins`), never adds a
+boundary only it enforces.
+
+```yaml
+# platform.yaml, level 0
+global:
+  okdp:
+    access:
+      admins: [platform_admin]   # the platform's administrators
+      groupPrefix: "oidc:"       # the API server's --oidc-groups-prefix
+# projects/demo/project.yaml, level 1
+access:
+  okdp-project-demo: editor
+  demo-leads: admin
+  analysts: viewer
+```
+
+A project's file gives `access`, a map of group names to a role,
+`viewer`, `editor` or `admin`, read from the project's file alone (the
+context at level 1, `Result.Access`): absent or `null`, the default,
+`okdp-project-<namespace>: editor` (`compiler.DefaultProjectGroup`);
+`{}`, no group has a role, the platform's administrators alone reach
+the project. No instance receives it: it is no value of the context. A
+group's name is the one the identity provider's tokens give in their
+`groups` claim (`compiler.IsGroupName`): a letter or a digit, then
+letters, digits, `.`, `_`, `@`, `:` and `-`, 255 characters at most. No
+`/`: a Keycloak group by its name, its groups mapper's *Full group path*
+off, so that a name means one group; no space nor comma, which an Argo
+CD policy line would read otherwise.
+
+| Role | Argo CD, the AppProject `project-<namespace>` | Kubernetes, the namespace |
+|---|---|---|
+| `viewer` | `applications, get` | the ClusterRole `view` |
+| `editor` | a viewer's, `applications, sync`, `applications, action/*`, `logs, get`; no `exec` | `edit` |
+| `admin` | an editor's, `applications, delete`, `applications, override` | `admin` |
+
+The AppProject's `roles`, one per role that has groups, least first,
+named after the role, each policy `p, proj:project-<namespace>:<role>,
+<resource>, <action>, project-<namespace>/*, allow`, its `groups` those
+of the role as the tokens give them; the RoleBindings of
+`access.yaml`, their subjects the same groups, each named
+`global.okdp.access.groupPrefix` and the group's name, as the API
+server names the groups of its OIDC users (`oidc:analysts` for
+`oidc:`). Kubernetes' `edit` lets a pod be exec'ed into and the
+namespace's Secrets be read, Argo CD's editor not: the cluster's roles
+are the built-in ones. A privileged project's groups have the same
+roles, in its namespace and its AppProject.
+
+The platform's administrators, `global.okdp.access.admins`, are bound
+once, by the platform's bootstrap: Argo CD's `role:admin`, the cluster's
+administration. The compiler checks them against the platform's schema
+and writes nothing of them.
+
+| Case | Error |
+|---|---|
+| `access` that is not a map | `the project's file (level 1): access: the roles of the project's groups, a map of group names to viewer, editor or admin, got ...`, every instance of the project refused |
+| a group's name that is not one | `access.<group>: a group name, a letter or a digit then letters, digits, ".", "_", "@", ":" or "-", 255 characters at most (no "/": the group's name, not its path)` |
+| a role that is not one | `access.<group>: a role, viewer, editor or admin, got "<value>"` |
+| `access` in `platform.yaml` or `connections.yaml` | `context layer <n> (level <l>): access: the roles of a project's groups, its file's, of level 1 only` |
+| `access` in `config.yaml` | `values layer <n>: access is the project's, its file's (the context at level 1)` |
+| `global.okdp.access` in `project.yaml` | `global.okdp.access: a platform setting, level 0 only` |
+
+### The control plane's role
+
+The control plane, okdp-control-plane-server, is optional; when the
+platform installs it, `global.okdp.controlPlane.serviceAccount` names
+its ServiceAccount, and the targets give it, in each project's
+namespace, the Role `okdp-control-plane`, what the server does there
+(`target.ControlPlaneRules`):
+
+| API group | Resources | Verbs | What for |
+|---|---|---|---|
+| `""` | `secrets` | `get`, `create`, `update`, `delete` | the credentials of its connections and of its secret stores, by name: never listed |
+| `""` | `pods` | `get`, `list`, `delete` | an instance's status; a user's pods left by an instance deleted |
+| `""` | `pods/log` | `get` | an instance's logs, a SparkApplication's driver's |
+| `""` | `events` | `list` | why an instance is not ready |
+| `""` | `persistentvolumeclaims` | `get`, `list`, `delete` | a user's volumes left by an instance deleted |
+| `metrics.k8s.io` | `pods` | `list` | the resource usage of its pods |
+| `external-secrets.io` | `secretstores`, `externalsecrets` | `get`, `list`, `create`, `update`, `delete` | the project's secret stores and the secrets read from them |
+| `sparkoperator.k8s.io` | `sparkapplications` | `get`, `list`, `watch`, `create`, `update`, `delete` | the Spark workloads |
+
+So its cluster-wide role keeps `namespaces: get, create` alone, to
+create a project's namespace before the engine applies its manifests;
+what it reads outside the projects is its own (the engines' objects,
+Applications in `argocd` or HelmReleases in `okdp-releases`, read only;
+its own credentials in its namespace; the SparkApplication CRD) and is
+granted by its chart, not compiled. A Secret of a namespace that is no
+project's, the engines', the store's, the identity provider's, is
+beyond its reach. A privileged project's namespace has the same Role:
+the server does there what it does elsewhere.
 
 ## Claims
 

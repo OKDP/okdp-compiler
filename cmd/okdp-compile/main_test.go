@@ -185,7 +185,7 @@ func TestWriteTree(t *testing.T) {
 		}
 	}
 	files := map[string][]byte{"projects/demo/instances/a/Chart.yaml": []byte("new\n"), markerFile: []byte(marker)}
-	if err := writeTree(dir, files, nil); err != nil {
+	if err := writeTree(dir, files); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := tree(t, dir), map[string]string{filepath.FromSlash("projects/demo/instances/a/Chart.yaml"): "new\n", filepath.FromSlash(markerFile): marker}; !maps.Equal(got, want) {
@@ -214,7 +214,7 @@ func TestWriteTree(t *testing.T) {
 		}
 	}
 	files = map[string][]byte{"projects/data/secret": []byte("overwritten\n"), "projects/demo/kustomization.yaml": []byte("demo\n"), "projects/solo/instances/a/Chart.yaml": []byte("solo\n"), markerFile: []byte(marker)}
-	if err := writeTree(dir, files, nil); err != nil {
+	if err := writeTree(dir, files); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{}
@@ -237,7 +237,7 @@ func TestWriteTree(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "projects"), filepath.Join(linked, "projects")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeTree(linked, map[string][]byte{"projects/demo/kustomization.yaml": []byte("linked\n")}, nil); err == nil {
+	if err := writeTree(linked, map[string][]byte{"projects/demo/kustomization.yaml": []byte("linked\n")}); err == nil {
 		t.Error("written through projects/, a link")
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "projects", "demo", "kustomization.yaml")); err != nil || string(b) != "demo\n" {

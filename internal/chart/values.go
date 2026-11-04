@@ -70,6 +70,10 @@ func coalesceValues(defaults, user M) M {
 	return coalesce(defaults, user, true)
 }
 
+// Coalesce: coalesceValues, for a caller that shows the values a chart's
+// templates see.
+func Coalesce(defaults, user M) M { return coalesceValues(defaults, user) }
+
 // coalesce: coalesceValues at any depth, Helm's coalesceTablesFullKey and
 // cleanNilValues below the top level (top false), where a user null over a
 // null default stays.

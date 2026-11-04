@@ -73,9 +73,13 @@ providers, consenting for them.
 | may | set any key of `global.okdp`, template code in its values | not checked | |
 | may | reserve namespaces no project may have, its own components' (`policy.reserved`), a reservation winning over `policy.privileged` | `policy.go: checkPlatformNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/context/0/reserved-namespace.yaml`, `reserved-and-privileged.yaml`, `testdata/cli/policy.txtar`, `TestCheckProjectName` |
 | may | name the platform's own projects, `policy.privileged` | `policy.go: privileged` | `testdata/cli/policy.txtar` (a privileged project's ClusterRole written) |
+| may | name its administrators' groups and the API server's group prefix (`access`): the bootstrap binds the administrators, the compiler writes nothing of them | `platform.schema.json`, `access.go: PlatformAdmins` | `TestPlatformAdmins`, `TestAccessCompile` |
+| may | name the control plane's identity (`controlPlane.serviceAccount`), bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | `target.ControlPlane` | `TestControlPlane`, `TestControlPlaneSetting` |
 | may | give a connection of any key of the store, `platform/<key>` | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
 | may | route any namespace to a provider of any namespace (a class) | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | `testdata/context/0/http-chart-repository.yaml` |
+| may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (the menu is `catalogs.yaml`'s), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
+| may not | a `catalogs.yaml` the compile does not read: an unknown key, at any level, a value of another type, a catalog or a category named twice, a service listed twice, of no catalog, or of a default version its catalog lacks | `repository/catalogs.go: ParseCatalogs`, `checkCatalogs`; `treeedit.ReadCatalogRepositories`, `UpdateCatalog`, `CheckCatalogs` | `TestParseCatalogs`, `TestLoadCatalogsFile`, `TestCheckCatalogs` |
 | may not | `{{` in a connection or in upstream values | `connections.go: resolver.resolve`, `chart/merge.go: applyUpstream` (`chart.NoTemplate`) | `TestResolveTemplate` |
 | may not | upstream values the policy denies, for a project that is not privileged | `policy.go: upstreamCheck` | `testdata/context/0/unlisted-registry.yaml` |
 
@@ -90,6 +94,9 @@ values for its instances, and its instances' directories are its own.
 | may | classes of its own, and the default class of a contract the platform leaves without one (`global.okdp.provisioning`) | `layers.go: platformOnly` | `examples/04_claims` (`project.yaml`) |
 | may | connections and named claims of its own | `layers.go: contextLayers` | `examples/03_full`, `examples/04_claims` |
 | may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
+| may | give the identity provider's groups a role within the project, `access` (`viewer`, `editor`, `admin`; `okdp-project-<namespace>` an editor by default): a project team gets exactly its roles, those of its AppProject and of its namespace, nothing of another project's | `access.go: ParseAccess`, `target.Access`, `argocd.Policies` | `TestAccessCompile`, `TestAccess`, `testdata/targets/<target>/projects/demo/project/` |
+| may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three; nor set it from another level than its file's (the platform's, an instance's `connections.yaml` or `config.yaml`) | `access.go: ParseAccess`, `layers.go: contextLayers`, `valuesLayers` | `TestParseAccess`, `TestAccessCompile` |
+| may not | the platform's administrators or the API server's group prefix (`global.okdp.access`) | `layers.go: platformOnly` | `TestAccessCompile` |
 | may not | any other key of `global.okdp`, known to the compiler or not, set by the platform or not: the chart of the OAuth clients, where they register, the ingress, TLS, the proxy, the store, the policy (making itself privileged) | `layers.go: platformOnly` | `testdata/context/1/sets-platform-charts.yaml`, `sets-platform-oidc.yaml`, `sets-platform-ingress.yaml`, `sets-platform-tls.yaml`, `sets-platform-proxy.yaml`, `sets-platform-secrets.yaml`, `sets-platform-policy.yaml`, `sets-unknown-platform-key.yaml` |
 | may not | change a value, a connection, a class or a default class of a lower level | `layers.go: contextLayers` (`chart.Overlap`) | `testdata/context/1/redefines-platform-connection.yaml`, `redefines-platform-class.yaml` |
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `testdata/context/1/template-code.yaml` |
@@ -116,12 +123,14 @@ and, a provider, its `claimers`.
 | may not | `global` but the keys the parameter schema declares, never `okdp` | `layers.go: valuesLayers` | `testdata/instance-sets-global.yaml` |
 | may not | `connections` or `claims` in `config.yaml` | `layers.go: valuesLayers` | `testdata/instance-sets-connections.yaml`, `instance-sets-claims.yaml` |
 | may not | anything but `connections` in `connections.yaml` | `repository.go: tree.instance` | `TestLoadErrors` |
+| may not | a file in its directory but `instance.yaml`, `config.yaml` and `connections.yaml` (a `values.yaml` no compile reads) | `repository.go: instanceFiles` | `TestInstanceFiles` (`instance_test.go`), `testdata/cli/layout.txtar` |
 | may not | template code, in a key or a string | `layers.go: valuesLayers` (`chart.NoTemplate`) | `testdata/template-code.yaml` |
 | may not | a parameter the schema refuses | `chart.Parameters` | `testdata/schema-violation.yaml` |
 | may not | `global` or a path its package protects in upstream values | `chart/merge.go: applyUpstream` | `testdata/protected-upstream.yaml` |
 | may not | a key of a pod's privileges, security context, identity, containers or objects in upstream values, in a string read as YAML too | `policy.go: upstreamCheck` | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml` |
 | may not | an image of none of the platform's registries | `policy.go: upstreamCheck` | `testdata/context/0/unlisted-registry.yaml` |
 | may not | a connection of another contract, a field the contract does not declare, a secret field | `connections.go: resolver.resolve`, `contract.fields` | `testdata/context/2/wrong-contract.yaml`, `unknown-field.yaml`, `secret-in-connection.yaml` |
+| may not | a connection that does not hold at its declaration, referenced or not, its own or its project's (a name, a contract, a field, a required field, a type, a `secretRef`) | `connections.go: declaredConnections`, `namespace.go: CompileAll` | `TestCompileAllDeclaredConnections`, `testdata/cli/layout.txtar` |
 | may not | a store key outside `<project>/` | `connections.go: storeSecret` | `testdata/context/2/remote-key-of-another-namespace.yaml` |
 
 ## A catalog author
@@ -151,6 +160,7 @@ which an instance's list replaces.
 | may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `chart.FinalValues` | `TestDcrCompile` |
 | may not | an OAuth client's Secret that is not the release's, `<release>-...` | `oidc.go: oidcClients` | `testdata/cli/oidc.txtar` |
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
+| may not | a connection reference out of the compile's reach (under `allOf`, `$defs`, `additionalProperties`...), which a reader of the schema, a console, would take for one the compile resolves and checks | `connections.go: requirements` (`schemaRefs`) | `TestRequirementsOutOfReach` |
 | may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
 | may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store | `namespace.go: tree.refuseSecretTargets` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
 | may not | expressions past the cost limit, a host function's call counted by the bytes it reads and writes, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions`, `hostCost` | `testdata/cli/limits.txtar`, `TestHostCostBytes` |
@@ -168,6 +178,8 @@ manifests of `projects/<namespace>/project/`
 | Namespace | Pod Security Admission `enforce: baseline`, `audit` and `warn: restricted` | `enforce: privileged` |
 | Flux | helm-controller impersonates `project-<namespace>` of `okdp-releases`, bound to a Role of every verb on every resource of the namespace only | helm-controller's own identity |
 | Argo CD | the AppProject `project-<namespace>`: the tree's repository, the namespace, no cluster-scoped resource | every namespace, every cluster-scoped resource |
+| People | the roles of its groups (`access`): Argo CD roles of its AppProject, its Applications only, no `exec`; RoleBindings of its namespace to `view`, `edit`, `admin` | the same |
+| Control plane | when the platform names its identity (`controlPlane.serviceAccount`): the Role `okdp-control-plane` of the namespace, what the server does there, Secrets by name and never listed | the same |
 | Kept | the Namespace when the project goes (Flux's prune label, Argo CD's `Delete=false`); the objects Helm keeps, Argo CD's `Prune=false,Delete=false` (`keep.go: keepSynced`) | the same |
 
 A chart that writes another namespace or a ClusterRole is refused by
@@ -255,6 +267,7 @@ the tree it reads:
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Validate` | `testdata/cli/errors.txtar` |
 | may not | have one project's failure keep the others from deploying (`--partial`), a release name it shares with another project among them | `compiler.Partial` (`internal/tree/partial.go`), `compiler.TreeFiles` (`internal/output`) | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `TestAReleaseCollisionKeepsItsProjects` |
 | may not | make `--partial` read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | `openDir` of `--output`, `compiler.TreeFiles` | `testdata/cli/kept.txtar` |
+| may not | keep a privilege revoked, a role taken back or a policy tightened by keeping one instance of a project refused (`--partial`): the kept project's Namespace, identity, AppProject, RoleBindings and Flux HelmReleases are of today's settings, its instances kept applied with them | `output.go: rederive`, `target.Keeper` (`flux.Target.Kept`, `argocd.Target.Kept`), `okdp.ProjectOf` | `testdata/cli/partial.txtar` (`ops`), `TestPartialRederives`, `TestFilesRederive`, `TestKept` |
 
 A control plane edits the tree with package `treeedit`, okdp-gitops
 committing each edit: whatever the API in front of it, an edit holds
@@ -308,6 +321,13 @@ these lines.
   refuses only a project of that name. Likewise a namespace of the
   platform's components that `policy.reserved` does not list: the
   compiler knows Kubernetes', the engines' and the store's only.
+- **Who changes a project's access.** `access` is in `project.yaml`:
+  whoever writes it gives the roles, its repository's writers (the
+  split topology, the project's administrators), every writer of a
+  shared repository. The compiler names the groups; the identity
+  provider decides who is in them, the API server's OIDC settings and
+  Argo CD's how the groups claim reaches them, and the bootstrap binds
+  the platform's administrators.
 - **Consent is in the provider's own file.** The `claimers` of a
   provider's `instance.yaml` are written by whoever writes that
   instance's directory, in a shared repository any of its writers.

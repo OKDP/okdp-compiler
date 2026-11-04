@@ -88,7 +88,7 @@ func main() {
 	flag.DurationVar(&o.timeout, "timeout", defaultTimeout, "how long the compile may take, every instance together, past which nothing is written; 0: no limit")
 	flag.StringVar(&o.report, "report", "", "write a JSON report, to the file, or stdout for -, even with --check and when the compile fails: each instance, its namespace, instance, release, service, version, privileged, status (compiled, refused or skipped), error, warnings, dependencies, claims and charts, and the tree's errors")
 	flag.BoolVar(&o.allowPlainSecrets, "allow-plain-secrets", false, "accept credentials written in clear (Inputs.AllowPlainSecrets of every instance): a provides secret without generate, a Secret of the objects with data or stringData; refused without it, the output being committed to the deployments repository")
-	flag.BoolVar(&o.partial, "partial", false, "write the projects whose instances all compile, each refusal printed, and keep what <output> holds of the others, and of the projects of a release name two namespaces share (--target flux and argocd); status 1 all the same; a failure of the tree (an option, a repository, the target) writes nothing")
+	flag.BoolVar(&o.partial, "partial", false, "write the projects whose instances all compile, each refusal printed, and keep what <output> holds of the others' instances, their manifests and identity of today's settings, and of the projects of a release name two namespaces share (--target flux and argocd); status 1 all the same; a failure of the tree (an option, a repository, the target) writes nothing")
 	flag.BoolVar(&o.force, "force", false, "write into an <output>/projects/ that okdp-compile did not write (no "+markerFile+"), removing from it every file it does not write")
 	flag.Parse()
 	if o.check && o.charts == "" {
@@ -172,10 +172,11 @@ func checkReport(o options) error {
 // --check; a release name two namespaces share (--target flux and
 // argocd), error: <namespace>/<release>: release ... need distinct
 // names, an instance each, fails it too; but with --partial, the projects
-// compiler.TreeFiles writes are, those it keeps left as the output has
-// them (writeTree's keep), read through openDir for the target's files of
-// them (the root Kustomization's entry, the releases they hold), each
-// printed, error: <namespace>: not written, ..., after the problems that
+// compiler.TreeFiles writes are, those it keeps written as the output has
+// them, read through openDir for the target's files of them (the root
+// Kustomization's entry, the releases they hold), but their manifests and
+// their instances' identity, of today's settings, each printed, error:
+// <namespace>: not written, ..., after the problems that
 // keep them, a refusal, a problem of the graph of its own, a release name
 // two namespaces share, or error: <namespace>/<release>: it depends on
 // <namespace>/<release>, of the project <namespace>, whose output is
@@ -316,12 +317,12 @@ func compileTree(o options, rep *report) error {
 		return nil
 	}
 	files[markerFile] = []byte(marker)
-	if err := writeTree(o.output, files, keep); err != nil {
+	if err := writeTree(o.output, files); err != nil {
 		return err
 	}
 	rep.Written = true
 	for _, ns := range keep {
-		fmt.Fprintf(os.Stderr, "error: %s: not written, an instance of it refused (--partial): %s kept as it is\n", ns, filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)))+string(filepath.Separator))
+		fmt.Fprintf(os.Stderr, "error: %s: not written, an instance of it refused (--partial): %s kept as it is, its namespace, identity and roles of today's settings\n", ns, filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)))+string(filepath.Separator))
 		rep.notWritten(ns)
 	}
 	for _, ti := range t.Instances {
@@ -516,10 +517,11 @@ func checkOutput(o options) error {
 // itself, not what it points to, so that no file of the command lands
 // through one, even in dir; a projects/ that is a link is refused. Then
 // every file under dir/projects/ that is not one of files removed, and
-// the directories left empty: the command owns projects/; but the
-// directories of the projects of keep, not written (--partial), which
-// stay as they are.
-func writeTree(dir string, files map[string][]byte, keep []string) error {
+// the directories left empty: the command owns projects/. A project kept
+// (--partial) is in files whole, as compiler.TreeFiles gives it: what the
+// output held of it, but a manifest of before that today's settings do
+// not write, removed.
+func writeTree(dir string, files map[string][]byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -549,8 +551,6 @@ func writeTree(dir string, files map[string][]byte, keep []string) error {
 		switch {
 		case err != nil:
 			return err
-		case e.IsDir() && slices.Contains(keep, path.Base(p)) && path.Dir(p) == "projects":
-			return fs.SkipDir
 		case e.IsDir():
 			dirs = append(dirs, p)
 			return nil

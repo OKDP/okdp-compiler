@@ -16,3 +16,13 @@ spec:
   clusterResourceWhitelist:
     - group: "*"
       kind: "*"
+  roles:
+    - name: editor
+      description: "The project's editors (project.yaml access)"
+      policies:
+        - p, proj:project-data:editor, applications, get, project-data/*, allow
+        - p, proj:project-data:editor, applications, sync, project-data/*, allow
+        - p, proj:project-data:editor, applications, action/*, project-data/*, allow
+        - p, proj:project-data:editor, logs, get, project-data/*, allow
+      groups:
+        - "okdp-project-data"

@@ -4,7 +4,7 @@
 symlink $WORK/tree/projects/demo/instances/web/config.yaml -> $WORK/secret.yaml
 status 1 okdp-compile --repository $WORK/tree -o $WORK/files
 ! stdout .
-stderr '^error: .*tree/projects/demo/instances/web/config.yaml: a symbolic link, not followed$'
+stderr '^error: .*tree/projects/demo/instances/web: projects/demo/instances/web/config.yaml: a symbolic link, not followed$'
 ! exists $WORK/files
 rm $WORK/tree/projects/demo/instances/web/config.yaml
 status 0 okdp-compile --repository $WORK/tree --check

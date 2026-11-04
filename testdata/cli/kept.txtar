@@ -10,8 +10,8 @@ cp $WORK/three.yaml $WORK/tree/projects/solo/instances/s/config.yaml
 status 1 okdp-compile --repository $WORK/tree -o $WORK/out --target flux --partial --report $WORK/report.json
 stderr '^error: data/data-x: values don''t meet'
 stderr '^error: demo/demo-app: it depends on data/data-pg, of the project data, whose output is kept$'
-stderr '^error: data: not written, an instance of it refused \(--partial\): .*out/projects/data/ kept as it is$'
-stderr '^error: demo: not written, an instance of it refused \(--partial\): .*out/projects/demo/ kept as it is$'
+stderr '^error: data: not written, an instance of it refused \(--partial\): .*out/projects/data/ kept as it is, its namespace, identity and roles of today''s settings$'
+stderr '^error: demo: not written, an instance of it refused \(--partial\): .*out/projects/demo/ kept as it is, its namespace, identity and roles of today''s settings$'
 grep 'replicas: 3' $WORK/out/projects/solo/instances/solo-s/instance.values.yaml
 cmp $WORK/out/projects/kustomization.yaml $WORK/root.yaml
 grep -count=1 '"status": "refused"' $WORK/report.json
@@ -51,8 +51,8 @@ stderr '^error: web-a/web-a-b: release "web-a-b" is in namespaces "web" and "web
 grep 'replicas: 3' $WORK/out/projects/solo/instances/solo-s/instance.values.yaml
 status 1 okdp-compile --repository $WORK/tree -o $WORK/out --target flux --partial --report $WORK/report.json
 stderr '^error: web/web-a-b: release "web-a-b" is in namespaces "web" and "web-a": the HelmReleases of okdp-releases need distinct names$'
-stderr '^error: web: not written, an instance of it refused \(--partial\): .*out/projects/web/ kept as it is$'
-stderr '^error: web-a: not written, an instance of it refused \(--partial\): .*out/projects/web-a/ kept as it is$'
+stderr '^error: web: not written, an instance of it refused \(--partial\): .*out/projects/web/ kept as it is, its namespace, identity and roles of today''s settings$'
+stderr '^error: web-a: not written, an instance of it refused \(--partial\): .*out/projects/web-a/ kept as it is, its namespace, identity and roles of today''s settings$'
 ! stderr 'error: (data|demo|solo)[:/]'
 grep 'replicas: 1' $WORK/out/projects/solo/instances/solo-s/instance.values.yaml
 grep 'replicas: 1' $WORK/out/projects/data/instances/data-x/instance.values.yaml

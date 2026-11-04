@@ -2,7 +2,8 @@
 // the Flux HelmRelease that installs it, waiting for the releases its
 // instance depends on (dependsOn), and the Kustomization of its values
 // ConfigMap; each project's own manifests, its Namespace, the platform's
-// secret store in it and the identity its releases are installed with; a
+// secret store in it, the RoleBindings of its groups and the identity its
+// releases are installed with; a
 // Kustomization per project, and the root's, of the projects: all a Flux
 // Kustomization of the path projects/ syncs. The format is okdp-gitops',
 // which commits the files as they are.
@@ -14,6 +15,8 @@ import (
 	"path"
 	"slices"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
@@ -130,11 +133,67 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 	return files, nil
 }
 
+// Kept: the files of a project kept (target.Keeper), of p, each marked
+// generated: its manifests (ProjectManifests) in its
+// target.ProjectManifests; and, for each instance whose HelmReleaseFile
+// previous holds, its HelmReleaseFile and KustomizationFile as Instance
+// writes them today, its identity of p (the project's ServiceAccountName
+// unless privileged), its dependsOn those of the previous HelmRelease:
+// the rest of the instance's files, its chart and values, kept as they
+// are. A previous HelmRelease that does not read fails it. The options
+// are checked first.
+func (t Target) Kept(p target.Project, previous map[string][]byte) (map[string][]byte, error) {
+	if err := t.check(); err != nil {
+		return nil, err
+	}
+	manifests, err := ProjectManifests(p)
+	if err != nil {
+		return nil, err
+	}
+	files := map[string][]byte{}
+	for name, data := range manifests {
+		files[path.Join(target.ProjectManifests(p.Namespace), name)] = append([]byte(target.Generated), data...)
+	}
+	prefix := path.Join(target.ProjectDir(p.Namespace), "instances") + "/"
+	for _, file := range slices.Sorted(maps.Keys(previous)) {
+		rest, ok := strings.CutPrefix(file, prefix)
+		release, name, _ := strings.Cut(rest, "/")
+		if !ok || name != HelmReleaseFile {
+			continue
+		}
+		if !chart.IsRelease(release) {
+			return nil, fmt.Errorf("%s: %q is no release", file, release)
+		}
+		var hr struct {
+			Spec struct {
+				DependsOn []struct {
+					Name string `yaml:"name"`
+				} `yaml:"dependsOn"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal(previous[file], &hr); err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		var dependsOn []string
+		for _, d := range hr.Spec.DependsOn {
+			dependsOn = append(dependsOn, d.Name)
+		}
+		dir := target.InstanceDir(p.Namespace, release)
+		for name, data := range t.Instance(p.Namespace, release, path.Join(t.PathPrefix, dir), dependsOn, p.Privileged) {
+			files[path.Join(dir, name)] = append([]byte(target.Generated), data...)
+		}
+	}
+	return files, nil
+}
+
 // ProjectManifests: the files of a project's target.ProjectManifestsDir,
 // not marked: target.NamespaceFile, the Namespace (target.Namespace);
 // target.SecretStoreFile, the platform's secret store in it, when the
-// platform names a provider (target.SecretStore), both as the argocd
-// target writes them; Flux's own, ServiceAccountFile, for
+// platform names a provider (target.SecretStore); target.AccessFile, the
+// RoleBindings of its groups, when one has a role (target.Access);
+// target.ControlPlaneFile, the control plane's Role and RoleBinding, when
+// the platform names its identity (target.ControlPlane); each as the
+// argocd target writes it; Flux's own, ServiceAccountFile, for
 // a project that is not one of the platform's own (ServiceAccount); and
 // their KustomizationFile, which sets no namespace: each manifest carries
 // its own, the Namespace none.
@@ -146,6 +205,12 @@ func ProjectManifests(p target.Project) (map[string][]byte, error) {
 	}
 	if store != nil {
 		files[target.SecretStoreFile] = store
+	}
+	if access := target.Access(p); access != nil {
+		files[target.AccessFile] = access
+	}
+	if cp := target.ControlPlane(p); cp != nil {
+		files[target.ControlPlaneFile] = cp
 	}
 	if !p.Privileged {
 		files[ServiceAccountFile] = ServiceAccount(p.Namespace)

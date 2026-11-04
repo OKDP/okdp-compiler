@@ -253,12 +253,15 @@ chart is reached through `upstream.<chart>`, without a parameter.
   the console refuse it before committing, and covers the rest.
 - `x-okdp-connection-ref` makes a string a [connection
   reference](specs/01_inputs_outputs.md#connections), on the items of a
-  list too (trino's `hiveCatalogs[].metastore`). Give it `"type":
-  "string"`: the compiler refuses any other value but `null`, after the
-  schema check. Its `require`, a JSON Schema, is what the service needs of
-  the connection beyond its contract: `{"properties": {"engine": {"const":
-  "postgresql"}}, "required": ["secretRef"]}` for a service that speaks
-  PostgreSQL only and reads a password. Write it there rather than as an
+  list too (trino's `hiveCatalogs[].metastore`), on a property reached
+  from the root through `properties` and `items` only: one under `allOf`,
+  `$defs`, `additionalProperties`... is refused, no compile would read
+  it. Give it `"type": "string"`: the compiler refuses any other value
+  but `null`, after the schema check. Its `require`, a JSON Schema, is
+  what the service needs of the connection beyond its contract:
+  `{"properties": {"engine": {"const": "postgresql"}}, "required":
+  ["secretRef"]}` for a service that speaks PostgreSQL only and reads a
+  password. Write it there rather than as an
   `errors` rule of the mapping: it is checked whatever the connection
   comes from, an external connection, an output or a claim, and the error
   names the reference, the connection and its provider ([what a reference
