@@ -13,7 +13,7 @@ import (
 // first, a package, the contracts of both.
 func TestCatalog(t *testing.T) {
 	c, err := LoadCatalog([]Repository{
-		{Name: "platform-charts", FS: fstest.MapFS{
+		{Name: "platform-charts", Role: RoleCatalog, FS: fstest.MapFS{
 			"catalog/trino/480.0.0-1.0.0/Chart.yaml":  file("name: trino\n"),
 			"catalog/trino/480.0.0-1.0.10/Chart.yaml": file("name: trino\n"),
 			"catalog/trino/479.0.0-1.0.0/Chart.yaml":  file("name: trino\n"),
@@ -21,7 +21,7 @@ func TestCatalog(t *testing.T) {
 			"catalog/hive/4.0.1-1.0.0/Chart.yaml":     file("name: hive\n"),
 			"contracts/s3.schema.json":                file("{}"),
 		}},
-		{Name: "sandbox-dependencies", FS: fstest.MapFS{
+		{Name: "sandbox-dependencies", Role: RoleCatalog, FS: fstest.MapFS{
 			"catalog/keycloak/7.3.2-1.0.0/Chart.yaml": file("name: keycloak\n"),
 			"contracts/s3.schema.json":                file("{}"),
 			"contracts/oidc.schema.json":              file("{}"),
@@ -76,8 +76,8 @@ func TestCatalog(t *testing.T) {
 // differs, as Load refuses them.
 func TestCatalogErrors(t *testing.T) {
 	_, err := LoadCatalog([]Repository{
-		{Name: "a", FS: fstest.MapFS{"catalog/trino/1.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file("{}")}},
-		{Name: "b", FS: fstest.MapFS{"catalog/trino/2.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file(`{"title": "other"}`)}},
+		{Name: "a", Role: RoleCatalog, FS: fstest.MapFS{"catalog/trino/1.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file("{}")}},
+		{Name: "b", Role: RoleTree, FS: fstest.MapFS{"catalog/trino/2.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file(`{"title": "other"}`)}},
 	})
 	for _, want := range []string{`service "trino" is in the repositories a and b`, "contract s3 differs between the repositories a and b"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -104,7 +104,7 @@ func (f refusingFS) Open(name string) (fs.File, error) {
 // refuses (the CLI's, a symbolic link) gives that error, named, not
 // ErrNotInCatalog: the version is there.
 func TestCatalogUnreadable(t *testing.T) {
-	c, err := LoadCatalog([]Repository{{Name: "charts", FS: refusingFS{fstest.MapFS{"catalog/web/1.0.0/Chart.yaml": file("name: web\n")}, "catalog/web/1.0.0"}}})
+	c, err := LoadCatalog([]Repository{{Name: "charts", Role: RoleCatalog, FS: refusingFS{fstest.MapFS{"catalog/web/1.0.0/Chart.yaml": file("name: web\n")}, "catalog/web/1.0.0"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,11 +22,30 @@ import (
 )
 
 // Repository: a part of the tree: its name in messages (its directory, on
-// the command line) and its files.
+// the command line), its files and its role, what it may contribute:
+// required, the zero value refused (Load, LoadCatalog).
 type Repository struct {
 	Name string
 	FS   fs.FS
+	Role Role
 }
+
+// Role: what a repository contributes to the tree. Its files are trusted
+// for their place in the tree (docs/04_threat_model.md): a part outside
+// its role is refused, naming the repository and the path, rather than
+// read, so that a catalog's maintainers add no project, privileged or
+// not, nor the platform's values.
+type Role string
+
+const (
+	// RoleTree: a repository of the deployment, the platform's or a
+	// project's: any part of the tree, PlatformFile, projects/, catalog/
+	// and contracts/.
+	RoleTree Role = "tree"
+	// RoleCatalog: a catalog of packages: catalog/ and contracts/ only;
+	// PlatformFile or projects/ in it refused.
+	RoleCatalog Role = "catalog"
+)
 
 // The names of the tree.
 const (
@@ -63,7 +82,9 @@ type tree struct {
 // repository, so that the order of repos changes nothing: PlatformFile;
 // catalog/<service>/, every version of the service; projects/<project>/,
 // the project's file and its instances. A contract may be in several, the
-// same bytes in each. An instance, projects/<project>/instances/<instance>/,
+// same bytes in each. Each repository has its role (Repository.Role): a
+// catalog's (RoleCatalog) are catalog/ and contracts/, its PlatformFile or
+// projects/ refused; a tree's (RoleTree), every part. An instance, projects/<project>/instances/<instance>/,
 // is: the package its InstanceFile names, catalog/<service>/<version>/ of
 // the repository of the service, loaded once, its Chart.yaml of that name
 // and version; the contracts of every repository; the context,
@@ -229,7 +250,10 @@ func (t *tree) definition(service, version string) (*okdp.Definition, error) {
 }
 
 // index: the owner of each part of the tree, every conflict at once, the
-// repositories in name order.
+// repositories in name order. A repository without a role, or of another
+// role than RoleTree and RoleCatalog, is refused; a catalog's PlatformFile
+// or projects/, there at all (a file, an empty directory), refused, the
+// rest of it read.
 func index(repos []Repository) (*tree, error) {
 	repos = slices.SortedFunc(slices.Values(repos), func(a, b Repository) int { return strings.Compare(a.Name, b.Name) })
 	t := &tree{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: fstest.MapFS{}, packages: map[[2]string]*okdp.Definition{}}
@@ -245,11 +269,33 @@ func index(repos []Repository) (*tree, error) {
 	from := map[string]string{} // a contract file: the first repository that has it
 	for i := range repos {
 		repo := &repos[i]
-		if _, err := fs.Stat(repo.FS, PlatformFile); err == nil {
-			own(PlatformFile, repo)
-			t.platform = repo
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			errs = append(errs, fmt.Errorf("%s: %w", where(*repo, PlatformFile), unwrapPath(err)))
+		switch repo.Role {
+		case RoleTree, RoleCatalog:
+		case "":
+			errs = append(errs, fmt.Errorf("repository %s: no role (Repository.Role): %s, a part of the deployment, or %s, packages and contracts only", repo.Name, RoleTree, RoleCatalog))
+			continue
+		default:
+			errs = append(errs, fmt.Errorf("repository %s: role %q: %s, a part of the deployment, or %s, packages and contracts only", repo.Name, repo.Role, RoleTree, RoleCatalog))
+			continue
+		}
+		if repo.Role == RoleCatalog {
+			// The platform's values and the projects are the deployment's:
+			// a catalog that holds them is refused, not read without them.
+			for _, p := range []string{PlatformFile, ProjectsDir} {
+				if _, err := fs.Stat(repo.FS, p); err == nil {
+					errs = append(errs, fmt.Errorf("%s: a catalog repository holds %s/ and %s/ only: %s is the deployment's (a repository of role %s)", where(*repo, p), CatalogDir, ContractsDir, p, RoleTree))
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					errs = append(errs, fmt.Errorf("%s: %w", where(*repo, p), unwrapPath(err)))
+				}
+			}
+		}
+		if repo.Role == RoleTree {
+			if _, err := fs.Stat(repo.FS, PlatformFile); err == nil {
+				own(PlatformFile, repo)
+				t.platform = repo
+			} else if !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, fmt.Errorf("%s: %w", where(*repo, PlatformFile), unwrapPath(err)))
+			}
 		}
 		services, err := dirs(*repo, CatalogDir)
 		errs = append(errs, err)
@@ -257,11 +303,13 @@ func index(repos []Repository) (*tree, error) {
 			own(fmt.Sprintf("service %q", s), repo)
 			t.services[s] = repo
 		}
-		projects, err := dirs(*repo, ProjectsDir)
-		errs = append(errs, err)
-		for _, p := range projects {
-			own(fmt.Sprintf("project %q", p), repo)
-			t.projects[p] = repo
+		if repo.Role == RoleTree {
+			projects, err := dirs(*repo, ProjectsDir)
+			errs = append(errs, err)
+			for _, p := range projects {
+				own(fmt.Sprintf("project %q", p), repo)
+				t.projects[p] = repo
+			}
 		}
 		entries, err := fs.ReadDir(repo.FS, ContractsDir)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {

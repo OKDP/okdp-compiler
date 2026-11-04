@@ -205,6 +205,11 @@ func TestCompileErrors(t *testing.T) {
 		"namespace":       {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 		"long namespace":  {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
 		"platform":        {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
+		"kube-system":     {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "kube-system"}, `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`},
+		"kube-node-lease": {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "kube-node-lease"}, `Inputs.Namespace "kube-node-lease": the namespace is reserved: kube-* is Kubernetes' own`},
+		"flux-system":     {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "flux-system"}, `Inputs.Namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`},
+		"argocd":          {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "argocd"}, `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's`},
+		"okdp-releases":   {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "okdp-releases"}, `Inputs.Namespace "okdp-releases": the namespace is reserved: a deployer engine's`},
 		"name":            {Inputs{Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -213,6 +218,25 @@ func TestCompileErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	// The platform's reserved namespaces (policy.reserved), at level 0:
+	// a reservation wins over a privilege; another namespace, default
+	// among them, compiles.
+	for _, privileged := range []bool{false, true} {
+		policy := M{"reserved": []any{"openbao", "demo"}}
+		want := `Inputs.Namespace "demo": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`
+		if privileged {
+			policy["privileged"] = []any{"demo"}
+			want += ", privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins"
+		}
+		in := inputs(M{"global": M{"okdp": M{"policy": policy}}})
+		if _, err := Compile(context.Background(), def, in); err == nil || err.Error() != want {
+			t.Errorf("reserved, privileged %v: got %v, want %s", privileged, err, want)
+		}
+		in.Namespace = "default"
+		if _, err := Compile(context.Background(), def, in); err != nil {
+			t.Errorf("default: %v", err)
+		}
 	}
 	// The longest release and namespace.
 	in := inputs()

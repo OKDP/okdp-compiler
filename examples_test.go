@@ -29,7 +29,7 @@ const examples = "examples"
 func load(t *testing.T, example string) []Instance {
 	t.Helper()
 	db := filepath.Join(examples, example, "input", "db")
-	instances, err := LoadRepository([]Repository{{Name: db, FS: os.DirFS(db)}})
+	instances, err := LoadRepository([]Repository{{Name: db, FS: os.DirFS(db), Role: RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}

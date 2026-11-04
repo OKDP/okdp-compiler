@@ -1,12 +1,12 @@
-// okdp-compile --repository <dir> [--repository <dir>]... -o <dir>
+// okdp-compile --repository <dir> [--repository <dir>]... [--catalog <dir>]... -o <dir>
 //
 //	[--target helm|flux|argocd] [--path-prefix <path>]
 //	[--flux-source <namespace>/<name>] [--repo-url <url>] [--revision <rev>]
 //	[--cost-limit <n>] [--timeout <duration>] [--force] [--report <file>|-]
 //	[--partial] [--allow-plain-secrets]
 //
-// every instance of a tree, its parts in one or more repositories,
-// compiled together, written for a deployer; --check [--charts <dir>] in
+// every instance of a tree, its parts in one or more repositories, its
+// packages in catalogs of their own too, compiled together, written for a deployer; --check [--charts <dir>] in
 // place of -o: the compile checked, the upstream charts too with
 // --charts; nothing written.
 
@@ -36,7 +36,8 @@ var version string
 
 // options: the command-line flags.
 type options struct {
-	repositories      []string      // --repository: the tree's parts, every input
+	repositories      []string      // --repository: the tree's parts (compiler.RoleTree)
+	catalogs          []string      // --catalog: catalogs, catalog/ and contracts/ only (compiler.RoleCatalog)
 	charts            string        // --charts, with --check
 	output            string        // --output, -o
 	check             bool          // --check
@@ -73,6 +74,7 @@ func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository; every instance of the tree, projects/<project>/instances/<instance>/, the release <project>-<instance> of the namespace <project>, compiled together, each with what the others of its namespace publish, after them, each claim bound to its provider, the dependencies checked, written for --target under <output>/projects/, which the command owns", func(s string) error { o.repositories = append(o.repositories, s); return nil })
+	flag.Func("catalog", "a catalog of packages, its directory, repeatable: catalog/ and contracts/ only, as --repository's, each service in one repository; one that holds platform.yaml or projects/ is refused, its maintainers adding no project nor the platform's values", func(s string) error { o.catalogs = append(o.catalogs, s); return nil })
 	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
 	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme; the final values, over each chart's defaults, checked against its values.schema.json, and an instance list appended to that leaves out items of the chart's default list warned of (default $OKDP_CHARTS with --check)")
 	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, each instance's umbrella chart, Chart.yaml, "+compiler.UmbrellaValues+", its values (helm -f), "+compiler.ObjectsFile+" and "+compiler.ObjectsTemplate+", OKDP's own objects, when it has any, "+compiler.InfoFile+", what it publishes, when it publishes something, and the files of --target, every symbolic link under <output>/projects/ removed first, nothing written through one; then the dependencies printed on stderr, one line each: <namespace>/<release>: depends on <instance> (<contract> <output>, <field>)")
@@ -135,7 +137,7 @@ func checkReport(o options) error {
 	if err != nil {
 		return err
 	}
-	dirs := slices.Clone(o.repositories)
+	dirs := slices.Concat(o.repositories, o.catalogs)
 	if o.output != "" {
 		dirs = append(dirs, filepath.Join(o.output, "projects"))
 	}
@@ -206,13 +208,13 @@ func compileTree(o options, rep *report) error {
 		return err
 	}
 	var repos []compiler.Repository
-	for _, dir := range o.repositories {
-		fsys, err := openDir("--repository", dir)
+	for _, in := range inputDirs(o) {
+		fsys, err := openDir(in.flag, in.dir)
 		if err != nil {
 			return err
 		}
 		defer fsys.Close()
-		repos = append(repos, compiler.Repository{Name: dir, FS: fsys})
+		repos = append(repos, compiler.Repository{Name: in.dir, FS: fsys, Role: in.role})
 	}
 	var charts compiler.ChartSource
 	if o.charts != "" {
@@ -398,29 +400,51 @@ func newTarget(o options) (compiler.Target, error) {
 	return tg, nil
 }
 
-// checkDirs: nil when each --repository is a directory, none given twice
-// or inside another, and none contains the output directory or is inside
-// it: the command removes from it what it does not write.
+// inputDir: a directory the command reads, the flag that gives it and its
+// role in the tree.
+type inputDir struct {
+	flag, dir string
+	role      compiler.Role
+}
+
+// inputDirs: the directories of o the command reads, --repository's
+// (compiler.RoleTree) then --catalog's (compiler.RoleCatalog), in order.
+func inputDirs(o options) []inputDir {
+	var out []inputDir
+	for _, dir := range o.repositories {
+		out = append(out, inputDir{"--repository", dir, compiler.RoleTree})
+	}
+	for _, dir := range o.catalogs {
+		out = append(out, inputDir{"--catalog", dir, compiler.RoleCatalog})
+	}
+	return out
+}
+
+// checkDirs: nil when each --repository and --catalog is a directory,
+// none given twice or inside another, and none contains the output
+// directory or is inside it: the command removes from it what it does not
+// write.
 func checkDirs(o options) error {
-	abs := make([]string, len(o.repositories))
-	for i, dir := range o.repositories {
-		if info, err := os.Stat(dir); err != nil {
-			return fmt.Errorf("--repository: %w", err)
+	dirs := inputDirs(o)
+	abs := make([]string, len(dirs))
+	for i, d := range dirs {
+		if info, err := os.Stat(d.dir); err != nil {
+			return fmt.Errorf("%s: %w", d.flag, err)
 		} else if !info.IsDir() {
-			return fmt.Errorf("--repository %s: not a directory", dir)
+			return fmt.Errorf("%s %s: not a directory", d.flag, d.dir)
 		}
 		var err error
-		if abs[i], err = filepath.Abs(dir); err != nil {
+		if abs[i], err = filepath.Abs(d.dir); err != nil {
 			return err
 		}
 		for j := range i {
 			switch {
 			case abs[i] == abs[j]:
-				return fmt.Errorf("--repository %s is given twice", dir)
+				return fmt.Errorf("%s %s is given twice", d.flag, d.dir)
 			case inside(abs[i], abs[j]):
-				return fmt.Errorf("--repository %s is inside --repository %s", dir, o.repositories[j])
+				return fmt.Errorf("%s %s is inside %s %s", d.flag, d.dir, dirs[j].flag, dirs[j].dir)
 			case inside(abs[j], abs[i]):
-				return fmt.Errorf("--repository %s is inside --repository %s", o.repositories[j], dir)
+				return fmt.Errorf("%s %s is inside %s %s", dirs[j].flag, dirs[j].dir, d.flag, d.dir)
 			}
 		}
 	}
@@ -431,9 +455,9 @@ func checkDirs(o options) error {
 	if err != nil {
 		return err
 	}
-	for i, dir := range o.repositories {
+	for i, d := range dirs {
 		if inside(out, abs[i]) || inside(abs[i], out) {
-			return fmt.Errorf("--output (-o) %s and --repository %s must not contain one another: the command removes what it does not write", o.output, dir)
+			return fmt.Errorf("--output (-o) %s and %s %s must not contain one another: the command removes what it does not write", o.output, d.flag, d.dir)
 		}
 	}
 	return nil

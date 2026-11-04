@@ -180,7 +180,7 @@ func TestTreeNames(t *testing.T) {
 		path.Join(instance, compiler.ConnectionsFile):                 file("connections: {own: {contract: http, url: https://own.example.org}}\n"),
 		path.Join(instance, compiler.ConfigFile):                      file("{}\n"),
 	}
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: tree}})
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: tree, Role: compiler.RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestTreeNames(t *testing.T) {
 // provider granted it, and the namespaces it lets claim of it, its
 // instance.yaml's claimers.
 func TestCompileTree(t *testing.T) {
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db"), Role: compiler.RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func (c *charts) Ensure(_ context.Context, refs []compiler.ChartRef) (fs.FS, err
 // then the values checked against them; unchecked, and why, when one
 // cannot be fetched.
 func TestCompileTreeCharts(t *testing.T) {
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db"), Role: compiler.RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,11 +297,63 @@ func TestIsName(t *testing.T) {
 	}
 }
 
+// TestCheckProjectName: the compile's rule of a project's name, its
+// errors the compile's of an instance of the project, the namespace named
+// a project's: a name, none the compiler reserves, none of the platform's
+// policy.reserved, privileged or not; another, default among them, or
+// any without a platform, passes.
+func TestCheckProjectName(t *testing.T) {
+	platform := map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": map[string]any{"reserved": []any{"openbao", "vault"}, "privileged": []string{"vault", "data"}}}}}
+	for name, want := range map[string]string{
+		"demo": "", "default": "", "data": "", "kube": "", "okdp": "",
+		"Demo":          `project "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`,
+		"":              `project "": a namespace name`,
+		"platform":      `project "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`,
+		"kube-foo":      `project "kube-foo": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`,
+		"flux-system":   `project "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`,
+		"argocd":        `project "argocd": the namespace is reserved: a deployer engine's`,
+		"okdp-releases": `project "okdp-releases": the namespace is reserved: a deployer engine's`,
+		"openbao":       `project "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`,
+		"vault":         `project "vault": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins`,
+	} {
+		err := compiler.CheckProjectName(name, platform)
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%q: %v", name, err)
+		case want != "" && (err == nil || !strings.HasPrefix(err.Error(), want)):
+			t.Errorf("%q: got %v, want %s", name, err, want)
+		case strings.HasSuffix(want, "no project has it") && err.Error() != want:
+			t.Errorf("%q: got %v, want %s", name, err, want)
+		}
+	}
+	// Without a platform, the compiler's rule alone.
+	if err := compiler.CheckProjectName("openbao", nil); err != nil {
+		t.Errorf("openbao, no platform: %v", err)
+	}
+	if err := compiler.CheckProjectName("kube-system", nil); err == nil {
+		t.Error("kube-system, no platform: no error")
+	}
+	// The compile refuses what CheckProjectName refuses, in the same
+	// words, Inputs.Namespace for project: the example's instance, its
+	// namespace demo, the example's platform reserving it.
+	def, in := example()
+	example := in.Context[0].Values
+	example["global"].(map[string]any)["okdp"].(map[string]any)["policy"] = map[string]any{"reserved": []any{"demo"}, "privileged": []any{"demo"}}
+	for _, ns := range []string{"kube-foo", "platform", "demo"} {
+		in.Namespace, in.Release = ns, ns+"-webapp"
+		_, cerr := compiler.Compile(context.Background(), def, in)
+		err := compiler.CheckProjectName(ns, example)
+		if cerr == nil || err == nil || strings.Replace(cerr.Error(), "Inputs.Namespace", "project", 1) != err.Error() {
+			t.Errorf("%s: compile %v, check %v", ns, cerr, err)
+		}
+	}
+}
+
 // TestBuild: a tree loaded and compiled with the options on each
 // instance; one that does not load, a *LoadError of every problem, the
 // errors it is of unwrapped.
 func TestBuild(t *testing.T) {
-	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}}
+	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db"), Role: compiler.RoleTree}}
 	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{CostLimit: 1_000_000, AllowPlainSecrets: true})
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +369,7 @@ func TestBuild(t *testing.T) {
 	_, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
 		"projects/demo/instances/a/instance.yaml": {Data: []byte("service: nope\nversion: 1.0.0\n")},
 		"platform.yaml": {Data: []byte("global: [\n")},
-	}}}, compiler.BuildOptions{})
+	}, Role: compiler.RoleTree}}, compiler.BuildOptions{})
 	le, ok := errors.AsType[*compiler.LoadError](err)
 	if !ok || len(le.Problems) != 2 || !errors.Is(err, compiler.ErrNotInCatalog) {
 		t.Errorf("a tree that does not load: %#v", err)

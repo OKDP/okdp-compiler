@@ -34,14 +34,16 @@ enforce](#what-the-compiler-cannot-enforce) closes it.
 ## Authority comes from the file
 
 The compiler does not know who wrote a file: it trusts a file for its
-place in the tree ([repository layout](01_usage.md#repository-layout)).
-`platform.yaml` is level 0, the platform's; `project.yaml`, level 1, a
-project's; an instance's `connections.yaml`, level 2, and its
-`config.yaml`, the instance values. Who writes each is decided by the
-hosting of the repositories: their write access and their reviews (a
-platform repository its administrators write, a project's its team, a
-catalog its maintainers). Through the library, the caller decides which
-layers are level 0 (`Inputs.Context`).
+place in the tree ([repository layout](01_usage.md#repository-layout)) and
+for its repository's role: a repository of the tree holds any part of it,
+a catalog `catalog/` and `contracts/` only (`--catalog`,
+`compiler.RoleCatalog`). `platform.yaml` is level 0, the platform's;
+`project.yaml`, level 1, a project's; an instance's `connections.yaml`,
+level 2, and its `config.yaml`, the instance values. Who writes each is
+decided by the hosting of the repositories: their write access and their
+reviews (a platform repository its administrators write, a project's its
+team, a catalog its maintainers). Through the library, the caller decides
+which layers are level 0 (`Inputs.Context`).
 
 | Author | Writes | Reviewed | The compiler takes it as |
 |---|---|---|---|
@@ -51,7 +53,7 @@ layers are level 0 (`Inputs.Context`).
 | [A catalog](#a-catalog-author) | `catalog/<service>/<version>/`, `contracts/` | in the catalog's repository | reviewed, but for the rules below |
 | [The engines](#the-engines) | apply `compiled/` | | the identity the targets give each project |
 | [The secret store](#the-secret-store) | keeps the keys | | the keys the compiler writes |
-| [okdp-gitops](#okdp-gitops-and-the-runner) | runs the compile, commits `compiled/` | | a caller |
+| [okdp-gitops](#okdp-gitops-and-the-runner) | runs the compile, commits `compiled/` and a control plane's edits (`treeedit`) | | a caller |
 
 ## The platform author (level 0)
 
@@ -69,6 +71,7 @@ providers, consenting for them.
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
 | may | set any key of `global.okdp`, template code in its values | not checked | |
+| may | reserve namespaces no project may have, its own components' (`policy.reserved`), a reservation winning over `policy.privileged` | `policy.go: checkPlatformNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/context/0/reserved-namespace.yaml`, `reserved-and-privileged.yaml`, `testdata/cli/policy.txtar`, `TestCheckProjectName` |
 | may | name the platform's own projects, `policy.privileged` | `policy.go: privileged` | `testdata/cli/policy.txtar` (a privileged project's ClusterRole written) |
 | may | give a connection of any key of the store, `platform/<key>` | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
 | may | route any namespace to a provider of any namespace (a class) | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
@@ -92,7 +95,8 @@ values for its instances, and its instances' directories are its own.
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `testdata/context/1/template-code.yaml` |
 | may not | a connection of a store key outside `<project>/`: the platform's, another namespace's | `connections.go: storeSecret` | `testdata/context/1/remote-key-of-the-platform.yaml` |
 | may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
-| may not | the name `platform`, the segment of the platform's keys | `pipeline.go: Compile` | `testdata/cli/secrets.txtar` |
+| may not | the name `platform`, the segment of the platform's keys | `policy.go: checkNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/cli/secrets.txtar`, `TestCheckProjectName` |
+| may not | a reserved namespace: `kube-*`, Kubernetes' own; `flux-system`, `argocd`, `okdp-releases`, the engines' and the targets' (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); another namespace a target writes in (the flux target's `Source`); those of `policy.reserved`, privileged or not | `policy.go: checkNamespace`, `checkPlatformNamespace`, `target.OwnNamespaces`; before a project is created, `compiler.CheckProjectName`, the compile's two | `testdata/cli/policy.txtar` (`reserved`), `TestCompileErrors`, `TestCheckProjectName`, `TestOwnNamespaces` |
 
 ## An instance author (level 2 and `config.yaml`)
 
@@ -137,6 +141,7 @@ which an instance's list replaces.
 | may | its own values, template code included, not held to the upstream policy | not checked | |
 | may | objects of any namespaced kind in the instance's namespace, an ExternalSecret or a PushSecret of any key of the store among them | not checked: the store's policy | |
 | may | consent for its instances to serve other namespaces (`provisions[].claimers`), unless an instance lists its own | `namespace.go: Instance.Claimers` | `testdata/cli/claims.txtar` |
+| may not | hold `platform.yaml` or `projects/` in its repository, a catalog's (`--catalog`, `RoleCatalog`): a project, privileged or in a reserved namespace, or the platform's values, added from a catalog; nor a repository given without a role | `repository.go: index` | `testdata/cli/repository.txtar` (`--catalog`), `TestLoadRoles` |
 | may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the context's layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: contextLayers`, `context.go: parameters` | `testdata/cli/policy.txtar` (`schema-okdp`, `schema-default`), `TestPlatformFromContext` |
 | may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (an ExternalSecret of another namespace) |
 | may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (a ClusterRole) |
@@ -171,6 +176,21 @@ Admission refuses a privileged pod. A privileged project escapes all of
 it: the objects policy, the upstream policy, the confined identity and
 the baseline. The files are compared with `testdata/targets/<target>/`
 (`TestTargets`): `demo` confined, `data` privileged.
+
+The targets' objects in the engines' namespaces are named after the
+releases and the projects (an Application or a HelmRelease
+`<project>-<instance>`, its ConfigMap `values-<release>`, an AppProject
+or a ServiceAccount `project-<namespace>`): a project and an instance
+choose those names. The platform's own objects there must take a name
+none of them can, with a dot (`okdp.instances`, not `okdp-instances`,
+which the instance `instances` of a project `okdp` would replace,
+pruning every Application its app of apps applies): a rule of the
+platform's manifests, which the compiler does not see.
+
+| | Rule | Enforced by | Fixture |
+|---|---|---|---|
+| may not | a project of a namespace a target writes in (`okdp-releases`, `argocd`, Flux's `Source`'s): the engine's objects there, rewritten with the project's every verb | `policy.go: reservedNamespace`, `target.OwnNamespaces` | `TestOwnNamespaces`, `testdata/cli/policy.txtar` |
+| may not | an object of the platform's of the same name as a release's in the engines' namespaces, when the platform names its own with a dot | the platform's naming rule, not the compiler | |
 
 ## The secret store
 
@@ -236,10 +256,22 @@ the tree it reads:
 | may not | have one project's failure keep the others from deploying (`--partial`), a release name it shares with another project among them | `compiler.Partial` (`internal/tree/partial.go`), `compiler.TreeFiles` (`internal/output`) | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `TestAReleaseCollisionKeepsItsProjects` |
 | may not | make `--partial` read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | `openDir` of `--output`, `compiler.TreeFiles` | `testdata/cli/kept.txtar` |
 
+A control plane edits the tree with package `treeedit`, okdp-gitops
+committing each edit: whatever the API in front of it, an edit holds
+these lines.
+
+| | Rule | Enforced by | Fixture |
+|---|---|---|---|
+| may not | address a directory other than its own through a name, a dot segment joined into a path (an instance `..`, the project, removed with every instance) | `treeedit: checkRef`, `ValidateName` | `TestDotSegmentNamesAreNotFound` |
+| may not | write a change after which an instance it writes, or one that compiled before, does not compile, nor remove what an instance uses | `treeedit: Check.Verify` (`compiler.AddedProblems`, `compiler.Regressions`) | `TestAnEditThatDoesNotCompileIsRefused`, `TestARemovalRefusesWhatIsInUse` |
+| may not | create an instance whose release another project's instance has, nor a project of a name the compile refuses | `Check.Verify` (`compiler.ReleaseTaken`), `treeedit.CheckProjectName` | `TestCreateRefusesACollidingReleaseName`, `TestAProjectOfAReservedNameIsRefused` |
+
 ## What the compiler cannot enforce
 
-- **Who writes a file.** The compiler trusts a file for its place in
-  the tree: in one repository, whoever may write a project's directory
+- **Who writes a file.** The compiler trusts a file for its place in the
+  tree and its repository's role, which the caller gives: a catalog given
+  as a repository of the tree (`--repository`, `RoleTree`) adds projects
+  all the same. In one repository, whoever may write a project's directory
   may write `platform.yaml` but for the repository's reviews; whoever
   writes the output repository deploys anything, a privileged project's
   objects included, and so does the token that writes it.
@@ -273,7 +305,9 @@ the tree it reads:
   `secrets.provider`, is one trust domain. A Kubernetes namespace named
   `platform` made outside the tree (by an administrator, by a privileged
   project) writes `platform/*` under the templated policy: the compiler
-  refuses only a project of that name.
+  refuses only a project of that name. Likewise a namespace of the
+  platform's components that `policy.reserved` does not list: the
+  compiler knows Kubernetes', the engines' and the store's only.
 - **Consent is in the provider's own file.** The `claimers` of a
   provider's `instance.yaml` are written by whoever writes that
   instance's directory, in a shared repository any of its writers.

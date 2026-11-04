@@ -70,8 +70,9 @@ type Service struct {
 
 // LoadCatalog: the catalog that repos make together, as Load reads it:
 // each service in one repository, a contract in several with the same
-// bytes, so that the order of repos changes nothing. Every problem at
-// once, each naming its repositories.
+// bytes, so that the order of repos changes nothing; each repository of
+// its role, as Load requires (Repository.Role). Every problem at once,
+// each naming its repositories.
 func LoadCatalog(repos []Repository) (*Catalog, error) {
 	t, err := index(repos)
 	if err != nil {

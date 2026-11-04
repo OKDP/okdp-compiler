@@ -1,0 +1,8 @@
+# error: Inputs.Namespace "demo": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins
+# A namespace the platform both reserves and lists as privileged is
+# reserved: a reservation wins over a privilege.
+global:
+  okdp:
+    policy:
+      privileged: [demo]
+      reserved: [demo]

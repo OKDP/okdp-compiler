@@ -190,6 +190,11 @@
                   "items": {"type": "string"},
                   "description": "The namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value, as the other projects may not: the compile refuses their objects of a cluster-scoped kind or of another namespace; the targets give their releases the engine's own identity, the other projects' one confined to their namespace (Result.Privileged)."
                 },
+                "reserved": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "Namespaces no project may have, beside those the compiler reserves (platform, the segment of the platform's keys of the store; kube-*, Kubernetes' own; flux-system, argocd and okdp-releases, the deployer engines' and the targets'): the namespaces of the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's, a CI runner's...). Every instance of such a project is refused, privileged or not: a namespace both lists is reserved."
+                },
                 "upstream": {
                   "type": "object",
                   "additionalProperties": false,

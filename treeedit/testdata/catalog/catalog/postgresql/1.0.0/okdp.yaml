@@ -1,0 +1,43 @@
+# OKDP's part of the postgresql package: it provisions database-server
+# connections, one database per claim bound to its instance (claims: id,
+# contract, namespace, name, request), and publishes each, an output named
+# after the claim's ID: what the claim requested (request: size,
+# extensions, the contract's claim schema's defaults applied), granted.
+
+provisions: [database-server]
+
+# The database of each claim, its extensions as requested, retained when
+# the claim is gone: an operator drops it. Its SQL name is the claim's ID,
+# its dots and dashes underscores.
+objects:
+  - $for: c in claims
+    $each:
+      apiVersion: postgresql.cnpg.io/v1
+      kind: Database
+      metadata:
+        name: ${{ c.id }}
+        labels: ${{ labels }}
+        annotations: {helm.sh/resource-policy: keep}
+      spec:
+        name: ${{ c.id.replace('.', '_').replace('-', '_') }}
+        owner: ${{ c.id }}
+        cluster: {name: '${{ release.name }}'}
+        extensions: "${{ c.request.extensions.map(e, {'name': e}) }}"
+        databaseReclaimPolicy: retain
+
+# The connection of each claim: the server, the database, what was
+# granted, and its owner's credentials, a generated Secret.
+provides:
+  - $for: c in claims
+    $each:
+      contract: database-server
+      name: ${{ c.id }}
+      values:
+        host: ${{ release.name }}-rw.${{ release.namespace }}.svc
+        dbName: ${{ c.id.replace('.', '_').replace('-', '_') }}
+        size: ${{ c.request.size }}
+        extensions: ${{ c.request.extensions }}
+      secretRef: {name: '${{ c.id }}-credentials'}
+      secret:
+        generate: [{key: password}]
+        stringData: {username: '${{ c.id }}'}

@@ -1,11 +1,27 @@
-// Package treeedit: the files of a tree as written (compiler.LoadRepository
-// reads them), for a caller that edits the tree, a control plane: an
-// instance's instance.yaml, a values file, a project's description, an
-// entry of connections or claims, a document merged key by key; each
-// edited in place, its head (a licence), its comments and its other keys
-// kept, so that a hand-written file survives an edit of the console. The
-// files are written as every file of a tree: yaml v3, two-space
-// indentation (the yq v4 defaults).
+// Package treeedit: the reads and the edits of a tree as written
+// (compiler.LoadRepository reads it), for a caller that edits the tree,
+// a control plane, and keeps it where it likes (Git): every rule of an
+// edit is here, the caller holds the files.
+//
+// A tree is read through a Reader. The readers give its parts: the
+// instances (ReadInstance, ListInstances), the connections, the named
+// claims, the projects, the catalogs of CatalogsFile and the console's
+// menu, and, of an output a target wrote, what an instance publishes
+// (ListPublished) and its compiled files (ReadCompiled). An edit
+// (CreateInstance, PutConnection, DeleteProject...) is an Edit: pure, it
+// reads the tree and returns its Change, the files to write and to
+// remove, and the Check of the change by the compile of the tree before
+// and after it (Check.Verify: the instances it writes compile, those
+// that compiled still do, a removal of what is in use refused, a new
+// release that is another's refused). Apply runs an edit on a Writer, a
+// transaction, with the caller's compile of the tree.
+//
+// The files are edited in place: an instance's instance.yaml, a values
+// file, a project's description, an entry of connections or claims, a
+// document merged key by key, each its head (a licence), its comments
+// and its other keys kept, so that a hand-written file survives an edit
+// of the console. They are written as every file of a tree: yaml v3,
+// two-space indentation (the yq v4 defaults).
 package treeedit
 
 import (

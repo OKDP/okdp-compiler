@@ -76,12 +76,20 @@ type Target struct {
 // empty tree; each marked generated
 // (target.Generated). The options are checked first; two releases of one
 // name in two namespaces are refused: their HelmReleases share
-// ReleasesNamespace.
+// ReleasesNamespace; and a project of ReleasesNamespace or of the Source's
+// namespace (target.OwnNamespaces). The platform's own objects in these
+// namespaces take a name a release cannot (a dot: okdp.projects), the
+// HelmReleases being named after the releases, their values ConfigMaps
+// values-<release>, the projects' ServiceAccounts project-<namespace>.
 func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte, error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
 	if err := target.UniqueReleases(results, ReleaseObjects); err != nil {
+		return nil, err
+	}
+	source, _, _ := strings.Cut(t.source(), "/")
+	if err := target.OwnNamespaces(results, map[string]string{ReleasesNamespace: ReleaseObjects + " and the identities of the projects", source: "the GitRepository of the tree (Flux.Source)"}); err != nil {
 		return nil, err
 	}
 	files, err := helm.Target{}.Files(results, g)

@@ -84,7 +84,7 @@ func TestLoad(t *testing.T) {
 		"demo/demo-b (b) app-1.0.0 global@0 claims,global@1",
 		"other/other-c (c) app-2.0.0 global@0 claimers demo,*",
 	}
-	instances, err := Load([]Repository{{"db", whole}})
+	instances, err := Load([]Repository{{"db", whole, RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,8 +95,8 @@ func TestLoad(t *testing.T) {
 		t.Error("two Definitions of app 1.0.0")
 	}
 	parts := []Repository{
-		{"platform", split("platform.yaml")}, {"catalog", split("catalog/", "contracts/")},
-		{"demo", split("projects/demo/", "contracts/")}, {"other", split("projects/other/")},
+		{"platform", split("platform.yaml"), RoleTree}, {"catalog", split("catalog/", "contracts/"), RoleCatalog},
+		{"demo", split("projects/demo/", "contracts/"), RoleTree}, {"other", split("projects/other/"), RoleTree},
 	}
 	for _, repos := range [][]Repository{parts, {parts[3], parts[2], parts[1], parts[0]}} {
 		instances, err := Load(repos)
@@ -124,13 +124,13 @@ func TestLoadErrors(t *testing.T) {
 			"catalog/app/1.0.0/Chart.yaml":   file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 			"projects/demo/project.yaml":     file("{}\n"),
 			"contracts/database.schema.json": file("{}"),
-		}},
+		}, RoleTree},
 		{"a", fstest.MapFS{
 			"platform.yaml":                  file("{}\n"),
 			"catalog/app/1.0.0/Chart.yaml":   file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 			"projects/demo/project.yaml":     file("{}\n"),
 			"contracts/database.schema.json": file(`{"type": "object"}`),
-		}},
+		}, RoleTree},
 	})
 	want := `contract database differs between the repositories a and b
 platform.yaml is in the repositories a and b
@@ -157,7 +157,7 @@ project "demo" is in the repositories a and b`
 		"projects/demo/instances/j/instance.yaml":    file("service: app\nversion: 1.0.0\nclaimers: [demo, Demo]\n"),
 		"projects/demo/instances/k/instance.yaml":    file("service: app\nversion: 1.0.0\nclaimers: ['*', '*']\n"),
 		"projects/bad/project.yaml":                  file("description: {text: d}\n"),
-	}}})
+	}, RoleTree}})
 	for _, w := range []string{
 		"db/platform.yaml: claims: a project's (project.yaml)",
 		"db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found in type struct",
@@ -188,7 +188,7 @@ func TestError(t *testing.T) {
 		"catalog/app/1.0.0/Chart.yaml":            file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 		"projects/demo/instances/a/instance.yaml": file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
 		"projects/demo/instances/b/instance.yaml": file("service: nope\nversion: 1.0.0\n"),
-	}}})
+	}, RoleTree}})
 	le, ok := errors.AsType[*Error](err)
 	if !ok {
 		t.Fatalf("%v: not an *Error", err)
@@ -229,5 +229,55 @@ func TestParseInstance(t *testing.T) {
 	}
 	if _, err := ParseInstance([]byte("service: app\nname: x\n")); err == nil || !strings.Contains(err.Error(), "field name not found") {
 		t.Errorf("an unknown key: %v", err)
+	}
+}
+
+// TestLoadRoles: a repository has a role, the zero value refused; a
+// catalog's platform.yaml or projects/, there at all, refused, naming the
+// repository and the path, the project of a privileged name it would add
+// among them; its catalog/ and contracts/ read.
+func TestLoadRoles(t *testing.T) {
+	tree := fstest.MapFS{
+		"platform.yaml":              file("global: {okdp: {policy: {privileged: [strimzi]}}}\n"),
+		"projects/demo/project.yaml": file("{}\n"),
+	}
+	catalog := fstest.MapFS{
+		"catalog/app/1.0.0/Chart.yaml":                   file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
+		"contracts/database.schema.json":                 file("{}"),
+		"projects/strimzi/instances/x/instance.yaml":     file("service: app\nversion: 1.0.0\n"),
+		"projects/kube-system/instances/y/instance.yaml": file("service: app\nversion: 1.0.0\n"),
+		"platform.yaml": file("{}\n"),
+	}
+	_, err := Load([]Repository{{"tree", tree, RoleTree}, {"evil", catalog, RoleCatalog}})
+	for _, w := range []string{
+		"evil/platform.yaml: a catalog repository holds catalog/ and contracts/ only: platform.yaml is the deployment's (a repository of role tree)",
+		"evil/projects: a catalog repository holds catalog/ and contracts/ only: projects is the deployment's (a repository of role tree)",
+	} {
+		if err == nil || !strings.Contains(err.Error(), w) {
+			t.Errorf("got %v\nwant it to hold %s", err, w)
+		}
+	}
+	if err != nil && strings.Contains(err.Error(), "is in the repositories") {
+		t.Errorf("a catalog's platform.yaml owned: %v", err)
+	}
+	for _, repos := range [][]Repository{{{"tree", tree, ""}}, {{"tree", tree, "platform"}}} {
+		for name, load := range map[string]func([]Repository) error{
+			"Load":        func(r []Repository) error { _, err := Load(r); return err },
+			"LoadCatalog": func(r []Repository) error { _, err := LoadCatalog(r); return err },
+		} {
+			if err := load(repos); err == nil || !strings.Contains(err.Error(), "repository tree: ") || !strings.Contains(err.Error(), "tree, a part of the deployment, or catalog, packages and contracts only") {
+				t.Errorf("%s, role %q: got %v", name, repos[0].Role, err)
+			}
+		}
+	}
+	// A catalog of catalog/ and contracts/ only: its packages and
+	// contracts serve the tree's instances.
+	delete(catalog, "platform.yaml")
+	delete(catalog, "projects/strimzi/instances/x/instance.yaml")
+	delete(catalog, "projects/kube-system/instances/y/instance.yaml")
+	tree["projects/demo/instances/web/instance.yaml"] = file("service: app\nversion: 1.0.0\n")
+	instances, err := Load([]Repository{{"tree", tree, RoleTree}, {"charts", catalog, RoleCatalog}})
+	if err != nil || len(instances) != 1 || instances[0].Inputs.Namespace != "demo" || instances[0].Inputs.Contracts == nil {
+		t.Errorf("got %v, %v", instances, err)
 	}
 }

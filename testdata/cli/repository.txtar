@@ -62,6 +62,30 @@ cmp stderr $WORK/outputs.txt
 status 1 okdp-compile --repository $WORK/lib --repository $WORK/demo --repository $WORK/outputs -o $WORK/none
 stderr '^error: project "demo" is in the repositories .*demo and .*outputs$'
 
+# --catalog: a catalog of packages, catalog/ and contracts/ only, lib as
+# one: the same compile.
+status 0 okdp-compile --catalog $WORK/lib --repository $WORK/demo --check
+! stdout .
+! stderr .
+
+# A catalog that holds the platform's values or a project is refused,
+# each naming its path, nothing of the tree read: its maintainers write
+# packages, not the deployment (a project of a privileged name, a
+# reserved namespace).
+status 1 okdp-compile --catalog $WORK/evil --repository $WORK/lib --repository $WORK/demo --check
+! stdout .
+stderr '^error: .*/evil/platform.yaml: a catalog repository holds catalog/ and contracts/ only: platform.yaml is the deployment.s \(a repository of role tree\)$'
+stderr '^.*/evil/projects: a catalog repository holds catalog/ and contracts/ only: projects is the deployment.s \(a repository of role tree\)$'
+
+-- evil/platform.yaml --
+global: {okdp: {policy: {privileged: [evil]}}}
+-- evil/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+-- evil/projects/strimzi/instances/x/instance.yaml --
+service: web
+version: 1.0.0
 -- stale.yaml --
 stale: true
 -- depends.txt --

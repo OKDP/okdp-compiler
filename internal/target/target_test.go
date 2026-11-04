@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -311,5 +312,39 @@ func TestReleases(t *testing.T) {
 	_, err = (flux.Target{}).Files(results[:2], nil)
 	if re := (*target.ReleaseError)(nil); !errors.As(err, &re) || re.Release != "demo-db" {
 		t.Errorf("flux: got %v, want a *ReleaseError", err)
+	}
+}
+
+// TestOwnNamespaces: a project of a namespace a target writes its own
+// objects in is refused, by the flux target (okdp-releases, its Source's
+// namespace) and the argocd target (argocd), one error per namespace;
+// the namespaces the targets write in by default are those the compile
+// reserves (okdp.EngineNamespaces), so that the compile refuses them
+// first.
+func TestOwnNamespaces(t *testing.T) {
+	g, err := graph.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		target interface {
+			Files([]*okdp.Result, *graph.Graph) (map[string][]byte, error)
+		}
+		results []*okdp.Result
+		want    string
+	}{
+		"flux releases": {flux.Target{}, []*okdp.Result{{Namespace: flux.ReleasesNamespace, Release: "okdp-releases-x"}}, `project "okdp-releases": the namespace is reserved: it holds the HelmReleases of okdp-releases and the identities of the projects, no project's`},
+		"flux source":   {flux.Target{Source: "gitops/tree"}, []*okdp.Result{{Namespace: "gitops", Release: "gitops-x"}, {Namespace: "demo", Release: "demo-x"}}, `project "gitops": the namespace is reserved: it holds the GitRepository of the tree (Flux.Source), no project's`},
+		"argocd":        {argocd.Target{RepoURL: "https://x"}, []*okdp.Result{{Namespace: argocd.Namespace, Release: "argocd-x"}}, `project "argocd": the namespace is reserved: it holds the Applications of argocd and the AppProjects, no project's`},
+	} {
+		if _, err := tc.target.Files(tc.results, g); err == nil || err.Error() != tc.want {
+			t.Errorf("%s: got %v\nwant %s", name, err, tc.want)
+		}
+	}
+	source, _, _ := strings.Cut(flux.DefaultSource, "/")
+	for _, ns := range []string{flux.ReleasesNamespace, source, argocd.Namespace} {
+		if !slices.Contains(okdp.EngineNamespaces(), ns) {
+			t.Errorf("%s: a target's namespace the compile does not reserve (okdp.EngineNamespaces)", ns)
+		}
 	}
 }

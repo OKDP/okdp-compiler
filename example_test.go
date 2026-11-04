@@ -27,7 +27,7 @@ func Example() {
 	treeFS := os.DirFS("examples/02_advanced/input/db")
 
 	instances, err := compiler.LoadRepository([]compiler.Repository{
-		{Name: "db", FS: treeFS}, // the tree, in one or more repositories: platform.yaml, contracts/, catalog/, projects/
+		{Name: "db", FS: treeFS, Role: compiler.RoleTree}, // the tree, in one or more repositories: platform.yaml, contracts/, catalog/, projects/; a catalog of its own, RoleCatalog, catalog/ and contracts/ only
 	})
 	if err != nil {
 		log.Fatal(err) // every problem of the tree, each naming its path

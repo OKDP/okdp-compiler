@@ -59,12 +59,20 @@ type Target struct {
 // target.ProjectManifests, its manifests (ProjectManifests), each marked
 // generated (target.Generated). The options are checked first; two
 // releases of one name in two namespaces are refused: their Applications
-// share Namespace.
+// share Namespace; and a project of Namespace (target.OwnNamespaces).
+// The platform's own objects in Namespace, the app of apps among them,
+// take a name a release cannot (a dot: okdp.instances), the Applications
+// being named after the releases, <project>-<instance>, the AppProjects
+// project-<namespace>: an Application okdp-instances would be the
+// release of the instance instances of a project okdp.
 func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte, error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
 	if err := target.UniqueReleases(results, ReleaseObjects); err != nil {
+		return nil, err
+	}
+	if err := target.OwnNamespaces(results, map[string]string{Namespace: ReleaseObjects + " and the AppProjects"}); err != nil {
 		return nil, err
 	}
 	files, err := helm.Target{}.Files(results, g)

@@ -1,5 +1,6 @@
-// Policy: the platform's policy, global.okdp.policy: which projects are
-// the platform's own (privileged), and what the others' instances may not
+// Policy: the platform's policy, global.okdp.policy: which namespaces no
+// project may have (reserved), which projects are the platform's own
+// (privileged), and what the others' instances may not
 // do: their objects stay in their namespace, no cluster-scoped kind
 // (checkObjects); their upstream values set no key of a pod's privileges,
 // identity, containers or objects, and their images come from the
@@ -25,6 +26,87 @@ import (
 // the platform's own projects.
 func privileged(okdp M, namespace string) bool {
 	return slices.ContainsFunc(value.AsList(value.Dig(okdp, "policy.privileged")), func(v any) bool { return value.Str(v) == namespace })
+}
+
+// EngineNamespaces: the namespaces of the deployer engines and of the
+// objects the targets write in them, which no project may have: a
+// project's releases are installed with every verb of its namespace, and
+// there they would rewrite the engine's sources, its Applications or
+// HelmReleases, the other projects' identities: flux-system, Flux's and
+// its default source's (flux.DefaultSource), okdp-releases, the flux
+// target's HelmReleases and ServiceAccounts (flux.ReleasesNamespace),
+// argocd, Argo CD's and the argocd target's Applications and AppProjects
+// (argocd.Namespace). A target that writes in another (Flux.Source's)
+// refuses its projects too.
+func EngineNamespaces() []string { return []string{"argocd", "flux-system", "okdp-releases"} }
+
+// reservedNamespace: why namespace is no project's, those the compiler
+// reserves whatever the platform: platform, the segment of the platform's
+// keys of the store; kube-*, Kubernetes' own (kube-system, kube-public,
+// kube-node-lease); EngineNamespaces. Not default: a project may be
+// named so (the sandbox's confined demo). "" when it may be one; those of
+// global.okdp.policy.reserved are the platform's (Compile).
+func reservedNamespace(namespace string) string {
+	switch {
+	case namespace == platformKeys:
+		return fmt.Sprintf("%s/ holds the platform's keys of the secret store, which no project writes", platformKeys)
+	case strings.HasPrefix(namespace, "kube-"):
+		return "kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)"
+	case slices.Contains(EngineNamespaces(), namespace):
+		return fmt.Sprintf("a deployer engine's, or the namespace its target writes in (%s): a project's releases there would drive the engine", strings.Join(EngineNamespaces(), ", "))
+	}
+	return ""
+}
+
+// reservedByPlatform: whether namespace is one of
+// global.okdp.policy.reserved, the namespaces the platform keeps from
+// every project.
+func reservedByPlatform(okdp M, namespace string) bool {
+	return slices.ContainsFunc(value.AsList(value.Dig(okdp, "policy.reserved")), func(v any) bool { return value.Str(v) == namespace })
+}
+
+// The rule of a project's name, its namespace, in two parts, as the
+// compile applies them (Compile): the compiler's own, then the
+// platform's; CheckNamespace both, for a program that creates projects.
+// field names the name in the errors: Inputs.Namespace for Compile.
+
+// checkNamespace: nil when namespace may be a project's whatever the
+// platform: a DNS label (chart.IsDNSLabel), none the compiler reserves
+// (reservedNamespace).
+func checkNamespace(field, namespace string) error {
+	switch {
+	case !chart.IsDNSLabel(namespace):
+		return fmt.Errorf("%s %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", field, namespace)
+	case reservedNamespace(namespace) != "":
+		return fmt.Errorf("%s %q: the namespace is reserved: %s", field, namespace, reservedNamespace(namespace))
+	}
+	return nil
+}
+
+// checkPlatformNamespace: nil when namespace is none of the platform's
+// reserved namespaces, global.okdp.policy.reserved of okdp, the
+// platform's settings: a reservation wins over a privilege.
+func checkPlatformNamespace(field, namespace string, okdp M) error {
+	if !reservedByPlatform(okdp, namespace) {
+		return nil
+	}
+	also := ""
+	if privileged(okdp, namespace) {
+		also = ", privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins"
+	}
+	return fmt.Errorf("%s %q: the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it%s", field, namespace, also)
+}
+
+// CheckNamespace: nil when namespace may be a project's, okdp the
+// platform's settings (global.okdp): checkNamespace, then
+// checkPlatformNamespace. A namespace a target writes in by its options
+// (the flux target's Source) is the target's to refuse
+// (target.OwnNamespaces).
+func CheckNamespace(field, namespace string, okdp M) error {
+	if err := checkNamespace(field, namespace); err != nil {
+		return err
+	}
+	return checkPlatformNamespace(field, namespace, okdp)
 }
 
 // clusterScoped: the well-known cluster-scoped kinds, <group>/<kind>, the

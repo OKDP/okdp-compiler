@@ -52,6 +52,7 @@ package compiler
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
@@ -64,6 +65,7 @@ import (
 	"github.com/okdp/okdp-compiler/internal/target/flux"
 	"github.com/okdp/okdp-compiler/internal/target/helm"
 	"github.com/okdp/okdp-compiler/internal/tree"
+	"github.com/okdp/okdp-compiler/internal/value"
 )
 
 // The types a caller names.
@@ -129,8 +131,13 @@ type (
 	// the default one of the claimer's context (global.okdp.provisioning).
 	Bound = okdp.Bound
 	// Repository: a part of a tree LoadRepository reads: its name in
-	// messages and its files.
+	// messages, its files and its Role, required: RoleTree, any part of the
+	// tree, or RoleCatalog, catalog/ and contracts/ only, its platform.yaml
+	// or projects/ refused.
 	Repository = repository.Repository
+	// Role: what a Repository contributes to the tree (RoleTree,
+	// RoleCatalog); the zero value is refused.
+	Role = repository.Role
 	// Catalog: the packages and the contracts of a tree's repositories
 	// together (LoadCatalog): its services (Services, Service), the files
 	// of a package (Package), the contracts (Contracts).
@@ -236,6 +243,18 @@ const (
 	ObjectsTemplate = helm.ObjectsTemplate
 )
 
+// The roles of a Repository (Repository.Role).
+const (
+	// RoleTree: a repository of the deployment, the platform's or a
+	// project's: any part of the tree, PlatformFile, ProjectsDir,
+	// CatalogDir and ContractsDir.
+	RoleTree = repository.RoleTree
+	// RoleCatalog: a catalog of packages, CatalogDir and ContractsDir
+	// only: a catalog that holds PlatformFile or ProjectsDir is refused, so
+	// that its maintainers add no project nor the platform's values.
+	RoleCatalog = repository.RoleCatalog
+)
+
 // DefaultFluxSource: the GitRepository of the flux target when
 // Flux.Source is empty, okdp-gitops'.
 const DefaultFluxSource = flux.DefaultSource
@@ -305,6 +324,27 @@ func CheckReleases(results []*Result) error {
 // at most, as the compile checks them; for a caller that writes a tree,
 // each name a directory or a key.
 func IsName(name string) bool { return chart.IsDNSLabel(name) }
+
+// CheckProjectName: nil when name may name a project, its namespace, as
+// the compile checks it (Compile, which refuses every instance of the
+// project otherwise), platform the platform's values, PlatformFile's, the
+// context at level 0 (nil for none): a name (IsName); none the compiler
+// reserves, platform (the segment of the platform's keys of the secret
+// store), kube-* (Kubernetes' own) and the deployer engines' and the
+// targets' namespaces (argocd, flux-system, okdp-releases); none of the
+// platform's, global.okdp.policy.reserved, privileged or not. The errors
+// are the compile's, the name a project's: project "kube-foo": the
+// namespace is reserved: .... A namespace a target writes in by its
+// options (Flux.Source's) is refused when the target writes the tree.
+// For a program that creates projects, before it creates any of a
+// project's parts.
+func CheckProjectName(name string, platform map[string]any) error {
+	v, err := value.Normalize(platform)
+	if err != nil {
+		return fmt.Errorf("the platform's values (%s): %w", PlatformFile, err)
+	}
+	return okdp.CheckNamespace("project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
+}
 
 // ProjectDir: projects/<namespace>, where every target writes the files of
 // the instances of a namespace, the flux target its kustomization.yaml.
@@ -383,7 +423,9 @@ func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) 
 // in the namespace of its project: each part of the tree in one
 // repository (platform.yaml, catalog/<service>/, projects/<project>/), a
 // contract in several with the same bytes, so that the order of repos
-// changes nothing. Every problem at once, each naming its repository and
+// changes nothing; platform.yaml and projects/ of a repository of
+// RoleTree only, a catalog's (RoleCatalog) refused, as a repository
+// without a role. Every problem at once, each naming its repository and
 // path: a *LoadError.
 func LoadRepository(repos []Repository) ([]Instance, error) {
 	return repository.Load(repos)

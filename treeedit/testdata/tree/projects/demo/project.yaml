@@ -1,0 +1,14 @@
+description: The demo project
+connections:
+  ext-db:
+    contract: database-server
+    description: A database outside the platform
+    dbName: ext
+    engine: postgresql
+    host: db.example.org
+    secretRef:
+      name: ext-db-credentials
+claims:
+  analytics:
+    contract: database-server
+    class: large

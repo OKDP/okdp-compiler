@@ -1,0 +1,13 @@
+# The catalog repositories a compile fetches (okdp-gitops); the console's
+# menu of their services (categories).
+repositories:
+  - {name: test-charts, url: https://git.example.org/okdp/test-charts.git, ref: main}
+categories:
+  - title: Databases
+    icon: pi-database
+    services:
+      - {name: postgresql, description: PostgreSQL}
+  - title: Apps
+    icon: pi-box
+    services:
+      - {name: app, description: An application}

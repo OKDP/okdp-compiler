@@ -245,6 +245,28 @@ func UniqueReleases(results []*okdp.Result, objects string) error {
 	return errors.Join(errs...)
 }
 
+// OwnNamespaces: nil when no result is of one of namespaces, those the
+// target writes its own objects in (its releases' objects, the engine's
+// source): else an error per namespace that has one, in name order,
+// naming what the target writes there. The compile refuses the engines'
+// usual namespaces already (okdp.EngineNamespaces); a target that writes
+// in another, by its options, refuses its projects too: a project's
+// releases, with every verb of their namespace, would rewrite the engine's
+// objects there.
+func OwnNamespaces(results []*okdp.Result, namespaces map[string]string) error {
+	have := map[string]bool{}
+	for _, res := range results {
+		if _, own := namespaces[res.Namespace]; own {
+			have[res.Namespace] = true
+		}
+	}
+	var errs []error
+	for _, ns := range slices.Sorted(maps.Keys(have)) {
+		errs = append(errs, fmt.Errorf("project %q: the namespace is reserved: it holds %s, no project's", ns, namespaces[ns]))
+	}
+	return errors.Join(errs...)
+}
+
 // Lines: a file built line by line (Add).
 type Lines struct{ strings.Builder }
 

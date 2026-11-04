@@ -18,7 +18,7 @@ Two ways to use it:
 import compiler "github.com/okdp/okdp-compiler"
 
 instances, err := compiler.LoadRepository([]compiler.Repository{
-	{Name: "db", FS: treeFS}, // the tree, in one or more repositories: platform.yaml, contracts/, catalog/, projects/
+	{Name: "db", FS: treeFS, Role: compiler.RoleTree}, // the tree, in one or more repositories: platform.yaml, contracts/, catalog/, projects/; a catalog of its own, RoleCatalog, catalog/ and contracts/ only
 })
 if err != nil {
 	log.Fatal(err) // every problem of the tree, each naming its path
@@ -65,19 +65,27 @@ Argo CD Application (`compiler.ArgoCD`).
 of a tree that does not load), `compiler.TreeFiles` its output for one or
 more targets, the projects that do not deploy kept as the output written
 before holds them (`compiler.Partial`, the rule of `okdp-compile
---partial`); the control plane checks a change with
-`compiler.Regressions` and `compiler.ReleaseTaken`, and reads an output
-back with `compiler.ReadCompiled` and `compiler.ReadPublished`. Package
-`treeedit` edits the files of a tree as written, their comments kept;
-package `chartcache` keeps a chart cache that pulls the upstream charts
-of a check, OCI or https ([Go library](docs/01_usage.md#go-library)).
+--partial`). Package `treeedit` reads and edits a tree for a control
+plane, every rule of an edit its own: an instance, a connection, a
+named claim, a project or the catalog menu created, updated or removed
+is an `Edit`, pure, its `Change` the files to write and its `Check` by
+the compile of the tree before and after it (an instance written that
+does not compile, one that compiled and does not, a removal of what is
+in use, a release taken refused: `compiler.Regressions`,
+`compiler.ReleaseTaken`), `treeedit.Apply` runs it on a transaction; it
+reads an output back (`compiler.ReadCompiled`, `compiler.ReadPublished`),
+and edits the files as written, their comments kept. Package
+`chartcache` keeps a chart cache that pulls the upstream charts of a
+check, OCI or https ([Go library](docs/01_usage.md#go-library)).
 `compiler.Compile` compiles one instance, given its inputs, as
 `CompileAll` does each; it keeps no state between calls and is safe for
 concurrent use. Any `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree,
 `fstest.MapFS` (see `internal/okdp/pipeline_test.go`). The names of the
 tree (`compiler.ProjectsDir`, `compiler.InstanceFile`...), its release
 rule (`compiler.ReleaseName`) and where a target writes an instance
-(`compiler.InstanceDir`) are exported: a caller does not spell them.
+(`compiler.InstanceDir`) are exported: a caller does not spell them;
+the rule of a project's name, `compiler.CheckProjectName`, is the
+compile's, for a program that creates a project before any compile.
 
 What Helm does, the compiler does the same way, checked against `helm
 template` (`testdata/helm`): every values file is read as Helm
@@ -199,6 +207,13 @@ bin/okdp-compile --repository examples/03_full/input/db --check --charts example
 # nothing written: the tree checked, and its final values against the upstream charts
 ```
 
+`--catalog <dir>`, repeatable, adds a catalog of packages, `catalog/`
+and `contracts/` only: a catalog that holds `platform.yaml` or
+`projects/` is refused, its maintainers adding no project nor the
+platform's values (`compiler.RoleCatalog`; a `--repository` is
+`compiler.RoleTree`, and the library refuses a `compiler.Repository`
+without its `Role`).
+
 The settings of `global.okdp` the compiler reads are described, typed
 and defaulted by
 [`internal/okdp/platform.schema.json`](internal/okdp/platform.schema.json),
@@ -220,10 +235,16 @@ other namespaces and set any upstream value, the others' objects refused
 and their upstream values denied the keys of a pod's privileges,
 identity, containers or objects, their images held to the platform's
 registries, `upstream.registries`
-([upstream policy](docs/specs/01_inputs_outputs.md#upstream-policy)).
-An instance's `config.yaml` that sets `connections` or `claims`, or
-`global` but for the keys the package's parameter schema declares under
-it, fails
+([upstream policy](docs/specs/01_inputs_outputs.md#upstream-policy)),
+and the namespaces no project may have, `reserved`, beside those the
+compiler reserves: `platform`, `kube-*`, and the deployer engines' and
+the targets', `flux-system`, `argocd`, `okdp-releases`
+([inputs](docs/specs/01_inputs_outputs.md#inputs-and-outputs)). The
+platform's own objects in the engines' namespaces take a name with a dot
+(`okdp.instances`), which no release, `<project>-<instance>`, can take
+([targets](docs/specs/01_inputs_outputs.md#targets)). An instance's
+`config.yaml` that sets `connections` or `claims`, or `global` but for the
+keys the package's parameter schema declares under it, fails
 ([context values](docs/specs/01_inputs_outputs.md#context-values)); a
 context file that changes a value of a lower level, one of its
 connections, named claims or classes, or its default class, fails, and so
@@ -286,7 +307,7 @@ that is private.
 | Path | Description |
 |---|---|
 | `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, `Build`, `Partial`, `TreeFiles`, the targets, `Write`, the readers of an output... |
-| `treeedit/` | the files of a tree as written, for a caller that edits the tree: `instance.yaml`, the values files, an entry of `connections` or `claims`, a project's description, a document merged key by key, each edited in place |
+| `treeedit/` | the reads and the edits of a tree, for a caller that edits it (a control plane): the readers (`ReadInstance`, `ListConnections`, `ListClaims`, `ListProjects`, `ReadCatalogRepositories`, `ListPublished`, `ReadCompiled`...) over a `Reader`; the edits (`CreateInstance`, `PutConnection`, `DeleteClaim`, `CreateProject`, `UpdateCatalog`...), each an `Edit` whose `Change` lists the files to write and its `Check`, the verdict of the compile of the tree before and after it (`Check.Verify`: `CompileError`, `ErrInUse`, `ErrReleaseTaken`), `Apply` running it on a `Writer`; the files as written: `instance.yaml`, the values files, an entry of `connections` or `claims`, a project's description, `projects.yaml`, a document merged key by key, each edited in place |
 | `chartcache/` | a chart cache that pulls the upstream charts from their repositories (OCI, https), a `compiler.ChartSource`: the control plane's and okdp-gitops' |
 | `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
 | `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, claims, classes and providers, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages, `CompileAll` |

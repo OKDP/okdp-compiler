@@ -1,0 +1,7 @@
+# error: Inputs.Namespace "demo": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it
+# The platform's reserved namespaces (global.okdp.policy.reserved), level
+# 0's: the namespaces of its own components, no project's.
+global:
+  okdp:
+    policy:
+      reserved: [openbao, demo]

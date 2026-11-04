@@ -118,10 +118,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	switch {
 	case !chart.IsRelease(in.Release):
 		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
-	case !chart.IsDNSLabel(in.Namespace):
-		return nil, fmt.Errorf("Inputs.Namespace %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Namespace)
-	case in.Namespace == platformKeys:
-		return nil, fmt.Errorf("Inputs.Namespace %q: the namespace is reserved: %s/ holds the platform's keys of the secret store, which no project writes", in.Namespace, platformKeys)
+	case checkNamespace("Inputs.Namespace", in.Namespace) != nil:
+		return nil, checkNamespace("Inputs.Namespace", in.Namespace)
 	case in.Name != "" && !chart.IsDNSLabel(in.Name):
 		return nil, fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
 	}
@@ -140,6 +138,11 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// compile, which the stages below read (context.go).
 	inst, err := newInstance(def.Files, in, svc)
 	if err != nil {
+		return nil, err
+	}
+	// The platform's reserved namespaces, of its settings: a reservation
+	// wins over a privilege.
+	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
 		return nil, err
 	}
 	// 4. Platform requirements: the global.okdp keys the service requires,

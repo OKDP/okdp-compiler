@@ -122,7 +122,8 @@ binaries'.
 ## Command line
 
 ```text
-okdp-compile --repository <dir> [--repository <dir>]... -o <dir>
+okdp-compile --repository <dir> [--repository <dir>]...
+             [--catalog <dir>]... -o <dir>
              [--target helm|flux|argocd] [--path-prefix <path>]
              [--flux-source <namespace>/<name>]
              [--repo-url <url>] [--revision <revision>]
@@ -131,12 +132,14 @@ okdp-compile --repository <dir> [--repository <dir>]... -o <dir>
 okdp-compile --check [--charts <dir>] [--report <file>|-]
              [--allow-plain-secrets]
              --repository <dir> [--repository <dir>]...
+             [--catalog <dir>]...
 okdp-compile --version
 ```
 
 | Flag | Default | |
 |---|---|---|
 | `--repository` | required | a repository of the tree, its directory, repeatable: any part of the [tree](#repository-layout), each part in one repository; every instance of the tree compiled together ([`--repository`](#--repository)) |
+| `--catalog` | | a catalog of packages, its directory, repeatable: `catalog/` and `contracts/` only, as a `--repository`'s, each service in one repository; one that holds `platform.yaml` or `projects/` is refused ([repository layout](#repository-layout)) |
 | `--output`, `-o` | required, refused with `--check` | the output directory: under `projects/<namespace>/instances/<release>/`, each instance's umbrella chart, its values, OKDP's own objects and what it publishes, and the files of `--target`; every symbolic link under its `projects/` removed first, nothing written through one ([`--output`](#--output)) |
 | `--check` | | compile and check, write nothing: the errors and warnings, no `--output` ([`--check`](#--check)) |
 | `--charts` | `$OKDP_CHARTS`, with `--check` | chart cache directory, read by `--check` only: each upstream chart unpacked under its repository's directory, the URL without its scheme, as `helm pull --untar -d <dir>/<repository>/<chart>-<version>` writes it, `<repository>/<chart>-<version>/<chart>/` (`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`) ([chart cache](specs/01_inputs_outputs.md#chart-cache)); the final values checked against each upstream chart. Without `--check`, refused, and `$OKDP_CHARTS` not read |
@@ -156,9 +159,9 @@ okdp-compile --version
 Flags take one or two dashes, and every input is a flag: an argument that
 is not one is refused, where it would end the flags and those after it be
 ignored (a directory without its `--repository`). The directories of
-`--repository` and `--charts` must exist. Every output is built before any
-is written: anything that fails writes nothing; an error while writing may
-leave some of the files written.
+`--repository`, `--catalog` and `--charts` must exist. Every output is
+built before any is written: anything that fails writes nothing; an error
+while writing may leave some of the files written.
 
 What the command reads of those directories is bounded. A symbolic link
 under one is not followed: the file it is, a file whose path goes
@@ -176,7 +179,9 @@ pass 64 MiB together`.
 
 Every instance of a tree compiled together, the inputs of each read from
 the tree ([repository layout](#repository-layout)): `--repository <dir>`,
-repeatable, each directory any part of it. In order:
+repeatable, each directory any part of it, and `--catalog <dir>`,
+repeatable, each a catalog of packages, `catalog/` and `contracts/`
+only. In order:
 
 1. the tree: every instance, by project then instance, the release
    `<project>-<instance>` ([repository layout](#repository-layout),
@@ -687,11 +692,18 @@ and treats a released version directory as immutable: a change is a new
 version.
 
 The tree may be in several repositories, `--repository` given for each (a
-`compiler.Repository` each): a platform repository with `platform.yaml`,
-catalog repositories with `catalog/` and `contracts/` (OKDP's
-platform-charts is one, as it is), a repository per project with
-`projects/<project>/`, or all in one. They make one tree, part by part,
-with no precedence, so that the order of the flags changes nothing:
+`compiler.Repository` each, of the role `compiler.RoleTree`): a platform
+repository with `platform.yaml`, a repository per project with
+`projects/<project>/`, or all in one; and catalogs, `--catalog` for each
+(`compiler.RoleCatalog`), with `catalog/` and `contracts/` only (OKDP's
+platform-charts is one, as it is). A catalog is trusted for its packages,
+not for the deployment: one that holds `platform.yaml` or `projects/`, a
+file or a directory, even empty, is refused, each path named, rather than
+read without them, so that its maintainers add no project, of a
+privileged name or not, nor the platform's values. The library requires
+the role of each `compiler.Repository`: the zero value is refused. They
+make one tree, part by part, with no precedence, so that the order of
+the flags changes nothing:
 
 | Part | Across repositories |
 |---|---|
@@ -965,7 +977,15 @@ holds, to read it back.
   `compiler.ReleaseName(project, instance)` is the release of an instance
   of the tree, `<project>-<instance>`; `compiler.IsName(name)` whether a
   name may be a project's, an instance's, a connection's or a named
-  claim's, a DNS-1123 label; `compiler.ProjectDir(namespace)` and
+  claim's, a DNS-1123 label; `compiler.CheckProjectName(name,
+  platform)`, `platform` the values of `platform.yaml`, why the compile
+  would refuse every instance of a project of that name, in its words
+  (`project "kube-foo": the namespace is reserved: ...`): not a name,
+  one the compiler reserves (`platform`, `kube-*`, `argocd`,
+  `flux-system`, `okdp-releases`) or one of `global.okdp.policy.reserved`,
+  for a program that creates a project's namespace or directory before
+  any compile (the flux target's `Source`'s namespace is refused by the
+  target, when it writes the tree); `compiler.ProjectDir(namespace)` and
   `compiler.InstanceDir(namespace, release)` are where a target writes the
   files of a namespace, `projects/<namespace>`, and of an instance,
   `projects/<namespace>/instances/<release>`. A caller that writes a tree
@@ -1066,8 +1086,8 @@ holds, to read it back.
 - `compiler.Regressions(before, after)` are the instances that deployed
   in a tree before a change and do not after;
   `compiler.ReleaseTaken(tree, namespace, name)` the instance of another
-  namespace whose release an instance has too: what a control plane
-  checks a write with.
+  namespace whose release an instance has too: what `treeedit`'s
+  `Check.Verify` checks an edit with.
 - The readers of an output: `compiler.ReadArgoRoot(raw)`, the
   `compiler.ArgoSource` (`RepoURL`, `Revision`, `HEAD` by default) of an
   Argo CD entry point, the first `Application` with a `spec.source`;
@@ -1077,16 +1097,79 @@ holds, to read it back.
   namespace, release)`, an instance's umbrella chart
   (`compiler.Compiled`: its `Chart.yaml` as written, its values),
   `fs.ErrNotExist` before it is compiled.
-- Package `treeedit` reads and writes the files of a tree as written,
-  for a caller that edits the tree (a control plane): `ParseInstance` and
-  `EncodeInstance` (`instance.yaml`, its `claimers` absent, none or
-  listed, each kept apart), `EncodeValues`, `DecodeValues` (as the
-  compile reads a values file, every number a `float64`), `MarshalYAML`,
-  `RoundTrip`; `EditEntry` (an entry of `connections` or `claims`),
-  `EditKey`, `WriteDescription` and `ReadDescription` (the
-  `description` of `project.yaml`), `MergeDocument` (a document merged
-  key by key): each in place, the file's head, comments and other keys
-  kept.
+- Package `treeedit` reads and edits a tree for a caller that edits it
+  (a control plane), which keeps the files where it likes (Git): every
+  rule of an edit is the package's, the caller holds the files and
+  commits them. A tree is a `treeedit.Reader` (`ReadFile`, an error
+  wrapping `treeedit.ErrNotFound` for a missing file, `ReadDir`,
+  `Exists`), a transaction a `treeedit.Writer` (`WriteFile`, `Remove`
+  too); the paths are `ProjectDir`, `ProjectFilePath`, `InstancesDir`,
+  `InstanceDir`, beside `platform.yaml` `CatalogsFile` and
+  `ProjectsFile`, and `ValidateName` refuses a name `compiler.IsName`
+  refuses. A name that is a dot segment is not found
+  (`treeedit.ErrNotFound`), never joined into a path.
+  - The readers: `ReadInstance`, `ListInstances` (a
+    `treeedit.Instance`: `Project`, `Name`, `Service`, `Version`,
+    `Claimers` as written, `Values`, its `Release`); `ListConnections`,
+    `ReadConnection` (a `compiler.Connection`, of a project or of the
+    platform for `""`, `ConnectionsFile`); `ListClaims` (each a
+    `compiler.ClaimSpec`, listed even when the compile refuses it);
+    `ReadProject`, `ListProjects(r, split)` (a `treeedit.Project`, its
+    description; `split`, the projects each in a repository of their
+    own, `ProjectsFile` lists them, and a project whose `project.yaml`
+    cannot be read is listed all the same, `ReadErr`);
+    `CheckProjectName(r, name)` (`compiler.CheckProjectName` with the
+    platform's values of `r`, a `*treeedit.CompileError`),
+    `CheckNewProject`; `ReadCatalogRepositories` (the `repositories` of
+    `catalogs.yaml`, `CatalogRepositories`, each a `CatalogRepository`
+    `{Name, URL, Ref}`, its ref `main` by default), `ReadCatalog` (the
+    file, the console's menu), `ReadPlatformValues`; `DecodeProjects`
+    (`projects.yaml`: `ProjectsList`, each a `ProjectEntry`, its url,
+    branch or path of a repository). Of an output a target wrote, an
+    `fs.FS`: `ListPublished(r, output, project)` (a
+    `treeedit.Published`, the instances of the tree only) and
+    `ReadCompiled(output, project, name)` (`treeedit.CompiledFiles`, an
+    error wrapping `ErrNotFound` and `fs.ErrNotExist` before the compile).
+  - The edits: `CreateInstance`, `UpdateInstance(project, name, change)`,
+    `DeleteInstance`; `PutConnection(project, c, create)`,
+    `DeleteConnection`; `PutClaim`, `DeleteClaim`; `CreateProject(p,
+    split)`, `UpdateProject`, `DeleteProject(name, split)` (`split`:
+    `projects.yaml` edited, the project's repository the caller's);
+    `UpdateCatalog(target, change)`. Each refuses a name or an instance
+    it cannot write at once and is a `treeedit.Edit`: its `Action` and
+    `Target` name it (`deploy` `demo/web`, `create connection`
+    `platform/pg`), and `Change(r)`, pure, is its change of the tree `r`
+    holds, or an error wrapping `ErrNotFound` or `ErrExists`: a
+    `treeedit.Change`, the `Files` to write or remove in order, the
+    instance written (`Instance`) and its `Check`, nil when none is
+    needed. An instance's files are written when their content changes
+    only, a file's head, comments and other keys kept.
+  - The check: `Check.Verify(before, after)`, the tree compiled before
+    the change and after it (each a `treeedit.State`, `StateOf(tree,
+    err)`, its tree or its `*compiler.LoadError`), is a
+    `*treeedit.CompileError` when the change adds a problem to the
+    tree: an instance it writes (`Subjects`) does not compile, one that
+    compiled does not any more, the tree does not load and did, or with
+    a problem it did not have (whatever the problems for an edit of an
+    instance); a `*treeedit.ErrInUse` (`What`, `Users`) when it removes
+    what an instance that compiled uses; a `*treeedit.ErrReleaseTaken`
+    (`Release`, `Project`, `Instance`) when a new instance's release is
+    another project's instance's. It gives the warnings of the
+    instances written.
+  - `treeedit.Apply(w, edit, compile)` runs an edit on a transaction:
+    its change, the tree compiled before it is written and after it
+    with `compile` (the caller's, of the tree a `Reader` holds; nil:
+    unchecked), the verdict. On an error the caller drops the
+    transaction.
+- The files as written, `treeedit`'s too, for a caller that edits them
+  itself: `ParseInstance` and `EncodeInstance` (`instance.yaml`, its
+  `claimers` absent, none or listed, each kept apart), `EncodeValues`,
+  `DecodeValues` (as the compile reads a values file, every number a
+  `float64`), `MarshalYAML`, `RoundTrip`; `EditEntry` (an entry of
+  `connections` or `claims`), `EditKey`, `WriteDescription` and
+  `ReadDescription` (the `description` of `project.yaml`),
+  `MergeDocument` (a document merged key by key): each in place, the
+  file's head, comments and other keys kept.
 - `compiler.CheckReleases(results)` is what the Flux and Argo CD targets
   refuse of the release names, their objects sharing one namespace: a
   `*compiler.ReleaseError` (`Release`, `Namespaces`) per release in two
@@ -1160,7 +1243,7 @@ Compile every instance of the tree, the repositories of its parts
 checked out side by side; any error fails the job:
 
 ```bash
-bin/okdp-compile --repository platform --repository catalog --repository projects \
+bin/okdp-compile --repository platform --catalog catalog --repository projects \
   -o compiled --target flux || exit 1
 test -z "$(git status --porcelain compiled/)" || { git status --short compiled/; exit 1; }
 ```
@@ -1421,6 +1504,8 @@ of the targets' options are in
 | `--repo-url is required by --target argocd` | no repository for the Applications | give the one Argo CD reads the output from |
 | `--repository db/projects is inside --repository db`, `--output (-o) out and --repository out/db must not contain one another: ...` | nested directories: a part read twice, or an output that would remove the sources | give disjoint directories |
 | `project "demo" is in the repositories a and b` (`platform.yaml`, `service "<name>"`) | a part of the tree in two repositories | keep it in one ([repository layout](#repository-layout)) |
+| `charts/projects: a catalog repository holds catalog/ and contracts/ only: projects is the deployment's (a repository of role tree)` (`charts/platform.yaml`) | a `--catalog` (`compiler.RoleCatalog`) holds a part of the deployment, `projects/` or `platform.yaml` | move it to a repository of the tree (`--repository`), or give the directory as one if it is |
+| `repository db: no role (Repository.Role): tree, a part of the deployment, or catalog, packages and contracts only` | a library caller's `compiler.Repository` without its `Role` | set `compiler.RoleTree` or `compiler.RoleCatalog` |
 | `db/projects/demo/instances/web/connections.yaml: global: the instance's own connections only (connections): ...` | an instance's `connections.yaml` sets more than `connections` | set it in `project.yaml`, or `platform.yaml` ([repository layout](#repository-layout)) |
 | `db/projects/demo/project.yaml: description: a string, the project's description` | a project's description that is a map, a list or a number | write it as text ([repository layout](#repository-layout)) |
 | `contract s3 differs between the repositories a and b` | two repositories ship different contracts of one name | make them the same, or rename one |
@@ -1445,3 +1530,6 @@ of the targets' options are in
 | `error: demo/demo-b: claims.reports: claim: unknown key "share": contract, class, provider and request only` (`contract is required, ...`, `a connection of that name too (connections.reports)`) | a named claim of `project.yaml` not of the form, every instance of the project refused | fix the declaration ([claims](specs/01_inputs_outputs.md#claims)) |
 | `error: data/data-pg: claim "demo.app.db" (database-server): claimed of namespace demo: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` | a claim across namespaces, its credentials in the provider's namespace | set the platform's secret store, `global.okdp.secrets.store`, with its `provider` for a SecretStore of each namespace ([credentials across namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces), [what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
 | `error: platform/platform-x: Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` | a project named `platform`: its namespace would own the platform's keys of the secret store | rename the project |
+| `error: kube-system/kube-system-x: Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own ...`, `error: argocd/argocd-x: Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): ...` | a project of a namespace the compiler reserves: Kubernetes' own, or a deployer engine's, whose objects its releases would rewrite with every verb of the namespace | rename the project; a component of the platform that is not one of its projects is installed outside the tree |
+| `error: openbao/openbao-x: Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it` (`, privileged or not: ...`) | a project of a namespace `platform.yaml` reserves, `global.okdp.policy.reserved`, even one `policy.privileged` lists | rename the project, or remove the namespace from `policy.reserved` |
+| `project "gitops": the namespace is reserved: it holds the GitRepository of the tree (Flux.Source), no project's` | `--target flux` with `--flux-source` of the namespace of a project | rename the project, or keep the GitRepository in a namespace of no project |

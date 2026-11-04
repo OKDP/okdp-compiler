@@ -56,6 +56,45 @@ status 0 okdp-compile --repository $WORK/engine-priv -o $WORK/files
 grep 'kind: HelmRelease' $WORK/files/projects/infra/instances/infra-web/okdp.objects.yaml
 rm $WORK/files
 
+# A project of a namespace the compiler reserves (kube-*, the deployer
+# engines'), or the platform does (global.okdp.policy.reserved), even
+# one it lists as privileged: refused, nothing written. The project
+# default is not reserved.
+status 1 okdp-compile --repository $WORK/reserved -o $WORK/files --target flux
+! stdout .
+cmp stderr $WORK/reserved.txt
+! exists $WORK/files
+
+-- reserved.txt --
+error: argocd/argocd-web: Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine
+error: kube-system/kube-system-web: Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)
+error: openbao/openbao-web: Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins
+-- reserved/platform.yaml --
+global:
+  okdp:
+    policy:
+      privileged: [openbao]
+      reserved: [openbao]
+-- reserved/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- reserved/catalog/web/1.0.0/okdp.yaml --
+{}
+-- reserved/projects/kube-system/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- reserved/projects/argocd/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- reserved/projects/openbao/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- reserved/projects/default/instances/web/instance.yaml --
+service: web
+version: 1.0.0
 -- cluster-role.txt --
 error: demo/demo-web: web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
 -- tree/catalog/web/1.0.0/Chart.yaml --

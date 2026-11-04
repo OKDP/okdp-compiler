@@ -1,0 +1,9 @@
+# A database server that provisions a database for each claim bound to an
+# instance: the (fictional) cluster chart of CloudNativePG, under the key
+# cluster.
+
+apiVersion: v2
+name: postgresql
+version: 1.0.0
+dependencies:
+  - {name: cluster, repository: https://charts.example.org, version: 0.3.0}
