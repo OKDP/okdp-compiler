@@ -1125,9 +1125,14 @@ holds, to read it back.
   `RepositoryPuller.PrivateHosts` (host, `host:port` or `*.<domain>`: a
   registry of the cluster, `*.svc.cluster.local`) and of
   `InsecureHosts`, a proxy of the environment (`$HTTPS_PROXY`) dialed
-  whatever its address; the knob is the program's (the control plane's
-  `INSECURE_OCI_REGISTRIES` reaches `InsecureHosts`), not the tree's,
-  as one cache serves every tree; the archive's `Chart.yaml` the chart
+  whatever its address; its TLS connections trust the system's
+  certificates, or the pool `RepositoryPuller.SetRootCAs` gives (a
+  platform's CA beside the system's, before the first pull: a registry
+  of the cluster signed by it, its certificate checked all the same);
+  the knobs are the program's (the control plane's
+  `INSECURE_OCI_REGISTRIES` reaches `InsecureHosts`, okdp-gitops'
+  `GITOPS_PRIVATE_CHART_HOSTS` `PrivateHosts`), not the tree's, as one
+  cache serves every tree; the archive's `Chart.yaml` the chart
   and version named; `Cache.File` reads one of `chartcache.Files` only, and
   `Cache.FS` follows no symbolic link and bounds what it reads, as
   `okdp-compile` reads `--charts`.
@@ -1251,8 +1256,9 @@ holds, to read it back.
     its claims bound, each problem at its parameter path, the compile's
     rules only. `ValidateClaim(r, compile, project, claim)` validates a
     named claim as the project's instances bind it, at `claims.<name>`;
-    a project without instance binds none of its claims, which none
-    checks.
+    a project without instance binds none of its claims, which the tree
+    checks at their declaration all the same (class, request, name),
+    their field errors at `claims.<name>` too.
 - The files as written, `treeedit`'s too, for a caller that edits them
   itself: `ParseInstance` and `EncodeInstance` (`instance.yaml`, its
   `claimers` absent, none or listed, each kept apart), `EncodeValues`,
@@ -1366,11 +1372,13 @@ holds, to read it back.
   ten times counted ten times): past it, the compile fails with
   `the values the document builds exceed 32 MiB`.
 - `Inputs.AllowPlainSecrets` accepts credentials in clear: a `provides`
-  `secret` without `generate`, a plain Secret of its `stringData`, and a
-  Secret of the `objects` section with `data` or `stringData`. Unset,
-  they fail the compile: the objects file is written to the deployments
-  repository, so credentials are generated in the cluster or read from
-  the platform's secret store
+  `secret` without `generate`, a plain Secret of its `stringData`, a
+  Secret of the `objects` section with `data` or `stringData`, an
+  ExternalSecret whose template holds a literal at a sensitive key, a
+  Fake generator with values. Unset, they fail the compile, and a
+  literal of the upstream values at a sensitive key is a warning: the
+  objects file is written to the deployments repository, so credentials
+  are generated in the cluster or read from the platform's secret store
   ([credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)).
 - Errors are messages for the user, returned as they are; the package
   defines no error types, but `ErrNotInCatalog`, which a missing package
@@ -1564,6 +1572,8 @@ usage error with status 2.
 | `web: objects: Secret/token: namespace kube-system, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them` | an object of the package, or a generated Secret (`okdpGeneratedSecret`'s `namespace`), names another namespace than the instance's | the instance's namespace (`release.namespace`), or leave `namespace` out; the platform's own projects write other namespaces ([objects section](specs/01_inputs_outputs.md#objects-section)) |
 | `web: output "store": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it` | an output of `provides` has a `secret` of `stringData` alone: its credentials would be written in clear to the deployments repository | `generate` the secret keys, `stringData` for the others; or point `secretRef` at a Secret an operator, the chart or an ExternalSecret writes; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)) |
 | `web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it` | a Secret of the package's `objects` holds values, `data` or `stringData` | `okdpGeneratedSecret`, or an ExternalSecret of the platform's secret store; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: objects: ExternalSecret/demo-web: a plain value (spec.target.template.data.password): a literal at a sensitive key, ...`, `web: objects: Fake/demo-web: a plain value (spec.data): a Fake generator gives the values it holds; ...` | an ExternalSecret's template holds a literal at a sensitive key (an `okdpGeneratedSecret` `stringData`'s too), a Fake generator values | a template of what the store or a generator gives (`'{{ .password }}'`), a generated key; the static keys of `stringData` are not credentials ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `warning: upstream.app.auth.password: a literal at a sensitive key, a credential in clear in the values and the deployments repository: ...` | an instance's upstream value at a key named as a credential is a literal | generate it or read it from the store, the chart given the Secret's name (its `existingSecret`); a key that only names one is a false positive ([objects section](specs/01_inputs_outputs.md#objects-section)) |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |

@@ -152,6 +152,40 @@ func controlPlane(okdp M) *ServiceAccount {
 	return &ServiceAccount{Namespace: value.Str(sa["namespace"]), Name: value.Str(sa["name"])}
 }
 
+// Network: the network policy of a project's namespace (Project.Network),
+// global.okdp.network with policy true: every ingress to its pods denied
+// but from the namespace itself, from Ingress and from Claimers.
+type Network struct {
+	Ingress  []string // global.okdp.network.ingressNamespaces, in their order
+	Claimers []string // the namespaces of the claims the project's instances provide, sorted, once each, its own left out
+}
+
+// network: the Network of okdp, the platform's settings, without claimers;
+// nil unless global.okdp.network.policy is true.
+func network(okdp M) *Network {
+	if value.Dig(okdp, "network.policy") != true {
+		return nil
+	}
+	n := &Network{}
+	for _, ns := range value.AsList(value.Dig(okdp, "network.ingressNamespaces")) {
+		n.Ingress = append(n.Ingress, value.Str(ns))
+	}
+	return n
+}
+
+// claimers: the namespaces of claims, sorted, once each, namespace's left
+// out: those that reach a provider of namespace (Network.Claimers).
+func claimers(namespace string, claims []Claim) []string {
+	var out []string
+	for _, c := range claims {
+		if c.Namespace != namespace && !slices.Contains(out, c.Namespace) {
+			out = append(out, c.Namespace)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // admins: global.okdp.access.admins of okdp, the platform's settings: the
 // groups of the platform's administrators, in their order.
 func admins(okdp M) []string {
@@ -167,13 +201,15 @@ func admins(okdp M) []string {
 // namespace; whether it is one of the platform's own
 // (global.okdp.policy.privileged); the platform's secret store in it
 // (global.okdp.secrets with a provider); the roles of its groups
-// (Access); the control plane's identity (global.okdp.controlPlane).
+// (Access); the control plane's identity (global.okdp.controlPlane); its
+// network policy (global.okdp.network), nil when the platform has none.
 type Project struct {
 	Namespace    string
 	Privileged   bool
 	SecretStore  *SecretStore
 	Access       Access
 	ControlPlane *ServiceAccount
+	Network      *Network
 }
 
 // AccessError: a project's access the compile refuses (ParseAccess):
@@ -190,7 +226,9 @@ func (e *AccessError) Unwrap() error { return e.Err }
 // whose instances are kept (output.Files). The context's layers checked
 // as a compile checks them (contextLayers, platformSettings), their
 // error the error. An access that is refused is an *AccessError, the
-// Project given all the same, no group a role in it.
+// Project given all the same, no group a role in it. Its network policy
+// has the claimers of in.Claims alone: the caller adds those of the
+// project's other providers.
 func ProjectOf(in Inputs) (Project, error) {
 	if err := checkNamespace("Inputs.Namespace", in.Namespace); err != nil {
 		return Project{}, err
@@ -203,7 +241,10 @@ func ProjectOf(in Inputs) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{Namespace: in.Namespace, Privileged: privileged(settings, in.Namespace), SecretStore: secretStore(settings), Access: Access{GroupPrefix: groupPrefix(settings)}, ControlPlane: controlPlane(settings)}
+	p := Project{Namespace: in.Namespace, Privileged: privileged(settings, in.Namespace), SecretStore: secretStore(settings), Access: Access{GroupPrefix: groupPrefix(settings)}, ControlPlane: controlPlane(settings), Network: network(settings)}
+	if p.Network != nil {
+		p.Network.Claimers = claimers(in.Namespace, in.Claims)
+	}
 	if p.Access.Groups, err = projectAccess(in.Context, in.Namespace); err != nil {
 		p.Access.Groups = map[string]Role{}
 		return p, &AccessError{err}

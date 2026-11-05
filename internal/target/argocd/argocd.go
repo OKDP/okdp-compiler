@@ -126,7 +126,9 @@ func (t Target) Kept(p target.Project, _ map[string][]byte) (map[string][]byte, 
 // (target.SecretStore); target.AccessFile, the RoleBindings of its
 // groups, when one has a role (target.Access);
 // target.ControlPlaneFile, the control plane's Role and RoleBinding, when
-// the platform names its identity (target.ControlPlane); each as the flux
+// the platform names its identity (target.ControlPlane);
+// target.NetworkPolicyFile, the NetworkPolicy of its namespace, when the
+// platform sets one (target.NetworkPolicy); each as the flux
 // target writes it; and AppProjectFile, the AppProject of its Applications
 // (AppProject), Argo CD's own. The options are those Files checks.
 func (t Target) ProjectManifests(p target.Project) (map[string][]byte, error) {
@@ -143,6 +145,9 @@ func (t Target) ProjectManifests(p target.Project) (map[string][]byte, error) {
 	}
 	if cp := target.ControlPlane(p); cp != nil {
 		files[target.ControlPlaneFile] = cp
+	}
+	if np := target.NetworkPolicy(p); np != nil {
+		files[target.NetworkPolicyFile] = np
 	}
 	return files, nil
 }

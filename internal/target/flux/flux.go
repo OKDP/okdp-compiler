@@ -192,7 +192,9 @@ func (t Target) Kept(p target.Project, previous map[string][]byte) (map[string][
 // platform names a provider (target.SecretStore); target.AccessFile, the
 // RoleBindings of its groups, when one has a role (target.Access);
 // target.ControlPlaneFile, the control plane's Role and RoleBinding, when
-// the platform names its identity (target.ControlPlane); each as the
+// the platform names its identity (target.ControlPlane);
+// target.NetworkPolicyFile, the NetworkPolicy of its namespace, when the
+// platform sets one (target.NetworkPolicy); each as the
 // argocd target writes it; Flux's own, ServiceAccountFile, for
 // a project that is not one of the platform's own (ServiceAccount); and
 // their KustomizationFile, which sets no namespace: each manifest carries
@@ -211,6 +213,9 @@ func ProjectManifests(p target.Project) (map[string][]byte, error) {
 	}
 	if cp := target.ControlPlane(p); cp != nil {
 		files[target.ControlPlaneFile] = cp
+	}
+	if np := target.NetworkPolicy(p); np != nil {
+		files[target.NetworkPolicyFile] = np
 	}
 	if !p.Privileged {
 		files[ServiceAccountFile] = ServiceAccount(p.Namespace)

@@ -171,7 +171,7 @@ func (c *Check) Verify(before, after State) ([]Warning, error) {
 		if len(added) == 0 {
 			added = after.Load.Problems
 		}
-		ce := &CompileError{Err: &compiler.LoadError{Problems: added}}
+		ce := &CompileError{Err: after.Load.Select(added)}
 		if strict {
 			ce.Project, ce.Instance = c.Subjects[0].Project, c.Subjects[0].Name
 		}

@@ -233,6 +233,11 @@ type (
 	// global.okdp.controlPlane.serviceAccount), which the targets bind in
 	// each project's namespace to the Role okdp-control-plane.
 	ServiceAccount = okdp.ServiceAccount
+	// Network: the network policy of a project's namespace
+	// (Result.Network, global.okdp.network with policy true): the
+	// platform's ingress namespaces and the namespaces of the claims the
+	// instance provides, which the targets let in.
+	Network = okdp.Network
 )
 
 // The files Write gives besides Chart.yaml.

@@ -353,7 +353,11 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 // every run of other characters than letters and digits one "-", trimmed),
 // the parts joined by dots, which no part holds: two sources give two IDs,
 // and the dots tell the kind. Longer than 63 characters (chart.IsClaimID):
-// cut, and ended with 8 hexadecimal digits of its SHA-256.
+// what follows <namespace>. cut, the namespace kept whole, and ended with
+// 8 hexadecimal digits of its SHA-256: <namespace>.<cut>-<digits> to 54
+// characters before the digits, <namespace>.<digits> when no cut fits (a
+// namespace of 53 or 54 characters). A longer namespace cannot keep its
+// prefix within 63: the ID is cut whole, which checkClaims refuses.
 func claimID(namespace, instance, field, name string) string {
 	parts := []string{namespace, name}
 	if name == "" {
@@ -373,7 +377,74 @@ func claimID(namespace, instance, field, name string) string {
 	id := strings.Join(parts, ".")
 	if len(id) > 63 {
 		sum := sha256.Sum256([]byte(id))
-		id = strings.TrimRight(id[:54], "-.") + "-" + hex.EncodeToString(sum[:4])
+		suffix := hex.EncodeToString(sum[:4])
+		ns, rest := parts[0]+".", id[len(parts[0])+1:]
+		switch keep := 54 - len(ns); {
+		case keep > 0:
+			if cut := strings.TrimRight(rest[:keep], "-."); cut != "" {
+				return ns + cut + "-" + suffix
+			}
+			return ns + suffix
+		case len(ns)+len(suffix) <= 63:
+			return ns + suffix
+		}
+		id = strings.TrimRight(id[:54], "-.") + "-" + suffix
 	}
 	return id
+}
+
+// CheckDeclarations: the declarations of the context of in, a project's
+// that has no instance (in.Namespace, in.Contracts, in.Context; no
+// release), checked as CompileAll checks those of an instance's context,
+// which binds them: every connection at its declaration
+// (declaredConnections), then every named claim, in name order: its name
+// and its form, no connection's name (namedClaims); its class, the one it
+// names or the default one of the context, a class of
+// global.okdp.provisioning whose provider is of the form (claimClass);
+// its request, which sets no key the class fixes, against the contract's
+// claim schema (tree.request). Its provider is not looked for: a claim of
+// a project without instance is bound to none, nor provisioned, until an
+// instance's context declares it. The context's layers checked as a
+// compile checks them, and the platform's settings; every claim's error
+// joined, each at claims.<name> (FieldError).
+func CheckDeclarations(in Inputs) error {
+	layers, platform, err := contextLayers(in.Context)
+	if err != nil {
+		return err
+	}
+	settings, err := platformSettings(platform)
+	if err != nil {
+		return err
+	}
+	if err := declaredConnections(in); err != nil {
+		return err
+	}
+	merged := M{}
+	for _, l := range layers {
+		merged = value.Merge(merged, value.AsMap(value.Copy(l)))
+	}
+	claims, ok := merged["claims"].(M)
+	if !ok {
+		_, err := namedClaims(merged)
+		return err
+	}
+	classes := value.AsMap(settings["provisioning"])
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(claims)) {
+		// Each claim alone, its errors in name order.
+		named, err := namedClaims(M{"claims": M{name: claims[name]}, "connections": merged["connections"]})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		spec, where := named[name], value.Key("claims", name)
+		ch, _, _, err := claimClass(classes, in.Namespace, where, spec.Contract, spec)
+		if err == nil {
+			_, err = (&tree{}).request(in, where, spec.Contract, spec.Request, ch)
+		}
+		if err != nil {
+			errs = append(errs, atField(where, err))
+		}
+	}
+	return errors.Join(errs...)
 }

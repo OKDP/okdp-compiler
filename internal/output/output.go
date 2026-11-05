@@ -121,7 +121,8 @@ func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]
 // the output written before holds of it (none: none written), its
 // platform's part of today's settings (D-5): the project as its context
 // decides it now (okdp.ProjectOf of its first instance: privileged or
-// not, its secret store, the roles of its groups, the control plane),
+// not, its secret store, the roles of its groups, the control plane, its
+// network policy, the claimers of every instance's claims its own),
 // written by each of targets that is a target.Keeper (Kept), a path two
 // write differently an error, in place of every file previous holds under
 // its target.ProjectManifests, its instances' files kept as they are but
@@ -155,6 +156,15 @@ func rederive(t *tree.Tree, targets []target.Target, namespace string, previous 
 	}
 	if p.Namespace == "" {
 		return previous, nil, nil
+	}
+	// The network policy's claimers: those of the claims bound to every
+	// instance of the project, as the compile bound them, compiled or not.
+	for _, ti := range t.Instances {
+		if ti.Namespace() == namespace {
+			for _, pr := range ti.Provided {
+				target.AddClaimers(&p, pr.Claimer.Namespace())
+			}
+		}
 	}
 	written := map[string][]byte{}
 	for _, k := range keepers {

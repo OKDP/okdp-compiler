@@ -65,3 +65,33 @@ func Added(before, after *Error) []string {
 	}
 	return out
 }
+
+// Select: the Error of the problems of e that problems lists, in e's
+// order, each with its error when e has them (Unwrap): a change's added
+// problems (Added), their fields kept for a caller that maps them
+// (compiler.FieldErrors).
+func (e *Error) Select(problems []string) *Error {
+	out := &Error{}
+	for i, p := range e.Problems {
+		if !slices.Contains(problems, p) {
+			continue
+		}
+		out.Problems = append(out.Problems, p)
+		if len(e.errs) == len(e.Problems) {
+			out.errs = append(out.errs, e.errs[i])
+		}
+	}
+	return out
+}
+
+// unjoin: the errors errors.Join joined, err alone otherwise, none for
+// nil.
+func unjoin(err error) []error {
+	if err == nil {
+		return nil
+	}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
+}

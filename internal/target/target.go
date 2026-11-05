@@ -83,6 +83,10 @@ const (
 	// namespace, and its RoleBinding (ControlPlane); written when the
 	// platform names the control plane's identity.
 	ControlPlaneFile = "control-plane.yaml"
+	// NetworkPolicyFile: the NetworkPolicy of the project's namespace
+	// (NetworkPolicy); written when the platform sets one, for a project
+	// that is not one of the platform's own.
+	NetworkPolicyFile = "network-policy.yaml"
 )
 
 // ProjectManifests: projects/<namespace>/project, a project's own
@@ -99,19 +103,26 @@ type Project = okdp.Project
 // Projects: the projects of results, one per namespace that has a result,
 // in namespace order: privileged when any of its results is
 // (Result.Privileged), the first Result.SecretStore of the namespace that
-// is set, and the first result's Access and ControlPlane, which every
-// result of a namespace has alike (its file's, the platform's).
+// is set, and the first result's Access, ControlPlane and Network, which
+// every result of a namespace has alike (its file's, the platform's), the
+// network's claimers those of every result of the namespace (AddClaimers).
 func Projects(results []*okdp.Result) []Project {
 	byNamespace := map[string]*Project{}
 	for _, res := range results {
 		p, ok := byNamespace[res.Namespace]
 		if !ok {
 			p = &Project{Namespace: res.Namespace, Access: res.Access, ControlPlane: res.ControlPlane}
+			if res.Network != nil {
+				p.Network = &okdp.Network{Ingress: res.Network.Ingress}
+			}
 			byNamespace[res.Namespace] = p
 		}
 		p.Privileged = p.Privileged || res.Privileged
 		if p.SecretStore == nil {
 			p.SecretStore = res.SecretStore
+		}
+		if res.Network != nil {
+			AddClaimers(p, res.Network.Claimers...)
 		}
 	}
 	var out []Project
@@ -341,6 +352,77 @@ func ControlPlane(p Project) []byte {
 	l.Add("  - kind: ServiceAccount")
 	l.Add("    name: %q", sa.Name)
 	l.Add("    namespace: %q", sa.Namespace)
+	return []byte(l.String())
+}
+
+// AddClaimers: namespaces added to the claimers of p's network policy,
+// sorted, once each, p's own left out; none without a policy.
+func AddClaimers(p *Project, namespaces ...string) {
+	if p.Network == nil {
+		return
+	}
+	n := *p.Network
+	n.Claimers = slices.Clone(n.Claimers)
+	for _, ns := range namespaces {
+		if ns != p.Namespace && !slices.Contains(n.Claimers, ns) {
+			n.Claimers = append(n.Claimers, ns)
+		}
+	}
+	slices.Sort(n.Claimers)
+	p.Network = &n
+}
+
+// NetworkPolicyName: okdp-project, the NetworkPolicy of a project's
+// namespace.
+const NetworkPolicyName = "okdp-project"
+
+// NetworkPolicy: the NetworkPolicyFile of p, not marked, the same
+// whatever the target; nil when the platform sets no policy
+// (Project.Network nil) or p is one of the platform's own (an ingress
+// controller, an operator's webhooks, reached from outside the cluster
+// or from the API server, which no namespace names). In the project's
+// namespace, labelled ProjectLabel, a NetworkPolicy of every pod that
+// denies every ingress but from the pods of the namespace, from those of
+// the platform's ingress namespaces (Network.Ingress) and from those of
+// the namespaces whose claims the project provides (Network.Claimers),
+// each namespace by its name (kubernetes.io/metadata.name, which the API
+// server sets). Egress is not restricted: what a pod reaches is guarded
+// by the policy of the namespace it reaches, and a project's services
+// reach the API server, the identity provider, object stores and
+// networks the compiler does not know.
+func NetworkPolicy(p Project) []byte {
+	n := p.Network
+	if n == nil || p.Privileged {
+		return nil
+	}
+	var l Lines
+	l.Add("apiVersion: networking.k8s.io/v1")
+	l.Add("kind: NetworkPolicy")
+	l.Add("metadata:")
+	l.Add("  name: %s", NetworkPolicyName)
+	l.Add("  namespace: %q", p.Namespace)
+	l.Add("  labels:")
+	l.Add("    %s: %q", ProjectLabel, p.Namespace)
+	l.Add("spec:")
+	l.Add("  podSelector: {}")
+	l.Add("  policyTypes: [Ingress]")
+	l.Add("  ingress:")
+	l.Add("    - from:")
+	l.Add("        - podSelector: {}")
+	if from := slices.Concat(n.Ingress, n.Claimers); len(from) > 0 {
+		var q []string
+		for _, ns := range from {
+			if !slices.Contains(q, fmt.Sprintf("%q", ns)) {
+				q = append(q, fmt.Sprintf("%q", ns))
+			}
+		}
+		l.Add("    - from:")
+		l.Add("        - namespaceSelector:")
+		l.Add("            matchExpressions:")
+		l.Add("              - key: kubernetes.io/metadata.name")
+		l.Add("                operator: In")
+		l.Add("                values: [%s]", strings.Join(q, ", "))
+	}
 	return []byte(l.String())
 }
 

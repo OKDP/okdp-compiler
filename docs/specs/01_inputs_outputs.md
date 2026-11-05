@@ -368,7 +368,9 @@ object of a `contract` the contracts hold, then its fields, its
 once, at `connections.<name>`, before its claims bind: a typo in a
 connection no instance references yet is reported where it is written,
 a project's refusing its project's instances, the platform's every
-instance (`compiler.CheckConnection` checks one before it is written).
+instance (`compiler.CheckConnection` checks one before it is written);
+of a project without instance, the tree, which does not load
+([named claims](#claims)).
 
 ```
 connections.pg (connection "pg"): field "dbName" is required by the database contract
@@ -1198,6 +1200,8 @@ not, is the platform's, set at level 0: a project's layer sets
 | `policy.upstream.registries` | the registries the images of the other projects' upstream values come from, each a host, its port and a path prefix optional; unset, the images are not checked ([upstream policy](#upstream-policy)) |
 | `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them; the compiler writes nothing of them, the platform's bootstrap binds them once, a program that mirrors the platform's authority reads them (`compiler.PlatformAdmins`) ([access](#access)) |
 | `access.groupPrefix` | `""` by default: the prefix the Kubernetes API server gives the groups of its OIDC users (`--oidc-groups-prefix`), which the RoleBindings of the projects' groups name them with ([access](#access)) |
+| `network.policy` | `false` by default: `true`, the [targets](#the-projects-manifests) write a NetworkPolicy in each project's namespace but the platform's own (`policy.privileged`), its ingress denied but from the namespace itself, `network.ingressNamespaces` and the namespaces whose claims its instances provide, its egress open (`Result.Network`); off by default, as the compiler knows neither the cluster's ingress controller nor whether its network plugin enforces a policy: on, without the ingress controller's namespace, the services lose their ingress |
+| `network.ingressNamespaces` | none by default: the namespaces whose pods reach every project's pods with `network.policy`: the ingress controller's (that of `ingress`'s hosts), a monitoring's; DNS labels, once each |
 | `controlPlane.serviceAccount` | no default: the identity of the optional control plane, `{namespace, name}`, a DNS label and a DNS subdomain, both required; the [targets](#the-projects-manifests) bind it in each project's namespace to what it needs there (`Result.ControlPlane`); absent, the platform has no control plane, and nothing is written |
 
 Every compile checks `global` against the schema, in every mode, before
@@ -1649,7 +1653,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml`, those of the [umbrella chart](#umbrella-chart) |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written: the metadata of the [umbrella chart](#umbrella-chart) |
-| `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); nil when none. The binary prints each on stderr, `warning: <message>` |
+| `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); a list appended to that drops a chart's defaults ([append](#append)); a literal of the upstream values at a sensitive key ([objects section](#objects-section)); nil when none. The binary prints each on stderr, `warning: <message>` |
 
 `Values` and `Charts` have one entry per compiled chart: every dependency
 of `Chart.yaml`, its computed values `{}` when the values file does not
@@ -2017,6 +2021,20 @@ web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authoriza
 web: objects: ExternalSecret/demo-web-ledger: namespace finance, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them
 ```
 
+Nor does it install an object of the deployer engines' API groups, in
+its namespace or not: Flux's (`helm.toolkit.fluxcd.io`,
+`kustomize.toolkit.fluxcd.io`, `source.toolkit.fluxcd.io`,
+`notification.toolkit.fluxcd.io`, `image.toolkit.fluxcd.io`), the Flux
+Operator's (`fluxcd.controlplane.io`), Flux's source extensions
+(`source.extensions.fluxcd.io`) and Argo CD's (`argoproj.io`): a
+HelmRelease, a GitRepository, a ResourceSet or an Application would
+drive the engine with its own identity, past the project's
+(`engineGroups`; the engines' lockdown flags are the second line):
+
+```
+web: objects: HelmRelease/demo-web-override: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+```
+
 Whatever the project, no Secret (`v1`) of `Objects`, nor of the items of
 a `List`, holds values in clear, a non-empty `data` or `stringData`,
 unless the caller allows it (`Inputs.AllowPlainSecrets`): credentials are
@@ -2033,6 +2051,43 @@ before `stringData` (`testdata/cli/plain-secrets.txtar`):
 
 ```
 web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it
+```
+
+The other objects that would carry credentials in clear are refused
+alike, by the field that holds them:
+
+- an `ExternalSecret` (`external-secrets.io`), or a
+  `ClusterExternalSecret` (its `spec.externalSecretSpec`), whose
+  `target.template.data` holds a literal at a sensitive key: a key the
+  messages redact (`password`, `token`, `secret`, `...Key`, as
+  `value.Sensitive` names them) but one that names a credential rather
+  than holds one (`existing...`, `...Ref`, `passwordKey`); a literal
+  a string that is not empty and holds neither `{{` nor `${`, or a
+  number. A template (`'{{ .password }}'`) reads what the store or a
+  generator gives; a literal at another key (`region: eu`) passes. A
+  `stringData` of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret),
+  a `provides` secret's with `generate`, is such a template's: its
+  static keys are not credentials;
+- a `Fake` generator (`generators.external-secrets.io`), or a
+  `ClusterGenerator` of kind `Fake`, with values (`spec.data`,
+  `spec.generator.fakeSpec.data`): it gives the values it holds.
+
+```
+web: objects: ExternalSecret/demo-web: a plain value (spec.target.template.data.password): a literal at a sensitive key, not a template of what the store or a generator gives; credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it
+```
+
+What the rule does not see: a credential under a key that does not say
+so, in a template's literal (`url: postgres://u:p@db`) or a template of
+a constant (`'{{ "p" }}'`), in a ConfigMap, an annotation or another
+kind's field; and the values of the charts. Of the values, the
+instance's upstream values are checked as a guess: a literal (as
+above) at a sensitive key of `upstream.<key>`, a list's items under its
+key, is a warning (`Result.Warnings`), one per path, in path order, its
+value not printed, unless `Inputs.AllowPlainSecrets`; the instance's
+values file holds it in clear, and so does the output:
+
+```
+upstream.app.auth.password: a literal at a sensitive key, a credential in clear in the values and the deployments repository: generate it (okdpGeneratedSecret) or read it from the platform's secret store, and give the chart the Secret's name (its existingSecret)
 ```
 
 ### The objects file
@@ -2448,6 +2503,7 @@ projects/
       secret-store.yaml       the platform's secret store in it
       access.yaml             the RoleBindings of the project's groups
       control-plane.yaml      the control plane's Role and RoleBinding
+      network-policy.yaml     the NetworkPolicy of its namespace
       service-account.yaml    flux: the identity of its releases
       kustomization.yaml      flux: these files
       appproject.yaml         argocd: the AppProject of its Applications
@@ -2549,15 +2605,16 @@ the engine's own identity.
 | `service-account.yaml` | `flux`, a project that is not one of the platform's own: the ServiceAccount `project-<namespace>` in `okdp-releases`, which helm-controller impersonates for the project's releases (`serviceAccountName`), the Role `okdp-project` in the namespace, every verb on every resource of every API group (the boundary is the namespace, not the kinds), and its RoleBinding: a cluster-scoped object, or one of another namespace, is refused by the API server |
 | `access.yaml` | when a group of the project has a role ([access](#access)): the RoleBindings `okdp-access-viewer`, `okdp-access-editor` and `okdp-access-admin` in the namespace, each of a role that has groups, to Kubernetes' aggregated ClusterRole `view`, `edit` or `admin`, its subjects the groups of the role, `kind: Group`, named `global.okdp.access.groupPrefix` and the group's name |
 | `control-plane.yaml` | when the platform names the control plane's identity (`global.okdp.controlPlane.serviceAccount`, `Result.ControlPlane`), for every project, privileged or not: the Role `okdp-control-plane` in the namespace, what okdp-control-plane-server does there and nothing more ([the control plane's role](#the-control-planes-role)), and the RoleBinding `okdp-control-plane` of the ServiceAccount to it |
+| `network-policy.yaml` | when the platform sets `global.okdp.network.policy` (`Result.Network`), for a project that is not one of the platform's own (an ingress controller, an operator's webhooks, reached from outside the cluster or from the API server, which no namespace names): the NetworkPolicy `okdp-project` in the namespace, of every pod (`podSelector: {}`), `policyTypes: [Ingress]`, its ingress from the pods of the namespace, and from those of the namespaces `kubernetes.io/metadata.name` names (set by the API server): `global.okdp.network.ingressNamespaces`, then the namespaces of the claims its instances provide ([claims](#claims)), sorted, a provider staying reachable by its claimers, its claimers of every instance of the project, compiled or kept. Egress is not restricted: what a pod reaches is guarded by the policy of the namespace it reaches, and a project's services reach the API server, the identity provider, object stores and networks the compiler does not know |
 | `kustomization.yaml` | `flux`: these files, without a `namespace`: each carries its own |
 | `appproject.yaml` | `argocd`: the AppProject `project-<namespace>` in `argocd`, `sourceRepos` the `RepoURL`, its destination the namespace of `https://kubernetes.default.svc` and `clusterResourceWhitelist: []`, no cluster-scoped resource; for one of the platform's own projects, every namespace (`"*"`) and every cluster-scoped resource (`{group: "*", kind: "*"}`); a `description`; the `roles` of the project's groups ([access](#access)) |
 
 One tree, two engines: a caller may write the files of both deployer
 targets into one tree (okdp-gitops does), each engine reading its own.
 Every file both write is byte for byte the same, the umbrella charts and,
-in `project/`, `namespace.yaml`, `secret-store.yaml`, `access.yaml` and
-`control-plane.yaml` (a caller refuses a path the two write
-differently); only
+in `project/`, `namespace.yaml`, `secret-store.yaml`, `access.yaml`,
+`control-plane.yaml` and `network-policy.yaml` (a caller refuses a path
+the two write differently); only
 `appproject.yaml` is Argo CD's, and `kustomization.yaml` and
 `service-account.yaml` Flux's.
 
@@ -2575,15 +2632,18 @@ and `admin` in its namespace, and the control plane's Role and
 RoleBinding (the entry point's identity holds what they grant: the API
 server lets no one grant what it lacks). Its source is a directory,
 `directory: {include:
-'{namespace.yaml,secret-store.yaml,access.yaml,control-plane.yaml,appproject.yaml}'}`:
+'{namespace.yaml,secret-store.yaml,access.yaml,control-plane.yaml,network-policy.yaml,appproject.yaml}'}`
+(the entry point's AppProject admitting NetworkPolicies too):
 in a tree that
 holds the Flux files too, Argo CD would otherwise build the directory
 with its `kustomization.yaml`, which lists no AppProject and Flux's
 identity (an instance's Application is a Helm source, which its
 directory's Flux files do not change). The Namespace must exist before
 an instance syncs: an Application whose namespace does not exist yet
-fails its sync and retries. Network isolation is not the compiler's: no
-NetworkPolicy is written, the platform's own applies.
+fails its sync and retries. Network isolation is the compiler's on the
+platform's request only (`global.okdp.network.policy`,
+`network-policy.yaml`): ingress to a project's pods; the platform's own
+namespaces, and egress, are the platform's.
 
 The HelmReleases share `okdp-releases`, the Applications `argocd`: their
 names, the releases', must be unique across the namespaces. What a
@@ -2810,8 +2870,16 @@ claims:
 
 It is bound and given to its provider whether a reference names it or not,
 as a namespace holds a PersistentVolumeClaim no pod mounts; each reference
-to it is a [dependency](#dependencies). A level adds named claims, it
-changes none of a lower level's (`claims.<name>`, taken whole). Through
+to it is a [dependency](#dependencies). A project without instance binds
+none, nor does its provider provision it, but the tree checks its
+declarations all the same (`okdp.CheckDeclarations`), as an instance's
+compile would: each named claim's form and name, no connection's, its
+class, the one it names or the default one, a class of the context, its
+request, no key its class fixes, against the contract's claim schema;
+and each connection at its declaration. A problem is the tree's, which
+does not load, at `projects/<project>/project.yaml: claims.<name>`. A
+level adds named claims, it changes none of a lower level's
+(`claims.<name>`, taken whole). Through
 the library, the context of each instance of the namespace declares its
 named claims, alike: a name declared differently in two refuses every
 instance of the namespace. A package requires what it needs of a named
@@ -2864,8 +2932,12 @@ a Service name or a host segment, and a SQL identifier, replace its dots in the 
 one instance whose names normalize to one label (`dbs["eu.main"]` and
 `dbs.eu-main`) give one ID: the instance is refused (`<field>: claim: it
 gives the same ID (<id>) as <first field>: rename one of the parameters`).
-Longer than 63 characters, the ID is cut to 54, and ended with `-` and 8
-hexadecimal digits of its SHA-256. The provider gets each claim once, a
+Longer than 63 characters, the ID is cut to 54, the namespace and its
+dot kept whole (what follows them is cut), and ended with `-` and 8
+hexadecimal digits of its SHA-256; `<namespace>.<digits>` when nothing
+of the rest fits (a namespace of 53 or 54 characters): the ID is the
+claimers' namespace's, whatever the length of its other parts. The
+provider gets each claim once, a
 named claim's for all the references to it (`Inputs.Claims`, sorted by
 ID); the claimer its binding (`Inputs.Bindings`) and `Outcome.Claims`, by
 parameter path, each a `compiler.Bound`:

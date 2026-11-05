@@ -3,6 +3,8 @@ package chartcache
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +52,10 @@ const HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1.ta
 // for the hosts of PrivateHosts and of InsecureHosts: a registry of the
 // platform's own network is allowed by name. Behind a proxy
 // ($HTTPS_PROXY), the proxy is dialed, and reaches the hosts.
+//
+// Its TLS connections trust the system's certificates, or those
+// SetRootCAs gives: a registry of the platform signed by its own CA is
+// reached with that CA trusted, never with the certificate check off.
 type RepositoryPuller struct {
 	http          *http.Client
 	oci           *http.Client
@@ -73,6 +79,15 @@ func NewRepositoryPuller(insecureHosts []string) *RepositoryPuller {
 	f.http = &http.Client{Timeout: FetchTimeout, CheckRedirect: f.checkRedirect, Transport: f.base}
 	f.oci = &http.Client{Transport: retry.NewTransport(f.base), CheckRedirect: f.checkRedirect}
 	return f
+}
+
+// SetRootCAs sets the certificates every TLS connection of the puller
+// trusts, an https chart repository's, an OCI registry's, a token realm's
+// or a redirect's alike: a platform's CA beside the system's (a pool of
+// both, as okdp-gitops' Credentials.RootCAs is); nil, the system's alone.
+// Called before the first Pull.
+func (f *RepositoryPuller) SetRootCAs(roots *x509.CertPool) {
+	f.base.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 }
 
 // proxyHosts: the host names of the proxies of the environment

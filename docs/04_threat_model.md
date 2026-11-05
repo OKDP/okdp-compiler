@@ -75,6 +75,7 @@ providers, consenting for them.
 | may | name the platform's own projects, `policy.privileged` | `policy.go: privileged` | `testdata/cli/policy.txtar` (a privileged project's ClusterRole written) |
 | may | name its administrators' groups and the API server's group prefix (`access`): the bootstrap binds the administrators, the compiler writes nothing of them | `platform.schema.json`, `access.go: PlatformAdmins` | `TestPlatformAdmins`, `TestAccessCompile` |
 | may | name the control plane's identity (`controlPlane.serviceAccount`), bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | `target.ControlPlane` | `TestControlPlane`, `TestControlPlaneSetting` |
+| may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | `target.NetworkPolicy`, `okdp.network` | `testdata/cli/network.txtar`, `TestNetworkPolicy`, `TestClaimsNetwork` |
 | may | give a connection of any key of the store, `platform/<key>` | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
 | may | route any namespace to a provider of any namespace (a class) | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | `testdata/context/0/http-chart-repository.yaml` |
@@ -102,6 +103,7 @@ values for its instances, and its instances' directories are its own.
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `testdata/context/1/template-code.yaml` |
 | may not | a connection of a store key outside `<project>/`: the platform's, another namespace's | `connections.go: storeSecret` | `testdata/context/1/remote-key-of-the-platform.yaml` |
 | may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
+| may not | keep a declaration unchecked by having no instance: its named claims (class, request, name) and its connections checked as an instance's compile checks them, the tree refused | `repository.Load`, `okdp.CheckDeclarations` | `testdata/cli/layout.txtar`, `TestValidateClaim` |
 | may not | the name `platform`, the segment of the platform's keys | `policy.go: checkNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/cli/secrets.txtar`, `TestCheckProjectName` |
 | may not | a reserved namespace: `kube-*`, Kubernetes' own; `flux-system`, `argocd`, `okdp-releases`, the engines' and the targets' (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); another namespace a target writes in (the flux target's `Source`); those of `policy.reserved`, privileged or not | `policy.go: checkNamespace`, `checkPlatformNamespace`, `target.OwnNamespaces`; before a project is created, `compiler.CheckProjectName`, the compile's two | `testdata/cli/policy.txtar` (`reserved`), `TestCompileErrors`, `TestCheckProjectName`, `TestOwnNamespaces` |
 
@@ -154,7 +156,10 @@ which an instance's list replaces.
 | may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the context's layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: contextLayers`, `context.go: parameters` | `testdata/cli/policy.txtar` (`schema-okdp`, `schema-default`), `TestPlatformFromContext` |
 | may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (an ExternalSecret of another namespace) |
 | may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (a ClusterRole) |
+| may not | an object of the deployer engines' API groups (Flux's toolkit, the Flux Operator's `fluxcd.controlplane.io`, `source.extensions.fluxcd.io`, Argo CD's `argoproj.io`), for a project that is not privileged: it would drive the engine with the engine's identity | `policy.go: checkObjects`, `engineGroups` | `testdata/cli/policy.txtar` (a HelmRelease), `TestObjectsPolicy` |
+| may not | a dependency of key `global`, its values Helm's global values, which every chart of the umbrella reads | `chart/metadata.go: Metadata.Check` | `TestMetadataCheck` |
 | may not | a Secret of the objects with `data` or `stringData`, unless the caller allows it | `policy.go: checkPlainSecrets` | `testdata/cli/plain-secrets.txtar` (an objects' Secret) |
+| may not | an ExternalSecret (or ClusterExternalSecret) whose `target.template.data` holds a literal at a sensitive key, an `okdpGeneratedSecret` `stringData`'s included, nor a Fake generator (or ClusterGenerator of kind Fake) with values, unless the caller allows it | `policy.go: checkPlainSecrets`, `credentialLiteral`, `credentialReference` | `TestPlainSecrets` |
 | may not | a `provides` secret without `generate`, unless the caller allows it | `provides.go: credentialsSecret` | `testdata/cli/plain-secrets.txtar` (a `provides` secret) |
 | may not | a dependency over `http://`, a version range | `chart/ref.go: Ref.Check` | `testdata/cli/chart-sources.txtar` |
 | may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `chart.FinalValues` | `TestDcrCompile` |
@@ -181,6 +186,7 @@ manifests of `projects/<namespace>/project/`
 | Argo CD | the AppProject `project-<namespace>`: the tree's repository, the namespace, no cluster-scoped resource | every namespace, every cluster-scoped resource |
 | People | the roles of its groups (`access`): Argo CD roles of its AppProject, its Applications only, no `exec`; RoleBindings of its namespace to `view`, `edit`, `admin` | the same |
 | Control plane | when the platform names its identity (`controlPlane.serviceAccount`): the Role `okdp-control-plane` of the namespace, what the server does there, Secrets by name and never listed | the same |
+| Network | with `network.policy`: the NetworkPolicy `okdp-project`, ingress from the namespace, the platform's ingress namespaces and the namespaces of the claims it provides, egress open; written for a project kept too, of today's settings and claims | none: the platform's own |
 | Kept | the Namespace when the project goes (Flux's prune label, Argo CD's `Delete=false`); the objects Helm keeps, Argo CD's `Prune=false,Delete=false` (`keep.go: keepSynced`) | the same |
 
 A chart that writes another namespace or a ClusterRole is refused by
@@ -250,6 +256,7 @@ it pulls is bounded and must be the chart the instance names:
 | may not | have the cache keep an archive other than the layer an OCI manifest names (a registry, a mirror or a proxy serving another one) | `chartcache/oci.go: pullOCI`, the layer read whole and verified against its size and digest before it is unpacked | `TestPullOCIVerifiesTheLayer` |
 | may not | have a chart pulled over plain http, from a repository, an archive the index names or a redirect, but on a host of `InsecureHosts`, nor redirected from https to http, by an OCI registry too | `RepositoryPuller.check`, `checkRedirect` | `TestIndexIsHTTPS`, `TestPullerDialsPublicAddresses` |
 | may not | make the puller reach the platform's network (a blind request from the CI or the control plane to an RFC 1918, loopback or link-local address, the cloud metadata endpoint): a registry, a token realm, a redirect, an index or an archive at one refused as dialed, but for a host of `PrivateHosts` or `InsecureHosts` | `RepositoryPuller.dial`, `publicAddress`, oras's `BlockedRealmPrefixes` | `TestPullerDialsPublicAddresses` |
+| may not | have the puller accept a certificate no trusted CA signed: the system's, or the pool given to `SetRootCAs` (a platform's CA, for a registry of the cluster), never a check turned off | `RepositoryPuller.SetRootCAs`, net/http's TLS verification | `TestPullerRootCAs` |
 | may not | have the cache keep an archive of another chart or version than the one named (an index entry, a tag) | `chartcache/cache.go: checkChart` | `TestTheChartIsTheOneNamed` |
 | may not | read a file of the cache other than a chart's `Files`, or through a symbolic link, from the console (`File`) or a compile (`FS`) | `Cache.File`, `Cache.FS` (`internal/dirfs`) | `TestFileIsOneOfFiles`, `TestFSFollowsNoLink` |
 
@@ -315,7 +322,13 @@ these lines.
   a project share its namespace and its identity: a release reads the
   Secrets of the others; a provider's namespace holds the credentials of
   every claim it serves. Two of OKDP's objects that write one Secret of
-  a namespace are refused, not a Secret an upstream chart renders.
+  a namespace are refused, not a Secret an upstream chart renders. The
+  names of a release's objects start with `<release>-` (an OAuth
+  client's Secret, `okdpFullname`), a separator a release holds too:
+  the instances `a` and `a-b` of a project share the prefix of
+  `<namespace>-a-b-...`, and the first may name an object of the
+  second's; a separator no release holds would rename every package's
+  objects.
 - **The store's policy.** The compiler writes the keys; it cannot check
   that the store scopes them. A ClusterSecretStore, without
   `secrets.provider`, is one trust domain. A Kubernetes namespace named
@@ -334,14 +347,35 @@ these lines.
 - **Consent is in the provider's own file.** The `claimers` of a
   provider's `instance.yaml` are written by whoever writes that
   instance's directory, in a shared repository any of its writers.
-- **The network.** No NetworkPolicy is written: network isolation is the
-  platform's.
+- **The network.** Without `global.okdp.network.policy` (off by
+  default: the compiler knows neither the ingress controller nor whether
+  the network plugin enforces a policy) no NetworkPolicy is written, and
+  every pod reaches every project's. With it, a project's ingress is
+  its namespace's, the platform's ingress namespaces' and its claimers';
+  its egress, and the platform's own namespaces (`policy.privileged`),
+  stay open: the namespace reached guards itself, and a project's
+  services reach the API server, the identity provider and networks the
+  compiler does not know. A network plugin that does not enforce
+  policies (kind's default) leaves them inert.
 - **Credentials under a name that does not say so.** A message redacts
   the values of keys named as credentials (`password`, `token`,
   `...Key`); another key's value, and a store key, are printed.
 - **Credentials in clear allowed.** `--allow-plain-secrets`
   (`Inputs.AllowPlainSecrets`) accepts them, for a caller that knows its
   deployments repository private.
+- **The scope of the plain-secrets rule.** Refused: a `v1` Secret's
+  `data` or `stringData`; an ExternalSecret's (a ClusterExternalSecret's)
+  `target.template.data` literal (a non-empty string without `{{` nor
+  `${`, a number) at a key `value.Sensitive` names, a reference to a
+  credential (`existing...`, `...Ref`, `passwordKey`) excepted; a Fake
+  generator's values. Warned of, not refused: such a literal at a
+  sensitive key of an instance's upstream values (`plainUpstream`,
+  `TestPlainUpstream`). Not seen: a credential under another key name,
+  in a template's literal or a template of a constant, in a ConfigMap,
+  an annotation, an environment variable's `value`, any other kind or
+  field, or in OKDP's defaults and the values file of a package; the
+  key names are a guess, the review of a package and of the values its
+  instances give is the rest.
 - **Bounds the caller sets.** The CEL cost is bounded when the caller
   passes a limit (`Inputs.CostLimit`: the CLI and okdp-gitops do); the
   files read are bounded by the CLI's reader and okdp-gitops's, a

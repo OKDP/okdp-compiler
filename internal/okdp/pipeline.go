@@ -120,6 +120,11 @@ type Result struct {
 	// the project's namespace to what it needs there; nil when the
 	// platform has no control plane.
 	ControlPlane *ServiceAccount
+	// Network: the network policy of the project's namespace,
+	// global.okdp.network with policy true, its claimers the namespaces
+	// of the claims bound to the instance (Inputs.Claims), which must
+	// reach it; nil when the platform has none.
+	Network *Network
 }
 
 // Compile runs the mapping of def on one instance, cancelled with ctx
@@ -214,7 +219,10 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// cluster-scoped (checkObjects); no Secret of credentials in clear,
 	// unless allowed (checkPlainSecrets); then the sync options of Argo CD
 	// of those Helm keeps.
-	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp), Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp)}
+	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp), Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp), Network: network(inst.okdp)}
+	if out.Network != nil {
+		out.Network.Claimers = claimers(in.Namespace, in.Claims)
+	}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}
@@ -254,6 +262,11 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 		return nil, err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
+	// A literal of the instance's upstream values at a sensitive key, a
+	// credential in clear most likely: a warning, unless allowed.
+	if !in.AllowPlainSecrets {
+		out.Warnings = append(out.Warnings, plainUpstream(value.AsMap(inst.values["upstream"]))...)
+	}
 	return out, nil
 }
 

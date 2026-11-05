@@ -11,6 +11,10 @@ app:
         serviceAccount:
           name: okdp-control-plane-server
           namespace: okdp-system
+      network:
+        ingressNamespaces:
+          - ingress-nginx
+        policy: true
       policy:
         privileged:
           - data

@@ -19,6 +19,26 @@ status 1 okdp-compile --repository $WORK/conns --check
 stderr '^error: demo/demo-web: connections.unused \(connection "unused"\): field "url" is required by the api contract$'
 ! stderr 'other/other-web'
 
+# A project without instance has its declarations checked all the same,
+# as an instance's compile checks its context's: a named claim of a
+# class the platform does not define, whose request the
+# contract's claim schema refuses or sets a key its class fixes, or of a
+# connection's name, and a connection that does not hold; every problem
+# at once, the tree does not load. Declared well, it binds to nothing:
+# the tree compiles.
+status 1 okdp-compile --repository $WORK/empty --check
+! stdout .
+stderr '^error: \S+/empty/projects/idle/project.yaml: connections.broken \(connection "broken"\): field "url" is required by the api contract$'
+cp $WORK/claims.yaml $WORK/empty/projects/idle/project.yaml
+status 1 okdp-compile --repository $WORK/empty --check
+stderr '^error: \S+/empty/projects/idle/project.yaml: claims.big: claim \(api\): the request does not meet the contract''s claim schema \(x-okdp-claim\):$'
+stderr '^- at ''/size'': ''5G'' does not match pattern'
+stderr '^\S+/empty/projects/idle/project.yaml: claims.fixed: claim: request.tier: set by the class gold \(global.okdp.provisioning.api.classes.gold\): remove it, or name another class$'
+stderr '^\S+/empty/projects/idle/project.yaml: claims.nowhere: claim \(api\): class "silver" is not a class of api connections \(global.okdp.provisioning.api.classes\): gold$'
+stderr '^\S+/empty/projects/idle/project.yaml: claims.same: a connection of that name too \(connections.same\)$'
+cp $WORK/good.yaml $WORK/empty/projects/idle/project.yaml
+status 0 okdp-compile --repository $WORK/empty --check
+
 -- stray/catalogs.yaml --
 categories:
   - title: Web
@@ -51,3 +71,39 @@ version: 1.0.0
 -- conns/projects/other/instances/web/instance.yaml --
 service: web
 version: 1.0.0
+-- empty/platform.yaml --
+global:
+  okdp:
+    provisioning:
+      api:
+        default: gold
+        classes:
+          gold: {provider: data/api, request: {tier: gold}}
+-- empty/contracts/api.schema.json --
+{"x-okdp-contract": "api", "properties": {"url": {"type": "string"}}, "required": ["url"],
+ "x-okdp-claim": {"properties": {"size": {"type": "string", "pattern": "^[0-9]+Gi$"}, "tier": {"type": "string"}}, "additionalProperties": false}}
+-- empty/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- empty/projects/idle/project.yaml --
+connections:
+  broken: {contract: api}
+-- empty/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- claims.yaml --
+connections:
+  same: {contract: api, url: https://same.example.org}
+claims:
+  big: {contract: api, request: {size: 5G}}
+  fixed: {contract: api, request: {tier: silver}}
+  nowhere: {contract: api, class: silver}
+  same: {contract: api}
+-- good.yaml --
+connections:
+  ok: {contract: api, url: https://ok.example.org}
+claims:
+  db: {contract: api, request: {size: 5Gi}}

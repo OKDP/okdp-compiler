@@ -97,8 +97,11 @@ type tree struct {
 // of its InstanceFile, the namespaces that may claim of it across
 // namespaces (Inputs.Claimers). CatalogsFile, in one tree's repository
 // at most, read strictly, its menu of services of the catalogs
-// (checkCatalogs). Every problem at once, each naming its repository
-// and path; a package that fails once.
+// (checkCatalogs). A project without instance has the declarations of
+// its ProjectFile, its connections and its named claims, checked as an
+// instance's compile checks its context's (okdp.CheckDeclarations).
+// Every problem at once, each naming its repository and path; a package
+// that fails once.
 func Load(repos []Repository) ([]okdp.Instance, error) {
 	t, err := index(repos)
 	if err != nil {
@@ -131,6 +134,14 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 		errs = append(errs, err)
 		names, err := dirs(repo, path.Join(dir, InstancesDir))
 		errs = append(errs, err)
+		// A project without instance: its declarations checked as an
+		// instance's compile checks its context's, which binds them.
+		if err == nil && len(names) == 0 && layer != nil {
+			in := okdp.Inputs{Contracts: t.contracts, Context: slices.Clip(layers), Namespace: project}
+			for _, err := range unjoin(okdp.CheckDeclarations(in)) {
+				errs = append(errs, fmt.Errorf("%s: %w", where(repo, path.Join(dir, ProjectFile)), err))
+			}
+		}
 		for _, name := range names {
 			inst, err := t.instance(repo, project, name, slices.Clip(layers))
 			if err != nil || inst.Definition == nil {

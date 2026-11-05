@@ -106,6 +106,16 @@ func TestValidateClaim(t *testing.T) {
 	if err != nil || fields != nil {
 		t.Fatalf("a new claim of the default class: %+v %v", fields, err)
 	}
+	// A project without instance: its claims checked at their declaration
+	// all the same, bound to none.
+	s.tree["projects/idle/project.yaml"] = []byte("description: no instance yet\n")
+	fields, _, err = ValidateClaim(s.tree, compileReader, "idle", compiler.ClaimSpec{Name: "analytics", Contract: "database-server", Class: "huge"})
+	if err != nil || len(fields) == 0 || fields[0].Path != "claims.analytics" || !strings.Contains(fields[0].Message, `class "huge"`) {
+		t.Fatalf("a project without instance: %+v %v", fields, err)
+	}
+	if fields, _, err = ValidateClaim(s.tree, compileReader, "idle", compiler.ClaimSpec{Name: "batch", Contract: "database-server"}); err != nil || fields != nil {
+		t.Fatalf("a project without instance, a claim of the default class: %+v %v", fields, err)
+	}
 }
 
 // The overlay is the tree a change makes: a removed directory gone, a

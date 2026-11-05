@@ -379,3 +379,29 @@ func TestParseClaim(t *testing.T) {
 		t.Errorf("a claim that fails keeps what it holds: got %+v", c)
 	}
 }
+
+// TestClaimsNetwork: with the platform's network policy, a provider's
+// result names the namespaces of the claims bound to it, which its
+// project's policy lets in, its own left out, sorted, once each; so does
+// ProjectOf, of its inputs; without it, none.
+func TestClaimsNetwork(t *testing.T) {
+	d, in := provisioner(claimOutputs)
+	in.Context = append(in.Context, ContextLayer{Values: M{"global": M{"okdp": M{"network": M{"policy": true, "ingressNamespaces": []any{"ingress-nginx"}}}}}})
+	in.Claims = []Claim{{ID: "web.a", Contract: "api", Namespace: "web"}, {ID: "demo.b", Contract: "api", Namespace: "demo"}, {ID: "data.c", Contract: "api", Namespace: "data"}, {ID: "web.d", Contract: "api", Namespace: "web"}}
+	res, err := Compile(context.Background(), d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &Network{Ingress: []string{"ingress-nginx"}, Claimers: []string{"data", "web"}}
+	if !reflect.DeepEqual(res.Network, want) {
+		t.Errorf("result: %+v, want %+v", res.Network, want)
+	}
+	if p, err := ProjectOf(in); err != nil || !reflect.DeepEqual(p.Network, want) {
+		t.Errorf("ProjectOf: %+v, %v", p.Network, err)
+	}
+	d, in = provisioner(claimOutputs)
+	in.Claims = []Claim{{ID: "web.a", Contract: "api", Namespace: "web"}}
+	if res, err := Compile(context.Background(), d, in); err != nil || res.Network != nil {
+		t.Errorf("without the policy: %+v, %v", res, err)
+	}
+}

@@ -143,6 +143,7 @@ key:
 | `condition` set (`tags`, `enabled`, `import-values` alike) | `Chart.yaml: dependencies[<i>] (<key>): condition: the values decide what is rendered ($if on <key> in values.cel.yaml)` |
 | no `name` | `Chart.yaml: dependencies[<i>].name is required` |
 | a key that is not a DNS label ([chart keys](#chart-keys)) | `Chart.yaml: dependencies[<i>] (<key>): key "<key>": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` |
+| the key `global`, an `alias` or a `name`: Helm's values of every chart of the umbrella, which a dependency's values would replace | `Chart.yaml: dependencies[<i>] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias` |
 | the key of an earlier dependency (a chart rendered twice without an alias) | `Chart.yaml: dependencies[<i>] (<key>): the key of dependencies[<j>] too: give one of them an alias` |
 | `repository` starting with `http://`, the chart fetched in clear | `Chart.yaml: dependencies[<i>].repository "<repository>": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)` |
 | `repository` not starting with `https://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
@@ -159,7 +160,8 @@ a letter or a digit at each end, 63 characters at most (`app`,
 `admin-users`). It names the umbrella's dependency alias
 ([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
 (`../app`, `my_app`, `App`), an `alias` or, without one, a `name`, fails
-when `Chart.yaml` is loaded:
+when `Chart.yaml` is loaded, and so does `global`: the umbrella's values
+under it are Helm's global values, which every chart reads:
 
 ```text
 Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias

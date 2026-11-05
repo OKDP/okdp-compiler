@@ -5,5 +5,6 @@ resources:
   - access.yaml
   - control-plane.yaml
   - namespace.yaml
+  - network-policy.yaml
   - secret-store.yaml
   - service-account.yaml

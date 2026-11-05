@@ -3,6 +3,7 @@ package okdp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,6 +67,9 @@ func TestObjectsPolicy(t *testing.T) {
 		"a list":                {"  - {apiVersion: v1, kind: List, metadata: {name: l}, items: [{apiVersion: v1, kind: ConfigMap, metadata: {name: a}}]}\n", ""},
 		"a list's item":         {"  - {apiVersion: v1, kind: List, metadata: {name: l}, items: [{apiVersion: v1, kind: ConfigMap, metadata: {name: a}}, {apiVersion: rbac.authorization.k8s.io/v1, kind: ClusterRole, metadata: {name: r}}]}\n", "demo: objects: ClusterRole/r: a cluster-scoped kind (rbac.authorization.k8s.io/v1)"},
 		"a list's namespace":    {"  - {apiVersion: v1, kind: ConfigMapList, metadata: {name: l}, items: [{apiVersion: v1, kind: ConfigMap, metadata: {name: a, namespace: other}}]}\n", "demo: objects: ConfigMap/a: namespace other, not the instance's (demo)"},
+		"an engine's kind":      {object("helm.toolkit.fluxcd.io/v2", "HelmRelease", "r", nil), "demo: objects: HelmRelease/r: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine"},
+		"the Flux Operator's":   {object("fluxcd.controlplane.io/v1", "ResourceSet", "r", nil), "demo: objects: ResourceSet/r: an object of the deployer's kinds (fluxcd.controlplane.io/v1)"},
+		"a source extension's":  {object("source.extensions.fluxcd.io/v1beta1", "ArtifactGenerator", "g", nil), "demo: objects: ArtifactGenerator/g: an object of the deployer's kinds (source.extensions.fluxcd.io/v1beta1)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
@@ -169,9 +173,11 @@ func TestPolicySchema(t *testing.T) {
 }
 
 // TestPlainSecrets: no Secret of the objects holds values in clear, data
-// or stringData, a list's items included, unless the caller allows it
-// (Inputs.AllowPlainSecrets); a Secret without values, another kind with
-// data, a Secret of another API group and a generated Secret pass.
+// or stringData, a list's items included, no ExternalSecret's template a
+// literal at a sensitive key, no Fake generator values, unless the caller
+// allows it (Inputs.AllowPlainSecrets); a Secret without values, another
+// kind with data, a Secret of another API group, a generated Secret, a
+// template's literal at another key and a Password generator pass.
 func TestPlainSecrets(t *testing.T) {
 	for name, tc := range map[string]struct {
 		objects string
@@ -184,20 +190,65 @@ func TestPlainSecrets(t *testing.T) {
 		"another kind":    {"  - {apiVersion: v1, kind: ConfigMap, metadata: {name: c}, data: {k: v}}\n", ""},
 		"another group":   {"  - {apiVersion: example.org/v1, kind: Secret, metadata: {name: s}, data: {k: v}}\n", ""},
 		"a generated one": {"  - $spread: \"${{ okdpGeneratedSecret({'name': 's', 'keys': [{'key': 'k'}], 'stringData': {'user': 'u'}}) }}\"\n", ""},
+		"a generated one's sensitive literal": {"  - $spread: \"${{ okdpGeneratedSecret({'name': 's', 'keys': [{'key': 'k'}], 'stringData': {'adminPassword': 'p'}}) }}\"\n",
+			"demo: objects: ExternalSecret/s: a plain value (spec.target.template.data.adminPassword): a literal at a sensitive key, not a template of what the store or a generator gives; credentials are generated"},
+		"a template's literal": {"  - {apiVersion: external-secrets.io/v1, kind: ExternalSecret, metadata: {name: e}, spec: {target: {template: {data: {region: eu, url: 'postgres://{{ .user }}@db', password: hunter2}}}}}\n",
+			"demo: objects: ExternalSecret/e: a plain value (spec.target.template.data.password)"},
+		"a template's number": {"  - {apiVersion: external-secrets.io/v1, kind: ExternalSecret, metadata: {name: e}, spec: {target: {template: {data: {pin_token: 1234}}}}}\n", "ExternalSecret/e: a plain value (spec.target.template.data.pin_token)"},
+		"a template":          {"  - {apiVersion: external-secrets.io/v1, kind: ExternalSecret, metadata: {name: e}, spec: {target: {template: {data: {password: '{{ .password }}', passwordKey: password, existingSecret: s, region: eu}}}}}\n", ""},
+		"a cluster template": {"  - {apiVersion: external-secrets.io/v1, kind: ClusterExternalSecret, metadata: {name: c}, spec: {externalSecretSpec: {target: {template: {data: {apiKey: k}}}}}}\n",
+			"ClusterExternalSecret/c: a plain value (spec.externalSecretSpec.target.template.data.apiKey)"},
+		"a fake generator":         {"  - {apiVersion: generators.external-secrets.io/v1alpha1, kind: Fake, metadata: {name: f}, spec: {data: {user: u}}}\n", "demo: objects: Fake/f: a plain value (spec.data): a Fake generator gives the values it holds; credentials are generated"},
+		"a fake cluster generator": {"  - {apiVersion: generators.external-secrets.io/v1alpha1, kind: ClusterGenerator, metadata: {name: f}, spec: {kind: Fake, generator: {fakeSpec: {data: {k: v}}}}}\n", "ClusterGenerator/f: a plain value (spec.generator.fakeSpec.data)"},
+		"a password generator":     {"  - {apiVersion: generators.external-secrets.io/v1alpha1, kind: Password, metadata: {name: p}, spec: {length: 20}}\n", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def
 			d.Okdp = []byte("objects:\n" + tc.objects)
-			_, err := Compile(context.Background(), &d, inputs())
+			layer := map[string]any{}
+			if strings.Contains(name, "cluster") { // a cluster-scoped kind: a privileged project's
+				layer["global"] = M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}
+			}
+			_, err := Compile(context.Background(), &d, inputs(layer))
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
 			// Allowed: written as computed.
-			in := inputs()
+			in := inputs(layer)
 			in.AllowPlainSecrets = true
 			if res, err := Compile(context.Background(), &d, in); err != nil || len(res.Objects) == 0 {
 				t.Errorf("allowed: %v", err)
 			}
 		})
+	}
+}
+
+// TestPlainUpstream: a literal of the instance's upstream values at a
+// sensitive key is a warning, its value not printed, unless the caller
+// allows plain secrets; a template, a reference, another key none.
+func TestPlainUpstream(t *testing.T) {
+	d := *def
+	d.Package.Upstream = chart.Upstream{All: true}
+	user := M{"auth": M{"password": "hunter2", "existingSecret": "s", "existingSecretPasswordKey": "password", "username": "u", "enabled": true}, "tokens": []any{"t1", "${TOKEN}"}, "secretKey": 4321.0, "env": []any{M{"name": "API_KEY", "value": "v"}}}
+	res, err := Compile(context.Background(), &d, inputs(map[string]any{"upstream": M{"app": user}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "a literal at a sensitive key") {
+			got = append(got, strings.SplitN(w, ":", 2)[0])
+		}
+		if strings.Contains(w, "hunter2") || strings.Contains(w, "4321") {
+			t.Errorf("a value printed: %s", w)
+		}
+	}
+	if want := []string{"upstream.app.auth.password", "upstream.app.secretKey", "upstream.app.tokens[0]"}; !slices.Equal(got, want) {
+		t.Errorf("warned at %q, want %q", got, want)
+	}
+	in := inputs(map[string]any{"upstream": M{"app": user}})
+	in.AllowPlainSecrets = true
+	if res, err := Compile(context.Background(), &d, in); err != nil || slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "a literal at a sensitive key") }) {
+		t.Errorf("allowed: %v, %q", err, res.Warnings)
 	}
 }

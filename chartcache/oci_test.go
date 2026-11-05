@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -196,6 +197,56 @@ func TestPullerDialsPublicAddresses(t *testing.T) {
 	for addr, want := range map[string]bool{"8.8.8.8:443": true, "10.1.2.3:443": false, "[::ffff:192.168.1.1]:443": false, "169.254.169.254:80": false, "[fd00::1]:443": false, "100.64.0.1:443": false, "0.0.0.0:443": false, "[2001:4860::8888]:443": true} {
 		if err := publicAddress("h:1", addr); (err == nil) != want {
 			t.Errorf("%s: %v, public %v", addr, err, want)
+		}
+	}
+}
+
+// TestPullerRootCAs: a registry and an https chart repository signed by a
+// CA of the platform are refused without it (the system's certificates),
+// pulled with it given (SetRootCAs), the address allowed by PrivateHosts.
+func TestPullerRootCAs(t *testing.T) {
+	tgz := stored(t, map[string]string{"app/Chart.yaml": "name: app\nversion: 1.0.0\n"})
+	var s *httptest.Server
+	s = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch p := r.URL.Path; {
+		case p == "/index.yaml":
+			_, _ = fmt.Fprintf(w, "entries:\n  app:\n    - version: 1.0.0\n      urls: [%q]\n", s.URL+"/app-1.0.0.tgz")
+		case p == "/app-1.0.0.tgz", strings.HasPrefix(p, "/v2/charts/app/blobs/"):
+			_, _ = w.Write(tgz)
+		case strings.HasPrefix(p, "/v2/charts/app/manifests/"):
+			config := []byte("{}")
+			manifest, _ := json.Marshal(ocispec.Manifest{
+				SchemaVersion: 2, MediaType: ocispec.MediaTypeImageManifest,
+				Config: ocispec.Descriptor{MediaType: "application/vnd.cncf.helm.config.v1+json", Digest: digest.FromBytes(config), Size: int64(len(config))},
+				Layers: []ocispec.Descriptor{{MediaType: HelmChartContentMediaType, Digest: digest.FromBytes(tgz), Size: int64(len(tgz))}},
+			})
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+			w.Header().Set("Docker-Content-Digest", digest.FromBytes(manifest).String())
+			_, _ = w.Write(manifest)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer s.Close()
+	host := strings.TrimPrefix(s.URL, "https://")
+	roots := x509.NewCertPool()
+	roots.AddCert(s.Certificate())
+	pull := func(p *RepositoryPuller, repository string) error {
+		return p.Pull(t.Context(), compiler.ChartRef{Repository: repository, Chart: "app", Version: "1.0.0"}, func(r io.Reader) error {
+			_, err := io.ReadAll(r)
+			return err
+		})
+	}
+	for _, repository := range []string{s.URL, "oci://" + host + "/charts"} {
+		p := NewRepositoryPuller(nil)
+		p.PrivateHosts = []string{"127.0.0.1"}
+		var unknown x509.UnknownAuthorityError
+		if err := pull(p, repository); !errors.As(err, &unknown) {
+			t.Errorf("%s, its CA not trusted: %v", repository, err)
+		}
+		p.SetRootCAs(roots)
+		if err := pull(p, repository); err != nil {
+			t.Errorf("%s, its CA trusted: %v", repository, err)
 		}
 	}
 }

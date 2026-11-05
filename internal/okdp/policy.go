@@ -158,7 +158,10 @@ var clusterScoped = func() map[string]bool {
 // engineGroups: the API groups of the deployer engines' custom resources,
 // which a project that is not privileged may not install: a HelmRelease, a
 // GitRepository, a Kustomization or an Application in the project's
-// namespace lets it drive the engine with the engine's own identity. The
+// namespace lets it drive the engine with the engine's own identity, as
+// does an object of the Flux Operator (fluxcd.controlplane.io: a
+// FluxInstance, a ResourceSet) or of Flux's source extensions
+// (source.extensions.fluxcd.io). The
 // platform's lockdown of the engines (--no-cross-namespace-refs,
 // --default-service-account, Argo CD's application.namespaces) is the
 // second line.
@@ -168,6 +171,8 @@ var engineGroups = map[string]bool{
 	"source.toolkit.fluxcd.io":       true,
 	"notification.toolkit.fluxcd.io": true,
 	"image.toolkit.fluxcd.io":        true,
+	"fluxcd.controlplane.io":         true,
+	"source.extensions.fluxcd.io":    true,
 	"argoproj.io":                    true,
 }
 
@@ -444,24 +449,124 @@ func (r *upstreamRules) refused(ref, p string, at func(string) string) error {
 }
 
 // checkPlainSecrets: the objects of an instance of svc (Result.Objects),
-// unless Inputs.AllowPlainSecrets: none a Secret (v1) holding values, a
-// non-empty data or stringData, the items of one that holds a list of
-// them (items) alike. The objects file is written to the deployments
-// repository: credentials are generated in the cluster
-// (okdpGeneratedSecret, a provides secret's generate) or read from the
-// platform's secret store (an ExternalSecret), never written in clear. A
-// Secret with only metadata and type passes. The first refused, in order,
-// fails, named Secret/<name>, its key of values named, data before
-// stringData.
+// unless Inputs.AllowPlainSecrets, hold no credential in clear, the items
+// of one that holds a list of them (items) alike:
+//
+//   - no Secret (v1) holds values, a non-empty data or stringData;
+//   - no ExternalSecret (external-secrets.io), nor ClusterExternalSecret
+//     (spec.externalSecretSpec), has its target.template.data hold a
+//     literal (credentialLiteral) at a sensitive key (value.Sensitive):
+//     a template ({{ }}) reads what the store or a generator gives, a
+//     literal at another key (a region, a URL) passes;
+//   - no Fake generator (generators.external-secrets.io), nor
+//     ClusterGenerator of kind Fake, holds values (its data).
+//
+// The objects file is written to the deployments repository: credentials
+// are generated in the cluster (okdpGeneratedSecret, a provides secret's
+// generate) or read from the platform's secret store (an
+// ExternalSecret), never written in clear. A Secret with only metadata
+// and type passes. The first refused, in order, fails, named
+// <kind>/<name>, its field named, data before stringData, the keys of a
+// template in order; the value is never printed.
 func checkPlainSecrets(svc string, objects []M) error {
+	const advice = "credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it"
 	return eachObject(objects, func(o M) error {
-		if value.Str(o["kind"]) == "Secret" && apiGroup(value.Str(o["apiVersion"])) == "" {
+		kind, group, name := value.Str(o["kind"]), apiGroup(value.Str(o["apiVersion"])), value.Str(value.Dig(o, "metadata.name"))
+		var template, fake string
+		switch {
+		case kind == "Secret" && group == "":
 			for _, k := range []string{"data", "stringData"} {
 				if len(value.AsMap(o[k])) > 0 {
-					return fmt.Errorf("%s: objects: Secret/%s: a plain value (%s): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it", svc, value.Str(value.Dig(o, "metadata.name")), k)
+					return fmt.Errorf("%s: objects: Secret/%s: a plain value (%s): %s", svc, name, k, advice)
+				}
+			}
+		case kind == "ExternalSecret" && group == "external-secrets.io":
+			template = "spec.target.template.data"
+		case kind == "ClusterExternalSecret" && group == "external-secrets.io":
+			template = "spec.externalSecretSpec.target.template.data"
+		case kind == "Fake" && group == "generators.external-secrets.io":
+			fake = "spec.data"
+		case kind == "ClusterGenerator" && group == "generators.external-secrets.io" && value.Str(value.Dig(o, "spec.kind")) == "Fake":
+			fake = "spec.generator.fakeSpec.data"
+		}
+		if template != "" {
+			data := value.AsMap(value.Dig(o, template))
+			for _, k := range slices.Sorted(maps.Keys(data)) {
+				if value.Sensitive(k) && !credentialReference(k) && credentialLiteral(data[k]) {
+					return fmt.Errorf("%s: objects: %s/%s: a plain value (%s): a literal at a sensitive key, not a template of what the store or a generator gives; %s", svc, kind, name, value.Key(template, k), advice)
 				}
 			}
 		}
+		if fake != "" && len(value.AsMap(value.Dig(o, fake))) > 0 {
+			return fmt.Errorf("%s: objects: %s/%s: a plain value (%s): a Fake generator gives the values it holds; %s", svc, kind, name, fake, advice)
+		}
 		return nil
 	})
+}
+
+// credentialLiteral: v is written as it is, a credential when its key is
+// sensitive: a string that is not empty and holds no template ({{ }},
+// Helm's or External Secrets', nor ${ }, a reference of an environment
+// variable), or a number. A boolean, null, a map or a list is not one.
+func credentialLiteral(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return strings.TrimSpace(v) != "" && !strings.Contains(v, "{{") && !strings.Contains(v, "${")
+	case int, int64, uint64, float64:
+		return true
+	}
+	return false
+}
+
+// credentialReference: key is sensitive (value.Sensitive) by its name
+// only, and names a credential rather than holds one: an existing
+// Secret (existingSecret, existingSecretPasswordKey), a reference
+// (passwordSecretRef, tokenRef), or the key of a Secret that holds one
+// (adminPasswordKey, tokenKey; not secretKey, accessKey, which hold one).
+func credentialReference(key string) bool {
+	lower := strings.ToLower(strings.TrimSuffix(key, "s"))
+	if strings.HasPrefix(lower, "existing") || strings.HasSuffix(lower, "ref") {
+		return true
+	}
+	for _, sep := range []string{"key", "_key", "-key"} {
+		stem, ok := strings.CutSuffix(lower, sep)
+		if !ok || lower == "secretkey" || lower == "secret_key" || lower == "secret-key" {
+			continue
+		}
+		for _, s := range []string{"password", "passwd", "token", "secret"} {
+			if strings.HasSuffix(stem, s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// plainUpstream: a warning per literal (credentialLiteral) of the
+// instance's upstream values, upstream (upstream.<key>...), at a
+// sensitive key (value.SensitivePath, but credentialReference): most
+// likely a credential, which the instance's values file and the output
+// hold in clear. A warning, not a refusal: the key's name is a guess. In
+// the order of the paths; the value is never printed.
+func plainUpstream(upstream M) []string {
+	var out []string
+	var walk func(p, key string, v any)
+	walk = func(p, key string, v any) {
+		switch v := v.(type) {
+		case M:
+			for _, k := range slices.Sorted(maps.Keys(v)) {
+				walk(value.Key(p, k), k, v[k])
+			}
+		case []any:
+			for i, x := range v {
+				walk(value.Index(p, i), key, x)
+			}
+		default:
+			if key != "" && value.Sensitive(key) && !credentialReference(key) && credentialLiteral(v) {
+				out = append(out, fmt.Sprintf("%s: a literal at a sensitive key, a credential in clear in the values and the deployments repository: generate it (okdpGeneratedSecret) or read it from the platform's secret store, and give the chart the Secret's name (its existingSecret)", p))
+			}
+		}
+	}
+	walk("upstream", "", upstream)
+	return out
 }

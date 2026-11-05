@@ -47,10 +47,12 @@ var packages = map[string]fstest.MapFS{
 
 // platform: the platform's values: data is one of its own projects, its
 // secret store has a provider, a SecretStore of each project, the API
-// server prefixes the groups with oidc:, and the control plane's identity
-// is okdp-system/okdp-control-plane-server.
+// server prefixes the groups with oidc:, the control plane's identity
+// is okdp-system/okdp-control-plane-server, and each project's namespace
+// but data has a network policy, reached by ingress-nginx.
 var platform = map[string]any{"global": map[string]any{"okdp": map[string]any{
 	"access":       map[string]any{"admins": []any{"platform_admin"}, "groupPrefix": "oidc:"},
+	"network":      map[string]any{"policy": true, "ingressNamespaces": []any{"ingress-nginx"}},
 	"controlPlane": map[string]any{"serviceAccount": map[string]any{"namespace": "okdp-system", "name": "okdp-control-plane-server"}},
 	"policy":       map[string]any{"privileged": []any{"data"}},
 	"secrets":      map[string]any{"store": "platform", "provider": map[string]any{"vault": map[string]any{"server": "https://vault.example.org", "path": "okdp", "auth": map[string]any{"kubernetes": map[string]any{"mountPath": "kubernetes", "role": "okdp", "serviceAccountRef": map[string]any{"name": "okdp-secrets"}}}}}},
@@ -459,5 +461,56 @@ func TestKept(t *testing.T) {
 	}
 	if _, err := (argocd.Target{}).Kept(p, previous); err == nil {
 		t.Error("argocd: the options are not checked")
+	}
+}
+
+// TestNetworkPolicy: a project's network policy, the claimers of every
+// result of its namespace, sorted, once each, its own left out, after the
+// platform's ingress namespaces, a namespace both name once; none for one
+// of the platform's own projects, nor without the platform's policy.
+func TestNetworkPolicy(t *testing.T) {
+	net := func(claimers ...string) *okdp.Network {
+		return &okdp.Network{Ingress: []string{"ingress-nginx", "monitoring"}, Claimers: claimers}
+	}
+	ps := target.Projects([]*okdp.Result{
+		{Namespace: "data", Release: "data-a", Network: net("web", "demo")},
+		{Namespace: "data", Release: "data-b", Network: net("demo", "data", "monitoring")},
+		{Namespace: "ops", Release: "ops-x", Privileged: true, Network: net("demo")},
+		{Namespace: "web", Release: "web-x"},
+	})
+	if got := ps[0].Network.Claimers; !slices.Equal(got, []string{"demo", "monitoring", "web"}) {
+		t.Errorf("claimers: %v", got)
+	}
+	want := `apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: okdp-project
+  namespace: "data"
+  labels:
+    okdp.io/project: "data"
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: ["ingress-nginx", "monitoring", "demo", "web"]
+`
+	if got := string(target.NetworkPolicy(ps[0])); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	if np := target.NetworkPolicy(ps[1]); np != nil {
+		t.Errorf("a privileged project's:\n%s", np)
+	}
+	if np := target.NetworkPolicy(ps[2]); np != nil {
+		t.Errorf("without the platform's policy:\n%s", np)
+	}
+	if np := string(target.NetworkPolicy(target.Project{Namespace: "x", Network: &okdp.Network{}})); strings.Contains(np, "namespaceSelector") || !strings.Contains(np, "podSelector: {}") {
+		t.Errorf("no namespace allowed:\n%s", np)
 	}
 }

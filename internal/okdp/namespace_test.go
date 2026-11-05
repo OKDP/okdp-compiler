@@ -869,6 +869,16 @@ func TestClaimID(t *testing.T) {
 	if len(long) != 63 || !strings.HasPrefix(long, "demo."+strings.Repeat("a", 49)+"-") || !chart.IsClaimID(long) || long == claimID("demo", strings.Repeat("a", 53), "databases", "") {
 		t.Errorf("long: %q (%d)", long, len(long))
 	}
+	// Cut, the ID keeps its namespace whole, whatever its length up to
+	// 54: the claimers' (checkClaims).
+	for n := 1; n <= 54; n++ {
+		ns := strings.Repeat("n", n)
+		for _, id := range []string{claimID(ns, strings.Repeat("a", 60), "db", ""), claimID(ns, "", "", strings.Repeat("b", 63))} {
+			if len(id) > 63 || !strings.HasPrefix(id, ns+".") || !chart.IsClaimID(id) {
+				t.Errorf("a namespace of %d: %q (%d)", n, id, len(id))
+			}
+		}
+	}
 }
 
 // TestCompileAllCredentials: the credentials of a claim of another

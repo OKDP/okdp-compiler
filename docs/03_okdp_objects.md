@@ -120,3 +120,19 @@ with a Kustomization, Argo CD with a directory source.
 - Cons: not every chart has such a value, and its name differs from one
   chart to the next; the objects live and die with that chart (a chart the
   mapping leaves out with `$if` takes them along). It does not generalize.
+
+## The project's network policy
+
+The NetworkPolicy of a project's namespace (`global.okdp.network.policy`)
+is no object of an instance: it is the platform's decision, as the
+Namespace and the roles are, and the targets write it with the project's
+manifests, `projects/<namespace>/project/network-policy.yaml`, for a
+project kept too ([the project's
+manifests](specs/01_inputs_outputs.md#the-projects-manifests)). An
+instance's own NetworkPolicy, of its `objects` section, adds to it (the
+policies of a namespace are a union): it may open its pods further, to
+another namespace, never close what the platform's lets in. Its ingress
+is the namespace's, the platform's ingress namespaces' and the
+namespaces of the claims its instances provide, which the compile binds:
+a provider stays reachable by its claimers without a rule of its
+package.

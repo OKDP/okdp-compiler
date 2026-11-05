@@ -60,7 +60,8 @@ func ValidateInstance(r Reader, compile func(Reader) (*compiler.Tree, error), in
 // (PutClaim): its contract, its class or its provider, its request, as
 // the compile of the project's instances binds it, the field errors at
 // claims.<name>. A project without instance binds none of its claims:
-// none is checked.
+// the tree checks them at their declaration (its class, its request,
+// its name), a problem of the tree that maps to claims.<name> too.
 func ValidateClaim(r Reader, compile func(Reader) (*compiler.Tree, error), project string, c compiler.ClaimSpec) ([]compiler.FieldError, []Warning, error) {
 	entries, _, err := readEntries(r, ProjectFilePath(project), claimsKey)
 	if err != nil {

@@ -106,7 +106,8 @@ func (d Dependency) refused() (string, bool) {
 // not SemVer (the umbrella's), a library chart; a dependency without a
 // name, with a field that decides what is rendered, whose key is not a DNS
 // label (it names files, which ../x would place out of their directory,
-// and the umbrella's dependency alias) or is another's, or whose chart is
+// and the umbrella's dependency alias), is global (Helm's values of every
+// chart) or is another's, or whose chart is
 // not pinned in a chart repository (Ref.Check).
 func (m Metadata) Check() error {
 	switch {
@@ -136,6 +137,9 @@ func (m Metadata) Check() error {
 		}
 		if !IsDNSLabel(key) {
 			return fmt.Errorf("%s (%s): key %q: a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias", at, key, key)
+		}
+		if key == "global" {
+			return fmt.Errorf("%s (%s): key \"global\": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias", at, key)
 		}
 		if j, ok := keys[key]; ok {
 			return fmt.Errorf("%s (%s): the key of dependencies[%d] too: give one of them an alias", at, key, j)

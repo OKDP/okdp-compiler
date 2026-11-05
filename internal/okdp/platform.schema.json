@@ -198,6 +198,23 @@
                 }
               }
             },
+            "network": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The network policy of the projects' namespaces. Another key is refused: a misspelt one would leave the namespaces open.",
+              "properties": {
+                "policy": {
+                  "type": "boolean",
+                  "description": "true: the targets write, in each project's namespace but the platform's own (policy.privileged), a NetworkPolicy that denies every ingress to its pods but from the namespace itself, from ingressNamespaces and from the namespaces whose claims its instances provide; egress left open. false or absent: none, the namespaces open (the compiler does not know the cluster's ingress controller, nor whether its network plugin enforces policies)."
+                },
+                "ingressNamespaces": {
+                  "type": "array",
+                  "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"},
+                  "uniqueItems": true,
+                  "description": "With policy: the namespaces whose pods reach every project's pods: the ingress controller's (that of global.okdp.ingress's hosts), a monitoring's. Absent: none, a project's services reached by its own namespace and its claimers only."
+                }
+              }
+            },
             "controlPlane": {
               "type": "object",
               "additionalProperties": false,

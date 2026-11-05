@@ -474,17 +474,15 @@ type choice struct {
 // of a contract are.
 func provisioningKey(contract string) string { return value.Key("global.okdp.provisioning", contract) }
 
-// provider: the instance of candidates, those that provision contract, a
-// claim (spec) at field, of the instance self (-1 for a named claim, the
-// namespace's) of namespace, is bound to: the provider it names, else the
-// provider of the class it names, else of the default class of the
-// contract, of classes (global.okdp.provisioning of the context, by
-// contract), each <name> of its namespace or <namespace>/<name>, the
-// instance of that namespace whose name or release it is (names). A class
-// that is none, no default, a provider that is not of the form, that
-// names no instance, or more than one, or one that is no candidate, or the
-// instance itself, fail.
-func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec ClaimSpec, candidates []int) (choice, error) {
+// claimClass: the class a claim at field of contract is of, of classes
+// (by contract, global.okdp.provisioning of its context), and the
+// provider it names: the claim's own when it names one, no class then;
+// else the class it names, or the default one of the context, which must
+// be a class whose provider is of the form providerName reads, what the
+// class fixes of the request in the choice (its provider not looked for:
+// tree.provider); and the class as messages name it (which, "" for a
+// provider named).
+func claimClass(classes M, namespace, field, contract string, spec ClaimSpec) (choice, string, string, error) {
 	where := fmt.Sprintf("%s: claim (%s)", field, contract)
 	key := provisioningKey(contract)
 	ch := choice{provider: -1, class: spec.Class, named: spec.Class != "" || spec.Provider != ""}
@@ -499,7 +497,7 @@ func (t *tree) provider(classes M, namespace string, self int, field, contract s
 		which = fmt.Sprintf("class %q", ch.class)
 		if ch.class == "" {
 			if ch.class = value.Str(of["default"]); ch.class == "" {
-				return ch, fmt.Errorf("%s: it names no class, and the context sets no default one, %s.default (Inputs.Context): %s", where, key, these)
+				return ch, "", "", fmt.Errorf("%s: it names no class, and the context sets no default one, %s.default (Inputs.Context): %s", where, key, these)
 			}
 			which = fmt.Sprintf("the default class %q", ch.class)
 		}
@@ -511,14 +509,33 @@ func (t *tree) provider(classes M, namespace string, self int, field, contract s
 				these = "none is defined"
 			}
 			if spec.Class == "" {
-				return ch, fmt.Errorf("%s: %s (%s.default) is not a class of %s connections (%s.classes): %s", where, which, key, contract, key, these)
+				return ch, "", "", fmt.Errorf("%s: %s (%s.default) is not a class of %s connections (%s.classes): %s", where, which, key, contract, key, these)
 			}
-			return ch, fmt.Errorf("%s: %s is not a class of %s connections (%s.classes): %s", where, which, contract, key, these)
+			return ch, "", "", fmt.Errorf("%s: %s is not a class of %s connections (%s.classes): %s", where, which, contract, key, these)
 		}
 		name, ch.fixed = value.Str(class["provider"]), value.AsMap(class["request"])
 		if _, _, ok := providerName(name, namespace); !ok {
-			return ch, fmt.Errorf("%s: %s (%s): provider %q: %s", where, which, value.Key(key+".classes", ch.class), name, providerForms)
+			return ch, "", "", fmt.Errorf("%s: %s (%s): provider %q: %s", where, which, value.Key(key+".classes", ch.class), name, providerForms)
 		}
+	}
+	return ch, name, which, nil
+}
+
+// provider: the instance of candidates, those that provision contract, a
+// claim (spec) at field, of the instance self (-1 for a named claim, the
+// namespace's) of namespace, is bound to: the provider it names, else the
+// provider of the class it names, else of the default class of the
+// contract, of classes (global.okdp.provisioning of the context, by
+// contract), each <name> of its namespace or <namespace>/<name>, the
+// instance of that namespace whose name or release it is (names). A class
+// that is none, no default, a provider that is not of the form, that
+// names no instance, or more than one, or one that is no candidate, or the
+// instance itself, fail (claimClass, then the provider).
+func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec ClaimSpec, candidates []int) (choice, error) {
+	where := fmt.Sprintf("%s: claim (%s)", field, contract)
+	ch, name, which, err := claimClass(classes, namespace, field, contract, spec)
+	if err != nil {
+		return ch, err
 	}
 	// The provider as named, after the class it is of.
 	named := where

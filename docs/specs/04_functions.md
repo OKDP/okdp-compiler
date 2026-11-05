@@ -167,7 +167,7 @@ generates in the cluster, for
 |---|---|---|---|
 | `name` | string | required | name of the Secret, and of the ExternalSecret writing it |
 | `keys` | list | `[]` | the generated keys, below |
-| `stringData` | map of strings, numbers or booleans | `{}` | static keys, as text (`str`); a value containing `{{` is written as a template string literal |
+| `stringData` | map of strings, numbers or booleans | `{}` | static keys, as text (`str`), not credentials: a literal at a sensitive key (`password`, `token`, `...Key`) is refused unless `Inputs.AllowPlainSecrets` ([objects section](01_inputs_outputs.md#objects-section)); a value containing `{{` is written as a template string literal |
 | `labels` | map of strings | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](02_service_definition.md#context) |
 | `annotations` | map of strings | `{}` | annotations of every object |
 | `type` | string | none | type of the Secret |

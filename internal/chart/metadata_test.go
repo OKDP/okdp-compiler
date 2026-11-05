@@ -99,6 +99,8 @@ func TestMetadataCheck(t *testing.T) {
 		"key":            {chart(app, with(func(d *Dependency) { d.Alias = "Api" })), `Chart.yaml: dependencies[1] (Api): key "Api": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias`},
 		"name key":       {chart(with(func(d *Dependency) { d.Name = "my_app" })), `Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label`},
 		"long key":       {chart(with(func(d *Dependency) { d.Alias = strings.Repeat("a", 64) })), `Chart.yaml: dependencies[0] (aaaa`},
+		"global":         {chart(app, with(func(d *Dependency) { d.Alias = "global" })), `Chart.yaml: dependencies[1] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias`},
+		"named global":   {chart(with(func(d *Dependency) { d.Name = "global" })), `Chart.yaml: dependencies[0] (global): key "global"`},
 		"duplicate":      {chart(app, with(func(d *Dependency) { d.Name = "other" }), with(func(d *Dependency) { d.Name, d.Alias = "workspace", "app" })), "Chart.yaml: dependencies[2] (app): the key of dependencies[0] too: give one of them an alias"},
 		"file://":        {chart(with(func(d *Dependency) { d.Repository = "file://../x" })), `Chart.yaml: dependencies[0].repository "file://../x": the URL of a chart repository (https://... or oci://...)`},
 		"http://":        {chart(with(func(d *Dependency) { d.Repository = "http://charts.example.org" })), `Chart.yaml: dependencies[0].repository "http://charts.example.org": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)`},
