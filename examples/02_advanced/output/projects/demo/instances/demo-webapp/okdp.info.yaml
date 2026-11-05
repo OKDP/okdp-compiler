@@ -2,7 +2,7 @@ url: https://demo-webapp.okdp.example.org
 usage: |
   A web application. Open https://demo-webapp.okdp.example.org
 provides:
-  - name: demo-webapp
+  - name: webapp
     contract: http
     values:
       internalUrl: http://demo-webapp-app.demo.svc:8080

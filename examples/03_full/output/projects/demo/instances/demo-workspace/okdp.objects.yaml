@@ -148,6 +148,7 @@ apiVersion: generators.external-secrets.io/v1alpha1
 kind: Password
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -169,6 +170,7 @@ apiVersion: generators.external-secrets.io/v1alpha1
 kind: Password
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -190,6 +192,7 @@ apiVersion: generators.external-secrets.io/v1alpha1
 kind: Password
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -211,6 +214,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
     helm.sh/resource-policy: keep
   labels:
     app.kubernetes.io/instance: demo-workspace
@@ -302,3 +306,44 @@ spec:
       app.kubernetes.io/name: workspace
   policyTypes:
     - Ingress
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  labels:
+    app.kubernetes.io/instance: demo-workspace
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: workspace
+    app.kubernetes.io/part-of: okdp
+    okdp.io/credentials-s3: "true"
+    okdp.io/instance: demo-workspace
+    okdp.io/service: workspace
+  name: demo-workspace.datalake-credentials
+  namespace: demo
+spec:
+  data:
+    - remoteRef:
+        key: platform/datalake
+        property: accessKey
+      secretKey: accessKey
+    - remoteRef:
+        key: platform/datalake
+        property: secretKey
+      secretKey: secretKey
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: okdp-secrets
+  target:
+    creationPolicy: Owner
+    name: demo-workspace.datalake-credentials
+    template:
+      metadata:
+        labels:
+          app.kubernetes.io/instance: demo-workspace
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/name: workspace
+          app.kubernetes.io/part-of: okdp
+          okdp.io/credentials-s3: "true"
+          okdp.io/instance: demo-workspace
+          okdp.io/service: workspace

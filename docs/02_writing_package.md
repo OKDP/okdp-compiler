@@ -278,7 +278,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
 require:                                 # read by the mapping in every case
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
 defaults:
   app: app.defaults.yaml                 # OKDP's defaults, plain YAML; metrics has none
 upstream:
@@ -306,6 +306,12 @@ upstream:
   `true`, `false` or `{protect, append}`
   ([upstream](specs/02_service_definition.md#upstream)). Leave out
   a chart an instance has no reason to set (the webapp's `metrics`).
+  Whatever it accepts, the platform denies its projects' instances the
+  keys of a pod's privileges, identity, containers and objects
+  (`securityContext`, `hostPath`, `serviceAccount`, `sidecars`,
+  `extraObjects`...) and may hold their images to its registries ([upstream
+  policy](specs/01_inputs_outputs.md#upstream-policy)): a parameter is
+  the way to offer one of them, the package reviewed with it.
 - `protect` refuses instance values on a path, under it, or a non-map on the
   way to it ([protect](specs/01_inputs_outputs.md#protect)).
   Protect what the platform relies on:
@@ -453,10 +459,18 @@ connections:
     secretRef: {name: shared-db-credentials}   # never the password itself
 ```
 
+A connection whose credentials are in the platform's secret store says
+so, `secretRef: {remoteKey: <key>}` (an S3 store the platform neither
+deploys nor manages): the compiler reads them into a Secret of the
+instance's namespace, `<release>.<connection>-credentials`, with an
+ExternalSecret among the instance's objects, and the mapping reads its
+`secretRef.name` as any other's ([credentials in the platform's secret
+store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
+
 In the advanced example, `database: {}` instead claims a database of its
 own, which `demo-db`, the provider of the platform's default class of
 database connections, publishes under the claim's ID: host
-`demo-db-db.demo.svc`, Secret `demo.demo-webapp.database-credentials`, and
+`demo-db-db.demo.svc`, Secret `demo.webapp.database-credentials`, and
 a dependency (`Result.Dependencies`), which the deployment graph orders
 the releases with (Flux `dependsOn`, Argo CD sync waves,
 [GitOps](01_usage.md#gitops); claims below). The mapping reads both the
@@ -466,7 +480,7 @@ reference requires them, `"require": {"required": ["secretRef"]}`
 and a connection without a Secret is refused before the mapping runs.
 cnpg-postgresql publishes one `database-server` output per database: an
 instance of the namespace references it by that name (`database:
-demo-pg-hive`), which resolves to the output's values and `secretRef`, and
+pg-hive`), which resolves to the output's values and `secretRef`, and
 depends on the cnpg-postgresql instance; an instance of another namespace
 claims it, or gets it as a connection, its credentials Secret being in the
 provider's namespace
@@ -476,8 +490,9 @@ See [contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
 contract, its schema included (a `port` is a number, not a string built by
-an expression). An output is published under the release name, the
-default `name`: other instances reach the instance by it. Its values are
+an expression). An output is published under the instance's name, the
+default `name` (`db` for the instance `projects/demo/instances/db/`, not
+its release `demo-db`): other instances reach the instance by it. Its values are
 what the instance is reached at: build the hosts and Service names once,
 in `vars`, for the ingress and `provides` alike. A `name` is for several
 outputs of one contract (cnpg-postgresql's `database-server` outputs, one
@@ -498,10 +513,16 @@ provides:
         - {key: secretKey, length: 40, symbols: 0}
 ```
 
-`secret` (`generate` or `stringData`): the compiler renders the credentials
-Secret (rustfs). `secretRef` alone: an operator or an upstream chart creates
-it (cnpg-postgresql). Neither: consumers bring their own identity
-(seaweedfs). An output never points at a Secret nobody creates.
+`secret` (`generate`, with `stringData` for the keys that are not
+secret): the compiler renders the credentials Secret, generated in the
+cluster (rustfs); a `stringData` alone, credentials in clear in the
+deployments repository, fails unless the caller sets
+`Inputs.AllowPlainSecrets`, and so does a Secret of `objects` with
+`data` or `stringData` ([credentials
+Secrets](specs/01_inputs_outputs.md#credentials-secrets)). `secretRef`
+alone: an operator or an upstream chart creates it (cnpg-postgresql).
+Neither: consumers bring their own identity (seaweedfs). An output never
+points at a Secret nobody creates.
 
 A consumer may instead claim a connection, and let the instance that
 provisions its contract create it ([claims](specs/01_inputs_outputs.md#claims)):
@@ -523,24 +544,25 @@ package fixes what the service needs of every claim of the reference
 over it; both are checked against the claim schema when the claim
 binds, its defaults applied.
 
-An instance then says nothing for a database of its own, of the
-default class the platform or its project sets
+An instance then says nothing for a database of its own, of the default
+class the platform or its project sets
 (`global.okdp.provisioning.database-server.default`), the claim template;
 `{class: large}` for one of another class, the platform's or one its
 project adds, each a provider and what it fixes of the request; or
-`{provider: data/postgres2}` for one of a provider it names; a
-name references an existing connection, or a named claim its project
-declares (`claims: {analytics: {contract: database-server}}` in
-`project.yaml`), one database for every instance that names it. Of a
-named claim, a package requires what it needs with `require`, as of a
-connection: the claim is its project's, and so is what it requests, its
-declaration's `request`, which the package's does not change. Without a
-default class, a claim that names neither a class nor a provider is
-refused. The mapping reads the claim's connection as any other, checked
-against what the reference requires (`require`): a provider that
-publishes what the service cannot use refuses the claimer, which names a
-class whose provider meets it; the compiler never picks one. A key a
-class fixes of the request is the class's: a package's `request` that
+`{provider: data/postgres2}` for one of a provider it names, an
+instance, `<namespace>/<instance>` (or its release,
+`data/data-postgres2`); a name references an existing connection, or a
+named claim its project declares (`claims: {analytics: {contract:
+database-server}}` in `project.yaml`), one database for every instance
+that names it. Of a named claim, a package requires what it needs with
+`require`, as of a connection: the claim is its project's, and so is what
+it requests, its declaration's `request`, which the package's does not
+change. Without a default class, a claim that names neither a class nor a
+provider is refused. The mapping reads the claim's connection as any
+other, checked against what the reference requires (`require`): a provider
+that publishes what the service cannot use refuses the claimer, which
+names a class whose provider meets it; the compiler never picks one. A key
+a class fixes of the request is the class's: a package's `request` that
 sets it refuses the claims of that class.
 
 A provider declares the contracts it provisions, `provisions`, and
@@ -573,7 +595,7 @@ provides:
 ```
 
 A claim's ID is a Kubernetes name, DNS-1123 labels joined by dots
-(`demo.demo-app.db`): an object name, a Secret name or a label value takes
+(`demo.app.db`): an object name, a Secret name or a label value takes
 it as it is; a SQL name replaces its dots and dashes, as above, and a name
 that takes a label only (a Service, a host segment) its dots, a choice of
 the provider's.
@@ -581,31 +603,38 @@ the provider's.
 The compiler carries the credentials of a claim of another namespace
 through the platform's secret store ([credentials across
 namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)).
+An instance serves such a claim through a class of the platform's, or
+with its consent: the namespaces its `instance.yaml` lists
+(`claimers`), else those of the package's entry, `{contract:
+database-server, claimers: ['*']}` for a server every project may claim
+of; none by default
+([providers](specs/01_inputs_outputs.md#providers)).
 
 ### 7. Compile, render and check
 
 Each `ci/<case>-values.yaml` is an instance: its parameters, without
 `global` and `connections`, which an instance may not set. A case is
 compiled as a tree ([repository layout](01_usage.md#repository-layout)):
-the catalog's repository, its `catalog/` and `contracts/`, and a test
-tree of the case, outside it: `platform.yaml`, the platform values
+the catalog's repository, its `catalog/` and `contracts/`, and a test tree
+of the case, outside it: `platform.yaml`, the platform values
 (`global.okdp`), `ci/platform.yaml` and, for a case that needs others, its
 own `ci/<case>-platform.yaml` over it; and the instance,
-`projects/demo/instances/demo-<service>/`, its `instance.yaml` naming the
-package, its `config.yaml` the case's values, its `connections.yaml` the
-case's own connections (`ci/<case>-connections.yaml`).
-`scripts/compile-charts.sh` builds one per case. Write one case per
-mode: OIDC `existing`, `dcr` and off, internal and external connections,
-proxy set, each optional chart on, upstream values with appended lists. The
-`dcr` case's platform file gives `oidc.clientProvisioning: dcr`,
-`oidc.dcr.registrationUrl` and `authMethod: anonymous` (polaris's
-`ci/dcr-platform.yaml`). The examples of this repository compile in `dcr`
-mode only; the `existing` mode is tested by the unit tests
-(`internal/okdp/oidc_test.go`), with no example output.
+`projects/demo/instances/<service>/`, the release `demo-<service>`, its
+`instance.yaml` naming the package, its `config.yaml` the case's values,
+its `connections.yaml` the case's own connections
+(`ci/<case>-connections.yaml`). `scripts/compile-charts.sh` builds one per
+case. Write one case per mode: OIDC `existing`, `dcr` and off, internal
+and external connections, proxy set, each optional chart on, upstream
+values with appended lists. The `dcr` case's platform file gives
+`oidc.clientProvisioning: dcr`, `oidc.dcr.registrationUrl` and
+`authMethod: anonymous` (polaris's `ci/dcr-platform.yaml`). The examples
+of this repository compile in `dcr` mode only; the `existing` mode is
+tested by the unit tests (`internal/okdp/oidc_test.go`), with no example
+output.
 
 ```bash
 export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of --check, filled with helm pull --untar
-# /tmp/polaris-dcr: platform.yaml, projects/demo/instances/demo-polaris/{instance.yaml,config.yaml}
+# /tmp/polaris-dcr: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
 okdp-compile --repository . --repository /tmp/polaris-dcr --check   # against the upstream charts' defaults and schemas
 okdp-compile --repository . --repository /tmp/polaris-dcr -o /tmp/out
 i=/tmp/out/projects/demo/instances/demo-polaris
@@ -615,9 +644,9 @@ helm template demo-polaris "$chart" -n demo -f $i/instance.values.yaml
 scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and rendered
 ```
 
-- Render with the release name and namespace of the compile, the
-  instance's directory and its project's: the upstream charts derive their
-  names from the release.
+- Render with the release name and namespace of the compile,
+  `<project>-<instance>` and the project's directory, `demo-polaris` and
+  `demo`: the upstream charts derive their names from the release.
 - Render the umbrella as a deployment installs it: its
   dependencies are the sources the index names for the keys, the clients'
   charts the platform's oidc-dcr chart, `polaris-admin-principals` the
@@ -641,8 +670,10 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 
 ### Ingress and TLS
 
-The host follows the platform suffix; the class and the certificate issuer
-are platform values (`require` them, `protect` the four ingress paths).
+The host follows the platform suffix; the class and the certificate
+issuer, `global.okdp.tls.clusterIssuer`, the cert-manager ClusterIssuer
+the platform names whichever cert-manager runs it, are platform values
+(`require` them, `protect` the four ingress paths).
 
 ```yaml
 # values.cel.yaml
@@ -660,7 +691,28 @@ app:
 ```
 
 To add annotations, write them in a map next to
-`$merge: ${{ platform.ingressAnnotations }}` (airflow, superset).
+`$merge: ${{ platform.ingressAnnotations }}` (airflow, superset). The
+platform's come with them, `global.okdp.ingress.annotations`, those of
+the cluster's ingress controller: an annotation of one controller only
+(`nginx.ingress.kubernetes.io/proxy-body-size`) is a tuning another
+ignores, never what protects the service. A sign-in is the service's own
+(OIDC), or a proxy in front of it (oauth2-proxy): an annotation that
+another controller ignores would leave it open.
+
+A service that calls another of the platform over TLS trusts the
+platform's CA bundle: the Secret `global.okdp.tls.caBundleSecret` of its
+namespace, `ca.crt` (PEM) and `bundle.p12` (PKCS#12), as a trust-manager
+Bundle writes one. Mount it only when the platform sets it, never a name
+of the package's own (`certs-bundle`): unset, the platform's certificates
+are a public CA's, which the image trusts already.
+
+```yaml
+# values.cel.yaml
+app:
+  extraVolumes:
+    $if: ${{ global.okdp.?tls.?caBundleSecret.orValue('') != '' }}
+    $value: [{name: ca-bundle, secret: {secretName: '${{ global.okdp.tls.caBundleSecret }}'}}]
+```
 
 ### OAuth clients
 
@@ -784,8 +836,7 @@ External Secrets Operator generators, generated once in the cluster.
 # okdp.yaml
 vars:
   keep:                     # outlive the release: the database they encrypt does
-    helm.sh/resource-policy: keep
-    argocd.argoproj.io/sync-options: Delete=false
+    helm.sh/resource-policy: keep   # Argo CD's Prune=false,Delete=false added
 objects:
   - $spread: >-
       ${{ okdpGeneratedSecret({'name': okdpFullname('internal'), 'annotations': keep,
@@ -795,6 +846,11 @@ objects:
       ${{ platform.oidc.enabled ? [] : okdpGeneratedSecret({'name': okdpFullname('admin'),
           'keys': [{'key': 'password', 'length': 24}]}) }}
 ```
+
+Helm and Flux keep what `helm.sh/resource-policy: keep` marks; the
+compiler adds Argo CD's equivalents, `argocd.argoproj.io/sync-options:
+Prune=false,Delete=false`, to each such object it writes ([the objects
+file](specs/01_inputs_outputs.md#the-objects-file)).
 
 Point the upstream chart at the Secret (`*SecretName`, `existingSecret`) and
 protect that path: the chart's own templates would draw a new value on every

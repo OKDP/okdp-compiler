@@ -331,6 +331,36 @@ output:
 	}
 }
 
+// TestHostCost: what a host function builds counts in the session's CEL
+// cost (hostCost): an expression that writes a large string from a large
+// value, the value given, exhausts a small limit in one call, as CEL's
+// own join does; a small output stays within it; without a limit,
+// nothing is counted.
+func TestHostCost(t *testing.T) {
+	big := strings.Repeat("x", 10000)
+	list := make([]any, 1000)
+	for i := range list {
+		list[i] = "0123456789"
+	}
+	scope := M{"values": M{"big": big, "list": list, "small": "x"}}
+	const limit = 5000
+	for _, src := range []string{"quote(values.big)", "str(values.big)", "toJson(values.list)", "toPrettyJson(values.list)", "toYaml(values.list)", "values.list.join(',')"} {
+		doc := mapping("vars:\n  a: ${{ " + src + " }}\n")
+		_, err := NewSession(context.Background(), limit).Eval(scope, nil, doc)
+		if err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
+			t.Errorf("%s: got %v, want the limit exceeded", src, err)
+		}
+		s := NewSession(context.Background(), 0)
+		if _, err := s.Eval(scope, nil, doc); err != nil || s.used != 0 {
+			t.Errorf("%s without a limit: %v, %d counted", src, err, s.used)
+		}
+	}
+	s := NewSession(context.Background(), limit)
+	if _, err := s.Eval(scope, nil, mapping("vars:\n  a: ${{ quote(values.small) }}\n")); err != nil || s.used == 0 || s.used > 10 {
+		t.Errorf("a small output: %v, cost %d", err, s.used)
+	}
+}
+
 // TestErrorRules: the errors section, a list: each item it gives that is
 // not empty a message ($if and $value, per element with $for, a list
 // spliced with $spread), or the list an expression gives; the message of

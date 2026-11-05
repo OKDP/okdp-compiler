@@ -1,0 +1,213 @@
+# The platform's policy: an instance of a project that is not privileged
+# (global.okdp.policy.privileged) installs no cluster-scoped object and
+# writes no other namespace. The compile is refused, nothing written.
+status 1 okdp-compile --repository $WORK/tree -o $WORK/files
+! stdout .
+cmp stderr $WORK/cluster-role.txt
+! exists $WORK/files
+
+# The same package in a privileged project, the platform's own: its objects
+# are written as computed.
+status 0 okdp-compile --repository $WORK/priv -o $WORK/files
+! stdout .
+! stderr .
+grep 'kind: ClusterRole' $WORK/files/projects/infra/instances/infra-web/okdp.objects.yaml
+rm $WORK/files
+
+# An object of another namespace, whatever its kind: an ExternalSecret
+# there would read that namespace's keys with its SecretStore's identity.
+status 1 okdp-compile --repository $WORK/other -o $WORK/files
+! stdout .
+cmp stderr $WORK/other-namespace.txt
+! exists $WORK/files
+
+# A package schema that declares global.okdp is refused: its defaults
+# would bypass the context layer guards and set the platform's settings.
+status 1 okdp-compile --repository $WORK/schema-okdp -o $WORK/files
+! stdout .
+cmp stderr $WORK/schema-okdp.txt
+! exists $WORK/files
+
+# A package schema that declares global.imageRegistry is allowed: a
+# package legitimately gives a default to a key of global it uses.
+status 0 okdp-compile --repository $WORK/schema-global -o $WORK/files
+! stdout .
+! stderr .
+rm $WORK/files
+
+# An object of a deployer engine's kinds (Flux, Argo CD) lets a project
+# drive the engine: refused for a project that is not privileged.
+status 1 okdp-compile --repository $WORK/engine -o $WORK/files
+! stdout .
+cmp stderr $WORK/engine-cr.txt
+! exists $WORK/files
+
+# The same engine object in a privileged project: written as computed.
+status 0 okdp-compile --repository $WORK/engine-priv -o $WORK/files
+! stdout .
+! stderr .
+grep 'kind: HelmRelease' $WORK/files/projects/infra/instances/infra-web/okdp.objects.yaml
+rm $WORK/files
+
+-- cluster-role.txt --
+error: demo/demo-web: web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
+-- tree/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- tree/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: '${{ release.name }}-reader', labels: '${{ labels }}'}
+    rules: [{apiGroups: [''], resources: [nodes], verbs: [get, list]}]
+-- tree/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- priv/platform.yaml --
+global:
+  okdp:
+    policy:
+      privileged: [infra]
+-- priv/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- priv/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata: {name: '${{ release.name }}-reader', labels: '${{ labels }}'}
+    rules: [{apiGroups: [''], resources: [nodes], verbs: [get, list]}]
+-- priv/projects/infra/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- other-namespace.txt --
+error: demo/demo-web: web: objects: ExternalSecret/demo-web-ledger: namespace finance, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them
+-- other/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- other/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata: {name: '${{ release.name }}-ledger', namespace: finance, labels: '${{ labels }}'}
+    spec:
+      secretStoreRef: {name: okdp-secrets, kind: SecretStore}
+      target: {name: ledger}
+      data: [{secretKey: password, remoteRef: {key: finance/ledger, property: password}}]
+-- other/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- schema-okdp.txt --
+error: demo/demo-web: config.schema.json: global.okdp is the platform's settings: a package schema declares nothing under it
+-- schema-okdp/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- schema-okdp/catalog/web/1.0.0/okdp.yaml --
+{}
+-- schema-okdp/catalog/web/1.0.0/config.schema.json --
+{
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "okdp": {
+          "type": "object",
+          "properties": {
+            "policy": {
+              "type": "object",
+              "properties": {
+                "privileged": {
+                  "type": "array",
+                  "default": ["demo"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+-- schema-okdp/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- schema-global/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- schema-global/catalog/web/1.0.0/okdp.yaml --
+{}
+-- schema-global/catalog/web/1.0.0/config.schema.json --
+{
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "default": "registry.example.org"
+        }
+      }
+    }
+  }
+}
+-- schema-global/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- engine-cr.txt --
+error: demo/demo-web: web: objects: HelmRelease/demo-web-override: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+-- engine/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- engine/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata: {name: '${{ release.name }}-override', labels: '${{ labels }}'}
+    spec:
+      chart: {spec: {chart: nginx, sourceRef: {kind: HelmRepository, name: bitnami}}}
+      targetNamespace: kube-system
+-- engine/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- engine-priv/platform.yaml --
+global:
+  okdp:
+    policy:
+      privileged: [infra]
+-- engine-priv/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- engine-priv/catalog/web/1.0.0/okdp.yaml --
+objects:
+  - apiVersion: helm.toolkit.fluxcd.io/v2
+    kind: HelmRelease
+    metadata: {name: '${{ release.name }}-override', labels: '${{ labels }}'}
+    spec:
+      chart: {spec: {chart: nginx, sourceRef: {kind: HelmRepository, name: bitnami}}}
+      targetNamespace: kube-system
+-- engine-priv/projects/infra/instances/web/instance.yaml --
+service: web
+version: 1.0.0

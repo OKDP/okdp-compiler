@@ -19,7 +19,7 @@ import (
 func TestValuesLayers(t *testing.T) {
 	files := maps.Clone(pkg)
 	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
-		"global": {"properties": {"imageRegistry": {"type": "string"}, "okdp": {"type": "object"}}}}}`)}
+		"global": {"properties": {"imageRegistry": {"type": "string"}}}}}`)}
 	platform := ContextLayer{Values: map[string]any{"global": M{"imageRegistry": "platform.example.org"}}}
 	for name, tc := range map[string]struct {
 		instance []map[string]any
@@ -65,7 +65,8 @@ func TestValuesLayers(t *testing.T) {
 // of it), not a connection they give, even by a field they do not set, nor
 // a claim they declare, nor a class they define or the default class they
 // set: it adds classes beside theirs, and the classes of a contract they
-// leave out. A
+// leave out; and nothing else of global.okdp, the platform's settings,
+// whether the platform sets the key or not, nor global.okdp itself. A
 // layer changes an earlier one of its level. Levels are merged lowest
 // first, whatever their order in Inputs.Context and their gaps; above level
 // 0, no "{{". inputs gives layer 1, at level 0, the platform layer 2.
@@ -80,26 +81,30 @@ func TestContextLevels(t *testing.T) {
 		want   string // the error, none when empty
 	}{
 		"added": {[]ContextLayer{
-			at(1, map[string]any{"global": M{"storageClass": "fast", "okdp": M{"project": M{"name": "demo"}}}, "connections": M{"team-db": M{"contract": "database", "host": "a"}}}),
+			at(1, map[string]any{"global": M{"storageClass": "fast", "project": M{"name": "demo"}}, "connections": M{"team-db": M{"contract": "database", "host": "a"}}}),
 			at(1, map[string]any{"connections": M{"team-db": M{"host": "team-db.example.org"}}}),
 		}, ""},
-		"a platform value":       {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
-		"the same value":         {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0"},
-		"a platform null":        {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"registry": M{"host": "registry.example.org"}}}})}, "context layer 3 (level 1): global.okdp.registry is set at level 0"},
-		"a parent":               {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"global": M{"okdp": nil}})}, "context layer 4 (level 1): global.okdp is set at level 0"},
-		"a key with dots":        {[]ContextLayer{at(1, map[string]any{"global": M{"labels": M{"okdp.io/tier": "silver"}}})}, `context layer 3 (level 1): global.labels["okdp.io/tier"] is set at level 0`},
-		"a platform connection":  {[]ContextLayer{at(1, map[string]any{"connections": M{"shared-db": M{"port": 5433}}})}, "context layer 3 (level 1): connections.shared-db is set at level 0"},
-		"a template":             {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"connections": M{"team-db": M{"host": "{{ .Release.Name }}"}}})}, `context layer 4 (level 1): connections.team-db.host: the value contains "{{"`},
-		"a platform class":       {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"classes": M{"standard": M{"request": M{"size": "1Gi"}}}}}}}})}, "context layer 3 (level 1): global.okdp.provisioning.server.classes.standard is set at level 0"},
-		"the default class":      {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"default": "fast"}}}}})}, "context layer 3 (level 1): global.okdp.provisioning.server.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
-		"a class added":          {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"classes": M{"fast": M{"provider": "data/pg2"}}}, "s3": M{"default": "standard", "classes": M{"standard": M{"provider": "data/minio"}}}}}}})}, ""},
-		"a project's claim":      {[]ContextLayer{at(1, map[string]any{"claims": M{"reports": M{"contract": "database"}}}), at(2, map[string]any{"claims": M{"reports": M{"provider": "data/pg"}}})}, "context layer 4 (level 2): claims.reports is set at level 1"},
-		"a value of no layer":    {[]ContextLayer{at(1, map[string]any{"replicas": 3})}, ""},
-		"a value of no platform": {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"className": "nginx"}}}})}, ""},
-		"a third level":          {[]ContextLayer{at(1, map[string]any{"global": M{"storageClass": "fast"}}), at(2, map[string]any{"global": M{"storageClass": "slow"}})}, "context layer 4 (level 2): global.storageClass is set at level 1"},
-		"a gap":                  {[]ContextLayer{at(5, map[string]any{"global": M{"storageClass": "fast"}}), at(10, map[string]any{"global": M{"storageClass": "slow"}})}, "context layer 4 (level 10): global.storageClass is set at level 5"},
-		"in any order":           {[]ContextLayer{at(2, map[string]any{"global": M{"storageClass": "slow"}}), at(1, map[string]any{"global": M{"storageClass": "fast"}})}, "context layer 3 (level 2): global.storageClass is set at level 1"},
-		"the lowest level first": {[]ContextLayer{at(2, map[string]any{"global": M{"okdp": M{"registry": "r"}}}), at(1, map[string]any{"global": M{"okdp": M{"registry": "r"}}})}, "context layer 4 (level 1): global.okdp.registry is set at level 0"},
+		"a platform value":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "other.example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
+		"the same value":                   {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}})}, "context layer 3 (level 1): global.okdp.ingress.suffix is set at level 0"},
+		"a platform null":                  {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"registry": M{"host": "registry.example.org"}}}})}, "context layer 3 (level 1): global.okdp.registry is set at level 0"},
+		"a parent":                         {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"global": M{"okdp": nil}})}, "context layer 4 (level 1): global.okdp is set at level 0"},
+		"a key with dots":                  {[]ContextLayer{at(1, map[string]any{"global": M{"labels": M{"okdp.io/tier": "silver"}}})}, `context layer 3 (level 1): global.labels["okdp.io/tier"] is set at level 0`},
+		"a platform connection":            {[]ContextLayer{at(1, map[string]any{"connections": M{"shared-db": M{"port": 5433}}})}, "context layer 3 (level 1): connections.shared-db is set at level 0"},
+		"a template":                       {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"connections": M{"team-db": M{"host": "{{ .Release.Name }}"}}})}, `context layer 4 (level 1): connections.team-db.host: the value contains "{{"`},
+		"a platform class":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"classes": M{"standard": M{"request": M{"size": "1Gi"}}}}}}}})}, "context layer 3 (level 1): global.okdp.provisioning.server.classes.standard is set at level 0"},
+		"the default class":                {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"default": "fast"}}}}})}, "context layer 3 (level 1): global.okdp.provisioning.server.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
+		"a class added":                    {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"classes": M{"fast": M{"provider": "data/pg2"}}}, "s3": M{"default": "standard", "classes": M{"standard": M{"provider": "data/minio"}}}}}}})}, ""},
+		"a project's claim":                {[]ContextLayer{at(1, map[string]any{"claims": M{"reports": M{"contract": "database"}}}), at(2, map[string]any{"claims": M{"reports": M{"provider": "data/pg"}}})}, "context layer 4 (level 2): claims.reports is set at level 1"},
+		"a value of no layer":              {[]ContextLayer{at(1, map[string]any{"replicas": 3})}, ""},
+		"a value of no platform":           {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"ingress": M{"className": "nginx"}}}})}, "context layer 3 (level 1): global.okdp.ingress: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp"},
+		"a platform chart":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"s3": M{"classes": M{}}}, "charts": M{"oidcDcr": M{"repository": "oci://attacker.example/x", "chart": "oidc-dcr", "version": "0.6.0"}}}}})}, "context layer 3 (level 1): global.okdp.charts: a platform setting, level 0 only"},
+		"the privileged projects":          {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}})}, "context layer 3 (level 1): global.okdp.policy: a platform setting, level 0 only"},
+		"a key the compiler does not read": {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"project": M{"name": "demo"}}}})}, "context layer 3 (level 1): global.okdp.project: a platform setting, level 0 only"},
+		"a setting of a higher level":      {[]ContextLayer{at(2, map[string]any{"global": M{"okdp": M{"proxy": M{"noProxy": ".svc"}}}})}, "context layer 3 (level 2): global.okdp.proxy: a platform setting, level 0 only"},
+		"a third level":                    {[]ContextLayer{at(1, map[string]any{"global": M{"storageClass": "fast"}}), at(2, map[string]any{"global": M{"storageClass": "slow"}})}, "context layer 4 (level 2): global.storageClass is set at level 1"},
+		"a gap":                            {[]ContextLayer{at(5, map[string]any{"global": M{"storageClass": "fast"}}), at(10, map[string]any{"global": M{"storageClass": "slow"}})}, "context layer 4 (level 10): global.storageClass is set at level 5"},
+		"in any order":                     {[]ContextLayer{at(2, map[string]any{"global": M{"storageClass": "slow"}}), at(1, map[string]any{"global": M{"storageClass": "fast"}})}, "context layer 3 (level 2): global.storageClass is set at level 1"},
+		"the lowest level first":           {[]ContextLayer{at(2, map[string]any{"global": M{"okdp": M{"registry": "r"}}}), at(1, map[string]any{"global": M{"okdp": M{"registry": "r"}}})}, "context layer 4 (level 1): global.okdp.registry is set at level 0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := inputs()
@@ -120,9 +125,15 @@ func TestContextLevels(t *testing.T) {
 			}
 		})
 	}
+	// global.okdp set to a non-map above level 0, where level 0 sets none.
+	in := inputs()
+	in.Context = []ContextLayer{{Level: 1, Values: map[string]any{"global": M{"okdp": nil}}}}
+	if _, err := Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "context layer 1 (level 1): global.okdp: a platform setting, level 0 only") {
+		t.Errorf("okdp null at level 1: got %v", err)
+	}
 	// The context is merged by level, then the instance's values: a higher
 	// level's global reaches every chart, the instance's values win.
-	in := inputs(map[string]any{"replicas": 2})
+	in = inputs(map[string]any{"replicas": 2})
 	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"global": M{"storageClass": "fast"}, "replicas": 3}})
 	res, err := Compile(context.Background(), def, in)
 	if err != nil {

@@ -43,9 +43,9 @@ func provideCompile(provides string) (*Result, error) {
 }
 
 // TestProvides: what the instance publishes, its url and usage trimmed,
-// its outputs completed, named after the release unless named (a contract
-// without a naming convention), their secretRef; no object without a
-// secret.
+// its outputs completed, named after the instance unless named, its
+// release when it has no name (a contract without a naming convention),
+// their secretRef; no object without a secret.
 func TestProvides(t *testing.T) {
 	res, err := provideCompile(`
   - contract: http
@@ -67,6 +67,14 @@ func TestProvides(t *testing.T) {
 	}
 	if res.Objects != nil {
 		t.Errorf("objects: %#v", res.Objects)
+	}
+	// Named after the instance when it has a name (Inputs.Name).
+	d := *def
+	d.Okdp = []byte("provides:\n  - {contract: http, values: {url: https://demo-app.example.org}}\n")
+	in := inputs()
+	in.Contracts, in.Name = httpContract, "app"
+	if res, err := Compile(context.Background(), &d, in); err != nil || res.Info.Provides[0].Name != "app" {
+		t.Errorf("Inputs.Name: got %v, %v, want an output named app", res, err)
 	}
 }
 
@@ -95,23 +103,28 @@ func TestProvidesErrors(t *testing.T) {
 		"secret field":     {"  - {contract: http, values: {url: u, token: t}}\n", `"token" is a secret field`},
 		"required field":   {"  - {contract: api, name: other, values: {}}\n", `field "url" is required by the api contract`},
 		"empty secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
+		"plain secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n", `demo: output "other": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: https://demo-app.example.org}}\n", `two http outputs are named "demo-app"`},
 		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"b\"\ntwo api outputs are named \"a\""},
 		"a naming convention": {
 			"  - {contract: conv, values: {url: u}}\n",
 			`provides "demo-app" (conv): the conv contract cannot be read: conv.schema.json: x-okdp-internal: naming conventions are gone, a provider publishes its connections (provides)`,
 		},
-		"not a map":            {"  - {contract: api, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
-		"values not a map":     {"  - {contract: http, values: [url]}\n", "- at '/provides/0/values': got array, want object"},
-		"secretRef not a map":  {"  - {contract: api, name: other, values: {url: u}, secretRef: creds}\n", "- at '/provides/0/secretRef': got string, want object"},
-		"secret not a map":     {"  - {contract: api, name: other, values: {url: u}, secret: [token]}\n", "- at '/provides/0/secret': got array, want object"},
-		"a null secret":        {"  - {contract: api, name: other, values: {url: u}, secret: ~}\n", "- at '/provides/0/secret': got null, want object"},
-		"generate not a list":  {"  - {contract: api, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", "- at '/provides/0/secret/generate': got object, want array"},
-		"generated key":        {"  - {contract: api, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", "- at '/provides/0/secret/generate/0/length': got string, want integer"},
-		"stringData not a map": {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: [token]}}\n", "- at '/provides/0/secret/stringData': got array, want object"},
-		"stringData a number":  {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", "- at '/provides/0/secret/stringData/token': got number, want string"},
-		"secretRef no name":    {"  - {contract: api, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", "- at '/provides/0/secretRef': missing property 'name'"},
-		"secretRef name":       {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: 1}}\n", "- at '/provides/0/secretRef/name': got number, want string"},
+		"not a map":             {"  - {contract: api, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
+		"values not a map":      {"  - {contract: http, values: [url]}\n", "- at '/provides/0/values': got array, want object"},
+		"secretRef not a map":   {"  - {contract: api, name: other, values: {url: u}, secretRef: creds}\n", "- at '/provides/0/secretRef': got string, want object"},
+		"secret not a map":      {"  - {contract: api, name: other, values: {url: u}, secret: [token]}\n", "- at '/provides/0/secret': got array, want object"},
+		"a null secret":         {"  - {contract: api, name: other, values: {url: u}, secret: ~}\n", "- at '/provides/0/secret': got null, want object"},
+		"generate not a list":   {"  - {contract: api, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", "- at '/provides/0/secret/generate': got object, want array"},
+		"generated key":         {"  - {contract: api, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", "- at '/provides/0/secret/generate/0/length': got string, want integer"},
+		"stringData not a map":  {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: [token]}}\n", "- at '/provides/0/secret/stringData': got array, want object"},
+		"stringData a number":   {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", "- at '/provides/0/secret/stringData/token': got number, want string"},
+		"secretRef no name":     {"  - {contract: api, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", "- at '/provides/0/secretRef': missing property 'name'"},
+		"secretRef name":        {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: 1}}\n", "- at '/provides/0/secretRef/name': got number, want string"},
+		"secretRef name a path": {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: other/creds}}\n", "- at '/provides/0/secretRef/name': 'other/creds' does not match pattern"},
+		"secretRef name upper":  {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: Creds}}\n", "- at '/provides/0/secretRef/name': 'Creds' does not match pattern"},
+		"secretRef name long":   {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: " + strings.Repeat("a", 254) + "}}\n", "- at '/provides/0/secretRef/name': maxLength: got 254, want 253"},
+		"default Secret name":   {"  - {contract: api, name: Other_DB, values: {url: u}, secret: {generate: [{key: token}]}}\n", `provides "Other_DB" (api): secretRef.name "Other_DB-api-credentials": not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := provideCompile(tc.provides)
@@ -150,9 +163,14 @@ func TestProvidesTypes(t *testing.T) {
 }
 
 // TestProvidesSecret: an output with a secret gets a secretRef, and its
-// credentials Secret is an object.
+// credentials Secret is an object: a plain one when the caller allows it
+// (Inputs.AllowPlainSecrets), a generated one.
 func TestProvidesSecret(t *testing.T) {
-	res, err := provideCompile("  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
+	d := *def
+	d.Okdp = []byte("provides:\n  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n")
+	in := inputs()
+	in.Contracts, in.AllowPlainSecrets = httpContract, true
+	res, err := Compile(context.Background(), &d, in)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,10 +19,29 @@ import (
 )
 
 // Instance: an instance CompileAll compiles: its package and its inputs,
-// Published, Claims and Bindings left out: CompileAll gives them.
+// Name, Published, Claims and Bindings left out: CompileAll gives them; and
+// its name, which a provider names it by, as by its release, and which
+// names its outputs and its claims (Inputs.Name).
 type Instance struct {
 	Definition *Definition
 	Inputs     Inputs
+	Name       string // the instance's name: a claim's or a class's provider, <namespace>/<name> or <name> of the claimer's namespace, names it by its name or its release; the name of its outputs that name none and of its claims' IDs; LoadRepository's, its directory's; "": its release
+}
+
+// name: the name of the instance, its release when it has none.
+func (i Instance) name() string { return cmp.Or(i.Name, i.Inputs.Release) }
+
+// Claimers: the namespaces whose instances may claim connections of
+// contract of the instance, a provider, from another namespace, by naming
+// it or through a class of their project's (CompileAll; a class of the
+// platform's, level 0, needs none): Inputs.Claimers, else the claimers of
+// its package's provisions entry of contract; "*" any namespace; nil
+// none.
+func (i Instance) Claimers(contract string) []string {
+	if i.Inputs.Claimers != nil || i.Definition == nil {
+		return i.Inputs.Claimers
+	}
+	return i.Definition.Package.claimers(contract)
 }
 
 // Outcome: the compile of one instance of CompileAll: its result, nil
@@ -46,26 +65,34 @@ type Bound struct {
 // CompileAll compiles instances together. Each claim of a reference is
 // bound to the instance that provisions its contract, the one it names or
 // the provider of its class, the one it names or the default one of the
-// claimer's context, global.okdp.provisioning (bind): the provider gets it
+// claimer's context, global.okdp.provisioning (bind), one of another
+// namespace with its consent (consent): the provider gets it
 // (Inputs.Claims), its claimer the binding (Inputs.Bindings). Each instance
 // is compiled after the instances of its namespace whose outputs it
 // references and the providers of its claims, with what they publish
 // (Inputs.Published, set by CompileAll). An output two instances of a
 // namespace publish refuses both, and the instances whose references
 // resolved to it, or whose claims are bound to one of them, of any namespace.
+// Two objects that write one Secret of a namespace refuse the instances
+// that hold them (refuseSecretTargets), and those that depend on them.
 // Outcomes in the order of instances, which changes none
 // of them. Whether they deploy together is the graph's (graph.New).
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	t := &tree{ctx: ctx, all: instances, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}}
-	count := map[[2]string]int{}
+	count, names := map[[2]string]int{}, map[[2]string]int{}
 	for _, inst := range instances {
 		count[[2]string{inst.Inputs.Namespace, inst.Inputs.Release}]++
+		names[[2]string{inst.Inputs.Namespace, inst.name()}]++
 	}
 	var idx []int
 	for i, inst := range instances {
-		if in := inst.Inputs; count[[2]string{in.Namespace, in.Release}] > 1 {
+		switch in := inst.Inputs; {
+		case count[[2]string{in.Namespace, in.Release}] > 1:
 			t.out[i].Err = fmt.Errorf("release %q is given twice in namespace %q", in.Release, in.Namespace)
-		} else {
+		case names[[2]string{in.Namespace, inst.name()}] > 1:
+			// Its outputs and its claims are named after it.
+			t.out[i].Err = fmt.Errorf("instance name %q is given twice in namespace %q", inst.name(), in.Namespace)
+		default:
 			idx = append(idx, i)
 		}
 	}
@@ -83,6 +110,7 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	for _, ns := range slices.Sorted(maps.Keys(byNamespace)) {
 		refuseShared(byNamespace[ns], t.out, t.compile)
 	}
+	t.refuseSecretTargets(idx)
 	t.refuseClaimers(idx)
 	t.notes(idx)
 	return t.out
@@ -98,6 +126,7 @@ type tree struct {
 	claims    map[int][]Claim            // a provider's
 	bindings  map[int]map[string]Binding // a claimer's, by field, Output not set
 	index     map[[2]string]int          // the instances CompileAll compiles, by namespace and release
+	names     map[[2]string][]int        // the instances bind binds, by namespace and each name a provider may name them by: their release and their name
 }
 
 // compile: the instance i, with what is published (its namespace's), its
@@ -109,7 +138,7 @@ func (t *tree) compile(i int) error {
 	if t.published[ns] == nil {
 		t.published[ns] = map[string]Info{}
 	}
-	in.Published, in.Claims, in.Bindings = t.published[ns], t.claims[i], nil
+	in.Name, in.Published, in.Claims, in.Bindings = t.all[i].name(), t.published[ns], t.claims[i], nil
 	if bindings := t.bindings[i]; bindings != nil {
 		in.Bindings = map[string]Binding{}
 		for field, b := range bindings {
@@ -222,7 +251,8 @@ func (t *tree) notes(idx []int) {
 }
 
 // bind: the claims of the instances idx (claimsOf), each bound to the
-// instance of idx that provisions its contract (provider): its provider
+// instance of idx that provisions its contract (provider), with its
+// consent when it is of another namespace (consent): its provider
 // gets it, deduplicated, by ID (claims), its claimer the binding
 // (bindings, Outcome.Claims). A claim template that binds to none refuses
 // its instance, which is not compiled, nor are its other claims given to
@@ -234,9 +264,14 @@ func (t *tree) notes(idx []int) {
 // instances not refused, in order.
 func (t *tree) bind(idx []int) []int {
 	provisioning := map[string][]int{} // the instances that provision a contract, by contract
+	t.names = map[[2]string][]int{}
 	for _, i := range idx {
-		for _, c := range t.all[i].Definition.Package.Provisions {
-			provisioning[c] = append(provisioning[c], i)
+		for _, p := range t.all[i].Definition.Package.Provisions {
+			provisioning[p.Contract] = append(provisioning[p.Contract], i)
+		}
+		in := t.all[i].Inputs
+		for _, n := range slices.Compact([]string{in.Release, t.all[i].name()}) {
+			t.names[[2]string{in.Namespace, n}] = append(t.names[[2]string{in.Namespace, n}], i)
 		}
 	}
 	type bound struct {
@@ -252,7 +287,7 @@ func (t *tree) bind(idx []int) []int {
 	}
 	type declared struct {
 		instance int
-		spec     claimSpec
+		spec     ClaimSpec
 	}
 	var claims []bound
 	var toNamed []bound // the references to a named claim, its provider not known yet
@@ -263,10 +298,11 @@ func (t *tree) bind(idx []int) []int {
 	rank := map[int]map[string]int{}            // an instance's references' fields, to their position in parameter path order
 	decls := map[string]map[string][]declared{} // by namespace and name
 	classes := map[int]M{}                      // an instance's, by contract
+	platform := map[int]M{}                     // the platform's among them, by contract
 	for _, i := range idx {
 		in := t.all[i].Inputs
 		c := claimsOf(t.all[i].Definition, in)
-		classes[i] = c.classes
+		classes[i], platform[i] = c.classes, c.platform
 		rank[i] = map[string]int{}
 		for k, ref := range c.refs {
 			rank[i][ref.field] = k
@@ -283,13 +319,16 @@ func (t *tree) bind(idx []int) []int {
 				toNamed = append(toNamed, bound{claimer: i, ref: ref, id: claimID(in.Namespace, "", "", ref.name)})
 				continue
 			}
-			id := claimID(in.Namespace, in.Release, ref.field, "")
+			id := claimID(in.Namespace, t.all[i].name(), ref.field, "")
 			if first, dup := fields[id]; dup {
 				errs[i] = append(errs[i], refused{ref.field, fmt.Errorf("%s: claim: it gives the same ID (%s) as %s: rename one of the parameters", ref.field, id, first)})
 				continue
 			}
 			fields[id] = ref.field
 			ch, err := t.provider(c.classes, in.Namespace, i, ref.field, ref.contract, ref.spec, provisioning[ref.contract])
+			if err == nil {
+				err = t.consent(in.Namespace, ref.field, ref.contract, id, ref.spec, ch, c.platform)
+			}
 			request, rerr := t.request(in, ref.field, ref.contract, ref.spec.Request, ch)
 			if err = errors.Join(err, rerr); err != nil {
 				errs[i] = append(errs[i], refused{ref.field, err})
@@ -317,6 +356,9 @@ func (t *tree) bind(idx []int) []int {
 			}
 			spec, in := ds[0].spec, t.all[ds[0].instance].Inputs
 			ch, err := t.provider(classes[ds[0].instance], ns, -1, where, spec.Contract, spec, provisioning[spec.Contract])
+			if err == nil {
+				err = t.consent(ns, where, spec.Contract, claimID(ns, "", "", name), spec, ch, platform[ds[0].instance])
+			}
 			request, rerr := t.request(in, where, spec.Contract, spec.Request, ch)
 			if err = errors.Join(err, rerr); err != nil {
 				for _, d := range ds {
@@ -430,10 +472,12 @@ func provisioningKey(contract string) string { return value.Key("global.okdp.pro
 // namespace's) of namespace, is bound to: the provider it names, else the
 // provider of the class it names, else of the default class of the
 // contract, of classes (global.okdp.provisioning of the context, by
-// contract), each a release of its namespace or <namespace>/<release>. A
-// class that is none, no default, a provider that is not of the form, or
-// that is no candidate, or the instance itself, fail.
-func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec claimSpec, candidates []int) (choice, error) {
+// contract), each <name> of its namespace or <namespace>/<name>, the
+// instance of that namespace whose name or release it is (names). A class
+// that is none, no default, a provider that is not of the form, that
+// names no instance, or more than one, or one that is no candidate, or the
+// instance itself, fail.
+func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec ClaimSpec, candidates []int) (choice, error) {
 	where := fmt.Sprintf("%s: claim (%s)", field, contract)
 	key := provisioningKey(contract)
 	ch := choice{provider: -1, class: spec.Class, named: spec.Class != "" || spec.Provider != ""}
@@ -466,24 +510,82 @@ func (t *tree) provider(classes M, namespace string, self int, field, contract s
 		}
 		name, ch.fixed = value.Str(class["provider"]), value.AsMap(class["request"])
 		if _, _, ok := providerName(name, namespace); !ok {
-			return ch, fmt.Errorf("%s: %s (%s): provider %q: <release> or <namespace>/<release>", where, which, value.Key(key+".classes", ch.class), name)
+			return ch, fmt.Errorf("%s: %s (%s): provider %q: %s", where, which, value.Key(key+".classes", ch.class), name, providerForms)
 		}
 	}
-	ns, release, _ := providerName(name, namespace)
-	k := slices.IndexFunc(candidates, func(j int) bool {
-		c := t.all[j].Inputs
-		return c.Namespace == ns && c.Release == release
-	})
+	// The provider as named, after the class it is of.
+	named := where
+	if which != "" {
+		named += ": " + which
+	}
+	ns, n, _ := providerName(name, namespace)
+	matches, k := t.names[[2]string{ns, n}], -1
+	if len(matches) == 1 {
+		k = slices.Index(candidates, matches[0])
+	}
 	switch {
-	case k < 0 && spec.Provider != "":
-		return ch, fmt.Errorf("%s: %s/%s is no instance that provisions %s connections", where, ns, release, contract)
+	case len(matches) > 1:
+		return ch, fmt.Errorf("%s: %s/%s names more than one instance, %s: the claim would not know which", named, ns, n, t.matched(n, matches))
 	case k < 0:
-		return ch, fmt.Errorf("%s: %s: %s/%s is no instance that provisions %s connections", where, which, ns, release, contract)
+		return ch, fmt.Errorf("%s: %s/%s is no instance that provisions %s connections", named, ns, n, contract)
 	case candidates[k] == self:
 		return ch, fmt.Errorf("%s: the instance provisions it itself: a claim is of another instance", where)
 	}
 	ch.provider = candidates[k]
 	return ch, nil
+}
+
+// consent: nil when the claim id of contract, of the instances of
+// namespace, at field, may be bound to the provider of ch
+// (tree.provider): an instance of namespace; or, of another namespace,
+// the provider of a class of the platform's (platform, the classes of
+// level 0 by contract, which no level above changes: the platform routes
+// every namespace to it), or one whose claimers (Instance.Claimers) list
+// namespace, or "*". Else the error, naming the claim, the provider, the
+// class when the claim is bound through one, the claimers' namespace and
+// the provider's claimers, its instance's or its package's.
+func (t *tree) consent(namespace, field, contract, id string, spec ClaimSpec, ch choice, platform M) error {
+	p := t.all[ch.provider]
+	if p.Inputs.Namespace == namespace {
+		return nil
+	}
+	by := ""
+	if spec.Provider == "" {
+		if _, ok := value.AsMap(value.AsMap(platform[contract])["classes"])[ch.class]; ok {
+			return nil
+		}
+		by = fmt.Sprintf(", the provider of class %q", ch.class)
+		if spec.Class == "" {
+			by = fmt.Sprintf(", the provider of the default class %q", ch.class)
+		}
+	}
+	claimers := p.Claimers(contract)
+	if consents(claimers, namespace) {
+		return nil
+	}
+	provider := path.Join(p.Inputs.Namespace, p.Inputs.Release)
+	list := cmp.Or(strings.Join(claimers, ", "), "none")
+	if p.Inputs.Claimers == nil {
+		list += ", its package's"
+	}
+	return fmt.Errorf("%s: claim %q (%s): of %s%s, another namespace: %s is not one of its claimers (claimers of instance %s: %s): the provider lists the namespaces that may claim of it (claimers of its instance.yaml, else of its package's provisions), or the platform routes them through a class of platform.yaml", field, id, contract, provider, by, namespace, provider, list)
+}
+
+// matched: the instances matches, that the provider name n names, in
+// release order, each its release and how n names it: "<release> (its
+// release)", "<release> (its name)", the last after "and".
+func (t *tree) matched(n string, matches []int) string {
+	var each []string
+	for _, j := range matches {
+		by := "its name"
+		if t.all[j].Inputs.Release == n {
+			by = "its release"
+		}
+		each = append(each, fmt.Sprintf("%s (%s)", t.all[j].Inputs.Release, by))
+	}
+	slices.Sort(each)
+	last := len(each) - 1
+	return strings.Join(each[:last], ", ") + " and " + each[last]
 }
 
 // refuseShared: step 4 of CompileAll, for the instances idx of a
@@ -550,7 +652,109 @@ func refuseShared(idx []int, out []Outcome, compile func(int) error) {
 	}
 }
 
-// refuseClaimers: step 5 of CompileAll, for the instances idx. A provider
+// secretTarget: what an object of OKDP writes that another object of its
+// namespace must not: a Secret (kind "Secret", or "push" a key of the
+// secret store), of the namespace ns, named name.
+type secretTarget struct{ ns, kind, name string }
+
+// secretTargets: what the object o of an instance of namespace ns writes:
+// a v1 Secret its own name; an ExternalSecret the Secret of
+// spec.target.name, its own name when unset, unless its creationPolicy
+// is None; a PushSecret each key (remoteKey, and its property) of the
+// store it pushes.
+func secretTargets(ns string, o M) []secretTarget {
+	ns = cmp.Or(value.Str(value.Dig(o, "metadata.namespace")), ns)
+	name := value.Str(value.Dig(o, "metadata.name"))
+	group := apiGroup(value.Str(o["apiVersion"]))
+	switch kind := value.Str(o["kind"]); {
+	case group == "" && kind == "Secret":
+		return []secretTarget{{ns, "Secret", name}}
+	case group == "external-secrets.io" && kind == "ExternalSecret":
+		if value.Str(value.Dig(o, "spec.target.creationPolicy")) == "None" {
+			return nil
+		}
+		return []secretTarget{{ns, "Secret", cmp.Or(value.Str(value.Dig(o, "spec.target.name")), name)}}
+	case group == "external-secrets.io" && kind == "PushSecret":
+		var out []secretTarget
+		for _, d := range value.AsList(value.Dig(o, "spec.data")) {
+			ref := value.AsMap(value.Dig(value.AsMap(d), "match.remoteRef"))
+			key := value.Str(ref["remoteKey"])
+			if p := value.Str(ref["property"]); p != "" {
+				key += " (property " + p + ")"
+			}
+			out = append(out, secretTarget{ns, "push", key})
+		}
+		return out
+	}
+	return nil
+}
+
+// refuseSecretTargets: step 5 of CompileAll, for the instances idx. Two
+// objects that write one Secret of a namespace (secretTargets), of one
+// instance or of two, overwrite each other's credentials: each instance
+// that holds one is refused, its error naming the objects and the
+// instances, and no longer published: refuseClaimers then compiles again
+// those that reference its outputs, which fail. A provider's
+// secretRef.name, which names its claimers' copies (<release>-<name>),
+// could otherwise forge the Secret of a connection of another instance
+// (<release>.<connection>-credentials).
+func (t *tree) refuseSecretTargets(idx []int) {
+	out := t.out
+	type writer struct {
+		release, object string
+	}
+	writers := map[secretTarget][]writer{}
+	for _, i := range idx {
+		res := out[i].Result
+		if res == nil {
+			continue
+		}
+		for _, o := range res.Objects {
+			for _, x := range secretTargets(res.Namespace, o) {
+				w := writer{res.Release, value.Str(o["kind"]) + " " + value.Str(value.Dig(o, "metadata.name"))}
+				writers[x] = append(writers[x], w)
+			}
+		}
+	}
+	for _, i := range idx {
+		res := out[i].Result
+		if res == nil {
+			continue
+		}
+		var errs []error
+		seen := map[secretTarget]bool{}
+		for _, o := range res.Objects {
+			for _, x := range secretTargets(res.Namespace, o) {
+				if len(writers[x]) < 2 || seen[x] {
+					continue
+				}
+				seen[x] = true
+				count := map[string]int{}
+				for _, w := range writers[x] {
+					count[fmt.Sprintf("%s of %s", w.object, w.release)]++
+				}
+				var each []string
+				for _, w := range slices.Sorted(maps.Keys(count)) {
+					if n := count[w]; n > 1 {
+						w += fmt.Sprintf(" (%d times)", n)
+					}
+					each = append(each, w)
+				}
+				what := fmt.Sprintf("Secret %q", x.name)
+				if x.kind == "push" {
+					what = fmt.Sprintf("the key %s of the secret store", x.name)
+				}
+				errs = append(errs, fmt.Errorf("%s of namespace %s is written by %s: two objects may not write one Secret", what, x.ns, strings.Join(each, " and ")))
+			}
+		}
+		if errs != nil {
+			out[i] = Outcome{Err: errors.Join(errs...), Claims: out[i].Claims}
+			delete(t.published[res.Namespace], res.Release)
+		}
+	}
+}
+
+// refuseClaimers: step 6 of CompileAll, for the instances idx. A provider
 // refused by refuseShared stays published, so that a claimer of another
 // namespace was compiled with an output of a provider that is refused: each
 // successful instance with a dependency on a refused instance is compiled

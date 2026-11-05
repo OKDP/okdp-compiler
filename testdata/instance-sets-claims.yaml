@@ -1,0 +1,8 @@
+# error: values layer 1: claims are declared by the context (Inputs.Context): a project's, of level 1 or above
+# Named claims are a project's (project.yaml): an instance may not declare
+# one, which every instance of its project would reference by name; it
+# claims through its references, of a class or of a provider.
+claims:
+  reports:
+    contract: database
+    provider: finance/ledger-db

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.7.0](https://github.com/OKDP/okdp-compiler/compare/v0.6.0...v0.7.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* the compile and the output of a tree in the library, treeedit, chartcache
+* a project that is not privileged confined to its namespace, its globals, objects and upstream values, no http:// chart repository, no credentials in clear
+* the platform's secret store and privileged projects, a connection's credentials under its namespace of the store, a claim across namespaces through a platform class or the provider's consent
+* the release of an instance is <project>-<instance>, a claim's ID named after the instance, global.okdp.tls and ingress annotations, a connection's credentials from secretRef.remoteKey
+
+### Features
+
+* a project that is not privileged confined to its namespace, its globals, objects and upstream values, no http:// chart repository, no credentials in clear ([5092ce4](https://github.com/OKDP/okdp-compiler/commit/5092ce422e3a71e886fa358a69dc68410cebeea8))
+* a tree in the library, LoadCatalog, Connection and ClaimSpec, CheckReleases, CompileTree against the charts of a ChartSource, IsName ([26f1ed4](https://github.com/OKDP/okdp-compiler/commit/26f1ed4b5ffedac617b89f56c8f71a3538ebb8f6))
+* oidc-dcr with initial access tokens ([39b2477](https://github.com/OKDP/okdp-compiler/commit/39b24771b7a76be6f84d732ce4edca329da6df51))
+* okdp-compile bounds a compile's CEL cost, time and reads, follows no symbolic link, marks its output, redacts sensitive values, --report, --partial, --allow-plain-secrets ([077271b](https://github.com/OKDP/okdp-compiler/commit/077271b36c29af1ee11f49bda2f483e5d72306e6))
+* the compile and the output of a tree in the library, treeedit, chartcache ([f4b4f7a](https://github.com/OKDP/okdp-compiler/commit/f4b4f7ac2a1cb8196a8b8e67fd5e68cb6a3d6e0b))
+* the platform's secret store and privileged projects, a connection's credentials under its namespace of the store, a claim across namespaces through a platform class or the provider's consent ([ac876d0](https://github.com/OKDP/okdp-compiler/commit/ac876d0ff68c9b1bbd61cf18ade46f81e85d40ee))
+* the release of an instance is &lt;project&gt;-&lt;instance&gt;, a claim's ID named after the instance, global.okdp.tls and ingress annotations, a connection's credentials from secretRef.remoteKey ([1505c0d](https://github.com/OKDP/okdp-compiler/commit/1505c0dc6c8441ab0f649228f5489890b6b25c69))
+
+
+### Bug Fixes
+
+* refuse a package schema that declares global.okdp, the deployer engines' kinds in a project's objects and two objects that write one secret of a namespace, charge a host function the bytes of its argument ([f5db094](https://github.com/OKDP/okdp-compiler/commit/f5db094592fba4b472de52f2caf199d94f9bef8b))
+
 ## [0.6.0](https://github.com/OKDP/okdp-compiler/compare/v0.5.0...v0.6.0) (2026-10-31)
 
 

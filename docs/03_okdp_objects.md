@@ -30,13 +30,22 @@ order:
 - the credentials of claims across namespaces
   ([claims](specs/01_inputs_outputs.md#credentials-across-namespaces)): a
   provider's PushSecret of each claim of another namespace, a claimer's
-  ExternalSecret of each of its claims of another namespace. The
-  platform's secret store does not keep the namespaces' keys apart by
+  ExternalSecret of each of its claims of another namespace; and the
+  ExternalSecret of each connection it references whose credentials are
+  in the platform's secret store ([credentials in the platform's secret
+  store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
+  The platform's secret store does not keep the namespaces' keys apart by
   itself: what it must enforce is in [What the store must
   enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
 
 An instance with neither has no objects file: its umbrella is the
-upstream charts alone.
+upstream charts alone. Unless the project is one of the platform's own
+(`global.okdp.policy.privileged`), every object stays in the instance's
+namespace and none is of a cluster-scoped kind: the compile refuses them
+([objects section](specs/01_inputs_outputs.md#objects-section)). And no
+Secret holds values in clear, unless the caller allows it
+(`Inputs.AllowPlainSecrets`): the objects file is in the deployments
+repository.
 
 The `objects` section carries real weight: on 2026-10-12, 15 of the 24
 packages of the `okdp-compiler` branches of platform-charts and
@@ -66,8 +75,12 @@ written, `{{ .Files.Get "okdp.objects.yaml" }}`.
   deployer (one HelmRelease or Application per instance,
   [GitOps](01_usage.md#gitops)), and pruned with them: an object the next
   compile no longer writes, or the whole instance removed, is deleted with
-  the release. Nothing is published, and the chart cache of a check holds
-  nothing for them.
+  the release, but one Helm keeps (`helm.sh/resource-policy: keep`),
+  which Flux's helm-controller leaves as Helm does, and Argo CD through
+  the sync options the compiler adds to it, `Prune=false` and
+  `Delete=false` ([the objects
+  file](specs/01_inputs_outputs.md#the-objects-file)). Nothing is
+  published, and the chart cache of a check holds nothing for them.
 - **Helm's install order.** Helm installs a release's manifests sorted by
   kind, the umbrella's and its subcharts' together: Namespaces,
   ServiceAccounts, Secrets and ConfigMaps before the workloads, the kinds

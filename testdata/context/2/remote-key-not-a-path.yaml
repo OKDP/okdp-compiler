@@ -1,0 +1,12 @@
+# error: database: connection "shared-db": secretRef.remoteKey "demo//shared-db": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."
+# A key of the platform's secret store that is no path: an empty segment
+# (a "." or ".." segment, a leading or trailing "/" alike): a key reaches
+# past its first segment, the one a store's policy scopes, in no way.
+platform: {global: {okdp: {secrets: {store: okdp-secrets}}}}
+database: shared-db
+connections:
+  shared-db:
+    contract: database
+    host: db.example.org
+    dbName: webapp
+    secretRef: {remoteKey: demo//shared-db}

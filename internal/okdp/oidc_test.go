@@ -51,7 +51,7 @@ func setIssuer(ctx M, issuer string) {
 
 // TestDcrDefaults: the main client, confidential, named after the release,
 // with the instance label and 6 retries; no issuerUri, no wait for the
-// provider.
+// provider; no CA bundle, the chart's default ("").
 func TestDcrDefaults(t *testing.T) {
 	values, err := dcrValues(dcrCtx(), M{"grantTypes": []any{"authorization_code"}, "redirectUris": []any{"https://x/cb"}})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestDcrDefaults(t *testing.T) {
 			"scope":            "profile email",
 			"redirect_uris":    []any{"https://x/cb"},
 		},
-		"tls":              M{"insecure": false, "certificate": "certs-bundle"},
+		"tls":              M{"insecure": false, "certificate": ""},
 		"secret":           "demo-x-demo-dcr",
 		"mapping":          M{"useDefault": false, "keyMapping": M{"client_id": ".client_id", "client_secret": ".client_secret"}},
 		"security":         M{"serviceAccount": "demo-x-oidc-dcr", "role": "demo-x-oidc-dcr"},
@@ -140,7 +140,7 @@ func TestDcrArgs(t *testing.T) {
 		"public":     true,
 		"scope":      "openid groups",
 		"clientName": "console",
-		"secret":     "s",
+		"secret":     "demo-x-s",
 		"caSecret":   "ca",
 		"request":    M{"application_type": "native"},
 	})
@@ -158,7 +158,7 @@ func TestDcrArgs(t *testing.T) {
 	if keys := value.Dig(out, "mapping.keyMapping"); !reflect.DeepEqual(keys, M{"client_id": ".client_id"}) {
 		t.Errorf("a public client has no secret: %#v", keys)
 	}
-	if out["secret"] != "s" || value.Dig(out, "security.role") != "demo-x-oidc-dcr" || value.Dig(out, "tls.certificate") != "ca" {
+	if out["secret"] != "demo-x-s" || value.Dig(out, "security.role") != "demo-x-oidc-dcr" || value.Dig(out, "tls.certificate") != "ca" {
 		t.Errorf("names: %#v", out)
 	}
 	// The scope is the platform's when the client has none; public: false
@@ -255,7 +255,8 @@ func TestDcrModes(t *testing.T) {
 }
 
 // TestDcrErrors: the platform must register anonymously at a registration
-// URL (dcr mode), and the clients must be told apart (every mode); their
+// URL (dcr mode), the clients must be told apart and a client's secret be
+// one of the release's (every mode); their
 // form is mapping.schema.json's (TestMappingErrors). An error of the
 // template names the client, then the template's file.
 func TestDcrErrors(t *testing.T) {
@@ -269,6 +270,8 @@ func TestDcrErrors(t *testing.T) {
 		"registration url": {M{"registrationUrl": ""}, []any{M{"grantTypes": grants}}, "global.okdp.oidc.dcr.registrationUrl is required"},
 		"same name":        {nil, []any{M{"grantTypes": grants, "name": "a"}, M{"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
 		"same secret":      {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": "b", "secret": "demo-x-demo-dcr"}}, `oidcClients[1] (b): oidcClients[0] writes the same Secret, "demo-x-demo-dcr": give each client its own secret`},
+		"another Secret":   {nil, []any{M{"grantTypes": grants, "name": "b", "secret": "demo-db-credentials"}}, `oidcClients[0] (b): secret "demo-db-credentials": the Secret the client is written to is one of the release's, its name starts with "demo-x-"`},
+		"another mode":     {M{"enabled": false}, []any{M{"grantTypes": grants, "secret": "demo-x"}}, `oidcClients[0]: secret "demo-x": the Secret the client is written to is one of the release's, its name starts with "demo-x-"`},
 		"two main clients": {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
 		"template error":   {nil, []any{M{"grantTypes": grants, "scope": float64(1)}}, "oidcClients[0]: oidc-dcr.cel.yaml: vars scope: ${{ first("},
 	} {
@@ -290,7 +293,7 @@ func TestDcrErrors(t *testing.T) {
 // them.
 func TestDcrCompile(t *testing.T) {
 	ch := maps.Clone(charts)
-	ch["quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
+	ch["quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	okdpYAML := `
 vars:
@@ -370,7 +373,7 @@ app:
 	}{
 		"in values":        {"oidc-dcr: {}", true, app, ch, "values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it"},
 		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: DcrSource.Repository, Version: DcrSource.Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
-		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.5.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.5.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.5.0"},
+		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := compile(tc.output, tc.existing, tc.deps, tc.files, M{"replicas": 2})
@@ -382,7 +385,7 @@ app:
 	// The platform may name another oidc-dcr chart, a mirror.
 	mirror := chart.Ref{Repository: "oci://mirror.example.org/adaltas", Chart: "oidc-dcr", Version: "0.5.1"}
 	mirrored := maps.Clone(charts)
-	mirrored["mirror.example.org/adaltas/oidc-dcr-0.5.1/oidc-dcr/values.yaml"] = ch["quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/values.yaml"]
+	mirrored["mirror.example.org/adaltas/oidc-dcr-0.5.1/oidc-dcr/values.yaml"] = ch["quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml"]
 	res, err := compile("", false, app, mirrored, M{"replicas": 1, "global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": mirror.Repository, "chart": mirror.Chart, "version": mirror.Version}}}}})
 	if err != nil || res.Charts["oidc-dcr"] != mirror {
 		t.Errorf("global.okdp.charts.oidcDcr: %v %#v", err, res)

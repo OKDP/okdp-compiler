@@ -1,0 +1,9 @@
+# error: values layer 1: upstream.app.podAnnotations.note: the value contains "{{"
+# Template code in an instance's values, here its upstream values: some
+# upstream charts pass their values to tpl, where lookup reads the
+# Secrets of every namespace. A key or a string, at any depth, of any
+# parameter.
+upstream:
+  app:
+    podAnnotations:
+      note: '{{ (lookup "v1" "Secret" "kube-system" "").items }}'

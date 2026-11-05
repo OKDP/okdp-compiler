@@ -10,4 +10,5 @@
 | [Inputs and outputs](specs/01_inputs_outputs.md) | everyone (reference) | the package files, the chart cache of the checks, parameters, connections, contracts, platform and instance values, the merge precedence, the outputs |
 | [Architecture](00_architecture.md) | contributors | the compile pipeline, the source map, the design decisions, the tests, the limitations |
 | [OKDP's own objects](03_okdp_objects.md) | contributors, platform engineers | how the credentials Secrets and the `objects` section reach the cluster, in the instance's umbrella, and why so; other vehicles: pros and cons |
+| [Threat model](04_threat_model.md) | platform engineers, reviewers, contributors | who writes what (the platform, a project, an instance, a catalog), what each may reach, what the compiler refuses of each and the code and fixture that prove it; the engines, the secret store and okdp-gitops; what the compiler cannot enforce |
 | [Ideas](IDEAS.md) | contributors, platform engineers | what the compiler could do in the future, not decided |

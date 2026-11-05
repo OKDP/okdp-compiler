@@ -1,0 +1,8 @@
+# error: context layer 2 (level 1): global.project.name: the value contains "{{"
+# A project's file (project.yaml) with template code: only the platform's
+# level is reviewed. A project's settings reach the charts through the
+# mappings, and some upstream charts pass their values to tpl, where
+# lookup reads the Secrets of every namespace.
+global:
+  project:
+    name: '{{ (lookup "v1" "Secret" "finance" "ledger").data.password }}'

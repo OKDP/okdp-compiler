@@ -3,16 +3,20 @@ package compiler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
 )
@@ -30,15 +34,15 @@ func example() (*compiler.Definition, compiler.Inputs) {
 	in := compiler.Inputs{
 		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
 		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/db/platform.yaml")}},
-		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/demo-webapp/config.yaml")},
+		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 		Bindings: map[string]compiler.Binding{"database": {
-			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.demo-webapp.database",
+			Namespace: "demo", Release: "demo-db", Contract: "database", ID: "demo.webapp.database",
 			Output: &compiler.Output{
-				Name: "demo.demo-webapp.database", Contract: "database",
-				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_demo_webapp_database"},
-				SecretRef: &compiler.SecretRef{Name: "demo.demo-webapp.database-credentials"},
+				Name: "demo.webapp.database", Contract: "database",
+				Values:    map[string]any{"host": "demo-db-db.demo.svc", "dbName": "demo_webapp_database"},
+				SecretRef: &compiler.SecretRef{Name: "demo.webapp.database-credentials"},
 			},
 		}},
 	}
@@ -140,8 +144,10 @@ func TestLayers(t *testing.T) {
 		return seen
 	}
 	for pkg, unknown := range map[string][]string{
-		"internal/okdp":    {"internal/graph", "internal/target"},
-		"internal/graph":   {"internal/target"},
+		"internal/okdp":    {"internal/graph", "internal/target", "internal/tree"},
+		"internal/graph":   {"internal/target", "internal/tree"},
+		"internal/tree":    {"internal/target", "internal/repository"},
+		"internal/output":  {"internal/repository"},
 		"internal/compile": {"internal/okdp", "internal/chart"},
 		"internal/chart":   {"internal/okdp", "internal/compile"},
 	} {
@@ -155,5 +161,165 @@ func TestLayers(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestTreeNames: a tree written with the names the package exports, read
+// by LoadRepository: its instance is the release ReleaseName of its
+// project and directory, in the project's namespace, and a target writes
+// it in InstanceDir, under ProjectDir.
+func TestTreeNames(t *testing.T) {
+	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+	instance := path.Join(compiler.ProjectsDir, "demo", compiler.InstancesDir, "web")
+	tree := fstest.MapFS{
+		compiler.PlatformFile:                                         file("global: {okdp: {}}\n"),
+		path.Join(compiler.ContractsDir, "http.schema.json"):          file(`{"properties": {"url": {"type": "string"}}}`),
+		path.Join(compiler.CatalogDir, "web", "1.0.0", "Chart.yaml"):  file("apiVersion: v2\nname: web\nversion: 1.0.0\n"),
+		path.Join(compiler.ProjectsDir, "demo", compiler.ProjectFile): file("connections: {api: {contract: http, url: https://api.example.org}}\n"),
+		path.Join(instance, compiler.InstanceFile):                    file("service: web\nversion: 1.0.0\n"),
+		path.Join(instance, compiler.ConnectionsFile):                 file("connections: {own: {contract: http, url: https://own.example.org}}\n"),
+		path.Join(instance, compiler.ConfigFile):                      file("{}\n"),
+	}
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: tree}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 || len(instances[0].Inputs.Context) != 3 || len(instances[0].Inputs.Values) != 1 {
+		t.Fatalf("got %d instances, want one with its 3 context layers and its values", len(instances))
+	}
+	in := instances[0].Inputs
+	if want := compiler.ReleaseName("demo", "web"); in.Release != want || want != "demo-web" || in.Namespace != "demo" {
+		t.Errorf("release %s/%s, want demo/%s", in.Namespace, in.Release, want)
+	}
+	res, err := compiler.Compile(t.Context(), instances[0].Definition, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := compiler.NewGraph([]*compiler.Result{res})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := compiler.Helm{}.Files([]*compiler.Result{res}, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := compiler.InstanceDir("demo", in.Release)
+	if _, ok := files[path.Join(dir, "Chart.yaml")]; !ok || dir != path.Join(compiler.ProjectDir("demo"), "instances", "demo-web") || compiler.ProjectDir("demo") != "projects/demo" {
+		t.Errorf("files %q, want the umbrella chart in %s", slices.Sorted(maps.Keys(files)), dir)
+	}
+}
+
+// TestCompileTree: the tree of the claims example compiled: its graph,
+// the claims bound to its provider, each with its claimer and what the
+// provider granted it, and the namespaces it lets claim of it, its
+// instance.yaml's claimers.
+func TestCompileTree(t *testing.T) {
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := compiler.CompileTree(t.Context(), instances, nil)
+	if tree.Graph == nil || tree.Problems() != nil {
+		t.Fatalf("problems: %q", tree.Problems())
+	}
+	pg := tree.Instance("data", "postgresql")
+	if pg == nil || pg.Release() != "data-postgresql" || !slices.Contains(pg.Provisions(), "database-server") {
+		t.Fatalf("the provider: %+v", pg)
+	}
+	if got := pg.Claimers("database-server"); !slices.Equal(got, []string{"demo"}) {
+		t.Errorf("claimers: got %q, want demo", got)
+	}
+	var claims []string
+	for _, p := range pg.Provided {
+		if pg.Granted(p.ID) == nil {
+			t.Errorf("%s: granted nothing", p.ID)
+		}
+		claims = append(claims, p.ID+" by "+p.Claimer.Namespace()+"/"+p.Claimer.Name)
+	}
+	if want := []string{"demo.analytics by demo/dashboards", "demo.analytics by demo/reports", "demo.app.database by demo/app", "demo.metrics.database by demo/metrics"}; !reflect.DeepEqual(claims, want) {
+		t.Errorf("claims: got %q, want %q", claims, want)
+	}
+}
+
+// charts: a ChartSource that records what it is asked, and answers fsys,
+// or err.
+type charts struct {
+	refs []compiler.ChartRef
+	fsys fs.FS
+	err  error
+}
+
+func (c *charts) Ensure(_ context.Context, refs []compiler.ChartRef) (fs.FS, error) {
+	c.refs = refs
+	return c.fsys, c.err
+}
+
+// TestCompileTreeCharts: the charts the compile names fetched once each,
+// then the values checked against them; unchecked, and why, when one
+// cannot be fetched.
+func TestCompileTreeCharts(t *testing.T) {
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	away := &charts{err: errors.New("the registry is away")}
+	tree := compiler.CompileTree(t.Context(), instances, away)
+	if !errors.Is(tree.ChartsErr, away.err) || tree.Problems() != nil || tree.Graph == nil {
+		t.Errorf("unchecked: ChartsErr %v, problems %q", tree.ChartsErr, tree.Problems())
+	}
+	if len(away.refs) == 0 || len(slices.Compact(slices.Clone(away.refs))) != len(away.refs) {
+		t.Errorf("refs: %v", away.refs)
+	}
+	empty := &charts{fsys: fstest.MapFS{}}
+	tree = compiler.CompileTree(t.Context(), instances, empty)
+	if tree.ChartsErr != nil || tree.Problems() == nil {
+		t.Errorf("checked against a cache without the charts: ChartsErr %v, no problem", tree.ChartsErr)
+	}
+	if !reflect.DeepEqual(empty.refs, away.refs) {
+		t.Errorf("refs: %v, then %v", away.refs, empty.refs)
+	}
+	for _, inst := range instances {
+		if inst.Inputs.Charts != nil {
+			t.Fatal("the instances given were changed")
+		}
+	}
+}
+
+// TestIsName: a DNS-1123 label, 63 characters at most.
+func TestIsName(t *testing.T) {
+	for name, want := range map[string]bool{
+		"demo": true, "demo-app": true, "a1": true, strings.Repeat("a", 63): true,
+		"": false, "Demo": false, "-demo": false, "demo-": false, "de_mo": false, "a.b": false, "..": false, "a/b": false, strings.Repeat("a", 64): false,
+	} {
+		if got := compiler.IsName(name); got != want {
+			t.Errorf("%q: got %v", name, got)
+		}
+	}
+}
+
+// TestBuild: a tree loaded and compiled with the options on each
+// instance; one that does not load, a *LoadError of every problem, the
+// errors it is of unwrapped.
+func TestBuild(t *testing.T) {
+	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db")}}
+	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{CostLimit: 1_000_000, AllowPlainSecrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := tr.Problems(); problems != nil || tr.Graph == nil {
+		t.Fatalf("problems: %q", problems)
+	}
+	for _, ti := range tr.Instances {
+		if ti.Inputs.CostLimit != 1_000_000 || !ti.Inputs.AllowPlainSecrets {
+			t.Errorf("%s/%s: %+v", ti.Namespace(), ti.Name, ti.Inputs)
+		}
+	}
+	_, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
+		"projects/demo/instances/a/instance.yaml": {Data: []byte("service: nope\nversion: 1.0.0\n")},
+		"platform.yaml": {Data: []byte("global: [\n")},
+	}}}, compiler.BuildOptions{})
+	le, ok := errors.AsType[*compiler.LoadError](err)
+	if !ok || len(le.Problems) != 2 || !errors.Is(err, compiler.ErrNotInCatalog) {
+		t.Errorf("a tree that does not load: %#v", err)
 	}
 }

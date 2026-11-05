@@ -4,7 +4,7 @@ usage: |
   Open https://demo-workspace.okdp.example.org; its API is https://demo-workspace.okdp.example.org/api.
   Catalogs: archive, marketing, sales.
 provides:
-  - name: demo-workspace
+  - name: workspace
     contract: http
     values:
       internalUrl: http://demo-workspace-api.demo.svc:8080

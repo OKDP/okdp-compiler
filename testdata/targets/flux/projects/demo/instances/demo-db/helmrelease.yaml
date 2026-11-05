@@ -13,6 +13,7 @@ spec:
   releaseName: "demo-db"
   targetNamespace: "demo"
   storageNamespace: "demo"
+  serviceAccountName: "project-demo"
   chart:
     spec:
       chart: "./deploy/projects/demo/instances/demo-db"
@@ -23,7 +24,7 @@ spec:
         namespace: flux-system
   timeout: 15m
   install:
-    createNamespace: true
+    createNamespace: false
     strategy:
       name: RetryOnFailure
       retryInterval: 2m

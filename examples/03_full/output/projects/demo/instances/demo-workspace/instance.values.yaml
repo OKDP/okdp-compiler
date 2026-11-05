@@ -5,7 +5,7 @@ api:
       properties: {}
       storage:
         bucket: okdp-datalake
-        credentials: datalake-credentials
+        credentials: demo-workspace.datalake-credentials
         endpoint: https://s3.eu-west-1.amazonaws.com
         pathStyle: false
         region: eu-west-1
@@ -70,14 +70,14 @@ api:
           key: client_secret
           name: demo-workspace-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_workspace_database
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_workspace_database
     - name: DB_SSL_MODE
       value: prefer
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo.demo-workspace.database-credentials
+          name: demo.workspace.database-credentials
     - name: WORKSPACE_SESSIONS
       value: database
     - name: AUDIT_DB_URL
@@ -107,7 +107,7 @@ api:
       valueFrom:
         secretKeyRef:
           key: accessKey
-          name: datalake-credentials
+          name: demo-workspace.datalake-credentials
     - name: HTTPS_PROXY
       value: http://proxy.okdp.example.org:3128
     - name: https_proxy
@@ -130,14 +130,11 @@ api:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -146,23 +143,15 @@ api:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -173,6 +162,18 @@ api:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: IfNotPresent
@@ -230,14 +231,11 @@ automation-oidc-dcr:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -246,23 +244,15 @@ automation-oidc-dcr:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -273,12 +263,24 @@ automation-oidc-dcr:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: Always
     registry: registry.example.org
     repository: mirror/oidc-dcr-job
-    tag: 0.5.0
+    tag: 0.6.0
   mapping:
     keyMapping:
       client_id: .client_id
@@ -310,14 +312,11 @@ console-oidc-dcr:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -326,23 +325,15 @@ console-oidc-dcr:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -353,12 +344,24 @@ console-oidc-dcr:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: Always
     registry: registry.example.org
     repository: mirror/oidc-dcr-job
-    tag: 0.5.0
+    tag: 0.6.0
   mapping:
     keyMapping:
       client_id: .client_id
@@ -398,14 +401,11 @@ gateway:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -414,23 +414,15 @@ gateway:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -441,6 +433,18 @@ gateway:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   headers:
     X-Workspace-Cost-Center: cc-4217
@@ -459,14 +463,11 @@ metrics:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -475,23 +476,15 @@ metrics:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -502,6 +495,18 @@ metrics:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   interval: 15s
   labels:
@@ -531,14 +536,11 @@ oidc-dcr:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -547,23 +549,15 @@ oidc-dcr:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -574,12 +568,24 @@ oidc-dcr:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     pullPolicy: Always
     registry: registry.example.org
     repository: mirror/oidc-dcr-job
-    tag: 0.5.0
+    tag: 0.6.0
   mapping:
     keyMapping:
       client_id: .client_id
@@ -630,14 +636,14 @@ scheduler:
           key: client_secret
           name: demo-workspace-demo-dcr
     - name: DB_URL
-      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_demo_workspace_database
+      value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_workspace_database
     - name: DB_SSL_MODE
       value: prefer
     - name: DB_PASSWORD
       valueFrom:
         secretKeyRef:
           key: password
-          name: demo.demo-workspace.database-credentials
+          name: demo.workspace.database-credentials
     - name: WORKSPACE_SESSIONS
       value: database
     - name: AUDIT_DB_URL
@@ -667,7 +673,7 @@ scheduler:
       valueFrom:
         secretKeyRef:
           key: accessKey
-          name: datalake-credentials
+          name: demo-workspace.datalake-credentials
     - name: HTTPS_PROXY
       value: http://proxy.okdp.example.org:3128
     - name: https_proxy
@@ -700,14 +706,11 @@ scheduler:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -716,23 +719,15 @@ scheduler:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -743,6 +738,18 @@ scheduler:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd
   image:
     tag: 3.2.0

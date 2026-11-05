@@ -1,12 +1,15 @@
 package target_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"testing/fstest"
@@ -41,8 +44,16 @@ var packages = map[string]fstest.MapFS{
 	},
 }
 
-// compiled: three instances, compiled, and their graph: demo-web, which
-// waits for demo-db, in namespace demo; data-db alone in data.
+// platform: the platform's values: data is one of its own projects, and
+// its secret store has a provider, a SecretStore of each project.
+var platform = map[string]any{"global": map[string]any{"okdp": map[string]any{
+	"policy":  map[string]any{"privileged": []any{"data"}},
+	"secrets": map[string]any{"store": "platform", "provider": map[string]any{"vault": map[string]any{"server": "https://vault.example.org", "path": "okdp", "auth": map[string]any{"kubernetes": map[string]any{"mountPath": "kubernetes", "role": "okdp", "serviceAccountRef": map[string]any{"name": "okdp-secrets"}}}}}},
+}}}
+
+// compiled: three instances, compiled with platform, and their graph:
+// demo-web, which waits for demo-db, in namespace demo; data-db alone in
+// data, privileged.
 func compiled(t *testing.T) ([]*okdp.Result, *graph.Graph) {
 	t.Helper()
 	instance := func(pkg, release, namespace string, values map[string]any) okdp.Instance {
@@ -50,7 +61,7 @@ func compiled(t *testing.T) ([]*okdp.Result, *graph.Graph) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return okdp.Instance{Definition: def, Inputs: okdp.Inputs{Contracts: contracts, Values: []map[string]any{values}, Release: release, Namespace: namespace}}
+		return okdp.Instance{Definition: def, Inputs: okdp.Inputs{Contracts: contracts, Context: []okdp.ContextLayer{{Values: platform}}, Values: []map[string]any{values}, Release: release, Namespace: namespace}}
 	}
 	var results []*okdp.Result
 	for _, o := range okdp.CompileAll(context.Background(), []okdp.Instance{
@@ -145,5 +156,160 @@ func TestOptions(t *testing.T) {
 				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestProjects: a project per namespace of the results, in namespace
+// order, privileged when any of its results is, its secret store the
+// first set.
+func TestProjects(t *testing.T) {
+	store := &okdp.SecretStore{Name: "platform", ServiceAccount: "okdp-secrets", Provider: map[string]any{"fake": map[string]any{}}}
+	got := target.Projects([]*okdp.Result{
+		{Namespace: "demo", Release: "demo-web"},
+		{Namespace: "data", Release: "data-db", Privileged: true, SecretStore: store},
+		{Namespace: "demo", Release: "demo-db", Privileged: true, SecretStore: store},
+	})
+	want := []target.Project{{Namespace: "data", Privileged: true, SecretStore: store}, {Namespace: "demo", Privileged: true, SecretStore: store}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if got := target.Projects(nil); got != nil {
+		t.Errorf("no result: %v", got)
+	}
+}
+
+// TestNamespace: the Namespace of a project: its Pod Security Admission
+// labels, baseline enforced unless privileged, and kept by both engines
+// when the project is gone.
+func TestNamespace(t *testing.T) {
+	want := `apiVersion: v1
+kind: Namespace
+metadata:
+  name: "demo"
+  labels:
+    okdp.io/project: "demo"
+    kustomize.toolkit.fluxcd.io/prune: disabled
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+`
+	if got := target.Namespace(target.Project{Namespace: "demo"}); string(got) != want {
+		t.Errorf("got:\n%s", got)
+	}
+	want = `apiVersion: v1
+kind: Namespace
+metadata:
+  name: "data"
+  labels:
+    okdp.io/project: "data"
+    kustomize.toolkit.fluxcd.io/prune: disabled
+    pod-security.kubernetes.io/enforce: privileged
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+`
+	if got := target.Namespace(target.Project{Namespace: "data", Privileged: true}); string(got) != want {
+		t.Errorf("privileged:\n%s", got)
+	}
+}
+
+// TestOneTree: the files both deployer targets write are the same, those
+// of the umbrella charts and of the projects' manifests (the Namespace,
+// the secret store): one tree holds the files of both; each writes files
+// of its own beside them.
+func TestOneTree(t *testing.T) {
+	results, g := compiled(t)
+	fluxFiles, err := flux.Target{}.Files(results, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	argoFiles, err := argocd.Target{RepoURL: "https://git.example.org/okdp/deployments.git"}.Files(results, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := 0
+	for p, b := range fluxFiles {
+		if a, ok := argoFiles[p]; ok {
+			shared++
+			if !bytes.Equal(a, b) {
+				t.Errorf("%s: the targets write it differently", p)
+			}
+		}
+	}
+	for _, p := range []string{"projects/demo/project/namespace.yaml", "projects/demo/project/secret-store.yaml", "projects/data/project/namespace.yaml"} {
+		if _, ok := fluxFiles[p]; !ok {
+			t.Errorf("%s is not written by both", p)
+		}
+	}
+	if shared == 0 {
+		t.Error("no file in common")
+	}
+}
+
+// TestSecretStore: the platform's secret store in a project's namespace,
+// its ServiceAccount without a mounted token and the SecretStore, its
+// provider as the platform writes it; nil without a provider.
+func TestSecretStore(t *testing.T) {
+	want := `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: okdp-secrets
+  namespace: demo
+  labels:
+    okdp.io/project: demo
+automountServiceAccountToken: false
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: platform
+  namespace: demo
+  labels:
+    okdp.io/project: demo
+spec:
+  provider:
+    vault:
+      auth:
+        kubernetes:
+          role: 'okdp: x'
+      server: https://vault.example.org
+`
+	store := &okdp.SecretStore{Name: "platform", ServiceAccount: "okdp-secrets", Provider: map[string]any{"vault": map[string]any{"server": "https://vault.example.org", "auth": map[string]any{"kubernetes": map[string]any{"role": "okdp: x"}}}}}
+	got, err := target.SecretStore(target.Project{Namespace: "demo", SecretStore: store})
+	if err != nil || string(got) != want {
+		t.Errorf("got %v:\n%s", err, got)
+	}
+	if got, err := target.SecretStore(target.Project{Namespace: "demo"}); got != nil || err != nil {
+		t.Errorf("no provider: %q, %v", got, err)
+	}
+}
+
+// TestReleases: a *ReleaseError per release in two namespaces or more,
+// which each deployer target wraps.
+func TestReleases(t *testing.T) {
+	results := []*okdp.Result{{Release: "demo-db", Namespace: "demo"}, {Release: "demo-db", Namespace: "data"}, {Release: "a-b", Namespace: "a"}, {Release: "a-b", Namespace: "x"}, {Release: "a-b", Namespace: "b"}, {Release: "one", Namespace: "a"}}
+	err := target.Releases(results)
+	var got []target.ReleaseError
+	for _, e := range err.(interface{ Unwrap() []error }).Unwrap() {
+		var re *target.ReleaseError
+		if !errors.As(e, &re) {
+			t.Fatalf("%v: not a *ReleaseError", e)
+		}
+		got = append(got, *re)
+	}
+	want := []target.ReleaseError{{Release: "a-b", Namespaces: []string{"a", "b", "x"}}, {Release: "demo-db", Namespaces: []string{"data", "demo"}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if want := `release "a-b" is in namespaces "a", "b" and "x"`; got[0].Error() != want {
+		t.Errorf("got %q, want %q", got[0].Error(), want)
+	}
+	if err := target.Releases(results[2:3]); err != nil {
+		t.Errorf("one release: %v", err)
+	}
+	_, err = (flux.Target{}).Files(results[:2], nil)
+	if re := (*target.ReleaseError)(nil); !errors.As(err, &re) || re.Release != "demo-db" {
+		t.Errorf("flux: got %v, want a *ReleaseError", err)
 	}
 }

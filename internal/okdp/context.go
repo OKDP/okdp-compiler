@@ -7,10 +7,12 @@
 package okdp
 
 import (
+	"cmp"
 	_ "embed"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"sort"
 	"sync"
 
@@ -23,6 +25,7 @@ import (
 // and what the mapping sees (scope).
 type instance struct {
 	release, namespace string       // Inputs.Release, Inputs.Namespace
+	name               string       // Inputs.Name, the release when it is empty
 	svc                *Service     // the package: Chart.yaml's name and version
 	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
 	okdp               M            // global.okdp as written, as the mapping sees it, checked against platform.schema.json
@@ -30,7 +33,7 @@ type instance struct {
 	dcr                bool         // platform.oidc.dcr.enabled: OIDC enabled, the OAuth clients registered by DCR
 	deps               []Dependency // the instances the connection references point to, of the namespace or, for a claim, of its provider's, by parameter path
 	scope              M            // what the mapping sees
-	transfers          []transfer   // the credentials of its claims of another namespace, copied into its own (pullSecret)
+	transfers          []transfer   // the credentials of its claims of another namespace, and of its connections in the platform's secret store, read into Secrets of its own (pullSecret)
 }
 
 // newInstance: stages 1 to 3, the instance of a compile of the package
@@ -48,7 +51,8 @@ type instance struct {
 // defaults applied (schemaValues): a value of another type is refused
 // rather than read as not set, oidc: false would leave OIDC enabled. The
 // OIDC settings are derived from them: the client provisioning mode in
-// effect (existing or dcr).
+// effect (existing or dcr), and the CA bundle of the oidc-dcr Jobs,
+// tls.caBundleSecret unless oidc.dcr.caSecret is set.
 //
 // 3. Connections: the connection references of the parameters
 // (x-okdp-connection-ref) resolved in a copy against the contracts
@@ -63,11 +67,12 @@ type instance struct {
 // order.
 //
 // The merged values stay as the user wrote them. The mapping sees release
-// (name, namespace), values (the resolved parameters), global (global.okdp,
-// as written), platform (what the compiler derives from it: oidc, the
-// Secret of the main OAuth client, the ingress annotations, the proxy
-// environment), and the package: service (name, version), labels and
-// selectorLabels (without component).
+// (name, namespace), values (the resolved parameters), global (as written:
+// global.okdp, the platform's settings, and the other keys of global, a
+// project's own settings among them), platform (what the compiler derives
+// from global.okdp: oidc, the Secret of the main OAuth client, the ingress
+// annotations, the proxy environment), and the package: service (name,
+// version), labels and selectorLabels (without component).
 func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	schema, values, err := parameters(files, in, svc)
 	if err != nil {
@@ -77,12 +82,20 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	inst := &instance{release: in.Release, namespace: in.Namespace, svc: svc, values: values}
-	inst.okdp = value.AsMap(value.AsMap(values["global"])["okdp"])
+	inst := &instance{release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values}
+	// The platform's settings come from the validated context, not from the
+	// coalesced parameters: a package schema's defaults do not reach them.
+	inst.okdp = value.AsMap(value.Dig(settings, "global.okdp"))
 	oidc := value.AsMap(value.Dig(settings, "global.okdp.oidc"))
 	mode := value.Str(oidc["clientProvisioning"])
 	inst.dcr = value.Truthy(oidc["enabled"]) && mode == "dcr"
-	value.AsMap(oidc["dcr"])["enabled"] = inst.dcr
+	dcr := value.AsMap(oidc["dcr"])
+	dcr["enabled"] = inst.dcr
+	// The CA bundle the oidc-dcr Jobs trust: the platform's, tls.caBundleSecret,
+	// unless dcr sets its own; "" for none.
+	if _, set := dcr["caSecret"]; !set {
+		dcr["caSecret"] = value.Str(value.Dig(settings, "global.okdp.tls.caBundleSecret"))
+	}
 	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
 	inst.oidc = oidc
 	named, err := namedClaims(values)
@@ -90,8 +103,8 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		return nil, err
 	}
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
-	if r.walk(schema.Doc, params, ""); r.errs != nil {
+	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
+	if r.walk(schema.Doc, params); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
 			err = &missingOutputs{outputs: r.missing, err: err}
@@ -120,18 +133,28 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		"release":        M{"name": in.Release, "namespace": in.Namespace},
 		"values":         params,
 		"claims":         claimsScope(in.Claims),
-		"global":         M{"okdp": value.Copy(inst.okdp)}, // the platform values, as written
+		"global":         value.AsMap(value.Copy(values["global"])), // the platform's and the project's settings, as written
 		"platform": M{
 			"oidc": oidc,
 			// The Secret that holds the service's main OAuth client:
 			// provisioned, or registered by DCR (oidc.go; oidcClientSecret(name)
 			// for the others).
 			"oidcClientSecret":   clientSecret(in.Release, in.Namespace, inst.dcr, ""),
-			"ingressAnnotations": M{"cert-manager.io/cluster-issuer": value.Str(value.Dig(inst.okdp, "certificateIssuers.selfSigned.name"))},
+			"ingressAnnotations": ingressAnnotations(inst.okdp),
 			"proxyEnv":           proxyEnv,
 		},
 	}
 	return inst, nil
+}
+
+// ingressAnnotations: platform.ingressAnnotations, the annotations of
+// every service's ingress: cert-manager.io/cluster-issuer, the platform's
+// tls.clusterIssuer, then ingress.annotations of okdp (global.okdp, checked
+// against platformSchema: strings), the ingress controller's, over it.
+func ingressAnnotations(okdp M) M {
+	out := M{"cert-manager.io/cluster-issuer": value.Str(value.Dig(okdp, "tls.clusterIssuer"))}
+	maps.Copy(out, value.AsMap(value.Dig(okdp, "ingress.annotations")))
+	return out
 }
 
 // parameters: stage 1, the parameter schema of the package's files, the

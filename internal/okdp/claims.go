@@ -21,7 +21,7 @@ import (
 // (provisions): the instance provisions it and publishes it, an output of
 // Contract named ID.
 type Claim struct {
-	ID        string         `json:"id"`                // the connection's name, DNS-1123 labels joined by dots: <namespace>.<name>, or <namespace>.<release>.<field>
+	ID        string         `json:"id"`                // the connection's name, DNS-1123 labels joined by dots: <namespace>.<name>, or <namespace>.<instance>.<field>
 	Contract  string         `json:"contract"`          // a contract the package provisions
 	Namespace string         `json:"namespace"`         // the namespace of the instances that claim it
 	Name      string         `json:"name,omitempty"`    // a named claim's name, claims.<name> of the context, the connection of every reference to it in Namespace; "" for a claim template's
@@ -37,26 +37,28 @@ type Binding struct {
 	Output             *Output // that output, nil when it is not known yet (the provider not compiled)
 }
 
-// claimSpec: a claim, as written (parseClaim): an object of the
+// ClaimSpec: a claim, as written (parseClaim): an object of the
 // parameters in place of a connection's name, a claim template, or a
-// named claim of the context (claims.<name>).
-type claimSpec struct {
-	Contract string // a named claim's contract; "" for a claim template, of its reference's
-	Class    string // the class named, of global.okdp.provisioning.<contract>.classes; "" for the default one, or a provider named
-	Provider string // the provider named, <release> of the namespace or <namespace>/<release>; "" when none
-	Request  M      // what it requests (request), nil when nothing
+// named claim of the context (claims.<name>, ParseClaim). Its tags are
+// the keys it is written with.
+type ClaimSpec struct {
+	Name     string `json:"-" yaml:"-"`                                   // a named claim's name, its key in claims; "" for a claim template
+	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // a named claim's contract; "" for a claim template, of its reference's
+	Class    string `json:"class,omitempty" yaml:"class,omitempty"`       // the class named, of global.okdp.provisioning.<contract>.classes; "" for the default one, or a provider named
+	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"` // the provider named, <name> of the namespace or <namespace>/<name>, an instance's name or its release; "" when none
+	Request  M      `json:"request,omitempty" yaml:"request,omitempty"`   // what it requests (request), nil when nothing
 }
 
 // parseClaim: the claim m at path. A claim template, a reference's: {} a
 // connection of its own, of the default class of its contract; class, the
-// class it names; provider, the instance that provisions it, <release> of
-// the namespace or <namespace>/<release>, not with a class; request, what
-// it requests of it, an object the contract's claim schema checks at
-// binding. A named claim (named), claims.<name> of the context: contract,
-// required, a contract name, class, provider and request. Any other key
-// fails, and so does a value that is not a string of that form, or a
-// request that is not an object.
-func parseClaim(m M, path string, named bool) (*claimSpec, error) {
+// class it names; provider, the instance that provisions it, <name> of
+// the namespace or <namespace>/<name>, the instance's name or its
+// release, not with a class; request, what it requests of it, an object
+// the contract's claim schema checks at binding. A named claim (named),
+// claims.<name> of the context: contract, required, a contract name,
+// class, provider and request. Any other key fails, and so does a value
+// that is not a string of that form, or a request that is not an object.
+func parseClaim(m M, path string, named bool) (*ClaimSpec, error) {
 	keys, allowed := []string{"class", "provider", "request"}, "class, provider and request only"
 	if named {
 		keys, allowed = []string{"class", "contract", "provider", "request"}, "contract, class, provider and request only"
@@ -66,13 +68,13 @@ func parseClaim(m M, path string, named bool) (*claimSpec, error) {
 			return nil, fmt.Errorf("%s: claim: unknown key %q: %s", path, k, allowed)
 		}
 		if _, ok := m[k].(M); k == "request" && !ok && m[k] != nil {
-			return nil, fmt.Errorf("%s: claim: request must be an object, got %s", path, value.Short(m[k]))
+			return nil, fmt.Errorf("%s: claim: request must be an object, got %s", path, value.ShortAt(k, m[k]))
 		}
 		if _, ok := m[k].(string); k != "request" && !ok && m[k] != nil {
-			return nil, fmt.Errorf("%s: claim: %s must be a string, got %s", path, k, value.Short(m[k]))
+			return nil, fmt.Errorf("%s: claim: %s must be a string, got %s", path, k, value.ShortAt(k, m[k]))
 		}
 	}
-	c := &claimSpec{Contract: value.Str(m["contract"]), Class: value.Str(m["class"]), Provider: value.Str(m["provider"])}
+	c := &ClaimSpec{Contract: value.Str(m["contract"]), Class: value.Str(m["class"]), Provider: value.Str(m["provider"])}
 	if r, ok := m["request"].(M); ok {
 		c.Request = r
 	}
@@ -83,7 +85,7 @@ func parseClaim(m M, path string, named bool) (*claimSpec, error) {
 		return nil, fmt.Errorf("%s: claim: contract %q is not a contract name", path, c.Contract)
 	}
 	if _, _, ok := providerName(c.Provider, ""); c.Provider != "" && !ok {
-		return nil, fmt.Errorf("%s: claim: provider %q: <release> or <namespace>/<release>", path, c.Provider)
+		return nil, fmt.Errorf("%s: claim: provider %q: %s", path, c.Provider, providerForms)
 	}
 	if c.Class != "" && c.Provider != "" {
 		return nil, fmt.Errorf("%s: claim: class or provider, not both", path)
@@ -95,36 +97,30 @@ func parseClaim(m M, path string, named bool) (*claimSpec, error) {
 // claims of its context (valuesLayers: never the instance's own values),
 // by name: each name a DNS-1123 label and no connection's, each claim of
 // the form parseClaim reads. Every problem, one line each, in name order.
-func namedClaims(values M) (map[string]claimSpec, error) {
+func namedClaims(values M) (map[string]ClaimSpec, error) {
 	v, set := values["claims"]
 	if !set {
 		return nil, nil
 	}
 	m, ok := v.(M)
 	if !ok {
-		return nil, fmt.Errorf("claims: the named claims, by name, got %s", value.Short(v))
+		return nil, fmt.Errorf("claims: the named claims, by name, got %s", value.ShortAt("claims", v))
 	}
 	conns := value.AsMap(values["connections"])
-	out := map[string]claimSpec{}
+	out := map[string]ClaimSpec{}
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(m)) {
-		where := value.Key("claims", name)
-		decl, ok := m[name].(M)
-		switch _, conn := conns[name]; {
-		case !chart.IsDNSLabel(name):
-			errs = append(errs, fmt.Errorf("%s: claim: its name is a DNS-1123 label", where))
-		case !ok:
-			errs = append(errs, fmt.Errorf("%s: a claim, an object, got %s", where, value.Short(m[name])))
-		case conn:
-			errs = append(errs, fmt.Errorf("%s: a connection of that name too (%s)", where, value.Key("connections", name)))
-		default:
-			c, err := parseClaim(decl, where, true)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			out[name] = *c
+		_, isMap := m[name].(M)
+		if _, conn := conns[name]; conn && isMap && chart.IsDNSLabel(name) {
+			errs = append(errs, fmt.Errorf("%s: a connection of that name too (%s)", value.Key("claims", name), value.Key("connections", name)))
+			continue
 		}
+		c, err := ParseClaim(name, m[name])
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		out[name] = c
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
@@ -132,29 +128,85 @@ func namedClaims(values M) (map[string]claimSpec, error) {
 	return out, nil
 }
 
-// providerName: the instance a provider names, a claim's or a class's:
-// <namespace>/<release>, or <release> of namespace; false when s is not of
-// that form.
-func providerName(s, namespace string) (string, string, bool) {
-	ns, release, qualified := strings.Cut(s, "/")
-	if !qualified {
-		ns, release = namespace, ns
+// ParseClaim: the named claim name, v, as written in claims: a name that
+// is a DNS-1123 label, an object of the form parseClaim reads. The claim
+// holds what v does, each key that is a string of its type, even when it
+// fails: a caller lists a claim that does not compile.
+func ParseClaim(name string, v any) (ClaimSpec, error) {
+	where := value.Key("claims", name)
+	decl, ok := v.(M)
+	c := ClaimSpec{Name: name, Contract: value.Str(decl["contract"]), Class: value.Str(decl["class"]), Provider: value.Str(decl["provider"])}
+	if r, isMap := decl["request"].(M); isMap {
+		c.Request = r
 	}
-	return ns, release, (!qualified || chart.IsDNSLabel(ns)) && chart.IsRelease(release)
+	switch {
+	case !chart.IsDNSLabel(name):
+		return c, fmt.Errorf("%s: claim: its name is a DNS-1123 label", where)
+	case !ok:
+		return c, fmt.Errorf("%s: a claim, an object, got %s", where, value.ShortAt(name, v))
+	}
+	parsed, err := parseClaim(decl, where, true)
+	if err != nil {
+		return c, err
+	}
+	parsed.Name = name
+	return *parsed, nil
+}
+
+// providerForms: what a provider may be, in the messages of one that is
+// not of the form (providerName).
+const providerForms = "<instance>, <release>, <namespace>/<instance> or <namespace>/<release>"
+
+// providerName: the namespace and the name of the instance a provider
+// names, a claim's or a class's: <namespace>/<name>, or <name> of
+// namespace, the name an instance's name or its release (tree.provider);
+// false when s is not of that form.
+func providerName(s, namespace string) (string, string, bool) {
+	ns, name, qualified := strings.Cut(s, "/")
+	if !qualified {
+		ns, name = namespace, ns
+	}
+	return ns, name, (!qualified || chart.IsDNSLabel(ns)) && chart.IsRelease(name)
 }
 
 // checkProvisions: the contracts a package provisions (okdp.yaml's
-// provisions), each a contract name, once.
-func checkProvisions(provisions []string) error {
-	for i, c := range provisions {
+// provisions), each a contract name, once, its claimers of the form
+// CheckClaimers reads.
+func checkProvisions(provisions []Provision) error {
+	for i, p := range provisions {
 		switch {
-		case !chart.IsFileName(c):
-			return fmt.Errorf("okdp.yaml: provisions[%d]: %q is not a contract name", i, c)
-		case slices.Index(provisions, c) < i:
-			return fmt.Errorf("okdp.yaml: provisions: %s is listed twice", c)
+		case !chart.IsFileName(p.Contract):
+			return fmt.Errorf("okdp.yaml: provisions[%d]: %q is not a contract name", i, p.Contract)
+		case slices.IndexFunc(provisions, func(o Provision) bool { return o.Contract == p.Contract }) < i:
+			return fmt.Errorf("okdp.yaml: provisions: %s is listed twice", p.Contract)
+		}
+		if err := CheckClaimers(fmt.Sprintf("okdp.yaml: provisions[%d] (%s): claimers", i, p.Contract), p.Claimers); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// CheckClaimers: claimers, the namespaces whose instances may claim of a
+// provider across namespaces (Inputs.Claimers, a provisions entry's), at
+// name in the message: each a namespace name, a DNS-1123 label, or "*",
+// any namespace, once; the first that is not.
+func CheckClaimers(name string, claimers []string) error {
+	for i, c := range claimers {
+		switch {
+		case c != "*" && !chart.IsDNSLabel(c):
+			return fmt.Errorf("%s[%d]: %q is not a namespace name, nor \"*\"", name, i, c)
+		case slices.Index(claimers, c) < i:
+			return fmt.Errorf("%s: %s is listed twice", name, c)
+		}
+	}
+	return nil
+}
+
+// consents: whether claimers, those of a provider, let the instances of
+// namespace claim of it: it is listed, or "*" is.
+func consents(claimers []string, namespace string) bool {
+	return slices.Contains(claimers, "*") || slices.Contains(claimers, namespace)
 }
 
 // checkClaims: the claims bound to an instance of svc: each a claim ID
@@ -216,16 +268,34 @@ func claimsScope(claims []Claim) []any {
 // context it names (name, spec its declaration).
 type claimRef struct {
 	field, contract, name string
-	spec                  claimSpec
+	spec                  ClaimSpec
 }
 
 // instanceClaims: what CompileAll binds of an instance (claimsOf): the
-// claims of its references, the named claims of its context, and the
-// classes its context defines, global.okdp.provisioning.
+// claims of its references, the named claims of its context, the classes
+// its context defines, global.okdp.provisioning, and those of them the
+// platform defines, at level 0.
 type instanceClaims struct {
-	refs    []claimRef
-	named   map[string]claimSpec
-	classes M // by contract: {default, classes: {<name>: {provider, request}}}, of the form the platform schema checks
+	refs     []claimRef
+	named    map[string]ClaimSpec
+	classes  M // by contract: {default, classes: {<name>: {provider, request}}}, of the form the platform schema checks
+	platform M // the same, of the layers of level 0 alone (platformClasses)
+}
+
+// platformClasses: global.okdp.provisioning of the layers of level 0 of
+// layers, merged: the platform's classes, which route every namespace to
+// their provider, with its consent given (tree.consent). A layer that
+// values cannot hold gives none: the layers failed before (valuesLayers).
+func platformClasses(layers []ContextLayer) M {
+	out := M{}
+	for _, l := range layers {
+		v, err := value.Normalize(l.Values)
+		if l.Level != 0 || err != nil {
+			continue
+		}
+		out = value.Merge(out, value.AsMap(value.Dig(value.AsMap(v), "global.okdp.provisioning")))
+	}
+	return out
 }
 
 // claimsOf: the claims of the references of an instance of def, in
@@ -255,7 +325,7 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 		return instanceClaims{}
 	}
 	var out []claimRef
-	refs(schema.Doc, value.Copy(values), "", func(ref M, v any, path string) any {
+	refs(schema.Doc, value.Copy(values), "", "", func(ref M, v any, path, _ string) any {
 		if !value.Truthy(ref["provision"]) {
 			return v
 		}
@@ -275,20 +345,21 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 		}
 		return v
 	})
-	return instanceClaims{out, named, value.AsMap(value.Dig(values, "global.okdp.provisioning"))}
+	return instanceClaims{out, named, value.AsMap(value.Dig(values, "global.okdp.provisioning")), platformClasses(in.Context)}
 }
 
-// claimID: the ID of a claim of the reference at field of release in
-// namespace, or of the named claim name: <namespace>.<name>, or
-// <namespace>.<release>.<field>, each part a DNS-1123 label (lowercased,
+// claimID: the ID of a claim of the reference at field of the instance
+// in namespace (Instance.Name, its release when it has none), or of the
+// named claim name: <namespace>.<name>, or
+// <namespace>.<instance>.<field>, each part a DNS-1123 label (lowercased,
 // every run of other characters than letters and digits one "-", trimmed),
 // the parts joined by dots, which no part holds: two sources give two IDs,
 // and the dots tell the kind. Longer than 63 characters (chart.IsClaimID):
 // cut, and ended with 8 hexadecimal digits of its SHA-256.
-func claimID(namespace, release, field, name string) string {
+func claimID(namespace, instance, field, name string) string {
 	parts := []string{namespace, name}
 	if name == "" {
-		parts = []string{namespace, release, field}
+		parts = []string{namespace, instance, field}
 	}
 	for i, p := range parts {
 		var b strings.Builder

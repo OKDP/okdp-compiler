@@ -1,0 +1,12 @@
+# error: app: upstream.app.image.repository: image docker.io/evil/app is not from a registry of global.okdp.policy.upstream.registries (registry.example.org, mirror.example.org/okdp): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them
+# The platform's registries (global.okdp.policy.upstream.registries): an
+# image of the upstream values comes from one of them. A layer of level 0
+# gives them, with an image of upstream values from another.
+global:
+  okdp:
+    policy:
+      upstream:
+        registries: [registry.example.org, mirror.example.org/okdp]
+upstream:
+  app:
+    image: {repository: docker.io/evil/app}

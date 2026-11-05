@@ -1,0 +1,34 @@
+# A package's charts are pinned versions over https:// or oci://: a
+# dependency over http://, which a check and the deployer would fetch in
+# clear, where it could be swapped on the way, is refused, and so is a
+# version range, which would let the deployer render another chart than
+# the one the values were checked against. The instance fails, nothing
+# written.
+status 1 okdp-compile --repository $WORK/http -o $WORK/files
+! stdout .
+stderr '^error: .*/instance.yaml: the package .*http/catalog/web/1.0.0: Chart.yaml: dependencies\[0\].repository "http://charts.example.org": http://, the chart fetched in clear: the URL of a chart repository \(https://... or oci://...\)$'
+! exists $WORK/files
+
+status 1 okdp-compile --repository $WORK/range -o $WORK/files
+! stdout .
+stderr '^error: .*/instance.yaml: the package .*range/catalog/web/1.0.0: Chart.yaml: dependencies\[0\].version "~1.0": a pinned chart version \(1.2.3\), not a range$'
+! exists $WORK/files
+
+-- http/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: http://charts.example.org, version: 1.0.0}
+-- http/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- range/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: "~1.0"}
+-- range/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0

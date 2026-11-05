@@ -106,11 +106,79 @@ func TestApplication(t *testing.T) {
 	}
 }
 
+// appProject: the AppProject of project demo, confined to its namespace.
+const appProject = `apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: "project-demo"
+  namespace: argocd
+  labels:
+    okdp.io/project: "demo"
+spec:
+  description: "OKDP project demo: its instances, confined to its namespace"
+  sourceRepos:
+    - "https://x/tree.git"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "demo"
+  clusterResourceWhitelist: []
+`
+
+// privilegedProject: the AppProject of project data, one of the
+// platform's own.
+const privilegedProject = `apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: "project-data"
+  namespace: argocd
+  labels:
+    okdp.io/project: "data"
+spec:
+  description: "OKDP project data, one of the platform's own: its instances install cluster-scoped objects and write every namespace"
+  sourceRepos:
+    - "https://x/tree.git"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+`
+
+// TestProjectManifests: a project's manifests: its Namespace, kept when
+// the project is gone, the flux target's, its AppProject, confined to its
+// namespace unless privileged, and the platform's secret store when the
+// platform names a provider.
+func TestProjectManifests(t *testing.T) {
+	tg := Target{RepoURL: "https://x/tree.git"}
+	store := &okdp.SecretStore{Name: "platform", ServiceAccount: "okdp-secrets", Provider: map[string]any{"vault": map[string]any{"server": "https://vault.example.org"}}}
+	got, err := tg.ProjectManifests(target.Project{Namespace: "demo", SecretStore: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got[AppProjectFile]) != appProject || len(got) != 3 {
+		t.Errorf("the AppProject:\n%s", got[AppProjectFile])
+	}
+	if ns := string(got[target.NamespaceFile]); ns != string(target.Namespace(target.Project{Namespace: "demo"})) {
+		t.Errorf("the Namespace:\n%s", ns)
+	}
+	if s := string(got[target.SecretStoreFile]); !strings.Contains(s, "kind: SecretStore\n") || !strings.Contains(s, "  name: platform\n  namespace: demo\n") {
+		t.Errorf("the SecretStore:\n%s", s)
+	}
+	got, err = tg.ProjectManifests(target.Project{Namespace: "data", Privileged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got[AppProjectFile]) != privilegedProject || len(got) != 2 {
+		t.Errorf("the privileged AppProject:\n%s", got[AppProjectFile])
+	}
+}
+
 // TestFiles: the files of the helm target, then each instance's
 // Application, its sync wave after those of the releases it depends on,
-// marked generated.
+// and each project's manifests, marked generated.
 func TestFiles(t *testing.T) {
-	db := &okdp.Result{Namespace: "data", Release: "demo-db", Service: "db", Version: "1.0.0", Info: okdp.Info{Provides: []okdp.Output{{Name: "demo-db", Contract: "database"}}}}
+	db := &okdp.Result{Namespace: "data", Release: "demo-db", Service: "db", Version: "1.0.0", Info: okdp.Info{Provides: []okdp.Output{{Name: "demo-db", Contract: "database"}}}, Privileged: true}
 	web := &okdp.Result{Namespace: "demo", Release: "demo-web", Service: "web", Version: "1.0.0", Dependencies: []okdp.Dependency{{Instance: "demo-db", Namespace: "data", Contract: "database", Field: "database", Output: "demo-db"}}}
 	results := []*okdp.Result{web, db}
 	g, err := graph.New(results)
@@ -132,6 +200,15 @@ func TestFiles(t *testing.T) {
 	}
 	if _, ok := files["projects/demo/instances/demo-web/instance.values.yaml"]; !ok {
 		t.Error("the helm target's files are not written")
+	}
+	for p, want := range map[string]string{"projects/demo/project/namespace.yaml": "enforce: baseline", "projects/demo/project/appproject.yaml": `namespace: "demo"`, "projects/data/project/namespace.yaml": "enforce: privileged", "projects/data/project/appproject.yaml": `namespace: "*"`} {
+		got := string(files[p])
+		if !strings.HasPrefix(got, target.Generated) || !strings.Contains(got, want) {
+			t.Errorf("%s:\n%s", p, got)
+		}
+	}
+	if _, ok := files["projects/demo/project/secret-store.yaml"]; ok {
+		t.Error("a secret store without a provider")
 	}
 	twice := []*okdp.Result{{Namespace: "a", Release: "x"}, {Namespace: "b", Release: "x"}}
 	if _, err := (Target{RepoURL: "https://x"}).Files(twice, g); err == nil || !strings.Contains(err.Error(), "the Applications of argocd need distinct names") {

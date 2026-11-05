@@ -1,0 +1,10 @@
+# error: database: connection "shared-db": secretRef: name or remoteKey, not both
+# A connection's credentials are in a Secret of the instance's namespace
+# (name) or in the platform's secret store (remoteKey), not both.
+database: shared-db
+connections:
+  shared-db:
+    contract: database
+    host: db.example.org
+    dbName: webapp
+    secretRef: {name: shared-db-credentials, remoteKey: platform.shared-db}

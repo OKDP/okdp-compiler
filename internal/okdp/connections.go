@@ -32,12 +32,13 @@ import (
 type resolver struct {
 	contracts fs.FS                // Inputs.Contracts
 	conns     M                    // the external connections
-	claims    map[string]claimSpec // the named claims of the context (namedClaims)
+	levels    map[string]uint      // the level of the context each is given at, by name (connectionLevels)
+	claims    map[string]ClaimSpec // the named claims of the context (namedClaims)
 	classes   M                    // global.okdp.provisioning, by contract: the default class of a claim that names none
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
-	store     string               // global.okdp.secrets.store: the ClusterSecretStore the credentials of a claim of another namespace go through
-	transfers []transfer           // those credentials, in order
+	store     string               // global.okdp.secrets.store: the store the credentials of a claim of another namespace go through, and those of a connection's secretRef.remoteKey are in
+	transfers []transfer           // those credentials, in order, each Secret once (addTransfer)
 	release   string               // Inputs.Release: never its own provider
 	namespace string
 	draft     any          // the parameter schema's $schema: the draft of the requirements that name none
@@ -85,41 +86,43 @@ type Dependency struct {
 // refs: v, at path, of the schema s, each value carrying an
 // x-okdp-connection-ref (ref) replaced by what visit gives for it, in path
 // order (keys sorted, items in order), at its parameter path (value.Key,
-// value.Index: a key with a dot in brackets). The keys the schema does not
-// declare are left as they are.
-func refs(s M, v any, path string, visit func(ref M, v any, path string) any) any {
+// value.Index: a key with a dot in brackets) and under its key, an item's
+// its list's, the key of a message's value.ShortAt. The keys the schema
+// does not declare are left as they are.
+func refs(s M, v any, path, key string, visit func(ref M, v any, path, key string) any) any {
 	if ref, ok := s["x-okdp-connection-ref"].(M); ok {
-		return visit(ref, v, path)
+		return visit(ref, v, path, key)
 	}
 	switch t := v.(type) {
 	case M:
 		props := value.AsMap(s["properties"])
 		for _, k := range slices.Sorted(maps.Keys(props)) {
 			if x, ok := t[k]; ok {
-				t[k] = refs(value.AsMap(props[k]), x, value.Key(path, k), visit)
+				t[k] = refs(value.AsMap(props[k]), x, value.Key(path, k), k, visit)
 			}
 		}
 	case []any:
 		// A list: the same, with the item schema.
 		for i, x := range t {
-			t[i] = refs(value.AsMap(s["items"]), x, value.Index(path, i), visit)
+			t[i] = refs(value.AsMap(s["items"]), x, value.Index(path, i), key, visit)
 		}
 	}
 	return v
 }
 
-// walk: v, at path, of the schema s, with every reference replaced by the
-// resolved connection (refs, reference). The error of a reference that
-// does not resolve is recorded (errs).
-func (r *resolver) walk(s M, v any, path string) any { return refs(s, v, path, r.reference) }
+// walk: v, the parameters, of the schema s, with every reference replaced
+// by the resolved connection (refs, reference). The error of a reference
+// that does not resolve is recorded (errs).
+func (r *resolver) walk(s M, v any) any { return refs(s, v, "", "", r.reference) }
 
-// reference: v, the value of a reference ref at path, resolved. Null or
-// empty means not set; a string is a connection's name, or a named
+// reference: v, the value of a reference ref at path, under key, resolved.
+// Null or empty means not set; a string is a connection's name, or a named
 // claim's; an object a claim template (parseClaim), when the reference
-// takes them (provision). Another value
-// would reach the mapping unresolved, past the contract. What it resolves
-// to meets its requirement, require (readRequirement).
-func (r *resolver) reference(ref M, v any, path string) any {
+// takes them (provision). Another value would reach the mapping
+// unresolved, past the contract: refused, its value printed as a
+// sensitive key's is (value.ShortAt). What it resolves to meets its
+// requirement, require (readRequirement).
+func (r *resolver) reference(ref M, v any, path, key string) any {
 	if v == nil || v == "" {
 		return v
 	}
@@ -136,15 +139,15 @@ func (r *resolver) reference(ref M, v any, path string) any {
 		c, err = r.resolve(t, contract, path, nil, req, provision)
 	case M:
 		if !provision {
-			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v))
+			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 			break
 		}
-		var claim *claimSpec
+		var claim *ClaimSpec
 		if claim, err = parseClaim(t, path, false); err == nil {
 			c, err = r.resolve("", contract, path, claim, req, true)
 		}
 	default:
-		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.Short(v))
+		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 	}
 	if err != nil {
 		r.errs = append(r.errs, err)
@@ -178,12 +181,13 @@ type resolved struct {
 // names (contract.requires), then the named claim (its contract, the
 // reference's provision), then the binding (its contract), then the output (several instances, none),
 // the fields of an external connection or an output in alphabetical order
-// (contract.fields), then the required fields, then the violations of the
+// (contract.fields), then an external connection's secretRef.remoteKey
+// (storeSecret), then the required fields, then the violations of the
 // contract, all of them (contract.check), then those of the requirement,
 // all of them (requirement.check), then "{{" in what it resolves to
 // (chart.NoTemplate). A reference to an instance that resolves is
 // recorded (deps), field naming it, ref the output.
-func (r *resolver) resolve(ref, contract, field string, claim *claimSpec, req *requirement, provision bool) (M, error) {
+func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *requirement, provision bool) (M, error) {
 	c, err := readContract(r.contracts, contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
@@ -242,7 +246,7 @@ func (r *resolver) resolve(ref, contract, field string, claim *claimSpec, req *r
 
 // resolveNamed: the named claim ref, declared as spec, a claim of the
 // contract c, when the reference takes claims (provision).
-func (r *resolver) resolveNamed(c *contract, ref, field string, spec claimSpec, provision bool) (*resolved, error) {
+func (r *resolver) resolveNamed(c *contract, ref, field string, spec ClaimSpec, provision bool) (*resolved, error) {
 	switch {
 	case !provision:
 		return nil, fmt.Errorf("%s: %q is a claim: the reference takes none (x-okdp-connection-ref's provision)", field, ref)
@@ -255,7 +259,7 @@ func (r *resolver) resolveNamed(c *contract, ref, field string, spec claimSpec, 
 // resolveClaim: the claim at field, as written (claim), to the output its
 // binding gives, its credentials a copy of the instance's own when the
 // provider is of another namespace.
-func (r *resolver) resolveClaim(c *contract, ref, field string, claim *claimSpec) (*resolved, error) {
+func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec) (*resolved, error) {
 	contract := c.name
 	b, ok := r.bindings[field]
 	if !ok {
@@ -292,32 +296,207 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *claimSpec
 			return nil, fmt.Errorf("%s: claim %q (%s): of %s, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", field, b.ID, contract, provider)
 		}
 		name := r.release + "-" + b.Output.SecretRef.Name
-		r.transfers = append(r.transfers, transfer{secret: name, key: storeKey(b.ID), contract: contract, fields: fields})
+		r.addTransfer(transfer{secret: name, key: storeKey(b.Namespace, b.ID), contract: contract, fields: fields})
 		x.secretRef = M{"name": name}
 	}
 	return x, nil
 }
 
-// resolveExternal: the external connection ref, conn, of the contract c.
+// resolveExternal: the external connection ref, conn, of the contract c,
+// its fields checked (contract.fields), then its secretRef: {name}, or
+// {remoteKey}, its credentials in the platform's secret store
+// (storeSecret).
 func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*resolved, error) {
 	x := &resolved{values: M{}, ref: ref, source: "external", where: fmt.Sprintf("%s (connection %q)", field, ref)}
 	if value.Str(conn["contract"]) != c.name {
 		return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(conn["contract"]), c.name)
 	}
-	for k, v := range conn {
-		switch k {
-		case "contract", "description":
-		// Credentials are only referenced, never inlined.
-		case "secretRef":
-			x.secretRef = M{"name": value.AsMap(v)["name"]}
-		default:
-			x.values[k] = v
-		}
-	}
+	var secretRef M
+	x.values, secretRef = connectionFields(conn)
 	if err := c.fields(x.values, fmt.Sprintf("%s: connection %q", field, ref)); err != nil {
 		return nil, err
 	}
+	switch _, fromStore := secretRef["remoteKey"]; {
+	case fromStore:
+		name, err := r.storeSecret(c, ref, field, secretRef)
+		if err != nil {
+			return nil, err
+		}
+		x.secretRef = M{"name": name}
+	case secretRef != nil:
+		x.secretRef = M{"name": secretRef["name"]}
+	}
 	return x, nil
+}
+
+// connectionFields: the fields of the contract that the external
+// connection conn holds, its keys but contract, description and
+// secretRef, and its secretRef, nil when it has none: credentials are
+// only referenced, never inlined.
+func connectionFields(conn M) (fields, secretRef M) {
+	fields = M{}
+	for k, v := range conn {
+		switch k {
+		case "contract", "description":
+		case "secretRef":
+			secretRef = value.AsMap(v)
+		default:
+			fields[k] = v
+		}
+	}
+	return fields, secretRef
+}
+
+// Connection: an external connection, connections.<name> of the context
+// (the platform's, a project's, an instance's), as written: the contract
+// it is of, a description, the contract's fields, and where its secret
+// fields are (secretRef): the Secret of the namespace of each instance
+// that references it (SecretRef, its name), or a key of the platform's
+// secret store, global.okdp.secrets.store (RemoteKey).
+type Connection struct {
+	Name        string         // its key in connections
+	Contract    string         // contract
+	Description string         // description, "" when none
+	Values      map[string]any // its other keys, the contract's fields, not the secret ones
+	SecretRef   string         // secretRef.name, "" when none
+	RemoteKey   string         // secretRef.remoteKey, "" when none
+}
+
+// ParseConnection: the connection name, v, as written in connections; what
+// it holds is checked by the compile of each instance that references it
+// (resolveExternal).
+func ParseConnection(name string, v any) Connection {
+	conn := value.AsMap(v)
+	fields, secretRef := connectionFields(conn)
+	return Connection{
+		Name:        name,
+		Contract:    value.Str(conn["contract"]),
+		Description: value.Str(conn["description"]),
+		Values:      fields,
+		SecretRef:   value.Str(secretRef["name"]),
+		RemoteKey:   value.Str(secretRef["remoteKey"]),
+	}
+}
+
+// MarshalYAML: the connection as written in connections.<name>, its own
+// keys first, contract, description and secretRef, then the contract's
+// fields, sorted, for a YAML encoder of the yaml.v3 family.
+func (c Connection) MarshalYAML() (any, error) {
+	type ref struct {
+		Name      string `yaml:"name,omitempty"`
+		RemoteKey string `yaml:"remoteKey,omitempty"`
+	}
+	entry := struct {
+		Contract    string `yaml:"contract"`
+		Description string `yaml:"description,omitempty"`
+		SecretRef   *ref   `yaml:"secretRef,omitempty"`
+		Fields      M      `yaml:",inline"`
+	}{Contract: c.Contract, Description: c.Description}
+	if c.SecretRef != "" || c.RemoteKey != "" {
+		entry.SecretRef = &ref{Name: c.SecretRef, RemoteKey: c.RemoteKey}
+	}
+	entry.Fields = M{}
+	for k, v := range c.Values {
+		if k != "contract" && k != "description" && k != "secretRef" {
+			entry.Fields[k] = v
+		}
+	}
+	return entry, nil
+}
+
+// storeSecret: the Secret of the instance's namespace the credentials of
+// the external connection ref, of the contract c, are read into from the
+// platform's secret store, under the key of its secretRef, {remoteKey}:
+// <release>.<ref>-credentials, the release and the connection's name,
+// DNS-1123 labels, joined by a dot, which neither holds, so that no other
+// connection's Secret takes the name, nor a claim's: <release>-<secret>
+// across namespaces; within one, the provider's
+// <id>-<contract>-credentials, its ID <namespace>.<...>, and a tree's
+// release is <namespace>-<instance>. Recorded once (addTransfer), each
+// secret field of the contract a property of the key. The key is a path
+// of the store (isStorePath); a connection above level 0, a project's or
+// an instance's, names one under its namespace, <namespace>/<rest>,
+// where its own PushSecrets or an administrator put it (storeKey): the
+// platform's keys are read through the platform's connections, and
+// another namespace's never. The first that fails, in order: remoteKey
+// with a name; remoteKey not a string, or empty; "{{" in it; no store;
+// the connection's name not a DNS-1123 label; a contract without secret
+// field; a key that is no path; a key outside the namespace.
+func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
+	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
+	key, ok := secretRef["remoteKey"].(string)
+	fields := c.secretFields()
+	switch {
+	case secretRef["name"] != nil:
+		return "", fmt.Errorf("%s: name or remoteKey, not both", where)
+	case !ok || key == "":
+		// A key of the store names credentials, it holds none: printed as
+		// the messages below print it (value.Short, not ShortAt, which
+		// reads remoteKey as an API key).
+		return "", fmt.Errorf("%s.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got %s", where, value.Short(secretRef["remoteKey"]))
+	}
+	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
+		return "", err
+	}
+	level := r.levels[ref]
+	switch {
+	case r.store == "":
+		return "", fmt.Errorf("%s.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set", where)
+	case !chart.IsDNSLabel(ref):
+		return "", fmt.Errorf("%s.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials", where)
+	case fields == nil:
+		return "", fmt.Errorf("%s.remoteKey: the %s contract has no secret field (x-okdp-secret): there are no credentials to read", where, c.name)
+	case !isStorePath(key):
+		return "", fmt.Errorf("%s.remoteKey %q: a path of the platform's secret store, segments separated by \"/\", none empty, \".\" or \"..\"", where, key)
+	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
+		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
+	}
+	name := r.release + "." + ref + "-credentials"
+	r.addTransfer(transfer{secret: name, key: key, contract: c.name, fields: fields})
+	return name, nil
+}
+
+// isStorePath: key is a path of the platform's secret store, as the
+// compiler writes them (storeKey): segments separated by "/", none empty,
+// "." or "..", so that no key reaches past its first segment, the one a
+// store's policy scopes.
+func isStorePath(key string) bool {
+	for s := range strings.SplitSeq(key, "/") {
+		if s == "" || s == "." || s == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// connectionLevels: the level of the context each connection is given at
+// (Inputs.Context), by name: the lowest level that gives it, a lower
+// level's connection being taken whole (contextLayers), which the
+// resolver scopes a secretRef.remoteKey by (storeSecret). A layer that
+// values cannot hold gives none: the layers failed before (valuesLayers).
+func connectionLevels(layers []ContextLayer) map[string]uint {
+	levels := map[string]uint{}
+	for _, l := range layers {
+		v, err := value.Normalize(l.Values)
+		if err != nil {
+			continue
+		}
+		for name := range value.AsMap(value.AsMap(v)["connections"]) {
+			if lv, ok := levels[name]; !ok || l.Level < lv {
+				levels[name] = l.Level
+			}
+		}
+	}
+	return levels
+}
+
+// addTransfer: x recorded, unless a transfer of its Secret is already: two
+// references to one connection, or to one named claim, read its
+// credentials into one Secret, by one ExternalSecret.
+func (r *resolver) addTransfer(x transfer) {
+	if !slices.ContainsFunc(r.transfers, func(t transfer) bool { return t.secret == x.secret }) {
+		r.transfers = append(r.transfers, x)
+	}
 }
 
 // resolveOutput: the output ref of the contract c that another instance
@@ -480,7 +659,7 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 	if claim, set := d["x-okdp-claim"]; set {
 		cd, ok := claim.(map[string]any)
 		if !ok {
-			return nil, fail(fmt.Sprintf("x-okdp-claim: a JSON Schema, an object, got %s", value.Short(m["x-okdp-claim"])))
+			return nil, fail(fmt.Sprintf("x-okdp-claim: a JSON Schema, an object, got %s", value.ShortAt("x-okdp-claim", m["x-okdp-claim"])))
 		}
 		cd = maps.Clone(cd)
 		if _, ok := cd["$schema"]; !ok && d["$schema"] != nil {
@@ -543,7 +722,7 @@ func readRequirement(ref M, draft any) (*requirement, error) {
 	}
 	doc, ok := v.(M)
 	if !ok {
-		return nil, fmt.Errorf("require: a JSON Schema, an object, got %s", value.Short(v))
+		return nil, fmt.Errorf("require: a JSON Schema, an object, got %s", value.ShortAt("require", v))
 	}
 	doc = value.AsMap(value.Copy(doc))
 	if _, ok := doc["$schema"]; !ok && draft != nil {
@@ -573,7 +752,7 @@ func requirements(s M) error {
 			}
 			if r, set := ref["request"]; set && r != nil {
 				if _, ok := r.(M); !ok {
-					errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: request: an object, got %s", at, value.Short(r)))
+					errs = append(errs, fmt.Errorf("config.schema.json: %s: x-okdp-connection-ref: request: an object, got %s", at, value.ShortAt("request", r)))
 				}
 			}
 			return

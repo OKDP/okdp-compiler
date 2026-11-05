@@ -10,7 +10,7 @@ dependsOn: [database-server, object-store, ingress]
 require:                               # global.okdp.<path>, each set and not empty
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
   - oidc.issuerUri
 defaults:                              # OKDP's defaults, over the chart's values.yaml
   api: api.defaults.yaml
@@ -34,9 +34,9 @@ upstream:                              # the instance's upstream.api: api's only
 # The mapping of the workspace service: YAML shaped like the upstream values,
 # where ${{ <CEL> }} computes a value and $-keys shape the structure. It
 # reads the instance's parameters (values, each connection reference
-# replaced by its connection), the platform's and the project's settings
-# (global.okdp, and platform, derived from them by the compiler), the release
-# and the service.
+# replaced by its connection), the platform's settings (global.okdp, and
+# platform, derived from them by the compiler), the project's (global, beside
+# okdp), the release and the service.
 #
 # Sections, in the order they are evaluated: vars, errors, then output
 # (values.cel.yaml), instance, provides, objects, oidcClients. Each sees the
@@ -53,10 +53,10 @@ vars:
   apiUrl: ${{ cel.bind(base, 'https://' + host, base + '/api') }}
   internalUrl: http://${{ api }}.${{ release.namespace }}.svc:8080
 
-  # The project's settings (project.yaml), optional: read with .? and
-  # orValue, a missing key failing the expression otherwise. m[?'k'] is the
-  # same.
-  project: ${{ global.okdp.?project.orValue({}) }}
+  # The project's settings (project.yaml), under global beside okdp, the
+  # platform's, optional: read with .? and orValue, a missing key failing
+  # the expression otherwise. m[?'k'] is the same.
+  project: ${{ global.?project.orValue({}) }}
   projectName: ${{ project.?displayName.or(project.?name).orValue(release.namespace) }}
   costCenter: ${{ project[?'costCenter'].orValue('') }}
   ranges: ${{ project.?allowedSourceRanges.orValue([]) }}

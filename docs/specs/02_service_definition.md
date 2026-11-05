@@ -100,7 +100,7 @@ publishes it:
 |---|---|---|
 | `name` | string | Required: the chart's name in its repository. |
 | `alias` | string | The dependency's key, when it is not the chart's name. |
-| `repository` | string | Required: a chart repository (`https://`, `http://`) or an OCI registry path (`oci://`). |
+| `repository` | string | Required: a chart repository (`https://`) or an OCI registry path (`oci://`); `http://`, the chart fetched in clear, is refused. |
 | `version` | string | Required: a pinned version. |
 
 Its key is its `alias`, else its `name`: a [chart key](#chart-keys). The
@@ -134,7 +134,8 @@ values file decides what is rendered, and each chart's values are its
 key's.
 
 Each dependency is checked when the file is loaded, the first failing
-check reported; `<i>` is its position in the list, from 0, `<key>` its
+check reported (`testdata/cli/chart-sources.txtar`: `http://`, a
+range); `<i>` is its position in the list, from 0, `<key>` its
 key:
 
 | Case | Error |
@@ -143,7 +144,8 @@ key:
 | no `name` | `Chart.yaml: dependencies[<i>].name is required` |
 | a key that is not a DNS label ([chart keys](#chart-keys)) | `Chart.yaml: dependencies[<i>] (<key>): key "<key>": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` |
 | the key of an earlier dependency (a chart rendered twice without an alias) | `Chart.yaml: dependencies[<i>] (<key>): the key of dependencies[<j>] too: give one of them an alias` |
-| `repository` not starting with `https://`, `http://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
+| `repository` starting with `http://`, the chart fetched in clear | `Chart.yaml: dependencies[<i>].repository "<repository>": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)` |
+| `repository` not starting with `https://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
 | `name` holding a `/`, `.` or `..`, or with leading or trailing spaces | `Chart.yaml: dependencies[<i>].name "<name>": the name of a chart of the repository` |
 | `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `Chart.yaml: dependencies[<i>].version "<version>": a pinned chart version (1.2.3), not a range` |
 
@@ -179,7 +181,7 @@ with the mapping, the package keys skipped ([sections](#sections)).
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `defaults` | map: key → path | `{}` | OKDP's defaults for a dependency: [defaults](#defaults). |
 | `upstream` | `true`, `false`, or a map: key → `true`, `false` or `{protect, append}` | `false` | The instance upstream values each dependency accepts: [upstream](#upstream). |
-| `provisions` | list of contracts | `[]` | The contracts the package provisions connections of, one per claim bound to an instance: [provisions](#provisions). |
+| `provisions` | list of contracts, each its name or `{contract, claimers}` | `[]` | The contracts the package provisions connections of, one per claim bound to an instance, and the namespaces that may claim of its instances from another namespace: [provisions](#provisions). |
 | `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` | | | The sections of the mapping, not read when the file is loaded: [sections](#sections). |
 
 Absent, or empty, `okdp.yaml` is a package with no requirements, no catalog
@@ -279,7 +281,12 @@ The dependencies that accept the instance's upstream values,
 The compiler's own charts, the OAuth client charts, never accept
 upstream values. The instance's values for a dependency that accepts none
 are ignored. How they are written and applied:
-[upstream values](01_inputs_outputs.md#upstream-values).
+[upstream values](01_inputs_outputs.md#upstream-values). Whatever the
+package accepts, the upstream values of a project that is not one of the
+platform's own (`global.okdp.policy.privileged`) set no key of a pod's
+privileges, identity, containers or objects, and take their images from
+the platform's registries:
+[upstream policy](01_inputs_outputs.md#upstream-policy).
 
 Another form fails when `okdp.yaml` is loaded:
 
@@ -316,7 +323,7 @@ provider of the class it names or of the default class of its contract
 Each instance gets the claims bound to it (`Inputs.Claims`), the mapping's
 `claims` ([context](#context)), and publishes, for each, an output of its
 contract named its `id` ([provides](#provides)), a Kubernetes name,
-DNS-1123 labels joined by dots (`demo.demo-app.db`,
+DNS-1123 labels joined by dots (`demo.app.db`,
 [claims](01_inputs_outputs.md#claims)): an object name, a Secret name or a
 label value takes it as it is, a SQL name replaces its dots and dashes,
 what it grants of the claim's `request` among its values
@@ -337,15 +344,41 @@ The data of a claim's connection outlives the claim: once no instance
 claims it (a claim template's reference gone, a named claim no longer
 declared by its project), its output and the objects the mapping writes
 for it are gone from the compile, and the package keeps what they held (a
-database's reclaim policy, `helm.sh/resource-policy: keep`): an operator
-removes it. An entry is a contract's name, a file name of the contracts;
-one listed twice, or one that is not a name, fails when the package is
-loaded:
+database's reclaim policy, `helm.sh/resource-policy: keep`, which the
+compiler gives Argo CD's equivalents, `argocd.argoproj.io/sync-options:
+Prune=false,Delete=false`, [the objects
+file](01_inputs_outputs.md#the-objects-file)): an operator removes it.
+
+An instance of the package serves the claims of its own namespace, and
+of the platform's classes, which route every namespace to it; a claim
+of another namespace that names it, or a class of its project's, only
+with its consent: its instance's `claimers`
+(`instance.yaml`, `Inputs.Claimers`), else the `claimers` of the entry
+of the claim's contract, the namespaces whose instances may claim of it,
+`*` for any, none by default
+([providers](01_inputs_outputs.md#providers)). A package meant to serve
+every project, a platform's database server, lists `*`; one whose
+instances serve their own project lists none:
+
+```yaml
+provisions:
+  - {contract: database-server, claimers: ['*']}
+  - s3                       # the instances' own claimers only
+```
+
+An entry is a contract's name, a file name of the contracts, or
+`{contract, claimers}`, each claimer a namespace name, a DNS-1123
+label, or `*`; a contract listed twice, a claimer listed twice, one that
+is not a name, or another key, fails when the package is loaded:
 
 | Case | Error |
 |---|---|
 | an entry that is not a file name (empty, `.`, `..`, a `/` or `\`) | `okdp.yaml: provisions[<i>]: "<entry>" is not a contract name` |
 | an entry listed twice | `okdp.yaml: provisions: <contract> is listed twice` |
+| a claimer that is neither a namespace name nor `*` | `okdp.yaml: provisions[<i>] (<contract>): claimers[<k>]: "<claimer>" is not a namespace name, nor "*"` |
+| a claimer listed twice | `okdp.yaml: provisions[<i>] (<contract>): claimers: <claimer> is listed twice` |
+| another key than `contract` and `claimers` | `okdp.yaml: provisions (line <n>): unknown key "<key>": contract and claimers only` |
+| an entry that is neither a name nor a map | `okdp.yaml: provisions (line <n>): an entry is a contract name, or {contract, claimers}` |
 
 ## values.cel.yaml
 
@@ -473,7 +506,7 @@ dependsOn: [database-server, object-store, ingress]
 require:                               # global.okdp.<path>, each set and not empty
   - ingress.suffix
   - ingress.className
-  - certificateIssuers.selfSigned.name
+  - tls.clusterIssuer
   - oidc.issuerUri
 defaults:                              # OKDP's defaults, over the chart's values.yaml
   api: api.defaults.yaml
@@ -667,7 +700,16 @@ must be a map with a non-empty `kind` and `metadata.name`
 list fails; absent or null, there are none. They follow the credentials
 Secrets in `Result.Objects`, written to the objects file the umbrella
 renders as written:
-[the objects file](01_inputs_outputs.md#the-objects-file).
+[the objects file](01_inputs_outputs.md#the-objects-file). The platform's
+policy then applies to them: unless the project is one of the platform's
+own (`global.okdp.policy.privileged`), every object stays in the
+instance's namespace (`namespace` unset, or `release.namespace`) and none
+is of a cluster-scoped kind (a ClusterRole, a Namespace, a
+CustomResourceDefinition...), `okdpGeneratedSecret`'s included; and, in
+every project, no Secret holds values in clear (`data`, `stringData`)
+unless the caller sets `Inputs.AllowPlainSecrets`: an
+`okdpGeneratedSecret`, or an ExternalSecret of the platform's secret
+store ([objects section](01_inputs_outputs.md#objects-section)).
 
 ### instance
 
@@ -688,7 +730,7 @@ set: another value, a null included, fails rather than is printed as text,
 
 ```yaml
 provides:
-  - contract: iceberg-catalog                 # published under the release name
+  - contract: iceberg-catalog                 # named after the instance
     values:
       uri: ${{ apiUrl }}/api/catalog
       realm: ${{ str(values.realm) }}
@@ -704,14 +746,14 @@ A list of outputs, the connections the instance publishes, in
 `Result.Info` and `okdp.info.yaml`
 ([the info file](01_inputs_outputs.md#the-info-file)). What
 another instance of the namespace references: an output, by its `name`,
-the release's by default, when its compile is given what this one
-publishes (`Inputs.Published`, `CompileAll`)
+the instance's by default (`Inputs.Name`), when its compile is given
+what this one publishes (`Inputs.Published`, `CompileAll`)
 ([resolution](01_inputs_outputs.md#resolution)). Each item:
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `contract` | string | required | The contract: `<contract>.schema.json` of `Inputs.Contracts`. |
-| `name` | string | the release name | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
+| `name` | string | the instance's name (`Inputs.Name`, the release when it is empty) | The output's name, the one other instances of the namespace reference. Unique per contract: `two <contract> outputs are named "<name>"`. |
 | `values` | map | `{}` | The contract's fields. Checked and completed against the contract (no unknown or secret field, defaults, required fields, valid against its schema): [contracts](01_inputs_outputs.md#contracts). |
 | `secretRef` | `{name}` | see `secret` | The Secret holding the secret fields. Only `name` is kept, required: a non-empty string. `{}` is not set. |
 | `secret` | map | none | The credentials Secret the compiler renders, below. |
@@ -746,14 +788,27 @@ each ([the info file](01_inputs_outputs.md#the-info-file)).
 `generate`, same key fields, checked the same way; `stringData` optional,
 strings, numbers or booleans, written as text), `{stringData: {...}}` a
 plain Secret with these keys, strings only: a Secret's `stringData` holds
-strings, the API server refuses a number. A `generate` that is not a list,
-a `stringData` that is not a map, fail rather than render a Secret without
-these keys, before the contract checks, a null too.
+strings, the API server refuses a number. A plain Secret writes the
+credentials in clear to the deployments repository: it fails, `<service>:
+output "<name>": secret: a plain value (stringData): credentials are
+generated (generate) or read from the platform's secret store;
+Inputs.AllowPlainSecrets allows it`, unless the caller sets
+`Inputs.AllowPlainSecrets`; a generated Secret keeps `stringData` for the
+keys that are not secret ([credentials
+Secrets](01_inputs_outputs.md#credentials-secrets)). A `generate` that
+is not a list, a `stringData` that is not a map, fail rather than render
+a Secret without these keys, before the contract checks, a null too.
 
 The Secret is named after `secretRef.name` when given, else
 `<name>-<contract>-credentials`, which then becomes the output's
-`secretRef`. Without `secret` (or with `secret: {}`), no Secret is
-rendered and the output has a `secretRef` only when the mapping gives one.
+`secretRef`: a Secret's name, a DNS-1123 subdomain (labels joined by dots,
+as a claim's ID: `${{ c.id }}-credentials`), 253 characters at most, else
+the compile fails (`secretRef.name "<name>": not a Secret's name, ...`). A
+claimer of another namespace reads a copy, `<release>-<name>`, which no
+other object of its namespace may write ([compiling instances
+together](01_inputs_outputs.md#compiling-instances-together)). Without
+`secret` (or with `secret: {}`), no Secret is rendered and the output has
+a `secretRef` only when the mapping gives one.
 A `secret` with neither a non-empty `generate` nor a non-empty
 `stringData` fails with `<service>: output "<name>": secret needs
 stringData or generate` (`<service>`: the `name` of `Chart.yaml`). The
@@ -783,7 +838,7 @@ registers its own by OIDC Dynamic Client Registration, per
 
 | Mode | The compiler |
 |---|---|
-| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, rendered by the platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`, oidc-dcr 0.5.0 by default: [platform charts](01_inputs_outputs.md#platform-charts)): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
+| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, rendered by the platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 by default: [platform charts](01_inputs_outputs.md#platform-charts)): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
 | otherwise (`existing`, or `platform.oidc.enabled` false) | adds no chart: the platform provides each client's Secret |
 
 | Key | Type | Default | Meaning |
@@ -795,8 +850,8 @@ registers its own by OIDC Dynamic Client Registration, per
 | `clientName` | string | `<release>-<namespace>`, then `-<name>` for a named client | Its name at the identity provider. |
 | `public` | boolean | `false` | A public client (a browser application), without a client secret. |
 | `request` | map | `{}` | Fields of the registration request (snake_case, as OIDC Dynamic Client Registration names them): they override the computed ones. |
-| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to. |
-| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts. |
+| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to, one of the release's: its name starts with `<release>-` (`${{ release.name }}-console`). |
+| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts; the platform's default is its CA bundle, `global.okdp.tls.caBundleSecret`, `""` (none) when unset. |
 
 A key left out by `$if` is not set, a null one is refused by its type,
 and `""` takes the default of a string key. Only `dcr` mode uses the
@@ -806,12 +861,15 @@ keys; how they become the values of the client's chart:
 Every mode checks the clients, after the mapping: each client is a map,
 its `name` of the form above, of these keys only, each of its type,
 `grantTypes` given and not empty ([sections](#evaluation-order)); then one
-client at most has no name, and names are unique. In `dcr` mode, no two
-clients write one Secret. As soon as the mapping declares a client, its
-chart key belongs to the compiler: `Chart.yaml` may not list it, nor the
-values file compute it (`Chart.yaml: dependencies[<i>] (<key>): the chart
-of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>:
-the chart of <client> is compiled from oidcClients: remove it`). Only
+client at most has no name, names are unique, and a `secret` given is
+the release's, `<release>-...`: the Job's Role writes it, and would
+write another Secret of the namespace, another instance's credentials.
+In `dcr` mode, no two clients write one Secret. As soon as the mapping
+declares a client, its chart key belongs to the compiler: `Chart.yaml`
+may not list it, nor the values file compute it (`Chart.yaml:
+dependencies[<i>] (<key>): the chart of <client> is added by the
+compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is
+compiled from oidcClients: remove it`). Only
 `dcr` mode checks against the oidc-dcr chart, in the chart cache of a
 check ([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
 check stops the compile ([compile errors](#compile-errors)).
@@ -965,7 +1023,7 @@ The variables of every expression:
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
 | `claims` | The claims bound to the instance (`Inputs.Claims`), in order, each `{id, contract, namespace, name, request}`: the connection to provision and publish, an output of `contract` named `id`; the namespace of the instances that claim it; the named claim's name, `""` for a claim template's; what it requests, as the contract's claim schema allows (`x-okdp-claim`), its defaults applied, `{}` when it has none ([provisions](#provisions)). `[]` when none. |
 | `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global`, `connections` and `claims`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
-| `global` | `{okdp: ...}`: `global.okdp` of the same merged values, as written ([context values](01_inputs_outputs.md#context-values)). Other keys of `global` are not visible. |
+| `global` | `global` of the same merged values, as written: `okdp`, the platform's settings ([context values](01_inputs_outputs.md#context-values)), and the other keys, the platform's (`imageRegistry`) and a project's own (`global.project`, [levels](01_inputs_outputs.md#levels)), which every chart receives too. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `Chart.yaml`, as written ([Chart.yaml](#chartyaml)). |
 | `labels` | the labels of OKDP's objects, below, without component. |
@@ -982,9 +1040,9 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 
 | Variable | Value |
 |---|---|
-| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
+| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied, its `caSecret` `global.okdp.tls.caBundleSecret` (else `""`) when it sets none ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
 | `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
-| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.certificateIssuers.selfSigned.name>}`, `""` when unset. |
+| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.tls.clusterIssuer>}`, the platform's ClusterIssuer, `""` when unset, and `global.okdp.ingress.annotations` over it, the ingress controller's. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 
 The settings these are derived from are checked against the platform
@@ -1125,8 +1183,9 @@ Other errors of the mapping:
 | `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [the values file](#valuescelyaml) (`/output`), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |
 | `<where>${{ <expression> }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:` then `- at '/okdpGeneratedSecret<path>': <violation>`, one line each | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
 | `values.cel.yaml: <key>: not a dependency of Chart.yaml` | a key of the [values file](#valuescelyaml) |
-| `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate` | [`provides`](#provides) |
+| `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `<service>: output "<name>": secret: a plain value (stringData): ...` | [`provides`](#provides) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
+| `<client>: secret "<secret>": the Secret the client is written to is one of the release's, its name starts with "<release>-"` | a client's `secret` that does not start with the release and a `-`, in every mode |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
 | `Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it` | a client's chart key, `oidc-dcr` or `<name>-oidc-dcr`, a dependency of `Chart.yaml` or a key of the values file |
 | `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |

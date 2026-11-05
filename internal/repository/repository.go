@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"path"
@@ -29,16 +30,24 @@ type Repository struct {
 
 // The names of the tree.
 const (
-	PlatformFile    = "platform.yaml"    // the platform's values, context level 0
-	ContractsDir    = "contracts"        // <contract>.schema.json
-	CatalogDir      = "catalog"          // <service>/<version>/, a package
-	ProjectsDir     = "projects"         // <project>/, a namespace
-	ProjectFile     = "project.yaml"     // a project's values, context level 1
-	InstancesDir    = "instances"        // <project>/instances/<instance>/, a release
-	InstanceFile    = "instance.yaml"    // {service, version}: the instance's package
-	ConnectionsFile = "connections.yaml" // the instance's own connections, context level 2
-	ConfigFile      = "config.yaml"      // the instance's values
+	PlatformFile       = "platform.yaml"    // the platform's values, context level 0
+	ContractsDir       = "contracts"        // <contract>.schema.json
+	CatalogDir         = "catalog"          // <service>/<version>/, a package
+	ProjectsDir        = "projects"         // <project>/, a namespace
+	ProjectFile        = "project.yaml"     // a project's values, context level 1
+	ProjectDescription = "description"      // ProjectFile's key describing the project, a string: no value of the context
+	InstancesDir       = "instances"        // <project>/instances/<instance>/, the release <project>-<instance>
+	InstanceFile       = "instance.yaml"    // {service, version, claimers}: the instance's package, and the namespaces that may claim of it
+	ConnectionsFile    = "connections.yaml" // the instance's own connections, context level 2
+	ConfigFile         = "config.yaml"      // the instance's values
 )
+
+// ReleaseName: the release of the instance of project, <project>-<instance>,
+// the project's directory name and the instance's: the releases of a tree
+// are unique across its projects, as the HelmReleases or Applications of a
+// deployer, which share a namespace, need them (the targets refuse the
+// names that hold a "-" and meet, a-b/c and a/b-c).
+func ReleaseName(project, instance string) string { return project + "-" + instance }
 
 // tree: the repositories merged, the owner of each part.
 type tree struct {
@@ -59,14 +68,17 @@ type tree struct {
 // the repository of the service, loaded once, its Chart.yaml of that name
 // and version; the contracts of every repository; the context,
 // PlatformFile at level 0, without claims, ProjectFile at 1, its named
-// claims among it, and ConnectionsFile at 2, connections only, and the
-// values, ConfigFile, each when present; the release, the instance's
-// directory name, and the namespace, the project's. Every problem at once,
-// each naming its repository and path; a package that fails once.
+// claims among it, without its ProjectDescription, and ConnectionsFile at
+// 2, connections only, and the values, ConfigFile, each when present; the
+// name, the instance's directory name, the release, ReleaseName of the
+// project and the name, and the namespace, the project's; the claimers
+// of its InstanceFile, the namespaces that may claim of it across
+// namespaces (Inputs.Claimers). Every problem at once, each naming its
+// repository and path; a package that fails once.
 func Load(repos []Repository) ([]okdp.Instance, error) {
 	t, err := index(repos)
 	if err != nil {
-		return nil, err
+		return nil, newError([]error{err})
 	}
 	var errs []error
 	var platform []okdp.ContextLayer
@@ -85,7 +97,7 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 	for _, project := range slices.Sorted(maps.Keys(t.projects)) {
 		repo := *t.projects[project]
 		dir := path.Join(ProjectsDir, project)
-		layer, err := readLayer(repo, path.Join(dir, ProjectFile), 1)
+		layer, err := readProject(repo, path.Join(dir, ProjectFile))
 		layers := append(slices.Clone(platform), layer...)
 		errs = append(errs, err)
 		names, err := dirs(repo, path.Join(dir, InstancesDir))
@@ -99,30 +111,32 @@ func Load(repos []Repository) ([]okdp.Instance, error) {
 			instances = append(instances, inst)
 		}
 	}
-	if err := errors.Join(errs...); err != nil {
+	if err := newError(errs); err != nil {
 		return nil, err
 	}
 	return instances, nil
 }
 
 // instance: the instance name of project, in repo, the context layers
-// below its own. Without its Definition when its package failed for an
-// instance before it.
+// below its own: its InstanceFile, {service, version}, the package, and
+// claimers, optional, the namespaces whose instances may claim of it
+// across namespaces, each a namespace name or "*", once
+// (okdp.CheckClaimers): Inputs.Claimers, nil when absent, the package's
+// then. Without its Definition when its package failed for an instance
+// before it.
 func (t *tree) instance(repo Repository, project, name string, layers []okdp.ContextLayer) (okdp.Instance, error) {
 	dir := path.Join(ProjectsDir, project, InstancesDir, name)
 	file := path.Join(dir, InstanceFile)
-	var pkg struct {
-		Service string `yaml:"service"`
-		Version string `yaml:"version"`
-	}
+	var pkg InstanceSpec
 	b, err := fs.ReadFile(repo.FS, file)
 	if err == nil {
-		dec := yaml.NewDecoder(bytes.NewReader(b))
-		dec.KnownFields(true)
-		err = dec.Decode(&pkg)
+		pkg, err = ParseInstance(b)
 	}
 	if err == nil && (pkg.Service == "" || pkg.Version == "") {
 		err = errors.New("service and version are required")
+	}
+	if err == nil {
+		err = okdp.CheckClaimers("claimers", pkg.Claimers)
 	}
 	if err != nil {
 		return okdp.Instance{}, fmt.Errorf("%s: %w", where(repo, file), unwrapPath(err))
@@ -148,11 +162,40 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 	if err != nil {
 		return okdp.Instance{}, err
 	}
-	in := okdp.Inputs{Contracts: t.contracts, Context: append(layers, connections...), Release: name, Namespace: project}
+	in := okdp.Inputs{Contracts: t.contracts, Context: append(layers, connections...), Release: ReleaseName(project, name), Namespace: project, Claimers: pkg.Claimers}
 	for _, l := range values {
 		in.Values = append(in.Values, l.Values)
 	}
-	return okdp.Instance{Definition: def, Inputs: in}, nil
+	return okdp.Instance{Definition: def, Inputs: in, Name: name}, nil
+}
+
+// InstanceSpec: an instance's InstanceFile, as written: its package,
+// catalog/<service>/<version>/, and its claimers, the namespaces whose
+// instances may claim of it from another namespace (namespace names, or
+// "*"): nil when absent, its package's then; empty for none (claimers:
+// []).
+type InstanceSpec struct {
+	Service  string   `yaml:"service"`
+	Version  string   `yaml:"version"`
+	Claimers []string `yaml:"claimers"`
+}
+
+// ParseInstance: an InstanceFile, its first document, strictly: a key
+// that is none of InstanceSpec's refused. What Load checks after it
+// (service and version required, the claimers) is the compile's.
+func ParseInstance(b []byte) (InstanceSpec, error) {
+	// Anonymous, so that a message names no Go type ("in type struct").
+	var spec struct {
+		Service  string   `yaml:"service"`
+		Version  string   `yaml:"version"`
+		Claimers []string `yaml:"claimers"`
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(&spec); err != nil && !errors.Is(err, io.EOF) {
+		return InstanceSpec{}, err
+	}
+	return InstanceSpec(spec), nil
 }
 
 // definition: the package of version of service, catalog/<service>/<version>/
@@ -161,13 +204,9 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 // instance's; that of the package's load, its own, the first time only:
 // nil and no error after.
 func (t *tree) definition(service, version string) (*okdp.Definition, error) {
-	repo, ok := t.services[service]
-	if !ok {
-		return nil, fmt.Errorf("service %q is in the catalog of no repository", service)
-	}
-	dir := path.Join(CatalogDir, service, version)
-	if _, err := fs.Stat(repo.FS, dir); err != nil || !chart.IsFileName(version) {
-		return nil, fmt.Errorf("version %q of service %q is not in %s", version, service, where(*repo, path.Join(CatalogDir, service)))
+	repo, dir, err := t.packageDir(service, version)
+	if err != nil {
+		return nil, err
 	}
 	key := [2]string{service, version}
 	if def, loaded := t.packages[key]; loaded {
@@ -291,6 +330,22 @@ func readLayer(repo Repository, file string, level uint) ([]okdp.ContextLayer, e
 		return nil, fmt.Errorf("%s: %w", where(repo, file), err)
 	}
 	return []okdp.ContextLayer{{Level: level, Values: v}}, nil
+}
+
+// readProject: a project's file, the context layer of level 1, without
+// its ProjectDescription, a string, or null: the project's own, which no
+// instance receives.
+func readProject(repo Repository, file string) ([]okdp.ContextLayer, error) {
+	layers, err := readLayer(repo, file, 1)
+	for _, l := range layers {
+		if d, set := l.Values[ProjectDescription]; set {
+			if _, isString := d.(string); !isString && d != nil {
+				return nil, fmt.Errorf("%s: %s: a string, the project's description", where(repo, file), ProjectDescription)
+			}
+			delete(l.Values, ProjectDescription)
+		}
+	}
+	return layers, err
 }
 
 // where: a path of repo, as messages name it.

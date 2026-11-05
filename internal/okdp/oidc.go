@@ -16,6 +16,7 @@ import (
 	_ "embed"
 	"fmt"
 	"maps"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 
@@ -32,7 +33,7 @@ const DcrChart = "oidc-dcr"
 // DcrSource: the chart that registers an OAuth client by dynamic client
 // registration, the version whose values the embedded template writes: the
 // default of global.okdp.charts.oidcDcr.
-var DcrSource = chart.Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.5.0"}
+var DcrSource = chart.Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.6.0"}
 
 // dcrTemplate: the oidc-dcr values of one client (the mapping language).
 //
@@ -80,14 +81,15 @@ func clientSecret(release, namespace string, dcr bool, name string) string {
 func oidcFunctions(inst *instance) []cel.EnvOption {
 	release, ns, dcr := inst.release, inst.namespace, inst.dcr
 	return []cel.EnvOption{
-		cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))),
+		compile.Costed(cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))), "oidcClientSecret_dyn"),
 	}
 }
 
 // oidcClients: the clients of the mapping's oidcClients section, checked
 // against mappingSchema (runMapping), then in every mode (one main client
-// at most, unique names), and, in dcr mode, the values of the oidc-dcr
+// at most, unique names, a secret given named <release>-...), and, in dcr
+// mode, the values of the oidc-dcr
 // chart of each: chart -> values, from dcrTemplate. The platform must then
 // register anonymously, at its registrationUrl, and no two clients write
 // one Secret.
@@ -110,6 +112,11 @@ func oidcClients(session *compile.Session, inst *instance, section []any) ([]oid
 			return nil, nil, fmt.Errorf("%s: %s has the same name: client names must be unique", c.where, other)
 		}
 		seen[c.name] = c.where
+		// The Job's Role writes the Secret: one of the release's, never
+		// another Secret of the namespace (another instance's credentials).
+		if s := value.Str(spec["secret"]); s != "" && !strings.HasPrefix(s, inst.release+"-") {
+			return nil, nil, fmt.Errorf("%s: secret %q: the Secret the client is written to is one of the release's, its name starts with %q", c.where, s, inst.release+"-")
+		}
 		c.fullname = fullname(inst.release, c.chart)
 		clients = append(clients, c)
 	}
@@ -117,9 +124,15 @@ func oidcClients(session *compile.Session, inst *instance, section []any) ([]oid
 		return clients, nil, nil
 	}
 	dcr := value.AsMap(inst.oidc["dcr"])
-	// OKDP only registers anonymously.
-	if value.Str(dcr["authMethod"]) != "anonymous" {
-		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.authMethod %q is not supported: OKDP registers its OAuth clients anonymously", value.Str(dcr["authMethod"]))
+	switch value.Str(dcr["authMethod"]) {
+	case "anonymous":
+		// No token needed: the registration endpoint accepts anonymous requests.
+	case "initialAccessToken":
+		// The oidc-dcr Job reads an initial access token from a Secret of the
+		// namespace (dcr.tokenSecret, default okdp-dcr-token, key token), which
+		// the platform mints per namespace and writes to the secret store.
+	default:
+		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.authMethod %q is not supported: anonymous or initialAccessToken", value.Str(dcr["authMethod"]))
 	}
 	if u, ok := dcr["registrationUrl"].(string); !ok || u == "" {
 		return nil, nil, fmt.Errorf("global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at")

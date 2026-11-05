@@ -1,0 +1,8 @@
+# error: global.okdp.charts.oidcDcr.repository "http://charts.example.org/mirror": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)
+# A platform file that names the chart the OAuth clients are rendered with
+# in an http:// repository: a chart is fetched over https:// or oci://,
+# never in clear, by a check and by the deployer.
+global:
+  okdp:
+    charts:
+      oidcDcr: {repository: http://charts.example.org/mirror, chart: oidc-dcr, version: 0.6.0}

@@ -30,14 +30,14 @@
           "values": {"type": "object", "description": "The contract's fields."},
           "secretRef": {
             "type": "object",
-            "description": "The Secret holding the secret fields: {} is not set; only name is kept. Absent, the Secret of secret, <name>-<contract>-credentials.",
-            "properties": {"name": {"type": "string", "minLength": 1}},
+            "description": "The Secret holding the secret fields: {} is not set; only name is kept. Absent, the Secret of secret, <name>-<contract>-credentials. A claimer of another namespace reads a copy, <release>-<name>, which no other object of its namespace may write (CompileAll).",
+            "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 253, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "description": "A Secret's name, a DNS-1123 subdomain: DNS-1123 labels (lowercase letters, digits and -, a letter or digit at each end) joined by dots, as a claim's ID."}},
             "if": {"minProperties": 1},
             "then": {"required": ["name"]}
           },
           "secret": {
             "type": "object",
-            "description": "The credentials Secret the compiler renders, named after secretRef: generated (generate, the keys of okdpGeneratedSecret, and stringData) or plain (stringData, strings only). Other keys are ignored.",
+            "description": "The credentials Secret the compiler renders, named after secretRef: generated (generate, the keys of okdpGeneratedSecret, and stringData for the keys that are not secret) or plain (stringData, strings only), which the compile refuses unless Inputs.AllowPlainSecrets: credentials in clear in the deployments repository. Other keys are ignored.",
             "properties": {
               "generate": {"type": "array", "items": {"$ref": "#/$defs/generatedKey"}},
               "stringData": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean"]}}
@@ -50,7 +50,7 @@
     },
     "objects": {
       "type": "array",
-      "description": "OKDP's own objects, whole manifests, passed as written.",
+      "description": "OKDP's own objects, whole manifests, passed as written. Those of an instance of a project that is not privileged (global.okdp.policy.privileged) stay in its namespace (metadata.namespace unset, or the release's), and none is of a cluster-scoped kind: the compile refuses them. In every project, no Secret holds values in clear (data, stringData) unless Inputs.AllowPlainSecrets: okdpGeneratedSecret, or an ExternalSecret of the platform's secret store.",
       "items": {
         "type": "object",
         "required": ["kind", "metadata"],
@@ -84,7 +84,7 @@
           "clientName": {"type": "string", "description": "Its name at the identity provider; \"\" or absent: <release>-<namespace>[-<name>]."},
           "public": {"type": "boolean", "description": "A public client, without a client secret; absent: false."},
           "request": {"type": "object", "description": "Fields of the registration request, over the computed ones."},
-          "secret": {"type": "string", "description": "The Secret the Job writes the client to; \"\" or absent: oidcClientSecret(<name>)."},
+          "secret": {"type": "string", "description": "The Secret the Job writes the client to, one of the release's: its name starts with <release>-; \"\" or absent: oidcClientSecret(<name>)."},
           "caSecret": {"type": "string", "description": "The Secret holding the CA bundle the Job trusts; \"\" or absent: platform.oidc.dcr.caSecret."}
         }
       }
@@ -101,7 +101,7 @@
         "labels": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra labels of the ExternalSecret and the Secret."},
         "annotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The annotations of every object."},
         "type": {"type": "string", "description": "The type of the Secret."},
-        "namespace": {"type": "string", "description": "The namespace of every object; \"\" or absent: the release's."},
+        "namespace": {"type": "string", "description": "The namespace of every object; \"\" or absent: the release's. Another namespace: the platform's projects only (global.okdp.policy.privileged), the compile refuses it otherwise."},
         "refreshInterval": {"type": "string", "description": "The ExternalSecret's refresh interval; \"\" or absent: \"0\", generated once."},
         "apiVersion": {"type": "string", "description": "The ExternalSecret's apiVersion; \"\" or absent: external-secrets.io/v1."}
       }

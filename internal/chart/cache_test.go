@@ -8,13 +8,14 @@ import (
 )
 
 // TestRefCacheDir: a repository's directory of the chart cache, a path
-// inside it or none.
+// inside it or none; none for http://, a chart in clear.
 func TestRefCacheDir(t *testing.T) {
 	for repository, want := range map[string]string{
 		"oci://quay.io/adaltas":             "quay.io/adaltas",
 		"oci://quay.io/adaltas/":            "quay.io/adaltas",
 		"https://charts.example.org":        "charts.example.org",
-		"http://localhost:8080/charts/":     "localhost:8080/charts",
+		"https://localhost:8080/charts/":    "localhost:8080/charts",
+		"http://localhost:8080/charts/":     "",
 		"https://":                          "",
 		"https:///charts":                   "",
 		"https://charts.example.org//x":     "",
@@ -46,7 +47,7 @@ func TestChartCache(t *testing.T) {
 		"charts.example.org/nodefaults-1.0.0/nodefaults/Chart.yaml": {Data: []byte("name: nodefaults\n")},
 		"charts.example.org/bom-1.0.0/bom/values.yaml":              {Data: []byte("\uFEFFb: on\n")},
 		"charts.example.org/bom-1.0.0/bom/values.schema.json":       {Data: []byte("\uFEFF{}")},
-		"quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr/values.yaml":       {Data: []byte("enabled: true\n")},
+		"quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml":       {Data: []byte("enabled: true\n")},
 		"rooted-1.0.0/rooted/values.yaml":                           {Data: []byte("a: 0\n")},
 		"charts.example.org/packed-1.0.0.tgz":                       {Data: []byte("not read")},
 		"charts.example.org/flat-1.0.0/values.yaml":                 {Data: []byte("a: 0\n")},
@@ -67,7 +68,7 @@ func TestChartCache(t *testing.T) {
 		"byte order mark":  {ref("bom", "1.0.0"), "charts.example.org/bom-1.0.0/bom", M{"b": true}, "{}"},
 		"read once, again": {ref("app", "1.0.0"), "charts.example.org/app-1.0.0/app", M{"a": float64(1)}, "{}"},
 		"a trailing /":     {Ref{Repository: "https://charts.example.org/", Chart: "app", Version: "1.0.0"}, "charts.example.org/app-1.0.0/app", M{"a": float64(1)}, "{}"},
-		"an OCI chart":     {Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.5.0"}, "quay.io/adaltas/oidc-dcr-0.5.0/oidc-dcr", M{"enabled": true}, ""},
+		"an OCI chart":     {Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.6.0"}, "quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr", M{"enabled": true}, ""},
 	} {
 		u, err := c.get(tc.ref)
 		if err != nil {

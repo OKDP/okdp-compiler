@@ -5,6 +5,7 @@
 package okdp
 
 import (
+	"fmt"
 	"io/fs"
 
 	"go.yaml.in/yaml/v3"
@@ -34,8 +35,9 @@ type Package struct {
 	Defaults  map[string]string `yaml:"defaults"`  // dependency key -> a values file of the package, <key>.defaults.yaml by convention: OKDP's defaults for the chart
 	Upstream  chart.Upstream    `yaml:"upstream"`  // the dependencies that accept instance upstream values, with their protect and append paths
 	// Provisions: the contracts the package provisions connections of, one
-	// per claim bound to an instance (Inputs.Claims).
-	Provisions []string `yaml:"provisions"`
+	// per claim bound to an instance (Inputs.Claims), each with the
+	// namespaces that may claim of an instance of it by default.
+	Provisions []Provision `yaml:"provisions"`
 
 	// The mapping's keys, read by the mapping (Definition.Okdp), declared
 	// so that okdp.yaml is read strictly: any other key fails.
@@ -45,6 +47,47 @@ type Package struct {
 	Provides    yaml.Node `yaml:"provides"`
 	Objects     yaml.Node `yaml:"objects"`
 	OIDCClients yaml.Node `yaml:"oidcClients"`
+}
+
+// Provision: an entry of okdp.yaml's provisions: a contract the package
+// provisions connections of, written as its name, or as {contract,
+// claimers}: Claimers, the namespaces whose instances may claim of an
+// instance of the package across namespaces, unless the instance lists
+// its own (Inputs.Claimers), "*" for any; none by default (tree.consent).
+type Provision struct {
+	Contract string   `yaml:"contract"`
+	Claimers []string `yaml:"claimers"`
+}
+
+// UnmarshalYAML: a provisions entry, a contract name or {contract,
+// claimers}, strictly: another key, or another form, fails.
+func (p *Provision) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		p.Claimers = nil
+		return n.Decode(&p.Contract)
+	case yaml.MappingNode:
+		for i := 0; i < len(n.Content); i += 2 {
+			if k := n.Content[i].Value; k != "contract" && k != "claimers" {
+				return fmt.Errorf("provisions (line %d): unknown key %q: contract and claimers only", n.Content[i].Line, k)
+			}
+		}
+		type plain Provision
+		return n.Decode((*plain)(p))
+	}
+	return fmt.Errorf("provisions (line %d): an entry is a contract name, or {contract, claimers}", n.Line)
+}
+
+// claimers: the namespaces that may claim connections of contract of an
+// instance of the package, across namespaces, its provisions entry's;
+// nil when it lists none.
+func (p Package) claimers(contract string) []string {
+	for _, e := range p.Provisions {
+		if e.Contract == contract {
+			return e.Claimers
+		}
+	}
+	return nil
 }
 
 // packageKeys: the keys of okdp.yaml its package reader reads (Package),
@@ -86,5 +129,15 @@ func (d *Definition) service() (*Service, error) {
 	if err := checkProvisions(p.Provisions); err != nil {
 		return nil, err
 	}
-	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Roles: p.Roles, DependsOn: p.DependsOn, Require: p.Require, Charts: specs, Provisions: p.Provisions}, nil
+	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Roles: p.Roles, DependsOn: p.DependsOn, Require: p.Require, Charts: specs, Provisions: p.contracts()}, nil
+}
+
+// contracts: the contracts the package provisions, in the order of its
+// provisions; nil when none.
+func (p Package) contracts() []string {
+	var out []string
+	for _, e := range p.Provisions {
+		out = append(out, e.Contract)
+	}
+	return out
 }

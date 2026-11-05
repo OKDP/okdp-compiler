@@ -1,8 +1,13 @@
 // Package argocd: the argocd target: the umbrella chart of each instance,
 // with the Argo CD Application that installs it, its sync wave after those
-// of the releases its instance depends on. The format is okdp-gitops',
-// byte for byte but for the mark of the first line, so that it can write
-// its package instances with Application.
+// of the releases its instance depends on, and each project's own
+// manifests, its Namespace, the platform's secret store in it and the
+// AppProject its Applications are in, confined to its namespace. The
+// format is okdp-gitops', which commits the files as they are. An
+// Application that applies the Applications (app of apps) reads the
+// directory projects/, recurse, include */instances/*/application.yaml;
+// an ApplicationSet over the directories projects/*/project applies the
+// projects' manifests.
 package argocd
 
 import (
@@ -15,12 +20,31 @@ import (
 	"github.com/okdp/okdp-compiler/internal/target/helm"
 )
 
-// ApplicationFile: an instance's Application, in its directory.
-const ApplicationFile = "application.yaml"
+// The files of the target besides the umbrella charts.
+const (
+	// ApplicationFile: an instance's Application, in its directory.
+	ApplicationFile = "application.yaml"
+	// AppProjectFile: a project's AppProject, in its
+	// target.ProjectManifestsDir (AppProject).
+	AppProjectFile = "appproject.yaml"
+)
 
-// Namespace: the namespace of the Applications: their names, the
-// releases', must be unique.
+// Namespace: the namespace of the Applications and of the AppProjects:
+// the Applications' names, the releases', must be unique.
 const Namespace = "argocd"
+
+// ReleaseObjects: the objects of the target named after the releases,
+// which share Namespace: what a release in two namespaces makes clash
+// (target.UniqueReleases).
+const ReleaseObjects = "the Applications of " + Namespace
+
+// ProjectName: project-<namespace>, the AppProject of a project, which
+// its Applications are in.
+func ProjectName(namespace string) string { return "project-" + namespace }
+
+// Server: the cluster the Applications are destined to, the one Argo CD
+// runs in.
+const Server = "https://kubernetes.default.svc"
 
 // Target: the argocd target.
 type Target struct {
@@ -31,14 +55,16 @@ type Target struct {
 
 // Files: the helm target's files, then, in each instance's
 // target.InstanceDir, its ApplicationFile (Application), its sync wave
-// the release's (graph.Graph.Wave), marked generated (target.Generated).
-// The options are checked first; two releases of one name in two
-// namespaces are refused: their Applications share Namespace.
+// the release's (graph.Graph.Wave), and in each project's
+// target.ProjectManifests, its manifests (ProjectManifests), each marked
+// generated (target.Generated). The options are checked first; two
+// releases of one name in two namespaces are refused: their Applications
+// share Namespace.
 func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte, error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
-	if err := target.UniqueReleases(results, "the Applications of "+Namespace); err != nil {
+	if err := target.UniqueReleases(results, ReleaseObjects); err != nil {
 		return nil, err
 	}
 	files, err := helm.Target{}.Files(results, g)
@@ -50,7 +76,73 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 		wave := g.Wave(graph.Node{Namespace: res.Namespace, Release: res.Release})
 		files[path.Join(dir, ApplicationFile)] = append([]byte(target.Generated), t.Application(res.Namespace, res.Release, path.Join(t.PathPrefix, dir), wave)...)
 	}
+	for _, p := range target.Projects(results) {
+		manifests, err := t.ProjectManifests(p)
+		if err != nil {
+			return nil, err
+		}
+		for name, data := range manifests {
+			files[path.Join(target.ProjectManifests(p.Namespace), name)] = append([]byte(target.Generated), data...)
+		}
+	}
 	return files, nil
+}
+
+// ProjectManifests: the files of a project's target.ProjectManifestsDir,
+// not marked: target.NamespaceFile, the Namespace, kept when the project
+// is gone (target.Namespace); target.SecretStoreFile, the platform's
+// secret store in it, when the platform names a provider
+// (target.SecretStore), both as the flux target writes them; and
+// AppProjectFile, the AppProject of its Applications (AppProject), Argo
+// CD's own. The options are those Files checks.
+func (t Target) ProjectManifests(p target.Project) (map[string][]byte, error) {
+	files := map[string][]byte{target.NamespaceFile: target.Namespace(p), AppProjectFile: t.AppProject(p)}
+	store, err := target.SecretStore(p)
+	if err != nil {
+		return nil, err
+	}
+	if store != nil {
+		files[target.SecretStoreFile] = store
+	}
+	return files, nil
+}
+
+// AppProject: the AppProjectFile of a project, not marked: the AppProject
+// ProjectName in Namespace, labelled target.ProjectLabel, its source
+// RepoURL; its destinations the project's namespace of Server, no
+// cluster-scoped resource (an empty clusterResourceWhitelist: a
+// ClusterRole or a CRD of an instance is refused), or, for one of the
+// platform's own projects, every namespace and every cluster-scoped
+// resource. The options are those Files checks.
+func (t Target) AppProject(p target.Project) []byte {
+	var a target.Lines
+	a.Add("apiVersion: argoproj.io/v1alpha1")
+	a.Add("kind: AppProject")
+	a.Add("metadata:")
+	a.Add("  name: %q", ProjectName(p.Namespace))
+	a.Add("  namespace: %s", Namespace)
+	a.Add("  labels:")
+	a.Add("    %s: %q", target.ProjectLabel, p.Namespace)
+	a.Add("spec:")
+	if p.Privileged {
+		a.Add("  description: %q", "OKDP project "+p.Namespace+", one of the platform's own: its instances install cluster-scoped objects and write every namespace")
+	} else {
+		a.Add("  description: %q", "OKDP project "+p.Namespace+": its instances, confined to its namespace")
+	}
+	a.Add("  sourceRepos:")
+	a.Add("    - %q", t.RepoURL)
+	a.Add("  destinations:")
+	a.Add("    - server: %s", Server)
+	if p.Privileged {
+		a.Add("      namespace: \"*\"")
+		a.Add("  clusterResourceWhitelist:")
+		a.Add("    - group: \"*\"")
+		a.Add("      kind: \"*\"")
+	} else {
+		a.Add("      namespace: %q", p.Namespace)
+		a.Add("  clusterResourceWhitelist: []")
+	}
+	return []byte(a.String())
 }
 
 // check: the options.
@@ -78,7 +170,7 @@ func (t Target) Application(namespace, release, dir string, wave int) []byte {
 	a.Add("  name: %q", release)
 	a.Add("  namespace: %s", Namespace)
 	a.Add("  labels:")
-	a.Add("    okdp.io/project: %q", namespace)
+	a.Add("    %s: %q", target.ProjectLabel, namespace)
 	a.Add("    okdp.io/instance: %q", release)
 	a.Add("  annotations:")
 	a.Add("    argocd.argoproj.io/sync-wave: \"%d\"", wave)
@@ -86,7 +178,7 @@ func (t Target) Application(namespace, release, dir string, wave int) []byte {
 	a.Add("  finalizers:")
 	a.Add("    - resources-finalizer.argocd.argoproj.io")
 	a.Add("spec:")
-	a.Add("  project: %q", "project-"+namespace)
+	a.Add("  project: %q", ProjectName(namespace))
 	a.Add("  source:")
 	a.Add("    repoURL: %q", t.RepoURL)
 	a.Add("    targetRevision: %q", revision)
@@ -96,7 +188,7 @@ func (t Target) Application(namespace, release, dir string, wave int) []byte {
 	a.Add("      valueFiles:")
 	a.Add("        - %s", helm.ValuesFile)
 	a.Add("  destination:")
-	a.Add("    server: https://kubernetes.default.svc")
+	a.Add("    server: %s", Server)
 	a.Add("    namespace: %q", namespace)
 	a.Add("  ignoreDifferences:")
 	a.Add("    - group: admissionregistration.k8s.io")

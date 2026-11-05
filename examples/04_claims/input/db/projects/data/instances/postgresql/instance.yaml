@@ -1,6 +1,13 @@
-# The database server of the platform's projects, in the namespace data:
-# the provider of the platform's default class of database-server
-# connections (platform.yaml), and of the project demo's large class
-# (project.yaml): the one the claims bind to.
+# The database server of the platform's projects, the release
+# data-postgresql in the namespace data: the provider of the platform's
+# default class of database-server connections (platform.yaml), and of
+# the project demo's large class (project.yaml): the one the claims bind
+# to.
 service: postgresql
 version: 1.0.0
+# The namespaces whose instances may claim of it from another namespace
+# by naming it, or through a class of their project's (large): its
+# consent, over its package's (provisions), which lists none. A class of
+# the platform's (standard) needs none: the platform routes every
+# namespace to its provider.
+claimers: [demo]

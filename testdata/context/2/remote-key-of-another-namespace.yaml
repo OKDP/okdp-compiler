@@ -1,0 +1,16 @@
+# error: database: connection "stolen": secretRef.remoteKey "cnpg-system/finance.ledger.database": a key of the platform's secret store a project may not read: a connection above level 0 (level 2) names a key under "demo/", its namespace; the platform's keys are read through the platform's connections (level 0)
+# An instance's own connection (connections.yaml, level 2) whose
+# credentials are in the platform's secret store under the key of a claim
+# of another namespace, the one the provider cnpg-system pushed for the
+# claim finance.ledger.database: a connection above level 0 reads its
+# namespace's keys only, demo/... here (a project's project.yaml, level 1,
+# alike). The store, platform.yaml's, is given under platform, a level-0
+# layer of the test: a tree's connections.yaml holds connections only.
+platform: {global: {okdp: {secrets: {store: okdp-secrets}}}}
+database: stolen
+connections:
+  stolen:
+    contract: database
+    host: cnpg-postgresql-rw.cnpg-system.svc
+    dbName: finance_ledger_database
+    secretRef: {remoteKey: cnpg-system/finance.ledger.database}

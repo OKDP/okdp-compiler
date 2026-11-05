@@ -171,7 +171,7 @@ generates in the cluster, for
 | `labels` | map of strings | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](02_service_definition.md#context) |
 | `annotations` | map of strings | `{}` | annotations of every object |
 | `type` | string | none | type of the Secret |
-| `namespace` | string | `release.namespace` | namespace of every object |
+| `namespace` | string | `release.namespace` | namespace of every object; another than the release's, a privileged project's only (`global.okdp.policy.privileged`, [objects section](01_inputs_outputs.md#objects-section)) |
 | `refreshInterval` | string | `"0"` | refresh interval of the ExternalSecret, a duration (`1h`): `"0"` generates once |
 | `apiVersion` | string | `external-secrets.io/v1` | apiVersion of the ExternalSecret |
 

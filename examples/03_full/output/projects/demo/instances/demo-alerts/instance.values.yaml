@@ -4,14 +4,11 @@ alertmanager:
   global:
     imageRegistry: registry.example.org
     okdp:
-      certificateIssuers:
-        selfSigned:
-          name: okdp-ca
       charts:
         oidcDcr:
           chart: oidc-dcr
           repository: oci://registry.example.org/mirror
-          version: 0.5.0
+          version: 0.6.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -20,23 +17,15 @@ alertmanager:
         dcr:
           authMethod: anonymous
           backoffLimit: 3
-          caSecret: okdp-ca-bundle
           image:
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
-            tag: 0.5.0
+            tag: 0.6.0
           registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
           ttlSeconds: 300
           waitTtlSeconds: 120
         issuerUri: https://sso.okdp.example.org/realms/okdp/
-      project:
-        allowedSourceRanges:
-          - 10.20.0.0/16
-          - 192.168.10.0/24
-        costCenter: cc-4217
-        name: demo
-        nodePool: analytics
       provisioning:
         database:
           classes:
@@ -47,4 +36,16 @@ alertmanager:
         httpProxy: http://proxy.okdp.example.org:3128
         httpsProxy: http://proxy.okdp.example.org:3128
         noProxy: .svc,.cluster.local,.okdp.example.org
+      secrets:
+        store: okdp-secrets
+      tls:
+        caBundleSecret: okdp-ca-bundle
+        clusterIssuer: okdp-ca
+    project:
+      allowedSourceRanges:
+        - 10.20.0.0/16
+        - 192.168.10.0/24
+      costCenter: cc-4217
+      name: demo
+      nodePool: analytics
     storageClass: fast-ssd

@@ -178,7 +178,9 @@ func checkDir(t *testing.T, dir string, files map[string][]byte) {
 // after the tree's, without config.yaml, must fail with the message of its
 // first line (# error: ..., \n for a line break). A context file may set
 // parameters too: those of level 2, an instance's own connections,
-// reference the connections they give.
+// reference the connections they give. Its key platform, when it has one,
+// is a layer of level 0 the case needs (the platform's secret store), set
+// before its own: a level above 0 sets no platform setting.
 func TestExampleErrors(t *testing.T) {
 	testdata := "testdata"
 	values, _ := filepath.Glob(filepath.Join(testdata, "*.yaml"))
@@ -208,6 +210,10 @@ func TestExampleErrors(t *testing.T) {
 			in := webapp.Inputs
 			if level, err := strconv.ParseUint(filepath.Base(filepath.Dir(f)), 10, 0); err == nil {
 				for _, l := range readLayers(t, []string{f}) {
+					if p, ok := l["platform"].(map[string]any); ok {
+						in.Context = append(in.Context, ContextLayer{Level: 0, Values: p})
+						delete(l, "platform")
+					}
 					in.Context = append(in.Context, ContextLayer{Level: uint(level), Values: l})
 				}
 				in.Values = nil
