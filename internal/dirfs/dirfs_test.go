@@ -154,3 +154,25 @@ func TestDirFSBounds(t *testing.T) {
 		t.Errorf("grown: %d bytes, %v", n, err)
 	}
 }
+
+// TestChartsBounds: a chart cache (NewCharts) bounds the files read of
+// each directory, a chart's, not of the cache: the charts of one
+// project, each within its bound, leave another's chart readable.
+func TestChartsBounds(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, map[string]string{"r/x-1/x/values.yaml": strings.Repeat("x", 10), "r/x-1/x/values.schema.json": strings.Repeat("x", 10), "r/y-1/y/values.yaml": strings.Repeat("y", 10), "r/z-1/z/values.yaml": strings.Repeat("z", 10)})
+	d, err := NewCharts("--charts", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	d.dirCap = 15
+	for _, name := range []string{"r/x-1/x/values.yaml", "r/y-1/y/values.yaml", "r/z-1/z/values.yaml"} {
+		if _, err := fs.ReadFile(d, name); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := fs.ReadFile(d, "r/x-1/x/values.schema.json"); err == nil || err.Error() != "open r/x-1/x/values.schema.json: the files read of --charts "+dir+", r/x-1/x, pass 15 bytes together" {
+		t.Errorf("past a chart's cap: %v", err)
+	}
+}

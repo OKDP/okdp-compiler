@@ -162,8 +162,9 @@ which an instance's list replaces.
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
 | may not | a connection reference out of the compile's reach (under `allOf`, `$defs`, `additionalProperties`...), which a reader of the schema, a console, would take for one the compile resolves and checks | `connections.go: requirements` (`schemaRefs`) | `TestRequirementsOutOfReach` |
 | may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
-| may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store | `namespace.go: tree.refuseSecretTargets` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
+| may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store, an item of a `List` among them | `namespace.go: tree.refuseSecretTargets`, `policy.go: eachObject` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
 | may not | expressions past the cost limit, a host function's call counted by the bytes it reads and writes, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions`, `hostCost` | `testdata/cli/limits.txtar`, `TestHostCostBytes` |
+| may not | amplify its input past the cost limit or the size of a document: a `$for`'s elements and what its body builds counted in the cost, a document's values 32 MiB at most whatever the limit, each copy of a value counted | `compile.Session`: `charge`, `grow`, `memSize` | `TestLoopCost` |
 
 ## The engines
 
@@ -247,7 +248,8 @@ it pulls is bounded and must be the chart the instance names:
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
 | may not | have the cache keep an archive other than the layer an OCI manifest names (a registry, a mirror or a proxy serving another one) | `chartcache/oci.go: pullOCI`, the layer read whole and verified against its size and digest before it is unpacked | `TestPullOCIVerifiesTheLayer` |
-| may not | have a chart pulled over plain http, from a repository, an archive the index names or a redirect, but on a host of `InsecureHosts`, nor redirected from https to http | `RepositoryPuller.check`, `checkRedirect` | `TestIndexIsHTTPS` |
+| may not | have a chart pulled over plain http, from a repository, an archive the index names or a redirect, but on a host of `InsecureHosts`, nor redirected from https to http, by an OCI registry too | `RepositoryPuller.check`, `checkRedirect` | `TestIndexIsHTTPS`, `TestPullerDialsPublicAddresses` |
+| may not | make the puller reach the platform's network (a blind request from the CI or the control plane to an RFC 1918, loopback or link-local address, the cloud metadata endpoint): a registry, a token realm, a redirect, an index or an archive at one refused as dialed, but for a host of `PrivateHosts` or `InsecureHosts` | `RepositoryPuller.dial`, `publicAddress`, oras's `BlockedRealmPrefixes` | `TestPullerDialsPublicAddresses` |
 | may not | have the cache keep an archive of another chart or version than the one named (an index entry, a tag) | `chartcache/cache.go: checkChart` | `TestTheChartIsTheOneNamed` |
 | may not | read a file of the cache other than a chart's `Files`, or through a symbolic link, from the console (`File`) or a compile (`FS`) | `Cache.File`, `Cache.FS` (`internal/dirfs`) | `TestFileIsOneOfFiles`, `TestFSFollowsNoLink` |
 
@@ -262,6 +264,7 @@ the tree it reads:
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
 | may not | make it read a file out of a repository (a symbolic link), block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openDir`, `internal/dirfs: FS.Open` | `testdata/cli/symlink.txtar`, `TestDirFSBounds` |
+| may not | exhaust the chart cache's reads with the charts its packages name, refusing another project's instances: each chart's files 64 MiB together, the cache unbounded but by its charts | `internal/dirfs: NewCharts`, `chartcache.Cache.FS`, `--charts` | `TestChartsBounds`, `TestEachChartHasItsBudget` |
 | may not | make it run without end | `--cost-limit`, `--timeout` (`compile.Session`) | `testdata/cli/limits.txtar` |
 | may not | make it delete an output it did not write, or write through a symbolic link of the output, at any depth under `projects/`, in the output or out of it (every link there removed before a file is written) | `main.go: checkOutput`, `writeTree`, `removeLinks` | `testdata/cli/output.txtar`, `TestWriteTree` |
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Validate` | `testdata/cli/errors.txtar` |

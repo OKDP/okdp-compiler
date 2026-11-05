@@ -41,6 +41,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"cel.dev/cel-go/common/types/traits"
 	"cel.dev/cel-go/ext"
 	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -138,6 +139,8 @@ type Session struct {
 	ctx   context.Context
 	limit uint64 // 0: no limit
 	used  uint64 // counted under a limit only
+	built uint64 // the size of the values the document being evaluated built (grow), at most maxDocSize
+	loops int    // how many $for bodies are running: what they build is counted in the cost (grow)
 	funcs []cel.EnvOption
 	progs []cel.ProgramOption // how its programs run (NewSession)
 	envs  map[string]*cel.Env // by variable names, sorted (compile)
@@ -174,6 +177,81 @@ func toData(v ref.Val) (any, error) {
 		return nil, err
 	}
 	return pb.(*structpb.Value).AsInterface(), nil
+}
+
+// The sizes memSize and dataSize count, about the bytes Go takes: a
+// scalar, a string's or bytes' header besides its bytes (scalarMem); an
+// entry of a map, besides its key's bytes, or an item of a list, besides
+// its value (slotMem); a map or a list itself (containerMem).
+const (
+	scalarMem    = 16
+	slotMem      = 16
+	containerMem = 48
+)
+
+// memSize: the size of the CEL value v as data (toData), walked until it
+// passes left: its size and true, or false once past it. A value that
+// holds another many times counts it each time, as its conversion copies
+// it each time, and the walk stops at left.
+func memSize(v ref.Val, left uint64) (uint64, bool) {
+	n := uint64(scalarMem)
+	switch t := v.(type) {
+	case types.String:
+		n += uint64(len(t))
+	case types.Bytes:
+		n += uint64(len(t)) * 4 / 3 // base64
+	case *types.Optional:
+		if t.HasValue() {
+			return memSize(t.GetValue(), left)
+		}
+	case traits.Mapper:
+		n = containerMem
+		for it := t.Iterator(); it.HasNext() == types.True && n <= left; {
+			k := it.Next()
+			kn, _ := memSize(k, left-n)
+			n = addSat(n, slotMem+kn)
+			if e, ok := t.Find(k); ok && n <= left {
+				en, _ := memSize(e, left-n)
+				n = addSat(n, en)
+			}
+		}
+	case traits.Lister:
+		n = containerMem
+		for it := t.Iterator(); it.HasNext() == types.True && n <= left; {
+			en, _ := memSize(it.Next(), left-n)
+			n = addSat(n, slotMem+en)
+		}
+	}
+	return n, n <= left
+}
+
+// dataSize: the size of v, data, as memSize counts it, walked until it
+// passes left.
+func dataSize(v any, left uint64) (uint64, bool) {
+	n := uint64(scalarMem)
+	switch t := v.(type) {
+	case string:
+		n += uint64(len(t))
+	case M:
+		n = containerMem
+		for k, e := range t {
+			if n > left {
+				break
+			}
+			en, _ := dataSize(e, left-n)
+			n = addSat(n, slotMem+uint64(len(k))+en)
+		}
+	case []any:
+		n = containerMem
+		for _, e := range t {
+			if n > left {
+				break
+			}
+			en, _ := dataSize(e, left-n)
+			n = addSat(n, slotMem+en)
+		}
+	}
+	return n, n <= left
 }
 
 // expr: an expression of a document, compiled once, in the environment of
@@ -255,14 +333,68 @@ func (s *Session) exec(prg cel.Program, scope M) (any, error) {
 	}
 	switch {
 	case s.limit > 0 && s.used > s.limit:
-		return nil, fmt.Errorf("the expressions of the compile exceed its CEL cost limit (%d)", s.limit)
+		return nil, s.costError()
 	case err != nil && s.ctx.Err() != nil:
 		return nil, s.ctx.Err() // interrupted: the context's error
 	case err != nil:
 		return nil, err
 	}
-	// The value as data: what has no data form fails the expression.
+	// The value as data, its size counted first: a list of references to
+	// one large value is small in CEL, and as large as its copies once
+	// converted. What has no data form fails the expression.
+	n, ok := memSize(out, maxDocSize-s.built)
+	if !ok {
+		return nil, s.sizeError()
+	}
+	if err := s.grow(n); err != nil {
+		return nil, err
+	}
 	return toData(out)
+}
+
+// maxDocSize: the size of the values a document may build (memSize, about
+// the bytes they take in memory), whatever the cost limit: those its
+// directives build, those its expressions return, the copies of each
+// element of a $for included. 32 MiB holds the values of a chart many
+// times over; a document past it amplifies its input.
+const maxDocSize = 32 << 20
+
+// grow: n, the size of values the document builds, counted: past
+// maxDocSize, the document fails; inside a $for, n counts in the CEL cost
+// too (charge), what a loop repeats being no CEL evaluation of its own.
+func (s *Session) grow(n uint64) error {
+	if s.built = addSat(s.built, n); s.built > maxDocSize {
+		return s.sizeError()
+	}
+	if s.loops > 0 {
+		return s.charge(n)
+	}
+	return nil
+}
+
+// charge: n units of the work of the directives counted in the CEL cost,
+// under a limit, the context checked: an element of a $for, what a $for
+// builds (grow).
+func (s *Session) charge(n uint64) error {
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	if s.limit > 0 {
+		if s.used = addSat(s.used, n); s.used > s.limit {
+			return s.costError()
+		}
+	}
+	return nil
+}
+
+// costError: the error of a compile past its CEL cost limit.
+func (s *Session) costError() error {
+	return fmt.Errorf("the expressions of the compile exceed its CEL cost limit (%d)", s.limit)
+}
+
+// sizeError: the error of a document past maxDocSize.
+func (s *Session) sizeError() error {
+	return fmt.Errorf("the values the document builds exceed %d MiB", maxDocSize>>20)
 }
 
 // piece: a literal text, or the source of an expression.
@@ -383,6 +515,12 @@ type Doc struct {
 // source, then its path, under the section (okdp.yaml: objects[1]: ...)
 // but in a source that is the section (values.cel.yaml: app: env[2]: ...).
 func (s *Session) Eval(scope M, sections []string, srcs ...Source) (*Doc, error) {
+	// The size of what this document builds, counted from 0; that of a
+	// document evaluated by an expression of another (a template a host
+	// function evaluates) counted in the other's too.
+	outer := s.built
+	s.built = 0
+	defer func() { s.built = addSat(outer, s.built) }()
 	t, err := builder{s}.document(srcs, slices.Sorted(maps.Keys(scope)), sections)
 	if err != nil {
 		return nil, err

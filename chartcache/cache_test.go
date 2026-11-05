@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
 	"github.com/okdp/okdp-compiler/internal/dirfs"
@@ -242,6 +243,51 @@ func TestFSFollowsNoLink(t *testing.T) {
 	}
 	if _, err := fs.ReadFile(NewCache(filepath.Join(dir, "none"), nil).FS(), "x/Chart.yaml"); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("no cache directory: %v", err)
+	}
+}
+
+// TestEachChartHasItsBudget: the charts one project names, each within
+// the bounds of a file, past the 64 MiB the files of a chart may weigh
+// together, leave another project's instance checked against its chart:
+// each chart has its own budget (dirfs.NewCharts).
+func TestEachChartHasItsBudget(t *testing.T) {
+	dir := t.TempDir()
+	tree := fstest.MapFS{"platform.yaml": {Data: []byte("{}\n")}}
+	chart := func(repo, name, values string) {
+		cd := filepath.Join(dir, repo, name+"-1.0.0", name)
+		if err := os.MkdirAll(cd, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for file, data := range map[string]string{"Chart.yaml": "name: " + name + "\nversion: 1.0.0\n", "values.yaml": values} {
+			if err := os.WriteFile(filepath.Join(cd, file), []byte(data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	service := func(svc, name, repo string) {
+		tree["catalog/"+svc+"/1.0.0/Chart.yaml"] = &fstest.MapFile{Data: fmt.Appendf(nil, "apiVersion: v2\nname: %s\nversion: 1.0.0\ndependencies:\n  - {name: %s, alias: app, repository: https://%s, version: 1.0.0}\n", svc, name, repo)}
+	}
+	big := "a: \"" + strings.Repeat("x", dirfs.MaxFileSize-16) + "\"\n"
+	for i := range dirfs.MaxDirSize/dirfs.MaxFileSize + 1 {
+		name := fmt.Sprintf("c%02d", i)
+		chart("big.example.org", name, big)
+		service("s"+name, name, "big.example.org")
+		tree["projects/aaa/instances/"+name+"/instance.yaml"] = &fstest.MapFile{Data: []byte("service: s" + name + "\nversion: 1.0.0\n")}
+	}
+	chart("charts.example.org", "hello", "x: y\n")
+	service("hello", "hello", "charts.example.org")
+	tree["projects/victim/instances/web/instance.yaml"] = &fstest.MapFile{Data: []byte("service: hello\nversion: 1.0.0\n")}
+	tr, err := compiler.Build(t.Context(), []compiler.Repository{{Name: ".", FS: tree, Role: compiler.RoleTree}}, compiler.BuildOptions{Charts: NewCache(dir, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ti := range tr.Instances {
+		if err := ti.Err(); err != nil {
+			t.Errorf("%s/%s: %v", ti.Namespace(), ti.Name, err)
+		}
+	}
+	if tr.ChartsErr != nil {
+		t.Errorf("charts: %v", tr.ChartsErr)
 	}
 }
 

@@ -33,8 +33,15 @@ type item interface {
 // string, $${{ read as ${{.
 type constant struct{ v any }
 
-// eval: the scalar.
-func (c constant) eval(*Session, M) (any, bool, error) { return c.v, true, nil }
+// eval: the scalar, its size counted (Session.grow): the values hold it
+// once more.
+func (c constant) eval(s *Session, _ M) (any, bool, error) {
+	n := uint64(scalarMem)
+	if str, ok := c.v.(string); ok {
+		n += uint64(len(str))
+	}
+	return c.v, true, s.grow(n)
+}
 
 // eval: a lone expression, the whole scalar: its value, of its type.
 func (e *expr) eval(s *Session, scope M) (any, bool, error) {
@@ -66,24 +73,28 @@ func (t text) eval(s *Session, scope M) (any, bool, error) {
 		}
 		b.WriteString(value.Str(v))
 	}
-	return b.String(), true, nil
+	return b.String(), true, s.grow(scalarMem + uint64(b.Len()))
 }
 
 // list: a YAML list, its items in order; an error at the position of the
 // item as written.
 type list []item
 
-// eval: the values of the items, spliced.
+// eval: the values of the items, spliced, their slots counted
+// (Session.grow), their values by the nodes that give them.
 func (l list) eval(s *Session, scope M) (any, bool, error) {
 	out := []any{}
 	for i, it := range l {
 		vs, err := it.items(s, scope)
+		if err == nil {
+			err = s.grow(slotMem * uint64(len(vs)))
+		}
 		if err != nil {
 			return nil, false, atIndex(i, err)
 		}
 		out = append(out, vs...)
 	}
-	return out, true, nil
+	return out, true, s.grow(containerMem)
 }
 
 // one: a list item that is one node: its value, none when it is left out.
@@ -126,11 +137,18 @@ type field struct {
 	n        node
 }
 
-// eval: the map: its keys kept, then $merge.
+// eval: the map: its keys kept, then $merge, a copy of its map merged
+// over them; its entries and the copy counted (Session.grow).
 func (m plainMap) eval(s *Session, scope M) (any, bool, error) {
 	out := M{}
+	if err := s.grow(containerMem); err != nil {
+		return nil, false, err
+	}
 	for _, f := range m.fields {
 		v, keep, err := f.n.eval(s, scope)
+		if err == nil && keep {
+			err = s.grow(slotMem + uint64(len(f.out)))
+		}
 		if err != nil {
 			return nil, false, atKey(f.key, err)
 		}
@@ -143,7 +161,15 @@ func (m plainMap) eval(s *Session, scope M) (any, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		out = value.Merge(out, value.AsMap(v))
+		src := value.AsMap(v)
+		n, ok := dataSize(src, maxDocSize-s.built)
+		if !ok {
+			return nil, false, s.sizeError()
+		}
+		if err := s.grow(n); err != nil {
+			return nil, false, err
+		}
+		out = value.Merge(out, src)
 	}
 	return out, true, nil
 }
@@ -181,7 +207,11 @@ type loop struct {
 
 // run: f on the scope of each element of the list, in order: scope, the
 // variable bound to the element, then the $vars bindings. A null list has
-// no element; a value that is not a list fails.
+// no element; a value that is not a list fails. Each element counts 1 in
+// the CEL cost, the context checked (Session.charge), and what its body
+// builds counts too (Session.grow): a $for repeats its body without an
+// evaluation of CEL's own, three nested over a list of 150 elements
+// building 3.4 million items from an expression of cost 150.
 func (l *loop) run(s *Session, scope M, f func(local M) error) error {
 	v, _, err := l.list.eval(s, scope)
 	if err != nil {
@@ -191,8 +221,20 @@ func (l *loop) run(s *Session, scope M, f func(local M) error) error {
 	if !ok && v != nil {
 		return fmt.Errorf("$for %q: not a list", l.spec)
 	}
+	if len(elems) == 0 {
+		return nil
+	}
+	// One copy of scope for the elements, its variable and $vars bound
+	// again for each: an evaluation keeps no scope, its value being data.
+	local := make(M, len(scope)+1+len(l.vars))
+	maps.Copy(local, scope)
+	s.loops++
+	defer func() { s.loops-- }()
 	for _, x := range elems {
-		local := with(scope, l.name, x)
+		if err := s.charge(1); err != nil {
+			return fmt.Errorf("$for %q: %w", l.spec, err)
+		}
+		local[l.name] = x
 		if err := l.vars.bind(s, local); err != nil {
 			return err
 		}
@@ -201,14 +243,6 @@ func (l *loop) run(s *Session, scope M, f func(local M) error) error {
 		}
 	}
 	return nil
-}
-
-// with: a copy of scope with k bound to v.
-func with(scope M, k string, v any) M {
-	out := make(M, len(scope)+1)
-	maps.Copy(out, scope)
-	out[k] = v
-	return out
 }
 
 // forMap: a map with $for: one key per element, $key as text, its value
@@ -230,13 +264,14 @@ func (m *forMap) eval(s *Session, scope M) (any, bool, error) {
 		if err != nil {
 			return err
 		}
-		out[value.Str(k)] = v
-		return nil
+		key := value.Str(k)
+		out[key] = v
+		return s.grow(slotMem + uint64(len(key)))
 	})
 	if err != nil {
 		return nil, false, err
 	}
-	return out, true, nil
+	return out, true, s.grow(containerMem)
 }
 
 // forItem: a list item with $for: the items $each gives per element, a

@@ -191,7 +191,7 @@ func apiGroup(apiVersion string) string {
 // platform's projects alone (global.okdp.policy.privileged) install
 // cluster-scoped objects and write other namespaces.
 func checkObjects(svc, namespace string, objects []M) error {
-	for _, o := range objects {
+	return eachObject(objects, func(o M) error {
 		meta := value.AsMap(o["metadata"])
 		id := value.Str(o["kind"]) + "/" + value.Str(meta["name"])
 		version := value.Str(o["apiVersion"])
@@ -204,11 +204,28 @@ func checkObjects(svc, namespace string, objects []M) error {
 		if ns, set := meta["namespace"]; set && ns != nil && ns != "" && ns != namespace {
 			return fmt.Errorf("%s: objects: %s: namespace %s, not the instance's (%s): the platform's projects write other namespaces (global.okdp.policy.privileged), %s is not one of them", svc, id, value.Str(ns), namespace, namespace)
 		}
+		return nil
+	})
+}
+
+// eachObject: f on each object of objects, in order, each followed by the
+// items of the list it holds, at any depth (items: a List, which Helm and
+// Argo CD install item by item, an item that is not a map skipped): the
+// one walk of the rules on an instance's objects (checkObjects,
+// checkPlainSecrets, refuseSecretTargets, keepSynced), so that an object
+// wrapped in a List escapes none. The first error of f stops it.
+func eachObject(objects []M, f func(o M) error) error {
+	for _, o := range objects {
+		if err := f(o); err != nil {
+			return err
+		}
 		var items []M
 		for _, i := range value.AsList(o["items"]) {
-			items = append(items, value.AsMap(i))
+			if m, ok := i.(M); ok {
+				items = append(items, m)
+			}
 		}
-		if err := checkObjects(svc, namespace, items); err != nil {
+		if err := eachObject(items, f); err != nil {
 			return err
 		}
 	}
@@ -437,7 +454,7 @@ func (r *upstreamRules) refused(ref, p string, at func(string) string) error {
 // fails, named Secret/<name>, its key of values named, data before
 // stringData.
 func checkPlainSecrets(svc string, objects []M) error {
-	for _, o := range objects {
+	return eachObject(objects, func(o M) error {
 		if value.Str(o["kind"]) == "Secret" && apiGroup(value.Str(o["apiVersion"])) == "" {
 			for _, k := range []string{"data", "stringData"} {
 				if len(value.AsMap(o[k])) > 0 {
@@ -445,13 +462,6 @@ func checkPlainSecrets(svc string, objects []M) error {
 				}
 			}
 		}
-		var items []M
-		for _, i := range value.AsList(o["items"]) {
-			items = append(items, value.AsMap(i))
-		}
-		if err := checkPlainSecrets(svc, items); err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }

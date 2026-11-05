@@ -307,7 +307,8 @@ and `--timeout` (10m, 0 for none), the whole compile, past which nothing
 is written ([command line](docs/01_usage.md#command-line)). What the
 command reads is too: a symbolic link in a repository or the chart cache
 is not followed but refused, a file over 4 MiB, or a directory's files
-over 64 MiB together, refused. Credentials written in clear fail the
+over 64 MiB together (a chart's, in the chart cache), refused.
+Credentials written in clear fail the
 compile, but with `--allow-plain-secrets`, for a deployments repository
 that is private.
 

@@ -7,9 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"os"
+	"slices"
 	"strings"
+	"syscall"
+	"time"
 
 	compiler "github.com/okdp/okdp-compiler"
 	"sigs.k8s.io/yaml"
@@ -32,22 +38,113 @@ const HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1.ta
 // chart repositories without TLS); every other host over https only: an
 // http:// chart repository, an index.yaml naming an http:// archive, a
 // redirect to one are refused, and a redirect from https to http is
-// refused whatever the host.
+// refused whatever the host, of an OCI registry (a blob's) as of an https
+// repository.
+//
+// A chart host is a package's to name, and the puller runs where the
+// platform's services are reachable (a CI job, the control plane): every
+// connection it opens, to a registry, a token realm, a redirect's target,
+// an index or an archive, is refused when its address is private (RFC
+// 1918, unique-local, carrier-grade NAT), loopback, link-local (the cloud
+// metadata endpoints) or unspecified, the address checked as dialed, but
+// for the hosts of PrivateHosts and of InsecureHosts: a registry of the
+// platform's own network is allowed by name. Behind a proxy
+// ($HTTPS_PROXY), the proxy is dialed, and reaches the hosts.
 type RepositoryPuller struct {
-	client        remote.Client
 	http          *http.Client
+	oci           *http.Client
+	base          *http.Transport // the transport of both, its dialer the address check
+	cache         auth.Cache
+	proxies       []string // the hosts of the proxies of the environment, dialed whatever their address
 	InsecureHosts []string
+	// PrivateHosts: the chart hosts, host, host:port or *.<domain>,
+	// allowed at a private, loopback or link-local address (a registry
+	// of the cluster, *.svc.cluster.local), beside InsecureHosts.
+	PrivateHosts []string
 }
 
 // NewRepositoryPuller pulls from OCI registries and https chart
 // repositories.
 func NewRepositoryPuller(insecureHosts []string) *RepositoryPuller {
-	f := &RepositoryPuller{
-		client:        &auth.Client{Client: retry.DefaultClient, Cache: auth.NewCache()},
-		InsecureHosts: insecureHosts,
-	}
-	f.http = &http.Client{Timeout: FetchTimeout, CheckRedirect: f.checkRedirect}
+	f := &RepositoryPuller{cache: auth.NewCache(), InsecureHosts: insecureHosts, proxies: proxyHosts()}
+	d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	f.base = http.DefaultTransport.(*http.Transport).Clone()
+	f.base.DialContext = f.dial(d)
+	f.http = &http.Client{Timeout: FetchTimeout, CheckRedirect: f.checkRedirect, Transport: f.base}
+	f.oci = &http.Client{Transport: retry.NewTransport(f.base), CheckRedirect: f.checkRedirect}
 	return f
+}
+
+// proxyHosts: the host names of the proxies of the environment
+// (http.ProxyFromEnvironment's variables).
+func proxyHosts() []string {
+	var out []string
+	for _, v := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if u, err := url.Parse(os.Getenv(v)); err == nil && u.Hostname() != "" {
+			out = append(out, u.Hostname())
+		}
+	}
+	return out
+}
+
+// allowed: the host of addr (host:port) may be at any address: a host of
+// PrivateHosts or of InsecureHosts, or a proxy of the environment.
+func (f *RepositoryPuller) allowed(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if slices.Contains(f.proxies, host) {
+		return true
+	}
+	for _, h := range slices.Concat(f.PrivateHosts, f.InsecureHosts) {
+		h = strings.TrimSpace(h)
+		if h == addr || h == host || (strings.HasPrefix(h, "*.") && strings.HasSuffix(host, h[1:])) {
+			return true
+		}
+	}
+	return false
+}
+
+// dial: the DialContext of the puller's transport: d's, an address that
+// is not public refused (publicAddress) but for an allowed host, checked
+// once resolved, as dialed, so that a name resolved again (DNS
+// rebinding) is checked too.
+func (f *RepositoryPuller) dial(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if f.allowed(addr) {
+			return d.DialContext(ctx, network, addr)
+		}
+		guarded := *d
+		guarded.Control = func(_, address string, _ syscall.RawConn) error {
+			return publicAddress(addr, address)
+		}
+		return guarded.DialContext(ctx, network, addr)
+	}
+}
+
+// notPublic: the addresses a chart host is refused at, but when allowed:
+// oras's realm denylist, strict (loopback, link-local, unspecified, the
+// cloud metadata endpoints; RFC 1918, unique-local, carrier-grade NAT).
+var notPublic = slices.Concat(auth.DefaultBlockedRealmPrefixes(), auth.PrivateRealmPrefixes())
+
+// publicAddress: nil when address, the ip:port host:port addr is dialed
+// at, is public: not in notPublic, nor loopback, private, link-local,
+// multicast or unspecified, an IPv4 address in IPv6 unwrapped.
+func publicAddress(addr, address string) error {
+	ap, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return fmt.Errorf("%s: dialed at %q, not an address", addr, address)
+	}
+	ip := ap.Addr().Unmap().WithZone("")
+	refused := ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+	for _, p := range notPublic {
+		refused = refused || p.Contains(ip)
+	}
+	if refused {
+		return fmt.Errorf("%s is at %s, a private, loopback or link-local address: a chart host reaches one only when it is allowed (RepositoryPuller.PrivateHosts, InsecureHosts)", addr, ip)
+	}
+	return nil
 }
 
 // maxRedirects: the redirects a GET follows, as net/http's default.
@@ -100,7 +197,13 @@ func (f *RepositoryPuller) pullOCI(ctx context.Context, repository, tag string, 
 		return err
 	}
 	repo.PlainHTTP = plainHTTP
-	repo.Client = f.client
+	// A token realm of another host than the registry's at a private
+	// address refused by oras too, unless the puller allows hosts there.
+	blocked := notPublic
+	if len(f.PrivateHosts) > 0 || len(f.InsecureHosts) > 0 {
+		blocked = auth.DefaultBlockedRealmPrefixes()
+	}
+	repo.Client = &auth.Client{Client: f.oci, Cache: f.cache, BlockedRealmPrefixes: blocked}
 
 	manifestDesc, rc, err := repo.FetchReference(ctx, tag)
 	if err != nil {

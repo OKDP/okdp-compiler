@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"net/http"
@@ -18,7 +20,6 @@ import (
 
 	compiler "github.com/okdp/okdp-compiler"
 	"github.com/opencontainers/go-digest"
-	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
 )
@@ -57,10 +58,10 @@ func registry(t *testing.T, repository, tag string, layer, served []byte) *httpt
 	t.Helper()
 	config := []byte("{}")
 	manifest, err := json.Marshal(ocispec.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2},
-		MediaType: ocispec.MediaTypeImageManifest,
-		Config:    ocispec.Descriptor{MediaType: "application/vnd.cncf.helm.config.v1+json", Digest: digest.FromBytes(config), Size: int64(len(config))},
-		Layers:    []ocispec.Descriptor{{MediaType: HelmChartContentMediaType, Digest: digest.FromBytes(layer), Size: int64(len(layer))}},
+		SchemaVersion: 2,
+		MediaType:     ocispec.MediaTypeImageManifest,
+		Config:        ocispec.Descriptor{MediaType: "application/vnd.cncf.helm.config.v1+json", Digest: digest.FromBytes(config), Size: int64(len(config))},
+		Layers:        []ocispec.Descriptor{{MediaType: HelmChartContentMediaType, Digest: digest.FromBytes(layer), Size: int64(len(layer))}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -125,5 +126,76 @@ func TestPullOCIVerifiesTheLayer(t *testing.T) {
 				t.Errorf("a directory of the chart left: %v", err)
 			}
 		})
+	}
+}
+
+// TestPullerDialsPublicAddresses: a chart host at a private, loopback or
+// link-local address is refused, its index, an OCI registry's token
+// realm of another host alike, but for a host of PrivateHosts or of
+// InsecureHosts; an OCI registry's redirect from https to http is
+// refused, as an index's.
+func TestPullerDialsPublicAddresses(t *testing.T) {
+	tgz := stored(t, map[string]string{"app/Chart.yaml": "name: app\nversion: 1.0.0\n"})
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(tgz) }))
+	defer plain.Close()
+	realm := ""
+	var s *httptest.Server
+	s = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch p := r.URL.Path; {
+		case p == "/index.yaml":
+			_, _ = fmt.Fprintf(w, "entries:\n  app:\n    - version: 1.0.0\n      urls: [%q]\n", s.URL+"/app-1.0.0.tgz")
+		case p == "/app-1.0.0.tgz":
+			_, _ = w.Write(tgz)
+		case realm != "":
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`",service="x"`)
+			w.WriteHeader(http.StatusUnauthorized)
+		case strings.HasPrefix(p, "/v2/charts/app/manifests/"):
+			config := []byte("{}")
+			manifest, _ := json.Marshal(ocispec.Manifest{
+				SchemaVersion: 2, MediaType: ocispec.MediaTypeImageManifest,
+				Config: ocispec.Descriptor{MediaType: "application/vnd.cncf.helm.config.v1+json", Digest: digest.FromBytes(config), Size: int64(len(config))},
+				Layers: []ocispec.Descriptor{{MediaType: HelmChartContentMediaType, Digest: digest.FromBytes(tgz), Size: int64(len(tgz))}},
+			})
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+			w.Header().Set("Docker-Content-Digest", digest.FromBytes(manifest).String())
+			_, _ = w.Write(manifest)
+		case strings.HasPrefix(p, "/v2/charts/app/blobs/"):
+			http.Redirect(w, r, plain.URL+"/blob", http.StatusTemporaryRedirect)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer s.Close()
+	host := strings.TrimPrefix(s.URL, "https://")
+	puller := func(private ...string) *RepositoryPuller {
+		p := NewRepositoryPuller(nil)
+		p.PrivateHosts = private
+		p.base.TLSClientConfig = s.Client().Transport.(*http.Transport).TLSClientConfig
+		return p
+	}
+	pull := func(p *RepositoryPuller, repository string) error {
+		return p.Pull(t.Context(), compiler.ChartRef{Repository: repository, Chart: "app", Version: "1.0.0"}, func(io.Reader) error { return nil })
+	}
+	const private = "a private, loopback or link-local address"
+	if err := pull(puller(), s.URL); err == nil || !strings.Contains(err.Error(), private) {
+		t.Errorf("an index at a loopback address: %v", err)
+	}
+	if err := pull(puller("127.0.0.1"), s.URL); err != nil {
+		t.Errorf("an index of a host allowed: %v", err)
+	}
+	if err := pull(puller(), "oci://"+host+"/charts"); err == nil || !strings.Contains(err.Error(), private) {
+		t.Errorf("a registry at a loopback address: %v", err)
+	}
+	if err := pull(puller("*.example.org", host), "oci://"+host+"/charts"); err == nil || !strings.Contains(err.Error(), "from https to http refused") {
+		t.Errorf("a blob redirected to http: %v", err)
+	}
+	realm = "https://10.255.255.1:1/token"
+	if err := pull(puller(host), "oci://"+host+"/charts"); err == nil || !strings.Contains(err.Error(), "10.255.255.1:1 is at 10.255.255.1, "+private) {
+		t.Errorf("a realm at a private address: %v", err)
+	}
+	for addr, want := range map[string]bool{"8.8.8.8:443": true, "10.1.2.3:443": false, "[::ffff:192.168.1.1]:443": false, "169.254.169.254:80": false, "[fd00::1]:443": false, "100.64.0.1:443": false, "0.0.0.0:443": false, "[2001:4860::8888]:443": true} {
+		if err := publicAddress("h:1", addr); (err == nil) != want {
+			t.Errorf("%s: %v, public %v", addr, err, want)
+		}
 	}
 }

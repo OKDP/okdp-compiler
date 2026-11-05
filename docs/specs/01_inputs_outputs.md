@@ -2003,7 +2003,9 @@ trust-manager's `Bundle`, Kyverno's `ClusterPolicy` and
 Calico's `GlobalNetworkPolicy`, OpenShift's `SecurityContextConstraints`
 and `ClusterResourceQuota`, `ClusterWorkflowTemplate`). An object that
 holds `items` (a `List`, which Helm installs item by item) has each item
-checked alike. A kind the compiler does not know, without a namespace, is
+checked alike, at any depth: every rule on an instance's objects (this
+one, the plain Secrets, two writers of one Secret, the sync options of
+an object Helm keeps) walks them so (`eachObject`). A kind the compiler does not know, without a namespace, is
 assumed namespaced: the engine's identity, confined to the namespace, is
 the second line ([targets](#targets)). The first refused object, in the
 order of `Objects`, fails the compile, named `<kind>/<name>`
@@ -2067,8 +2069,8 @@ when the release no longer renders it or is uninstalled, and so does
 Flux's helm-controller. Argo CD renders the chart with `helm template`
 and reads no Helm annotation: it would prune the object, and delete it
 with its Application. Whatever wrote it (the mapping's `objects`, a
-generated Secret's, the compiler's), each such object of `Objects`
-carries Argo CD's equivalents, in its annotation
+generated Secret's, the compiler's), each such object of `Objects`, an
+item of a `List` among them, carries Argo CD's equivalents, in its annotation
 `argocd.argoproj.io/sync-options`, after the options it holds,
 comma-separated: `Prune=false`, not pruned when it leaves the
 Application's manifests, and `Delete=false`, not deleted with the
@@ -2372,7 +2374,7 @@ output it lacks. In the order of the instances:
    of two, refuse the instances that hold them, each: a v1 `Secret`, an
    `ExternalSecret`'s `spec.target.name` (its own name when unset; none
    with `creationPolicy: None`), a `PushSecret`'s key of the store and
-   property. They would overwrite each other's credentials: a provider's
+   property, an item of a `List` alike. They would overwrite each other's credentials: a provider's
    `secretRef.name` names its claimers' copies, `<release>-<secret>`,
    which could otherwise be the Secret of another instance's connection,
    `<release>.<connection>-credentials`. The instances that reference

@@ -219,7 +219,7 @@ func compileTree(o options, rep *report) error {
 	}
 	var charts compiler.ChartSource
 	if o.charts != "" {
-		fsys, err := openDir("--charts", o.charts)
+		fsys, err := dirfs.NewCharts("--charts", o.charts)
 		if err != nil {
 			return err
 		}
@@ -344,10 +344,11 @@ func compileTree(o options, rep *report) error {
 	return nil
 }
 
-// openDir: the files under dir, given as flag (--repository, --charts,
-// --output), as dirfs.New reads them: a symbolic link refused wherever
-// it points, a file that is neither regular nor a directory refused, a
-// file over 4 MiB, or the files read over 64 MiB together, refused.
+// openDir: the files under dir, given as flag (--repository, --output),
+// as dirfs.New reads them: a symbolic link refused wherever it points, a
+// file that is neither regular nor a directory refused, a file over
+// 4 MiB, or the files read over 64 MiB together, refused. --charts is
+// read as dirfs.NewCharts reads it: 64 MiB for each chart's files.
 func openDir(flag, dir string) (*dirfs.FS, error) { return dirfs.New(flag, dir) }
 
 // graphErrors: err, the problems of the graph at the release of ti, each

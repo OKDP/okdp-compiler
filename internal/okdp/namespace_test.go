@@ -1030,6 +1030,16 @@ func TestCompileAllSecretTargets(t *testing.T) {
 				"demo-b": `error: Secret "s" of namespace demo is written by Secret s of demo-a and Secret s of demo-b (2 times): two objects may not write one Secret`,
 			},
 		},
+		"an item of a List": {
+			[]Instance{
+				writer("demo", "a", M{"writes": []any{M{"apiVersion": "v1", "kind": "List", "metadata": M{"name": "l"}, "items": []any{M{"apiVersion": "v1", "kind": "List", "items": []any{es("same", "same", "Owner")}}}}}}),
+				writer("demo", "b", M{"writes": []any{es("same", "same", "Owner")}}),
+			},
+			map[string]string{
+				"demo-a": `error: Secret "same" of namespace demo is written by ExternalSecret same of demo-a and ExternalSecret same of demo-b: two objects may not write one Secret`,
+				"demo-b": `error: Secret "same" of namespace demo is written by ExternalSecret same of demo-a and ExternalSecret same of demo-b: two objects may not write one Secret`,
+			},
+		},
 		"a key of the store": {
 			[]Instance{
 				writer("demo", "a", M{"writes": []any{push("p", "demo/k", "password"), push("q", "demo/k", "username")}}),

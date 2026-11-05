@@ -10,7 +10,7 @@ import (
 // Helm reads it (trimmed, any case), gets Argo CD's Prune=false and
 // Delete=false, after the sync options it has, each once, an option of
 // that name it sets left as it is; its annotations copied, a map two
-// objects share unchanged; another object, without keep, without
+// objects share unchanged; an item of a List alike; another object, without keep, without
 // annotations or metadata, left as it is.
 func TestKeepSynced(t *testing.T) {
 	shared := M{resourcePolicy: "keep"}
@@ -24,6 +24,7 @@ func TestKeepSynced(t *testing.T) {
 		{"kind": "Secret", "metadata": M{"name": "g", "annotations": M{resourcePolicy: "delete"}}},
 		{"kind": "Secret", "metadata": M{"name": "h"}},
 		{"kind": "Secret"},
+		{"kind": "List", "items": []any{M{"kind": "Database", "metadata": M{"name": "i", "annotations": M{resourcePolicy: "keep"}}}}},
 	}
 	keepSynced(objects)
 	want := map[string]any{
@@ -35,6 +36,9 @@ func TestKeepSynced(t *testing.T) {
 		"f": "Prune=false,Delete=false",
 		"g": nil,
 		"h": nil,
+	}
+	if got := objects[9]["items"].([]any)[0].(M)["metadata"].(M)["annotations"].(M)[syncOptions]; got != "Prune=false,Delete=false" {
+		t.Errorf("an item of a List: got %v", got)
 	}
 	for _, o := range objects {
 		meta, _ := o["metadata"].(M)

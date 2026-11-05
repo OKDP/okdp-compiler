@@ -9,14 +9,16 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"strings"
 	"sync"
 )
 
 // The bounds of what is read of a directory (FS): a file at most
 // MaxFileSize bytes, the files read of one directory, each counted once,
-// at most MaxDirSize together. A tree's files are YAML and JSON
-// documents, an upstream chart's in the cache its values and schema.
+// at most MaxDirSize together; of a chart cache (NewCharts), the files of
+// each chart's directory. A tree's files are YAML and JSON documents, an
+// upstream chart's in the cache its values and schema.
 const (
 	MaxFileSize = 4 << 20
 	MaxDirSize  = 64 << 20
@@ -43,9 +45,11 @@ type FS struct {
 	fileCap int64
 	dirCap  int64
 
-	mu    sync.Mutex
-	sizes map[string]int64 // the regular files opened, by name
-	total int64            // their sizes
+	perDir bool // each directory's files counted apart (NewCharts)
+
+	mu     sync.Mutex
+	sizes  map[string]int64 // the regular files opened, by name
+	totals map[string]int64 // their sizes, by directory when perDir, else all under ""
 }
 
 // New: the FS of dir, which messages name as label (--repository,
@@ -56,7 +60,22 @@ func New(label, dir string) (*FS, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
-	return &FS{root: root, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}}, nil
+	return &FS{root: root, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}, totals: map[string]int64{}}, nil
+}
+
+// NewCharts: the FS of dir, a chart cache (--charts, chartcache.Cache),
+// as New's but for the bound of the files read together: MaxDirSize
+// for the files of each directory, a chart's, not for the cache's. A
+// chart's files are read by the instances that name it: one budget for
+// the cache would let the charts one project names, each within its
+// bounds, exhaust it, and refuse every later instance of the compile,
+// another project's included.
+func NewCharts(label, dir string) (*FS, error) {
+	d, err := New(label, dir)
+	if err == nil {
+		d.perDir = true
+	}
+	return d, err
 }
 
 // Close: the directory released, its files opened readable until each is
@@ -133,7 +152,7 @@ func (d *FS) lstat(name string) (fs.FileInfo, error) {
 
 // count: nil when a regular file of size bytes may be read: within
 // fileCap, and, unless it was opened before, the files opened with it
-// within dirCap.
+// within dirCap: those of the FS, or of its directory when perDir.
 func (d *FS) count(name string, size int64) error {
 	if size > d.fileCap {
 		return fmt.Errorf("%d bytes, over the %s a file read may hold", size, mib(d.fileCap))
@@ -143,11 +162,16 @@ func (d *FS) count(name string, size int64) error {
 	if _, ok := d.sizes[name]; ok {
 		return nil
 	}
-	if d.total+size > d.dirCap {
-		return fmt.Errorf("the files read of %s pass %s together", d.label, mib(d.dirCap))
+	scope, label := "", d.label
+	if d.perDir {
+		scope = path.Dir(name)
+		label = d.label + ", " + scope + ","
+	}
+	if d.totals[scope]+size > d.dirCap {
+		return fmt.Errorf("the files read of %s pass %s together", label, mib(d.dirCap))
 	}
 	d.sizes[name] = size
-	d.total += size
+	d.totals[scope] += size
 	return nil
 }
 

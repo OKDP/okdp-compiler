@@ -95,11 +95,13 @@ func ChartDir(ref compiler.ChartRef) (string, error) {
 // FS is the cache as okdp-compiler reads it (Inputs.Charts), bounded and
 // with no symbolic link followed, as okdp-compile reads its --charts: a
 // link refused wherever it points, a file that is neither regular nor a
-// directory refused, a file over 4 MiB, or the files read through one FS
-// over 64 MiB together, refused. A cache directory that cannot be opened
-// (none yet) gives an FS whose every file fails with that error.
+// directory refused, a file over 4 MiB, or the files read of one chart
+// through one FS over 64 MiB together, refused (dirfs.NewCharts): each
+// chart has its own budget, so that the charts one project names do not
+// exhaust the others'. A cache directory that cannot be opened (none yet)
+// gives an FS whose every file fails with that error.
 func (c *Cache) FS() fs.FS {
-	fsys, err := dirfs.New("the chart cache", c.Dir)
+	fsys, err := dirfs.NewCharts("the chart cache", c.Dir)
 	if err != nil {
 		return errFS{err}
 	}
@@ -137,7 +139,7 @@ func (c *Cache) File(ctx context.Context, ref compiler.ChartRef, name string) ([
 		return nil, err
 	}
 	dir, _ := ChartDir(ref)
-	fsys, err := dirfs.New("the chart cache", c.Dir)
+	fsys, err := dirfs.NewCharts("the chart cache", c.Dir)
 	if err != nil {
 		return nil, err
 	}

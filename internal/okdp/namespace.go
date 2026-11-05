@@ -698,7 +698,7 @@ func secretTargets(ns string, o M) []secretTarget {
 
 // refuseSecretTargets: step 5 of CompileAll, for the instances idx. Two
 // objects that write one Secret of a namespace (secretTargets), of one
-// instance or of two, overwrite each other's credentials: each instance
+// instance or of two, an item of a List among them (eachObject), overwrite each other's credentials: each instance
 // that holds one is refused, its error naming the objects and the
 // instances, and no longer published: refuseClaimers then compiles again
 // those that reference its outputs, which fail. A provider's
@@ -716,12 +716,13 @@ func (t *tree) refuseSecretTargets(idx []int) {
 		if res == nil {
 			continue
 		}
-		for _, o := range res.Objects {
+		_ = eachObject(res.Objects, func(o M) error {
 			for _, x := range secretTargets(res.Namespace, o) {
 				w := writer{res.Release, value.Str(o["kind"]) + " " + value.Str(value.Dig(o, "metadata.name"))}
 				writers[x] = append(writers[x], w)
 			}
-		}
+			return nil
+		})
 	}
 	for _, i := range idx {
 		res := out[i].Result
@@ -730,7 +731,7 @@ func (t *tree) refuseSecretTargets(idx []int) {
 		}
 		var errs []error
 		seen := map[secretTarget]bool{}
-		for _, o := range res.Objects {
+		_ = eachObject(res.Objects, func(o M) error {
 			for _, x := range secretTargets(res.Namespace, o) {
 				if len(writers[x]) < 2 || seen[x] {
 					continue
@@ -753,7 +754,8 @@ func (t *tree) refuseSecretTargets(idx []int) {
 				}
 				errs = append(errs, fmt.Errorf("%s of namespace %s is written by %s: two objects may not write one Secret", what, x.ns, strings.Join(each, " and ")))
 			}
-		}
+			return nil
+		})
 		if errs != nil {
 			out[i] = Outcome{Err: errors.Join(errs...), Claims: out[i].Claims}
 			delete(t.published[res.Namespace], res.Release)

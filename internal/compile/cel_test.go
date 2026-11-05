@@ -722,3 +722,48 @@ func TestSession(t *testing.T) {
 		t.Errorf("interrupted: got %v after %d of %d items", err, calls, len(items))
 	}
 }
+
+// TestLoopCost: what a $for repeats counts, its elements and what its body
+// builds (Session.charge, Session.grow): three loops nested over 150
+// elements, 3.4 million items of one constant map, pass a limit of
+// 100000 at once; without a limit, the size of the document stops them,
+// as it stops a list of references to a value bound before it, each copy
+// counted; a cancelled context stops a loop of no expression.
+func TestLoopCost(t *testing.T) {
+	nested := "vars:\n  big: ${{ lists.range(150) }}\noutput:\n  x:\n    - $for: a in big\n      $each:\n        - $for: b in big\n          $each:\n            - $for: c in big\n              $each: {k: v}\n"
+	const limit = 100_000
+	s := NewSession(context.Background(), limit)
+	_, err := s.Eval(mapCtx(), []string{"output"}, mapping(nested))
+	if want := fmt.Sprintf("exceed its CEL cost limit (%d)", limit); err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("nested loops under a limit: got %v, want %q", err, want)
+	}
+	want := fmt.Sprintf("the values the document builds exceed %d MiB", maxDocSize>>20)
+	if _, err := NewSession(context.Background(), 0).Eval(mapCtx(), []string{"output"}, mapping(nested)); err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("nested loops without a limit: got %v, want %q", err, want)
+	}
+	laughs := "vars:\n  a: " + strings.Repeat("x", 1000) + "\n"
+	prev := "a"
+	for _, n := range []string{"b", "c", "d", "e", "f", "g", "h"} {
+		laughs += "  " + n + ": ${{ [" + strings.TrimSuffix(strings.Repeat(prev+",", 10), ",") + "] }}\n"
+		prev = n
+	}
+	if _, err := NewSession(context.Background(), 0).Eval(mapCtx(), nil, mapping(laughs)); err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("references to a value: got %v, want %q", err, want)
+	}
+	// A small loop: its elements and its items counted, within the limit.
+	s = NewSession(context.Background(), limit)
+	d, err := s.Eval(mapCtx(), []string{"output"}, mapping("output:\n  x:\n    - $for: i in values.items\n      $each: {k: v}\n"))
+	if err != nil || len(value.AsList(d.Sections["output"].(M)["x"])) != 2 || s.used < 2 {
+		t.Errorf("a small loop: %v, cost %d", err, s.used)
+	}
+	// The list given, then the context cancelled: the loop, of no
+	// expression, stops at its next element.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := cel.Function("stop", cel.Overload("stop_dyn", []*cel.Type{cel.DynType}, cel.DynType,
+		cel.UnaryBinding(func(v ref.Val) ref.Val { cancel(); return v })))
+	_, err = NewSession(ctx, 0, stop).Eval(mapCtx(), []string{"output"}, mapping("output:\n  x:\n    - $for: i in stop(lists.range(1000))\n      $each: 1\n"))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled in a loop: got %v, want context.Canceled", err)
+	}
+}

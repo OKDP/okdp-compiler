@@ -173,7 +173,11 @@ a directory (a FIFO, a device) fails, `not a regular file nor a
 directory: not read`; so does a file over 4 MiB, `<n> bytes, over the 4
 MiB a file read may hold`, and a new one once the files read of one
 directory pass 64 MiB together, `the files read of --repository <dir>
-pass 64 MiB together`.
+pass 64 MiB together`. The chart cache (`--charts`, okdp-gitops's) is
+bounded by chart: the files of each chart's directory 64 MiB together,
+`the files read of --charts <dir>, <chart directory>, pass 64 MiB
+together`, so that the charts one project names do not exhaust the
+cache's reads and refuse another project's instances.
 
 ### `--repository`
 
@@ -1114,8 +1118,17 @@ holds, to read it back.
   unpacked, a pull that fails leaving no directory of the chart; an
   https chart repository's archive and redirects https too, plain http
   only on the hosts given to `NewRepositoryPuller` (`InsecureHosts`),
-  never from https; the archive's `Chart.yaml` the chart and version
-  named; `Cache.File` reads one of `chartcache.Files` only, and
+  never from https, an OCI registry's redirects (a blob's) alike; every
+  connection it opens (a registry, a token realm, a redirect, an index,
+  an archive) refused at a private, loopback or link-local address, the
+  address checked as dialed, but for the hosts of
+  `RepositoryPuller.PrivateHosts` (host, `host:port` or `*.<domain>`: a
+  registry of the cluster, `*.svc.cluster.local`) and of
+  `InsecureHosts`, a proxy of the environment (`$HTTPS_PROXY`) dialed
+  whatever its address; the knob is the program's (the control plane's
+  `INSECURE_OCI_REGISTRIES` reaches `InsecureHosts`), not the tree's,
+  as one cache serves every tree; the archive's `Chart.yaml` the chart
+  and version named; `Cache.File` reads one of `chartcache.Files` only, and
   `Cache.FS` follows no symbolic link and bounds what it reads, as
   `okdp-compile` reads `--charts`.
 - `compiler.Partial(tree)` is what `--partial` writes: the results of
@@ -1345,9 +1358,13 @@ holds, to read it back.
   server compiling packages it does not review sets one, as an
   instance's values can make an expression iterate over them;
   okdp-gitops and `okdp-compile` set 50000000 (`--cost-limit`), about
-  50 MB that host functions read or write. The example costs under
-  1000, the OAuth client's template most of it
-  (`ExampleCompile_server`).
+  50 MB that host functions read or write. A `$for` costs 1 an element
+  and the size of what its body builds, its context checked at each.
+  The example costs under 1000, the OAuth client's template most of it
+  (`ExampleCompile_server`). Whatever the limit, a document's values
+  are 32 MiB at most (about their bytes in memory, a value a list holds
+  ten times counted ten times): past it, the compile fails with
+  `the values the document builds exceed 32 MiB`.
 - `Inputs.AllowPlainSecrets` accepts credentials in clear: a `provides`
   `secret` without `generate`, a plain Secret of its `stringData`, and a
   Secret of the `objects` section with `data` or `stringData`. Unset,

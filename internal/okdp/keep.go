@@ -26,16 +26,17 @@ var keepOptions = []string{"Prune=false", "Delete=false"}
 // options of keepOptions added to those of its sync-options annotation,
 // comma-separated, unless it sets an option of that name already
 // (Prune=confirm stays); its metadata and annotations copied, not
-// changed in place. The other objects are left as they are.
+// changed in place; an item of a List alike (eachObject). The other
+// objects are left as they are.
 func keepSynced(objects []map[string]any) {
-	for _, o := range objects {
+	_ = eachObject(objects, func(o M) error {
 		meta, ok := o["metadata"].(M)
 		if !ok {
-			continue
+			return nil
 		}
 		annotations, ok := meta["annotations"].(M)
 		if !ok || !kept(annotations) {
-			continue
+			return nil
 		}
 		var options []string
 		if s, ok := annotations[syncOptions].(string); ok && strings.TrimSpace(s) != "" {
@@ -56,7 +57,8 @@ func keepSynced(objects []map[string]any) {
 		meta = maps.Clone(meta)
 		meta["annotations"] = annotations
 		o["metadata"] = meta
-	}
+		return nil
+	})
 }
 
 // kept: annotations say Helm keeps the object, helm.sh/resource-policy

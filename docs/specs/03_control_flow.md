@@ -503,11 +503,22 @@ elements), and the bytes of the string it returns (`sha256`, `toJson`,
 `Inputs.CostLimit` (checked after each expression; `--cost-limit` of
 `okdp-compile`, 50000000 by default), the compile fails with
 `the expressions of the compile exceed its CEL cost limit (<n>)`
-([usage](../01_usage.md)). The context of `Compile` is checked before
-each expression and every 100 iterations of a comprehension. The
-language has no recursion and no include, and every loop (`$for`, CEL's
-macros) runs over a list or a map it is given: the work is bounded by
-the document and the size of the data it iterates.
+([usage](../01_usage.md)). A `$for` counts too, as it repeats its body
+without an evaluation of CEL's own: each element costs 1, and what its
+body builds costs its size (a constant map of one key about 100). The
+context of `Compile` is checked before each expression, at each element
+of a `$for` and every 100 iterations of a comprehension. The language
+has no recursion and no include, and every loop (`$for`, CEL's macros)
+runs over a list or a map it is given: the work is bounded by the
+document and the size of the data it iterates.
+
+Whatever the limit, a document builds 32 MiB of values at most, about
+the bytes they take in memory: what its directives build, what its
+expressions return, a value counted each time a list holds it again, as
+each is a copy. Past it, the compile fails with
+`the values the document builds exceed 32 MiB`: three `$for` nested
+over 150 elements, or a binding of ten references to the previous one
+eight times, amplify their input; the values of a chart are far below.
 
 ## Errors
 
