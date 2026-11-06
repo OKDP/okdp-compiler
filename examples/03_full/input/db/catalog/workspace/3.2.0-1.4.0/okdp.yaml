@@ -294,4 +294,4 @@ oidcClients:
   # admins, writing a Secret of its own name.
   - $spread: >-
       ${{ values.admins.size() == 0 ? [] : [{'name': 'automation', 'grantTypes': ['client_credentials'],
-          'secret': okdpFullname('automation-oauth')}] }}
+          'secret': okdpFullname('automation')}] }}

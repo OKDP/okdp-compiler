@@ -298,3 +298,110 @@ func TestFilesRederive(t *testing.T) {
 		t.Errorf("the platform's settings refused: %v", err)
 	}
 }
+
+// TestFilesUnloaded: a project that does not load (Tree.Refused) is kept
+// as the previous output holds it, its manifests of today's settings when
+// its project.yaml reads (its context, no instance), as they were when it
+// does not; a context the platform refuses fails not the tree; a project
+// that is not in the output is none.
+func TestFilesUnloaded(t *testing.T) {
+	tr := compiled([]string{"data/db"})
+	tr.Refused = []tree.Refused{
+		{Namespace: "demo", Problems: []string{"db/projects/demo/instances/x/values.yaml: not a file"}, Inputs: okdp.Inputs{Namespace: "demo"}, Own: true},
+		{Namespace: "lost", Problems: []string{"db/projects/lost/project.yaml: parse"}, Inputs: okdp.Inputs{Namespace: "lost"}},
+		{Namespace: "new", Problems: []string{"db/projects/new/instances/x/values.yaml: not a file"}, Inputs: okdp.Inputs{Namespace: "new"}, Own: true},
+	}
+	previous := fstest.MapFS{
+		"projects/demo/kustomization.yaml":            file("old demo\n"),
+		"projects/demo/project/access.yaml":           file("old access\n"),
+		"projects/demo/instances/demo-web/Chart.yaml": file("old web\n"),
+		"projects/lost/instances/lost-web/Chart.yaml": file("old lost\n"),
+	}
+	files, kept, err := Files(tr, []target.Target{flux.Target{}}, previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 3 || !kept[0].Unloaded || kept[0].Namespace != "demo" || kept[0].Instances != nil || kept[0].Problems[0] != tr.Refused[0].Problems[0] {
+		t.Fatalf("kept: %+v", kept)
+	}
+	if string(files["projects/demo/instances/demo-web/Chart.yaml"]) != "old web\n" || files["projects/demo/project/namespace.yaml"] == nil || string(files["projects/demo/project/access.yaml"]) == "old access\n" {
+		t.Errorf("demo: %v", slices.Sorted(maps.Keys(files)))
+	}
+	if string(files["projects/lost/instances/lost-web/Chart.yaml"]) != "old lost\n" || kept[1].Rederived != nil {
+		t.Errorf("lost, no context: %v %+v", slices.Sorted(maps.Keys(files)), kept[1])
+	}
+	if _, ok := files["projects/new/project/namespace.yaml"]; ok {
+		t.Error("a project the output does not hold is written")
+	}
+	// A context the platform's settings refuse: its output kept as it was.
+	tr.Refused[0].Inputs.Context = []okdp.ContextLayer{{Values: map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": "x"}}}}}
+	files, _, err = Files(tr, []target.Target{flux.Target{}}, previous)
+	if err != nil || string(files["projects/demo/project/access.yaml"]) != "old access\n" {
+		t.Errorf("settings refused: %v", err)
+	}
+}
+
+// TestFilesDropped: a project kept whose namespace the compiler or the
+// platform reserves now is dropped, whether it loads or not and whatever
+// the target: nothing of it kept, written nor listed in the root
+// Kustomization or among the releases, Kept.Dropped says why, the others
+// kept as ever; one the output does not hold is not dropped.
+func TestFilesDropped(t *testing.T) {
+	reserved := []okdp.ContextLayer{{Values: map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": map[string]any{"reserved": []any{"openbao"}}}}}}}
+	tr := compiled([]string{"openbao/web", "kube-system/web", "demo/web", "fresh/web"}, "openbao/web", "kube-system/web", "demo/web", "fresh/web")
+	for _, ti := range tr.Instances {
+		ti.Inputs.Context = reserved
+	}
+	tr.Refused = []tree.Refused{{Namespace: "loose", Problems: []string{"x"}, Inputs: okdp.Inputs{Namespace: "loose", Context: reserved}, Own: true}}
+	previous := fstest.MapFS{}
+	for _, ns := range []string{"openbao", "kube-system", "demo"} {
+		previous["projects/"+ns+"/kustomization.yaml"] = file("old " + ns + "\n")
+		previous["projects/"+ns+"/instances/"+ns+"-web/Chart.yaml"] = file("old web\n")
+	}
+	for _, tg := range []target.Target{flux.Target{}, helm.Target{}} {
+		files, kept, err := Files(tr, []target.Target{tg}, previous)
+		if err != nil {
+			t.Fatalf("%T: %v", tg, err)
+		}
+		dropped := map[string]string{}
+		for _, k := range kept {
+			if k.Dropped != "" {
+				dropped[k.Namespace] = k.Dropped
+			}
+		}
+		if len(dropped) != 2 || !strings.Contains(dropped["openbao"], "reserved by the platform (global.okdp.policy.reserved)") || !strings.Contains(dropped["kube-system"], "kube-* is Kubernetes' own") {
+			t.Errorf("%T: dropped %q", tg, dropped)
+		}
+		for p := range files {
+			if strings.HasPrefix(p, "projects/openbao/") || strings.HasPrefix(p, "projects/kube-system/") {
+				t.Errorf("%T: %s of a project dropped", tg, p)
+			}
+		}
+		if string(files["projects/demo/instances/demo-web/Chart.yaml"]) != "old web\n" {
+			t.Errorf("%T: demo: %v", tg, slices.Sorted(maps.Keys(files)))
+		}
+		if _, isFlux := tg.(flux.Target); isFlux && strings.Contains(string(files["projects/kustomization.yaml"]), "openbao") {
+			t.Errorf("the root Kustomization lists openbao: %s", files["projects/kustomization.yaml"])
+		}
+	}
+	// A dropped project's release no longer counts: another namespace may
+	// have it.
+	other := compiled([]string{"openbao/web", "a/b-web"}, "openbao/web")
+	other.Instances[0].Inputs.Context = reserved
+	other.Instances[1].Inputs.Namespace, other.Instances[1].Inputs.Release, other.Instances[1].Name = "a", "a-b-web", "b-web"
+	if _, kept, err := Files(other, []target.Target{flux.Target{}}, fstest.MapFS{"projects/openbao/instances/a-b-web/Chart.yaml": file("old\n")}); err != nil || kept[0].Dropped == "" {
+		t.Errorf("a release of a project dropped: %v %+v", err, kept)
+	}
+}
+
+// TestPlatformObjectNames: the names the targets write in every namespace
+// are among okdp.PlatformObjectNames, which a release may not take
+// (okdp.checkRelease).
+func TestPlatformObjectNames(t *testing.T) {
+	names := []string{flux.RoleName, target.NetworkPolicyName, target.ControlPlaneName, target.AccessName(okdp.RoleViewer), target.AccessName(okdp.RoleEditor), target.AccessName(okdp.RoleAdmin)}
+	for _, n := range names {
+		if !slices.Contains(okdp.PlatformObjectNames, n) {
+			t.Errorf("%s: written by a target in every namespace, not in okdp.PlatformObjectNames", n)
+		}
+	}
+}

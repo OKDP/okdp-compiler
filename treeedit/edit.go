@@ -116,15 +116,23 @@ type State struct {
 }
 
 // StateOf is the State of a compile, compiler.Build's tree and error: a
-// *compiler.LoadError is the State's, any other error is returned.
+// *compiler.LoadError is the State's, so is why the projects of the tree
+// that do not load do not (compiler.LoadErrorOf), any other error is
+// returned.
 func StateOf(tree *compiler.Tree, err error) (State, error) {
-	if load, ok := errors.AsType[*compiler.LoadError](err); ok {
-		return State{Load: load}, nil
-	}
 	if err != nil {
+		if load, ok := errors.AsType[*compiler.LoadError](err); ok {
+			return State{Load: load}, nil
+		}
 		return State{}, err
 	}
-	return State{Tree: tree}, nil
+	// A project that does not load is a problem of the tree for a check:
+	// a change may not add one, though the tree compiles without it.
+	s := State{Tree: tree}
+	if load := compiler.LoadErrorOf(tree); load != nil {
+		s = State{Load: load}
+	}
+	return s, nil
 }
 
 // Check: how the compile of the tree checks a change, the compile of the

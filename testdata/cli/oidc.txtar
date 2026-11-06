@@ -1,11 +1,13 @@
-# The Secret an OAuth client is written to is one of its release's,
-# <release>-...: the Job that registers the client writes it with a Role
-# of the namespace, and would otherwise overwrite another instance's
-# credentials (demo-db's). Refused in every mode, here OIDC unset;
-# nothing written.
+# The Secret an OAuth client is written to is its release's,
+# <release>-<client name> exactly (<release>-oidc for the main client), not
+# any name that starts with <release>-: the Job that registers the client
+# writes it with a Role of the namespace, and would otherwise overwrite
+# another instance's credentials (demo-db's, or demo-web-x's: the prefix
+# of the release demo-web is the prefix of an instance web-x). Refused in
+# every mode, here OIDC unset; nothing written.
 status 1 okdp-compile --repository $WORK/tree -o $WORK/files
 ! stdout .
-stderr '^error: demo/demo-web: oidcClients\[0\]: secret "demo-db-credentials": the Secret the client is written to is one of the release''s, its name starts with "demo-web-"$'
+stderr '^error: demo/demo-web: oidcClients\[0\]: secret "demo-db-credentials": the Secret the client is written to is the release''s, "demo-web-oidc" \(<release>-<client name>, <release>-oidc for the main client\)$'
 ! exists $WORK/files
 
 -- tree/catalog/web/1.0.0/Chart.yaml --

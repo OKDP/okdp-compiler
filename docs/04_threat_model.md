@@ -64,9 +64,9 @@ are checked whatever their layer; the only one that sets `global.okdp`
 but `provisioning`: the ingress, TLS, the OAuth clients and their chart
 (`charts`), the proxy, the secret store (`secrets`) and the policy
 (`policy`: the privileged projects, the upstream deny-list and
-registries). Its connections name any key of the store, the platform's
-own under `platform/`, and its classes route every namespace to their
-providers, consenting for them.
+registries). Its connections name any key of the store, visible to every
+project (a connection of level 0 is every project's), and its classes
+route every namespace to their providers, consenting for them.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
@@ -76,7 +76,8 @@ providers, consenting for them.
 | may | name its administrators' groups and the API server's group prefix (`access`): the bootstrap binds the administrators, the compiler writes nothing of them | `platform.schema.json`, `access.go: PlatformAdmins` | `TestPlatformAdmins`, `TestAccessCompile` |
 | may | name the control plane's identity (`controlPlane.serviceAccount`), bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | `target.ControlPlane` | `TestControlPlane`, `TestControlPlaneSetting` |
 | may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | `target.NetworkPolicy`, `okdp.network` | `testdata/cli/network.txtar`, `TestNetworkPolicy`, `TestClaimsNetwork` |
-| may | give a connection of any key of the store, `platform/<key>` | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
+| may | give a connection of any key of the store, `platform/<key>` of a ClusterSecretStore; with `secrets.provider`, a key a namespace reads, `<namespace>/<key>`, read through the project's connection | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
+| may not | give a connection a key under `platform/` when the platform gives `secrets.provider`: no namespace reads it, the platform's credentials are copied under the keys of the namespaces that use them | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`provider`) |
 | may | route any namespace to a provider of any namespace (a class) | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | `testdata/context/0/http-chart-repository.yaml` |
 | may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (the menu is `catalogs.yaml`'s), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
@@ -130,7 +131,7 @@ and, a provider, its `claimers`.
 | may not | a parameter the schema refuses | `chart.Parameters` | `testdata/schema-violation.yaml` |
 | may not | `global` or a path its package protects in upstream values | `chart/merge.go: applyUpstream` | `testdata/protected-upstream.yaml` |
 | may not | a key of a pod's privileges, security context, identity, containers or objects in upstream values, in a string read as YAML too | `policy.go: upstreamCheck` | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml` |
-| may not | an image of none of the platform's registries | `policy.go: upstreamCheck` | `testdata/context/0/unlisted-registry.yaml` |
+| may not | an image of none of the platform's registries, set as an `image` string, a `registry` and a `repository`, or by a key that names one (`initImage`, `imageRegistry`, `defaultImageRegistry`, `imageName`, `...ImageRepository`) | `policy.go: upstreamCheck`, `namesImage` | `testdata/context/0/unlisted-registry.yaml`, `unlisted-image-registry.yaml`, `unlisted-default-image-registry.yaml`, `unlisted-image-name.yaml`, `unlisted-init-image.yaml`, `unlisted-sidecar-image-repository.yaml` |
 | may not | a connection of another contract, a field the contract does not declare, a secret field | `connections.go: resolver.resolve`, `contract.fields` | `testdata/context/2/wrong-contract.yaml`, `unknown-field.yaml`, `secret-in-connection.yaml` |
 | may not | a connection that does not hold at its declaration, referenced or not, its own or its project's (a name, a contract, a field, a required field, a type, a `secretRef`) | `connections.go: declaredConnections`, `namespace.go: CompileAll` | `TestCompileAllDeclaredConnections`, `testdata/cli/layout.txtar` |
 | may not | a store key outside `<project>/` | `connections.go: storeSecret` | `testdata/context/2/remote-key-of-another-namespace.yaml` |
@@ -163,7 +164,8 @@ which an instance's list replaces.
 | may not | a `provides` secret without `generate`, unless the caller allows it | `provides.go: credentialsSecret` | `testdata/cli/plain-secrets.txtar` (a `provides` secret) |
 | may not | a dependency over `http://`, a version range | `chart/ref.go: Ref.Check` | `testdata/cli/chart-sources.txtar` |
 | may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `chart.FinalValues` | `TestDcrCompile` |
-| may not | an OAuth client's Secret that is not the release's, `<release>-...` | `oidc.go: oidcClients` | `testdata/cli/oidc.txtar` |
+| may not | a release named like an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-*`, the secret store, its ServiceAccount, the DCR token's Secret), or the beginning of one up to a `-`: the project `okdp`'s instance `project` would write the Role `okdp-project` that confines every release of the namespace | `release.go: checkRelease`, `PlatformObjectNames` | `TestReleaseNamedLikeAPlatformObject`, `TestPlatformObjectNames` |
+| may not | an OAuth client's Secret that is not the release's, `<release>-<client name>` exactly (`<release>-oidc` for the main client), not any name that starts with `<release>-`: that prefix is the instances' `web-x` as much as `web`'s | `oidc.go: oidcClients` | `testdata/cli/oidc.txtar` |
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
 | may not | a connection reference out of the compile's reach (under `allOf`, `$defs`, `additionalProperties`...), which a reader of the schema, a console, would take for one the compile resolves and checks | `connections.go: requirements` (`schemaRefs`) | `TestRequirementsOutOfReach` |
 | may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
@@ -221,13 +223,19 @@ must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)):
 |---|---|---|
 | `<provider namespace>/<claim ID>` | the provider's PushSecret (`transfer.go: pushSecrets`) | the claimers' ExternalSecrets (`pullSecret`), the claim ID starting with their namespace |
 | `<namespace>/<key>` | the namespace's PushSecrets, an administrator | the connections of the namespace's project and instances (`storeSecret`) |
-| `platform/<key>` | the platform, as the store's operator | the platform's connections (level 0) |
+| `platform/<key>` | the platform, as the store's operator | the platform's connections (level 0), through a ClusterSecretStore only |
 
 With `secrets.provider`, the store is a SecretStore of each namespace,
 authenticating with its ServiceAccount (`secrets.serviceAccount`,
 `okdp-secrets`): one templated policy (OpenBao, Vault) gives each
-namespace write on `<namespace>/*`, read on `+/<namespace>.*` and on
-`platform/*`. Without it, the store is one ClusterSecretStore, one
+namespace write on `<namespace>/*` and read on `+/<namespace>.*`, and
+nothing on `platform/`: the platform's credentials are copied under the
+keys of the namespaces that use them (`<namespace>/<key>`, the sandbox's
+`<namespace>/s3/platform`), and a connection naming a `platform/` key is
+refused. A connection of level 0 is visible to every project: its key is
+read by each project's instances as that project, so one that is not a
+`platform/` key serves the namespace whose segment it is under, and no
+other. Without a provider, the store is one ClusterSecretStore, one
 identity for every namespace it admits: the tree is one trust domain,
 whatever the keys. The compiler keeps the connections it resolves under
 their namespace's segment, and refuses a project named `platform`; it
@@ -255,7 +263,7 @@ it pulls is bounded and must be the chart the instance names:
 |---|---|---|---|
 | may not | have the cache keep an archive other than the layer an OCI manifest names (a registry, a mirror or a proxy serving another one) | `chartcache/oci.go: pullOCI`, the layer read whole and verified against its size and digest before it is unpacked | `TestPullOCIVerifiesTheLayer` |
 | may not | have a chart pulled over plain http, from a repository, an archive the index names or a redirect, but on a host of `InsecureHosts`, nor redirected from https to http, by an OCI registry too | `RepositoryPuller.check`, `checkRedirect` | `TestIndexIsHTTPS`, `TestPullerDialsPublicAddresses` |
-| may not | make the puller reach the platform's network (a blind request from the CI or the control plane to an RFC 1918, loopback or link-local address, the cloud metadata endpoint): a registry, a token realm, a redirect, an index or an archive at one refused as dialed, but for a host of `PrivateHosts` or `InsecureHosts` | `RepositoryPuller.dial`, `publicAddress`, oras's `BlockedRealmPrefixes` | `TestPullerDialsPublicAddresses` |
+| may not | make the puller reach the platform's network (a blind request from the CI or the control plane to an RFC 1918, loopback or link-local address, the cloud metadata endpoint): a registry, a token realm, a redirect, an index or an archive at one refused as dialed, but for a host of `PrivateHosts` or `InsecureHosts`; behind a proxy (`$HTTPS_PROXY`), which would connect to any address, the destination is resolved here and refused at such an address before the proxy is dialed, a name this host cannot resolve refused (the proxy resolves it again: one that answers differently to it is the proxy's to refuse) | `RepositoryPuller.dial`, `proxyFor`, `publicAddress`, oras's `BlockedRealmPrefixes` | `TestPullerDialsPublicAddresses`, `TestPullerChecksTheDestinationBehindAProxy` |
 | may not | have the puller accept a certificate no trusted CA signed: the system's, or the pool given to `SetRootCAs` (a platform's CA, for a registry of the cluster), never a check turned off | `RepositoryPuller.SetRootCAs`, net/http's TLS verification | `TestPullerRootCAs` |
 | may not | have the cache keep an archive of another chart or version than the one named (an index entry, a tag) | `chartcache/cache.go: checkChart` | `TestTheChartIsTheOneNamed` |
 | may not | read a file of the cache other than a chart's `Files`, or through a symbolic link, from the console (`File`) or a compile (`FS`) | `Cache.File`, `Cache.FS` (`internal/dirfs`) | `TestFileIsOneOfFiles`, `TestFSFollowsNoLink` |
@@ -272,12 +280,13 @@ the tree it reads:
 |---|---|---|---|
 | may not | make it read a file out of a repository (a symbolic link), block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openDir`, `internal/dirfs: FS.Open` | `testdata/cli/symlink.txtar`, `TestDirFSBounds` |
 | may not | exhaust the chart cache's reads with the charts its packages name, refusing another project's instances: each chart's files 64 MiB together, the cache unbounded but by its charts | `internal/dirfs: NewCharts`, `chartcache.Cache.FS`, `--charts` | `TestChartsBounds`, `TestEachChartHasItsBudget` |
-| may not | make it run without end | `--cost-limit`, `--timeout` (`compile.Session`) | `testdata/cli/limits.txtar` |
+| may not | make it run without end, or hold the tree for long: the CEL cost of an instance's expressions is bounded (the default limit about ten times the dearest case of the catalogs), one expression may cost what is left of the limit, not the limit again, one instance's compile is bounded in time and refused alone past it, the whole compile too | `--cost-limit`, `--instance-timeout`, `--timeout` (`compile.Session`: `program`, `okdp.Compile`: `Inputs.Timeout`) | `testdata/cli/limits.txtar`, `TestSession`, `TestCompileTimeout` |
 | may not | make it delete an output it did not write, or write through a symbolic link of the output, at any depth under `projects/`, in the output or out of it (every link there removed before a file is written) | `main.go: checkOutput`, `writeTree`, `removeLinks` | `testdata/cli/output.txtar`, `TestWriteTree` |
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Validate` | `testdata/cli/errors.txtar` |
-| may not | have one project's failure keep the others from deploying (`--partial`), a release name it shares with another project among them | `compiler.Partial` (`internal/tree/partial.go`), `compiler.TreeFiles` (`internal/output`) | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `TestAReleaseCollisionKeepsItsProjects` |
+| may not | have one project's failure keep the others from deploying (`--partial`): a refused instance, a release name it shares with another project, a file of its own that does not load (a stray file, an unknown key, a `project.yaml` that does not parse), each refusing that project and keeping its output | `repository.go: LoadProjects`, `compiler.Partial` (`internal/tree/partial.go`), `compiler.TreeFiles` (`internal/output`) | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `testdata/cli/load.txtar`, `TestLoadProjects`, `TestAReleaseCollisionKeepsItsProjects` |
 | may not | make `--partial` read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | `openDir` of `--output`, `compiler.TreeFiles` | `testdata/cli/kept.txtar` |
 | may not | keep a privilege revoked, a role taken back or a policy tightened by keeping one instance of a project refused (`--partial`): the kept project's Namespace, identity, AppProject, RoleBindings and Flux HelmReleases are of today's settings, its instances kept applied with them | `output.go: rederive`, `target.Keeper` (`flux.Target.Kept`, `argocd.Target.Kept`), `okdp.ProjectOf` | `testdata/cli/partial.txtar` (`ops`), `TestPartialRederives`, `TestFilesRederive`, `TestKept` |
+| may not | keep a project in a namespace reserved after it was written, by the platform (`policy.reserved`) or by the compiler (a release that reserves a name): a project kept by `--partial` whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor re-derived, said so; the tree does not fail for it | `access.go: CheckProject` (`ProjectOf`, one view with `Compile`), `output.go: rederive`, `Kept.Dropped` | `testdata/cli/reserved.txtar`, `TestProjectOfNamespace`, `TestFilesDropped` |
 
 A control plane edits the tree with package `treeedit`, okdp-gitops
 committing each edit: whatever the API in front of it, an edit holds
@@ -323,20 +332,31 @@ these lines.
   Secrets of the others; a provider's namespace holds the credentials of
   every claim it serves. Two of OKDP's objects that write one Secret of
   a namespace are refused, not a Secret an upstream chart renders. The
-  names of a release's objects start with `<release>-` (an OAuth
-  client's Secret, `okdpFullname`), a separator a release holds too:
-  the instances `a` and `a-b` of a project share the prefix of
-  `<namespace>-a-b-...`, and the first may name an object of the
-  second's; a separator no release holds would rename every package's
-  objects.
+  names of a release's objects start with `<release>-` (`okdpFullname`),
+  a separator a release holds too: the instances `a` and `a-b` of a
+  project share the prefix of `<namespace>-a-b-...`, and the first may
+  name an object of the second's; a separator no release holds would
+  rename every package's objects. What the compiler decides is limited
+  to what it writes itself: an OAuth client's Secret is the release's
+  exactly, and a release is none of the platform's objects' names.
+- **The OAuth clients a namespace may register.** With
+  `oidc.dcr.authMethod: initialAccessToken`, the registration Jobs read
+  the initial access token of their namespace (`dcr.tokenSecret`, key
+  `token`, `okdp-dcr-token` by default): whoever reads that Secret, a
+  project's editor with Kubernetes' `edit` among them, registers OAuth
+  clients at the identity provider with it. The compiler cannot bound
+  what a client asks for (its redirect URIs, scopes, grants); the
+  identity provider's client registration policies, and the token's
+  expiry and use count, are the boundary.
 - **The store's policy.** The compiler writes the keys; it cannot check
   that the store scopes them. A ClusterSecretStore, without
   `secrets.provider`, is one trust domain. A Kubernetes namespace named
   `platform` made outside the tree (by an administrator, by a privileged
-  project) writes `platform/*` under the templated policy: the compiler
-  refuses only a project of that name. Likewise a namespace of the
-  platform's components that `policy.reserved` does not list: the
-  compiler knows Kubernetes', the engines' and the store's only.
+  project) writes `platform/*` under the templated policy, which reads
+  none: the compiler refuses only a project of that name. Likewise a
+  namespace of the platform's components that `policy.reserved` does not
+  list: the compiler knows Kubernetes', the engines' and the store's
+  only.
 - **Who changes a project's access.** `access` is in `project.yaml`:
   whoever writes it gives the roles, its repository's writers (the
   split topology, the project's administrators), every writer of a
@@ -377,7 +397,8 @@ these lines.
   key names are a guess, the review of a package and of the values its
   instances give is the rest.
 - **Bounds the caller sets.** The CEL cost is bounded when the caller
-  passes a limit (`Inputs.CostLimit`: the CLI and okdp-gitops do); the
+  passes a limit (`Inputs.CostLimit`: the CLI and okdp-gitops do), one
+  instance's time when it passes `Inputs.Timeout` (the CLI does); the
   files read are bounded by the CLI's reader and okdp-gitops's, a
   library caller's `fs.FS` being its own.
 - **The upstream schemas** are checked with a chart cache only

@@ -27,8 +27,8 @@ func bigValue(n int) M {
 // TestHostCostBytes: a host function pays the bytes of its argument, not
 // its entries (hostCost): sha256 of a value of a mebibyte under one key
 // costs about a mebibyte, as str, toJson, toYaml and quote do; an
-// expression that hashes it 300 times passes 50000000, the default limit
-// of okdp-compile, where it once cost under 20000.
+// expression that hashes it 300 times passes a limit of 50000000, where it
+// once cost under 20000.
 func TestHostCostBytes(t *testing.T) {
 	const mib = 1 << 20
 	scope := M{"values": bigValue(mib)}

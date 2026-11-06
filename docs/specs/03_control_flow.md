@@ -501,7 +501,7 @@ serialisation (a string's bytes, a map's keys and values, a list's
 elements), and the bytes of the string it returns (`sha256`, `toJson`,
 `toYaml`, `quote` of a large value). Once the total passes
 `Inputs.CostLimit` (checked after each expression; `--cost-limit` of
-`okdp-compile`, 50000000 by default), the compile fails with
+`okdp-compile`, 1000000 by default), the compile fails with
 `the expressions of the compile exceed its CEL cost limit (<n>)`
 ([usage](../01_usage.md)). A `$for` counts too, as it repeats its body
 without an evaluation of CEL's own: each element costs 1, and what its

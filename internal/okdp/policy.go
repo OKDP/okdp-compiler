@@ -381,10 +381,20 @@ func (r *upstreamRules) key(k string, v any, p string, at func(string) string) e
 // leaves the chart's default, which the compile does not read: "", as an
 // image null. Each reference starts with an entry of registries, then
 // ends, or goes on with "/" or, after an entry with a path, ":" or "@" (a
-// tag, a digest).
+// tag, a digest). The keys whose name says they hold an image, a registry
+// or a repository of images (namesImage) are references as well.
 func (r *upstreamRules) image(m, base M, k, p string, at func(string) string) error {
 	if r.registries == nil {
 		return nil
+	}
+	// A key that names an image or a registry by its name, whatever the
+	// chart calls it: initImage, imageName, imageRegistry,
+	// defaultImageRegistry, sidecarImageRepository; its string, when not
+	// empty, is a reference as the image's.
+	for _, key := range slices.Sorted(maps.Keys(m)) {
+		if ref, ok := m[key].(string); ok && ref != "" && namesImage(key) && !r.allowed(ref) {
+			return r.refused(ref, value.Key(p, key), at)
+		}
 	}
 	// The instance's string, or its null as "", set; else the computed
 	// string. Another value is no image's (Harbor's registry section).
@@ -418,6 +428,15 @@ func (r *upstreamRules) image(m, base M, k, p string, at func(string) string) er
 		return r.refused(ref, value.Key(p, "registry"), at)
 	}
 	return r.refused(ref, value.Key(p, repo), at)
+}
+
+// namesImage: whether the key k names an image, a registry or a
+// repository of images by its own name, as the charts spell them: it ends
+// in image, imageRegistry, imageRepository or imageName, whatever its case,
+// but image itself, which image reads with its sibling keys.
+func namesImage(k string) bool {
+	l := strings.ToLower(k)
+	return l != "image" && slices.ContainsFunc([]string{"image", "imageregistry", "imagerepository", "imagename"}, func(suffix string) bool { return strings.HasSuffix(l, suffix) })
 }
 
 // isString: whether v is a string.

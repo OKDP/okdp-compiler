@@ -5,9 +5,11 @@ package okdp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
+	"time"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/compile"
@@ -35,7 +37,8 @@ type Inputs struct {
 	Claims    []Claim            // the claims bound to the instance, of contracts its package provisions: the mapping's claims; it publishes an output of each's contract named its ID (CompileAll sets them)
 	Claimers  []string           // the namespaces whose instances may claim of the instance, a provider, from another namespace, by naming it or through a class of their project's (CompileAll; a class of the platform's, level 0, needs none): namespace names, once each, or "*", any; nil: the claimers of its package's provisions entry of the claim's contract, none by default (Instance.Claimers); LoadRepository's, its instance.yaml's
 	Bindings  map[string]Binding // the provider each claim of a reference is bound to, by parameter path, and the output it publishes for it (CompileAll sets them); nil: no claim resolves
-	CostLimit uint64             // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; a server bounds what a package's expressions compute over the values an instance gives
+	CostLimit uint64             // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; an expression may cost what is left of it, not the limit again; a server bounds what a package's expressions compute over the values an instance gives
+	Timeout   time.Duration      // how long this compile may take (0: no limit), beside ctx's deadline: past it the instance is refused, the others of a tree compiled all the same
 	// AllowPlainSecrets: credentials written in clear accepted, a
 	// provides secret without generate (a plain Secret of its stringData)
 	// and a Secret of the objects with data or stringData; false, they
@@ -90,6 +93,9 @@ type Result struct {
 	// Chart: the package's Chart.yaml, as read (Definition.Chart): the
 	// umbrella chart's metadata, its dependencies in their order.
 	Chart chart.Metadata
+	// Cost: the CEL cost of the compile's expressions (Inputs.CostLimit
+	// counts it); 0 without a limit, which counts none.
+	Cost uint64
 	// Warnings: what the compile warns of without failing, those of the
 	// package (Definition.Warnings): a values.yaml that holds expressions;
 	// with a chart cache, an instance list appended to that leaves out
@@ -130,7 +136,18 @@ type Result struct {
 // Compile runs the mapping of def on one instance, cancelled with ctx
 // (between stages, and within the evaluation of an expression). It is safe
 // for concurrent use: it keeps no state between calls.
-func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
+func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, err error) {
+	if in.Timeout > 0 {
+		parent := ctx
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, in.Timeout)
+		defer cancel()
+		defer func() {
+			if err != nil && parent.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+				result, err = nil, fmt.Errorf("the compile takes longer than the instance timeout (%s)", in.Timeout)
+			}
+		}()
+	}
 	// ctx, def and the file systems are required: nil panics.
 	switch {
 	case !chart.IsRelease(in.Release):
@@ -160,6 +177,10 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	// The platform's reserved namespaces, of its settings: a reservation
 	// wins over a privilege.
 	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
+		return nil, err
+	}
+	// A release named like an object the platform writes in the namespace.
+	if err := checkRelease("Inputs.Release", in.Release, inst.okdp); err != nil {
 		return nil, err
 	}
 	// The roles of the project's groups, its file's: refused, they refuse
@@ -267,6 +288,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	if !in.AllowPlainSecrets {
 		out.Warnings = append(out.Warnings, plainUpstream(value.AsMap(inst.values["upstream"]))...)
 	}
+	out.Cost = session.Used()
 	return out, nil
 }
 

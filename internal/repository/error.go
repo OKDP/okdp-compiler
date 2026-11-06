@@ -47,6 +47,13 @@ func newError(errs []error) error {
 	return e
 }
 
+// JoinErrors: the *Error of errs as newError makes it; nil when there is
+// none.
+func JoinErrors(errs []error) *Error {
+	e, _ := newError(errs).(*Error)
+	return e
+}
+
 // Added: the problems of after that before has not, in after's order;
 // every one of after's when before is nil: what a change of the tree
 // added to why it does not load.

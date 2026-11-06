@@ -39,6 +39,7 @@ type resolver struct {
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
 	store     string               // global.okdp.secrets.store: the store the credentials of a claim of another namespace go through, and those of a connection's secretRef.remoteKey are in
+	provider  bool                 // global.okdp.secrets.provider is set: a SecretStore of each namespace, which reads no platform/ key
 	transfers []transfer           // those credentials, in order, each Secret once (addTransfer)
 	release   string               // Inputs.Release: never its own provider
 	namespace string
@@ -174,7 +175,7 @@ func declaredConnections(in Inputs) error {
 			conns = value.Merge(conns, c)
 		}
 	}
-	r := resolver{contracts: in.Contracts, conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), release: in.Release, namespace: in.Namespace}
+	r := resolver{contracts: in.Contracts, conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), provider: len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace}
 	return r.declared()
 }
 
@@ -532,7 +533,10 @@ func (c Connection) MarshalYAML() (any, error) {
 // another namespace's never. The first that fails, in order: remoteKey
 // with a name; remoteKey not a string, or empty; "{{" in it; no store;
 // the connection's name not a DNS-1123 label; a contract without secret
-// field; a key that is no path; a key outside the namespace.
+// field; a key that is no path; a key outside the namespace; a key under
+// platform/ when the platform gives the store's provider (a SecretStore of
+// each namespace, which no policy lets read platform/: the platform's
+// credentials are copied under the keys of the namespaces that use them).
 func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
 	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
 	key, ok := secretRef["remoteKey"].(string)
@@ -559,6 +563,8 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 		return "", fmt.Errorf("%s.remoteKey: the %s contract has no secret field (x-okdp-secret): there are no credentials to read", where, c.name)
 	case !isStorePath(key):
 		return "", fmt.Errorf("%s.remoteKey %q: a path of the platform's secret store, segments separated by \"/\", none empty, \".\" or \"..\"", where, key)
+	case r.provider && strings.HasPrefix(key, platformKeys+"/"):
+		return "", fmt.Errorf("%s.remoteKey %q: no namespace reads %s/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>, read through a connection of the project (level 1)", where, key, platformKeys)
 	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
 		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
 	}

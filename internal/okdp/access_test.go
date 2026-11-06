@@ -151,6 +151,40 @@ func TestProjectOf(t *testing.T) {
 	}
 }
 
+// TestProjectOfNamespace: the namespace of a project is checked as the
+// compile of its instances checks it, the compiler's reserved names and
+// the platform's (global.okdp.policy.reserved), privileged or not, a
+// *NamespaceError, so that ProjectOf and Compile agree on which
+// projects exist; CheckProject is that check alone.
+func TestProjectOfNamespace(t *testing.T) {
+	platform := map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}, "reserved": []any{"demo"}}}}}
+	in := inputs(platform)
+	_, cerr := Compile(context.Background(), def, in)
+	_, perr := ProjectOf(in)
+	if cerr == nil || perr == nil || cerr.Error() != perr.Error() {
+		t.Fatalf("Compile: %v\nProjectOf: %v", cerr, perr)
+	}
+	for _, err := range []error{perr, CheckProject(in)} {
+		if _, ok := errors.AsType[*NamespaceError](err); !ok || !strings.Contains(err.Error(), "reserved by the platform (global.okdp.policy.reserved)") {
+			t.Errorf("reserved by the platform: %v", err)
+		}
+	}
+	for _, ns := range []string{"kube-system", "argocd", "platform", "Not_A_Label"} {
+		in := inputs(nil)
+		in.Namespace = ns
+		if _, err := ProjectOf(in); !errors.As(err, new(*NamespaceError)) {
+			t.Errorf("%s: %v", ns, err)
+		}
+	}
+	if err := CheckProject(inputs(map[string]any{"global": M{"okdp": M{"policy": M{"reserved": []any{"other"}}}}})); err != nil {
+		t.Errorf("a namespace nothing reserves: %v", err)
+	}
+	// The platform's settings refused are no namespace problem.
+	if err := CheckProject(inputs(map[string]any{"global": M{"okdp": M{"policy": M{"privileged": "demo"}}}})); err == nil || errors.As(err, new(*NamespaceError)) {
+		t.Errorf("the platform's settings refused: %v", err)
+	}
+}
+
 // TestPlatformAdmins and TestProjectAccess: the accessors of a program
 // that mirrors the platform's authority.
 func TestPlatformAdmins(t *testing.T) {

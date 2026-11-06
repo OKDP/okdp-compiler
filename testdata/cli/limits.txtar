@@ -11,6 +11,19 @@ exists $WORK/files/projects/demo/instances/demo-echo/instance.values.yaml
 status 0 okdp-compile --repository $WORK/tree --check --cost-limit 0
 status 0 okdp-compile --repository $WORK/tree --check
 
+# --instance-timeout: one instance's compile; past it, that instance is
+# refused, the others compiled (--partial keeps its project); 0, no limit.
+status 1 okdp-compile --repository $WORK/tree -o $WORK/slow --instance-timeout 1ns
+! stdout .
+stderr '^error: demo/demo-echo: the compile takes longer than the instance timeout \(1ns\)$'
+! exists $WORK/slow
+status 1 okdp-compile --repository $WORK/solo -o $WORK/slow --instance-timeout 1ns --partial
+stderr '^error: demo/demo-echo: the compile takes longer than the instance timeout \(1ns\)$'
+stderr '^error: demo: not written, an instance of it refused'
+status 0 okdp-compile --repository $WORK/tree --check --instance-timeout 0
+status 2 okdp-compile --repository $WORK/tree --check --instance-timeout 10
+stderr 'invalid value "10" for flag -instance-timeout'
+
 # --timeout: the whole compile; past it, nothing written; 0, no limit.
 status 1 okdp-compile --repository $WORK/tree -o $WORK/late --timeout 1ns
 ! stdout .
@@ -24,6 +37,15 @@ stderr 'invalid value "many" for flag -cost-limit'
 status 2 okdp-compile --repository $WORK/tree --check --timeout 10
 stderr 'invalid value "10" for flag -timeout'
 
+-- solo/catalog/echo/1.0.0/Chart.yaml --
+apiVersion: v2
+name: echo
+version: 1.0.0
+dependencies:
+  - {name: echo, alias: app, repository: https://charts.example.org, version: 1.0.0}
+-- solo/projects/demo/instances/echo/instance.yaml --
+service: echo
+version: 1.0.0
 -- tree/catalog/echo/1.0.0/Chart.yaml --
 apiVersion: v2
 name: echo

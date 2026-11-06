@@ -12,7 +12,8 @@ import (
 )
 
 // Kept: a project of a tree whose output is not written (Partial), and
-// why: its instances that do not deploy, each with its problem.
+// why: its instances that do not deploy, each with its problem, or that
+// it does not load (Unloaded).
 type Kept struct {
 	// Namespace is the project.
 	Namespace string
@@ -21,6 +22,13 @@ type Kept struct {
 	Problems []string
 	// Instances are the instances of Problems.
 	Instances []KeptInstance
+	// Unloaded: the project does not load (Tree.Refused): Problems are
+	// its load problems, as they are, and it has no Instances.
+	Unloaded bool
+	// Dropped is why the project's output is dropped, nothing of it kept
+	// nor written (output.Files): its namespace is none a project may
+	// have today (okdp.NamespaceError); "" when it is kept.
+	Dropped string
 	// Rederived are the files of the project the output writes of today's
 	// settings though it is kept (output.Files): its manifests, its
 	// instances' identity, in path order; none when its output is kept
@@ -49,7 +57,8 @@ type KeptInstance struct {
 // projects left out), or that depends on a release of a kept project
 // (Result.Dependencies: a connection reference, a claim), compiled with
 // what that release publishes now, which is not deployed. g is nil only
-// when the graph has a problem at no instance of t.
+// when the graph has a problem at no instance of t. The projects that do
+// not load (Tree.Refused) are kept first.
 func Partial(t *Tree) (results []*okdp.Result, g *graph.Graph, kept []Kept) {
 	return PartialWith(t, nil)
 }
@@ -68,6 +77,9 @@ func PartialWith(t *Tree, also map[*Instance]error) (results []*okdp.Result, g *
 		}
 		k.Problems = append(k.Problems, fmt.Sprintf("%s/%s: %v", ti.Namespace(), ti.Name, err))
 		k.Instances = append(k.Instances, KeptInstance{Instance: ti, Err: err, Depends: depends})
+	}
+	for _, r := range t.Refused {
+		byNamespace[r.Namespace] = &Kept{Namespace: r.Namespace, Problems: slices.Clone(r.Problems), Unloaded: true}
 	}
 	for _, ti := range t.Instances {
 		if ti.Outcome.Err != nil {

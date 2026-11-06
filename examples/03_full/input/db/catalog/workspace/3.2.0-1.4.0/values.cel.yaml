@@ -71,7 +71,7 @@ scheduler:                                       # the second render of the work
     - $spread: ${{ env }}
     - name: WORKSPACE_API_URL
       value: ${{ internalUrl }}
-    - $for: "s in (values.admins.size() > 0 ? [okdpFullname('automation-oauth')] : [])"
+    - $for: "s in (values.admins.size() > 0 ? [okdpFullname('automation')] : [])"
       $each:                                     # the automation client's Secret, a name it sets
         - name: AUTOMATION_CLIENT_ID
           valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_id}}

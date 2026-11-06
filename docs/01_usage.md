@@ -127,7 +127,8 @@ okdp-compile --repository <dir> [--repository <dir>]...
              [--target helm|flux|argocd] [--path-prefix <path>]
              [--flux-source <namespace>/<name>]
              [--repo-url <url>] [--revision <revision>]
-             [--cost-limit <n>] [--timeout <duration>] [--force]
+             [--cost-limit <n>] [--instance-timeout <duration>]
+             [--timeout <duration>] [--force]
              [--report <file>|-] [--partial] [--allow-plain-secrets]
 okdp-compile --check [--charts <dir>] [--report <file>|-]
              [--allow-plain-secrets]
@@ -148,9 +149,10 @@ okdp-compile --version
 | `--flux-source` | `flux-system/okdp-gitops` | `--target flux`: the GitRepository of that repository, `<namespace>/<name>` |
 | `--repo-url` | required by `--target argocd` | `--target argocd`: the repository Argo CD reads the output directory from |
 | `--revision` | `HEAD` | `--target argocd`: its revision |
-| `--cost-limit` | `50000000` | the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', what a host function reads and builds counted (`Inputs.CostLimit`): past it, the instance is refused, `the expressions of the compile exceed its CEL cost limit (n)`; `0`, no limit |
+| `--cost-limit` | `1000000` | the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', what a host function reads and builds counted (`Inputs.CostLimit`): past it, the instance is refused, `the expressions of the compile exceed its CEL cost limit (n)`; an expression costs what is left of it, not the limit again; `0`, no limit. The default is about ten times the dearest case of the three OKDP catalogs (88000) |
+| `--instance-timeout` | `1m` | how long one instance's compile may take (`Inputs.Timeout`), a Go duration: past it that instance is refused, `the compile takes longer than the instance timeout (<duration>)`, the others compiled, and `--partial` keeps its project; `0`, no limit |
 | `--report` | | write a JSON report of the compile to the file, or to stdout for `-`, even with `--check` and when the compile fails: each instance, its status, error, warnings, dependencies, claims and charts, and the tree's errors ([`--report`](#--report)); refused inside a `--repository` or `<output>/projects/` |
-| `--partial` | | write the projects whose instances all compile, and keep what the output holds of the others' instances, their manifests and identity of today's settings, status 1 all the same ([`--partial`](#--partial)); refused with `--check` |
+| `--partial` | | write the projects whose instances all compile and that load, and keep what the output holds of the others' instances, their manifests and identity of today's settings, status 1 all the same ([`--partial`](#--partial)); refused with `--check` |
 | `--force` | | write into an `<output>/projects/` that holds files but no `projects/.okdp-compile`, which the command did not write, removing from it every file it does not write ([`--output`](#--output)); refused with `--check` |
 | `--allow-plain-secrets` | | accept credentials written in clear (`Inputs.AllowPlainSecrets` of every instance): a `provides` `secret` without `generate`, a Secret of the `objects` section with `data` or `stringData`; without it they fail the compile, the output being committed to the deployments repository |
 | `--timeout` | `10m` | how long the compile may take, every instance together, a Go duration (`90s`, `1h`): past it, `the compile takes longer than --timeout <duration>: nothing written`; `0`, no limit |
@@ -189,7 +191,9 @@ only. In order:
 
 1. the tree: every instance, by project then instance, the release
    `<project>-<instance>` ([repository layout](#repository-layout),
-   `compiler.LoadRepository`), every problem of the tree at once;
+   `compiler.LoadRepository`), every problem of the tree at once; a
+   project's own (its `project.yaml`, an instance's files, the version
+   it names) refuses that project, not the tree ([`--partial`](#--partial));
 2. the instances compiled together, each claim bound to its provider
    ([claims](specs/01_inputs_outputs.md#claims)), each instance with what
    the others of its namespace publish, after those whose outputs it
@@ -438,7 +442,7 @@ are unchanged.
 | `instances[].dependencies` | the instances it depends on, `{instance, namespace, contract, field, output}` (`Result.Dependencies`, `namespace` when another) |
 | `instances[].claims` | each claim of its references bound to its provider, `{field, id, contract, provider: {namespace, release}, class}`, `class` `""` when the claim names its provider |
 | `instances[].charts` | the upstream charts it renders, by key, `{key, repository, chart, version}` (`Result.Charts`) |
-| `errors` | what fails that is no instance's: an option, a repository, the target, the output, `--timeout` |
+| `errors` | what fails that is no instance's: an option, a repository, a problem of a project that does not load, the target, the output, `--timeout` |
 | `written` | the files were written under `-o`, those of some projects only with `--partial` |
 
 The lists are empty, never `null`. An instance whose compile succeeded
@@ -475,6 +479,37 @@ error: demo/demo-web: values don't meet the specifications of the schema(s) in t
 web:
 - at '/replicas': minimum: got 0, want 1
 error: demo: not written, an instance of it refused (--partial): out/projects/demo/ kept as it is, its namespace, identity and roles of today's settings
+```
+
+A project whose namespace is reserved since the output was written, by
+`global.okdp.policy.reserved` or by a release of the compiler that
+reserves a name, is not kept: its instances are refused like any
+project's of that namespace, and its output is dropped, nothing of its
+Role, Namespace or releases kept nor re-derived (they would sit in a
+namespace no project has), and not in the root `kustomization.yaml`; said
+so, and the other projects are written.
+
+```text
+error: openbao: dropped from the output (--partial): Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it: nothing of out/projects/openbao/ kept
+```
+
+A project that does not load fails alike: a file of its own that does not
+parse (`project.yaml`, an `instance.yaml`, a `config.yaml`), a key
+`instance.yaml` does not know, a stray file in an instance's directory, a
+package version its catalog lacks, a connection or a claim it declares
+that does not hold. The project is refused as a whole, none of its
+instances compiled, each problem printed, and its output kept as it is,
+its manifests of today's settings when its `project.yaml` reads (its
+network policy then has no claimers: the claims bound to it do not
+bind); the other projects are written. Without `--partial` the problems
+fail the command, nothing written. Only the platform's parts fail the
+tree, with or without `--partial`: `platform.yaml`, `catalogs.yaml`, a
+repository and its role, a package that does not load, a contract that
+differs between repositories.
+
+```text
+error: db/projects/demo/instances/web/values.yaml: not a file of an instance, which holds instance.yaml, config.yaml and connections.yaml only: no compile reads it
+error: demo: not written, it does not load (--partial): out/projects/demo/ kept as it is, its namespace, identity and roles of today's settings
 ```
 
 An instance of another project that depends on a release of a project
@@ -521,7 +556,7 @@ written has too in another namespace, or the output of two projects kept
 | Status | When |
 |---|---|
 | 0 | compiled, or checked (`--check`), each binding and warning on stderr, then, the files written, each dependency, as [`--repository`](#--repository) prints them; `--version`, `--help` |
-| 1 | any error: `error: <message>` on stderr, one per refused instance, per problem of the graph and per instance of a release name two projects share, `error: <namespace>/<release>: <message>`; with `--partial`, one per project not written too, `error: <namespace>: not written, ...`, the others written |
+| 1 | any error: `error: <message>` on stderr, one per refused instance, per problem of the graph and per instance of a release name two projects share, `error: <namespace>/<release>: <message>`; one per problem of a project that does not load, `error: <repository>/<path>: <message>`; with `--partial`, one per project not written too, `error: <namespace>: not written, ...`, the others written |
 | 2 | unknown flag, a flag without its argument, an argument that is not a flag: the message and the usage on stderr |
 
 A message is a whole report and may span several lines: every schema
@@ -677,7 +712,9 @@ output/projects/<project>/instances/<project>-<instance>/   -o <dir>
   Secret of the instance's namespace, `secretRef: {name: <secret>}`, or in
   the platform's secret store, `secretRef: {remoteKey: <key>}`, which the
   compiler reads into one, a key under `<project>/` for a project's or
-  an instance's connection, the platform's under `platform/`
+  an instance's connection, the platform's under `platform/` with a
+  ClusterSecretStore, refused with `secrets.provider`, where no namespace
+  reads it
   ([credentials in the platform's secret
   store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
 - `catalogs.yaml`, beside `platform.yaml`, is the program's that fetches
@@ -1104,11 +1141,18 @@ holds, to read it back.
   deploy.
 - `compiler.Build(ctx, repos, compiler.BuildOptions{CostLimit,
   AllowPlainSecrets, Charts})` is the compile of a tree as `okdp-compile`
-  and okdp-gitops run it: `LoadRepository`, the options on each
-  instance, `CompileTree`. A tree that does not load is a
+  and okdp-gitops run it: the load, the options on each instance,
+  `CompileTree`. A problem of the platform's parts (a repository,
+  `platform.yaml`, `catalogs.yaml`, a package, a contract) is a
   `*compiler.LoadError`, `Problems` one per problem (a report of several
-  lines one of them), which `LoadRepository` returns too;
-  `compiler.AddedProblems(before, after)` the problems a change added.
+  lines one of them), the projects' among them; `LoadRepository`
+  returns one for any problem, a project's too. A project that does not
+  load is refused as a whole, not the tree: no instance of it, a
+  `compiler.RefusedProject` in `Tree.Refused` (`Namespace`, `Problems`,
+  `Errs`), kept by `Partial` like a project of a refused instance;
+  `compiler.LoadErrorOf(tree)` is their problems as one `*LoadError`,
+  nil when every project loads, and `compiler.AddedProblems(before,
+  after)` the problems a change added.
   `compiler.StaticCharts(fsys)` is a chart cache filled already, which
   fetches nothing: the instances compiled once with it (`okdp-compile
   --check --charts`); package `chartcache` keeps one that pulls what it
@@ -1125,7 +1169,10 @@ holds, to read it back.
   `RepositoryPuller.PrivateHosts` (host, `host:port` or `*.<domain>`: a
   registry of the cluster, `*.svc.cluster.local`) and of
   `InsecureHosts`, a proxy of the environment (`$HTTPS_PROXY`) dialed
-  whatever its address; its TLS connections trust the system's
+  whatever its address, the destination of a request it serves resolved
+  here first and refused at such an address likewise (a name this host
+  cannot resolve is refused: the proxy resolves it again); its TLS
+  connections trust the system's
   certificates, or the pool `RepositoryPuller.SetRootCAs` gives (a
   platform's CA beside the system's, before the first pull: a registry
   of the cluster signed by it, its certificate checked all the same);
@@ -1138,10 +1185,14 @@ holds, to read it back.
   `okdp-compile` reads `--charts`.
 - `compiler.Partial(tree)` is what `--partial` writes: the results of
   the projects written and their graph, and the projects kept, each a
-  `compiler.KeptProject` (`Namespace`; `Problems`, `<namespace>/<instance>:
+  `compiler.KeptProject` (`Namespace`; `Dropped`, why a project whose
+  namespace is reserved now is dropped from the output, nothing of it
+  among the files; `Problems`, `<namespace>/<instance>:
   <why>`; `Instances`, each a `compiler.KeptInstance`, its `Err`, and
   `Depends` for one that compiled but depends on a release of a project
-  kept). `compiler.TreeFiles(tree, targets, previous)` is the output of a
+  kept; `Unloaded`, a project that does not load, its `Problems` its load
+  problems and no instance). `compiler.TreeFiles(tree, targets,
+  previous)` is the output of a
   tree for one or more targets, path -> content: the files of the
   projects written, merged (a path two targets write differently fails
   it), the files of the projects kept as `previous`, the output written
@@ -1363,8 +1414,13 @@ holds, to read it back.
   its whole argument, which a map's entry count does not measure. A
   server compiling packages it does not review sets one, as an
   instance's values can make an expression iterate over them;
-  okdp-gitops and `okdp-compile` set 50000000 (`--cost-limit`), about
-  50 MB that host functions read or write. A `$for` costs 1 an element
+  okdp-gitops and `okdp-compile` set 1000000 (`--cost-limit`), about
+  1 MB that host functions read or write; one expression costs what is
+  left of the limit, not the limit again. `Inputs.Timeout` bounds one
+  compile in time, beside the context's deadline: past it the instance
+  is refused with its own message (`BuildOptions.InstanceTimeout` sets
+  it on every instance of a tree, `--instance-timeout`), `Result.Cost`
+  is the cost it used (counted under a limit only). A `$for` costs 1 an element
   and the size of what its body builds, its context checked at each.
   The example costs under 1000, the OAuth client's template most of it
   (`ExampleCompile_server`). Whatever the limit, a document's values
@@ -1579,6 +1635,7 @@ usage error with status 2.
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database: connection "shared-db": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set` | a connection whose credentials are in the platform's secret store (`secretRef: {remoteKey: <key>}`), and the platform names no store | set `global.okdp.secrets.store` in `platform.yaml`, or give the Secret of the instance's namespace, `secretRef: {name: <secret>}` ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | `database: connection "shared-db": secretRef: name or remoteKey, not both`, `... secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got 5`, `... secretRef.remoteKey: the connection's name is not a DNS-1123 label: ...`, `... secretRef.remoteKey: the queue contract has no secret field (x-okdp-secret): ...`, `... secretRef.remoteKey "demo//shared-db": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."` | a `secretRef` with both a Secret and a key of the store; a key that is not a string, or empty; a connection named so that its Secret, `<release>.<name>-credentials`, cannot be; a contract without credentials; a key that is no path of the store | one of them; the key, a string; rename the connection; drop `secretRef`; a path, `<segment>/<segment>` |
+| `storage: connection "datalake": secretRef.remoteKey "platform/datalake": no namespace reads platform/ when the platform gives a secret store provider (...)` | a connection whose key is under `platform/` while `global.okdp.secrets.provider` is set (a SecretStore per namespace, whose policy reads no `platform/`) (`testdata/cli/secrets.txtar`) | copy the platform's credentials under the key of each namespace that uses them, `<namespace>/<key>`, and name it in a connection of the project (`project.yaml`, level 1) ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | `storage: connection "stolen": secretRef.remoteKey "finance/finance.ledger.database": a key of the platform's secret store a project may not read: a connection above level 0 (level 2) names a key under "demo/", its namespace; the platform's keys are read through the platform's connections (level 0)` | a connection of `project.yaml` (level 1) or `connections.yaml` (level 2) keeps its credentials in the platform's secret store under a key outside its namespace's segment: another namespace's claim, the platform's keys (`testdata/cli/secrets.txtar`) | a key under `<project>/`, which the namespace's PushSecrets write and an administrator of the store fills; reference the platform's connection for the platform's keys ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): the fields violate the database contract:` then `- at '/engine': value must be one of 'postgresql', 'mysql'`, `- at '/port': got string, want integer` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
@@ -1641,7 +1698,7 @@ the cause or the fix is not in the message:
 | `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` (`testdata/context/0/dcr-without-registration-url.yaml`) | set it in the platform values |
 | `Chart.yaml: dependencies[1] (oidc-dcr): the chart of oidcClients[0] is added by the compiler: remove it` | `Chart.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; give the dependency another key (`alias`), or rename the client, when it is another chart |
 | `values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it` | the values file computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
-| `oidcClients[0] (console): secret "console-creds": the Secret the client is written to is one of the release's, its name starts with "demo-webapp-"` | a client's `secret` names a Secret of the namespace that is not the release's: its Job's Role would write another instance's Secret | name it after the release, `${{ release.name }}-console`, or drop `secret` for the default, `oidcClientSecret(<name>)` |
+| `oidcClients[0] (console): secret "console-creds": the Secret the client is written to is the release's, "demo-webapp-console" (<release>-<client name>, <release>-oidc for the main client)` | a client's `secret` names a Secret of the namespace that is not the release's, exactly: its Job's Role would write another instance's Secret | name it after the release and the client, `${{ release.name }}-console`, or drop `secret` for the default, `oidcClientSecret(<name>)` |
 | `oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0` | with `--check --charts`, `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 
 ### Repositories and the graph
@@ -1675,6 +1732,7 @@ of the targets' options are in
 | `error: demo/demo-app: db: claim: request.size: set by the class large (global.okdp.provisioning.database-server.classes.large): remove it, or name another class` | the claim requests a key its class fixes, in its `request` or its package's | remove it, or name a class that does not fix it |
 | `error: demo/demo-app: db: claim: class or provider, not both` | the claim names both | name one |
 | `error: demo/demo-app: db: claim "demo.app.db" (database-server): of data/data-pg, the provider of class "large", another namespace: demo is not one of its claimers (claimers of instance data/data-pg: none, its package's): ...` (`of data/data-pg, another namespace` for a provider named, `claims.<name>: ...` for a named claim) | the provider, of another project, is named by the claim or by a class of the project's, and does not consent: its `instance.yaml`'s `claimers`, else its package's (`provisions`), do not list the project | list the project in the provider's `claimers`, `claimers: [demo]` in its `instance.yaml`, or have the platform add a class of its own in `platform.yaml` and name it ([providers](specs/01_inputs_outputs.md#providers)) |
+| `db/projects/demo/instances/web/instance.yaml: yaml: unmarshal errors:` then `line 3: field replicas not found: service, version and claimers only` | an `instance.yaml` key it does not define (here values written in it, which belong in `config.yaml`), a key twice, a `service` or `version` that is no string, `claimers` no list of names; one line per problem, no Go type | `instance.yaml` holds `service`, `version` and `claimers` only; the values are `config.yaml`'s |
 | `db/projects/data/instances/pg/instance.yaml: claimers[0]: "Demo" is not a namespace name, nor "*"` (`claimers: demo is listed twice`) | an instance's claimer that is not a project's name nor `*`, or listed twice | list each project once, by its name, or `"*"` |
 | `context layer 2 (level 1): global.okdp.provisioning.database-server.default is set at level 0 (Inputs.Context): ...` (`...classes.standard is set at level 0`) | a project changes the platform's default class, or one of its classes | add a class of the project's own and name it ([levels](specs/01_inputs_outputs.md#levels)) |
 | `error: demo/demo-b: db: claim "reports" has contract "s3", "database-server" is expected` | the reference names a named claim of the project of another contract | name a claim of its contract, or declare one ([claims](specs/01_inputs_outputs.md#claims)) |

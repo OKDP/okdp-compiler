@@ -1,0 +1,11 @@
+# error: app: upstream.app.sidecarImageRepository: image evil/sidecar is not from a registry of global.okdp.policy.upstream.registries (registry.example.org, mirror.example.org/okdp): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them
+# The platform's registries (global.okdp.policy.upstream.registries) bind the
+# keys that name an image or a registry, whatever the chart calls them: a key ending in ImageRepository.
+global:
+  okdp:
+    policy:
+      upstream:
+        registries: [registry.example.org, mirror.example.org/okdp]
+upstream:
+  app:
+    sidecarImageRepository: evil/sidecar

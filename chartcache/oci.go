@@ -51,7 +51,12 @@ const HelmChartContentMediaType = "application/vnd.cncf.helm.chart.content.v1.ta
 // metadata endpoints) or unspecified, the address checked as dialed, but
 // for the hosts of PrivateHosts and of InsecureHosts: a registry of the
 // platform's own network is allowed by name. Behind a proxy
-// ($HTTPS_PROXY), the proxy is dialed, and reaches the hosts.
+// ($HTTPS_PROXY), the proxy is dialed, and reaches the hosts: the
+// destination is resolved here first and refused at such an address, as
+// dialed directly, but for the same allowed hosts (the proxy resolves it
+// again; one that answers differently to it is the proxy's to refuse).
+// A name this host cannot resolve is refused: its address cannot be
+// checked.
 //
 // Its TLS connections trust the system's certificates, or those
 // SetRootCAs gives: a registry of the platform signed by its own CA is
@@ -61,7 +66,8 @@ type RepositoryPuller struct {
 	oci           *http.Client
 	base          *http.Transport // the transport of both, its dialer the address check
 	cache         auth.Cache
-	proxies       []string // the hosts of the proxies of the environment, dialed whatever their address
+	proxies       []string                              // the hosts of the proxies of the environment, dialed whatever their address
+	proxy         func(*http.Request) (*url.URL, error) // the proxy of a request, http.ProxyFromEnvironment
 	InsecureHosts []string
 	// PrivateHosts: the chart hosts, host, host:port or *.<domain>,
 	// allowed at a private, loopback or link-local address (a registry
@@ -72,10 +78,11 @@ type RepositoryPuller struct {
 // NewRepositoryPuller pulls from OCI registries and https chart
 // repositories.
 func NewRepositoryPuller(insecureHosts []string) *RepositoryPuller {
-	f := &RepositoryPuller{cache: auth.NewCache(), InsecureHosts: insecureHosts, proxies: proxyHosts()}
+	f := &RepositoryPuller{cache: auth.NewCache(), InsecureHosts: insecureHosts, proxies: proxyHosts(), proxy: http.ProxyFromEnvironment}
 	d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 	f.base = http.DefaultTransport.(*http.Transport).Clone()
 	f.base.DialContext = f.dial(d)
+	f.base.Proxy = f.proxyFor
 	f.http = &http.Client{Timeout: FetchTimeout, CheckRedirect: f.checkRedirect, Transport: f.base}
 	f.oci = &http.Client{Transport: retry.NewTransport(f.base), CheckRedirect: f.checkRedirect}
 	return f
@@ -102,15 +109,65 @@ func proxyHosts() []string {
 	return out
 }
 
-// allowed: the host of addr (host:port) may be at any address: a host of
-// PrivateHosts or of InsecureHosts, or a proxy of the environment.
+// proxyFor: the proxy of the environment for req, if it has one, once the
+// destination of req is checked as a direct connection would be: resolved
+// here, every address public (publicAddress), unless the host is allowed
+// (PrivateHosts, InsecureHosts). The proxy would connect to whatever it is
+// told: the dial check sees the proxy's address only.
+func (f *RepositoryPuller) proxyFor(req *http.Request) (*url.URL, error) {
+	proxy, err := f.proxy(req)
+	if proxy == nil || err != nil {
+		return proxy, err
+	}
+	host, port := req.URL.Hostname(), req.URL.Port()
+	switch {
+	case port != "":
+	case req.URL.Scheme == "http":
+		port = "80"
+	default:
+		port = "443"
+	}
+	addr := net.JoinHostPort(host, port)
+	if f.permitted(addr) {
+		return proxy, nil
+	}
+	ips, err := f.resolve(req.Context(), host)
+	if err != nil {
+		return nil, fmt.Errorf("%s: cannot be resolved here to check its address before the proxy %s: %w", addr, proxy.Redacted(), err)
+	}
+	for _, ip := range ips {
+		if err := publicAddress(addr, netip.AddrPortFrom(ip, 0).String()); err != nil {
+			return nil, fmt.Errorf("%w (through the proxy %s)", err, proxy.Redacted())
+		}
+	}
+	return proxy, nil
+}
+
+// resolve: the addresses of host, itself when it is one.
+func (f *RepositoryPuller) resolve(ctx context.Context, host string) ([]netip.Addr, error) {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return []netip.Addr{ip}, nil
+	}
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
+
+// allowed: the host of addr (host:port) may be dialed at any address: a
+// host of PrivateHosts or of InsecureHosts (permitted), or a proxy of the
+// environment.
 func (f *RepositoryPuller) allowed(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
 	}
-	if slices.Contains(f.proxies, host) {
-		return true
+	return slices.Contains(f.proxies, host) || f.permitted(addr)
+}
+
+// permitted: the chart host of addr (host:port) may be at any address: a
+// host of PrivateHosts or of InsecureHosts.
+func (f *RepositoryPuller) permitted(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
 	}
 	for _, h := range slices.Concat(f.PrivateHosts, f.InsecureHosts) {
 		h = strings.TrimSpace(h)

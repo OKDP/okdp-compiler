@@ -11,12 +11,15 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	compiler "github.com/okdp/okdp-compiler"
@@ -248,5 +251,83 @@ func TestPullerRootCAs(t *testing.T) {
 		if err := pull(p, repository); err != nil {
 			t.Errorf("%s, its CA trusted: %v", repository, err)
 		}
+	}
+}
+
+// TestPullerChecksTheDestinationBehindAProxy: with a proxy for the request,
+// the destination is resolved here and refused at a private, loopback or
+// link-local address before the proxy is dialed (it would connect to any),
+// a literal address or a name; a public address goes through the proxy; a
+// host of PrivateHosts or InsecureHosts too; a name that does not resolve is
+// refused; a request the proxy is not for is dialed directly and guarded.
+func TestPullerChecksTheDestinationBehindAProxy(t *testing.T) {
+	// A fake proxy: it counts the connections it is dialed with and
+	// answers each CONNECT 502.
+	var dialed atomic.Int32
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			dialed.Add(1)
+			_, _ = c.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"))
+			_ = c.Close()
+		}
+	}()
+	proxyURL, _ := url.Parse("http://" + l.Addr().String())
+	puller := func(proxy func(*http.Request) (*url.URL, error), private ...string) *RepositoryPuller {
+		p := NewRepositoryPuller(nil)
+		p.PrivateHosts = private
+		p.proxy, p.proxies = proxy, []string{"127.0.0.1"} // the proxy itself is dialed, as HTTPS_PROXY's
+		return p
+	}
+	through := func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	pull := func(p *RepositoryPuller, repository string) error {
+		return p.Pull(t.Context(), compiler.ChartRef{Repository: repository, Chart: "app", Version: "1.0.0"}, func(io.Reader) error { return nil })
+	}
+	const private = "a private, loopback or link-local address"
+	for name, repository := range map[string]string{
+		"a loopback address":      "https://127.0.0.1:8443",
+		"a private address":       "https://10.1.2.3",
+		"the metadata endpoint":   "https://169.254.169.254",
+		"a v6 unique-local":       "https://[fd00::1]",
+		"a name at loopback":      "https://localhost:8443",
+		"a registry at a private": "oci://192.168.0.7:5000/charts",
+		"a v4 mapped into v6":     "https://[::ffff:192.168.1.1]",
+		"a private address, port": "https://172.16.0.1:80",
+	} {
+		before := dialed.Load()
+		if err := pull(puller(through), repository); err == nil || !strings.Contains(err.Error(), private) || !strings.Contains(err.Error(), "through the proxy "+proxyURL.String()) {
+			t.Errorf("%s: got %v", name, err)
+		}
+		if dialed.Load() != before {
+			t.Errorf("%s: the proxy was dialed", name)
+		}
+	}
+	// A public address goes through the proxy, which refuses it its own way.
+	before := dialed.Load()
+	if err := pull(puller(through), "https://93.184.216.34"); err == nil || strings.Contains(err.Error(), private) || dialed.Load() == before {
+		t.Errorf("a public address: %v, dialed %d times", err, dialed.Load()-before)
+	}
+	// A host allowed is not checked.
+	before = dialed.Load()
+	if err := pull(puller(through, "127.0.0.1", "localhost"), "https://127.0.0.1:8443"); err == nil || strings.Contains(err.Error(), private) || dialed.Load() == before {
+		t.Errorf("an allowed host: %v", err)
+	}
+	// A name that does not resolve cannot be checked.
+	before = dialed.Load()
+	if err := pull(puller(through), "https://nowhere.invalid"); err == nil || !strings.Contains(err.Error(), "cannot be resolved here to check its address before the proxy") || dialed.Load() != before {
+		t.Errorf("an unresolvable name: %v", err)
+	}
+	// No proxy for the request: dialed directly, and guarded.
+	direct := func(*http.Request) (*url.URL, error) { return nil, nil }
+	if err := pull(puller(direct), "https://127.0.0.2:8443"); err == nil || !strings.Contains(err.Error(), private) || strings.Contains(err.Error(), "through the proxy") {
+		t.Errorf("direct: %v", err)
 	}
 }

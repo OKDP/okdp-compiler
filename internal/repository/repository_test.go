@@ -160,7 +160,7 @@ project "demo" is in the repositories a and b`
 	}, RoleTree}})
 	for _, w := range []string{
 		"db/platform.yaml: claims: a project's (project.yaml)",
-		"db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found in type struct",
+		"db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found: service, version and claimers only",
 		`db/projects/demo/instances/b/instance.yaml: service "nope" is in the catalog of no repository`,
 		`db/projects/demo/instances/c/instance.yaml: version "9.0.0" of service "app" is not in db/catalog/app`,
 		"db/projects/demo/instances/d/instance.yaml: the package db/catalog/bad/1.0.0: its Chart.yaml is other 1.0.0\ndb/projects/demo/instances/f/config.yaml: ",
@@ -193,7 +193,7 @@ func TestError(t *testing.T) {
 	if !ok {
 		t.Fatalf("%v: not an *Error", err)
 	}
-	if len(le.Problems) != 2 || !strings.HasPrefix(le.Problems[0], "db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found in type struct") ||
+	if len(le.Problems) != 2 || !strings.HasPrefix(le.Problems[0], "db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found: service, version and claimers only") ||
 		le.Problems[1] != `db/projects/demo/instances/b/instance.yaml: service "nope" is in the catalog of no repository` || err.Error() != strings.Join(le.Problems, "\n") {
 		t.Errorf("problems: %q", le.Problems)
 	}
@@ -229,6 +229,26 @@ func TestParseInstance(t *testing.T) {
 	}
 	if _, err := ParseInstance([]byte("service: app\nname: x\n")); err == nil || !strings.Contains(err.Error(), "field name not found") {
 		t.Errorf("an unknown key: %v", err)
+	}
+	// Every problem at once, by line, no Go type in a message.
+	for raw, want := range map[string]string{
+		"service: app\nname: x\nclaimers: a\nversion: [1]\n": "yaml: unmarshal errors:\n  line 2: field name not found: service, version and claimers only\n  line 3: claimers: a list of namespace names expected\n  line 4: version: a string expected",
+		"service: a\nservice: b\n":                           "yaml: unmarshal errors:\n  line 2: mapping key \"service\" already defined at line 1",
+		"claimers: [a, {b: c}]\n":                            "yaml: unmarshal errors:\n  line 1: claimers: a list of namespace names expected",
+		"- service\n":                                        "yaml: unmarshal errors:\n  line 1: a mapping of service, version and claimers expected",
+		"service: {a: b}\n":                                  "yaml: unmarshal errors:\n  line 1: service: a string expected",
+	} {
+		_, err := ParseInstance([]byte(raw))
+		if err == nil || err.Error() != want || strings.Contains(err.Error(), "struct") || strings.Contains(err.Error(), "[]string") {
+			t.Errorf("%q: got %v, want %q", raw, err, want)
+		}
+	}
+	// Null stands for none, as it did; a number is the string of its digits.
+	if got, err := ParseInstance([]byte("service: app\nversion: 1.0\nclaimers:\n")); err != nil || got.Version != "1.0" || got.Claimers != nil {
+		t.Errorf("null claimers, a number version: %+v %v", got, err)
+	}
+	if got, err := ParseInstance([]byte("---\n")); err != nil || got.Service != "" {
+		t.Errorf("an empty document: %+v %v", got, err)
 	}
 }
 
@@ -279,5 +299,90 @@ func TestLoadRoles(t *testing.T) {
 	instances, err := Load([]Repository{{"tree", tree, RoleTree}, {"charts", catalog, RoleCatalog}})
 	if err != nil || len(instances) != 1 || instances[0].Inputs.Namespace != "demo" || instances[0].Inputs.Contracts == nil {
 		t.Errorf("got %v, %v", instances, err)
+	}
+}
+
+// TestLoadProjects: a project's own problem (a stray file in an instance's
+// directory, a key instance.yaml does not know, a project.yaml that does
+// not parse, a version its catalog lacks) refuses that project as a
+// whole, its other instances too, the others loaded; the context of a
+// project whose project.yaml reads is kept for what the platform decides
+// of it. A problem of the platform's parts (platform.yaml, a package that
+// fails, a contract that differs) is an error, the projects' problems
+// among them; Load lists every problem, as before.
+func TestLoadProjects(t *testing.T) {
+	tree := fstest.MapFS{
+		"platform.yaml":                              file("global: {okdp: {ingress: {suffix: example.org}}}\n"),
+		"catalog/app/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
+		"projects/good/instances/a/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
+		"projects/stray/project.yaml":                file("global: {team: stray}\n"),
+		"projects/stray/instances/a/instance.yaml":   file("service: app\nversion: 1.0.0\n"),
+		"projects/stray/instances/b/instance.yaml":   file("service: app\nversion: 1.0.0\n"),
+		"projects/stray/instances/b/values.yaml":     file("replicas: 2\n"),
+		"projects/unknown/instances/a/instance.yaml": file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
+		"projects/broken/project.yaml":               file("[a\n"),
+		"projects/broken/instances/a/instance.yaml":  file("service: app\nversion: 1.0.0\n"),
+		"projects/old/instances/a/instance.yaml":     file("service: app\nversion: 9.0.0\n"),
+	}
+	l, err := LoadProjects([]Repository{{"db", tree, RoleTree}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := summary(t, l.Instances), []string{"good/good-a (a) app-1.0.0 global@0 no contract"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("instances: got %q\nwant %q", got, want)
+	}
+	var names []string
+	for _, r := range l.Refused {
+		names = append(names, r.Project)
+		if len(r.Problems) == 0 || len(r.Problems) != len(r.Errs) || r.Problems[0] != r.Errs[0].Error() {
+			t.Errorf("%s: problems %q, errors %v", r.Project, r.Problems, r.Errs)
+		}
+		if r.Inputs.Namespace != r.Project || r.Own != (r.Project != "broken") {
+			t.Errorf("%s: inputs %+v, own %v", r.Project, r.Inputs, r.Own)
+		}
+	}
+	if want := []string{"broken", "old", "stray", "unknown"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("refused: got %q, want %q", names, want)
+	}
+	in := l.Refused[2].Inputs
+	if l.Refused[0].Inputs.Context[0].Level != 0 || len(l.Refused[0].Inputs.Context) != 1 {
+		t.Errorf("broken's inputs: the platform's layer alone: %+v", l.Refused[0].Inputs)
+	}
+	if in.Namespace != "stray" || len(in.Context) != 2 || in.Context[1].Values["global"] == nil {
+		t.Errorf("stray's inputs: %+v", in)
+	}
+	if got := l.Refused[2].Problems; len(got) != 1 || !strings.HasPrefix(got[0], "db/projects/stray/instances/b/values.yaml: not a file of an instance") {
+		t.Errorf("stray's problems: %q", got)
+	}
+	if !errors.Is(l.Refused[1].Errs[0], ErrNotInCatalog) {
+		t.Errorf("old: %v", l.Refused[1].Errs[0])
+	}
+	// Load: any problem fails the tree, every one listed, in name order.
+	_, err = Load([]Repository{{"db", tree, RoleTree}})
+	le, ok := errors.AsType[*Error](err)
+	if !ok || len(le.Problems) != 4 || !strings.HasPrefix(le.Problems[0], "db/projects/broken/project.yaml: ") || !errors.Is(err, ErrNotInCatalog) {
+		t.Errorf("Load: %v", err)
+	}
+	// The platform's parts fail the tree, the projects' problems listed
+	// with theirs.
+	tree["platform.yaml"] = file("[a\n")
+	tree["catalog/bad/1.0.0/Chart.yaml"] = file("apiVersion: v2\nname: other\nversion: 1.0.0\n")
+	tree["projects/good/instances/b/instance.yaml"] = file("service: bad\nversion: 1.0.0\n")
+	tree["projects/good2/instances/c/instance.yaml"] = file("service: bad\nversion: 1.0.0\n")
+	l, err = LoadProjects([]Repository{{"db", tree, RoleTree}})
+	if l != nil || err == nil {
+		t.Fatalf("a platform that does not parse: %v %v", l, err)
+	}
+	for _, w := range []string{"db/platform.yaml: ", "db/projects/stray/instances/b/values.yaml: not a file", "the package db/catalog/bad/1.0.0: its Chart.yaml is other 1.0.0"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("got %v\nwant it to hold %s", err, w)
+		}
+	}
+	// A package that fails is the catalog's, not a project's: the tree
+	// fails, whatever project names it first.
+	delete(tree, "platform.yaml")
+	l, err = LoadProjects([]Repository{{"db", tree, RoleTree}})
+	if l != nil || err == nil || strings.Count(err.Error(), "its Chart.yaml is other") != 1 {
+		t.Errorf("a package that fails: %v %v", l, err)
 	}
 }

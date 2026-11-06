@@ -101,60 +101,160 @@ type tree struct {
 // its ProjectFile, its connections and its named claims, checked as an
 // instance's compile checks its context's (okdp.CheckDeclarations).
 // Every problem at once, each naming its repository and path; a package
-// that fails once.
+// that fails once. A tree with any problem is an error and gives no
+// instance: LoadProjects loads what it can.
 func Load(repos []Repository) ([]okdp.Instance, error) {
+	l, err := LoadProjects(repos)
+	if err != nil {
+		return nil, err
+	}
+	if len(l.Refused) > 0 {
+		return nil, newError(l.errs)
+	}
+	return l.Instances, nil
+}
+
+// Loaded: a tree LoadProjects read: the instances of the projects that
+// load, and the projects that do not.
+type Loaded struct {
+	// Instances are those of the projects that load, as Load gives them.
+	Instances []okdp.Instance
+	// Refused are the projects that do not load, in name order.
+	Refused []Refused
+
+	errs []error // every problem, in the order Load lists them
+}
+
+// Refused: a project that does not load: one problem of its own, its
+// project.yaml, an instance's files or its package's version, refuses
+// the project as a whole (no instance of it), not the tree.
+type Refused struct {
+	// Project is the project's name, its directory's.
+	Project string
+	// Problems are why, each naming its repository and path, as an
+	// *Error lists them.
+	Problems []string
+	// Errs are the errors of Problems, one each.
+	Errs []error
+	// Inputs are the project's context, for a caller that needs what the
+	// platform decides of it though it does not load (its Namespace, the
+	// platform's layers and the project's, the contracts), no instance.
+	Inputs okdp.Inputs
+	// Own: Inputs holds the project's own layer, its ProjectFile read (or
+	// none); not when it does not read: the platform's alone.
+	Own bool
+}
+
+// packageError: why a package fails to load, the catalog's, not the
+// instance's that names it.
+type packageError struct{ err error }
+
+func (e *packageError) Error() string { return e.err.Error() }
+func (e *packageError) Unwrap() error { return e.err }
+
+// LoadProjects: Load, per project. A problem of a part of the platform,
+// the tree's repositories and their roles, PlatformFile, CatalogsFile,
+// a catalog's package or its contracts, is an error (an *Error with every
+// problem, the projects' too, in Load's order); a problem of a project's
+// own (its ProjectFile, an instance's files, the package version it
+// names, a connection or a claim it declares) refuses that project as a
+// whole, listed in Loaded.Refused with its problems, and the instances of
+// the others are loaded.
+func LoadProjects(repos []Repository) (*Loaded, error) {
 	t, err := index(repos)
 	if err != nil {
 		return nil, newError([]error{err})
 	}
-	var errs []error
+	var errs []error // every problem, in Load's order
+	var platformErrs []error
 	for _, r := range repos {
 		if r.Role == RoleTree {
-			errs = append(errs, t.checkCatalogs(r)...)
+			p := t.checkCatalogs(r)
+			errs = append(errs, p...)
+			platformErrs = append(platformErrs, p...)
 		}
 	}
 	var platform []okdp.ContextLayer
 	if t.platform != nil {
 		platform, err = readLayer(*t.platform, PlatformFile, 0)
 		errs = append(errs, err)
+		platformErrs = append(platformErrs, err)
 		// The named claims are a project's, of its namespace: the
 		// platform's connections serve every project.
 		for _, l := range platform {
 			if _, set := l.Values["claims"]; set {
-				errs = append(errs, fmt.Errorf("%s: claims: a project's (%s)", where(*t.platform, PlatformFile), ProjectFile))
+				err := fmt.Errorf("%s: claims: a project's (%s)", where(*t.platform, PlatformFile), ProjectFile)
+				errs = append(errs, err)
+				platformErrs = append(platformErrs, err)
 			}
 		}
 	}
-	var instances []okdp.Instance
+	l := &Loaded{}
 	for _, project := range slices.Sorted(maps.Keys(t.projects)) {
 		repo := *t.projects[project]
 		dir := path.Join(ProjectsDir, project)
+		var own []error // the project's own problems
 		layer, err := readProject(repo, path.Join(dir, ProjectFile))
 		layers := append(slices.Clone(platform), layer...)
-		errs = append(errs, err)
+		own = append(own, err)
+		readable := err == nil
 		names, err := dirs(repo, path.Join(dir, InstancesDir))
-		errs = append(errs, err)
+		own = append(own, err)
 		// A project without instance: its declarations checked as an
 		// instance's compile checks its context's, which binds them.
 		if err == nil && len(names) == 0 && layer != nil {
 			in := okdp.Inputs{Contracts: t.contracts, Context: slices.Clip(layers), Namespace: project}
 			for _, err := range unjoin(okdp.CheckDeclarations(in)) {
-				errs = append(errs, fmt.Errorf("%s: %w", where(repo, path.Join(dir, ProjectFile)), err))
+				own = append(own, fmt.Errorf("%s: %w", where(repo, path.Join(dir, ProjectFile)), err))
 			}
 		}
+		var instances []okdp.Instance
 		for _, name := range names {
 			inst, err := t.instance(repo, project, name, slices.Clip(layers))
+			if pe, ok := errors.AsType[*packageError](err); ok {
+				// The catalog's problem, not the project's: listed in its
+				// place all the same.
+				own = append(own, pe)
+				platformErrs = append(platformErrs, pe)
+				continue
+			}
 			if err != nil || inst.Definition == nil {
-				errs = append(errs, err)
+				own = append(own, err)
 				continue
 			}
 			instances = append(instances, inst)
 		}
+		errs = append(errs, own...)
+		own = slices.DeleteFunc(own, func(err error) bool {
+			_, catalog := errors.AsType[*packageError](err)
+			return catalog
+		})
+		if r := refusal(project, own); r != nil {
+			r.Inputs = okdp.Inputs{Contracts: t.contracts, Context: slices.Clip(slices.Clone(platform)), Namespace: project}
+			if readable {
+				r.Inputs.Context, r.Own = slices.Clip(layers), true
+			}
+			l.Refused = append(l.Refused, *r)
+			continue
+		}
+		l.Instances = append(l.Instances, instances...)
 	}
-	if err := newError(errs); err != nil {
-		return nil, err
+	l.errs = errs
+	if err := newError(platformErrs); err != nil {
+		return nil, newError(errs)
 	}
-	return instances, nil
+	return l, nil
+}
+
+// refusal: the Refused of project for its problems errs, the nil ones left
+// out and those errors.Join joined listed one by one; nil when there is
+// none.
+func refusal(project string, errs []error) *Refused {
+	e, ok := newError(errs).(*Error)
+	if !ok {
+		return nil
+	}
+	return &Refused{Project: project, Problems: e.Problems, Errs: e.errs}
 }
 
 // instance: the instance name of project, in repo, the context layers
@@ -187,7 +287,12 @@ func (t *tree) instance(repo Repository, project, name string, layers []okdp.Con
 	}
 	def, err := t.definition(pkg.Service, pkg.Version)
 	if err != nil {
-		return okdp.Instance{}, fmt.Errorf("%s: %w", where(repo, file), err)
+		err = fmt.Errorf("%s: %w", where(repo, file), err)
+		if _, ok := errors.AsType[*packageError](err); ok {
+			// The catalog's problem: the tree's, not the project's.
+			err = &packageError{err}
+		}
+		return okdp.Instance{}, err
 	}
 	connections, err := readLayer(repo, path.Join(dir, ConnectionsFile), 2)
 	if err != nil {
@@ -247,21 +352,70 @@ type InstanceSpec struct {
 }
 
 // ParseInstance: an InstanceFile, its first document, strictly: a key
-// that is none of InstanceSpec's refused. What Load checks after it
-// (service and version required, the claimers) is the compile's.
+// that is none of InstanceSpec's refused, a duplicate one, a value of
+// another form than a string, or a list of strings for the claimers. What
+// Load checks after it (service and version required, the claimers) is
+// the compile's. Its messages name the keys and the lines, no Go type.
 func ParseInstance(b []byte) (InstanceSpec, error) {
-	// Anonymous, so that a message names no Go type ("in type struct").
-	var spec struct {
-		Service  string   `yaml:"service"`
-		Version  string   `yaml:"version"`
-		Claimers []string `yaml:"claimers"`
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	if err := dec.Decode(&spec); err != nil && !errors.Is(err, io.EOF) {
+	var doc yaml.Node
+	if err := yaml.NewDecoder(bytes.NewReader(b)).Decode(&doc); err != nil {
+		if errors.Is(err, io.EOF) {
+			return InstanceSpec{}, nil
+		}
 		return InstanceSpec{}, err
 	}
-	return InstanceSpec(spec), nil
+	root := &doc
+	if root.Kind == yaml.DocumentNode && len(root.Content) == 1 {
+		root = root.Content[0]
+	}
+	if root.Kind == yaml.ScalarNode && root.Tag == "!!null" {
+		return InstanceSpec{}, nil
+	}
+	if root.Kind != yaml.MappingNode {
+		return InstanceSpec{}, fmt.Errorf("yaml: unmarshal errors:\n  line %d: a mapping of service, version and claimers expected", root.Line)
+	}
+	var problems []string
+	first := map[string]int{}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		k, v := root.Content[i], root.Content[i+1]
+		if at, dup := first[k.Value]; dup {
+			problems = append(problems, fmt.Sprintf("line %d: mapping key %q already defined at line %d", k.Line, k.Value, at))
+			continue
+		}
+		first[k.Value] = k.Line
+		switch k.Value {
+		case "service", "version":
+			if v.Kind != yaml.ScalarNode {
+				problems = append(problems, fmt.Sprintf("line %d: %s: a string expected", v.Line, k.Value))
+			}
+		case "claimers":
+			if !claimersNode(v) {
+				problems = append(problems, fmt.Sprintf("line %d: claimers: a list of namespace names expected", v.Line))
+			}
+		default:
+			problems = append(problems, fmt.Sprintf("line %d: field %s not found: service, version and claimers only", k.Line, k.Value))
+		}
+	}
+	if problems != nil {
+		return InstanceSpec{}, fmt.Errorf("yaml: unmarshal errors:\n  %s", strings.Join(problems, "\n  "))
+	}
+	var spec InstanceSpec
+	if err := root.Decode(&spec); err != nil {
+		return InstanceSpec{}, err
+	}
+	return spec, nil
+}
+
+// claimersNode: whether n is a value of claimers: null, or a list of
+// scalars.
+func claimersNode(n *yaml.Node) bool {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Tag == "!!null"
+	case yaml.SequenceNode:
+		return !slices.ContainsFunc(n.Content, func(c *yaml.Node) bool { return c.Kind != yaml.ScalarNode })
+	}
+	return false
 }
 
 // definition: the package of version of service, catalog/<service>/<version>/
@@ -281,14 +435,14 @@ func (t *tree) definition(service, version string) (*okdp.Definition, error) {
 	t.packages[key] = nil
 	files, err := fs.Sub(repo.FS, dir)
 	if err != nil {
-		return nil, err
+		return nil, &packageError{err}
 	}
 	def, err := okdp.LoadDefinition(files)
 	if err == nil && (def.Chart.Name != service || def.Chart.Version != version) {
 		err = fmt.Errorf("its Chart.yaml is %s %s", def.Chart.Name, def.Chart.Version)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("the package %s: %w", where(*repo, dir), err)
+		return nil, &packageError{fmt.Errorf("the package %s: %w", where(*repo, dir), err)}
 	}
 	t.packages[key] = def
 	return def, nil

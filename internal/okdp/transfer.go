@@ -68,7 +68,10 @@ func refreshInterval(okdp M) string {
 
 // platformKeys: the first segment of the platform's keys of the secret
 // store, platform/<key>, the credentials of its connections, which every
-// namespace reads and none writes: no project is named so (Compile).
+// namespace of a ClusterSecretStore reads and none writes; with
+// secrets.provider no namespace reads them, the platform's credentials
+// being copied under the namespaces' own keys, and a connection naming
+// one is refused (storeSecret). No project is named so (Compile).
 const platformKeys = "platform"
 
 // storeKey: the key of a claim's credentials in the platform's secret

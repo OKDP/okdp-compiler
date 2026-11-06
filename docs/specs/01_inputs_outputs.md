@@ -33,6 +33,7 @@ empty one fails as another:
 | Case | Error |
 |---|---|
 | a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
+| a release that is the name of an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-viewer`, `-editor`, `-admin`, `okdp-secrets`, `okdp-dcr-token`, the names `global.okdp.secrets` and `oidc.dcr.tokenSecret` give), or its beginning up to a `-` (`okdp`, `okdp-access`): the objects of a release are named `<release>` and `<release>-<x>`, and would take its place | `Inputs.Release "okdp-project": the name of an object the platform writes in every namespace (okdp-project), or its beginning up to a "-": ...` |
 | a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 | the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce); `testdata/cli/secrets.txtar`) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
 | a namespace `kube-*`, Kubernetes' own (`kube-system`, `kube-public`, `kube-node-lease`) | `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)` |
@@ -369,7 +370,7 @@ once, at `connections.<name>`, before its claims bind: a typo in a
 connection no instance references yet is reported where it is written,
 a project's refusing its project's instances, the platform's every
 instance (`compiler.CheckConnection` checks one before it is written);
-of a project without instance, the tree, which does not load
+of a project without instance, that project, which does not load
 ([named claims](#claims)).
 
 ```
@@ -583,9 +584,12 @@ of the store, `global.okdp.secrets.store` ([credentials across
 namespaces](#credentials-across-namespaces): a SecretStore of each
 namespace, or a ClusterSecretStore), under which each secret field of
 the contract (`x-okdp-secret`) is a property of its name. The platform's
-keys are under `platform/`, the segment the store gives every namespace
-to read ([what the store must enforce](#what-the-store-must-enforce)). An
-S3 store that OKDP neither deploys nor manages, for instance:
+keys, under a ClusterSecretStore, are under `platform/`, the segment
+every namespace the store admits reads; with `secrets.provider` no
+namespace reads it, and the platform's credentials are copied under the
+keys of the namespaces that use them ([what the store must
+enforce](#what-the-store-must-enforce)). An S3 store that OKDP neither
+deploys nor manages, for instance:
 
 ```yaml
 # examples/03_full/input/db/platform.yaml
@@ -640,15 +644,19 @@ or `..`: a key reaches past its first segment, the one a store's policy
 scopes, in no way. The platform's keys are under `platform/`, outside
 `<namespace>/<id>`, where the credentials of the claims cross
 namespaces; `platform` is no project's namespace ([inputs and
-outputs](#inputs-and-outputs)). A connection of level 0 names any key: the
-platform's values are reviewed with the platform. A connection above
+outputs](#inputs-and-outputs)). A connection of level 0 names any key
+that is a path: the platform's values are reviewed with the platform, and
+a connection of level 0 is every project's, each of its instances reading
+the key as its own namespace; with `secrets.provider`, a key under
+`platform/` is refused, no namespace reading it ([what the store must
+enforce](#what-the-store-must-enforce)). A connection above
 level 0, a project's (`project.yaml`) or an instance's own
 (`connections.yaml`), names a key under its namespace, `<namespace>/`,
 and no other: the namespace's own segment, where its PushSecrets push
 the credentials of the claims it provides, and where an administrator of
-the store puts what it may read; the platform's keys are read through
-the platform's connections, and another namespace's never, whatever the
-store's policy allows ([what the store must
+the store puts what it may read, the platform's credentials copied for it
+among them; another namespace's keys never, whatever the store's policy
+allows ([what the store must
 enforce](#what-the-store-must-enforce)):
 
 ```yaml
@@ -789,6 +797,7 @@ storage: "demo-pg" is not a connection, nor an output of an instance of the name
 | external, a `remoteKey` of a connection whose name is not a DNS-1123 label | `<path>: connection "<name>": secretRef.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials` | |
 | external, a `remoteKey` of a contract without `x-okdp-secret` field | `<path>: connection "<name>": secretRef.remoteKey: the <contract> contract has no secret field (x-okdp-secret): there are no credentials to read` | |
 | external, a `remoteKey` that is no path of the store: an empty, `.` or `..` segment | `<path>: connection "<name>": secretRef.remoteKey "<key>": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."` | `context/2/remote-key-not-a-path.yaml` |
+| external, a `remoteKey` under `platform/` when the platform gives `secrets.provider` | `<path>: connection "<name>": secretRef.remoteKey "<key>": no namespace reads platform/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>, read through a connection of the project (level 1)` | `testdata/cli/secrets.txtar` (`provider`) |
 | external, above level 0, a `remoteKey` outside the instance's namespace, `<namespace>/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) | `<path>: connection "<name>": secretRef.remoteKey "<key>": a key of the platform's secret store a project may not read: a connection above level 0 (level <level>) names a key under "<namespace>/", its namespace; the platform's keys are read through the platform's connections (level 0)` | `context/2/remote-key-of-another-namespace.yaml` |
 | output, values that values cannot hold (a NaN) | `<path>: output "<name>" of <instance>: json: <cause>` | |
 | neither a connection nor an output | `<path>: "<name>" is not a connection`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` when instances publish an output of that name of another contract | |
@@ -1472,7 +1481,11 @@ JupyterHub's). The reference starts with an entry, then ends, goes on
 with `/` or, after an entry with a path, with `:` or `@` (a tag, a
 digest): `mirror.example.org/okdp` admits
 `mirror.example.org/okdp/app:1.0`, not `mirror.example.org/okdp-x/app`
-nor `mirror.example.org:5000/okdp/app`. An `image`, a `registry` or a
+nor `mirror.example.org:5000/okdp/app`. A non-empty string at a key whose
+name says it holds an image, a registry or a repository of images, one
+that ends in `image`, `imageRegistry`, `imageRepository` or `imageName`,
+whatever its case (`initImage`, `imageRegistry`,
+`defaultImageRegistry`), is a reference as well. An `image`, a `registry` or a
 `repository` set to `null` leaves the chart's default, which the compile
 does not read: it is refused. Unset, the images are not checked; `[]`,
 none may be set. The chart's defaults are not checked: a package whose
@@ -1525,7 +1538,7 @@ come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
 | a template (in values an instance layer or a context layer above level 0 gives, the layer fails before: [Layers](#layers), [Levels](#levels)) | `<key>: <at>: the value contains "{{"`, `<key>: <at>: the key contains "{{"`; `<key>: <at>: cannot be checked for "{{": <type> is not a values type` |
 | a protected path | `<key>: <at>: <protected> is set by the platform and cannot be changed` |
 | a denied key, of a project that is not privileged ([upstream policy](#upstream-policy)) | `<key>: <at>: <name> is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), <namespace> is not one of them`; `(global.okdp.policy.upstream.deny)` for the platform's; `runAsUser 0, root, is denied...`, `runAsNonRoot false is denied...`; in a string read as YAML, `<at>, read as YAML: <path>: ...` |
-| an image of none of the platform's registries | `<key>: <at>: image <reference> is not from a registry of global.okdp.policy.upstream.registries (<registries>): the platform's projects pull from any (global.okdp.policy.privileged), <namespace> is not one of them`; `image null, the chart's default,` for a `null` |
+| an image of none of the platform's registries (an `image`, a `registry` and a `repository`, or a key ending in `Image`, `ImageRegistry`, `ImageRepository` or `ImageName`) | `<key>: <at>: image <reference> is not from a registry of global.okdp.policy.upstream.registries (<registries>): the platform's projects pull from any (global.okdp.policy.privileged), <namespace> is not one of them`; `image null, the chart's default,` for a `null` |
 | an appended path, not a list | `<key>: <at> must be a list` |
 
 ## Merge precedence
@@ -1744,7 +1757,8 @@ mode a client's `secret` replaces the Secret name, which
 follow, and two clients may not write one Secret
 ([compile errors](02_service_definition.md#compile-errors)). The
 Secret is the release's, the default names above and a `secret` given
-alike: its name starts with `<release>-`, checked in every mode, so
+alike: a `secret` is `<release>-<name>` exactly (`<release>-oidc` for the
+main client), checked in every mode, so
 that the Job, whose Role writes it, cannot overwrite another Secret of
 the namespace, another instance's credentials
 (`testdata/cli/oidc.txtar`).
@@ -2876,7 +2890,7 @@ declarations all the same (`okdp.CheckDeclarations`), as an instance's
 compile would: each named claim's form and name, no connection's, its
 class, the one it names or the default one, a class of the context, its
 request, no key its class fixes, against the contract's claim schema;
-and each connection at its declaration. A problem is the tree's, which
+and each connection at its declaration. A problem refuses the project, which
 does not load, at `projects/<project>/project.yaml: claims.<name>`. A
 level adds named claims, it changes none of a lower level's
 (`claims.<name>`, taken whole). Through
@@ -3284,7 +3298,10 @@ separates the namespaces' credentials is the store's own authorisation,
 which the key layout lets it express. Every key is `<segment>/<rest>`:
 `<namespace>/<id>`, the credentials a namespace pushes, under its own
 name, the ID starting with the namespace that reads them;
-`platform/<key>`, the platform's connections'. A path-based store
+`<namespace>/<key>`, what an administrator or the platform puts there for
+it (the platform's identity of a service the namespace uses, copied under
+each consumer namespace); `platform/<key>`, the platform's connections' of
+a ClusterSecretStore. A path-based store
 (OpenBao, Vault, a cloud secret manager) with one policy, applied to the
 identity of each namespace:
 
@@ -3294,7 +3311,14 @@ identity of each namespace:
   starts with its name and a dot, whichever namespace pushed it, and no
   other namespace's (`demo.*` is not `demo-x.*`: a namespace is a DNS-1123
   label, without dot);
-- reads the platform's keys, `platform/*`.
+
+No namespace reads `platform/` with `secrets.provider`: a policy that
+gave it would let a namespace made outside the tree read what the
+platform keeps for the others, so the platform's credentials are copied
+under the keys of the namespaces that use them (`<namespace>/<key>`, which
+a connection of the project, level 1, names), and a connection naming a
+`platform/` key is refused. `platform/*` is read only where the store is
+one ClusterSecretStore (below).
 
 With `secrets.provider`, the store is the SecretStore of each
 namespace, authenticating with the ServiceAccount `secrets.serviceAccount`
@@ -3328,16 +3352,13 @@ path "okdp/metadata/{{identity.entity.aliases.auth_kubernetes_XXXX.metadata.serv
 path "okdp/data/+/{{identity.entity.aliases.auth_kubernetes_XXXX.metadata.service_account_namespace}}.*" {
   capabilities = ["read"]
 }
-# The platform's keys, the credentials of its connections.
-path "okdp/data/platform/*" {
-  capabilities = ["read"]
-}
 ```
 
-The platform writes `platform/<key>` as the operator of the store, and
-nothing of the compiler's needs more of it: a project named `platform`
-would own the platform's keys, and is refused ([inputs and
-outputs](#inputs-and-outputs)). A cloud secret manager scopes its
+The platform writes the keys it copies (`<namespace>/<key>`) as the
+operator of the store, and nothing of the compiler's needs more of it: no
+`platform/*` is read, and a namespace named `platform` would be granted it
+by the policy's first path, so a project of that name is refused
+([inputs and outputs](#inputs-and-outputs)). A cloud secret manager scopes its
 identities alike, on the path of the key (AWS: a resource policy on
 `okdp/<namespace>/*`, with the mount as the prefix of every key).
 

@@ -852,7 +852,7 @@ registers its own by OIDC Dynamic Client Registration, per
 | `clientName` | string | `<release>-<namespace>`, then `-<name>` for a named client | Its name at the identity provider. |
 | `public` | boolean | `false` | A public client (a browser application), without a client secret. |
 | `request` | map | `{}` | Fields of the registration request (snake_case, as OIDC Dynamic Client Registration names them): they override the computed ones. |
-| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to, one of the release's: its name starts with `<release>-` (`${{ release.name }}-console`). |
+| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to, the release's: `<release>-<name>` exactly (`${{ release.name }}-console`), `<release>-oidc` for the main client. |
 | `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts; the platform's default is its CA bundle, `global.okdp.tls.caBundleSecret`, `""` (none) when unset. |
 
 A key left out by `$if` is not set, a null one is refused by its type,
@@ -864,8 +864,10 @@ Every mode checks the clients, after the mapping: each client is a map,
 its `name` of the form above, of these keys only, each of its type,
 `grantTypes` given and not empty ([sections](#evaluation-order)); then one
 client at most has no name, names are unique, and a `secret` given is
-the release's, `<release>-...`: the Job's Role writes it, and would
-write another Secret of the namespace, another instance's credentials.
+the release's, `<release>-<name>` exactly (`<release>-oidc` for the main
+client): the Job's Role writes it, and would write another Secret of the
+namespace, another instance's credentials, were any name that starts with
+`<release>-` accepted (the instances `web` and `web-x` share the prefix).
 In `dcr` mode, no two clients write one Secret. As soon as the mapping
 declares a client, its chart key belongs to the compiler: `Chart.yaml`
 may not list it, nor the values file compute it (`Chart.yaml:
@@ -1187,7 +1189,7 @@ Other errors of the mapping:
 | `values.cel.yaml: <key>: not a dependency of Chart.yaml` | a key of the [values file](#valuescelyaml) |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `<service>: output "<name>": secret: a plain value (stringData): ...` | [`provides`](#provides) |
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
-| `<client>: secret "<secret>": the Secret the client is written to is one of the release's, its name starts with "<release>-"` | a client's `secret` that does not start with the release and a `-`, in every mode |
+| `<client>: secret "<secret>": the Secret the client is written to is the release's, "<release>-<name>" (<release>-<client name>, <release>-oidc for the main client)` | a client's `secret` that is not that name, in every mode |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
 | `Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it` | a client's chart key, `oidc-dcr` or `<name>-oidc-dcr`, a dependency of `Chart.yaml` or a key of the values file |
 | `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |

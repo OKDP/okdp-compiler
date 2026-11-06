@@ -54,6 +54,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"time"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
@@ -156,6 +157,11 @@ type (
 	// the deployment graph of those that compile: by instance (Instance,
 	// Release), why each that does not deploy does not (Problems).
 	Tree = tree.Tree
+	// RefusedProject: a project of a Tree that does not load, why
+	// (Problems, each naming its repository and path), and no instance of
+	// it: Tree.Refused, its output kept (Partial) as a project whose
+	// instance is refused keeps it.
+	RefusedProject = tree.Refused
 	// TreeInstance: an instance of a Tree and its compile: its Outcome,
 	// the problem of the graph at its release (GraphErr), the claims bound
 	// to it as a provider (Provided), what it granted each (Granted).
@@ -199,7 +205,7 @@ type (
 	// KeptProject: a project of a tree whose output is not written
 	// (Partial, TreeFiles), and why: Problems, an instance each,
 	// <namespace>/<instance>: <why>, and Instances, the instances of the
-	// problems; Rederived, the files TreeFiles writes of it of today's
+	// problems, or, Unloaded, its load problems and no instance; Rederived, the files TreeFiles writes of it of today's
 	// settings all the same (its manifests, its instances' identity).
 	KeptProject = tree.Kept
 	// KeptInstance: an instance of a KeptProject that does not deploy, and
@@ -520,6 +526,11 @@ func AddedProblems(before, after *LoadError) []string {
 type BuildOptions struct {
 	// CostLimit: Inputs.CostLimit of each instance, 0 for none.
 	CostLimit uint64
+	// InstanceTimeout: Inputs.Timeout of each instance, 0 for none: how
+	// long one instance's compile may take, past which that instance is
+	// refused and the others compiled, beside ctx's deadline, the whole
+	// tree's.
+	InstanceTimeout time.Duration
 	// AllowPlainSecrets: Inputs.AllowPlainSecrets of each instance.
 	AllowPlainSecrets bool
 	// Charts: the chart cache CompileTree checks the final values against
@@ -528,21 +539,46 @@ type BuildOptions struct {
 }
 
 // Build: the tree repos make together (LoadRepository), each instance
-// with the options' CostLimit and AllowPlainSecrets, compiled
+// with the options' CostLimit, InstanceTimeout and AllowPlainSecrets, compiled
 // (CompileTree, with opts.Charts), cancelled with ctx: what okdp-compile
-// and okdp-gitops compile. A tree that does not load is a *LoadError,
-// every problem listed; an instance refused is the tree's answer
-// (TreeInstance.Err), not an error.
+// and okdp-gitops compile. A problem of the platform's parts (a
+// repository, platform.yaml, catalogs.yaml, a catalog) is a *LoadError,
+// every problem listed, the projects' among them; a project that does not
+// load is refused as a whole, not the tree: it has no instance and is
+// among the tree's Refused (Partial keeps its output), the others compile.
+// An instance refused is the tree's answer (TreeInstance.Err), not an
+// error.
 func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, error) {
-	instances, err := LoadRepository(repos)
+	loaded, err := repository.LoadProjects(repos)
 	if err != nil {
 		return nil, err
 	}
+	instances := loaded.Instances
 	for i := range instances {
 		instances[i].Inputs.CostLimit = opts.CostLimit
+		instances[i].Inputs.Timeout = opts.InstanceTimeout
 		instances[i].Inputs.AllowPlainSecrets = opts.AllowPlainSecrets
 	}
-	return CompileTree(ctx, instances, opts.Charts), nil
+	t := CompileTree(ctx, instances, opts.Charts)
+	for _, r := range loaded.Refused {
+		t.Refused = append(t.Refused, RefusedProject{Namespace: r.Project, Problems: r.Problems, Errs: r.Errs, Inputs: r.Inputs, Own: r.Own})
+	}
+	return t, nil
+}
+
+// LoadErrorOf: why the projects of t that do not load (Tree.Refused) do
+// not, as the *LoadError the whole tree would be with them, their
+// problems in order; nil when every project loads: for a caller that
+// reasons on a tree as a whole (treeedit.StateOf).
+func LoadErrorOf(t *Tree) *LoadError {
+	if t == nil {
+		return nil
+	}
+	var errs []error
+	for _, r := range t.Refused {
+		errs = append(errs, r.Errs...)
+	}
+	return repository.JoinErrors(errs)
 }
 
 // StaticCharts: a chart cache filled already, fsys (each chart unpacked

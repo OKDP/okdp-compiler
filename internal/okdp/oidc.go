@@ -13,10 +13,10 @@
 package okdp
 
 import (
+	"cmp"
 	_ "embed"
 	"fmt"
 	"maps"
-	"strings"
 
 	"cel.dev/cel-go/cel"
 
@@ -74,6 +74,13 @@ func clientSecret(release, namespace string, dcr bool, name string) string {
 	return "creds-" + release + "-oauth2-" + name
 }
 
+// explicitSecret: the Secret a client may name for itself (its secret key),
+// the only one of the release's it may: <release>-<name>, <release>-oidc
+// for the main client, which has no name.
+func explicitSecret(release, name string) string {
+	return release + "-" + cmp.Or(name, "oidc")
+}
+
 // oidcFunctions: oidcClientSecret(name), the Secret of the OAuth client
 // name ("" for the main client, as platform.oidcClientSecret) in the
 // platform's mode, for the instance inst; a client's explicit secret is
@@ -112,10 +119,12 @@ func oidcClients(session *compile.Session, inst *instance, section []any) ([]oid
 			return nil, nil, fmt.Errorf("%s: %s has the same name: client names must be unique", c.where, other)
 		}
 		seen[c.name] = c.where
-		// The Job's Role writes the Secret: one of the release's, never
-		// another Secret of the namespace (another instance's credentials).
-		if s := value.Str(spec["secret"]); s != "" && !strings.HasPrefix(s, inst.release+"-") {
-			return nil, nil, fmt.Errorf("%s: secret %q: the Secret the client is written to is one of the release's, its name starts with %q", c.where, s, inst.release+"-")
+		// The Job's Role writes the Secret: the release's, exactly, never
+		// another Secret of the namespace (another instance's credentials):
+		// the names that start with <release>- are the instances' whose
+		// release does (web and web-x).
+		if s, want := value.Str(spec["secret"]), explicitSecret(inst.release, c.name); s != "" && s != want {
+			return nil, nil, fmt.Errorf("%s: secret %q: the Secret the client is written to is the release's, %q (<release>-<client name>, <release>-oidc for the main client)", c.where, s, want)
 		}
 		c.fullname = fullname(inst.release, c.chart)
 		clients = append(clients, c)

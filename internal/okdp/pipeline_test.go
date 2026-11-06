@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -638,5 +639,45 @@ func TestCheckWarnings(t *testing.T) {
 	want := []string{"the package's", "upstream.app.env: appended to the package's list, not to the default list of app-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of app (its defaults or values file) to keep them"}
 	if !slices.Equal(checked.Warnings, want) {
 		t.Errorf("warnings:\n got %q\nwant %q", checked.Warnings, want)
+	}
+}
+
+// TestCompileTimeout: Inputs.Timeout bounds one compile, beside the
+// context's deadline: past it the instance is refused with its own message,
+// not the context's; the caller's context cancelled is still its error; a
+// tree compiled together refuses the instance alone; the cost of a compile
+// is the result's (Result.Cost), counted under a limit.
+func TestCompileTimeout(t *testing.T) {
+	in := inputs()
+	in.Timeout = time.Nanosecond
+	res, err := Compile(context.Background(), def, in)
+	if res != nil || err == nil || err.Error() != "the compile takes longer than the instance timeout (1ns)" || errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("past the instance timeout: %v, %v", res, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	in.Timeout = time.Hour
+	if _, err := Compile(ctx, def, in); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: %v", err)
+	}
+	ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := Compile(ctx, def, in); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "instance timeout") {
+		t.Errorf("the caller's deadline: %v", err)
+	}
+	in.Timeout = 0
+	if res, err := Compile(context.Background(), def, in); err != nil || res.Cost != 0 {
+		t.Errorf("no limit: %v, cost %v", err, res)
+	}
+	in.CostLimit = 1_000_000
+	if res, err := Compile(context.Background(), def, in); err != nil || res.Cost == 0 || res.Cost > in.CostLimit {
+		t.Errorf("under a limit: %v, cost %v", err, res)
+	}
+	slow, fast := Instance{Definition: def, Inputs: inputs(), Name: "slow"}, Instance{Definition: def, Inputs: inputs(), Name: "fast"}
+	slow.Inputs.Release, fast.Inputs.Release = "demo-slow", "demo-fast"
+	slow.Inputs.Timeout = time.Nanosecond
+	out := CompileAll(context.Background(), []Instance{slow, fast})
+	if out[0].Err == nil || !strings.Contains(out[0].Err.Error(), "instance timeout") || out[1].Err != nil || out[1].Result == nil {
+		t.Errorf("a tree: %v / %v", out[0].Err, out[1].Err)
 	}
 }

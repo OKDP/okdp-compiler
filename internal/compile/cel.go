@@ -142,23 +142,41 @@ type Session struct {
 	built uint64 // the size of the values the document being evaluated built (grow), at most maxDocSize
 	loops int    // how many $for bodies are running: what they build is counted in the cost (grow)
 	funcs []cel.EnvOption
-	progs []cel.ProgramOption // how its programs run (NewSession)
 	envs  map[string]*cel.Env // by variable names, sorted (compile)
 }
 
 // NewSession: the session of a compile: cancelled with ctx, its
 // expressions' total CEL cost at most limit (0: no limit), its documents
 // calling the host functions funcs besides the language's own
-// (functions.go). Its programs, each built once per expression
-// (compile), check the context every interruptEvery iterations; under a
-// limit, each evaluation may cost the limit, its cost counted (exec).
+// (functions.go). Its programs, each built per expression (compile), check
+// the context every interruptEvery iterations; under a limit, each
+// evaluation may cost what the session has left, its cost counted (exec,
+// program).
 func NewSession(ctx context.Context, limit uint64, funcs ...cel.EnvOption) *Session {
-	s := &Session{ctx: ctx, limit: limit, funcs: funcs, envs: map[string]*cel.Env{}}
-	s.progs = []cel.ProgramOption{cel.InterruptCheckFrequency(interruptEvery)}
-	if limit > 0 {
-		s.progs = append(s.progs, cel.CostLimit(limit))
+	return &Session{ctx: ctx, limit: limit, funcs: funcs, envs: map[string]*cel.Env{}}
+}
+
+// Used: the CEL cost of the evaluations so far, those of the directives
+// of a $for included; 0 without a limit, which counts none.
+func (s *Session) Used() uint64 { return s.used }
+
+// left: the cost the session may still use, under a limit.
+func (s *Session) left() uint64 {
+	if s.used >= s.limit {
+		return 0
 	}
-	return s
+	return s.limit - s.used
+}
+
+// options: how a program runs: the context checked every interruptEvery
+// iterations; under a limit, an evaluation may cost the rest of the
+// session's, no more.
+func (s *Session) options() []cel.ProgramOption {
+	opts := []cel.ProgramOption{cel.InterruptCheckFrequency(interruptEvery)}
+	if s.limit > 0 {
+		opts = append(opts, cel.CostLimit(s.left()))
+	}
+	return opts
 }
 
 // interruptEvery: how many iterations of a comprehension run between two
@@ -258,7 +276,10 @@ func dataSize(v any, left uint64) (uint64, bool) {
 // the names in scope at its place, to the program its evaluations run.
 type expr struct {
 	src string // as written between ${{ and }}, trimmed, for messages
+	env *cel.Env
+	ast *cel.Ast
 	prg cel.Program
+	cap uint64 // the cost its program may use, under a limit: what the session had left when it was built
 }
 
 // compile: the expression src, as written (CEL's errors give its line and
@@ -288,11 +309,12 @@ func (s *Session) compile(src string, names []string) (*expr, error) {
 		}
 		s.envs[key] = env
 	}
-	e := &expr{src: strings.TrimSpace(src)}
+	e := &expr{src: strings.TrimSpace(src), env: env}
 	ast, iss := env.Compile(src)
 	err := iss.Err()
 	if err == nil {
-		e.prg, err = env.Program(ast, s.progs...)
+		e.ast, e.cap = ast, s.left()
+		e.prg, err = env.Program(ast, s.options()...)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("${{ %s }}: %w", e.src, err)
@@ -312,19 +334,23 @@ func (s *Session) eval(src string, scope M) (any, error) {
 // run: the value of the expression e in scope, as data, evaluated within
 // the session (exec); an error names the expression.
 func (s *Session) run(e *expr, scope M) (any, error) {
-	v, err := s.exec(e.prg, scope)
+	v, err := s.exec(e, scope)
 	if err != nil {
 		return nil, fmt.Errorf("${{ %s }}: %w", e.src, err)
 	}
 	return v, nil
 }
 
-// exec: the program prg evaluated in scope, as data, within the session:
+// exec: the expression e evaluated in scope, as data, within the session:
 // its context checked before and during the evaluation; under a limit, the
-// evaluation may cost the limit, and the session fails once the total cost
-// of its evaluations passes it.
-func (s *Session) exec(prg cel.Program, scope M) (any, error) {
+// evaluation may cost what the session has left, and the session fails
+// once the total cost of its evaluations passes the limit.
+func (s *Session) exec(e *expr, scope M) (any, error) {
 	if err := s.ctx.Err(); err != nil {
+		return nil, err
+	}
+	prg, err := s.program(e)
+	if err != nil {
 		return nil, err
 	}
 	out, details, err := prg.ContextEval(s.ctx, scope)
@@ -350,6 +376,22 @@ func (s *Session) exec(prg cel.Program, scope M) (any, error) {
 		return nil, err
 	}
 	return toData(out)
+}
+
+// program: the program of e, built again for what the session has left
+// when that is less than it was built for, so that an evaluation costs
+// that at most, not the limit: an expression late in a compile cannot use
+// the whole limit again.
+func (s *Session) program(e *expr) (cel.Program, error) {
+	if s.limit == 0 || s.left() >= e.cap {
+		return e.prg, nil
+	}
+	prg, err := e.env.Program(e.ast, s.options()...)
+	if err != nil {
+		return nil, fmt.Errorf("${{ %s }}: %w", e.src, err)
+	}
+	e.prg, e.cap = prg, s.left()
+	return prg, nil
 }
 
 // maxDocSize: the size of the values a document may build (memSize, about

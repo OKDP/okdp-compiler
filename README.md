@@ -61,8 +61,9 @@ and a target writes them for a deployer: the umbrella chart of each
 (`compiler.Helm`), with its Flux HelmRelease (`compiler.Flux`) or its
 Argo CD Application (`compiler.ArgoCD`).
 `compiler.Build` is the compile of a tree as both command lines run it,
-`LoadRepository` then `CompileTree` (`compiler.LoadError`, every problem
-of a tree that does not load), `compiler.TreeFiles` its output for one or
+the load, then `CompileTree` (`compiler.LoadError`, every problem of a
+tree whose platform does not load; a project that does not load is
+`Tree.Refused`, the others compiled), `compiler.TreeFiles` its output for one or
 more targets, the projects that do not deploy kept as the output written
 before holds them, their manifests and identity of today's settings
 (`compiler.Partial`, the rule of `okdp-compile --partial`). Package
@@ -300,12 +301,14 @@ writes the projects whose instances all compile and keeps what the
 output holds of the others, and of two projects that share a release
 name, failing all the same ([`--partial`](docs/01_usage.md#--partial)).
 
-What a package computes is bounded: `--cost-limit` (50000000, 0 for
+What a package computes is bounded: `--cost-limit` (1000000, 0 for
 none), the CEL cost of each instance's expressions, the bytes a host
 function reads and builds counted, past which the instance is refused,
-and `--timeout` (10m, 0 for none), the whole compile, past which nothing
-is written ([command line](docs/01_usage.md#command-line)). What the
-command reads is too: a symbolic link in a repository or the chart cache
+`--instance-timeout` (1m, 0 for none), one instance's compile, past which
+that instance is refused, and `--timeout` (10m, 0 for none), the whole
+compile, past which nothing is written
+([command line](docs/01_usage.md#command-line)). What the command reads
+is too: a symbolic link in a repository or the chart cache
 is not followed but refused, a file over 4 MiB, or a directory's files
 over 64 MiB together (a chart's, in the chart cache), refused.
 Credentials written in clear fail the

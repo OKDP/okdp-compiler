@@ -140,7 +140,7 @@ func TestDcrArgs(t *testing.T) {
 		"public":     true,
 		"scope":      "openid groups",
 		"clientName": "console",
-		"secret":     "demo-x-s",
+		"secret":     "demo-x-oidc",
 		"caSecret":   "ca",
 		"request":    M{"application_type": "native"},
 	})
@@ -158,7 +158,7 @@ func TestDcrArgs(t *testing.T) {
 	if keys := value.Dig(out, "mapping.keyMapping"); !reflect.DeepEqual(keys, M{"client_id": ".client_id"}) {
 		t.Errorf("a public client has no secret: %#v", keys)
 	}
-	if out["secret"] != "demo-x-s" || value.Dig(out, "security.role") != "demo-x-oidc-dcr" || value.Dig(out, "tls.certificate") != "ca" {
+	if out["secret"] != "demo-x-oidc" || value.Dig(out, "security.role") != "demo-x-oidc-dcr" || value.Dig(out, "tls.certificate") != "ca" {
 		t.Errorf("names: %#v", out)
 	}
 	// The scope is the platform's when the client has none; public: false
@@ -256,7 +256,7 @@ func TestDcrModes(t *testing.T) {
 
 // TestDcrErrors: the platform must register anonymously at a registration
 // URL (dcr mode), the clients must be told apart and a client's secret be
-// one of the release's (every mode); their
+// the release's, <release>-<client name> exactly (every mode); their
 // form is mapping.schema.json's (TestMappingErrors). An error of the
 // template names the client, then the template's file.
 func TestDcrErrors(t *testing.T) {
@@ -269,9 +269,10 @@ func TestDcrErrors(t *testing.T) {
 		"auth method":      {M{"authMethod": "bearer"}, []any{M{"grantTypes": grants}}, `global.okdp.oidc.dcr.authMethod "bearer" is not supported`},
 		"registration url": {M{"registrationUrl": ""}, []any{M{"grantTypes": grants}}, "global.okdp.oidc.dcr.registrationUrl is required"},
 		"same name":        {nil, []any{M{"grantTypes": grants, "name": "a"}, M{"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
-		"same secret":      {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": "b", "secret": "demo-x-demo-dcr"}}, `oidcClients[1] (b): oidcClients[0] writes the same Secret, "demo-x-demo-dcr": give each client its own secret`},
-		"another Secret":   {nil, []any{M{"grantTypes": grants, "name": "b", "secret": "demo-db-credentials"}}, `oidcClients[0] (b): secret "demo-db-credentials": the Secret the client is written to is one of the release's, its name starts with "demo-x-"`},
-		"another mode":     {M{"enabled": false}, []any{M{"grantTypes": grants, "secret": "demo-x"}}, `oidcClients[0]: secret "demo-x": the Secret the client is written to is one of the release's, its name starts with "demo-x-"`},
+		"same secret":      {nil, []any{M{"grantTypes": grants, "secret": "demo-x-oidc"}, M{"grantTypes": grants, "name": "oidc", "secret": "demo-x-oidc"}}, `oidcClients[1] (oidc): oidcClients[0] writes the same Secret, "demo-x-oidc": give each client its own secret`},
+		"another Secret":   {nil, []any{M{"grantTypes": grants, "name": "b", "secret": "demo-db-credentials"}}, `oidcClients[0] (b): secret "demo-db-credentials": the Secret the client is written to is the release's, "demo-x-b" (<release>-<client name>, <release>-oidc for the main client)`},
+		"another's prefix": {nil, []any{M{"grantTypes": grants, "name": "b", "secret": "demo-x-b-credentials"}}, `oidcClients[0] (b): secret "demo-x-b-credentials": the Secret the client is written to is the release's, "demo-x-b"`},
+		"another mode":     {M{"enabled": false}, []any{M{"grantTypes": grants, "secret": "demo-x"}}, `oidcClients[0]: secret "demo-x": the Secret the client is written to is the release's, "demo-x-oidc"`},
 		"two main clients": {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
 		"template error":   {nil, []any{M{"grantTypes": grants, "scope": float64(1)}}, "oidcClients[0]: oidc-dcr.cel.yaml: vars scope: ${{ first("},
 	} {

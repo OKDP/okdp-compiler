@@ -2,7 +2,8 @@
 //
 //	[--target helm|flux|argocd] [--path-prefix <path>]
 //	[--flux-source <namespace>/<name>] [--repo-url <url>] [--revision <rev>]
-//	[--cost-limit <n>] [--timeout <duration>] [--force] [--report <file>|-]
+//	[--cost-limit <n>] [--instance-timeout <duration>] [--timeout <duration>]
+//	[--force] [--report <file>|-]
 //	[--partial] [--allow-plain-secrets]
 //
 // every instance of a tree, its parts in one or more repositories, its
@@ -47,18 +48,21 @@ type options struct {
 	repoURL, revision string        // --repo-url, --revision: argocd
 	costLimit         uint64        // --cost-limit: each instance's, 0 none
 	timeout           time.Duration // --timeout: the compile's, 0 none
+	instanceTimeout   time.Duration // --instance-timeout: each instance's, 0 none
 	force             bool          // --force: an output without its marker
 	report            string        // --report: a file, - for stdout
 	partial           bool          // --partial: the projects that compile written
 	allowPlainSecrets bool          // --allow-plain-secrets: each instance's
 }
 
-// The defaults of --cost-limit and --timeout: the command compiles
-// packages it may not have reviewed, an expression bounded as
-// okdp-gitops bounds it, the whole compile in time.
+// The defaults of --cost-limit, --instance-timeout and --timeout: the
+// command compiles packages it may not have reviewed, an expression
+// bounded as okdp-gitops bounds it, each instance and the whole compile in
+// time.
 const (
-	defaultCostLimit = 50_000_000
-	defaultTimeout   = 10 * time.Minute
+	defaultCostLimit       = 1_000_000
+	defaultInstanceTimeout = time.Minute
+	defaultTimeout         = 10 * time.Minute
 )
 
 // errReported: a failure whose messages are printed already: exit 1,
@@ -85,6 +89,7 @@ func main() {
 	flag.StringVar(&o.repoURL, "repo-url", "", "--target argocd, required: the repository Argo CD reads <output> from")
 	flag.StringVar(&o.revision, "revision", "", "--target argocd: its revision (default HEAD)")
 	flag.Uint64Var(&o.costLimit, "cost-limit", defaultCostLimit, "the CEL cost each instance's expressions may use together, its mapping's and the compiler's templates', past which the instance is refused; 0: no limit")
+	flag.DurationVar(&o.instanceTimeout, "instance-timeout", defaultInstanceTimeout, "how long one instance's compile may take, past which that instance is refused and the others compiled (--partial keeps its project); 0: no limit")
 	flag.DurationVar(&o.timeout, "timeout", defaultTimeout, "how long the compile may take, every instance together, past which nothing is written; 0: no limit")
 	flag.StringVar(&o.report, "report", "", "write a JSON report, to the file, or stdout for -, even with --check and when the compile fails: each instance, its namespace, instance, release, service, version, privileged, status (compiled, refused or skipped), error, warnings, dependencies, claims and charts, and the tree's errors")
 	flag.BoolVar(&o.allowPlainSecrets, "allow-plain-secrets", false, "accept credentials written in clear (Inputs.AllowPlainSecrets of every instance): a provides secret without generate, a Secret of the objects with data or stringData; refused without it, the output being committed to the deployments repository")
@@ -180,9 +185,13 @@ func checkReport(o options) error {
 // keep them, a refusal, a problem of the graph of its own, a release name
 // two namespaces share, or error: <namespace>/<release>: it depends on
 // <namespace>/<release>, of the project <namespace>, whose output is
-// kept; and the command fails all the same. Each instance is recorded in
-// rep as its compile ends, the problems of the graph and the shared
-// release names at their instances, and whether the files were written.
+// kept; a project that does not load (a file of its own that does not
+// parse, a stray file) is refused as a whole, each problem printed, error:
+// <path>: <message>, and kept alike, error: <namespace>: not written, it
+// does not load ...; and the command fails all the same. Each instance is
+// recorded in rep as its compile ends, the problems of the graph and the
+// shared release names at their instances, and whether the files were
+// written.
 func compileTree(o options, rep *report) error {
 	switch {
 	case o.repositories == nil:
@@ -232,7 +241,7 @@ func compileTree(o options, rep *report) error {
 		ctx, cancel = context.WithTimeout(ctx, o.timeout)
 		defer cancel()
 	}
-	t, err := compiler.Build(ctx, repos, compiler.BuildOptions{CostLimit: o.costLimit, AllowPlainSecrets: o.allowPlainSecrets, Charts: charts})
+	t, err := compiler.Build(ctx, repos, compiler.BuildOptions{CostLimit: o.costLimit, InstanceTimeout: o.instanceTimeout, AllowPlainSecrets: o.allowPlainSecrets, Charts: charts})
 	if err != nil {
 		return err
 	}
@@ -243,6 +252,15 @@ func compileTree(o options, rep *report) error {
 		return fmt.Errorf("the compile takes longer than --timeout %s: nothing written", o.timeout)
 	}
 	refused := false
+	// A project that does not load: its problems, which refuse it and not
+	// the tree.
+	for _, r := range t.Refused {
+		for _, p := range r.Problems {
+			fmt.Fprintf(os.Stderr, "error: %s\n", p)
+			rep.Errors = append(rep.Errors, p)
+		}
+		refused = true
+	}
 	for _, ti := range t.Instances {
 		out := ti.Outcome
 		rep.add(ti.Instance, out)
@@ -297,9 +315,16 @@ func compileTree(o options, rep *report) error {
 	if err != nil {
 		return err
 	}
-	var keep []string
+	var keep, unloaded []string
+	dropped := map[string]string{}
 	for _, k := range kept {
 		keep = append(keep, k.Namespace)
+		if k.Unloaded {
+			unloaded = append(unloaded, k.Namespace)
+		}
+		if k.Dropped != "" {
+			dropped[k.Namespace] = k.Dropped
+		}
 		for _, ki := range k.Instances {
 			switch {
 			case ki.Outcome.Err != nil, ki.Depends && !o.partial:
@@ -322,7 +347,16 @@ func compileTree(o options, rep *report) error {
 	}
 	rep.Written = true
 	for _, ns := range keep {
-		fmt.Fprintf(os.Stderr, "error: %s: not written, an instance of it refused (--partial): %s kept as it is, its namespace, identity and roles of today's settings\n", ns, filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)))+string(filepath.Separator))
+		if why, ok := dropped[ns]; ok {
+			fmt.Fprintf(os.Stderr, "error: %s: dropped from the output (--partial): %s: nothing of %s kept\n", ns, why, filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)))+string(filepath.Separator))
+			rep.notWritten(ns)
+			continue
+		}
+		why := "an instance of it refused"
+		if slices.Contains(unloaded, ns) {
+			why = "it does not load"
+		}
+		fmt.Fprintf(os.Stderr, "error: %s: not written, %s (--partial): %s kept as it is, its namespace, identity and roles of today's settings\n", ns, why, filepath.Join(o.output, filepath.FromSlash(compiler.ProjectDir(ns)))+string(filepath.Separator))
 		rep.notWritten(ns)
 	}
 	for _, ti := range t.Instances {

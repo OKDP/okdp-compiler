@@ -24,8 +24,8 @@ stderr '^error: demo/demo-web: connections.unused \(connection "unused"\): field
 # class the platform does not define, whose request the
 # contract's claim schema refuses or sets a key its class fixes, or of a
 # connection's name, and a connection that does not hold; every problem
-# at once, the tree does not load. Declared well, it binds to nothing:
-# the tree compiles.
+# at once, the project does not load (it is refused, not the
+# tree). Declared well, it binds to nothing: the tree compiles.
 status 1 okdp-compile --repository $WORK/empty --check
 ! stdout .
 stderr '^error: \S+/empty/projects/idle/project.yaml: connections.broken \(connection "broken"\): field "url" is required by the api contract$'
@@ -33,9 +33,9 @@ cp $WORK/claims.yaml $WORK/empty/projects/idle/project.yaml
 status 1 okdp-compile --repository $WORK/empty --check
 stderr '^error: \S+/empty/projects/idle/project.yaml: claims.big: claim \(api\): the request does not meet the contract''s claim schema \(x-okdp-claim\):$'
 stderr '^- at ''/size'': ''5G'' does not match pattern'
-stderr '^\S+/empty/projects/idle/project.yaml: claims.fixed: claim: request.tier: set by the class gold \(global.okdp.provisioning.api.classes.gold\): remove it, or name another class$'
-stderr '^\S+/empty/projects/idle/project.yaml: claims.nowhere: claim \(api\): class "silver" is not a class of api connections \(global.okdp.provisioning.api.classes\): gold$'
-stderr '^\S+/empty/projects/idle/project.yaml: claims.same: a connection of that name too \(connections.same\)$'
+stderr '^error: \S+/empty/projects/idle/project.yaml: claims.fixed: claim: request.tier: set by the class gold \(global.okdp.provisioning.api.classes.gold\): remove it, or name another class$'
+stderr '^error: \S+/empty/projects/idle/project.yaml: claims.nowhere: claim \(api\): class "silver" is not a class of api connections \(global.okdp.provisioning.api.classes\): gold$'
+stderr '^error: \S+/empty/projects/idle/project.yaml: claims.same: a connection of that name too \(connections.same\)$'
 cp $WORK/good.yaml $WORK/empty/projects/idle/project.yaml
 status 0 okdp-compile --repository $WORK/empty --check
 

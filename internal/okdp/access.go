@@ -219,25 +219,61 @@ type AccessError struct{ Err error }
 func (e *AccessError) Error() string { return e.Err.Error() }
 func (e *AccessError) Unwrap() error { return e.Err }
 
+// NamespaceError: the namespace of a project is none a project may have
+// today: the compiler reserves it, or the platform does
+// (global.okdp.policy.reserved). A project that holds it is dropped from
+// an output (ProjectOf, output.Files), not kept.
+type NamespaceError struct{ Err error }
+
+func (e *NamespaceError) Error() string { return e.Err.Error() }
+func (e *NamespaceError) Unwrap() error { return e.Err }
+
+// CheckProject: nil when the namespace of in may be a project's today, as
+// the compile of any of its instances decides it: a DNS label, none the
+// compiler reserves, none the platform does (global.okdp.policy.reserved
+// of the settings in.Context's level 0 gives, checked as a compile
+// checks them); a *NamespaceError otherwise, any other error the
+// settings'. The one view of the platform's namespaces for Compile and
+// ProjectOf.
+func CheckProject(in Inputs) error {
+	_, err := platformOf(in)
+	return err
+}
+
+// platformOf: the platform's settings of the context of in, global.okdp,
+// when the namespace of in may be a project's (CheckProject).
+func platformOf(in Inputs) (M, error) {
+	if err := checkNamespace("Inputs.Namespace", in.Namespace); err != nil {
+		return nil, &NamespaceError{err}
+	}
+	_, platform, err := contextLayers(in.Context)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := platformSettings(platform)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, settings); err != nil {
+		return nil, &NamespaceError{err}
+	}
+	return settings, nil
+}
+
 // ProjectOf: the Project of the namespace of in, of its context alone,
 // as the compile of any of its instances gives it (Result): today's
 // settings of the platform and of the project, whether its instances
 // compile or not, for the targets to write the manifests of a project
 // whose instances are kept (output.Files). The context's layers checked
 // as a compile checks them (contextLayers, platformSettings), their
-// error the error. An access that is refused is an *AccessError, the
+// error the error; so is the namespace, as the compile checks it
+// (CheckProject): a *NamespaceError when the compiler or the platform
+// reserves it. An access that is refused is an *AccessError, the
 // Project given all the same, no group a role in it. Its network policy
 // has the claimers of in.Claims alone: the caller adds those of the
 // project's other providers.
 func ProjectOf(in Inputs) (Project, error) {
-	if err := checkNamespace("Inputs.Namespace", in.Namespace); err != nil {
-		return Project{}, err
-	}
-	_, platform, err := contextLayers(in.Context)
-	if err != nil {
-		return Project{}, err
-	}
-	settings, err := platformSettings(platform)
+	settings, err := platformOf(in)
 	if err != nil {
 		return Project{}, err
 	}

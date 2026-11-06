@@ -374,6 +374,23 @@ func TestBuild(t *testing.T) {
 	if !ok || len(le.Problems) != 2 || !errors.Is(err, compiler.ErrNotInCatalog) {
 		t.Errorf("a tree that does not load: %#v", err)
 	}
+	// A project that does not load is refused, not the tree: no instance
+	// of it, the others compiled, its problems LoadErrorOf's.
+	tr, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
+		"catalog/app/1.0.0/Chart.yaml":            {Data: []byte("apiVersion: v2\nname: app\nversion: 1.0.0\n")},
+		"projects/good/instances/a/instance.yaml": {Data: []byte("service: app\nversion: 1.0.0\n")},
+		"projects/bad/instances/a/instance.yaml":  {Data: []byte("service: nope\nversion: 1.0.0\n")},
+		"projects/bad/instances/b/instance.yaml":  {Data: []byte("service: app\nversion: 1.0.0\n")},
+	}, Role: compiler.RoleTree}}, compiler.BuildOptions{})
+	if err != nil || len(tr.Instances) != 1 || tr.Instances[0].Namespace() != "good" || len(tr.Refused) != 1 || tr.Refused[0].Namespace != "bad" {
+		t.Fatalf("a project that does not load: %v %+v", err, tr)
+	}
+	if le := compiler.LoadErrorOf(tr); le == nil || len(le.Problems) != 1 || !errors.Is(le, compiler.ErrNotInCatalog) {
+		t.Errorf("LoadErrorOf: %v", le)
+	}
+	if compiler.LoadErrorOf(nil) != nil || compiler.LoadErrorOf(&compiler.Tree{}) != nil {
+		t.Error("LoadErrorOf a tree that loads")
+	}
 }
 
 // TestAccess: project.yaml's access, read from the project's file alone,

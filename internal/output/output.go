@@ -44,8 +44,12 @@ import (
 // rest of t written; then every release of the projects written and of
 // the kept projects' output in previous is in one namespace, else an
 // error wrapping a *target.ReleaseError per release: two releases of one
-// name are never written. An error of previous (a symbolic link, a file
-// over its bounds) fails it. kept are the projects kept, and why.
+// name are never written. A project kept whose namespace is none a
+// project may have today, the compiler's reserved names or the platform's
+// (global.okdp.policy.reserved), is dropped: nothing of it is kept nor
+// written, Kept.Dropped says why, and the tree does not fail. An error of
+// previous (a symbolic link, a file over its bounds) fails it. kept are
+// the projects kept, and why.
 func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]byte, []tree.Kept, error) {
 	var shared []string // the objects named after the releases, of each target that has them
 	for _, tg := range targets {
@@ -72,17 +76,24 @@ func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]
 		if err != nil {
 			return nil, nil, fmt.Errorf("the output of the project kept %s: %w", k.Namespace, err)
 		}
-		if _, ok := files[path.Join(target.ProjectDir(k.Namespace), flux.KustomizationFile)]; ok {
+		previousFiles := files
+		var dropped error
+		files, kept[i].Rederived, dropped, err = rederive(t, targets, k.Namespace, files)
+		if err != nil {
+			return nil, nil, fmt.Errorf("the project kept %s: %w", k.Namespace, err)
+		}
+		if dropped != nil {
+			// A namespace no project may have today: nothing of it kept.
+			kept[i].Dropped = dropped.Error()
+			continue
+		}
+		if _, ok := previousFiles[path.Join(target.ProjectDir(k.Namespace), flux.KustomizationFile)]; ok {
 			keep = append(keep, k.Namespace)
 		}
-		for p := range files {
+		for p := range previousFiles {
 			if release, ok := instanceOf(k.Namespace, p); ok {
 				releases[[2]string{k.Namespace, release}] = true
 			}
-		}
-		files, kept[i].Rederived, err = rederive(t, targets, k.Namespace, files)
-		if err != nil {
-			return nil, nil, fmt.Errorf("the project kept %s: %w", k.Namespace, err)
 		}
 		maps.Copy(kepts, files)
 	}
@@ -120,42 +131,54 @@ func Files(t *tree.Tree, targets []target.Target, previous fs.FS) (map[string][]
 // rederive: the files of the project kept namespace of t, previous those
 // the output written before holds of it (none: none written), its
 // platform's part of today's settings (D-5): the project as its context
-// decides it now (okdp.ProjectOf of its first instance: privileged or
-// not, its secret store, the roles of its groups, the control plane, its
-// network policy, the claimers of every instance's claims its own),
-// written by each of targets that is a target.Keeper (Kept), a path two
-// write differently an error, in place of every file previous holds under
-// its target.ProjectManifests, its instances' files kept as they are but
+// decides it now (okdp.ProjectOf of its first instance, or of its own
+// context when it does not load: privileged or not, its secret store, the
+// roles of its groups, the control plane, its network policy, the
+// claimers of every instance's claims its own), written by each of
+// targets that is a target.Keeper (Kept), a path two write differently an
+// error, in place of every file previous holds under its
+// target.ProjectManifests, its instances' files kept as they are but
 // those Kept gives; previous as it is when no target is a Keeper. A
 // privilege revoked, a role taken back, a tightened policy, reach the
 // kept project's namespace and identity at once, whatever its instances:
 // the instances kept are applied with today's identity, which refuses
 // what they hold that it no longer allows. An access the compile refuses
-// gives no group a role; the platform's settings refused fail it. And
-// the paths written of today's settings, in path order.
-func rederive(t *tree.Tree, targets []target.Target, namespace string, previous map[string][]byte) (files map[string][]byte, rederived []string, err error) {
+// gives no group a role; the platform's settings refused fail it. A
+// namespace that is none a project may have today, reserved by the
+// compiler since the output was written or by the platform
+// (global.okdp.policy.reserved), drops the project: dropped says why,
+// and nothing of it is kept, nor re-derived (okdp.CheckProject, the
+// compile's own view). And the paths written of today's settings, in
+// path order.
+func rederive(t *tree.Tree, targets []target.Target, namespace string, previous map[string][]byte) (files map[string][]byte, rederived []string, dropped, err error) {
+	inputs, unloaded, own, ok := projectInputs(t, namespace)
+	if !ok || len(previous) == 0 {
+		return previous, nil, nil, nil
+	}
+	if err := okdp.CheckProject(inputs); err != nil {
+		switch {
+		case errors.As(err, new(*okdp.NamespaceError)):
+			return nil, nil, err, nil
+		case unloaded:
+			// The context of a project that does not load may be what it
+			// does not load for: its output is kept, not the tree's
+			// failure.
+			return previous, nil, nil, nil
+		}
+		return nil, nil, nil, fmt.Errorf("its manifests of today's settings: %w", err)
+	}
 	var keepers []target.Keeper
 	for _, tg := range targets {
 		if k, ok := tg.(target.Keeper); ok {
 			keepers = append(keepers, k)
 		}
 	}
-	if len(previous) == 0 || len(keepers) == 0 {
-		return previous, nil, nil
+	if len(keepers) == 0 || unloaded && !own {
+		return previous, nil, nil, nil
 	}
-	var p target.Project
-	for _, ti := range t.Instances {
-		if ti.Namespace() != namespace {
-			continue
-		}
-		var err error
-		if p, err = okdp.ProjectOf(ti.Inputs); err != nil && !errors.As(err, new(*okdp.AccessError)) {
-			return nil, nil, fmt.Errorf("its manifests of today's settings: %w", err)
-		}
-		break
-	}
-	if p.Namespace == "" {
-		return previous, nil, nil
+	p, err := okdp.ProjectOf(inputs)
+	if err != nil && !errors.As(err, new(*okdp.AccessError)) {
+		return nil, nil, nil, fmt.Errorf("its manifests of today's settings: %w", err)
 	}
 	// The network policy's claimers: those of the claims bound to every
 	// instance of the project, as the compile bound them, compiled or not.
@@ -170,11 +193,11 @@ func rederive(t *tree.Tree, targets []target.Target, namespace string, previous 
 	for _, k := range keepers {
 		files, err := k.Kept(p, previous)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		for f, b := range files {
 			if prev, ok := written[f]; ok && string(prev) != string(b) {
-				return nil, nil, fmt.Errorf("%s: two targets write it differently", f)
+				return nil, nil, nil, fmt.Errorf("%s: two targets write it differently", f)
 			}
 			written[f] = b
 		}
@@ -187,7 +210,25 @@ func rederive(t *tree.Tree, targets []target.Target, namespace string, previous 
 		}
 	}
 	maps.Copy(out, written)
-	return out, slices.Sorted(maps.Keys(written)), nil
+	return out, slices.Sorted(maps.Keys(written)), nil, nil
+}
+
+// projectInputs: the inputs the project namespace of t is read from, those
+// of its first instance, else its own context when it does not load
+// (tree.Refused, unloaded, own when its project.yaml read); none for a
+// project of t that has neither.
+func projectInputs(t *tree.Tree, namespace string) (in okdp.Inputs, unloaded, own, ok bool) {
+	for _, ti := range t.Instances {
+		if ti.Namespace() == namespace {
+			return ti.Inputs, false, true, true
+		}
+	}
+	for _, r := range t.Refused {
+		if r.Namespace == namespace {
+			return r.Inputs, true, r.Own, true
+		}
+	}
+	return okdp.Inputs{}, false, false, false
 }
 
 // releaseObjects: the objects of tg named after the releases, which share

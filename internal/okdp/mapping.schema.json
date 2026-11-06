@@ -84,7 +84,7 @@
           "clientName": {"type": "string", "description": "Its name at the identity provider; \"\" or absent: <release>-<namespace>[-<name>]."},
           "public": {"type": "boolean", "description": "A public client, without a client secret; absent: false."},
           "request": {"type": "object", "description": "Fields of the registration request, over the computed ones."},
-          "secret": {"type": "string", "description": "The Secret the Job writes the client to, one of the release's: its name starts with <release>-; \"\" or absent: oidcClientSecret(<name>)."},
+          "secret": {"type": "string", "description": "The Secret the Job writes the client to, the release's, <release>-<client name> exactly (<release>-oidc for the main client); \"\" or absent: oidcClientSecret(<name>)."},
           "caSecret": {"type": "string", "description": "The Secret holding the CA bundle the Job trusts; \"\" or absent: platform.oidc.dcr.caSecret."}
         }
       }

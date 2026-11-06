@@ -84,6 +84,24 @@ func TestPartial(t *testing.T) {
 	}
 }
 
+// TestPartialRefused: a project that does not load (Tree.Refused) is kept,
+// with its load problems, first, no instance of it; an instance that
+// depends on one of its releases is kept too.
+func TestPartialRefused(t *testing.T) {
+	instances := []okdp.Instance{instance("b", "b1"), instance("f", "f1")}
+	outcomes := []okdp.Outcome{compiled("b", "b1", on("a", "a-a1")), compiled("f", "f1")}
+	tr := build(instances, outcomes)
+	tr.Refused = []Refused{{Namespace: "a", Problems: []string{"db/projects/a/instances/x/values.yaml: not a file"}}}
+	results, g, kept := Partial(tr)
+	if g == nil || len(results) != 1 || results[0].Release != "f-f1" {
+		t.Fatalf("written: %v %v", results, g)
+	}
+	if len(kept) != 2 || kept[0].Namespace != "a" || !kept[0].Unloaded || kept[0].Instances != nil ||
+		!reflect.DeepEqual(kept[0].Problems, tr.Refused[0].Problems) || kept[1].Namespace != "b" || kept[1].Unloaded {
+		t.Errorf("kept: %+v", kept)
+	}
+}
+
 // TestRegressions: the instances that deployed before and do not after,
 // in after's order; a new one, or one that did not deploy before, is none.
 func TestRegressions(t *testing.T) {

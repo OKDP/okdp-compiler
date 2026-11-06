@@ -293,7 +293,7 @@ automation-oidc-dcr:
     grant_types:
       - client_credentials
     scope: profile email groups
-  secret: demo-workspace-automation-oauth
+  secret: demo-workspace-automation
   security:
     role: demo-workspace-automation-oidc-dcr
     serviceAccount: demo-workspace-automation-oidc-dcr
@@ -696,12 +696,12 @@ scheduler:
       valueFrom:
         secretKeyRef:
           key: client_id
-          name: demo-workspace-automation-oauth
+          name: demo-workspace-automation
     - name: AUTOMATION_CLIENT_SECRET
       valueFrom:
         secretKeyRef:
           key: client_secret
-          name: demo-workspace-automation-oauth
+          name: demo-workspace-automation
   fullnameOverride: demo-workspace-scheduler
   global:
     imageRegistry: registry.example.org

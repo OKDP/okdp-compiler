@@ -699,6 +699,35 @@ func TestSession(t *testing.T) {
 	if _, err := NewSession(context.Background(), cost/2).Eval(mapCtx(), nil, mapping(one)); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", cost/2)) {
 		t.Errorf("past the limit in one evaluation: got %v", err)
 	}
+	// An evaluation costs what the session has left, not the limit: after
+	// one binding, the second stops where the rest runs out, not at the
+	// limit again (it would have run to its end, which costs less than the
+	// limit).
+	items := make([]any, 200)
+	for i := range items {
+		items[i] = M{"n": float64(i)}
+	}
+	var calls int
+	tick := cel.Function("tick", cel.Overload("tick_dyn", []*cel.Type{cel.DynType}, cel.DynType,
+		cel.UnaryBinding(func(v ref.Val) ref.Val { calls++; return v })))
+	scope := M{"values": M{"items": items}}
+	s = NewSession(context.Background(), math.MaxUint64, tick)
+	if _, err := s.Eval(scope, nil, mapping("vars:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n  b: ${{ values.items.map(i, tick(i.n * 2.0)) }}\n")); err != nil {
+		t.Fatal(err)
+	}
+	both := s.Used()
+	if calls != len(items) {
+		t.Fatalf("%d calls of %d", calls, len(items))
+	}
+	calls = 0
+	limit = both * 3 / 4
+	_, err = NewSession(context.Background(), limit, tick).Eval(scope, nil, mapping("vars:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n  b: ${{ values.items.map(i, tick(i.n * 2.0)) }}\n"))
+	if err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
+		t.Fatalf("past the limit: %v", err)
+	}
+	if calls >= len(items) {
+		t.Errorf("the second binding ran to its end (%d calls): the limit was not the rest of the session's", calls)
+	}
 	// Cancelled before an evaluation: the context's error.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -706,7 +735,7 @@ func TestSession(t *testing.T) {
 		t.Errorf("cancelled: got %v, want context.Canceled", err)
 	}
 	// Cancelled during one: a comprehension stops at its next check.
-	items := make([]any, 2*interruptEvery)
+	items = make([]any, 2*interruptEvery)
 	for i := range items {
 		items[i] = float64(i)
 	}
@@ -714,7 +743,7 @@ func TestSession(t *testing.T) {
 	// the evaluation.
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
-	calls := 0
+	calls = 0
 	stop := cel.Function("stop", cel.Overload("stop_dyn", []*cel.Type{cel.DynType}, cel.DynType,
 		cel.UnaryBinding(func(v ref.Val) ref.Val { calls++; cancel(); return v })))
 	_, err = NewSession(ctx, 0, stop).Eval(M{"values": M{"items": items}}, nil, mapping("vars:\n  a: ${{ values.items.map(i, stop(i)) }}\n"))

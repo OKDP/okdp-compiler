@@ -260,7 +260,7 @@
                     "registries": {
                       "type": "array",
                       "items": {"type": "string", "pattern": "^[^\\s/:@]+(:[0-9]+)?(/[^\\s/:@]+)*$"},
-                      "description": "The registries the images of the upstream values come from, each a host, its port and a path prefix optional (registry.example.org, mirror.example.org:5000/okdp): every image string, and the reference a registry and a repository string make (<registry>/<repository>, the computed one of either the instance does not set; an image map's name without repository), starts with one of them, followed by its end, a / or, after a path, a : or @ (a tag, a digest); an image, a registry or a repository null, the chart's default, is refused. Absent: the images are not checked; []: none may be set."
+                      "description": "The registries the images of the upstream values come from, each a host, its port and a path prefix optional (registry.example.org, mirror.example.org:5000/okdp): every image string, and the reference a registry and a repository string make (<registry>/<repository>, the computed one of either the instance does not set; an image map's name without repository), starts with one of them, followed by its end, a / or, after a path, a : or @ (a tag, a digest); a string at a key that names an image, a registry or a repository by its name (it ends in image, imageRegistry, imageRepository or imageName, whatever its case: initImage, imageRegistry, defaultImageRegistry), non-empty, is a reference as well; an image, a registry or a repository null, the chart's default, is refused. Absent: the images are not checked; []: none may be set."
                     }
                   }
                 }

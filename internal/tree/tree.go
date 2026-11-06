@@ -30,6 +30,26 @@ type Tree struct {
 	// upstream charts: a chart the ChartSource could not fetch; nil when
 	// they were, or without a ChartSource.
 	ChartsErr error
+	// Refused are the projects that do not load (repository.Load), no
+	// instance of them in Instances, in name order: their output is kept
+	// (Partial), not written.
+	Refused []Refused
+}
+
+// Refused: a project of a Tree that does not load, why, and its own
+// context for what the platform decides of it all the same.
+type Refused struct {
+	// Namespace is the project.
+	Namespace string
+	// Problems are why, each naming its repository and path, with their
+	// errors in Errs.
+	Problems []string
+	Errs     []error
+	// Inputs are the project's context (Namespace, Context, Contracts).
+	Inputs okdp.Inputs
+	// Own: Inputs holds the project's own layer; not when its
+	// project.yaml does not read, the platform's alone.
+	Own bool
 }
 
 // ChartSource: a chart cache that fetches the upstream charts it lacks,
