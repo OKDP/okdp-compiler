@@ -213,6 +213,53 @@ func checkObjects(svc, namespace string, objects []M) error {
 	})
 }
 
+// checkDuplicateObjects: the objects of an instance of svc in namespace
+// (Result.Objects, every source, the items of a list alike) hold no two of
+// one apiVersion group, kind, namespace (unset, "" or null, the
+// instance's) and name: the second would replace the first in the cluster,
+// whichever comes last in the file, as two claims' objects whose names a
+// provider derived the same way do. Of every project, privileged or not;
+// the versions of a group are one object. A Secret is left to
+// refuseSecretTargets, which compares those of the namespace's instances
+// all together. An object without a name (generateName) is none to
+// compare. The second is named, <kind>/<name>,
+// with the first's position.
+func checkDuplicateObjects(svc, namespace string, objects []M) error {
+	seen := map[string]int{}
+	n := 0
+	return eachObject(objects, func(o M) error {
+		n++
+		meta := value.AsMap(o["metadata"])
+		name := value.Str(meta["name"])
+		if name == "" {
+			return nil
+		}
+		ns := namespace
+		if v, set := meta["namespace"]; set && v != nil && v != "" {
+			ns = value.Str(v)
+		}
+		kind := value.Str(o["kind"])
+		if kind == "Secret" && apiGroup(value.Str(o["apiVersion"])) == "" {
+			return nil
+		}
+		id := apiGroup(value.Str(o["apiVersion"])) + "/" + kind + "/" + ns + "/" + name
+		if first, dup := seen[id]; dup {
+			return fmt.Errorf("%s: objects: %s/%s: two objects of one kind (%s), namespace (%s) and name: object %d and object %d; the second would replace the first. A name derived from a claim's ID must be one per ID (okdpSqlName, okdpObjectName)", svc, kind, name, apiGroupName(value.Str(o["apiVersion"])), ns, first, n)
+		}
+		seen[id] = n
+		return nil
+	})
+}
+
+// apiGroupName: the group of an apiVersion as the messages name it, "core"
+// for the core group (v1).
+func apiGroupName(apiVersion string) string {
+	if g := apiGroup(apiVersion); g != "" {
+		return g
+	}
+	return "core"
+}
+
 // eachObject: f on each object of objects, in order, each followed by the
 // items of the list it holds, at any depth (items: a List, which Helm and
 // Argo CD install item by item, an item that is not a map skipped): the

@@ -1,9 +1,9 @@
-url: https://demo-webapp.okdp.example.org
+url: https://webapp-demo.okdp.example.org
 usage: |
-  A web application. Open https://demo-webapp.okdp.example.org
+  A web application. Open https://webapp-demo.okdp.example.org
 provides:
   - name: webapp
     contract: http
     values:
       internalUrl: http://demo-webapp-app.demo.svc:8080
-      url: https://demo-webapp.okdp.example.org
+      url: https://webapp-demo.okdp.example.org

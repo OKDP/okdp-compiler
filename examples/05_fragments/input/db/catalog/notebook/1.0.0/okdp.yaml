@@ -1,0 +1,55 @@
+# A notebook, written with the fragments the compiler provides instead of
+# hand-written workloads: okdpWebWorkload (a Deployment on a hardened pod, a
+# Service, a volume, an Ingress), the sign-in proxy of okdpSignInProxy in
+# front of it, and okdpJob (a hardened Job, a Helm hook) for its first
+# start. See docs/02_writing_package.md, "Fragments".
+require:
+  - ingress.suffix
+  - ingress.className
+  - oidc.issuerUri
+
+vars:
+  # The image is by digest; the host ends with -<namespace>.<suffix>, the
+  # form the compile requires of a project's hosts.
+  image: registry.example.org/okdp/notebook:1.0.0@sha256:5f285c86523439ab3859f1b75e1fab1b4d7d958daa0349e609ef45be403a854d
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+
+# The main OAuth client: the sign-in proxy of the workload uses it
+# (platform.oidcClientSecret).
+oidcClients:
+  - redirectUris: ['https://${{ host }}/oauth2/callback']
+    grantTypes: [authorization_code, refresh_token]
+
+instance:
+  url: https://${{ host }}
+  usage: A notebook at https://${{ host }}, for the groups ${{ values.?allowedGroups.orValue(platform.access.editors).join(', ') }}.
+
+objects:
+  - $spread: >-
+      ${{ okdpWebWorkload({
+          'component': 'web',
+          'port': 8888,
+          'pod': {
+            'containers': [{
+              'name': 'notebook', 'image': image,
+              'ports': [{'name': 'http', 'containerPort': 8888}],
+              'env': [{'name': 'NOTEBOOK_ROOT', 'value': '/data'}],
+              'volumeMounts': [{'name': 'data', 'mountPath': '/data'}, {'name': 'tmp', 'mountPath': '/tmp'}],
+              'resources': {'requests': {'cpu': '250m', 'memory': '512Mi'}, 'limits': {'memory': '1Gi'}}}],
+            'volumes': [{'name': 'tmp', 'emptyDir': {}}],
+            'runAsUser': 1000, 'fsGroup': 1000},
+          'storage': {'size': str(values.storageGi) + 'Gi'},
+          'ingress': {'host': host},
+          'signIn': {'allowedGroups': values.?allowedGroups.orValue(platform.access.editors)}
+        }) }}
+  # Its first start: a hook after the install, on the same hardened pod.
+  - $spread: >-
+      ${{ okdpJob({
+          'name': okdpFullname('seed'),
+          'component': 'seed',
+          'pod': {
+            'containers': [{'name': 'seed', 'image': image, 'command': ['/bin/seed', '/data'],
+                            'volumeMounts': [{'name': 'tmp', 'mountPath': '/tmp'}]}],
+            'volumes': [{'name': 'tmp', 'emptyDir': {}}]},
+          'hook': {'helm': 'post-install', 'weight': 5}
+        }) }}

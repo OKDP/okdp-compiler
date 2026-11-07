@@ -1,0 +1,109 @@
+# The sign-in proxy of okdpSignInProxy(args): oauth2-proxy, by digest, in
+# front of a service that has no login of its own, signing users in with
+# the platform's OIDC (the main OAuth client of the instance:
+# platform.oidcClientSecret, which the package's oidcClients declares) and
+# letting in the members of the allowed groups only, by default the
+# project's editors and the platform's administrators
+# (platform.access.editors): the groups claim, never the realm's roles,
+# which every project's people hold. It never skips the check of the
+# email: a user whose email the provider has not verified is not let in.
+# Embedded in the compiler and evaluated at each call (fragment,
+# fragments.go), by the mapping engine: ${{ CEL }} expressions, the same
+# directives and functions.
+#
+# It returns the proxy's container (the arguments of okdpPodSpec's
+# containers), the volumes it needs, and the objects: its cookie secret,
+# generated once in the cluster (okdpGeneratedSecret).
+#
+# Inputs:
+#   args      the arguments, checked against mapping.schema.json
+#             (okdpSignInProxy)
+#   platform, global  the instance's: platform.oidc, platform.access...
+vars:
+  # The name of the cookie and of the Secret holding its secret.
+  name: ${{ first([args.?name.orValue(''), okdpFullname('oauth2-proxy')]) }}
+  port: ${{ args.?port.orValue(4180.0) }}
+  groups: ${{ args.?allowedGroups.orValue(platform.access.editors) }}
+  # The CA bundle the proxy trusts when it calls the issuer: the
+  # arguments', else the platform's; "" for none.
+  ca: ${{ first([args.?caBundleSecret.orValue(''), global.okdp.?tls.?caBundleSecret.orValue('')]) }}
+  issuer: ${{ str(platform.oidc.?issuerUri.orValue('')) }}
+  image: >-
+    ${{ first([args.?image.orValue(''), 'quay.io/oauth2-proxy/oauth2-proxy:v7.15.4@sha256:b1b2021fe8f4004573e8d690dec6c7bb29cc44364572cf8510a05bf3a0ae2ded']) }}
+
+errors:
+  - $if: ${{ !platform.oidc.enabled }}
+    $value: >-
+      okdpSignInProxy: the platform's OIDC is disabled (global.okdp.oidc.enabled): a sign-in
+      proxy has no identity provider to sign users in with
+  - $if: ${{ issuer == '' }}
+    $value: >-
+      okdpSignInProxy: global.okdp.oidc.issuerUri is required. It is a platform value: the identity provider the proxy signs users in with
+  - $if: ${{ args.?host.orValue('') == '' }}
+    $value: 'okdpSignInProxy: host is required, the host the users reach the service at (the redirect URL of the OAuth client)'
+  - $if: ${{ args.?upstream.orValue('') == '' }}
+    $value: 'okdpSignInProxy: upstream is required, the URL of the service the proxy fronts'
+  - $if: ${{ groups.size() == 0 }}
+    $value: >-
+      okdpSignInProxy: no allowed group: the proxy would let in every user of the realm; the project's
+      groups are platform.access.viewers, editors and admins
+
+values:
+  container:
+    name: oauth2-proxy
+    image: ${{ image }}
+    args:
+      - --http-address=0.0.0.0:${{ str(port) }}
+      - --upstream=${{ args.upstream }}
+      - --provider=oidc
+      - --oidc-issuer-url=${{ issuer }}
+      - --redirect-url=https://${{ args.host }}/oauth2/callback
+      - --scope=${{ platform.oidc.scope }}
+      - $if: ${{ platform.oidc.?usePKCE.orValue(true) }}
+        $value: --code-challenge-method=S256
+      - $if: ${{ ca != '' }}
+        $value: --provider-ca-file=/cacerts/ca.crt
+      # The groups decide, not the email's domain.
+      - --email-domain=*
+      - --oidc-groups-claim=${{ args.?groupsClaim.orValue('groups') }}
+      - $spread: ${{ groups.map(g, '--allowed-group=' + g) }}
+      - --cookie-name=_${{ name }}_oauth2
+      - --cookie-secure=true
+      - --cookie-expire=${{ args.?cookieExpire.orValue('8h') }}
+      - --skip-provider-button=true
+      - --reverse-proxy=true
+      - $if: ${{ args.?upstreamTimeout.orValue('') != '' }}
+        $value: --upstream-timeout=${{ args.upstreamTimeout }}
+      - --silence-ping-logging=true
+    env:
+      - name: OAUTH2_PROXY_CLIENT_ID
+        valueFrom:
+          secretKeyRef: {name: '${{ platform.oidcClientSecret }}', key: client_id}
+      - name: OAUTH2_PROXY_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef: {name: '${{ platform.oidcClientSecret }}', key: client_secret}
+      - name: OAUTH2_PROXY_COOKIE_SECRET
+        valueFrom:
+          secretKeyRef: {name: '${{ name }}', key: cookie-secret}
+    ports:
+      - {name: proxy, containerPort: '${{ port }}'}
+    readinessProbe:
+      httpGet: {path: /ping, port: proxy}
+      periodSeconds: 10
+    livenessProbe:
+      httpGet: {path: /ping, port: proxy}
+      periodSeconds: 20
+    resources: >-
+      ${{ args.?resources.orValue({'requests': {'cpu': '50m', 'memory': '64Mi'}, 'limits': {'cpu': '200m', 'memory': '128Mi'}}) }}
+    volumeMounts:
+      - $if: ${{ ca != '' }}
+        name: cacerts
+        mountPath: /cacerts
+        readOnly: true
+  volumes:
+    - $if: ${{ ca != '' }}
+      name: cacerts
+      secret:
+        secretName: ${{ ca }}
+  objects: >-
+    ${{ okdpGeneratedSecret({'name': name, 'keys': [{'key': 'cookie-secret', 'length': 32}]}) }}

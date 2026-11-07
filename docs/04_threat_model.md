@@ -92,7 +92,7 @@ values for its instances, and its instances' directories are its own.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may | settings under `global` beside `okdp` (`global.project`, `storageClass`), parameters and upstream values for its instances, under an instance's rules | `layers.go: contextLayers` | `examples/03_full` (`project.yaml`) |
+| may | settings under `global` beside `okdp`: the keys the platform lists (`global.okdp.policy.projectGlobals`, `project` and `storageClass` by default), checked as upstream values; parameters and upstream values for its instances, under an instance's rules | `layers.go: contextLayers` | `examples/03_full` (`project.yaml`) |
 | may | classes of its own, and the default class of a contract the platform leaves without one (`global.okdp.provisioning`) | `layers.go: platformOnly` | `examples/04_claims` (`project.yaml`) |
 | may | connections and named claims of its own | `layers.go: contextLayers` | `examples/03_full`, `examples/04_claims` |
 | may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
@@ -100,6 +100,7 @@ values for its instances, and its instances' directories are its own.
 | may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three; nor set it from another level than its file's (the platform's, an instance's `connections.yaml` or `config.yaml`) | `access.go: ParseAccess`, `layers.go: contextLayers`, `valuesLayers` | `TestParseAccess`, `TestAccessCompile` |
 | may not | the platform's administrators or the API server's group prefix (`global.okdp.access`) | `layers.go: platformOnly` | `TestAccessCompile` |
 | may not | any other key of `global.okdp`, known to the compiler or not, set by the platform or not: the chart of the OAuth clients, where they register, the ingress, TLS, the proxy, the store, the policy (making itself privileged) | `layers.go: platformOnly` | `testdata/context/1/sets-platform-charts.yaml`, `sets-platform-oidc.yaml`, `sets-platform-ingress.yaml`, `sets-platform-tls.yaml`, `sets-platform-proxy.yaml`, `sets-platform-secrets.yaml`, `sets-platform-policy.yaml`, `sets-unknown-platform-key.yaml` |
+| may not | any other key of `global`: every chart receives it, past `protect` and the upstream policy (`imageRegistry`, `security`, `securityContext`...), privileged project or not; what a listed key holds is denied what the upstream policy denies (`securityContext`, `hostNetwork`..., an image of no registry of the platform's) | `layers.go: contextLayers` (`projectGlobals`), `upstreamGlobals` | `testdata/context/1/sets-global-image-registry.yaml`, `sets-global-security.yaml`, `sets-global-security-context.yaml`, `global-denied-key.yaml`, `global-unlisted-registry.yaml`, `TestProjectGlobals` |
 | may not | change a value, a connection, a class or a default class of a lower level | `layers.go: contextLayers` (`chart.Overlap`) | `testdata/context/1/redefines-platform-connection.yaml`, `redefines-platform-class.yaml` |
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `testdata/context/1/template-code.yaml` |
 | may not | a connection of a store key outside `<project>/`: the platform's, another namespace's | `connections.go: storeSecret` | `testdata/context/1/remote-key-of-the-platform.yaml` |
@@ -132,6 +133,7 @@ and, a provider, its `claimers`.
 | may not | `global` or a path its package protects in upstream values | `chart/merge.go: applyUpstream` | `testdata/protected-upstream.yaml` |
 | may not | a key of a pod's privileges, security context, identity, containers or objects in upstream values, in a string read as YAML too | `policy.go: upstreamCheck` | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml` |
 | may not | an image of none of the platform's registries, set as an `image` string, a `registry` and a `repository`, or by a key that names one (`initImage`, `imageRegistry`, `defaultImageRegistry`, `imageName`, `...ImageRepository`) | `policy.go: upstreamCheck`, `namesImage` | `testdata/context/0/unlisted-registry.yaml`, `unlisted-image-registry.yaml`, `unlisted-default-image-registry.yaml`, `unlisted-image-name.yaml`, `unlisted-init-image.yaml`, `unlisted-sidecar-image-repository.yaml` |
+| may not | serve a host that does not end with `-<namespace>.<ingress.suffix>` and that the platform does not list for the project (`policy.ingressHosts`): an Ingress's rules (one without host) and tls, a Certificate's `dnsNames` and `commonName`, a route's `hostnames`, the cert-manager, ingress-nginx `server-alias` and external-dns annotations, the `ingress` hosts of a chart's values: a host is shared by every project, the identity provider's traffic and certificates for its name are not the project's | `hosts.go: checkIngressHosts`, `checkIngressValues` | `testdata/denied-ingress-host.yaml`, `denied-ingress-annotation.yaml`, `TestIngressHostsObjects`, `TestIngressHostsValues` |
 | may not | a connection of another contract, a field the contract does not declare, a secret field | `connections.go: resolver.resolve`, `contract.fields` | `testdata/context/2/wrong-contract.yaml`, `unknown-field.yaml`, `secret-in-connection.yaml` |
 | may not | a connection that does not hold at its declaration, referenced or not, its own or its project's (a name, a contract, a field, a required field, a type, a `secretRef`) | `connections.go: declaredConnections`, `namespace.go: CompileAll` | `TestCompileAllDeclaredConnections`, `testdata/cli/layout.txtar` |
 | may not | a store key outside `<project>/` | `connections.go: storeSecret` | `testdata/context/2/remote-key-of-another-namespace.yaml` |
@@ -155,10 +157,12 @@ which an instance's list replaces.
 | may | consent for its instances to serve other namespaces (`provisions[].claimers`), unless an instance lists its own | `namespace.go: Instance.Claimers` | `testdata/cli/claims.txtar` |
 | may not | hold `platform.yaml` or `projects/` in its repository, a catalog's (`--catalog`, `RoleCatalog`): a project, privileged or in a reserved namespace, or the platform's values, added from a catalog; nor a repository given without a role | `repository.go: index` | `testdata/cli/repository.txtar` (`--catalog`), `TestLoadRoles` |
 | may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the context's layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: contextLayers`, `context.go: parameters` | `testdata/cli/policy.txtar` (`schema-okdp`, `schema-default`), `TestPlatformFromContext` |
+| may | write a workload with the fragments (`okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`): containers with no privilege escalation, no capability, non-root, the runtime's seccomp profile, a read-only root filesystem unless asked, no service account token unless asked, no `hostPath` volume, no host namespace; a sign-in proxy of oauth2-proxy by digest that lets in the project's groups, never the realm's roles, never an unverified email | `fragments.go`, `fragment-*.cel.yaml`, `mapping.schema.json` | `TestPodSpec`, `TestJob`, `TestSignInProxy`, `TestWebWorkload`, `examples/05_fragments` |
 | may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (an ExternalSecret of another namespace) |
 | may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (a ClusterRole) |
 | may not | an object of the deployer engines' API groups (Flux's toolkit, the Flux Operator's `fluxcd.controlplane.io`, `source.extensions.fluxcd.io`, Argo CD's `argoproj.io`), for a project that is not privileged: it would drive the engine with the engine's identity | `policy.go: checkObjects`, `engineGroups` | `testdata/cli/policy.txtar` (a HelmRelease), `TestObjectsPolicy` |
 | may not | a dependency of key `global`, its values Helm's global values, which every chart of the umbrella reads | `chart/metadata.go: Metadata.Check` | `TestMetadataCheck` |
+| may not | two objects of one API group, kind, namespace and name in an instance's objects, the second would replace the first: two claimers' objects whose name a provider derived from the claim's ID by a lossy mapping (`a-b.c`, `a.b-c`); the names are `okdpSqlName(id)`, `okdpObjectName(id)`, injective over the IDs | `policy.go: checkDuplicateObjects`, `names.go: sqlName`, `objectName` | `testdata/cli/policy.txtar` (`duplicate`), `TestDuplicateObjects`, `TestNamesInjective` |
 | may not | a Secret of the objects with `data` or `stringData`, unless the caller allows it | `policy.go: checkPlainSecrets` | `testdata/cli/plain-secrets.txtar` (an objects' Secret) |
 | may not | an ExternalSecret (or ClusterExternalSecret) whose `target.template.data` holds a literal at a sensitive key, an `okdpGeneratedSecret` `stringData`'s included, nor a Fake generator (or ClusterGenerator of kind Fake) with values, unless the caller allows it | `policy.go: checkPlainSecrets`, `credentialLiteral`, `credentialReference` | `TestPlainSecrets` |
 | may not | a `provides` secret without `generate`, unless the caller allows it | `provides.go: credentialsSecret` | `testdata/cli/plain-secrets.txtar` (a `provides` secret) |
@@ -313,6 +317,24 @@ these lines.
   (`policy.upstream.deny`); a string a chart renders as YAML is checked
   when it reads as YAML whole, not a fragment its template completes.
   The engine's identity and Pod Security Admission are the second line.
+- **The OAuth client Jobs.** In `dcr` mode the Job that registers an
+  OAuth client is rendered by the platform's oidc-dcr chart
+  (`global.okdp.charts.oidcDcr`), not by the compiler: its pod has no
+  security context, mounts its service account's token and runs its image
+  by tag, none of which the chart's values reach. The Job holds the
+  namespace's initial access token. The chart is the platform's to
+  harden, or to replace by a chart whose Job takes these values.
+- **What a fragment's arguments hold.** A fragment hardens the pod; the
+  image it runs (a digest is the package's to write), the volumes, the
+  service account and its rights, the ports the application opens are the
+  package's, reviewed with it. A pod written by hand escapes the fragments.
+- **A host a chart builds elsewhere.** The host rule reads OKDP's objects
+  and the `ingress` keys of the charts' values, not an Ingress an upstream
+  chart renders from other values or templates; two namespaces of which
+  one is a dashed suffix of the other (`demo`, `team-demo`) share the
+  form `x-team-demo.<suffix>`. The platform's admission policy (Ingress
+  hosts of a namespace) and cert-manager's approver policy for the
+  issuer are the second line.
 - **A kind the compiler does not know.** An object of a cluster-scoped
   kind of no known operator is taken as namespaced: the engine's
   identity refuses it.

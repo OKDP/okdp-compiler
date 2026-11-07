@@ -369,7 +369,7 @@ metrics:
 ```yaml
 # okdp.yaml, after the package keys
 vars:                      # names and hosts computed once, in order
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
   sessionSecret: ${{ okdpFullname('session') }}
 
@@ -676,7 +676,16 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 
 ### Ingress and TLS
 
-The host follows the platform suffix; the class and the certificate
+The host follows the platform suffix and the namespace,
+`<service>-<namespace>.<suffix>`
+(`${{ service.name }}-${{ release.namespace }}`; `-server` or `-api` goes
+before the namespace, never after it): a project
+that is not privileged serves the hosts that end with
+`-<namespace>.<suffix>`, or that the platform lists for it
+(`global.okdp.policy.ingressHosts`), in the objects and in the `ingress`
+keys of the charts' values, and the compile refuses the others, the
+package's defaults and a host parameter included
+([hosts](specs/01_inputs_outputs.md#hosts)). The class and the certificate
 issuer, `global.okdp.tls.clusterIssuer`, the cert-manager ClusterIssuer
 the platform names whichever cert-manager runs it, are platform values
 (`require` them, `protect` the four ingress paths).
@@ -730,7 +739,7 @@ client is public. The main client has no name; any other is named
 ```yaml
 # okdp.yaml
 vars:
-  consoleHost: ${{ release.name }}-console.${{ global.okdp.ingress.suffix }}
+  consoleHost: console-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
 oidcClients:
   - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client: no name
     grantTypes: [authorization_code, refresh_token]          # required
@@ -782,6 +791,36 @@ With OIDC off (`global.okdp.oidc.enabled: false`) no chart is added and no
 Secret exists: read the Secrets under `platform.oidc.enabled`
 ([conditional items](#conditional-items-maps-from-lists)) when the service
 supports it.
+
+Who may sign in. A realm's roles are the platform's, every project's
+people hold them: a service that lets anyone with a role of the realm in
+runs the code of a project (a notebook, a flow, a UI that submits jobs) for
+the people of the others. The people of a project are its groups, the
+roles of its `project.yaml` `access` (`okdp-project-<namespace>`, an
+editor, without one), and the compiler gives them to the mapping:
+
+| Variable | Value |
+|---|---|
+| `platform.access.viewers` | the groups with any role in the project, and the platform's administrators |
+| `platform.access.editors` | the groups with the editor or the admin role, and the platform's administrators |
+| `platform.access.admins` | the groups with the admin role, and the platform's administrators |
+| `platform.access.platformAdmins` | the platform's administrators alone (`global.okdp.access.admins`) |
+
+Each list is sorted, once each name, the names the identity provider's
+tokens give the groups (no prefix). A package that restricts who signs in
+defaults its allowed groups to them, a parameter replacing the default
+only to narrow or to widen on purpose:
+
+```yaml
+# values.cel.yaml
+app:
+  oidc:
+    allowedGroups: ${{ values.?allowedGroups.orValue(platform.access.editors) }}
+```
+
+A service with a role of its own maps them: viewers read, editors run,
+admins administer. Never a default of the realm's roles (`data_engineer`),
+which every project's people hold.
 
 ### Render a chart twice
 
@@ -915,6 +954,37 @@ A `$for` over a list of zero or one element binds the value the group uses
 (superset, spark-history-server). A list computed in an expression is
 spliced with `$spread`.
 
+### Fragments
+
+A workload a package adds beside the upstream chart, or without one, is
+written with the fragments the compiler provides, not by hand: a Job
+(`okdpJob`), a web service with its volume, Ingress and sign-in proxy
+(`okdpWebWorkload`), the sign-in proxy alone (`okdpSignInProxy`), a pod
+spec (`okdpPodSpec`). They are CEL functions that return the objects,
+`$spread` into `objects`; the pod is hardened (no privilege escalation, no
+capability, non-root, seccomp, a read-only root filesystem, no service
+account token), the sign-in proxy lets in the project's groups
+(`platform.access`), the host is the project's. The arguments, and the
+exceptions a pod may ask for (`readOnlyRootFilesystem: false`, a token),
+are in
+[functions](specs/04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload);
+a complete package is
+`examples/05_fragments/input/db/catalog/notebook/1.0.0/okdp.yaml`.
+
+```yaml
+# okdp.yaml
+objects:
+  - $spread: >-
+      ${{ okdpWebWorkload({'component': 'web', 'port': 8888,
+          'pod': {'containers': [{'name': 'notebook', 'image': image, 'ports': [{'name': 'http', 'containerPort': 8888}],
+                                   'volumeMounts': [{'name': 'data', 'mountPath': '/data'}]}],
+                  'runAsUser': 1000, 'fsGroup': 1000},
+          'storage': {'size': '10Gi'}, 'ingress': {'host': host}, 'signIn': {}}) }}
+```
+
+A package that needs what a fragment refuses, a privileged container, a
+host path, writes its pod itself.
+
 ### Labels
 
 OKDP's objects take OKDP's labels, their selectors OKDP's selector labels:
@@ -924,6 +994,21 @@ Deployment and Service). The console finds an instance's workloads by
 `app.kubernetes.io/instance`. An upstream chart that leaves it out of its
 pods usually has a value for extra labels: set it (polaris-console
 `podLabels`, airflow `labels`).
+
+### Names from a claim's ID
+
+A provider names what it creates for a claim after the claim's ID
+(`<namespace>.<name>`): a database, a role, a keyspace, a topic's object.
+Never `c.id.replace('-', '_').replace('.', '_')`: `a-b.c` and `a.b-c`
+are both `a_b_c`, and the claim of one namespace would own the other's
+(two claimers, one role). Call `okdpSqlName(c.id)` for an identifier of
+`[a-z0-9_]` (`okdpSqlName(c.id, 48)` for a store with a shorter limit,
+Cassandra's keyspaces), `okdpObjectName(c.id)` for a Kubernetes name:
+one name per ID, cut with a hash of the ID past the limit, never a name
+that starts with `system` (`okdpSqlName`). Test it with two claimers
+whose IDs collide under a lossy mapping, and the compile refuses two
+objects of one kind, namespace and name
+([functions](specs/04_functions.md#okdpsqlname-and-okdpobjectname)).
 
 ### Database connection
 

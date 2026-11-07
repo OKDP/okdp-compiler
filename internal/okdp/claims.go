@@ -406,7 +406,8 @@ func claimID(namespace, instance, field, name string) string {
 // a project without instance is bound to none, nor provisioned, until an
 // instance's context declares it. The context's layers checked as a
 // compile checks them, and the platform's settings; every claim's error
-// joined, each at claims.<name> (FieldError).
+// joined, each at claims.<name> (FieldError); the global it sets checked by
+// the upstream policy (upstreamGlobals), as an instance's compile checks it.
 func CheckDeclarations(in Inputs) error {
 	layers, platform, err := contextLayers(in.Context)
 	if err != nil {
@@ -414,6 +415,9 @@ func CheckDeclarations(in Inputs) error {
 	}
 	settings, err := platformSettings(platform)
 	if err != nil {
+		return err
+	}
+	if err := upstreamGlobals(in, layers, settings); err != nil {
 		return err
 	}
 	if err := declaredConnections(in); err != nil {

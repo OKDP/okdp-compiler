@@ -189,7 +189,7 @@ func ExampleCompile_server() {
 	_, err = compiler.Compile(ctx, def, in)
 	fmt.Println(errors.Is(err, context.Canceled))
 	// Output:
-	// [app oidc-dcr] https://demo-webapp.okdp.example.org
+	// [app oidc-dcr] https://webapp-demo.okdp.example.org
 	// okdp.yaml: vars db: ${{ type(values.database) == map ? values.database : {} }}: the expressions of the compile exceed its CEL cost limit (10)
 	// true
 }

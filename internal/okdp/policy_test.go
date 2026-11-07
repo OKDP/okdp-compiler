@@ -87,6 +87,60 @@ func TestObjectsPolicy(t *testing.T) {
 	}
 }
 
+// TestDuplicateObjects: an instance's objects hold no two of one apiVersion
+// group, kind, namespace and name, whatever their sources and their
+// versions, the items of a list included, in a privileged project too; a
+// name apart, a kind, a group or a Secret (left to the namespace's check
+// of the Secrets) does not collide, nor does a namespace apart, a privileged
+// project's.
+func TestDuplicateObjects(t *testing.T) {
+	object := func(apiVersion, kind, name, namespace string) string {
+		ns := ""
+		if namespace != "" {
+			ns = ", namespace: " + namespace
+		}
+		return "  - {apiVersion: " + apiVersion + ", kind: " + kind + ", metadata: {name: " + name + ns + "}}\n"
+	}
+	for name, tc := range map[string]struct {
+		objects string
+		want    string // the error, none when empty
+	}{
+		"apart":                           {object("v1", "ConfigMap", "a", "") + object("v1", "ConfigMap", "b", "") + object("v1", "Service", "a", "") + object("example.org/v1", "ConfigMap", "a", ""), ""},
+		"two":                             {object("v1", "ConfigMap", "a", "") + object("v1", "ConfigMap", "a", ""), "demo: objects: ConfigMap/a: two objects of one kind (core), namespace (demo) and name: object 1 and object 2"},
+		"the namespace is the instance's": {object("v1", "ConfigMap", "a", "") + object("v1", "ConfigMap", "a", "demo"), "ConfigMap/a: two objects"},
+		"versions":                        {object("kafka.strimzi.io/v1beta2", "KafkaTopic", "t", "") + object("kafka.strimzi.io/v1", "KafkaTopic", "t", ""), "KafkaTopic/t: two objects of one kind (kafka.strimzi.io)"},
+		"a list's item":                   {object("v1", "ConfigMap", "a", "") + "  - {apiVersion: v1, kind: List, metadata: {name: l}, items: [{apiVersion: v1, kind: ConfigMap, metadata: {name: a}}]}\n", "demo: objects: ConfigMap/a: two objects of one kind (core), namespace (demo) and name: object 1 and object 3"},
+		"a generated Secret":              {"  - $spread: \"${{ okdpGeneratedSecret({'name': 's', 'keys': [{'key': 'k'}]}) }}\"\n  - $spread: \"${{ okdpGeneratedSecret({'name': 's', 'keys': [{'key': 'k'}]}) }}\"\n", "Password/s-k: two objects of one kind (generators.external-secrets.io)"},
+		"a Secret":                        {object("v1", "Secret", "s", "") + object("v1", "Secret", "s", ""), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := *def
+			d.Okdp = []byte("objects:\n" + tc.objects)
+			for _, privileged := range []bool{false, true} {
+				in := inputs()
+				if privileged {
+					in = inputs(map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}})
+				}
+				_, err := Compile(context.Background(), &d, in)
+				if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+					t.Errorf("privileged %v: got %v, want %q", privileged, err, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestDuplicateObjectsNamespace: the same name in two namespaces is two
+// objects, in a privileged project, which writes other namespaces.
+func TestDuplicateObjectsNamespace(t *testing.T) {
+	d := *def
+	d.Okdp = []byte("objects:\n  - {apiVersion: v1, kind: ConfigMap, metadata: {name: a}}\n  - {apiVersion: v1, kind: ConfigMap, metadata: {name: a, namespace: other}}\n")
+	in := inputs(map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}})
+	if _, err := Compile(context.Background(), &d, in); err != nil {
+		t.Error(err)
+	}
+}
+
 // TestUpstreamPolicy: the upstream values of an instance of a project that
 // is not privileged set no denied key, at any depth, in a list or in a
 // string read as YAML, nor runAsUser 0 nor runAsNonRoot false, nor a key

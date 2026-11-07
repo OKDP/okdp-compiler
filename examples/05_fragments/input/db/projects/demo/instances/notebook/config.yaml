@@ -1,0 +1,3 @@
+# The instance's parameters, over the defaults of the package's
+# config.schema.json: the size of its volume.
+storageGi: 20

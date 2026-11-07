@@ -2,6 +2,7 @@ package okdp
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"math"
 	"strings"
@@ -175,5 +176,99 @@ func TestValuesLayersGoTypes(t *testing.T) {
 		if _, err := Compile(context.Background(), def, in); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: got %v, want %s", name, err, tc.want)
 		}
+	}
+}
+
+// TestProjectGlobals: a layer above level 0 sets the keys of global the
+// platform lists (global.okdp.policy.projectGlobals, project and
+// storageClass by default), the same for a privileged project; the upstream
+// policy checks what they hold, unless the project is privileged; the
+// refusals are field problems at global.<key>. Level 0's global is the
+// platform's.
+func TestProjectGlobals(t *testing.T) {
+	policy := func(p M) ContextLayer {
+		return ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": p}}}}
+	}
+	project := func(g M) ContextLayer { return ContextLayer{Level: 1, Values: map[string]any{"global": g}} }
+	for name, tc := range map[string]struct {
+		platform ContextLayer
+		global   M
+		want     string // the error, none when empty
+		field    string // the field it is tagged with
+	}{
+		"the defaults":                   {policy(M{}), M{"project": M{"name": "demo"}, "storageClass": "fast"}, "", ""},
+		"imageRegistry":                  {policy(M{}), M{"imageRegistry": "evil.example.com"}, "context layer 3 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass", "global.imageRegistry"},
+		"security":                       {policy(M{}), M{"security": M{"allowInsecureImages": true}}, "global.security: a key of global the platform does not let a project set", "global.security"},
+		"securityContext":                {policy(M{}), M{"securityContext": M{"privileged": true}}, "global.securityContext: a key of global the platform does not let a project set", "global.securityContext"},
+		"the first in key order":         {policy(M{}), M{"zone": "a", "app": "b"}, "global.app: a key of global", "global.app"},
+		"a key with dots":                {policy(M{}), M{"okdp.io/tier": "gold"}, `global["okdp.io/tier"]: a key of global`, `global["okdp.io/tier"]`},
+		"the platform's list":            {policy(M{"projectGlobals": []any{"imageRegistry"}}), M{"imageRegistry": "registry.example.org"}, "", ""},
+		"the list replaces the defaults": {policy(M{"projectGlobals": []any{"imageRegistry"}}), M{"storageClass": "fast"}, "global.storageClass: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists imageRegistry", "global.storageClass"},
+		"none":                           {policy(M{"projectGlobals": []any{}}), M{"project": M{}}, "projectGlobals lists none", "global.project"},
+		"a denied key":                   {policy(M{}), M{"project": M{"hostNetwork": true}}, "context layer 3 (level 1): global.project.hostNetwork: hostNetwork is denied to the instance's upstream values", "global.project.hostNetwork"},
+		"a denied key of the platform":   {policy(M{"upstream": M{"deny": []any{"rbac"}}}), M{"project": M{"a": M{"rbac": M{}}}}, "global.project.a.rbac: rbac is denied", "global.project.a.rbac"},
+		"an unlisted registry":           {policy(M{"projectGlobals": []any{"image"}, "upstream": M{"registries": []any{"registry.example.org"}}}), M{"image": M{"registry": "docker.io", "repository": "evil/app"}}, "global.image.registry: image docker.io/evil/app is not from a registry", "global.image.registry"},
+		"a listed registry":              {policy(M{"projectGlobals": []any{"image"}, "upstream": M{"registries": []any{"registry.example.org"}}}), M{"image": M{"registry": "registry.example.org", "repository": "app"}}, "", ""},
+		"a privileged project":           {policy(M{"privileged": []any{"demo"}}), M{"project": M{"hostNetwork": true}}, "", ""},
+		"a privileged project's keys":    {policy(M{"privileged": []any{"demo"}}), M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set", "global.imageRegistry"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := inputs()
+			in.Context = append(in.Context, tc.platform, project(tc.global))
+			_, err := Compile(context.Background(), def, in)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var fe *FieldError
+			switch {
+			case err == nil || !strings.Contains(err.Error(), tc.want):
+				t.Fatalf("got %v, want an error containing %q", err, tc.want)
+			case !errors.As(err, &fe) || fe.Field != tc.field:
+				t.Errorf("got %#v, want a problem at %q", fe, tc.field)
+			}
+		})
+	}
+	// Level 0's global is the platform's, whatever the list; the
+	// instance's layers set the keys their package declares, the upstream
+	// policy checking them too.
+	files := maps.Clone(pkg)
+	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}, "global": {"properties": {"image": {"type": "object"}}}}}`)}
+	in := inputs(map[string]any{"global": M{"image": M{"repository": "docker.io/evil/app"}}})
+	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"upstream": M{"registries": []any{"registry.example.org"}}}}, "imageRegistry": "docker.io"}}})
+	_, err := Compile(context.Background(), withFiles(files), in)
+	if err != nil {
+		t.Errorf("level 0's global: %v", err)
+	}
+	in = inputs()
+	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"upstream": M{"registries": []any{"registry.example.org"}}}}}}})
+	in.Values = []map[string]any{{"global": M{"image": M{"repository": "docker.io/evil/app"}}}}
+	var fe *FieldError
+	if _, err := Compile(context.Background(), withFiles(files), in); err == nil || !strings.Contains(err.Error(), "values layer 1: global.image.repository: image docker.io/evil/app is not from a registry") || !errors.As(err, &fe) || fe.Field != "global.image.repository" {
+		t.Errorf("an instance's global: got %v", err)
+	}
+}
+
+// TestDeclarationsGlobals: a project without instance has its global
+// checked as an instance's compile checks it: the keys the platform lists
+// and what they hold.
+func TestDeclarationsGlobals(t *testing.T) {
+	platform := ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"upstream": M{"deny": []any{"rbac"}}}}}}}
+	for name, tc := range map[string]struct {
+		global M
+		want   string
+	}{
+		"listed":       {M{"storageClass": "fast", "project": M{"name": "demo"}}, ""},
+		"unlisted":     {M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set"},
+		"a denied key": {M{"project": M{"rbac": M{}}}, "global.project.rbac: rbac is denied"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := CheckDeclarations(Inputs{Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

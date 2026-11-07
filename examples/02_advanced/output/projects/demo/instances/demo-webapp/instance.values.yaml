@@ -61,13 +61,13 @@ app:
     className: nginx
     enabled: true
     hosts:
-      - host: demo-webapp.okdp.example.org
+      - host: webapp-demo.okdp.example.org
         paths:
           - path: /
             pathType: Prefix
     tls:
       - hosts:
-          - demo-webapp.okdp.example.org
+          - webapp-demo.okdp.example.org
         secretName: demo-webapp-tls
   replicaCount: 2
   resources:
@@ -115,7 +115,7 @@ oidc-dcr:
       - authorization_code
       - refresh_token
     redirect_uris:
-      - https://demo-webapp.okdp.example.org/oauth2/callback
+      - https://webapp-demo.okdp.example.org/oauth2/callback
     scope: profile email groups
   secret: demo-webapp-demo-dcr
   security:

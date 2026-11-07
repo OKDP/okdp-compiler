@@ -1,0 +1,10 @@
+# The package of a notebook service, written with OKDP's fragments: no
+# upstream chart, only its own objects (okdp.yaml). A package that renders
+# no chart lists a dependency all the same; this one is a stub that
+# values.cel.yaml leaves out.
+
+apiVersion: v2
+name: notebook
+version: 1.0.0
+dependencies:
+  - {name: notebook, repository: https://charts.example.org, version: 1.0.0}

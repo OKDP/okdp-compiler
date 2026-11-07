@@ -22,7 +22,9 @@ upstream:
     append: [env]
 
 vars:
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  # <service>-<namespace>.<suffix>: a host of a project ends with
+  # -<namespace>.<suffix> (global.okdp.policy.ingressHosts lists exceptions).
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # The database parameter: the resolved connection, or {} when not set.
   db: '${{ type(values.database) == map ? values.database : {} }}'
   dbSecret: ${{ db.?secretRef.name.orValue('') }}

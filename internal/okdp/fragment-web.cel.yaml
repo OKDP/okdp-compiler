@@ -1,0 +1,164 @@
+# The objects of okdpWebWorkload(args): a web workload on the hardened pod
+# of okdpPodSpec. Its Deployment (one replica; Recreate with a volume,
+# which is ReadWriteOnce), its Service and, when asked, a
+# PersistentVolumeClaim, an Ingress (the host is the project's, the
+# platform's ingress class and annotations) and the sign-in proxy of
+# okdpSignInProxy in front of it as a sidecar of the pod: the Service then
+# reaches the proxy alone, and a NetworkPolicy lets in nothing else. The
+# first container of the pod is the application. Embedded in the compiler
+# and evaluated at each call (fragment, fragments.go), by the mapping
+# engine: ${{ CEL }} expressions, the same directives and functions.
+#
+# Inputs:
+#   args  the arguments, checked against mapping.schema.json
+#         (okdpWebWorkload)
+#   release, platform, global  the instance's
+vars:
+  component: ${{ args.component }}
+  name: ${{ first([args.?name.orValue(''), okdpFullname(args.component)]) }}
+  selector: ${{ okdpSelectorLabels(args.component) }}
+  # The labels of OKDP's objects, then the arguments': a later one wins.
+  lbl:
+    $for: l in okdpLabels(args.component).transformList(k, v, [k, v]) + args.?labels.orValue({}).transformList(k, v, [k, v])
+    $key: ${{ l[0] }}
+    $value: ${{ l[1] }}
+  wantsSignIn: ${{ has(args.signIn) }}
+  hasIngress: ${{ has(args.ingress) }}
+  # The proxy needs the ingress's host and the application's port as a
+  # number (errors say which is missing).
+  signIn: ${{ wantsSignIn && hasIngress && type(args.port) == double }}
+  storage: ${{ args.?storage.orValue({}) }}
+  hasStorage: ${{ size(storage) > 0 }}
+  volume: ${{ storage.?volumeName.orValue('data') }}
+  claim: ${{ name }}-${{ volume }}
+  # The sign-in proxy: in front of the application, on the pod's loopback
+  # at its port; the arguments' own win.
+  proxyArgs:
+    $if: ${{ signIn }}
+    $value:
+      name: ${{ okdpFullname(component + '-oauth2-proxy') }}
+      host: ${{ args.?ingress.?host.orValue('') }}
+      upstream: http://127.0.0.1:${{ str(args.port) }}/
+      $merge: ${{ args.signIn }}
+  proxy: '${{ signIn ? okdpSignInProxy(proxyArgs) : {} }}'
+  # The pod: the arguments', the proxy beside the application, the volume.
+  podArgs:
+    $merge: ${{ args.pod.transformMap(k, v, !(k in ['containers', 'volumes']), v) }}
+    containers: >-
+      ${{ args.pod.containers + (signIn ? [proxy.container] : []) }}
+    volumes: >-
+      ${{ args.pod.?volumes.orValue([]) + (signIn ? proxy.volumes : [])
+          + (hasStorage ? [{'name': volume, 'persistentVolumeClaim': {'claimName': claim}}] : []) }}
+  strategy: "${{ args.?strategy.orValue(hasStorage ? 'Recreate' : 'RollingUpdate') }}"
+  ingressAnnotations:
+    $for: l in platform.ingressAnnotations.transformList(k, v, [k, v]) + args.?ingress.?annotations.orValue({}).transformList(k, v, [k, v])
+    $key: ${{ l[0] }}
+    $value: ${{ l[1] }}
+
+errors:
+  - $if: ${{ wantsSignIn && !hasIngress }}
+    $value: 'okdpWebWorkload: signIn needs an ingress: the host the users reach the service at'
+  - $if: ${{ wantsSignIn && type(args.port) != double }}
+    $value: 'okdpWebWorkload: signIn needs the application''s port as a number: the proxy reaches it on the pod''s loopback'
+  - $if: ${{ args.pod.containers.exists(c, c.name == 'oauth2-proxy') && signIn }}
+    $value: 'okdpWebWorkload: a container named oauth2-proxy beside the sign-in proxy'
+
+values:
+  objects:
+    - $for: "s in (hasStorage ? [storage] : [])"
+      $each:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: ${{ claim }}
+          labels: ${{ lbl }}
+          annotations:
+            $if: ${{ storage.?keep.orValue(true) }}
+            $value: {helm.sh/resource-policy: keep}
+        spec:
+          accessModes: ${{ s.?accessModes.orValue(['ReadWriteOnce']) }}
+          storageClassName:
+            $if: ${{ s.?storageClassName.orValue('') != '' }}
+            $value: ${{ s.storageClassName }}
+          resources:
+            requests:
+              storage: ${{ s.size }}
+    - apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${{ name }}
+        labels: ${{ lbl }}
+        annotations:
+          $if: ${{ has(args.annotations) }}
+          $value: ${{ args.annotations }}
+      spec:
+        replicas: ${{ args.?replicas.orValue(1.0) }}
+        strategy:
+          type: ${{ strategy }}
+        selector:
+          matchLabels: ${{ selector }}
+        template:
+          metadata:
+            labels: ${{ lbl }}
+            annotations:
+              $if: ${{ has(args.podAnnotations) }}
+              $value: ${{ args.podAnnotations }}
+          spec: ${{ okdpPodSpec(podArgs) }}
+    - apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${{ name }}
+        labels: ${{ lbl }}
+      spec:
+        selector: ${{ selector }}
+        ports:
+          # Only the proxy is reachable when there is one: the application
+          # has no login of its own.
+          - name: http
+            port: ${{ args.?servicePort.orValue(80.0) }}
+            targetPort: "${{ signIn ? 'proxy' : args.port }}"
+    - $for: "i in (hasIngress ? [args.ingress] : [])"
+      $each:
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: ${{ name }}
+          labels: ${{ lbl }}
+          annotations: ${{ ingressAnnotations }}
+        spec:
+          ingressClassName: ${{ first([i.?className.orValue(''), global.okdp.?ingress.?className.orValue('')]) }}
+          rules:
+            - host: ${{ i.host }}
+              http:
+                paths:
+                  - path: ${{ i.?path.orValue('/') }}
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: ${{ name }}
+                        port: {name: http}
+          tls:
+            - hosts: ['${{ i.host }}']
+              secretName: ${{ first([i.?tlsSecretName.orValue(''), name + '-tls']) }}
+    # The application listens beside the proxy, on the pod's address: only
+    # the proxy's port is let in, so that no other pod reaches the
+    # application around the sign-in. Enforced where the cluster's network
+    # plugin enforces NetworkPolicies; the policies of a namespace are a
+    # union, so with the platform's project policy
+    # (global.okdp.network.policy), which lets in the namespace's pods on
+    # every port, they still reach it.
+    - $for: "p in (signIn && args.?networkPolicy.orValue(true) ? [proxy] : [])"
+      $each:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: ${{ name }}
+          labels: ${{ lbl }}
+        spec:
+          podSelector:
+            matchLabels: ${{ selector }}
+          policyTypes: [Ingress]
+          ingress:
+            - ports:
+                - {protocol: TCP, port: 'proxy'}
+    - $spread: "${{ signIn ? proxy.objects : [] }}"

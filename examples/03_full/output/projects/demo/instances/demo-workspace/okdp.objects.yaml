@@ -93,7 +93,7 @@ spec:
 apiVersion: v1
 data:
   WORKSPACE_ADMINS: alice@example.org,bob@example.org
-  WORKSPACE_API_URL: https://demo-workspace.okdp.example.org/api
+  WORKSPACE_API_URL: https://workspace-demo.okdp.example.org/api
   WORKSPACE_CATALOGS: archive,marketing,sales
   WORKSPACE_FEATURE_FLAGS: lineage,preview
   WORKSPACE_LOG_FORMAT: json

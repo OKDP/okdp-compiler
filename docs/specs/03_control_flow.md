@@ -16,6 +16,7 @@ Three kinds of document share the directives, the
 | the mapping: the sections of `okdp.yaml` and the values file, `values.cel.yaml` ([service definition](02_service_definition.md#sections)) | all |
 | the values of an OAuth client's chart, `internal/okdp/oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
 | the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `internal/okdp/generated-secret.cel.yaml`, embedded in the compiler | all |
+| the objects of the [fragments](04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload), `internal/okdp/fragment-*.cel.yaml`, embedded in the compiler | all |
 
 ## Directives
 

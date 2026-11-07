@@ -518,7 +518,7 @@ upstream:                              # api only: the instance's upstream.api
     protect: [fullnameOverride, mode, catalogs, ingress.enabled, ingress.hosts, ingress.tls, 'config["workspace.auth.*"]']
     append: [env, tolerations]         # the instance's lists added after the computed ones
 vars:                                  # the mapping's sections
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # ...
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
@@ -576,7 +576,7 @@ loaded ([okdp.yaml](#okdpyaml)).
 ```yaml
 # okdp.yaml, after the package keys
 vars:
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
@@ -659,7 +659,7 @@ Each file is its first YAML document. An empty or null document
 
 ```yaml
 vars:
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   settingsName: ${{ okdpFullname('settings') }}
   settings:                                   # any node: a map, a list, directives
     APP_URL: https://${{ host }}              # host: the binding above
@@ -1048,6 +1048,7 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 | `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
 | `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.tls.clusterIssuer>}`, the platform's ClusterIssuer, `""` when unset, and `global.okdp.ingress.annotations` over it, the ingress controller's. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
+| `platform.access` | who may use the project's services: the groups of the project (its `project.yaml` `access`, `okdp-project-<namespace>` an editor when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A project file whose `access` is refused gives no project group (the compile fails anyway). |
 
 The settings these are derived from are checked against the platform
 schema first (`- at '/global/okdp/oidc': got boolean, want object`):
@@ -1083,7 +1084,9 @@ Besides CEL's standard library, an expression calls the CEL libraries the
 language enables, each at a pinned version, and the host functions: `str`,
 `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`,
 `okdpFullname`, `okdpLabels`, `okdpSelectorLabels`, `okdpGeneratedSecret`,
-`oidcClientSecret`: [functions](04_functions.md).
+`okdpSqlName`, `okdpObjectName`, the fragments `okdpPodSpec`, `okdpJob`,
+`okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret`:
+[functions](04_functions.md).
 
 ## Errors
 

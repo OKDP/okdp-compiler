@@ -1,0 +1,8 @@
+# The project demo: who may use its services. okdp-project-demo, its default
+# group, is an editor; analysts only read; ops, the platform's operators of
+# the project, administer it. A service that signs users in lets in
+# platform.access.editors by default: okdp-project-demo and ops.
+access:
+  okdp-project-demo: editor
+  analysts: viewer
+  ops: admin

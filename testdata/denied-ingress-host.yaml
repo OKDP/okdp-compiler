@@ -1,0 +1,13 @@
+# error: app: ingress.extraHosts[0].name: host "sso.okdp.example.org" is not served by demo: a host that ends with -demo.okdp.example.org, or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), demo is not one of them
+# An ingress host the package leaves open (protect names ingress.hosts, not
+# ingress.extraHosts), naming the identity provider's: a host is a name
+# shared by every project, ingress-nginx merges the rules of one host across
+# namespaces and cert-manager signs a certificate for it. A project serves
+# the hosts that end with -<namespace>.<ingress.suffix> or the platform
+# lists for it.
+upstream:
+  app:
+    ingress:
+      extraHosts:
+        - name: sso.okdp.example.org
+          path: /

@@ -1,0 +1,6 @@
+# error: context layer 2 (level 1): global.securityContext: a key of global the platform does not let a project set
+# A project's file (project.yaml) setting a pod's security context through
+# global, past deniedKeys.
+global:
+  securityContext:
+    privileged: true

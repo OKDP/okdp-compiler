@@ -54,7 +54,7 @@ api:
     workspace.ui.theme: dark
   env:
     - name: WORKSPACE_URL
-      value: https://demo-workspace.okdp.example.org
+      value: https://workspace-demo.okdp.example.org
     - name: WORKSPACE_INSTANCE
       value: demo-workspace
     - name: WORKSPACE_PROJECT
@@ -186,13 +186,13 @@ api:
     className: nginx
     enabled: true
     hosts:
-      - host: demo-workspace.okdp.example.org
+      - host: workspace-demo.okdp.example.org
         paths:
           - path: /
             pathType: Prefix
     tls:
       - hosts:
-          - demo-workspace.okdp.example.org
+          - workspace-demo.okdp.example.org
         secretName: demo-workspace-tls
   mode: server
   nodeSelector:
@@ -201,7 +201,7 @@ api:
     enabled: true
     size: 50Gi
   podAnnotations:
-    checksum/settings: 1820ed01e199704584328998f995cc570309425689fc3e32ed386783e2b344c6
+    checksum/settings: 52bfb99f566046709272e9f3f3534216eb19088347d151ffa9cc18005068812c
     workspace.example.org/catalogs: WyJhcmNoaXZlIiwibWFya2V0aW5nIiwic2FsZXMiXQ==
   podLabels:
     app.kubernetes.io/instance: demo-workspace
@@ -372,12 +372,12 @@ console-oidc-dcr:
     client_name: demo-workspace console
     grant_types:
       - authorization_code
-    logo_uri: https://demo-workspace.okdp.example.org/console/logo.svg
+    logo_uri: https://workspace-demo.okdp.example.org/console/logo.svg
     post_logout_redirect_uris:
-      - https://demo-workspace.okdp.example.org/console
+      - https://workspace-demo.okdp.example.org/console
     redirect_uris:
-      - https://demo-workspace.okdp.example.org/console/callback
-      - https://demo-workspace-gateway.okdp.example.org/console/callback
+      - https://workspace-demo.okdp.example.org/console/callback
+      - https://workspace-gateway-demo.okdp.example.org/console/callback
     scope: profile email groups
     token_endpoint_auth_method: none
   secret: demo-workspace-demo-console-dcr
@@ -394,7 +394,7 @@ console-oidc-dcr:
 gateway:
   config: |
     # gateway.conf: a file with expressions in it
-    server_name demo-workspace-gateway.okdp.example.org;
+    server_name workspace-gateway-demo.okdp.example.org;
     banner "Workspace demo-workspace of demo";
     upstream demo-workspace-api { server demo-workspace-api-0.demo-workspace-api.demo.svc:8080; server demo-workspace-api-1.demo-workspace-api.demo.svc:8080; }
   fullnameOverride: demo-workspace-gateway
@@ -599,7 +599,7 @@ oidc-dcr:
       - authorization_code
       - refresh_token
     redirect_uris:
-      - https://demo-workspace.okdp.example.org/oauth2/callback
+      - https://workspace-demo.okdp.example.org/oauth2/callback
     scope: profile email groups offline_access
   secret: demo-workspace-demo-dcr
   security:
@@ -620,7 +620,7 @@ scheduler:
     workspace.scheduler.maxConcurrentRuns: "4"
   env:
     - name: WORKSPACE_URL
-      value: https://demo-workspace.okdp.example.org
+      value: https://workspace-demo.okdp.example.org
     - name: WORKSPACE_INSTANCE
       value: demo-workspace
     - name: WORKSPACE_PROJECT

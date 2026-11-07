@@ -65,6 +65,23 @@ status 1 okdp-compile --repository $WORK/reserved -o $WORK/files --target flux
 cmp stderr $WORK/reserved.txt
 ! exists $WORK/files
 
+# A key of global a project's file sets, past the platform's list
+# (global.okdp.policy.projectGlobals): every chart receives global, so
+# imageRegistry would reach them beside the upstream policy's registries.
+# storageClass and project are the default list's.
+status 1 okdp-compile --repository $WORK/project-global -o $WORK/files
+! stdout .
+cmp stderr $WORK/project-global.txt
+! exists $WORK/files
+
+# Two objects of one kind, namespace and name in an instance: the second
+# would replace the first, as two claims' objects do whose names a provider
+# derived the same way (a-b.c and a.b-c both a-b-c).
+status 1 okdp-compile --repository $WORK/duplicate -o $WORK/files
+! stdout .
+cmp stderr $WORK/duplicate.txt
+! exists $WORK/files
+
 -- reserved.txt --
 error: argocd/argocd-web: Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine
 error: kube-system/kube-system-web: Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)
@@ -278,5 +295,43 @@ objects:
       chart: {spec: {chart: nginx, sourceRef: {kind: HelmRepository, name: bitnami}}}
       targetNamespace: kube-system
 -- engine-priv/projects/infra/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- project-global.txt --
+error: demo/demo-web: context layer 1 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; every chart of the instances receives global, past their package's protect and the upstream policy
+-- project-global/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- project-global/catalog/web/1.0.0/okdp.yaml --
+{}
+-- project-global/projects/demo/project.yaml --
+global:
+  storageClass: fast
+  project: {name: demo}
+  imageRegistry: evil.example.com
+-- project-global/projects/demo/instances/web/instance.yaml --
+service: web
+version: 1.0.0
+-- duplicate.txt --
+error: demo/demo-web: web: objects: ConfigMap/demo-web-a-b-c: two objects of one kind (core), namespace (demo) and name: object 1 and object 2; the second would replace the first. A name derived from a claim's ID must be one per ID (okdpSqlName, okdpObjectName)
+-- duplicate/catalog/web/1.0.0/Chart.yaml --
+apiVersion: v2
+name: web
+version: 1.0.0
+dependencies:
+  - {name: web, repository: https://charts.example.org, version: 1.0.0}
+-- duplicate/catalog/web/1.0.0/okdp.yaml --
+vars:
+  ids: ['a-b.c', 'a.b-c']
+objects:
+  - $for: id in ids
+    $each:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata: {name: '${{ okdpFullname(id.replace(".", "-")) }}', labels: '${{ labels }}'}
+-- duplicate/projects/demo/instances/web/instance.yaml --
 service: web
 version: 1.0.0

@@ -43,12 +43,14 @@ upstream:                              # the instance's upstream.api: api's only
 # context and the vars bindings, none sees another section.
 
 vars:
-  # Text and expressions: a string.
-  host: ${{ release.name }}.${{ global.okdp.ingress.suffix }}
+  # Text and expressions: a string. A host ends with -<namespace>.<suffix>:
+  # the platform keeps the others from a project
+  # (global.okdp.policy.ingressHosts lists the exceptions).
+  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # okdpFullname(suffix): <release>-<suffix>, cut to 63 characters.
   api: ${{ okdpFullname('api') }}
   gateway: ${{ okdpFullname('gateway') }}
-  gatewayHost: ${{ gateway }}.${{ global.okdp.ingress.suffix }}
+  gatewayHost: ${{ service.name }}-gateway-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # cel.bind: a name inside one expression.
   apiUrl: ${{ cel.bind(base, 'https://' + host, base + '/api') }}
   internalUrl: http://${{ api }}.${{ release.namespace }}.svc:8080

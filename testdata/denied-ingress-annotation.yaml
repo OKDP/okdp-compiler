@@ -1,0 +1,9 @@
+# error: app: ingress.annotations["nginx.ingress.kubernetes.io/server-alias"]: host "sso.okdp.example.org" is not served by demo
+# The hosts an ingress answers to through the annotation of ingress-nginx
+# (server-alias; cert-manager's alt-names and external-dns's hostname are
+# held to the same rule) are held to the rule of the ingress's own.
+upstream:
+  app:
+    ingress:
+      annotations:
+        nginx.ingress.kubernetes.io/server-alias: webapp-demo.okdp.example.org, sso.okdp.example.org

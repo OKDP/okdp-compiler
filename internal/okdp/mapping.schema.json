@@ -89,6 +89,84 @@
         }
       }
     },
+    "okdpPodSpec": {"$ref": "#/$defs/podSpec"},
+    "okdpJob": {
+      "type": "object",
+      "description": "Not a section: the argument of okdpJob, a Job on the hardened pod of okdpPodSpec.",
+      "additionalProperties": false,
+      "required": ["name", "pod"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The Job's name."},
+        "component": {"type": "string", "description": "The component label (app.kubernetes.io/component) of the Job and its pod; \"\" or absent: none."},
+        "pod": {"$ref": "#/$defs/podSpec", "description": "The pod, the arguments of okdpPodSpec; restartPolicy Never unless it sets one."},
+        "backoffLimit": {"type": "integer", "minimum": 0, "description": "The retries before the Job fails; absent: 1."},
+        "ttlSecondsAfterFinished": {"type": "integer", "minimum": 0, "description": "How long the finished Job is kept, for its logs; absent: 300."},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 1, "description": "The time the Job may run; absent: no deadline."},
+        "hook": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The Job as a hook of the release: Helm's (the umbrella renders the objects), and Argo CD's.",
+          "properties": {
+            "helm": {"type": "string", "minLength": 1, "description": "helm.sh/hook: the events, comma separated (post-install,post-upgrade)."},
+            "weight": {"type": ["integer", "string"], "description": "helm.sh/hook-weight."},
+            "deletePolicy": {"type": "string", "description": "helm.sh/hook-delete-policy; absent: before-hook-creation."},
+            "argocd": {"type": "string", "enum": ["PreSync", "Sync", "PostSync", "SyncFail", "Skip"], "description": "argocd.argoproj.io/hook."},
+            "argocdDeletePolicy": {"type": "string", "enum": ["HookSucceeded", "HookFailed", "BeforeHookCreation"], "description": "argocd.argoproj.io/hook-delete-policy; absent: BeforeHookCreation."}
+          }
+        },
+        "labels": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra labels of the Job, over OKDP's."},
+        "podLabels": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra labels of its pod, over OKDP's."},
+        "annotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra annotations of the Job, over the hooks'."},
+        "podAnnotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The annotations of its pod."}
+      }
+    },
+    "okdpSignInProxy": {"$ref": "#/$defs/signInProxy"},
+    "okdpWebWorkload": {
+      "type": "object",
+      "description": "Not a section: the argument of okdpWebWorkload, a web workload on the hardened pod of okdpPodSpec.",
+      "additionalProperties": false,
+      "required": ["component", "pod", "port"],
+      "properties": {
+        "component": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The workload's component (app.kubernetes.io/component): its selector, and its name, okdpFullname(component), unless name is set."},
+        "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The name of its Deployment, Service, Ingress and NetworkPolicy; absent: okdpFullname(component)."},
+        "pod": {"$ref": "#/$defs/podSpec", "description": "The pod, the arguments of okdpPodSpec; its first container is the application. The sign-in proxy and the volume are added to it."},
+        "port": {"type": ["integer", "string"], "description": "The application's port, a name or a number of its container's ports; a number with signIn."},
+        "servicePort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "The Service's port; absent: 80."},
+        "replicas": {"type": "integer", "minimum": 0, "description": "Absent: 1."},
+        "strategy": {"enum": ["Recreate", "RollingUpdate"], "description": "Absent: Recreate with a volume, which is ReadWriteOnce, else RollingUpdate."},
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["size"],
+          "description": "A PersistentVolumeClaim, named <name>-<volumeName>, and the pod's volume of that name: the application mounts it (volumeMounts of its container).",
+          "properties": {
+            "size": {"type": "string", "minLength": 1, "description": "Its request, 10Gi."},
+            "volumeName": {"type": "string", "minLength": 1, "description": "The pod's volume; absent: data."},
+            "storageClassName": {"type": "string", "description": "\"\" or absent: the cluster's default."},
+            "accessModes": {"type": "array", "items": {"type": "string"}, "description": "Absent: ReadWriteOnce."},
+            "keep": {"type": "boolean", "description": "Kept on uninstall (helm.sh/resource-policy: keep); absent: true."}
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["host"],
+          "description": "An Ingress, host the project's (the compile refuses another, global.okdp.policy.ingressHosts), the platform's class and annotations.",
+          "properties": {
+            "host": {"type": "string", "minLength": 1},
+            "path": {"type": "string", "description": "Absent: /."},
+            "className": {"type": "string", "description": "Absent: global.okdp.ingress.className."},
+            "tlsSecretName": {"type": "string", "description": "Absent: <name>-tls."},
+            "annotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Over the platform's (platform.ingressAnnotations)."}
+          }
+        },
+        "signIn": {"$ref": "#/$defs/signInProxy", "description": "The sign-in proxy in front of the application, a sidecar of the pod: the arguments of okdpSignInProxy; its host is the ingress's and its upstream the application's port on the pod's loopback unless it sets its own. Needs an ingress and a numeric port."},
+        "networkPolicy": {"type": "boolean", "description": "With signIn, a NetworkPolicy letting in the proxy's port alone; absent: true."},
+        "labels": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra labels of every object, over OKDP's."},
+        "annotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The annotations of the Deployment."},
+        "podAnnotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The annotations of its pod."}
+      }
+    },
     "okdpGeneratedSecret": {
       "type": "object",
       "description": "Not a section: the argument of okdpGeneratedSecret, the objects of a Secret whose random values External Secrets Operator generates.",
@@ -108,6 +186,74 @@
     }
   },
   "$defs": {
+    "container": {
+      "type": "object",
+      "description": "A container of okdpPodSpec: a container's own fields but its security context, which the fragment sets.",
+      "additionalProperties": false,
+      "required": ["name", "image"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "image": {"type": "string", "minLength": 1, "description": "By digest (repository:tag@sha256:...) for a package that is reviewed for it."},
+        "imagePullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]},
+        "command": {"type": "array", "items": {"type": "string"}},
+        "args": {"type": "array", "items": {"type": "string"}},
+        "env": {"type": "array", "items": {"type": "object"}},
+        "envFrom": {"type": "array", "items": {"type": "object"}},
+        "ports": {"type": "array", "items": {"type": "object"}},
+        "resources": {"type": "object"},
+        "volumeMounts": {"type": "array", "items": {"type": "object"}},
+        "livenessProbe": {"type": "object"},
+        "readinessProbe": {"type": "object"},
+        "startupProbe": {"type": "object"},
+        "lifecycle": {"type": "object"},
+        "workingDir": {"type": "string"},
+        "readOnlyRootFilesystem": {"type": "boolean", "description": "Absent: true. false for an image that writes its root filesystem."},
+        "runAsUser": {"type": "integer", "minimum": 1, "description": "Absent: the image's user, which must not be root."},
+        "runAsGroup": {"type": "integer", "minimum": 1}
+      }
+    },
+    "podSpec": {
+      "type": "object",
+      "description": "The argument of okdpPodSpec: the containers and volumes of a pod, hardened. No security context, host namespace or hostPath volume.",
+      "additionalProperties": false,
+      "required": ["containers"],
+      "properties": {
+        "containers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/container"}},
+        "initContainers": {"type": "array", "items": {"$ref": "#/$defs/container"}},
+        "volumes": {"type": "array", "items": {"type": "object", "not": {"required": ["hostPath"]}}, "description": "Any volume but a hostPath."},
+        "serviceAccountName": {"type": "string"},
+        "automountServiceAccountToken": {"type": "boolean", "description": "Absent: false."},
+        "runAsUser": {"type": "integer", "minimum": 1},
+        "runAsGroup": {"type": "integer", "minimum": 1},
+        "fsGroup": {"type": "integer", "minimum": 1},
+        "restartPolicy": {"enum": ["Always", "OnFailure", "Never"]},
+        "nodeSelector": {"type": "object", "additionalProperties": {"type": "string"}},
+        "tolerations": {"type": "array", "items": {"type": "object"}},
+        "affinity": {"type": "object"},
+        "topologySpreadConstraints": {"type": "array", "items": {"type": "object"}},
+        "imagePullSecrets": {"type": "array", "items": {"type": "object"}},
+        "priorityClassName": {"type": "string"},
+        "terminationGracePeriodSeconds": {"type": "integer", "minimum": 0}
+      }
+    },
+    "signInProxy": {
+      "type": "object",
+      "description": "The argument of okdpSignInProxy: oauth2-proxy in front of a service, with the platform's OIDC.",
+      "additionalProperties": false,
+      "properties": {
+        "host": {"type": "string", "minLength": 1, "description": "The host the users reach the service at: the OAuth client's redirect URL is https://<host>/oauth2/callback. Required (okdpSignInProxy); okdpWebWorkload sets it."},
+        "upstream": {"type": "string", "minLength": 1, "description": "The URL of the service the proxy fronts. Required (okdpSignInProxy); okdpWebWorkload sets it."},
+        "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The Secret of the cookie secret, generated once, and the cookie's name; absent: okdpFullname('oauth2-proxy')."},
+        "allowedGroups": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "The groups let in, of the groups claim; absent: platform.access.editors, the project's editors and admins and the platform's administrators. Empty fails: it would let in the realm."},
+        "groupsClaim": {"type": "string", "description": "Absent: groups."},
+        "caBundleSecret": {"type": "string", "description": "The Secret holding ca.crt, which the proxy trusts calling the issuer; absent: global.okdp.tls.caBundleSecret."},
+        "image": {"type": "string", "description": "Absent: oauth2-proxy by digest."},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "The proxy's port; absent: 4180."},
+        "upstreamTimeout": {"type": "string", "description": "A duration (1h) for a service that holds a request open; absent: the proxy's."},
+        "cookieExpire": {"type": "string", "description": "Absent: 8h."},
+        "resources": {"type": "object", "description": "Absent: 50m / 64Mi requests, 200m / 128Mi limits."}
+      }
+    },
     "generatedKey": {
       "type": "object",
       "description": "A generated key: the key of the Secret, and the Password generating its value.",

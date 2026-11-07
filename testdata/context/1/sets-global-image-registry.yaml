@@ -1,0 +1,6 @@
+# error: context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set
+# A project's file (project.yaml) giving every chart of its instances an
+# image registry through global, past the upstream policy's registries:
+# global.imageRegistry reaches the charts that read it (CMP-12).
+global:
+  imageRegistry: evil.example.com

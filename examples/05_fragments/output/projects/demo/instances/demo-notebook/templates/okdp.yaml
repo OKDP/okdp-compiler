@@ -1,0 +1,2 @@
+{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}
+{{ .Files.Get "okdp.objects.yaml" }}

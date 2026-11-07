@@ -1,0 +1,67 @@
+# The objects of okdpJob(args): a Job on the hardened pod of okdpPodSpec,
+# retried backoffLimit times (1), kept ttlSecondsAfterFinished seconds
+# (300) for its logs, a Helm and Argo CD hook when asked. Embedded in the
+# compiler and evaluated at each call (fragment, fragments.go), by the
+# mapping engine: ${{ CEL }} expressions, the same directives and functions.
+#
+# Inputs:
+#   args  the arguments, checked against mapping.schema.json (okdpJob)
+#   release, labels  the instance: name, namespace; OKDP's labels
+vars:
+  hook: ${{ args.?hook.orValue({}) }}
+  component: ${{ args.?component.orValue('') }}
+  # The labels of OKDP's objects, then the arguments': a later one wins.
+  jobLabels:
+    $for: l in okdpLabels(component).transformList(k, v, [k, v]) + args.?labels.orValue({}).transformList(k, v, [k, v])
+    $key: ${{ l[0] }}
+    $value: ${{ l[1] }}
+  podLabels:
+    $for: l in okdpLabels(component).transformList(k, v, [k, v]) + args.?podLabels.orValue({}).transformList(k, v, [k, v])
+    $key: ${{ l[0] }}
+    $value: ${{ l[1] }}
+  jobAnnotations:
+    $merge: ${{ args.?annotations.orValue({}) }}
+    helm.sh/hook:
+      $if: ${{ has(hook.helm) }}
+      $value: ${{ hook.helm }}
+    helm.sh/hook-weight:
+      $if: ${{ has(hook.weight) }}
+      $value: ${{ str(hook.weight) }}
+    helm.sh/hook-delete-policy:
+      $if: ${{ has(hook.helm) }}
+      $value: ${{ hook.?deletePolicy.orValue('before-hook-creation') }}
+    argocd.argoproj.io/hook:
+      $if: ${{ has(hook.argocd) }}
+      $value: ${{ hook.argocd }}
+    argocd.argoproj.io/hook-delete-policy:
+      $if: ${{ has(hook.argocd) }}
+      $value: ${{ hook.?argocdDeletePolicy.orValue('BeforeHookCreation') }}
+  # A restart policy of the arguments' pod wins; a Job's pod never restarts
+  # in place by default.
+  podArgs:
+    restartPolicy: Never
+    $merge: ${{ args.pod }}
+
+values:
+  objects:
+    - apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: ${{ args.name }}
+        labels: ${{ jobLabels }}
+        annotations:
+          $if: ${{ jobAnnotations.size() > 0 }}
+          $value: ${{ jobAnnotations }}
+      spec:
+        backoffLimit: ${{ args.?backoffLimit.orValue(1.0) }}
+        ttlSecondsAfterFinished: ${{ args.?ttlSecondsAfterFinished.orValue(300.0) }}
+        activeDeadlineSeconds:
+          $if: ${{ has(args.activeDeadlineSeconds) }}
+          $value: ${{ args.activeDeadlineSeconds }}
+        template:
+          metadata:
+            labels: ${{ podLabels }}
+            annotations:
+              $if: ${{ has(args.podAnnotations) }}
+              $value: ${{ args.podAnnotations }}
+          spec: ${{ okdpPodSpec(podArgs) }}

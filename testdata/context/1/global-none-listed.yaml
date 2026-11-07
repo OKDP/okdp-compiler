@@ -1,0 +1,10 @@
+# error: context layer 3 (level 1): global.storageClass: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists none
+# The platform lists no key of global (policy.projectGlobals: []): a project
+# sets none, storageClass, which it sets by default, included.
+platform:
+  global:
+    okdp:
+      policy:
+        projectGlobals: []
+global:
+  storageClass: fast

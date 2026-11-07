@@ -317,15 +317,15 @@ dependencies:
     repository: oci://quay.io/adaltas
     version: 0.6.0
 $ cat out/projects/demo/instances/demo-webapp/okdp.info.yaml
-url: https://demo-webapp.okdp.example.org
+url: https://webapp-demo.okdp.example.org
 usage: |
-  A web application. Open https://demo-webapp.okdp.example.org
+  A web application. Open https://webapp-demo.okdp.example.org
 provides:
   - name: demo-webapp
     contract: http
     values:
       internalUrl: http://demo-webapp-app.demo.svc:8080
-      url: https://demo-webapp.okdp.example.org
+      url: https://webapp-demo.okdp.example.org
 ```
 
 In the full example, `project.yaml`, the project's file at level 1,
@@ -1616,6 +1616,7 @@ usage error with status 2.
 | `global.okdp.ingress.className is required. It is a context value: the platform's or a project's (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | set the key in `platform.yaml` ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context file, the second (`Inputs.Context[1]`), `project.yaml` at level 1, sets a value a file of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the file: a level only adds keys and connections; change the value in the lower level's files ([levels](specs/01_inputs_outputs.md#levels)) |
 | `context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp` | a context file above level 0, `project.yaml`, sets a key of `global.okdp` other than `provisioning`, one the compiler reads or not, one the platform sets or leaves unset (a key it sets fails before, `is set at level 0`), or `global.okdp` to a non-map | set it in `platform.yaml`, the platform's; a project's own settings, which the mappings read, go beside `okdp`: `global.project` ([levels](specs/01_inputs_outputs.md#levels)) |
+| `context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; ...` | a context file above level 0, `project.yaml`, sets a key of `global` beside `okdp` the platform does not list: every chart receives `global`, past its package's `protect` and the upstream policy; also `context layer 2 (level 1): global.project.hostNetwork: hostNetwork is denied ...` for a listed key that holds what the upstream policy denies | list the key in `global.okdp.policy.projectGlobals` of `platform.yaml` if it is harmless to every project (`[project, storageClass]` by default), else remove it; a project's own settings go under `global.project` |
 | `values layer 1: global.okdp is set by the context (Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance file, the first, second... values layer (`Inputs.Values[0]`, `[1]`...), its `config.yaml` first, sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values in `platform.yaml`; a package lets instances set a key of `global` by declaring it in `config.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `config.schema.json: global.okdp is the platform's settings: a package schema declares nothing under it`, `... a package schema gives it no default (properties.global.default)` | the package's parameter schema declares `properties.global.properties.okdp`, or its `properties.global.default` has the key `okdp`: a default of the platform's settings | remove it: the platform's settings are the context's, `platform.yaml` ([defaults](specs/01_inputs_outputs.md#defaults)) |
 | `values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level` | an instance's `config.yaml` sets `connections`, to any value | give the instance's own connections in its `connections.yaml`, a context file of its level; a connection of a lower level is not changed ([context values](specs/01_inputs_outputs.md#context-values)) |

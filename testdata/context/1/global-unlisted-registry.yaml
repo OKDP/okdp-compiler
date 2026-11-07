@@ -1,0 +1,13 @@
+# error: global.image.repository: image docker.io/evil/app is not from a registry of global.okdp.policy.upstream.registries (registry.example.org): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them
+# A key of global the platform lets a project set (image) holding an image
+# from another registry than the platform's.
+platform:
+  global:
+    okdp:
+      policy:
+        projectGlobals: [image]
+        upstream:
+          registries: [registry.example.org]
+global:
+  image:
+    repository: docker.io/evil/app

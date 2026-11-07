@@ -1120,6 +1120,25 @@ after the check against the lower levels
 context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
 ```
 
+Of `global` beside `okdp`, a layer above level 0 sets the keys the
+platform lists, `global.okdp.policy.projectGlobals`: `project` and
+`storageClass` unless it lists others. Every chart of an instance
+receives `global`, over its package's `protect` and beside the upstream
+values the platform checks, so `global.imageRegistry` or
+`global.securityContext` would reach the charts that read them past both:
+any other key is refused, for a privileged project too, at the first key
+in key order, a field problem at `global.<key>`. The keys the platform
+lists are checked as the upstream values are ([upstream
+policy](#upstream-policy)). Level 0's `global` is the platform's,
+reviewed with it
+(`testdata/context/1/sets-global-image-registry.yaml`,
+`sets-global-security.yaml`, `sets-global-security-context.yaml`,
+`global-none-listed.yaml`, `testdata/cli/policy.txtar`):
+
+```
+context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; every chart of the instances receives global, past their package's protect and the upstream policy
+```
+
 Only level 0 is reviewed with the platform: above it, as in an
 instance layer, no key or string of a layer may contain `{{`
 ([Layers](#layers)), the first one found by path reported,
@@ -1205,6 +1224,8 @@ not, is the platform's, set at level 0: a project's layer sets
 | `secrets.refreshInterval` | `1h` by default: how often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it |
 | `policy.privileged` | the namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to the [upstream policy](#upstream-policy); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
 | `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
+| `policy.ingressHosts` | per namespace, the exact host names the project serves beside those that end with `-<namespace>.<ingress.suffix>` (the rule, [hosts](#hosts)); none by default; a privileged project's are not checked |
+| `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's `project.yaml`, an instance's `connections.yaml`), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to the [upstream policy](#upstream-policy) |
 | `policy.upstream.deny` | key names the upstream values of the other projects' instances set nowhere, beside the compiler's ([upstream policy](#upstream-policy)) |
 | `policy.upstream.registries` | the registries the images of the other projects' upstream values come from, each a host, its port and a path prefix optional; unset, the images are not checked ([upstream policy](#upstream-policy)) |
 | `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them; the compiler writes nothing of them, the platform's bootstrap binds them once, a program that mirrors the platform's authority reads them (`compiler.PlatformAdmins`) ([access](#access)) |
@@ -1444,6 +1465,58 @@ it fail. Whatever `protect` names, the [upstream
 policy](#upstream-policy) applies too: a package does not open what the
 platform denies.
 
+### Hosts
+
+A host is a name every project shares: ingress-nginx merges the rules of
+one host across namespaces (a project's Ingress for `sso.okdp.sandbox`,
+path `/realms`, takes part of the identity provider's traffic), and
+cert-manager signs a certificate for any name from the platform's issuer
+(`default-issuer`, `cert-manager.io/cluster-issuer`). The compile of an
+instance of a project that is not privileged
+(`global.okdp.policy.privileged`) therefore refuses a host that does not
+end with `-<namespace>.<global.okdp.ingress.suffix>`
+(`seaweedfs-demo.okdp.sandbox` for the project `demo`: a name before the
+dash, a package names its hosts `<service>-<namespace>`) and is not listed for the project in
+`global.okdp.policy.ingressHosts`
+(`{demo: [sso.okdp.sandbox]}`, exact host names, no wildcard). The case
+and a final dot do not count. The rule holds for:
+
+- the instance's objects (every source, the items of a `List` alike): an
+  `Ingress`'s `spec.rules[].host` (a rule without host answers every host
+  and is refused) and `spec.tls[].hosts`; a cert-manager `Certificate`'s
+  `spec.dnsNames` and `spec.commonName`; a Gateway API `HTTPRoute`,
+  `GRPCRoute` or `TLSRoute`'s `spec.hostnames`; and, on any object, the
+  annotations that name hosts: `cert-manager.io/common-name`,
+  `cert-manager.io/alt-names`,
+  `nginx.ingress.kubernetes.io/server-alias`,
+  `external-dns.alpha.kubernetes.io/hostname` (commas and spaces
+  separate hosts);
+- the final values of each chart (the package's computed values and the
+  instance's upstream values over them; the upstream chart's own defaults
+  are not seen), under a key `ingress` or `ingresses` at any depth: a
+  `host`, `hostname` or `commonName` string, the strings of `hosts`,
+  `hostnames`, `dnsNames` and `extraHosts`, the `name` of an `extraHosts`
+  item, and the annotations above under its `annotations`. A value that is
+  not a string or is empty names no host.
+
+Without `global.okdp.ingress.suffix` only the listed hosts pass. The first
+refused fails the compile, objects before values, in order, named
+(`testdata/denied-ingress-host.yaml`, `denied-ingress-annotation.yaml`,
+`TestIngressHostsObjects`, `TestIngressHostsValues`):
+
+```
+web: objects: Ingress/demo-web: spec.rules[0].host: host "sso.okdp.sandbox" is not served by demo: a host that ends with -demo.okdp.sandbox, or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), demo is not one of them
+seaweedfs: master.ingress.host: host "sso.okdp.sandbox" is not served by demo: ...
+```
+
+What the rule does not see: a host a chart builds from values that are not
+under an `ingress` key, or from its templates; an Ingress an upstream chart
+renders from other values than the ones above. The platform's admission
+policy and cert-manager's approver policy for the issuer are the second
+line. Two namespaces of which one is a dashed suffix of the other (`demo`
+and `team-demo`) share a form: `x-team-demo.okdp.sandbox` fits both, the
+platform avoids such pairs or lists the hosts.
+
 ### Upstream policy
 
 The platform's rules over the upstream values of an instance of a
@@ -1452,8 +1525,12 @@ the compiler reads](#fields-the-compiler-reads)), whatever its package's
 `upstream` and `protect`, after `protect`: the package's own values, its
 defaults and values file, are not checked, being reviewed with it. The
 upstream values are `upstream.<key>` of the instance's merged values, its
-context's layers included. A privileged project's are not checked: the
-platform's own projects set any upstream value.
+context's layers included. The `global` of the layers above level 0, the
+keys the platform lets a project set (`global.okdp.policy.projectGlobals`,
+[levels](#levels)), are checked alike, at their own path
+(`global.project.hostNetwork`): they reach every chart. A privileged
+project's are not checked: the platform's own projects set any upstream
+value.
 
 A key named, at any depth, in a map or in a list's items, one of a pod's
 privileges, security context, identity, containers or objects, is
@@ -1494,7 +1571,9 @@ chart pulls from elsewhere sets the platform's registry in its values.
 The first refused, in path order (a map's images, then its keys
 sorted, a list's items in order), fails, the path and the key named (`testdata/denied-upstream.yaml`,
 `testdata/denied-upstream-text.yaml`,
-`testdata/context/0/unlisted-registry.yaml`):
+`testdata/context/0/unlisted-registry.yaml`, and for `global`,
+`testdata/context/1/global-denied-key.yaml`,
+`global-unlisted-registry.yaml`):
 
 ```
 app: upstream.app.podSecurityContext: podSecurityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
@@ -1812,7 +1891,7 @@ request:
   application_type: web
   client_name: demo-webapp-demo
   grant_types: [authorization_code, refresh_token]
-  redirect_uris: [https://demo-webapp.okdp.example.org/oauth2/callback]
+  redirect_uris: [https://webapp-demo.okdp.example.org/oauth2/callback]
   scope: profile email groups          # platform.oidc.scope, without openid
 secret: demo-webapp-demo-dcr
 security: {role: demo-webapp-oidc-dcr, serviceAccount: demo-webapp-oidc-dcr}
@@ -2047,6 +2126,24 @@ drive the engine with its own identity, past the project's
 
 ```
 web: objects: HelmRelease/demo-web-override: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+```
+
+Whatever the project, privileged or not, no two objects of `Objects`, the
+items of a `List` among them, are of one API group (the version does not
+count), kind, namespace (unset, `null` or `""` the instance's) and name:
+the second would replace the first in the cluster. A provider that
+derives the name of a claim's object from its ID with a lossy mapping
+(`a-b.c` and `a.b-c` both `a-b-c`) would give two claimers one object, and
+the second of them its credentials: the instance fails, and the
+functions [`okdpSqlName` and
+`okdpObjectName`](04_functions.md#okdpsqlname-and-okdpobjectname) give one
+name per ID. A Secret is left to the check of two objects that
+write one Secret (all of a namespace's instances together). An object has
+a name (the mapping schema requires it)
+(`testdata/cli/policy.txtar`, `TestDuplicateObjects`):
+
+```
+web: objects: ConfigMap/demo-web-a-b-c: two objects of one kind (core), namespace (demo) and name: object 1 and object 2; the second would replace the first. A name derived from a claim's ID must be one per ID (okdpSqlName, okdpObjectName)
 ```
 
 Whatever the project, no Secret (`v1`) of `Objects`, nor of the items of
@@ -2349,15 +2446,15 @@ its usage and its one output, under the release name, without
 credentials:
 
 ```yaml
-url: https://demo-webapp.okdp.example.org
+url: https://webapp-demo.okdp.example.org
 usage: |
-  A web application. Open https://demo-webapp.okdp.example.org
+  A web application. Open https://webapp-demo.okdp.example.org
 provides:
   - name: demo-webapp
     contract: http
     values:
       internalUrl: http://demo-webapp-app.demo.svc:8080
-      url: https://demo-webapp.okdp.example.org
+      url: https://webapp-demo.okdp.example.org
 ```
 
 No objects file: the instance has no objects, no credentials Secret and no
@@ -2753,6 +2850,15 @@ The platform's administrators, `global.okdp.access.admins`, are bound
 once, by the platform's bootstrap: Argo CD's `role:admin`, the cluster's
 administration. The compiler checks them against the platform's schema
 and writes nothing of them.
+
+A package restricts who signs in to its services by the same groups: the
+mapping sees them as `platform.access.viewers`, `.editors` and `.admins`,
+each role's list holding the higher roles' groups and the platform's
+administrators, and `platform.access.platformAdmins`
+([context](02_service_definition.md#context),
+[who may sign in](../02_writing_package.md#oauth-clients)): a service
+defaults its allowed groups to them, never to the realm's roles, which
+every project's people hold (`TestPlatformAccess`).
 
 | Case | Error |
 |---|---|

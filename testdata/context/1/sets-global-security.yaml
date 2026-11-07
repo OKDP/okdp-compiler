@@ -1,0 +1,6 @@
+# error: context layer 2 (level 1): global.security: a key of global the platform does not let a project set
+# A project's file (project.yaml) setting, under global, a key of the
+# Bitnami charts that lets an unverified image run, past deniedKeys.
+global:
+  security:
+    allowInsecureImages: true

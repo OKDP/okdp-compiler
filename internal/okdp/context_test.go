@@ -43,6 +43,7 @@ func TestPlatformDefaults(t *testing.T) {
 		"oidcClientSecret":   "creds-demo-app-oauth2",
 		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": "ca"},
 		"proxyEnv":           M{},
+		"access":             M{"viewers": []any{"okdp-project-demo"}, "editors": []any{"okdp-project-demo"}, "admins": []any{}, "platformAdmins": []any{}},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("got  %#v\nwant %#v", p, want)
@@ -360,5 +361,45 @@ func TestPlatformFromContext(t *testing.T) {
 		if _, err := chart.ReadParameterSchema(fstest.MapFS{"config.schema.json": {Data: doc}}); err == nil || !strings.Contains(err.Error(), "a package schema gives it no default (properties.global.default)") {
 			t.Errorf("%s: got %v, want the default of global.okdp refused", doc, err)
 		}
+	}
+}
+
+// TestPlatformAccess: platform.access, the groups of the project (its
+// file's access, the default group an editor without one) and the
+// platform's administrators: each role's list holds the higher roles'
+// groups and the administrators, sorted, once each.
+func TestPlatformAccess(t *testing.T) {
+	list := func(g ...string) []any {
+		out := []any{}
+		for _, x := range g {
+			out = append(out, x)
+		}
+		return out
+	}
+	project := func(access any) []ContextLayer {
+		return []ContextLayer{{Level: 1, Values: map[string]any{"access": access}}}
+	}
+	for name, tc := range map[string]struct {
+		okdp   M
+		layers []ContextLayer
+		want   M
+	}{
+		"the default group":             {M{}, nil, M{"viewers": list("okdp-project-demo"), "editors": list("okdp-project-demo"), "admins": list(), "platformAdmins": list()}},
+		"roles":                         {M{}, project(M{"readers": "viewer", "devs": "editor", "leads": "admin"}), M{"viewers": list("devs", "leads", "readers"), "editors": list("devs", "leads"), "admins": list("leads"), "platformAdmins": list()}},
+		"no group":                      {M{}, project(M{}), M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
+		"the platform's administrators": {M{"access": M{"admins": []any{"ops", "okdp-admins", "ops"}}}, project(M{"devs": "editor", "ops": "viewer"}), M{"viewers": list("devs", "okdp-admins", "ops"), "editors": list("devs", "okdp-admins", "ops"), "admins": list("okdp-admins", "ops"), "platformAdmins": list("okdp-admins", "ops")}},
+		"a refused access":              {M{"access": M{"admins": []any{"ops"}}}, project(M{"a/b": "viewer"}), M{"viewers": list("ops"), "editors": list("ops"), "admins": list("ops"), "platformAdmins": list("ops")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := inputs(M{"global": M{"okdp": tc.okdp}})
+			in.Context = append(in.Context, tc.layers...)
+			inst, err := newInstance(pkg, in, defService)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := value.AsMap(inst.scope["platform"])["access"]; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got  %#v\nwant %#v", got, tc.want)
+			}
+		})
 	}
 }

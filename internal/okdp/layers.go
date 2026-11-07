@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -105,11 +106,7 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 // above, merged in the same order; no other key of a higher level is read,
 // whatever the checks above let through.
 func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
-	order := make([]int, len(layers))
-	for i := range order {
-		order[i] = i
-	}
-	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(layers[a].Level, layers[b].Level) })
+	order := levelOrder(layers)
 	whole := func(keys []string) bool {
 		class := len(keys) == 6 && keys[4] == "classes" || len(keys) == 5 && keys[4] == "default"
 		return len(keys) == 2 && (keys[0] == "connections" || keys[0] == "claims") ||
@@ -137,6 +134,18 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
 		if l.Level > 0 {
 			if k := platformOnly(layer); k != "" {
 				return nil, nil, fmt.Errorf("%s: %s: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp", name, k)
+			}
+			// The keys of global are the platform's to list (level 0's
+			// policy.projectGlobals, read from the layers below).
+			allowed := projectGlobals(platform)
+			for _, k := range slices.Sorted(maps.Keys(value.AsMap(layer["global"]))) {
+				if k != "okdp" && !slices.Contains(allowed, k) {
+					listed := "none"
+					if len(allowed) > 0 {
+						listed = strings.Join(allowed, ", ")
+					}
+					return nil, nil, atField(value.Key("global", k), fmt.Errorf("%s: %s: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists %s; every chart of the instances receives global, past their package's protect and the upstream policy", name, value.Key("global", k), listed))
+				}
 			}
 		}
 		if _, set := layer["claims"]; set && l.Level == 0 {
@@ -166,6 +175,74 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
 		}
 	}
 	return out, platform, nil
+}
+
+// defaultProjectGlobals: the keys of global a project sets when the
+// platform lists none (global.okdp.policy.projectGlobals): project, its own
+// settings, which its packages' mappings read, and storageClass.
+var defaultProjectGlobals = []string{"project", "storageClass"}
+
+// projectGlobals: the keys of global a layer above level 0 may set, the
+// platform's global.okdp.policy.projectGlobals of platform (the context's
+// {global: {okdp: ...}}, level 0's), defaultProjectGlobals when it sets
+// none; global.okdp is never one (platformOnly).
+func projectGlobals(platform M) []string {
+	v := value.Dig(platform, "global.okdp.policy.projectGlobals")
+	if v == nil {
+		return defaultProjectGlobals
+	}
+	var out []string
+	for _, k := range value.AsList(v) {
+		out = append(out, value.Str(k))
+	}
+	return out
+}
+
+// levelOrder: the positions of layers by level, lowest first, a level's in
+// their order: the order contextLayers merges them in.
+func levelOrder(layers []ContextLayer) []int {
+	order := make([]int, len(layers))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(layers[a].Level, layers[b].Level) })
+	return order
+}
+
+// upstreamGlobals: the platform's check of the upstream values
+// (upstreamCheck) on the global of every layer above level 0 (layers,
+// valuesLayers' result for in): the keys of global a project sets, the
+// instance's own, as the upstream values of its charts, which every chart
+// receives: no key of deniedKeys or of the platform's deny list, and the
+// images from its registries. Level 0's global is the platform's, reviewed
+// with it; a privileged project's are not checked. The first refused, in
+// layer order, fails, at its path.
+func upstreamGlobals(in Inputs, layers []map[string]any, okdp M) error {
+	check := upstreamCheck(okdp, in.Namespace, privileged(okdp, in.Namespace))
+	if check == nil {
+		return nil
+	}
+	order := levelOrder(in.Context)
+	for i, layer := range layers {
+		name := fmt.Sprintf("values layer %d", i-len(in.Context)+1)
+		if i < len(order) {
+			l := in.Context[order[i]]
+			if l.Level == 0 {
+				continue
+			}
+			name = fmt.Sprintf("context layer %d (level %d)", order[i]+1, l.Level)
+		}
+		g := value.AsMap(layer["global"])
+		if len(g) == 0 {
+			continue
+		}
+		var path string
+		at := func(p string) string { path = p; return name + ": " + p }
+		if err := check(M{"global": g}, nil, at); err != nil {
+			return atField(path, err)
+		}
+	}
+	return nil
 }
 
 // platformOnly: the first path of layer, a context layer above level 0,

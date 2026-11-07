@@ -247,6 +247,22 @@
                   "items": {"type": "string"},
                   "description": "Namespaces no project may have, beside those the compiler reserves (platform, the segment of the platform's keys of the store; kube-*, Kubernetes' own; flux-system, argocd and okdp-releases, the deployer engines' and the targets'): the namespaces of the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's, a CI runner's...). Every instance of such a project is refused, privileged or not: a namespace both lists is reserved."
                 },
+                "ingressHosts": {
+                  "type": "object",
+                  "description": "The hosts a project that is not privileged serves beside those that end with -<namespace>.<ingress.suffix> (the rule: seaweedfs-demo.okdp.sandbox for the project demo): per namespace, the exact host names (no wildcard) its Ingress rules and tls, its cert-manager Certificates' dnsNames and commonName, its Gateway API routes' hostnames, the cert-manager, ingress-nginx server-alias and external-dns hostname annotations of its objects, and the hosts of the ingress of its charts' values (the keys ingress, ingresses) may name. A host is a name shared by every project: the identity provider's, another project's, a service of the platform's. Absent: none beside the rule. A privileged project's are not checked.",
+                  "additionalProperties": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"}
+                  },
+                  "propertyNames": {"pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"}
+                },
+                "projectGlobals": {
+                  "type": "array",
+                  "items": {"type": "string", "minLength": 1, "not": {"const": "okdp"}},
+                  "uniqueItems": true,
+                  "description": "The keys of global the layers above level 0 set (a project's project.yaml, an instance's connections.yaml), beside okdp, which is the platform's: every chart of the instances receives global, past its package's protect and the upstream policy's keys, so any other key is refused (a field problem at global.<key>). Absent: project (a project's own settings, which its packages' mappings read) and storageClass; []: none. The list holds for every project, privileged or not. What the listed keys hold is checked as the upstream values are (policy.upstream: a privileged project's are not checked); level 0's global is the platform's, reviewed with it."
+                },
                 "upstream": {
                   "type": "object",
                   "additionalProperties": false,

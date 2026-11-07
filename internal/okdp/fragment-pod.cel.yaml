@@ -1,0 +1,81 @@
+# The pod spec of okdpPodSpec(args): the containers and volumes of a
+# workload, hardened. Embedded in the compiler and evaluated at each call
+# (fragment, fragments.go), also for the pod of okdpJob and okdpWebWorkload,
+# by the mapping engine: ${{ CEL }} expressions, the same directives and
+# functions.
+#
+# Every container, init containers included, gets the security context a
+# restricted pod runs with: no privilege escalation, every capability
+# dropped, a read-only root filesystem unless asked
+# (readOnlyRootFilesystem: false), non-root, the runtime's seccomp profile;
+# the pod too: non-root, seccomp. The service account's token is not
+# mounted unless asked. The arguments hold no securityContext, nor the
+# pod's host namespaces, nor a hostPath volume (mapping.schema.json,
+# okdpPodSpec): a package that needs them writes its pod itself and is
+# reviewed for it.
+#
+# Inputs:
+#   args  the arguments, checked against mapping.schema.json (okdpPodSpec)
+vars:
+  # What a container keeps for the security context to set.
+  own: [readOnlyRootFilesystem, runAsUser, runAsGroup]
+  # The pod spec's keys the arguments pass as they are.
+  rest: >-
+    ${{ args.transformMap(k, v, !(k in ['containers', 'initContainers', 'volumes', 'serviceAccountName', 'automountServiceAccountToken', 'runAsUser', 'runAsGroup', 'fsGroup']), v) }}
+
+values:
+  spec:
+    $merge: ${{ rest }}
+    automountServiceAccountToken: ${{ args.?automountServiceAccountToken.orValue(false) }}
+    serviceAccountName:
+      $if: ${{ args.?serviceAccountName.orValue('') != '' }}
+      $value: ${{ args.serviceAccountName }}
+    securityContext:
+      runAsNonRoot: true
+      seccompProfile: {type: RuntimeDefault}
+      runAsUser:
+        $if: ${{ args.?runAsUser.orValue(0.0) > 0.0 }}
+        $value: ${{ args.runAsUser }}
+      runAsGroup:
+        $if: ${{ args.?runAsGroup.orValue(0.0) > 0.0 }}
+        $value: ${{ args.runAsGroup }}
+      fsGroup:
+        $if: ${{ args.?fsGroup.orValue(0.0) > 0.0 }}
+        $value: ${{ args.fsGroup }}
+    initContainers:
+      $if: ${{ args.?initContainers.orValue([]).size() > 0 }}
+      $value:
+        - $for: c in args.initContainers
+          $each:
+            $merge: ${{ c.transformMap(k, v, !(k in own), v) }}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: {drop: [ALL]}
+              readOnlyRootFilesystem: ${{ c.?readOnlyRootFilesystem.orValue(true) }}
+              runAsNonRoot: true
+              seccompProfile: {type: RuntimeDefault}
+              runAsUser:
+                $if: ${{ c.?runAsUser.orValue(0.0) > 0.0 }}
+                $value: ${{ c.runAsUser }}
+              runAsGroup:
+                $if: ${{ c.?runAsGroup.orValue(0.0) > 0.0 }}
+                $value: ${{ c.runAsGroup }}
+    containers:
+      - $for: c in args.containers
+        $each:
+          $merge: ${{ c.transformMap(k, v, !(k in own), v) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            readOnlyRootFilesystem: ${{ c.?readOnlyRootFilesystem.orValue(true) }}
+            runAsNonRoot: true
+            seccompProfile: {type: RuntimeDefault}
+            runAsUser:
+              $if: ${{ c.?runAsUser.orValue(0.0) > 0.0 }}
+              $value: ${{ c.runAsUser }}
+            runAsGroup:
+              $if: ${{ c.?runAsGroup.orValue(0.0) > 0.0 }}
+              $value: ${{ c.runAsGroup }}
+    volumes:
+      $if: ${{ args.?volumes.orValue([]).size() > 0 }}
+      $value: ${{ args.volumes }}

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"slices"
 	"sort"
 	"sync"
 
@@ -141,9 +142,51 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 			"oidcClientSecret":   clientSecret(in.Release, in.Namespace, inst.dcr, ""),
 			"ingressAnnotations": ingressAnnotations(inst.okdp),
 			"proxyEnv":           proxyEnv,
+			"access":             accessScope(in.Context, in.Namespace, inst.okdp),
 		},
 	}
 	return inst, nil
+}
+
+// accessScope: platform.access, who may use a project's services: the
+// groups of the project (project.yaml access, DefaultGroup an editor when
+// it gives none) and the platform's administrators
+// (global.okdp.access.admins), for a package that restricts who signs in:
+// viewers, the groups with any role in the project, editors, those with
+// editor or admin, admins, those with admin, each list holding the higher
+// roles' groups and the platform's administrators, sorted, once each; and
+// platformAdmins, the administrators alone. The names the identity
+// provider's tokens give the groups (no prefix). A project file whose
+// access is refused (Compile reports it, projectAccess) gives no group.
+func accessScope(layers []ContextLayer, namespace string, okdp M) M {
+	groups, _ := projectAccess(layers, namespace)
+	platform := admins(okdp)
+	list := func(roles ...Role) []any {
+		set := map[string]bool{}
+		for _, g := range platform {
+			set[g] = true
+		}
+		for g, r := range groups {
+			if slices.Contains(roles, r) {
+				set[g] = true
+			}
+		}
+		out := []any{}
+		for _, g := range slices.Sorted(maps.Keys(set)) {
+			out = append(out, g)
+		}
+		return out
+	}
+	only := []any{}
+	for _, g := range slices.Compact(slices.Sorted(slices.Values(platform))) {
+		only = append(only, g)
+	}
+	return M{
+		"viewers":        list(RoleViewer, RoleEditor, RoleAdmin),
+		"editors":        list(RoleEditor, RoleAdmin),
+		"admins":         list(RoleAdmin),
+		"platformAdmins": only,
+	}
 }
 
 // ingressAnnotations: platform.ingressAnnotations, the annotations of
@@ -191,6 +234,9 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 	}
 	settings, err := platformSettings(platform)
 	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := upstreamGlobals(in, layers, settings); err != nil {
 		return nil, nil, nil, err
 	}
 	return schema, values, settings, nil

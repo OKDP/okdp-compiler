@@ -45,7 +45,20 @@ namespace and none is of a cluster-scoped kind: the compile refuses them
 ([objects section](specs/01_inputs_outputs.md#objects-section)). And no
 Secret holds values in clear, unless the caller allows it
 (`Inputs.AllowPlainSecrets`): the objects file is in the deployments
-repository.
+repository. Nor do two objects of one kind, namespace and name coexist
+in an instance, whatever the project: the second would replace the first.
+A name derived from a claim's ID, the database or the role of a claim,
+the object of a topic, is `okdpSqlName(id)` or `okdpObjectName(id)`, one
+name per ID, never the ID with its dots and dashes replaced by one
+character, which gives `a-b.c` and `a.b-c` one name
+([functions](specs/04_functions.md#okdpsqlname-and-okdpobjectname)).
+
+A workload the package adds, a Job, a web service with its volume, its
+Ingress and its sign-in proxy, is written with the fragments the compiler
+provides (`okdpWebWorkload`, `okdpJob`, `okdpSignInProxy`,
+`okdpPodSpec`:
+[functions](specs/04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload),
+`examples/05_fragments`), hardened once, not by hand in each package.
 
 The `objects` section carries real weight: on 2026-10-12, 15 of the 24
 packages of the `okdp-compiler` branches of platform-charts and

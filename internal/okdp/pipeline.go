@@ -237,9 +237,11 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	// read for its connections whose credentials are in the platform's
 	// secret store. Then the platform's policy over them all: those of a
 	// project that is not privileged stay in its namespace, none
-	// cluster-scoped (checkObjects); no Secret of credentials in clear,
-	// unless allowed (checkPlainSecrets); then the sync options of Argo CD
-	// of those Helm keeps.
+	// cluster-scoped (checkObjects), serving no host the platform keeps from
+	// them (checkIngressHosts); no Secret of credentials in clear,
+	// unless allowed (checkPlainSecrets); no two of one kind, namespace and name
+	// (checkDuplicateObjects); then the sync options of Argo CD of those Helm
+	// keeps.
 	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp), Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp), Network: network(inst.okdp)}
 	if out.Network != nil {
 		out.Network.Claimers = claimers(in.Namespace, in.Claims)
@@ -255,11 +257,17 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 		if err := checkObjects(svc.Name, in.Namespace, out.Objects); err != nil {
 			return nil, err
 		}
+		if err := checkIngressHosts(svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
+			return nil, err
+		}
 	}
 	if !in.AllowPlainSecrets {
 		if err := checkPlainSecrets(svc.Name, out.Objects); err != nil {
 			return nil, err
 		}
+	}
+	if err := checkDuplicateObjects(svc.Name, in.Namespace, out.Objects); err != nil {
+		return nil, err
 	}
 	// Whatever wrote it, an object Helm keeps is kept by Argo CD alike.
 	keepSynced(out.Objects)
@@ -283,6 +291,12 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 		return nil, err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
+	// The hosts of the charts' ingresses, those of the objects checked above.
+	if !out.Privileged {
+		if err := checkIngressValues(in.Namespace, inst.okdp, out.Values); err != nil {
+			return nil, err
+		}
+	}
 	// A literal of the instance's upstream values at a sensitive key, a
 	// credential in clear most likely: a warning, unless allowed.
 	if !in.AllowPlainSecrets {

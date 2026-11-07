@@ -1,0 +1,5 @@
+# The instance's package: catalog/notebook/1.0.0/. The release is
+# demo-notebook, <project>-<instance>, the project's directory the namespace,
+# demo.
+service: notebook
+version: 1.0.0

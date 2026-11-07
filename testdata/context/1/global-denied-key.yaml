@@ -1,0 +1,13 @@
+# error: global.project.securityContext: securityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
+# A key of global the platform lets a project set (policy.projectGlobals
+# lists project) is checked as the upstream values are: every chart of the
+# instances receives it, so a key of a pod's privileges is refused in it
+# too, at any depth.
+platform:
+  global:
+    okdp:
+      policy:
+        projectGlobals: [project]
+global:
+  project:
+    securityContext: {runAsUser: 0}

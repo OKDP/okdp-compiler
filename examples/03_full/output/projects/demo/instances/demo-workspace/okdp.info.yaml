@@ -1,19 +1,19 @@
-url: https://demo-workspace.okdp.example.org
+url: https://workspace-demo.okdp.example.org
 usage: |
   Notebooks and SQL (workspace 3.2.0-1.4.0) for the project demo.
-  Open https://demo-workspace.okdp.example.org; its API is https://demo-workspace.okdp.example.org/api.
+  Open https://workspace-demo.okdp.example.org; its API is https://workspace-demo.okdp.example.org/api.
   Catalogs: archive, marketing, sales.
 provides:
   - name: workspace
     contract: http
     values:
       internalUrl: http://demo-workspace-api.demo.svc:8080
-      url: https://demo-workspace.okdp.example.org
+      url: https://workspace-demo.okdp.example.org
   - name: demo-workspace-exports
     contract: s3
     values:
       bucket: exports
-      endpoint: https://demo-workspace-gateway.okdp.example.org/s3
+      endpoint: https://workspace-gateway-demo.okdp.example.org/s3
       pathStyle: true
       provider: minio
       region: us-east-1

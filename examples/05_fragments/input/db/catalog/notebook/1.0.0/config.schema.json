@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "storageGi": {"type": "integer", "minimum": 1, "default": 10, "description": "The size of the notebook's volume."},
+    "allowedGroups": {"type": "array", "items": {"type": "string"}, "description": "The groups let in; default the project's editors, admins and the platform's administrators."}
+  }
+}

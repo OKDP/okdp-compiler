@@ -122,6 +122,8 @@ func functions(inst *instance, session **compile.Session) []cel.EnvOption {
 			}))), "okdpGeneratedSecret_map"),
 	}
 	opts = append(opts, labelFunctions(inst.svc.Name, release)...)
+	opts = append(opts, nameFunctions()...)
+	opts = append(opts, fragmentFunctions(inst, session)...)
 	return append(opts, oidcFunctions(inst)...)
 }
 
