@@ -187,12 +187,13 @@ func TestExpressionValues(t *testing.T) {
 }
 
 // TestLibraries: the CEL extensions at their pinned versions (Session.env):
-// json.encode (encoders 1), format's precision at most 100 (strings 5),
-// last (optional types 2).
+// base64.encode (encoders 0), format's precision at most 100 (strings 5),
+// last (optional types 2); and json.encode, a host function, keys sorted.
 func TestLibraries(t *testing.T) {
 	s := NewSession(context.Background(), 0)
 	for expr, want := range map[string]any{
 		"json.encode({'b': [1, 'x'], 'a': 2.5})": `{"a":2.5,"b":[1,"x"]}`,
+		"base64.encode(b'a')":                    "YQ==",
 		"'%.2f'.format([1.0])":                   "1.00",
 		"[1, 2].last()":                          float64(2),
 	} {

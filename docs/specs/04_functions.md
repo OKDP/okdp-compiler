@@ -66,7 +66,7 @@ error, when `k` is missing; `?:` evaluates the branch it takes only.
 ### CEL libraries
 
 Besides the standard library, the environment enables these libraries of
-cel-go v0.32.0, each at a pinned version: a cel-go upgrade does not change
+cel-go v0.33.2, each at a pinned version: a cel-go upgrade does not change
 what a mapping may call until the compiler raises a version.
 
 | Library | Version | Functions |
@@ -75,7 +75,7 @@ what a mapping may call until the compiler raises a version.
 | lists (`ext.Lists`) | 3 | `lists.range`, `slice`, `flatten`, `distinct`, `reverse`, `sort`, `sortBy` |
 | bindings (`ext.Bindings`) | 1 | `cel.bind(name, value, expr)` |
 | two-variable comprehensions (`ext.TwoVarComprehensions`) | 0 | `all(k, v, ...)`, `exists(k, v, ...)`, `existsOne`, `transformList`, `transformMap`, `transformMapEntry` |
-| encoders (`ext.Encoders`) | 1 | `base64.encode`, `base64.decode`, `json.encode` (compact, keys sorted; `toJson` is Helm's) |
+| encoders (`ext.Encoders`) | 0 | `base64.encode`, `base64.decode` |
 | optional types (`cel.OptionalTypes`) | 2 | `x.?field`, `m[?key]`, `l[?index]`, `orValue`, `hasValue`, `value`, `or`, `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `optFlatMap`, `l.first()` and `l.last()` (optionals: not the host function `first(list)`), optional entries `{?'k': opt}` |
 
 The math, sets and regex extensions are not enabled.
@@ -92,6 +92,7 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 | `first(list)` | any | `a \| default b` |
 | `sha256(x)` | string | `sha256sum` |
 | `toJson(x)` | string | `toJson` |
+| `json.encode(x)` | string | `toJson` |
 | `toPrettyJson(x)` | string | `toPrettyJson` |
 | `toYaml(x)` | string | `toYaml` |
 | `quote(x)` | string | `quote` |
@@ -110,7 +111,8 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 Each takes one argument (`okdpFullname`: zero or one; `okdpSqlName` and
 `okdpObjectName`: a string, and a whole number; the fragments: a map).
 `str`, `first`,
-`sha256`, `toJson`, `toPrettyJson`, `toYaml` and `quote` belong to the
+`sha256`, `toJson`, `json.encode`, `toPrettyJson`, `toYaml` and `quote`
+belong to the
 language (`internal/compile`); the `okdp` functions and `oidcClientSecret`
 to OKDP (the root package, `compiler`), which adds them to the compile's
 session.
@@ -133,7 +135,8 @@ session.
 |---|---|
 | `sha256(x)` | hex SHA-256 of `str(x)`; null is hashed as `""` (Helm hashes `<nil>`) |
 | `toJson(x)` | Go's `encoding/json`: compact, keys sorted, `<`, `>`, `&`, U+2028 and U+2029 escaped |
-| `toPrettyJson(x)` | the same, indented by two spaces |
+| `json.encode(x)` | the same as `toJson` |
+| `toPrettyJson(x)` | `toJson`'s, indented by two spaces |
 | `toYaml(x)` | sigs.k8s.io/yaml: keys sorted, YAML 1.1 quoting (`"yes"`, `"1.0"`), no final newline |
 | `quote(x)` | Go's `%q` of `str(x)`: `"a\"b"`; null gives `""`, nothing rather than two quotes |
 

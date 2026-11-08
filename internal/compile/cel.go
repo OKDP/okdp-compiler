@@ -297,7 +297,7 @@ func (s *Session) compile(src string, names []string) (*expr, error) {
 		// call: the language's, then the caller's. Every variable is dynamic:
 		// values are plain YAML data.
 		opts := append([]cel.EnvOption{ext.Strings(ext.StringsVersion(5)), ext.Lists(ext.ListsVersion(3)), ext.Bindings(ext.BindingsVersion(1)),
-			ext.TwoVarComprehensions(ext.TwoVarComprehensionsVersion(0)), ext.Encoders(ext.EncodersVersion(1)), cel.OptionalTypes(cel.OptionalTypesVersion(2))},
+			ext.TwoVarComprehensions(ext.TwoVarComprehensionsVersion(0)), ext.Encoders(ext.EncodersVersion(0)), cel.OptionalTypes(cel.OptionalTypesVersion(2))},
 			hostFunctions()...)
 		opts = append(opts, s.funcs...)
 		for _, n := range names {
