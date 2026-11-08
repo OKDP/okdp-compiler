@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.0](https://github.com/OKDP/okdp-compiler/compare/v0.6.0...v0.7.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* a layer above level 0 sets only the keys of global the platform lists, okdpSqlName and okdpObjectName, platform.access, hosts ending with the namespace, the hardened fragments
+* project access roles, the control plane's identity, catalogs.yaml read strictly, every connection checked at its declaration, the rules for a program that answers before it writes
+* a repository's role required, okdp-compile --catalog, the rule of a project's name, treeedit's checked reads and edits of a tree
+* the compile and the output of a tree in the library, treeedit, chartcache, oidc-dcr with initial access tokens, the platform's settings read of level 0 alone
+* a project that is not privileged confined to its namespace, a compile bounded in CEL cost, time and reads, a threat model, SECURITY.md and fuzzing in CI
+* the release of an instance is <project>-<instance>, a library tree and CompileTree against a ChartSource, the platform's secret store and privileged projects
+
+### Features
+
+* a layer above level 0 sets only the keys of global the platform lists, okdpSqlName and okdpObjectName, platform.access, hosts ending with the namespace, the hardened fragments ([0f30ed7](https://github.com/OKDP/okdp-compiler/commit/0f30ed7ff06755bf3c465437f83fef769b077fe3))
+* a NetworkPolicy per project namespace, a project's declarations checked as an instance's, TLS roots for the chart puller, no credential in clear in an ExternalSecret, no dependency of key global ([71cccfb](https://github.com/OKDP/okdp-compiler/commit/71cccfb90639be5f0cd522117087b2a175a20c20))
+* a project that is not privileged confined to its namespace, a compile bounded in CEL cost, time and reads, a threat model, SECURITY.md and fuzzing in CI ([2512924](https://github.com/OKDP/okdp-compiler/commit/251292434f97f06a14a0fed54519faf8cbdfb579))
+* a repository's role required, okdp-compile --catalog, the rule of a project's name, treeedit's checked reads and edits of a tree ([39a1b98](https://github.com/OKDP/okdp-compiler/commit/39a1b985cb25cd0ec37eb5b6751251fcb0e5c702))
+* project access roles, the control plane's identity, catalogs.yaml read strictly, every connection checked at its declaration, the rules for a program that answers before it writes ([04c9dfb](https://github.com/OKDP/okdp-compiler/commit/04c9dfbbb893aae3040fab40894b9ef7fea5469e))
+* the compile and the output of a tree in the library, treeedit, chartcache, oidc-dcr with initial access tokens, the platform's settings read of level 0 alone ([502d753](https://github.com/OKDP/okdp-compiler/commit/502d75300b914190ebd99b7f6d66788f9c5c0800))
+* the release of an instance is &lt;project&gt;-&lt;instance&gt;, a library tree and CompileTree against a ChartSource, the platform's secret store and privileged projects ([01986b9](https://github.com/OKDP/okdp-compiler/commit/01986b92d0ee618fafbe99953e5e84dcf18c78b8))
+
+
+### Bug Fixes
+
+* a project's load problem refuses that project alone, ProjectOf checks its namespace, a bounded instance timeout, no platform/ key of a store with a provider ([90f7385](https://github.com/OKDP/okdp-compiler/commit/90f73852974ac11d62e5032b4518664bc893201d))
+* the CEL cost of a $for, the chart cache bounded by chart, one walk of the rules on an instance's objects, the chart puller refusing private addresses ([920fbbb](https://github.com/OKDP/okdp-compiler/commit/920fbbb2f527c2944e242fe24aae70b965c1365d))
+
 ## [0.6.0](https://github.com/OKDP/okdp-compiler/compare/v0.5.0...v0.6.0) (2026-10-31)
 
 
