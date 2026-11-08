@@ -213,3 +213,18 @@ func TestHelmSchema(t *testing.T) {
 		})
 	}
 }
+
+// checkSchema: the values against the JSON schema b, read from name (none
+// when b is nil: the chart has no schema), one line per violation with its
+// path, as Helm prints them (Validate): upstreamChart.validate, the schema
+// compiled for this check alone.
+func checkSchema(name string, b []byte, values M) (string, error) {
+	if b == nil {
+		return "", nil
+	}
+	s, err := ParseSchema(name, b)
+	if err != nil {
+		return "", err
+	}
+	return Validate(name, s.root, values)
+}

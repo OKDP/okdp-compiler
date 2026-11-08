@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/chart"
 	"sigs.k8s.io/yaml"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -252,7 +252,7 @@ func (f *RepositoryPuller) check(u *url.URL) error {
 // Pull hands the archive of ref to read: from its OCI registry
 // (oci://<registry>/<path>, the chart <path>/<chart>:<version>), or from the
 // index.yaml of its https chart repository.
-func (f *RepositoryPuller) Pull(ctx context.Context, ref compiler.ChartRef, read func(io.Reader) error) error {
+func (f *RepositoryPuller) Pull(ctx context.Context, ref chart.Ref, read func(io.Reader) error) error {
 	if repo, ok := strings.CutPrefix(ref.Repository, "oci://"); ok {
 		repository := strings.TrimSuffix(repo, "/") + "/" + ref.Chart
 		return f.pullOCI(ctx, repository, ref.Version, PlainHTTP(repository, f.InsecureHosts), read)
@@ -337,7 +337,7 @@ const maxIndexSize = 64 << 20
 // pullIndex finds the chart version in the index.yaml of an https chart
 // repository, and hands its archive to read: the repository, the archive
 // and every redirect https, or http on one of InsecureHosts (check).
-func (f *RepositoryPuller) pullIndex(ctx context.Context, ref compiler.ChartRef, read func(io.Reader) error) error {
+func (f *RepositoryPuller) pullIndex(ctx context.Context, ref chart.Ref, read func(io.Reader) error) error {
 	base, err := url.Parse(strings.TrimSuffix(ref.Repository, "/") + "/")
 	if err != nil || (base.Scheme != "https" && base.Scheme != "http") {
 		return fmt.Errorf("repository %q: an oci://, https:// or http:// url", ref.Repository)

@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/dirfs"
 	"golang.org/x/sync/singleflight"
 	"sigs.k8s.io/yaml"
@@ -52,7 +52,7 @@ var Files = []string{"Chart.yaml", "values.yaml", "values.schema.json"}
 
 // Puller pulls the archive (.tgz) of a chart version and hands it to read.
 type Puller interface {
-	Pull(ctx context.Context, ref compiler.ChartRef, read func(io.Reader) error) error
+	Pull(ctx context.Context, ref chart.Ref, read func(io.Reader) error) error
 }
 
 // Cache is a chart cache directory. Safe for concurrent use.
@@ -70,27 +70,11 @@ func NewCache(dir string, puller Puller) *Cache {
 }
 
 // ChartDir is the directory of a chart in the cache, slash-separated:
-// <repository without scheme>/<chart>-<version>/<chart>. A repository,
-// a chart or a version holding a ? or a # (a URL's query or fragment)
-// is refused: the directory of none.
-func ChartDir(ref compiler.ChartRef) (string, error) {
-	repo := ref.Repository
-	for _, scheme := range []string{"oci://", "https://", "http://"} {
-		repo = strings.TrimPrefix(repo, scheme)
-	}
-	repo = strings.TrimSuffix(repo, "/")
-	for segment := range strings.SplitSeq(repo, "/") {
-		if segment == "" || segment == "." || segment == ".." || strings.ContainsAny(segment, `\?#`) {
-			return "", fmt.Errorf("repository %q is no directory of the chart cache", ref.Repository)
-		}
-	}
-	for _, s := range []string{ref.Chart, ref.Version} {
-		if s == "" || strings.ContainsAny(s, `/\?#`) || s == "." || s == ".." {
-			return "", fmt.Errorf("chart %q %q is no directory of the chart cache", ref.Chart, ref.Version)
-		}
-	}
-	return path.Join(repo, ref.Chart+"-"+ref.Version, ref.Chart), nil
-}
+// <repository without scheme>/<chart>-<version>/<chart>, the layout the
+// compiler reads (chart.Ref.Dir). A repository, a chart or a version
+// holding a ? or a # (a URL's query or fragment) is refused: the directory
+// of none.
+func ChartDir(ref chart.Ref) (string, error) { return ref.Dir() }
 
 // FS is the cache as okdp-compiler reads it (Inputs.Charts), bounded and
 // with no symbolic link followed, as okdp-compile reads its --charts: a
@@ -118,7 +102,7 @@ func (e errFS) Open(name string) (fs.File, error) {
 // Ensure pulls the charts the cache lacks, the compiler.ChartSource of a
 // compile (compiler.CompileTree): an error names each chart that cannot be
 // pulled, and the compile then goes on without the checks.
-func (c *Cache) Ensure(ctx context.Context, refs []compiler.ChartRef) (fs.FS, error) {
+func (c *Cache) Ensure(ctx context.Context, refs []chart.Ref) (fs.FS, error) {
 	var errs []error
 	for _, ref := range refs {
 		if err := c.Get(ctx, ref); err != nil {
@@ -131,7 +115,7 @@ func (c *Cache) Ensure(ctx context.Context, refs []compiler.ChartRef) (fs.FS, er
 // File returns a file of a chart, one of Files (values.yaml...), pulled
 // first when the cache lacks it, read through FS. A chart without the file
 // answers fs.ErrNotExist; a name not in Files is refused.
-func (c *Cache) File(ctx context.Context, ref compiler.ChartRef, name string) ([]byte, error) {
+func (c *Cache) File(ctx context.Context, ref chart.Ref, name string) ([]byte, error) {
 	if !slices.Contains(Files, name) {
 		return nil, fmt.Errorf("%q is no file of a chart the cache keeps: %s", name, strings.Join(Files, ", "))
 	}
@@ -149,7 +133,7 @@ func (c *Cache) File(ctx context.Context, ref compiler.ChartRef, name string) ([
 
 // Get pulls a chart into the cache unless it is there. Concurrent calls for
 // one chart share the pull; a failed pull is not tried again for a minute.
-func (c *Cache) Get(ctx context.Context, ref compiler.ChartRef) error {
+func (c *Cache) Get(ctx context.Context, ref chart.Ref) error {
 	dir, err := ChartDir(ref)
 	if err != nil {
 		return err
@@ -183,7 +167,7 @@ func (c *Cache) Get(ctx context.Context, ref compiler.ChartRef) error {
 // pull unpacks a chart into a temporary directory, then moves it in place;
 // a pull that fails leaves no directory of the chart (its parent, created
 // for it, removed when it is left empty).
-func (c *Cache) pull(ctx context.Context, ref compiler.ChartRef, dir string) (err error) {
+func (c *Cache) pull(ctx context.Context, ref chart.Ref, dir string) (err error) {
 	if c.puller == nil {
 		return errors.New("no chart puller")
 	}
@@ -227,7 +211,7 @@ func (c *Cache) pull(ctx context.Context, ref compiler.ChartRef, dir string) (er
 // checkChart: nil when dir holds the Chart.yaml of ref: its name the
 // chart, its version the version, as the ref names them; an archive of
 // another chart, or of another version, refused.
-func checkChart(dir string, ref compiler.ChartRef) error {
+func checkChart(dir string, ref chart.Ref) error {
 	b, err := os.ReadFile(filepath.Join(dir, "Chart.yaml"))
 	if err != nil {
 		return fmt.Errorf("the archive holds no %s/Chart.yaml", ref.Chart)
@@ -246,7 +230,7 @@ func checkChart(dir string, ref compiler.ChartRef) error {
 }
 
 // unpack writes the kept files of the chart directory of a chart archive.
-func unpack(r io.Reader, chart, dir string) error {
+func unpack(r io.Reader, name, dir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("the chart is not a gzip archive: %w", err)
@@ -255,7 +239,7 @@ func unpack(r io.Reader, chart, dir string) error {
 	tr := tar.NewReader(io.LimitReader(gz, MaxUncompressedSize))
 	keep := map[string]bool{}
 	for _, f := range Files {
-		keep[chart+"/"+f] = true
+		keep[name+"/"+f] = true
 	}
 	for {
 		hdr, err := tr.Next()
@@ -265,8 +249,8 @@ func unpack(r io.Reader, chart, dir string) error {
 		if err != nil {
 			return fmt.Errorf("reading the chart archive: %w", err)
 		}
-		name := path.Clean(strings.TrimPrefix(hdr.Name, "./"))
-		if hdr.Typeflag != tar.TypeReg || !keep[name] {
+		entry := path.Clean(strings.TrimPrefix(hdr.Name, "./"))
+		if hdr.Typeflag != tar.TypeReg || !keep[entry] {
 			continue
 		}
 		if hdr.Size > MaxFileSize {
@@ -279,7 +263,7 @@ func unpack(r io.Reader, chart, dir string) error {
 		if int64(len(data)) > MaxFileSize {
 			return fmt.Errorf("%s is more than %d bytes", hdr.Name, MaxFileSize)
 		}
-		if err := os.WriteFile(filepath.Join(dir, path.Base(name)), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, path.Base(entry)), data, 0o644); err != nil {
 			return err
 		}
 	}

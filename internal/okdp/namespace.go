@@ -80,7 +80,19 @@ type Bound struct {
 // Outcomes in the order of instances, which changes none
 // of them. Whether they deploy together is the graph's (graph.New).
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
-	t := &tree{ctx: ctx, all: instances, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}}
+	return CompileAllWith(ctx, instances, NewMemo())
+}
+
+// CompileAllWith: CompileAll, reading once what the memo holds: for a
+// caller that compiles the same instances again (with a chart cache), the
+// parameters of each, the contracts and the chart cache's charts, which the
+// first run read. The memo of instances other than the same ones, or whose
+// files or layers changed, gives their parameters of the first.
+func CompileAllWith(ctx context.Context, instances []Instance, memo *Memo) []Outcome {
+	if memo == nil {
+		memo = NewMemo()
+	}
+	t := &compilation{ctx: ctx, all: instances, memo: memo, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}}
 	count, names := map[[2]string]int{}, map[[2]string]int{}
 	for _, inst := range instances {
 		count[[2]string{inst.Inputs.Namespace, inst.Inputs.Release}]++
@@ -88,7 +100,7 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	}
 	var idx []int
 	for i, inst := range instances {
-		switch in := inst.Inputs; {
+		switch in := t.inputs(i); {
 		case count[[2]string{in.Namespace, in.Release}] > 1:
 			t.out[i].Err = fmt.Errorf("release %q is given twice in namespace %q", in.Release, in.Namespace)
 		case names[[2]string{in.Namespace, inst.name()}] > 1:
@@ -123,11 +135,12 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return t.out
 }
 
-// tree: the instances CompileAll compiles, their outcomes, what those
+// compilation: the instances CompileAll compiles, their outcomes, what those
 // compiled publish, by namespace and release, and their claims, bound.
-type tree struct {
+type compilation struct {
 	ctx       context.Context
 	all       []Instance
+	memo      *Memo // what the compiles read once
 	out       []Outcome
 	published map[string]map[string]Info
 	claims    map[int][]Claim            // a provider's
@@ -136,11 +149,20 @@ type tree struct {
 	names     map[[2]string][]int        // the instances bind binds, by namespace and each name a provider may name them by: their release and their name
 }
 
+// inputs: the inputs of instance i, with its Memo.
+func (t *compilation) inputs(i int) Inputs {
+	in := t.all[i].Inputs
+	if t.all[i].Definition != nil {
+		in.memo = t.memo.forInstance(i, t.all[i].Definition, in)
+	}
+	return in
+}
+
 // compile: the instance i, with what is published (its namespace's), its
 // claims and its bindings, their outputs those published so far; into
 // out, what it publishes published, removed when it fails.
-func (t *tree) compile(i int) error {
-	in := t.all[i].Inputs
+func (t *compilation) compile(i int) error {
+	in := t.inputs(i)
 	ns := in.Namespace
 	if t.published[ns] == nil {
 		t.published[ns] = map[string]Info{}
@@ -170,7 +192,7 @@ func (t *tree) compile(i int) error {
 
 // output: the output of contract named name that release of namespace
 // publishes; nil when none, or not compiled.
-func (t *tree) output(namespace, release, contract, name string) *Output {
+func (t *compilation) output(namespace, release, contract, name string) *Output {
 	for _, o := range t.published[namespace][release].Provides {
 		if o.Contract == contract && o.Name == name {
 			return &o
@@ -191,7 +213,7 @@ func (t *tree) output(namespace, release, contract, name string) *Output {
 //     final, whatever it gives.
 //  3. Those still waiting are compiled again, everything published, for
 //     the exact message.
-func (t *tree) compileAll(idx []int) {
+func (t *compilation) compileAll(idx []int) {
 	waiting := map[int][]outputKey{}
 	for _, i := range idx {
 		if m, ok := errors.AsType[*missingOutputs](t.compile(i)); ok {
@@ -217,7 +239,7 @@ func (t *tree) compileAll(idx []int) {
 
 // publishes reports whether every output of keys is published, a key of
 // no namespace in namespace, a key of a release by that release.
-func (t *tree) publishes(namespace string, keys []outputKey) bool {
+func (t *compilation) publishes(namespace string, keys []outputKey) bool {
 	for _, k := range keys {
 		found := false
 		for release, info := range t.published[cmp.Or(k.namespace, namespace)] {
@@ -234,7 +256,7 @@ func (t *tree) publishes(namespace string, keys []outputKey) bool {
 // say which instances do not compile, what they publish unknown, in name
 // order: those of the namespace, and the providers of its claims of
 // another namespace.
-func (t *tree) notes(idx []int) {
+func (t *compilation) notes(idx []int) {
 	refused := map[string][]string{}
 	for i, o := range t.out {
 		if in := t.all[i].Inputs; o.Result == nil {
@@ -269,170 +291,233 @@ func (t *tree) notes(idx []int) {
 // differently in two contexts refuses every instance of the namespace,
 // one that binds to none every instance whose context declares it. The
 // instances not refused, in order.
-func (t *tree) bind(idx []int) []int {
-	provisioning := map[string][]int{} // the instances that provision a contract, by contract
+func (t *compilation) bind(idx []int) []int {
+	b := t.newBinder(idx)
+	for _, i := range idx {
+		b.instance(i)
+	}
+	namedBound := b.named(idx)
+	b.attachNamed(namedBound)
+	b.give(idx, namedBound)
+	return b.outcomes(idx)
+}
+
+// boundClaim: a claim of a reference, bound to its provider (binder).
+type boundClaim struct {
+	claimer int
+	choice
+	ref     claimRef
+	id      string
+	request M // ref's request, the class's merged under it, checked, the claim schema's defaults applied
+}
+
+// claimError: an error of a claimer, at the field it is about.
+type claimError struct {
+	field string
+	err   error
+}
+
+// declaredClaim: a named claim as the context of an instance declares it.
+type declaredClaim struct {
+	instance int
+	spec     ClaimSpec
+}
+
+// binder: the state of compilation.bind, the claims of the instances idx found,
+// bound or refused.
+type binder struct {
+	t            *compilation
+	provisioning map[string][]int // the instances that provision a contract, by contract
+	claims       []boundClaim
+	toNamed      []boundClaim // the references to a named claim, its provider not known yet
+	// The checks run in any order: the field orders the report, the named
+	// claims of the context first, in name order, then the references in
+	// parameter path order (claimsOf), as the connection errors are.
+	errs     map[int][]claimError
+	rank     map[int]map[string]int                // an instance's references' fields, to their position in parameter path order
+	decls    map[string]map[string][]declaredClaim // by namespace and name
+	classes  map[int]M                             // an instance's, by contract
+	platform map[int]M                             // the platform's among them, by contract
+}
+
+// newBinder: the binder of the instances idx: what they provision, and the
+// names each is known by (compilation.names).
+func (t *compilation) newBinder(idx []int) *binder {
+	b := &binder{t: t, provisioning: map[string][]int{}, errs: map[int][]claimError{}, rank: map[int]map[string]int{}, decls: map[string]map[string][]declaredClaim{}, classes: map[int]M{}, platform: map[int]M{}}
 	t.names = map[[2]string][]int{}
 	for _, i := range idx {
 		for _, p := range t.all[i].Definition.Package.Provisions {
-			provisioning[p.Contract] = append(provisioning[p.Contract], i)
+			b.provisioning[p.Contract] = append(b.provisioning[p.Contract], i)
 		}
 		in := t.all[i].Inputs
 		for _, n := range slices.Compact([]string{in.Release, t.all[i].name()}) {
 			t.names[[2]string{in.Namespace, n}] = append(t.names[[2]string{in.Namespace, n}], i)
 		}
 	}
-	type bound struct {
-		claimer int
-		choice
-		ref     claimRef
-		id      string
-		request M // ref's request, the class's merged under it, checked, the claim schema's defaults applied
+	return b
+}
+
+// instance: the claims of instance i (claimsOf): its named claims to the
+// declarations of its namespace, its references to a named claim kept for
+// when the named claims are bound (toNamed), and each claim template
+// bound to its provider (provider), with its consent (consent) and its
+// request checked (compilation.request), or refused.
+func (b *binder) instance(i int) {
+	t := b.t
+	in := t.inputs(i)
+	c := claimsOf(t.all[i].Definition, in)
+	b.classes[i], b.platform[i] = c.classes, c.platform
+	b.rank[i] = map[string]int{}
+	for k, ref := range c.refs {
+		b.rank[i][ref.field] = k
 	}
-	type refused struct { // an error of a claimer, at the field it is about
-		field string
-		err   error
-	}
-	type declared struct {
-		instance int
-		spec     ClaimSpec
-	}
-	var claims []bound
-	var toNamed []bound // the references to a named claim, its provider not known yet
-	// The checks run in any order: the field orders the report, the named
-	// claims of the context first, in name order, then the references in
-	// parameter path order (claimsOf), as the connection errors are.
-	errs := map[int][]refused{}
-	rank := map[int]map[string]int{}            // an instance's references' fields, to their position in parameter path order
-	decls := map[string]map[string][]declared{} // by namespace and name
-	classes := map[int]M{}                      // an instance's, by contract
-	platform := map[int]M{}                     // the platform's among them, by contract
-	for _, i := range idx {
-		in := t.all[i].Inputs
-		c := claimsOf(t.all[i].Definition, in)
-		classes[i], platform[i] = c.classes, c.platform
-		rank[i] = map[string]int{}
-		for k, ref := range c.refs {
-			rank[i][ref.field] = k
+	fields := map[string]string{} // the claim templates' IDs of the instance, to their field
+	for name, spec := range c.named {
+		if b.decls[in.Namespace] == nil {
+			b.decls[in.Namespace] = map[string][]declaredClaim{}
 		}
-		fields := map[string]string{} // the claim templates' IDs of the instance, to their field
-		for name, spec := range c.named {
-			if decls[in.Namespace] == nil {
-				decls[in.Namespace] = map[string][]declared{}
-			}
-			decls[in.Namespace][name] = append(decls[in.Namespace][name], declared{i, spec})
-		}
-		for _, ref := range c.refs {
-			if ref.name != "" {
-				toNamed = append(toNamed, bound{claimer: i, ref: ref, id: claimID(in.Namespace, "", "", ref.name)})
-				continue
-			}
-			id := claimID(in.Namespace, t.all[i].name(), ref.field, "")
-			if first, dup := fields[id]; dup {
-				errs[i] = append(errs[i], refused{ref.field, fmt.Errorf("%s: claim: it gives the same ID (%s) as %s: rename one of the parameters", ref.field, id, first)})
-				continue
-			}
-			fields[id] = ref.field
-			ch, err := t.provider(c.classes, in.Namespace, i, ref.field, ref.contract, ref.spec, provisioning[ref.contract])
-			if err == nil {
-				err = t.consent(in.Namespace, ref.field, ref.contract, id, ref.spec, ch, c.platform)
-			}
-			request, rerr := t.request(in, ref.field, ref.contract, ref.spec.Request, ch)
-			if err = errors.Join(err, rerr); err != nil {
-				errs[i] = append(errs[i], refused{ref.field, err})
-				continue
-			}
-			claims = append(claims, bound{i, ch, ref, id, request})
-		}
+		b.decls[in.Namespace][name] = append(b.decls[in.Namespace][name], declaredClaim{i, spec})
 	}
-	// A named claim: one declaration, bound with the context of the first
-	// instance that declares it, in release order.
+	for _, ref := range c.refs {
+		if ref.name != "" {
+			b.toNamed = append(b.toNamed, boundClaim{claimer: i, ref: ref, id: claimID(in.Namespace, "", "", ref.name)})
+			continue
+		}
+		id := claimID(in.Namespace, t.all[i].name(), ref.field, "")
+		if first, dup := fields[id]; dup {
+			b.errs[i] = append(b.errs[i], claimError{ref.field, fmt.Errorf("%s: claim: it gives the same ID (%s) as %s: rename one of the parameters", ref.field, id, first)})
+			continue
+		}
+		fields[id] = ref.field
+		ch, err := t.provider(c.classes, in.Namespace, i, ref.field, ref.contract, ref.spec, b.provisioning[ref.contract])
+		if err == nil {
+			err = t.consent(in.Namespace, ref.field, ref.contract, id, ref.spec, ch, c.platform)
+		}
+		request, rerr := t.request(in, ref.field, ref.contract, ref.spec.Request, ch)
+		if err = errors.Join(err, rerr); err != nil {
+			b.errs[i] = append(b.errs[i], claimError{ref.field, err})
+			continue
+		}
+		b.claims = append(b.claims, boundClaim{i, ch, ref, id, request})
+	}
+}
+
+// named: the named claims of the namespaces, each bound once, by
+// namespace and name: one declaration, bound with the context of the first
+// instance that declares it, in release order. One declared differently in
+// two contexts refuses every instance of idx of its namespace, one that
+// binds to none every instance whose context declares it.
+func (b *binder) named(idx []int) map[[2]string]boundClaim {
+	t := b.t
 	release := func(i int) string { return t.all[i].Inputs.Release }
-	namedBound := map[[2]string]bound{}
-	for _, ns := range slices.Sorted(maps.Keys(decls)) {
-		for _, name := range slices.Sorted(maps.Keys(decls[ns])) {
-			ds := slices.SortedFunc(slices.Values(decls[ns][name]), func(a, b declared) int { return strings.Compare(release(a.instance), release(b.instance)) })
+	namedBound := map[[2]string]boundClaim{}
+	for _, ns := range slices.Sorted(maps.Keys(b.decls)) {
+		for _, name := range slices.Sorted(maps.Keys(b.decls[ns])) {
+			ds := slices.SortedFunc(slices.Values(b.decls[ns][name]), func(a, c declaredClaim) int { return strings.Compare(release(a.instance), release(c.instance)) })
 			where := value.Key("claims", name)
-			if k := slices.IndexFunc(ds, func(d declared) bool { return !reflect.DeepEqual(d.spec, ds[0].spec) }); k > 0 {
+			if k := slices.IndexFunc(ds, func(d declaredClaim) bool { return !reflect.DeepEqual(d.spec, ds[0].spec) }); k > 0 {
 				err := fmt.Errorf("%s: declared differently in the context of %s and %s", where, release(ds[0].instance), release(ds[k].instance))
 				for _, i := range idx {
 					if t.all[i].Inputs.Namespace == ns {
-						errs[i] = append(errs[i], refused{where, err})
+						b.errs[i] = append(b.errs[i], claimError{where, err})
 					}
 				}
 				continue
 			}
-			spec, in := ds[0].spec, t.all[ds[0].instance].Inputs
-			ch, err := t.provider(classes[ds[0].instance], ns, -1, where, spec.Contract, spec, provisioning[spec.Contract])
+			spec, in := ds[0].spec, t.inputs(ds[0].instance)
+			ch, err := t.provider(b.classes[ds[0].instance], ns, -1, where, spec.Contract, spec, b.provisioning[spec.Contract])
 			if err == nil {
-				err = t.consent(ns, where, spec.Contract, claimID(ns, "", "", name), spec, ch, platform[ds[0].instance])
+				err = t.consent(ns, where, spec.Contract, claimID(ns, "", "", name), spec, ch, b.platform[ds[0].instance])
 			}
 			request, rerr := t.request(in, where, spec.Contract, spec.Request, ch)
 			if err = errors.Join(err, rerr); err != nil {
 				for _, d := range ds {
-					errs[d.instance] = append(errs[d.instance], refused{where, err})
+					b.errs[d.instance] = append(b.errs[d.instance], claimError{where, err})
 				}
 				continue
 			}
-			namedBound[[2]string{ns, name}] = bound{choice: ch, ref: claimRef{where, spec.Contract, name, spec}, id: claimID(ns, "", "", name), request: request}
+			namedBound[[2]string{ns, name}] = boundClaim{choice: ch, ref: claimRef{where, spec.Contract, name, spec}, id: claimID(ns, "", "", name), request: request}
 		}
 	}
-	for _, b := range toNamed {
-		nb, ok := namedBound[[2]string{t.all[b.claimer].Inputs.Namespace, b.ref.name}]
+	return namedBound
+}
+
+// attachNamed: the references to a named claim bound to its provider, the
+// one of namedBound; one whose claim is refused is refused with it, one
+// whose provider is its own instance fails.
+func (b *binder) attachNamed(namedBound map[[2]string]boundClaim) {
+	for _, c := range b.toNamed {
+		nb, ok := namedBound[[2]string{b.t.all[c.claimer].Inputs.Namespace, c.ref.name}]
 		switch {
 		case !ok: // refused above
-		case nb.provider == b.claimer:
-			errs[b.claimer] = append(errs[b.claimer], refused{b.ref.field, fmt.Errorf("%s: claim (%s): the instance provisions it itself: a claim is of another instance", b.ref.field, b.ref.contract)})
+		case nb.provider == c.claimer:
+			b.errs[c.claimer] = append(b.errs[c.claimer], claimError{c.ref.field, fmt.Errorf("%s: claim (%s): the instance provisions it itself: a claim is of another instance", c.ref.field, c.ref.contract)})
 		default:
-			b.choice, b.request = nb.choice, nb.request
-			claims = append(claims, b)
+			c.choice, c.request = nb.choice, nb.request
+			b.claims = append(b.claims, c)
 		}
 	}
+}
+
+// give: the claims to their providers, deduplicated, by ID (compilation.claims):
+// the named claims of namedBound, whether a reference names them or not,
+// and each claim of an instance of idx not refused, with its binding
+// (compilation.bindings) and the Bound of its outcome. A provider's claims in ID
+// order, an outcome's in field order.
+func (b *binder) give(idx []int, namedBound map[[2]string]boundClaim) {
+	t := b.t
 	t.claims, t.bindings = map[int][]Claim{}, map[int]map[string]Binding{}
 	give := func(provider int, c Claim) {
 		if !slices.ContainsFunc(t.claims[provider], func(o Claim) bool { return o.ID == c.ID }) {
 			t.claims[provider] = append(t.claims[provider], c)
 		}
 	}
-	for k, b := range namedBound {
-		give(b.provider, Claim{ID: b.id, Contract: b.ref.contract, Namespace: k[0], Name: k[1], Request: b.request})
+	for k, c := range namedBound {
+		give(c.provider, Claim{ID: c.id, Contract: c.ref.contract, Namespace: k[0], Name: k[1], Request: c.request})
 	}
-	for _, b := range claims {
-		if errs[b.claimer] != nil {
+	for _, c := range b.claims {
+		if b.errs[c.claimer] != nil {
 			continue
 		}
-		in, p := t.all[b.claimer].Inputs, t.all[b.provider].Inputs
-		if t.bindings[b.claimer] == nil {
-			t.bindings[b.claimer] = map[string]Binding{}
+		in, p := t.all[c.claimer].Inputs, t.all[c.provider].Inputs
+		if t.bindings[c.claimer] == nil {
+			t.bindings[c.claimer] = map[string]Binding{}
 		}
-		t.bindings[b.claimer][b.ref.field] = Binding{Namespace: p.Namespace, Release: p.Release, Contract: b.ref.contract, ID: b.id}
-		t.out[b.claimer].Claims = append(t.out[b.claimer].Claims, Bound{Field: b.ref.field, Contract: b.ref.contract, ID: b.id, Namespace: p.Namespace, Release: p.Release, Class: b.class, Named: b.named})
-		give(b.provider, Claim{ID: b.id, Contract: b.ref.contract, Namespace: in.Namespace, Name: b.ref.name, Request: b.request})
+		t.bindings[c.claimer][c.ref.field] = Binding{Namespace: p.Namespace, Release: p.Release, Contract: c.ref.contract, ID: c.id}
+		t.out[c.claimer].Claims = append(t.out[c.claimer].Claims, Bound{Field: c.ref.field, Contract: c.ref.contract, ID: c.id, Namespace: p.Namespace, Release: p.Release, Class: c.class, Named: c.named})
+		give(c.provider, Claim{ID: c.id, Contract: c.ref.contract, Namespace: in.Namespace, Name: c.ref.name, Request: c.request})
 	}
-	for _, c := range t.claims {
-		slices.SortFunc(c, func(a, b Claim) int { return strings.Compare(a.ID, b.ID) })
+	for _, claims := range t.claims {
+		slices.SortFunc(claims, func(a, o Claim) int { return strings.Compare(a.ID, o.ID) })
 	}
 	for _, i := range idx {
-		slices.SortStableFunc(t.out[i].Claims, func(a, b Bound) int { return strings.Compare(a.Field, b.Field) })
+		slices.SortStableFunc(t.out[i].Claims, func(a, o Bound) int { return strings.Compare(a.Field, o.Field) })
 	}
+}
+
+// outcomes: the instances of idx not refused, in order; the others get
+// the outcome of their errors, joined in the order of the parameter paths
+// (rank), each at its field.
+func (b *binder) outcomes(idx []int) []int {
 	var kept []int
 	for _, i := range idx {
-		if errs[i] != nil {
-			at := func(r refused) int {
-				k, ok := rank[i][r.field]
-				if !ok {
-					return -1
-				}
-				return k
-			}
-			slices.SortStableFunc(errs[i], func(a, b refused) int { return cmp.Or(cmp.Compare(at(a), at(b)), strings.Compare(a.field, b.field)) })
-			joined := make([]error, len(errs[i]))
-			for k, e := range errs[i] {
-				joined[k] = atField(e.field, e.err)
-			}
-			t.out[i] = Outcome{Err: errors.Join(joined...)}
-		} else {
+		if b.errs[i] == nil {
 			kept = append(kept, i)
+			continue
 		}
+		at := func(r claimError) int {
+			k, ok := b.rank[i][r.field]
+			if !ok {
+				return -1
+			}
+			return k
+		}
+		slices.SortStableFunc(b.errs[i], func(a, c claimError) int { return cmp.Or(cmp.Compare(at(a), at(c)), strings.Compare(a.field, c.field)) })
+		joined := make([]error, len(b.errs[i]))
+		for k, e := range b.errs[i] {
+			joined[k] = atField(e.field, e.err)
+		}
+		b.t.out[i] = Outcome{Err: errors.Join(joined...)}
 	}
 	return kept
 }
@@ -442,7 +527,7 @@ func (t *tree) bind(idx []int) []int {
 // class's keys, then checked against the contract's claim schema, read
 // from the contracts of in, its defaults applied (contract.request). Every
 // key the class fixes that req sets fails, in key order.
-func (t *tree) request(in Inputs, field, contract string, req M, ch choice) (M, error) {
+func (t *compilation) request(in Inputs, field, contract string, req M, ch choice) (M, error) {
 	var errs []error
 	for _, k := range slices.Sorted(maps.Keys(req)) {
 		if _, fixed := ch.fixed[k]; fixed {
@@ -452,14 +537,14 @@ func (t *tree) request(in Inputs, field, contract string, req M, ch choice) (M, 
 	if errs != nil {
 		return nil, errors.Join(errs...)
 	}
-	c, err := readContract(in.Contracts, contract)
+	c, err := contractCacheOf(in).get(contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
 	}
 	return c.request(value.Merge(value.AsMap(value.Copy(ch.fixed)), req), field)
 }
 
-// choice: the provider a claim is bound to (tree.provider): its index, the
+// choice: the provider a claim is bound to (compilation.provider): its index, the
 // class it is the provider of ("" when the claim names it), whether the
 // claim names its class or its provider (named), and what the class fixes
 // of its request.
@@ -480,7 +565,7 @@ func provisioningKey(contract string) string { return value.Key("global.okdp.pro
 // else the class it names, or the default one of the context, which must
 // be a class whose provider is of the form providerName reads, what the
 // class fixes of the request in the choice (its provider not looked for:
-// tree.provider); and the class as messages name it (which, "" for a
+// compilation.provider); and the class as messages name it (which, "" for a
 // provider named).
 func claimClass(classes M, namespace, field, contract string, spec ClaimSpec) (choice, string, string, error) {
 	where := fmt.Sprintf("%s: claim (%s)", field, contract)
@@ -531,7 +616,7 @@ func claimClass(classes M, namespace, field, contract string, spec ClaimSpec) (c
 // that is none, no default, a provider that is not of the form, that
 // names no instance, or more than one, or one that is no candidate, or the
 // instance itself, fail (claimClass, then the provider).
-func (t *tree) provider(classes M, namespace string, self int, field, contract string, spec ClaimSpec, candidates []int) (choice, error) {
+func (t *compilation) provider(classes M, namespace string, self int, field, contract string, spec ClaimSpec, candidates []int) (choice, error) {
 	where := fmt.Sprintf("%s: claim (%s)", field, contract)
 	ch, name, which, err := claimClass(classes, namespace, field, contract, spec)
 	if err != nil {
@@ -561,14 +646,14 @@ func (t *tree) provider(classes M, namespace string, self int, field, contract s
 
 // consent: nil when the claim id of contract, of the instances of
 // namespace, at field, may be bound to the provider of ch
-// (tree.provider): an instance of namespace; or, of another namespace,
+// (compilation.provider): an instance of namespace; or, of another namespace,
 // the provider of a class of the platform's (platform, the classes of
 // level 0 by contract, which no level above changes: the platform routes
 // every namespace to it), or one whose claimers (Instance.Claimers) list
 // namespace, or "*". Else the error, naming the claim, the provider, the
 // class when the claim is bound through one, the claimers' namespace and
 // the provider's claimers, its instance's or its package's.
-func (t *tree) consent(namespace, field, contract, id string, spec ClaimSpec, ch choice, platform M) error {
+func (t *compilation) consent(namespace, field, contract, id string, spec ClaimSpec, ch choice, platform M) error {
 	p := t.all[ch.provider]
 	if p.Inputs.Namespace == namespace {
 		return nil
@@ -598,7 +683,7 @@ func (t *tree) consent(namespace, field, contract, id string, spec ClaimSpec, ch
 // matched: the instances matches, that the provider name n names, in
 // release order, each its release and how n names it: "<release> (its
 // release)", "<release> (its name)", the last after "and".
-func (t *tree) matched(n string, matches []int) string {
+func (t *compilation) matched(n string, matches []int) string {
 	var each []string
 	for _, j := range matches {
 		by := "its name"
@@ -722,7 +807,7 @@ func secretTargets(ns string, o M) []secretTarget {
 // secretRef.name, which names its claimers' copies (<release>-<name>),
 // could otherwise forge the Secret of a connection of another instance
 // (<release>.<connection>-credentials).
-func (t *tree) refuseSecretTargets(idx []int) {
+func (t *compilation) refuseSecretTargets(idx []int) {
 	out := t.out
 	type writer struct {
 		release, object string
@@ -785,9 +870,9 @@ func (t *tree) refuseSecretTargets(idx []int) {
 // namespace was compiled with an output of a provider that is refused: each
 // successful instance with a dependency on a refused instance is compiled
 // again, once, until none more fails. A claim's provider refused gives no
-// output (tree.compile): the claimer then fails as it does when its
+// output (compilation.compile): the claimer then fails as it does when its
 // provider does not compile.
-func (t *tree) refuseClaimers(idx []int) {
+func (t *compilation) refuseClaimers(idx []int) {
 	again := map[int]bool{}
 	for more := true; more; {
 		more = false

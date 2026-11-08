@@ -323,11 +323,11 @@ func (bs bindings) bind(s *Session, scope M) error {
 	return nil
 }
 
-// tree: a document built: its vars bindings, its errors section, and its
+// document: a document built: its vars bindings, its errors section, and its
 // sections by name, those it has, with the keys each writes (literals);
 // and the source of each of them, by key (vars, errors, a section), whose
 // errors start with its name (at).
-type tree struct {
+type document struct {
 	vars     bindings
 	errors   node
 	sections map[string]node
@@ -338,7 +338,7 @@ type tree struct {
 // at: err, an error of k (vars, errors, a section): under k, but for vars,
 // whose errors name their binding, and for a source that is the section k;
 // then under the name of its source.
-func (t *tree) at(k string, err error) error {
+func (t *document) at(k string, err error) error {
 	src := t.srcs[k]
 	if k != "vars" && src.Section == "" {
 		err = atKey(k, err)
@@ -380,9 +380,9 @@ type builder struct{ s *Session }
 // by one source at most. vars, a map of bindings, is built first, its
 // names then in scope of errors and of the sections, in order, each with
 // the keys it writes (literals).
-func (b builder) document(srcs []Source, names, sections []string) (*tree, error) {
+func (b builder) document(srcs []Source, names, sections []string) (*document, error) {
 	allowed := append([]string{"vars", "errors"}, sections...)
-	t := &tree{sections: map[string]node{}, written: map[string][]string{}, srcs: map[string]Source{}}
+	t := &document{sections: map[string]node{}, written: map[string][]string{}, srcs: map[string]Source{}}
 	read := map[string]any{} // vars, errors, a section: as read
 	from := map[string]int{} // its source, by position
 	for i, src := range srcs {

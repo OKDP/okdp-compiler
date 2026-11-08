@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/rogpeppe/go-internal/testscript"
+
+	"github.com/okdp/okdp-compiler/internal/outdir"
 )
 
 // TestMain: the test binary is also okdp-compile, the command of the
@@ -40,29 +42,15 @@ func tree(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// write: the files of files under dir, path -> content.
-func write(t *testing.T, dir string, files map[string]string) {
-	t.Helper()
-	for name, content := range files {
-		p := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
 // output: the files the command wrote under dir, path -> content, its
-// markerFile checked and left out: the files of the target.
+// outdir.MarkerFile checked and left out: the files of the target.
 func output(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	files := tree(t, dir)
-	if got := files[filepath.FromSlash(markerFile)]; got != marker {
-		t.Errorf("%s: %q", markerFile, got)
+	if got := files[filepath.FromSlash(outdir.MarkerFile)]; got != outdir.Marker {
+		t.Errorf("%s: %q", outdir.MarkerFile, got)
 	}
-	delete(files, filepath.FromSlash(markerFile))
+	delete(files, filepath.FromSlash(outdir.MarkerFile))
 	return files
 }
 
@@ -80,7 +68,7 @@ func TestRun(t *testing.T) {
 			if err := os.MkdirAll(stale, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			if err := errors.Join(os.WriteFile(filepath.Join(stale, "Chart.yaml"), []byte("stale: true\n"), 0o644), os.WriteFile(filepath.Join(dir, filepath.FromSlash(markerFile)), []byte(marker), 0o644)); err != nil {
+			if err := errors.Join(os.WriteFile(filepath.Join(stale, "Chart.yaml"), []byte("stale: true\n"), 0o644), os.WriteFile(filepath.Join(dir, filepath.FromSlash(outdir.MarkerFile)), []byte(outdir.Marker), 0o644)); err != nil {
 				t.Fatal(err)
 			}
 			if err := run(options{repositories: []string{filepath.Join(examples, example, "input", "db")}, output: dir}); err != nil {
@@ -164,84 +152,6 @@ func TestRunErrors(t *testing.T) {
 				t.Errorf("written: %v", slices.Sorted(maps.Keys(after)))
 			}
 		})
-	}
-}
-
-// TestWriteTree: the files written through the output directory, every
-// symbolic link under projects/ removed first, a file's or a directory's,
-// in the output or out of it, nothing written through one; a projects/
-// that is a link refused; what the command does not write under projects/
-// removed, a link itself, not what it points to.
-func TestWriteTree(t *testing.T) {
-	dir, outside := t.TempDir(), t.TempDir()
-	secret := filepath.Join(outside, "secret")
-	if err := os.WriteFile(secret, []byte("keep\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	write(t, dir, map[string]string{"projects/demo/instances/a/x.yaml": "old\n"})
-	for link, target := range map[string]string{"projects/demo/instances/a/Chart.yaml": secret, "projects/demo/instances/a/stale": secret} {
-		if err := os.Symlink(target, filepath.Join(dir, filepath.FromSlash(link))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	files := map[string][]byte{"projects/demo/instances/a/Chart.yaml": []byte("new\n"), markerFile: []byte(marker)}
-	if err := writeTree(dir, files); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := tree(t, dir), map[string]string{filepath.FromSlash("projects/demo/instances/a/Chart.yaml"): "new\n", filepath.FromSlash(markerFile): marker}; !maps.Equal(got, want) {
-		t.Errorf("got %v", got)
-	}
-	if b, err := os.ReadFile(secret); err != nil || string(b) != "keep\n" {
-		t.Errorf("the file a link pointed to: %q, %v", b, err)
-	}
-	// A directory link, out of the output or in it, at any depth under
-	// projects/: removed before anything is written, the files written
-	// in a directory of their own, nothing through the link.
-	elsewhere := filepath.Join(dir, "elsewhere")
-	if err := os.MkdirAll(filepath.Join(elsewhere, "instances"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for link, target := range map[string]string{"projects/data": outside, "projects/demo": "../elsewhere", "projects/solo/instances": "../../elsewhere/instances"} {
-		p := filepath.Join(dir, filepath.FromSlash(link))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(p); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(target, p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	files = map[string][]byte{"projects/data/secret": []byte("overwritten\n"), "projects/demo/kustomization.yaml": []byte("demo\n"), "projects/solo/instances/a/Chart.yaml": []byte("solo\n"), markerFile: []byte(marker)}
-	if err := writeTree(dir, files); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]string{}
-	for p, b := range files {
-		want[filepath.FromSlash(p)] = string(b)
-	}
-	if got := tree(t, dir); !maps.Equal(got, want) {
-		t.Errorf("got %v", got)
-	}
-	for _, p := range []string{"projects/data", "projects/demo", "projects/solo/instances"} {
-		if info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(p))); err != nil || !info.IsDir() {
-			t.Errorf("%s: not a directory: %v, %v", p, info, err)
-		}
-	}
-	if b, err := os.ReadFile(secret); err != nil || string(b) != "keep\n" {
-		t.Errorf("out of the output: %q, %v", b, err)
-	}
-	// A projects/ that is a link: refused, nothing written.
-	linked := t.TempDir()
-	if err := os.Symlink(filepath.Join(dir, "projects"), filepath.Join(linked, "projects")); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeTree(linked, map[string][]byte{"projects/demo/kustomization.yaml": []byte("linked\n")}); err == nil {
-		t.Error("written through projects/, a link")
-	}
-	if b, err := os.ReadFile(filepath.Join(dir, "projects", "demo", "kustomization.yaml")); err != nil || string(b) != "demo\n" {
-		t.Errorf("through projects/: %q, %v", b, err)
 	}
 }
 

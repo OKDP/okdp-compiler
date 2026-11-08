@@ -105,7 +105,9 @@ func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource)
 	if d, ok := charts.(Dir); ok {
 		return build(withCharts(instances, d.FS), okdp.CompileAll(ctx, withCharts(instances, d.FS)))
 	}
-	outcomes := okdp.CompileAll(ctx, instances)
+	// The second run reads the parameters and the contracts the first read.
+	memo := okdp.NewMemo()
+	outcomes := okdp.CompileAllWith(ctx, instances, memo)
 	if charts == nil {
 		return build(instances, outcomes)
 	}
@@ -116,7 +118,7 @@ func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource)
 		return t
 	}
 	checked := withCharts(instances, cache)
-	return build(checked, okdp.CompileAll(ctx, checked))
+	return build(checked, okdp.CompileAllWith(ctx, checked, memo))
 }
 
 // withCharts: a copy of instances, each with the chart cache charts.

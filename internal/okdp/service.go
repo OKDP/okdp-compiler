@@ -53,7 +53,7 @@ type Package struct {
 // provisions connections of, written as its name, or as {contract,
 // claimers}: Claimers, the namespaces whose instances may claim of an
 // instance of the package across namespaces, unless the instance lists
-// its own (Inputs.Claimers), "*" for any; none by default (tree.consent).
+// its own (Inputs.Claimers), "*" for any; none by default (compilation.consent).
 type Provision struct {
 	Contract string   `yaml:"contract"`
 	Claimers []string `yaml:"claimers"`

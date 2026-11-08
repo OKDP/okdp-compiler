@@ -586,7 +586,7 @@ func (s *Session) Eval(scope M, sections []string, srcs ...Source) (*Doc, error)
 // section, a list, every message collected before failing: each item it
 // gives that is not empty, as text (value.Str), a message, without the
 // name of its file.
-func (t *tree) bind(s *Session, outer M) (M, error) {
+func (t *document) bind(s *Session, outer M) (M, error) {
 	scope := make(M, len(outer)+len(t.vars))
 	maps.Copy(scope, outer)
 	if err := t.vars.bind(s, scope); err != nil {

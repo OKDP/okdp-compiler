@@ -23,12 +23,45 @@ func TestRefCacheDir(t *testing.T) {
 		"https://charts.example.org/../../": "",
 		"oci://..":                          "",
 		"oci://.":                           "",
+		"https://charts.example.org?x=1":    "",
+		"https://charts.example.org/c#frag": "",
 		`https://charts.example.org\x`:      "",
 		"file:///charts":                    "",
 		"charts.example.org":                "",
 	} {
 		if got := (Ref{Repository: repository}).cacheDir(); got != want {
 			t.Errorf("%s: got %q, want %q", repository, got, want)
+		}
+	}
+}
+
+// TestRefDir: a chart's directory of the chart cache, its repository
+// without the scheme, http:// included (a puller's InsecureHosts); a
+// repository, a chart or a version that is no directory of the cache has
+// none.
+func TestRefDir(t *testing.T) {
+	for ref, want := range map[Ref]string{
+		{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.6.0"}:   "quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr",
+		{Repository: "https://charts.example.org/", Chart: "app", Version: "1.8.0"}:  "charts.example.org/app-1.8.0/app",
+		{Repository: "http://localhost:8080/charts", Chart: "app", Version: "1.0.0"}: "localhost:8080/charts/app-1.0.0/app",
+	} {
+		if got, err := ref.Dir(); err != nil || got != want {
+			t.Errorf("%v: %q %v, want %q", ref, got, err, want)
+		}
+	}
+	for _, ref := range []Ref{
+		{Repository: "https://x/../y", Chart: "app", Version: "1.0.0"},
+		{Repository: "https://", Chart: "app", Version: "1.0.0"},
+		{Repository: "file:///x", Chart: "app", Version: "1.0.0"},
+		{Repository: "https://x", Chart: "../app", Version: "1.0.0"},
+		{Repository: "https://x", Chart: "", Version: "1.0.0"},
+		{Repository: "https://x:8443?y=1", Chart: "app", Version: "1.0.0"},
+		{Repository: "https://x/charts#f", Chart: "app", Version: "1.0.0"},
+		{Repository: "https://x", Chart: "app?x", Version: "1.0.0"},
+		{Repository: "https://x", Chart: "app", Version: "1.0.0#y"},
+	} {
+		if got, err := ref.Dir(); err == nil {
+			t.Errorf("%v: %q, no error", ref, got)
 		}
 	}
 }
@@ -56,7 +89,7 @@ func TestChartCache(t *testing.T) {
 	ref := func(chart, version string) Ref {
 		return Ref{Repository: "https://charts.example.org", Chart: chart, Version: version}
 	}
-	c := &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
+	c := NewChartCache(cache)
 	for name, tc := range map[string]struct {
 		ref      Ref
 		entry    string

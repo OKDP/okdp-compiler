@@ -20,22 +20,6 @@ import (
 // schemaURL: where a schema is compiled, for its $ref to itself.
 const schemaURL = "file:///values.schema.json"
 
-// checkSchema: the values against the JSON schema b, read from name (none
-// when b is nil: the chart has no schema), one line per violation with its
-// path, as Helm prints them (Validate). The values are what the chart's
-// templates see: Helm's coalesced values. The schema is read as ParseSchema
-// reads it, compiled as Helm 4 compiles it (CompileSchema).
-func checkSchema(name string, b []byte, values M) (string, error) {
-	if b == nil {
-		return "", nil
-	}
-	s, err := ParseSchema(name, b)
-	if err != nil {
-		return "", err
-	}
-	return Validate(name, s.root, values)
-}
-
 // Validate: v against sch, a schema of the file name, one line per
 // violation with its path, as Helm prints them, "" when v holds:
 //

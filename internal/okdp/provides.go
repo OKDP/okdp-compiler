@@ -7,7 +7,6 @@ package okdp
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"regexp"
 	"strings"
 
@@ -68,7 +67,7 @@ func published(info M, outputs []Output) Info {
 // true) gets its credentials Secret, named after its secretRef (default
 // <name>-<contract>-credentials), a DNS-1123 subdomain (isSecretName).
 // Then two outputs of one contract and name fail (twice).
-func provided(session *compile.Session, inst *instance, contracts fs.FS, provides []any, plain bool) ([]Output, []M, error) {
+func provided(session *compile.Session, inst *instance, contracts *contractCache, provides []any, plain bool) ([]Output, []M, error) {
 	var outputs []Output
 	var credentials []M
 	for _, x := range provides {
@@ -79,7 +78,7 @@ func provided(session *compile.Session, inst *instance, contracts fs.FS, provide
 			out = inst.name
 		}
 		where := fmt.Sprintf("provides %q (%s)", out, contract)
-		c, err := readContract(contracts, contract)
+		c, err := contracts.get(contract)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", where, err)
 		}

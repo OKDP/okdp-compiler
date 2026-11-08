@@ -160,7 +160,7 @@ const providerForms = "<instance>, <release>, <namespace>/<instance> or <namespa
 
 // providerName: the namespace and the name of the instance a provider
 // names, a claim's or a class's: <namespace>/<name>, or <name> of
-// namespace, the name an instance's name or its release (tree.provider);
+// namespace, the name an instance's name or its release (compilation.provider);
 // false when s is not of that form.
 func providerName(s, namespace string) (string, string, bool) {
 	ns, name, qualified := strings.Cut(s, "/")
@@ -285,7 +285,7 @@ type instanceClaims struct {
 
 // platformClasses: global.okdp.provisioning of the layers of level 0 of
 // layers, merged: the platform's classes, which route every namespace to
-// their provider, with its consent given (tree.consent). A layer that
+// their provider, with its consent given (compilation.consent). A layer that
 // values cannot hold gives none: the layers failed before (valuesLayers).
 func platformClasses(layers []ContextLayer) M {
 	out := M{}
@@ -314,7 +314,7 @@ func claimsOf(def *Definition, in Inputs) instanceClaims {
 	if err != nil {
 		return instanceClaims{}
 	}
-	schema, values, settings, err := parameters(def.Files, in, svc)
+	schema, values, settings, err := in.memo.paramsOf().get(def.Files, in, svc)
 	if err != nil {
 		return instanceClaims{}
 	}
@@ -402,7 +402,7 @@ func claimID(namespace, instance, field, name string) string {
 // names or the default one of the context, a class of
 // global.okdp.provisioning whose provider is of the form (claimClass);
 // its request, which sets no key the class fixes, against the contract's
-// claim schema (tree.request). Its provider is not looked for: a claim of
+// claim schema (compilation.request). Its provider is not looked for: a claim of
 // a project without instance is bound to none, nor provisioned, until an
 // instance's context declares it. The context's layers checked as a
 // compile checks them, and the platform's settings; every claim's error
@@ -444,7 +444,7 @@ func CheckDeclarations(in Inputs) error {
 		spec, where := named[name], value.Key("claims", name)
 		ch, _, _, err := claimClass(classes, in.Namespace, where, spec.Contract, spec)
 		if err == nil {
-			_, err = (&tree{}).request(in, where, spec.Contract, spec.Request, ch)
+			_, err = (&compilation{}).request(in, where, spec.Contract, spec.Request, ch)
 		}
 		if err != nil {
 			errs = append(errs, atField(where, err))

@@ -281,7 +281,8 @@ realm's mapper, or the users' emails, must be verified).
 | `host` | string, required | the host the users reach the service at: the OAuth client's redirect URL is `https://<host>/oauth2/callback` |
 | `upstream` | string, required | the URL of the service the proxy fronts |
 | `allowedGroups` | list | default `platform.access.editors`; empty fails: it would let in the realm |
-| `name` | DNS label | the Secret of the cookie secret, and the cookie's name; default `okdpFullname('oauth2-proxy')` |
+| `name` | DNS label | the Secret of the cookie secret, and the cookie's name unless `cookieName` is set; default `okdpFullname('oauth2-proxy')` |
+| `cookieName` | string | the cookie's name; default `_<name>_oauth2` |
 | `groupsClaim`, `caBundleSecret`, `image`, `port` (4180), `upstreamTimeout`, `cookieExpire` (`8h`), `resources` | | the claim (`groups`), the CA bundle Secret (default `global.okdp.tls.caBundleSecret`), the image (default by digest), the port, a duration for a service that holds a request open, the cookie's life, the proxy's resources (50m / 64Mi, 200m / 128Mi) |
 
 It fails when the platform's OIDC is disabled (`global.okdp.oidc.enabled`)
@@ -295,7 +296,7 @@ proxy's cookie secret. The first container of the pod is the application.
 
 | Key of `args` | Type | Meaning |
 |---|---|---|
-| `component` | DNS label, required | the component label, the selector's; the objects' name is `okdpFullname(component)` unless `name` is set |
+| `component` | DNS label | the component label, the selector's; the objects' name is `okdpFullname(component)` unless `name` is set; absent: no component label, the objects are the instance's own, named `okdpFullname()` |
 | `pod` | map, required | the arguments of `okdpPodSpec`; the proxy and the volume are added to it |
 | `port` | name or number, required | the application's port; a number with `signIn` |
 | `servicePort` | number | the Service's, 80 |

@@ -3,8 +3,9 @@
 // claim of the namespace, to an output another instance of the namespace
 // publishes, or to the output of a claim's provider, completed against
 // their contract, then checked against what the package requires of them
-// (require); the contracts, read at each use (readContract), and their
-// checks, which the outputs the instance provides go through too.
+// (require); the contracts, read once for a set of compiles
+// (readContract), and their checks, which the outputs the instance
+// provides go through too.
 
 package okdp
 
@@ -31,7 +32,7 @@ import (
 // namespace publish and the claims' bindings, recording those that point
 // to an instance.
 type resolver struct {
-	contracts fs.FS                // Inputs.Contracts
+	contracts *contractCache       // Inputs.Contracts
 	conns     M                    // the external connections
 	levels    map[string]uint      // the level of the context each is given at, by name (connectionLevels)
 	claims    map[string]ClaimSpec // the named claims of the context (namedClaims)
@@ -175,7 +176,7 @@ func declaredConnections(in Inputs) error {
 			conns = value.Merge(conns, c)
 		}
 	}
-	r := resolver{contracts: in.Contracts, conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), provider: len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace}
+	r := resolver{contracts: contractCacheOf(in), conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), provider: len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace}
 	return r.declared()
 }
 
@@ -190,7 +191,7 @@ func CheckConnection(contracts fs.FS, name string, conn any, level uint, namespa
 	if err != nil {
 		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
 	}
-	r := resolver{contracts: contracts, conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
+	r := resolver{contracts: newContractCache(contracts), conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
 	return r.declared()
 }
 
@@ -222,7 +223,7 @@ func (r *resolver) declaration(name, field string) error {
 	case value.Str(conn["contract"]) == "":
 		return fmt.Errorf("%s: contract is required, the contract of the connection", field)
 	}
-	c, err := readContract(r.contracts, value.Str(conn["contract"]))
+	c, err := r.contracts.get(value.Str(conn["contract"]))
 	if err != nil {
 		return fmt.Errorf("%s: %w", field, err)
 	}
@@ -273,7 +274,7 @@ type resolved struct {
 // (chart.NoTemplate). A reference to an instance that resolves is
 // recorded (deps), field naming it, ref the output.
 func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *requirement, provision bool) (M, error) {
-	c, err := readContract(r.contracts, contract)
+	c, err := r.contracts.get(contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
 	}
@@ -1037,10 +1038,11 @@ func (c *contract) fields(values M, where string) error {
 	return nil
 }
 
-// complete: the contract's defaults set in out, then its derived fields,
-// again until nothing changes, then the required check: every required
-// field not set, one line each, in alphabetical order, as the violations of
-// check.
+// complete: the contract's defaults set in out (copies: a contract is
+// read once for every compile that names it, Memo), then its derived
+// fields, again until nothing changes, then the required check: every
+// required field not set, one line each, in alphabetical order, as the
+// violations of check.
 func (c *contract) complete(out M, where string) error {
 	names := slices.Sorted(maps.Keys(c.props))
 	// Defaults first: a derived field may come from a defaulted one. Until
@@ -1060,7 +1062,7 @@ func (c *contract) complete(out M, where string) error {
 				if pass == "derived" && isDerived {
 					if src, ok := out[value.Str(derived["from"])]; ok {
 						if mv, ok := value.AsMap(derived["map"])[value.Str(src)]; ok {
-							out[k], changed = mv, true
+							out[k], changed = value.Copy(mv), true
 						}
 					}
 				} else if pass == "default" && !isDerived {
@@ -1068,7 +1070,7 @@ func (c *contract) complete(out M, where string) error {
 						// A conditional default applies only when its condition holds.
 						cond := value.AsMap(p["x-ui-condition"])
 						if len(cond) == 0 || value.Str(out[value.Str(cond["field"])]) == value.Str(cond["value"]) {
-							out[k], changed = d, true
+							out[k], changed = value.Copy(d), true
 						}
 					}
 				}

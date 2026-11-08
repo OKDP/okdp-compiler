@@ -67,35 +67,37 @@ tree whose platform does not load; a project that does not load is
 more targets, the projects that do not deploy kept as the output written
 before holds them, their manifests and identity of today's settings
 (`compiler.Partial`, the rule of `okdp-compile --partial`). Package
-`treeedit` reads and edits a tree for a control plane, every rule of an edit its own: an instance, a connection, a
-named claim, a project or the catalog menu created, updated or removed
-is an `Edit`, pure, its `Change` the files to write and its `Check` by
-the compile of the tree before and after it (an instance written that
-does not compile, one that compiled and does not, a removal of what is
-in use, a release taken refused: `compiler.Regressions`,
-`compiler.ReleaseTaken`), `treeedit.Apply` runs it on a transaction; it
-reads an output back (`compiler.ReadCompiled`, `compiler.ReadPublished`),
-and edits the files as written, their comments kept; `treeedit.Validate`
-gives the compile's verdict on an edit without writing it, field by
-field (`ValidateInstance`, `ValidateClaim`, `compiler.FieldErrors`).
-A program that answers before it compiles asks the compile's rules of
-the library, none written again: the connection references of a
-schema (`compiler.ConnectionRefs`), the contracts as the compile reads
-them (`compiler.ReadContract`), a connection at its declaration
-(`compiler.CheckConnection`), the layering of values
-(`compiler.MergeValues`, `compiler.CoalesceValues`), the names of the
-claims (`compiler.NamedClaimID`, `IsClaimID`, `CheckProvider`). Package
-`chartcache` keeps a chart cache that pulls the upstream charts of a
-check, OCI or https ([Go library](docs/01_usage.md#go-library)).
+`treeedit` reads and edits a tree for a control plane, every rule of an
+edit its own: an instance, a connection, a named claim, a project or the
+catalog menu created, updated or removed is an `Edit`, pure, its `Change`
+the files to write and its `Check` by the compile of the tree before and
+after it (an instance written that does not compile, one that compiled and
+does not, a removal of what is in use, a release taken refused:
+`compiler.Regressions`, `compiler.ReleaseTaken`), `treeedit.Apply` runs it
+on a transaction; it reads an output back (`compiler.ReadCompiled`,
+`compiler.ReadPublished`), chooses what a compile reads of a tree
+(`treeedit.ReadSources`, bounded) and writes of its output
+(`treeedit.OutputTargets`, `OutputFS`, `WriteOutput`), and edits the files
+as written, their comments kept; `treeedit.Validate` gives the compile's
+verdict on an edit without writing it, field by field (`ValidateInstance`,
+`ValidateClaim`, `compiler.FieldErrors`). A program that answers before it
+compiles asks the compile's rules of the library, none written again: the
+connection references of a schema (`compiler.ConnectionRefs`), the
+contracts as the compile reads them (`compiler.ReadContract`), a
+connection at its declaration (`compiler.CheckConnection`), the layering
+of values (`compiler.MergeValues`, `compiler.CoalesceValues`), the names
+of the claims (`compiler.NamedClaimID`, `IsClaimID`, `CheckProvider`).
+Package `chartcache` keeps a chart cache that pulls the upstream charts of
+a check, OCI or https ([Go library](docs/01_usage.md#go-library)).
 `compiler.Compile` compiles one instance, given its inputs, as
 `CompileAll` does each; it keeps no state between calls and is safe for
 concurrent use. Any `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree,
 `fstest.MapFS` (see `internal/okdp/pipeline_test.go`). The names of the
 tree (`compiler.ProjectsDir`, `compiler.InstanceFile`...), its release
 rule (`compiler.ReleaseName`) and where a target writes an instance
-(`compiler.InstanceDir`) are exported: a caller does not spell them;
-the rule of a project's name, `compiler.CheckProjectName`, is the
-compile's, for a program that creates a project before any compile.
+(`compiler.InstanceDir`) are exported: a caller does not spell them; the
+rule of a project's name, `compiler.CheckProjectName`, is the compile's,
+for a program that creates a project before any compile.
 
 What Helm does, the compiler does the same way, checked against `helm
 template` (`testdata/helm`): every values file is read as Helm

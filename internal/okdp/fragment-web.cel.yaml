@@ -14,12 +14,12 @@
 #         (okdpWebWorkload)
 #   release, platform, global  the instance's
 vars:
-  component: ${{ args.component }}
-  name: ${{ first([args.?name.orValue(''), okdpFullname(args.component)]) }}
-  selector: ${{ okdpSelectorLabels(args.component) }}
+  component: ${{ args.?component.orValue('') }}
+  name: ${{ first([args.?name.orValue(''), okdpFullname(component)]) }}
+  selector: ${{ okdpSelectorLabels(component) }}
   # The labels of OKDP's objects, then the arguments': a later one wins.
   lbl:
-    $for: l in okdpLabels(args.component).transformList(k, v, [k, v]) + args.?labels.orValue({}).transformList(k, v, [k, v])
+    $for: l in okdpLabels(component).transformList(k, v, [k, v]) + args.?labels.orValue({}).transformList(k, v, [k, v])
     $key: ${{ l[0] }}
     $value: ${{ l[1] }}
   wantsSignIn: ${{ has(args.signIn) }}
@@ -36,7 +36,7 @@ vars:
   proxyArgs:
     $if: ${{ signIn }}
     $value:
-      name: ${{ okdpFullname(component + '-oauth2-proxy') }}
+      name: "${{ okdpFullname(component == '' ? 'oauth2-proxy' : component + '-oauth2-proxy') }}"
       host: ${{ args.?ingress.?host.orValue('') }}
       upstream: http://127.0.0.1:${{ str(args.port) }}/
       $merge: ${{ args.signIn }}

@@ -78,7 +78,7 @@ type instance struct {
 // annotations, the proxy environment), and the package: service (name,
 // version), labels and selectorLabels (without component).
 func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
-	schema, values, settings, err := parameters(files, in, svc)
+	schema, values, settings, err := in.memo.paramsOf().get(files, in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 		return nil, err
 	}
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: in.Contracts, conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), provider: len(value.AsMap(value.Dig(inst.okdp, "secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
+	r := resolver{contracts: contractCacheOf(in), conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), provider: len(value.AsMap(value.Dig(inst.okdp, "secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
 	if r.walk(schema.Doc, params); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {

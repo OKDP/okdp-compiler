@@ -11,7 +11,7 @@ package, a chart and its values,
 mapping, `examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/` one
 that uses every part of the mapping language, each commented); the recipes
 and pitfalls come from the services packaged in `OKDP/platform-charts` and
-`OKDP/sandbox-dependencies`. What each file may contain is specified in
+`OKDP/sandbox-charts`. What each file may contain is specified in
 [the service definition](specs/02_service_definition.md), its [control
 flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
 and [inputs and outputs](specs/01_inputs_outputs.md), the command line in

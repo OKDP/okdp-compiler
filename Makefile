@@ -45,7 +45,9 @@ fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
 
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.
 FUZZ := internal/compile:FuzzScan internal/compile:FuzzMappingReader \
-	internal/chart:FuzzParsePath internal/chart:FuzzFormatPath internal/chart:FuzzParseValues
+	internal/chart:FuzzParsePath internal/chart:FuzzFormatPath internal/chart:FuzzParseValues \
+	internal/okdp:FuzzParseAccess internal/okdp:FuzzClaimID internal/okdp:FuzzUpstreamCheck \
+	internal/okdp:FuzzContextLayers internal/okdp:FuzzValuesLayers internal/repository:FuzzLoad
 FUZZTIME ?= 30s
 
 fuzz: ## Run each fuzz test for FUZZTIME (30s)

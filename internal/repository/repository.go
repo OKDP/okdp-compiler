@@ -68,8 +68,8 @@ const (
 // names that hold a "-" and meet, a-b/c and a/b-c).
 func ReleaseName(project, instance string) string { return project + "-" + instance }
 
-// tree: the repositories merged, the owner of each part.
-type tree struct {
+// parts: the repositories merged, the owner of each part.
+type parts struct {
 	platform  *Repository            // the owner of PlatformFile, nil when none
 	services  map[string]*Repository // the owner of catalog/<service>/, by service
 	projects  map[string]*Repository // the owner of projects/<project>/, by project
@@ -265,7 +265,7 @@ func refusal(project string, errs []error) *Refused {
 // (okdp.CheckClaimers): Inputs.Claimers, nil when absent, the package's
 // then. Without its Definition when its package failed for an instance
 // before it.
-func (t *tree) instance(repo Repository, project, name string, layers []okdp.ContextLayer) (okdp.Instance, error) {
+func (t *parts) instance(repo Repository, project, name string, layers []okdp.ContextLayer) (okdp.Instance, error) {
 	dir := path.Join(ProjectsDir, project, InstancesDir, name)
 	if err := instanceFiles(repo, dir); err != nil {
 		return okdp.Instance{}, err
@@ -423,7 +423,7 @@ func claimersNode(n *yaml.Node) bool {
 // name and version. The error of a version the catalog lacks is the
 // instance's; that of the package's load, its own, the first time only:
 // nil and no error after.
-func (t *tree) definition(service, version string) (*okdp.Definition, error) {
+func (t *parts) definition(service, version string) (*okdp.Definition, error) {
 	repo, dir, err := t.packageDir(service, version)
 	if err != nil {
 		return nil, err
@@ -453,9 +453,9 @@ func (t *tree) definition(service, version string) (*okdp.Definition, error) {
 // role than RoleTree and RoleCatalog, is refused; a catalog's PlatformFile
 // or projects/, there at all (a file, an empty directory), refused, the
 // rest of it read.
-func index(repos []Repository) (*tree, error) {
+func index(repos []Repository) (*parts, error) {
 	repos = slices.SortedFunc(slices.Values(repos), func(a, b Repository) int { return strings.Compare(a.Name, b.Name) })
-	t := &tree{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: fstest.MapFS{}, packages: map[[2]string]*okdp.Definition{}}
+	t := &parts{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: fstest.MapFS{}, packages: map[[2]string]*okdp.Definition{}}
 	var errs []error
 	owners := map[string][]string{} // a part, as messages name it: the repositories that have it
 	var parts []string

@@ -1,6 +1,7 @@
 # Fuzz: every night, and on demand, the fuzz tests of the Makefile
-# (make fuzz: the scanner of ${{ }}, the mapping reader, the paths and the
-# values parser), each for FUZZTIME. A failing input is written under the
+# (make fuzz: the scanner of ${{ }}, the mapping reader, the paths, the
+# values parser, the access, claim ID, upstream, layers and load rules), each
+# for FUZZTIME. A failing input is written under the
 # package's testdata/fuzz/, uploaded as an artifact to be reproduced
 # (go test -run '<Test>/<file>') and committed with its fix.
 name: fuzz

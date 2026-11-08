@@ -1476,8 +1476,8 @@ instance of a project that is not privileged
 (`global.okdp.policy.privileged`) therefore refuses a host that does not
 end with `-<namespace>.<global.okdp.ingress.suffix>`
 (`seaweedfs-demo.okdp.sandbox` for the project `demo`: a name before the
-dash, a package names its hosts `<service>-<namespace>`) and is not listed for the project in
-`global.okdp.policy.ingressHosts`
+dash, a package names its hosts `<service>-<namespace>`) and is not listed
+for the project in `global.okdp.policy.ingressHosts`
 (`{demo: [sso.okdp.sandbox]}`, exact host names, no wildcard). The case
 and a final dot do not count. The rule holds for:
 
@@ -1569,8 +1569,8 @@ none may be set. The chart's defaults are not checked: a package whose
 chart pulls from elsewhere sets the platform's registry in its values.
 
 The first refused, in path order (a map's images, then its keys
-sorted, a list's items in order), fails, the path and the key named (`testdata/denied-upstream.yaml`,
-`testdata/denied-upstream-text.yaml`,
+sorted, a list's items in order), fails, the path and the key named
+(`testdata/denied-upstream.yaml`, `testdata/denied-upstream-text.yaml`,
 `testdata/context/0/unlisted-registry.yaml`, and for `global`,
 `testdata/context/1/global-denied-key.yaml`,
 `global-unlisted-registry.yaml`):
@@ -2102,12 +2102,12 @@ and `ClusterResourceQuota`, `ClusterWorkflowTemplate`). An object that
 holds `items` (a `List`, which Helm installs item by item) has each item
 checked alike, at any depth: every rule on an instance's objects (this
 one, the plain Secrets, two writers of one Secret, the sync options of
-an object Helm keeps) walks them so (`eachObject`). A kind the compiler does not know, without a namespace, is
-assumed namespaced: the engine's identity, confined to the namespace, is
-the second line ([targets](#targets)). The first refused object, in the
-order of `Objects`, fails the compile, named `<kind>/<name>`
-(`testdata/cli/policy.txtar`); a privileged project's instance is not
-checked:
+an object Helm keeps) walks them so (`eachObject`). A kind the compiler does
+not know, without a namespace, is assumed namespaced: the engine's identity,
+confined to the namespace, is the second line ([targets](#targets)). The
+first refused object, in the order of `Objects`, fails the compile, named
+`<kind>/<name>` (`testdata/cli/policy.txtar`); a privileged project's
+instance is not checked:
 
 ```
 web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
@@ -2540,12 +2540,13 @@ output it lacks. In the order of the instances:
    of two, refuse the instances that hold them, each: a v1 `Secret`, an
    `ExternalSecret`'s `spec.target.name` (its own name when unset; none
    with `creationPolicy: None`), a `PushSecret`'s key of the store and
-   property, an item of a `List` alike. They would overwrite each other's credentials: a provider's
-   `secretRef.name` names its claimers' copies, `<release>-<secret>`,
-   which could otherwise be the Secret of another instance's connection,
-   `<release>.<connection>-credentials`. The instances that reference
-   their outputs, or whose claims they provide, are compiled again, as
-   in step 4. The objects an upstream chart renders are not read.
+   property, an item of a `List` alike. They would overwrite each other's
+   credentials: a provider's `secretRef.name` names its claimers' copies,
+   `<release>-<secret>`, which could otherwise be the Secret of another
+   instance's connection, `<release>.<connection>-credentials`. The
+   instances that reference their outputs, or whose claims they provide, are
+   compiled again, as in step 4. The objects an upstream chart renders are
+   not read.
 
 An instance is compiled once when it comes after the instances whose
 outputs it references, twice when it comes before: the outcomes are the
@@ -3047,17 +3048,17 @@ dot, a claim template's two): the claims of instance `a-b` and parameter
 namespace, not its release: the project is the namespace already. The
 ID is a Kubernetes name, a DNS subdomain: an object name, a Secret name,
 a label value and a store key take it as it is; what takes a label only,
-a Service name or a host segment, and a SQL identifier, replace its dots in the provider's mapping (`c.id.replace('.',
-'_').replace('-', '_')`), which the provider chooses. Two parameters of
-one instance whose names normalize to one label (`dbs["eu.main"]` and
-`dbs.eu-main`) give one ID: the instance is refused (`<field>: claim: it
-gives the same ID (<id>) as <first field>: rename one of the parameters`).
-Longer than 63 characters, the ID is cut to 54, the namespace and its
-dot kept whole (what follows them is cut), and ended with `-` and 8
-hexadecimal digits of its SHA-256; `<namespace>.<digits>` when nothing
-of the rest fits (a namespace of 53 or 54 characters): the ID is the
-claimers' namespace's, whatever the length of its other parts. The
-provider gets each claim once, a
+a Service name or a host segment, and a SQL identifier, replace its dots in
+the provider's mapping (`c.id.replace('.', '_').replace('-', '_')`), which
+the provider chooses. Two parameters of one instance whose names normalize
+to one label (`dbs["eu.main"]` and `dbs.eu-main`) give one ID: the instance
+is refused (`<field>: claim: it gives the same ID (<id>) as <first field>:
+rename one of the parameters`). Longer than 63 characters, the ID is cut to
+54, the namespace and its dot kept whole (what follows them is cut), and
+ended with `-` and 8 hexadecimal digits of its SHA-256;
+`<namespace>.<digits>` when nothing of the rest fits (a namespace of 53 or
+54 characters): the ID is the claimers' namespace's, whatever the length of
+its other parts. The provider gets each claim once, a
 named claim's for all the references to it (`Inputs.Claims`, sorted by
 ID); the claimer its binding (`Inputs.Bindings`) and `Outcome.Claims`, by
 parameter path, each a `compiler.Bound`:

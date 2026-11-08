@@ -25,7 +25,7 @@ func (e *notInCatalog) Is(target error) bool { return target == ErrNotInCatalog 
 
 // repo: the repository of the service, an error wrapping ErrNotInCatalog
 // when none has it.
-func (t *tree) repo(service string) (*Repository, error) {
+func (t *parts) repo(service string) (*Repository, error) {
 	repo, ok := t.services[service]
 	if !ok {
 		return nil, &notInCatalog{fmt.Sprintf("service %q is in the catalog of no repository", service)}
@@ -39,7 +39,7 @@ func (t *tree) repo(service string) (*Repository, error) {
 // directory. The directory that cannot be read for another reason (a
 // symbolic link the caller's fs.FS refuses) gives its own error, naming
 // it.
-func (t *tree) packageDir(service, version string) (*Repository, string, error) {
+func (t *parts) packageDir(service, version string) (*Repository, string, error) {
 	repo, err := t.repo(service)
 	if err != nil {
 		return nil, "", err
@@ -57,7 +57,7 @@ func (t *tree) packageDir(service, version string) (*Repository, string, error) 
 
 // Catalog: the packages and the contracts of repositories together, as
 // Load indexes them (LoadCatalog).
-type Catalog struct{ t *tree }
+type Catalog struct{ t *parts }
 
 // Service: a service of a Catalog, catalog/<service>/ of one repository:
 // its name, its repository's, and its versions, the directories of

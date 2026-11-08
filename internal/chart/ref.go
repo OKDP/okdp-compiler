@@ -14,7 +14,7 @@ import (
 // Ref: an upstream chart as its repository publishes it: what renders
 // the values of a chart key (a Flux HelmRelease, an Argo CD source), and
 // what the chart cache holds its defaults and schema under
-// (<repository>/<chart>-<version>/<chart>, cacheDir).
+// (<repository>/<chart>-<version>/<chart>, Dir).
 type Ref struct {
 	Repository string `yaml:"repository" json:"repository"` // https://... or oci://...
 	Chart      string `yaml:"chart" json:"chart"`           // the chart's name in the repository
@@ -142,24 +142,56 @@ func (r Ref) id() string {
 	return r.Chart + "-" + r.Version
 }
 
-// cacheDir: the directory of the chart cache that holds the charts of the
+// repoDir: the directory of the chart cache that holds the charts of the
 // repository: its URL without the scheme and a trailing /, host, port and
 // path kept (quay.io/adaltas for oci://quay.io/adaltas). "" for a
-// repository that is not https:// or oci:// (http:// among them: a chart
-// is not fetched in clear), or whose rest is not a path inside the chart
-// cache (fs.ValidPath, without \): an empty host, an empty, . or ..
-// segment. Check refuses such a repository.
-func (r Ref) cacheDir() string {
-	for _, scheme := range []string{"oci://", "https://"} {
+// repository that is not https:// or oci:// (http:// only when http: a
+// chart is not fetched in clear), or whose rest is not a path inside the
+// chart cache: an empty host, an empty, . or .. segment, a \, ? or # (a
+// URL's query or fragment).
+func (r Ref) repoDir(http bool) string {
+	schemes := []string{"oci://", "https://"}
+	if http {
+		schemes = append(schemes, "http://")
+	}
+	for _, scheme := range schemes {
 		if rest, ok := strings.CutPrefix(r.Repository, scheme); ok {
 			dir := strings.TrimSuffix(rest, "/")
-			if dir == "." || !fs.ValidPath(dir) || strings.Contains(dir, `\`) {
-				return ""
+			for segment := range strings.SplitSeq(dir, "/") {
+				if segment == "" || segment == "." || segment == ".." || strings.ContainsAny(segment, `\?#`) {
+					return ""
+				}
 			}
 			return dir
 		}
 	}
 	return ""
+}
+
+// cacheDir: the directory of the chart cache that holds the charts of the
+// repository (repoDir) of a chart that is fetched: "" for http:// among
+// others. Check refuses such a repository.
+func (r Ref) cacheDir() string { return r.repoDir(false) }
+
+// Dir: the directory of the chart in the chart cache, slash-separated:
+// <repository without scheme>/<chart>-<version>/<chart>, the layout of the
+// chart cache whoever fills it (helm pull --untar, chartcache.Cache) and
+// whoever reads it (a compile's checks, the console). http:// is a
+// directory too, for a cache that pulls from a host the platform trusts
+// (RepositoryPuller.InsecureHosts): Check refuses it in a package. A
+// repository, a chart or a version that is no directory of the cache (a
+// ?, a # or a \ in it, an empty, . or .. segment) has none.
+func (r Ref) Dir() (string, error) {
+	repo := r.repoDir(true)
+	if repo == "" {
+		return "", fmt.Errorf("repository %q is no directory of the chart cache", r.Repository)
+	}
+	for _, s := range []string{r.Chart, r.Version} {
+		if s == "" || strings.ContainsAny(s, `/\?#`) || s == "." || s == ".." {
+			return "", fmt.Errorf("chart %q %q is no directory of the chart cache", r.Chart, r.Version)
+		}
+	}
+	return path.Join(repo, r.id(), r.Chart), nil
 }
 
 // pull: the command that downloads the chart and unpacks it into its entry

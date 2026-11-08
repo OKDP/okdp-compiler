@@ -1128,17 +1128,16 @@ holds, to read it back.
   instances compiled again with them (`Inputs.Charts`), their final
   values checked; a chart that cannot be fetched leaves them unchecked,
   `Tree.ChartsErr` saying why. It is a `compiler.Tree`, its `Instances`
-  in their order, each a `compiler.TreeInstance`, the `Instance` with its `Outcome`, the
-  problem of the graph at its release (`GraphErr`), why it does not
-  deploy (`Err`), the claims bound to it as a provider, by ID
-  (`Provided`, each a `compiler.ProvidedClaim`, the `Bound` claim and
-  its `Claimer`), what it granted a claim (`Granted(id)`, the output it
-  publishes for it), the contracts its package provisions
-  (`Provisions`) and the namespaces that may claim of it
-  (`Claimers(contract)`); the tree's `Graph`, nil when it has a problem,
-  `Instance(namespace, name)`, `Release(namespace, release)`, and
-  `Problems()`, `<namespace>/<name>: <why>` per instance that does not
-  deploy.
+  in their order, each a `compiler.TreeInstance`, the `Instance` with its
+  `Outcome`, the problem of the graph at its release (`GraphErr`), why it
+  does not deploy (`Err`), the claims bound to it as a provider, by ID
+  (`Provided`, each a `compiler.ProvidedClaim`, the `Bound` claim and its
+  `Claimer`), what it granted a claim (`Granted(id)`, the output it
+  publishes for it), the contracts its package provisions (`Provisions`) and
+  the namespaces that may claim of it (`Claimers(contract)`); the tree's
+  `Graph`, nil when it has a problem, `Instance(namespace, name)`,
+  `Release(namespace, release)`, and `Problems()`, `<namespace>/<name>:
+  <why>` per instance that does not deploy.
 - `compiler.Build(ctx, repos, compiler.BuildOptions{CostLimit,
   AllowPlainSecrets, Charts})` is the compile of a tree as `okdp-compile`
   and okdp-gitops run it: the load, the options on each instance,
@@ -1310,6 +1309,27 @@ holds, to read it back.
     a project without instance binds none of its claims, which the tree
     checks at their declaration all the same (class, request, name),
     their field errors at `claims.<name>` too.
+- What a compile reads of a tree and writes of its output, `treeedit`'s
+  too, so that the caller holds files and no rule of the tree:
+  - `ReadSources(r)` copies what a compile reads of `r`, `platform.yaml`,
+    `catalogs.yaml` and every file under `projects/`, at their paths, as
+    the `fs.FS` `compiler.LoadRepository` takes. A file over
+    `MaxTreeFileSize` (4 MiB), or past `MaxTreeSize` (64 MiB) together,
+    fails it with an error wrapping `ErrTooLarge` (`TooLargeError`,
+    `TreeTooLargeError`), a path that is, or goes through, a symbolic
+    link with one wrapping `ErrSymlink` (the `Reader` returns it).
+  - `OutputTargets(r, prefix)` are the targets of the output: Flux
+    always, Argo CD when `ArgoCDRootPath` (`argocd/root.yaml`) says where
+    it reads the output from (`compiler.ReadArgoRoot`), both writing
+    their paths under `prefix/compiled` for the repository that holds
+    the output at `prefix`.
+  - `OutputFS(r)` is `CompiledDir` (`compiled/`) of `r` as an `fs.FS`,
+    for `compiler.TreeFiles`' previous output and the readers of an
+    output (`ReadCompiled`, `ListPublished`): read as it is opened, a
+    link refused, a missing path an error wrapping `fs.ErrNotExist` and
+    `ErrNotFound`. `WriteOutput(w, files)` rewrites it from the files of
+    `compiler.TreeFiles`: `compiled/` removed, each file written in path
+    order.
 - The files as written, `treeedit`'s too, for a caller that edits them
   itself: `ParseInstance` and `EncodeInstance` (`instance.yaml`, its
   `claimers` absent, none or listed, each kept apart), `EncodeValues`,
@@ -1414,7 +1434,8 @@ holds, to read it back.
   its whole argument, which a map's entry count does not measure. A
   server compiling packages it does not review sets one, as an
   instance's values can make an expression iterate over them;
-  okdp-gitops and `okdp-compile` set 1000000 (`--cost-limit`), about
+  okdp-gitops and `okdp-compile` set 1000000 (`compiler.DefaultCostLimit`,
+  `--cost-limit`), about
   1 MB that host functions read or write; one expression costs what is
   left of the limit, not the limit again. `Inputs.Timeout` bounds one
   compile in time, beside the context's deadline: past it the instance
@@ -1439,9 +1460,9 @@ holds, to read it back.
 - Errors are messages for the user, returned as they are; the package
   defines no error types, but `ErrNotInCatalog`, which a missing package
   wraps, `*LoadError`, the problems of a tree that does not load, and
-  `*ReleaseError`, which the Flux and Argo CD targets wrap. A message carries its context: the file, the
-  parameter path, the chart key, the mapping section (see
-  [troubleshooting](#troubleshooting)).
+  `*ReleaseError`, which the Flux and Argo CD targets wrap. A message
+  carries its context: the file, the parameter path, the chart key, the
+  mapping section (see [troubleshooting](#troubleshooting)).
 
 ## Integration
 

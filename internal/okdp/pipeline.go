@@ -46,6 +46,8 @@ type Inputs struct {
 	// (generate, okdpGeneratedSecret) or read from the platform's secret
 	// store, never written to the deployments repository.
 	AllowPlainSecrets bool
+
+	memo *instanceMemo // what the compiles of a set read once (Memo); nil: this compile reads its own
 }
 
 // ContextLayer: a values layer of the context (Inputs.Context), see
@@ -149,52 +151,19 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 		}()
 	}
 	// ctx, def and the file systems are required: nil panics.
-	switch {
-	case !chart.IsRelease(in.Release):
-		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
-	case checkNamespace("Inputs.Namespace", in.Namespace) != nil:
-		return nil, checkNamespace("Inputs.Namespace", in.Namespace)
-	case in.Name != "" && !chart.IsDNSLabel(in.Name):
-		return nil, fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
-	}
-	// Checked again: a Definition may be built in memory.
-	svc, err := def.service()
+	svc, err := checkInputs(def, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkClaims(svc, in.Claims); err != nil {
-		return nil, err
+	if in.memo == nil {
+		in.memo = NewMemo().forInstance(0, def, in)
 	}
-	if err := CheckClaimers("Inputs.Claimers", in.Claimers); err != nil {
-		return nil, err
-	}
-	// 1-3. Parameters, platform context, connections: the instance of the
-	// compile, which the stages below read (context.go).
-	inst, err := newInstance(def.Files, in, svc)
+	// 1-4. Parameters, platform context, connections, platform
+	// requirements: the instance of the compile, which the stages below
+	// read (context.go).
+	inst, groups, err := platformInstance(def, in, svc)
 	if err != nil {
 		return nil, err
-	}
-	// The platform's reserved namespaces, of its settings: a reservation
-	// wins over a privilege.
-	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
-		return nil, err
-	}
-	// A release named like an object the platform writes in the namespace.
-	if err := checkRelease("Inputs.Release", in.Release, inst.okdp); err != nil {
-		return nil, err
-	}
-	// The roles of the project's groups, its file's: refused, they refuse
-	// every instance of the project.
-	groups, err := projectAccess(in.Context, in.Namespace)
-	if err != nil {
-		return nil, err
-	}
-	// 4. Platform requirements: the global.okdp keys the service requires,
-	// in order, each set and not empty (not null, false, "", 0, [] or {}).
-	for _, k := range svc.Require {
-		if !value.Truthy(value.Dig(inst.okdp, k)) {
-			return nil, fmt.Errorf("global.okdp.%s is required. %s", k, platformValue)
-		}
 	}
 	// The compile's CEL session, with OKDP's host functions for the
 	// instance: the mapping and the compiler's templates are evaluated in
@@ -220,28 +189,116 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	}
 	// 7. Provides: the outputs, checked against the contracts, and their
 	// credentials Secrets; an output for each claim (claimed).
-	outputs, credentials, err := provided(session, inst, in.Contracts, value.AsList(res["provides"]), in.AllowPlainSecrets)
+	outputs, credentials, pushes, err := providedOutputs(session, inst, in, res)
 	if err != nil {
 		return nil, err
+	}
+	// 8. Objects, and the platform's policy over them.
+	out, err := instanceObjects(def, in, inst, svc, groups, res, outputs, credentials, pushes)
+	if err != nil {
+		return nil, err
+	}
+	// 9-10. Final values of the charts, checked against the upstream charts.
+	if err := finalValues(ctx, def, in, inst, svc, out, res, written, clientCharts(clients, dcrValues, dcrSource)); err != nil {
+		return nil, err
+	}
+	out.Cost = session.Used()
+	return out, nil
+}
+
+// checkInputs: the inputs of a compile of def and its package's service
+// (Definition.service), checked before anything is read: the release, the
+// namespace and the name, the claims bound to the instance and the
+// namespaces that may claim of it.
+func checkInputs(def *Definition, in Inputs) (*Service, error) {
+	switch {
+	case !chart.IsRelease(in.Release):
+		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
+	case checkNamespace("Inputs.Namespace", in.Namespace) != nil:
+		return nil, checkNamespace("Inputs.Namespace", in.Namespace)
+	case in.Name != "" && !chart.IsDNSLabel(in.Name):
+		return nil, fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
+	}
+	// Checked again: a Definition may be built in memory.
+	svc, err := def.service()
+	if err != nil {
+		return nil, err
+	}
+	if err := checkClaims(svc, in.Claims); err != nil {
+		return nil, err
+	}
+	if err := CheckClaimers("Inputs.Claimers", in.Claimers); err != nil {
+		return nil, err
+	}
+	return svc, nil
+}
+
+// platformInstance: stages 1 to 4, the instance of a compile
+// (newInstance: parameters, platform context, connections), then what the
+// platform asks of it: its namespace and its release not reserved, the
+// roles of the project's groups, its file's, which are refused for every
+// instance of the project (projectAccess), and the global.okdp keys the
+// service requires, in order, each set and not empty (not null, false, "",
+// 0, [] or {}).
+func platformInstance(def *Definition, in Inputs, svc *Service) (*instance, map[string]Role, error) {
+	inst, err := newInstance(def.Files, in, svc)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The platform's reserved namespaces, of its settings: a reservation
+	// wins over a privilege.
+	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
+		return nil, nil, err
+	}
+	// A release named like an object the platform writes in the namespace.
+	if err := checkRelease("Inputs.Release", in.Release, inst.okdp); err != nil {
+		return nil, nil, err
+	}
+	groups, err := projectAccess(in.Context, in.Namespace)
+	if err != nil {
+		return nil, nil, err
+	}
+	// 4. Platform requirements.
+	for _, k := range svc.Require {
+		if !value.Truthy(value.Dig(inst.okdp, k)) {
+			return nil, nil, fmt.Errorf("global.okdp.%s is required. %s", k, platformValue)
+		}
+	}
+	return inst, groups, nil
+}
+
+// providedOutputs: stage 7 of the mapping's result res, the outputs the
+// instance provides, checked against the contracts, with the credentials
+// Secrets of their secret fields, an output for each claim bound to the
+// instance (claimed), and the PushSecrets of the credentials of claims of
+// another namespace (pushSecrets).
+func providedOutputs(session *compile.Session, inst *instance, in Inputs, res M) (outputs []Output, credentials, pushes []M, err error) {
+	outputs, credentials, err = provided(session, inst, in.memo.contracts, value.AsList(res["provides"]), in.AllowPlainSecrets)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	if err := claimed(in.Claims, outputs); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	pushes, err := pushSecrets(inst, in.Contracts, in.Claims, outputs)
+	pushes, err = pushSecrets(inst, in.memo.contracts, in.Claims, outputs)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	// 8. Objects: the credentials Secrets, then the mapping's objects,
-	// then those of the credentials of claims across namespaces: pushed for
-	// the claims of another namespace, read for its own of another; and
-	// read for its connections whose credentials are in the platform's
-	// secret store. Then the platform's policy over them all: those of a
-	// project that is not privileged stay in its namespace, none
-	// cluster-scoped (checkObjects), serving no host the platform keeps from
-	// them (checkIngressHosts); no Secret of credentials in clear,
-	// unless allowed (checkPlainSecrets); no two of one kind, namespace and name
-	// (checkDuplicateObjects); then the sync options of Argo CD of those Helm
-	// keeps.
+	return outputs, credentials, pushes, nil
+}
+
+// instanceObjects: stage 8, the Result of the compile with its objects: the
+// credentials Secrets, then the mapping's objects, then those of the
+// credentials of claims across namespaces: pushed for the claims of another
+// namespace, read for its own of another; and read for its connections
+// whose credentials are in the platform's secret store. Then the platform's
+// policy over them all: those of a project that is not privileged stay in
+// its namespace, none cluster-scoped (checkObjects), serving no host the
+// platform keeps from them (checkIngressHosts); no Secret of credentials in
+// clear, unless allowed (checkPlainSecrets); no two of one kind, namespace
+// and name (checkDuplicateObjects); then the sync options of Argo CD of
+// those Helm keeps.
+func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, groups map[string]Role, res M, outputs []Output, credentials, pushes []M) (*Result, error) {
 	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp), Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp), Network: network(inst.okdp)}
 	if out.Network != nil {
 		out.Network.Claimers = claimers(in.Namespace, in.Claims)
@@ -271,30 +328,35 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	}
 	// Whatever wrote it, an object Helm keeps is kept by Argo CD alike.
 	keepSynced(out.Objects)
-	// 9. Final values, first the dependencies of Chart.yaml the umbrella
-	// renders (rendered): all but those the values file leaves out. Then
-	// the compiler's own charts: the chart of each OAuth client, compiled in
-	// dcr mode; neither Chart.yaml nor the values file may list them. Added
-	// to the dependencies of Chart.yaml, without changing them.
+	return out, nil
+}
+
+// finalValues: stages 9 and 10 of the mapping's result res (written: the
+// literal keys of its values file), set in out: the final values of each
+// chart the umbrella renders, first the dependencies of Chart.yaml (rendered):
+// all but those the values file leaves out. Then the compiler's own charts
+// (own): the chart of each OAuth client, compiled in dcr mode; neither
+// Chart.yaml nor the values file may list them. Added to the dependencies of
+// Chart.yaml, without changing them. Then the final values of each chart
+// rendered; with a chart cache, checked against its upstream chart.
+func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance, svc *Service, out *Result, res M, written []string, own []ownChart) error {
 	output := rendered(svc.Charts, written, value.AsMap(res["output"]))
-	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, def.valuesName(), output, clientCharts(clients, dcrValues, dcrSource))
+	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, def.valuesName(), output, own)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
-	// Then the final values of each chart rendered; with a chart cache,
-	// checked against its upstream chart (10. Upstream charts).
 	var warnings []string
-	if out.Values, out.Charts, warnings, err = chart.FinalValues(in.Charts, def.Files, specs, def.valuesName(), output, inst.values, upstreamCheck(inst.okdp, in.Namespace, out.Privileged)); err != nil {
-		return nil, err
+	if out.Values, out.Charts, warnings, err = chart.FinalValues(in.memo.charts, def.Files, specs, def.valuesName(), output, inst.values, upstreamCheck(inst.okdp, in.Namespace, out.Privileged)); err != nil {
+		return err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
 	// The hosts of the charts' ingresses, those of the objects checked above.
 	if !out.Privileged {
 		if err := checkIngressValues(in.Namespace, inst.okdp, out.Values); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	// A literal of the instance's upstream values at a sensitive key, a
@@ -302,8 +364,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	if !in.AllowPlainSecrets {
 		out.Warnings = append(out.Warnings, plainUpstream(value.AsMap(inst.values["upstream"]))...)
 	}
-	out.Cost = session.Used()
-	return out, nil
+	return nil
 }
 
 // rendered: the computed values of the dependencies the umbrella renders,

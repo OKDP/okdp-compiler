@@ -29,8 +29,8 @@ import (
 // upstream chart that renders them (its source). In key order: the first
 // error is the same from one compile to the next.
 //
-// cache: the chart cache, the upstream charts' defaults and schemas, each in
-// its repository's directory (chartCache); nil, no chart is read. With one,
+// charts: the chart cache, the upstream charts' defaults and schemas, each in
+// its repository's directory (ChartCache); nil, no chart is read. With one,
 // the final values of each key are checked against its upstream chart
 // (checkKey): the schema violations of every key are reported together,
 // and the warnings are returned, in key order. The final values are the
@@ -39,14 +39,10 @@ import (
 // the instance's merged values (their global, and their upstream values).
 // check: what the caller refuses of the upstream values of every key,
 // beside its protect paths (UpstreamCheck); nil, nothing.
-func FinalValues(cache, pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (map[string]map[string]any, map[string]Ref, []string, error) {
+func FinalValues(charts *ChartCache, pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (map[string]map[string]any, map[string]Ref, []string, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
 	var warnings []string
-	var charts *chartCache
-	if cache != nil {
-		charts = &chartCache{fsys: cache, charts: map[Ref]*upstreamChart{}}
-	}
 	for _, key := range slices.Sorted(maps.Keys(output)) {
 		spec, ok := specs[key]
 		if !ok {
@@ -162,7 +158,7 @@ func checkKey(u *upstreamChart, key string, src Ref, final M, appended [][]strin
 	if _, ok := values["global"]; !ok {
 		values["global"] = M{}
 	}
-	v, err := checkSchema(u.entry+"/values.schema.json", u.schema, values)
+	v, err := u.validate(values)
 	return v, warnings, err
 }
 

@@ -92,11 +92,11 @@ func FuzzHostCost(f *testing.F) {
 		}
 		v := types.DefaultTypeAdapter.NativeToValue(d)
 		n := byteSize(v)
-		if min := textBytes(d); n < min {
-			t.Errorf("%s: byteSize %d, under its %d bytes of keys and texts", j, n, min)
+		if lowest := textBytes(d); n < lowest {
+			t.Errorf("%s: byteSize %d, under its %d bytes of keys and texts", j, n, lowest)
 		}
-		if max := 8 * uint64(len(j)); n > max {
-			t.Errorf("%s: byteSize %d, over 8 times its JSON (%d)", j, n, max)
+		if highest := 8 * uint64(len(j)); n > highest {
+			t.Errorf("%s: byteSize %d, over 8 times its JSON (%d)", j, n, highest)
 		}
 		if c := *hostCost([]ref.Val{v}, types.String("abc")); c != n+4 {
 			t.Errorf("%s: cost %d with a result of 3 bytes, want %d", j, c, n+4)

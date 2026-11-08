@@ -189,7 +189,7 @@ func (p *parser) str(at string, m map[string]any, k string, required bool) strin
 // (ParseCatalogs), each service of its menu one of the catalogs of the
 // tree, its default version one of the service's; every problem, the
 // file named.
-func (t *tree) checkCatalogs(repo Repository) []error {
+func (t *parts) checkCatalogs(repo Repository) []error {
 	b, err := fs.ReadFile(repo.FS, CatalogsFile)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -211,7 +211,7 @@ func (t *tree) checkCatalogs(repo Repository) []error {
 
 // menu: the problems of the menu of c, of the file at: each service one
 // of the catalogs of t, its default version one of the service's.
-func (t *tree) menu(c *Catalogs, at string) []error {
+func (t *parts) menu(c *Catalogs, at string) []error {
 	var errs []error
 	for i, cat := range c.Categories {
 		for j, s := range cat.Services {

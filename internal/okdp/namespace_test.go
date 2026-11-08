@@ -213,7 +213,7 @@ var pgDef = func() *Definition {
 		"replicas": {"type": "integer", "default": 1},
 		"fail": {"type": "boolean", "default": false}}}`)}
 	d := withFiles(files)
-	// Any namespace may claim of an instance of it (tree.consent).
+	// Any namespace may claim of an instance of it (compilation.consent).
 	d.Package.Provisions = []Provision{{Contract: "server", Claimers: []string{"*"}}}
 	d.Okdp = []byte(`
 errors:

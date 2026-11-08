@@ -125,9 +125,9 @@
       "type": "object",
       "description": "Not a section: the argument of okdpWebWorkload, a web workload on the hardened pod of okdpPodSpec.",
       "additionalProperties": false,
-      "required": ["component", "pod", "port"],
+      "required": ["pod", "port"],
       "properties": {
-        "component": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The workload's component (app.kubernetes.io/component): its selector, and its name, okdpFullname(component), unless name is set."},
+        "component": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The workload's component (app.kubernetes.io/component): its selector, and its name, okdpFullname(component), unless name is set. Absent: none, the workload is the instance's own, named okdpFullname()."},
         "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The name of its Deployment, Service, Ingress and NetworkPolicy; absent: okdpFullname(component)."},
         "pod": {"$ref": "#/$defs/podSpec", "description": "The pod, the arguments of okdpPodSpec; its first container is the application. The sign-in proxy and the volume are added to it."},
         "port": {"type": ["integer", "string"], "description": "The application's port, a name or a number of its container's ports; a number with signIn."},
@@ -243,7 +243,8 @@
       "properties": {
         "host": {"type": "string", "minLength": 1, "description": "The host the users reach the service at: the OAuth client's redirect URL is https://<host>/oauth2/callback. Required (okdpSignInProxy); okdpWebWorkload sets it."},
         "upstream": {"type": "string", "minLength": 1, "description": "The URL of the service the proxy fronts. Required (okdpSignInProxy); okdpWebWorkload sets it."},
-        "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The Secret of the cookie secret, generated once, and the cookie's name; absent: okdpFullname('oauth2-proxy')."},
+        "name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The Secret of the cookie secret, generated once, and the cookie's name unless cookieName is set; absent: okdpFullname('oauth2-proxy')."},
+        "cookieName": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.-]+$", "description": "The cookie's name; absent: _<name>_oauth2."},
         "allowedGroups": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "The groups let in, of the groups claim; absent: platform.access.editors, the project's editors and admins and the platform's administrators. Empty fails: it would let in the realm."},
         "groupsClaim": {"type": "string", "description": "Absent: groups."},
         "caBundleSecret": {"type": "string", "description": "The Secret holding ca.crt, which the proxy trusts calling the issuer; absent: global.okdp.tls.caBundleSecret."},

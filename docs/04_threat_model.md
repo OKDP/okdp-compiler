@@ -78,7 +78,7 @@ route every namespace to their providers, consenting for them.
 | may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | `target.NetworkPolicy`, `okdp.network` | `testdata/cli/network.txtar`, `TestNetworkPolicy`, `TestClaimsNetwork` |
 | may | give a connection of any key of the store, `platform/<key>` of a ClusterSecretStore; with `secrets.provider`, a key a namespace reads, `<namespace>/<key>`, read through the project's connection | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
 | may not | give a connection a key under `platform/` when the platform gives `secrets.provider`: no namespace reads it, the platform's credentials are copied under the keys of the namespaces that use them | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`provider`) |
-| may | route any namespace to a provider of any namespace (a class) | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
+| may | route any namespace to a provider of any namespace (a class) | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | `testdata/context/0/http-chart-repository.yaml` |
 | may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (the menu is `catalogs.yaml`'s), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
 | may not | a `catalogs.yaml` the compile does not read: an unknown key, at any level, a value of another type, a catalog or a category named twice, a service listed twice, of no catalog, or of a default version its catalog lacks | `repository/catalogs.go: ParseCatalogs`, `checkCatalogs`; `treeedit.ReadCatalogRepositories`, `UpdateCatalog`, `CheckCatalogs` | `TestParseCatalogs`, `TestLoadCatalogsFile`, `TestCheckCatalogs` |
@@ -95,7 +95,7 @@ values for its instances, and its instances' directories are its own.
 | may | settings under `global` beside `okdp`: the keys the platform lists (`global.okdp.policy.projectGlobals`, `project` and `storageClass` by default), checked as upstream values; parameters and upstream values for its instances, under an instance's rules | `layers.go: contextLayers` | `examples/03_full` (`project.yaml`) |
 | may | classes of its own, and the default class of a contract the platform leaves without one (`global.okdp.provisioning`) | `layers.go: platformOnly` | `examples/04_claims` (`project.yaml`) |
 | may | connections and named claims of its own | `layers.go: contextLayers` | `examples/03_full`, `examples/04_claims` |
-| may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
+| may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
 | may | give the identity provider's groups a role within the project, `access` (`viewer`, `editor`, `admin`; `okdp-project-<namespace>` an editor by default): a project team gets exactly its roles, those of its AppProject and of its namespace, nothing of another project's | `access.go: ParseAccess`, `target.Access`, `argocd.Policies` | `TestAccessCompile`, `TestAccess`, `testdata/targets/<target>/projects/demo/project/` |
 | may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three; nor set it from another level than its file's (the platform's, an instance's `connections.yaml` or `config.yaml`) | `access.go: ParseAccess`, `layers.go: contextLayers`, `valuesLayers` | `TestParseAccess`, `TestAccessCompile` |
 | may not | the platform's administrators or the API server's group prefix (`global.okdp.access`) | `layers.go: platformOnly` | `TestAccessCompile` |
@@ -104,7 +104,7 @@ values for its instances, and its instances' directories are its own.
 | may not | change a value, a connection, a class or a default class of a lower level | `layers.go: contextLayers` (`chart.Overlap`) | `testdata/context/1/redefines-platform-connection.yaml`, `redefines-platform-class.yaml` |
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `testdata/context/1/template-code.yaml` |
 | may not | a connection of a store key outside `<project>/`: the platform's, another namespace's | `connections.go: storeSecret` | `testdata/context/1/remote-key-of-the-platform.yaml` |
-| may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: tree.consent` | `testdata/cli/claims.txtar` |
+| may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
 | may not | keep a declaration unchecked by having no instance: its named claims (class, request, name) and its connections checked as an instance's compile checks them, the tree refused | `repository.Load`, `okdp.CheckDeclarations` | `testdata/cli/layout.txtar`, `TestValidateClaim` |
 | may not | the name `platform`, the segment of the platform's keys | `policy.go: checkNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/cli/secrets.txtar`, `TestCheckProjectName` |
 | may not | a reserved namespace: `kube-*`, Kubernetes' own; `flux-system`, `argocd`, `okdp-releases`, the engines' and the targets' (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); another namespace a target writes in (the flux target's `Source`); those of `policy.reserved`, privileged or not | `policy.go: checkNamespace`, `checkPlatformNamespace`, `target.OwnNamespaces`; before a project is created, `compiler.CheckProjectName`, the compile's two | `testdata/cli/policy.txtar` (`reserved`), `TestCompileErrors`, `TestCheckProjectName`, `TestOwnNamespaces` |
@@ -119,14 +119,14 @@ and, a provider, its `claimers`.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may | any package of the catalog, `service` and `version` | `repository.go: tree.definition` | `examples/02_advanced` |
+| may | any package of the catalog, `service` and `version` | `repository.go: parts.definition` | `examples/02_advanced` |
 | may | parameters the package's schema accepts, the keys of `global` it declares | `layers.go: valuesLayers`, `chart.Parameters` | `examples/02_advanced` |
 | may | upstream values of the keys its package opens (`upstream`) | `chart/merge.go: applyUpstream` | `examples/02_advanced` |
 | may | connections of its own, their credentials under `<project>/` of the store | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`demo/own`) |
-| may | claims of a class, or of a provider of its namespace or with its consent; a request the contract's claim schema accepts | `namespace.go: tree.provider`, `tree.consent`, `tree.request` | `testdata/cli/claims.txtar` |
+| may | claims of a class, or of a provider of its namespace or with its consent; a request the contract's claim schema accepts | `namespace.go: compilation.provider`, `compilation.consent`, `compilation.request` | `testdata/cli/claims.txtar` |
 | may not | `global` but the keys the parameter schema declares, never `okdp` | `layers.go: valuesLayers` | `testdata/instance-sets-global.yaml` |
 | may not | `connections` or `claims` in `config.yaml` | `layers.go: valuesLayers` | `testdata/instance-sets-connections.yaml`, `instance-sets-claims.yaml` |
-| may not | anything but `connections` in `connections.yaml` | `repository.go: tree.instance` | `TestLoadErrors` |
+| may not | anything but `connections` in `connections.yaml` | `repository.go: parts.instance` | `TestLoadErrors` |
 | may not | a file in its directory but `instance.yaml`, `config.yaml` and `connections.yaml` (a `values.yaml` no compile reads) | `repository.go: instanceFiles` | `TestInstanceFiles` (`instance_test.go`), `testdata/cli/layout.txtar` |
 | may not | template code, in a key or a string | `layers.go: valuesLayers` (`chart.NoTemplate`) | `testdata/template-code.yaml` |
 | may not | a parameter the schema refuses | `chart.Parameters` | `testdata/schema-violation.yaml` |
@@ -173,7 +173,7 @@ which an instance's list replaces.
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
 | may not | a connection reference out of the compile's reach (under `allOf`, `$defs`, `additionalProperties`...), which a reader of the schema, a console, would take for one the compile resolves and checks | `connections.go: requirements` (`schemaRefs`) | `TestRequirementsOutOfReach` |
 | may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
-| may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store, an item of a `List` among them | `namespace.go: tree.refuseSecretTargets`, `policy.go: eachObject` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
+| may not | a Secret of a claimer's namespace another object writes, through its claimers' copies, `<release>-<secretRef.name>`, or two objects of one namespace that write one Secret or one key of the store, an item of a `List` among them | `namespace.go: compilation.refuseSecretTargets`, `policy.go: eachObject` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
 | may not | expressions past the cost limit, a host function's call counted by the bytes it reads and writes, or that read the cluster, the environment or the time | `compile.Session`, `hostFunctions`, `hostCost` | `testdata/cli/limits.txtar`, `TestHostCostBytes` |
 | may not | amplify its input past the cost limit or the size of a document: a `$for`'s elements and what its body builds counted in the cost, a document's values 32 MiB at most whatever the limit, each copy of a value counted | `compile.Session`: `charge`, `grow`, `memSize` | `TestLoopCost` |
 

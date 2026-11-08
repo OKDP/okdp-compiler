@@ -20,8 +20,9 @@
 #             (okdpSignInProxy)
 #   platform, global  the instance's: platform.oidc, platform.access...
 vars:
-  # The name of the cookie and of the Secret holding its secret.
+  # The name of the Secret holding the cookie's secret, and of the cookie.
   name: ${{ first([args.?name.orValue(''), okdpFullname('oauth2-proxy')]) }}
+  cookie: ${{ first([args.?cookieName.orValue(''), '_' + name + '_oauth2']) }}
   port: ${{ args.?port.orValue(4180.0) }}
   groups: ${{ args.?allowedGroups.orValue(platform.access.editors) }}
   # The CA bundle the proxy trusts when it calls the issuer: the
@@ -67,7 +68,7 @@ values:
       - --email-domain=*
       - --oidc-groups-claim=${{ args.?groupsClaim.orValue('groups') }}
       - $spread: ${{ groups.map(g, '--allowed-group=' + g) }}
-      - --cookie-name=_${{ name }}_oauth2
+      - --cookie-name=${{ cookie }}
       - --cookie-secure=true
       - --cookie-expire=${{ args.?cookieExpire.orValue('8h') }}
       - --skip-provider-button=true

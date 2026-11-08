@@ -462,6 +462,32 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 // Compile runs the mapping of def on one instance, cancelled with ctx
 // (between stages, and within the evaluation of an expression). It is safe
 // for concurrent use: it keeps no state between calls.
+//
+// Whatever the package says, it enforces (docs/04_threat_model.md):
+//   - names: a release, a namespace and an instance name that are labels,
+//     the namespace none the platform or the compiler reserves
+//     (global.okdp.policy.reserved, the engines' own), the release none
+//     of an object the platform writes in every namespace;
+//   - values: an instance's layers hold no connections, claims, access nor
+//     template code, and global only the keys its parameter schema
+//     declares, never okdp; the layers of a project above the platform's
+//     set nothing of global.okdp but provisioning and of global only
+//     the keys of global.okdp.policy.projectGlobals, and change no value
+//     of a lower level;
+//   - upstream values, of a project that is not privileged: the package's
+//     protect and append paths, no key of a pod's privileges, identity or
+//     containers, images from the platform's registries only;
+//   - connections: of their contract, a store key under the project's
+//     own, and the claims bound by CompileAll;
+//   - objects, of a project that is not privileged: its namespace's, none
+//     cluster-scoped nor of the engines' API groups, hosts that end with
+//     -<namespace>.<ingress.suffix> or that the platform lists for it
+//     (global.okdp.policy.ingressHosts), in the objects and in the values
+//     of its charts' ingresses; of any project, no two of one kind,
+//     namespace and name, and no credential in clear unless
+//     Inputs.AllowPlainSecrets;
+//   - cost: the CEL cost of the expressions (Inputs.CostLimit) and the
+//     time of the compile (Inputs.Timeout, ctx).
 func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	return okdp.Compile(ctx, def, in)
 }
@@ -480,6 +506,14 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 // namespace publish refuses both, and the instances whose references
 // resolved to it. Outcomes in the order of instances, which changes none
 // of them.
+//
+// Beside the rules of Compile, which it applies to each instance, it
+// enforces those that need several: a provider of another namespace only
+// through a class of the platform's or with its consent
+// (Instance.Claimers), the connections of every context checked at their
+// declaration, referenced or not, one writer per Secret of a namespace
+// (an instance's objects and the copies of its claimers' credentials), and
+// each claim's request checked against its contract's claim schema.
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return okdp.CompileAll(ctx, instances)
 }
@@ -510,6 +544,14 @@ func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) 
 // RoleTree only, a catalog's (RoleCatalog) refused, as a repository
 // without a role. Every problem at once, each naming its repository and
 // path: a *LoadError.
+//
+// It enforces the layout: only the files and keys a part of the tree has
+// (an instance's directory holds instance.yaml, config.yaml and
+// connections.yaml, and connections.yaml only connections), the names of
+// its projects and instances, the declarations of a project without
+// instance checked as an instance's compile checks them, and the catalogs'
+// roles. Any problem fails the whole load; Build refuses a project that
+// does not load alone.
 func LoadRepository(repos []Repository) ([]Instance, error) {
 	return repository.Load(repos)
 }
@@ -520,6 +562,12 @@ func LoadRepository(repos []Repository) ([]Instance, error) {
 func AddedProblems(before, after *LoadError) []string {
 	return repository.Added(before, after)
 }
+
+// DefaultCostLimit: the CEL cost one instance's expressions may use for a
+// caller that compiles packages it has not reviewed (okdp-compile's
+// --cost-limit, a server's BuildOptions.CostLimit), about ten times the
+// dearest case of the catalogs.
+const DefaultCostLimit = 1_000_000
 
 // BuildOptions: what Build sets on each instance of a tree, and the chart
 // cache of its checks.

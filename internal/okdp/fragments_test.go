@@ -333,13 +333,33 @@ func TestWebWorkload(t *testing.T) {
 	if value.Str(value.Dig(np, "spec.ingress")) != "[map[ports:[map[port:proxy protocol:TCP]]]]" {
 		t.Errorf("network policy: %#v", np)
 	}
+	// No component: the instance's own workload, named after the release,
+	// its selector without a component label, its proxy named okdpFullname.
+	got, err = eval(s, "okdpWebWorkload(x)", M{"x": M{
+		"port": 8080.0, "pod": M{"containers": []any{container("app")}},
+		"ingress": M{"host": "web-demo.example.org"}, "signIn": M{"cookieName": "_session"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"Deployment/demo-app", "Service/demo-app", "Ingress/demo-app", "NetworkPolicy/demo-app", "Password/demo-app-oauth2-proxy-cookie-secret", "ExternalSecret/demo-app-oauth2-proxy"}
+	if k := kinds(got); !slices.Equal(k, want) {
+		t.Fatalf("no component: kinds %v, want %v", k, want)
+	}
+	objects = value.AsList(got)
+	if sel := value.AsMap(value.Dig(value.AsMap(objects[0]), "spec.selector.matchLabels")); sel["app.kubernetes.io/instance"] != "demo-app" || sel["app.kubernetes.io/component"] != nil {
+		t.Errorf("no component: selector %#v", sel)
+	}
+	if args := value.Str(value.AsMap(value.AsList(value.Dig(value.AsMap(objects[0]), "spec.template.spec.containers"))[1])["args"]); !strings.Contains(args, "--cookie-name=_session") || strings.Contains(args, "_demo-app-oauth2-proxy_oauth2") {
+		t.Errorf("no component: proxy args %s", args)
+	}
 	for name, tc := range map[string]struct {
 		args M
 		want string
 	}{
 		"signIn without ingress": {M{"component": "w", "port": 8080.0, "pod": M{"containers": []any{container("a")}}, "signIn": M{}}, "okdpWebWorkload: signIn needs an ingress"},
 		"signIn, a named port":   {M{"component": "w", "port": "http", "pod": M{"containers": []any{container("a")}}, "ingress": M{"host": "h"}, "signIn": M{}}, "okdpWebWorkload: signIn needs the application's port as a number"},
-		"no component":           {M{"port": 1.0, "pod": M{"containers": []any{container("a")}}}, "missing property 'component'"},
+		"an empty component":     {M{"component": "", "port": 1.0, "pod": M{"containers": []any{container("a")}}}, "/okdpWebWorkload/component"},
 		"no port":                {M{"component": "w", "pod": M{"containers": []any{container("a")}}}, "missing property 'port'"},
 		"no host":                {M{"component": "w", "port": 1.0, "pod": M{"containers": []any{container("a")}}, "ingress": M{}}, "missing property 'host'"},
 		"a hostPath":             {M{"component": "w", "port": 1.0, "pod": M{"containers": []any{container("a")}, "volumes": []any{M{"name": "h", "hostPath": M{"path": "/"}}}}}, "/okdpWebWorkload/pod/volumes/0"},

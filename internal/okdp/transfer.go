@@ -7,7 +7,6 @@ package okdp
 import (
 	"cmp"
 	"fmt"
-	"io/fs"
 	"slices"
 
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -91,14 +90,14 @@ func storeKey(namespace, id string) string { return namespace + "/" + id }
 // the store with the PushSecret, when the claim is gone. A claim whose
 // output has no secretRef, or whose contract no secret field, has none.
 // The store is then required.
-func pushSecrets(inst *instance, contracts fs.FS, claims []Claim, outputs []Output) ([]M, error) {
+func pushSecrets(inst *instance, contracts *contractCache, claims []Claim, outputs []Output) ([]M, error) {
 	var out []M
 	for _, c := range claims {
 		i := slices.IndexFunc(outputs, func(o Output) bool { return o.Contract == c.Contract && o.Name == c.ID })
 		if c.Namespace == inst.namespace || i < 0 || outputs[i].SecretRef == nil {
 			continue
 		}
-		ct, err := readContract(contracts, c.Contract)
+		ct, err := contracts.get(c.Contract)
 		if err != nil {
 			return nil, err
 		}
