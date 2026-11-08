@@ -32,7 +32,7 @@ func bigValue(n int) M {
 func TestHostCostBytes(t *testing.T) {
 	const mib = 1 << 20
 	scope := M{"values": bigValue(mib)}
-	for _, src := range []string{"sha256(values)", "str(values)", "toJson(values)", "toYaml(values)", "quote(values)", "first([values])"} {
+	for _, src := range []string{"sha256(values)", "str(values)", "toJson(values)", "toYaml(values)", "quote(values)", "first([values])", "json.encode(values)"} {
 		s := NewSession(context.Background(), 1<<40)
 		if _, err := s.Eval(scope, nil, mapping("vars:\n  a: ${{ "+src+" }}\n")); err != nil {
 			t.Fatalf("%s: %v", src, err)

@@ -14,10 +14,10 @@ import (
 	"math"
 
 	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/cost"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
-	"cel.dev/cel-go/interpreter"
 	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -68,9 +68,9 @@ func (l hostLib) CompileOptions() []cel.EnvOption { return []cel.EnvOption{l.fn}
 // ProgramOptions: its calls counted with hostCost, when the program
 // tracks its cost (a session under a limit, NewSession).
 func (l hostLib) ProgramOptions() []cel.ProgramOption {
-	opts := make([]interpreter.CostTrackerOption, len(l.ids))
+	opts := make([]cost.TrackerOption, len(l.ids))
 	for i, id := range l.ids {
-		opts[i] = interpreter.OverloadCostTracker(id, hostCost)
+		opts[i] = cost.OverloadTracker(id, hostCost)
 	}
 	return []cel.ProgramOption{cel.CostTrackerOptions(opts...)}
 }
@@ -146,6 +146,10 @@ func addSat(a, b uint64) uint64 {
 // spaces, as sprig), toYaml (sigs.k8s.io/yaml without the last newline, as
 // Helm) and quote (Go's %q; a null gives "", as in sprig).
 func hostFunctions() []cel.EnvOption {
+	toJSON := func(v any) (string, error) {
+		b, err := json.Marshal(v)
+		return string(b), err
+	}
 	return []cel.EnvOption{
 		Func("str", cel.StringType, func(v any) (string, error) { return value.Str(v), nil }),
 		Func("first", cel.DynType, func(v any) (any, error) {
@@ -157,10 +161,10 @@ func hostFunctions() []cel.EnvOption {
 			return "", nil
 		}),
 		Func("sha256", cel.StringType, func(v any) (string, error) { return fmt.Sprintf("%x", sha256.Sum256([]byte(value.Str(v)))), nil }),
-		Func("toJson", cel.StringType, func(v any) (string, error) {
-			b, err := json.Marshal(v)
-			return string(b), err
-		}),
+		Func("toJson", cel.StringType, toJSON),
+		// json.encode, not ext.Encoders' (its version 1): that one writes a
+		// map in no fixed order and costs more than any limit admits.
+		Func("json.encode", cel.StringType, toJSON),
 		Func("toPrettyJson", cel.StringType, func(v any) (string, error) {
 			b, err := json.MarshalIndent(v, "", "  ")
 			return string(b), err
