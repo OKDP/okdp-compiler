@@ -145,7 +145,7 @@ pins: its mapping, its defaults and values, its `upstream` (the keys an
 instance may set, `protect`, `append`), its `objects`, `provides`,
 `provisions` and `oidcClients`. Its own values may hold template code
 and are not held to the upstream policy; its objects reach the cluster
-as written (the objects file is not templated by Helm), an
+as written (the objects' chart does not template them), an
 ExternalSecret or a PushSecret of it names any key of the store. Its
 `provisions` give the consent of its instances by default (`claimers`),
 which an instance's list replaces.

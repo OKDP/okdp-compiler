@@ -20,7 +20,7 @@ what a compile writes to git about it:
 - the labels of OKDP's objects (`okdp.io/instance`, `okdp.io/service`),
   and `okdp.io/provides-<contract>` per contract it provides.
 
-It would be one more document of `okdp.objects.yaml`, rendered in the
+It would be one more document of the `okdp-objects` stream, rendered in the
 instance's release by its umbrella, created and deleted with it.
 
 ### Advantages
@@ -149,7 +149,7 @@ opens rather than text it shows. The info file keeps `url` and
 Keep `usage` in the `instance` section, evaluated and checked by the
 compile, and have Helm keep it too: the umbrella's `templates/NOTES.txt`,
 the same in every output, written when the instance has a usage, prints
-it as written, as `templates/okdp.yaml` includes the objects:
+it as written:
 
 ```
 {{- (.Files.Get "okdp.info.yaml" | fromYaml).usage -}}

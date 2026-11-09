@@ -1,7 +1,8 @@
 // Own charts: the charts the compiler adds beside the dependencies of
-// Chart.yaml, those of the OAuth clients (oidc.go), their keys reserved and
-// their charts added in one place (addOwnCharts), and the platform's charts
-// (global.okdp.charts) they are rendered with.
+// Chart.yaml, those of the OAuth clients (oidc.go) and of the instance's
+// objects, their keys reserved and the clients' charts added in one place
+// (addOwnCharts), and the platform's charts (global.okdp.charts) they are
+// rendered with.
 
 package okdp
 
@@ -13,17 +14,38 @@ import (
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
-// platformCharts: the chart the platform renders the compiler's own charts
+// ObjectsChart: the chart key of the instance's objects, in the umbrella,
+// reserved in every compile; ObjectsValue: its value that holds them, one
+// YAML stream.
+const (
+	ObjectsChart = "okdp-objects"
+	ObjectsValue = "manifests"
+)
+
+// ObjectsSource: the chart that renders an instance's objects as written:
+// the default of global.okdp.charts.objects.
+var ObjectsSource = chart.Ref{Repository: "oci://quay.io/okdp/charts", Chart: ObjectsChart, Version: "1.0.0"}
+
+// platformCharts: the charts the platform renders the compiler's own charts
 // with (global.okdp.charts of okdp, of the form platform.schema.json gives
 // it: its keys, their types; another key is refused there, a misspelled
-// oidcDcr would otherwise leave the default in place): oidcDcr, the chart
-// of the OAuth clients in dcr mode, DcrSource by default.
-func platformCharts(okdp M) (chart.Ref, error) {
+// key would otherwise leave the default in place): oidcDcr, the chart of
+// the OAuth clients in dcr mode, DcrSource by default; objects, the chart
+// of the instance's objects, ObjectsSource by default.
+func platformCharts(okdp M) (dcr, objects chart.Ref, err error) {
 	charts := value.AsMap(okdp["charts"])
-	if charts["oidcDcr"] == nil {
-		return DcrSource, nil
+	dcr, objects = DcrSource, ObjectsSource
+	if charts["oidcDcr"] != nil {
+		if dcr, err = platformChart(charts["oidcDcr"], "global.okdp.charts.oidcDcr"); err != nil {
+			return chart.Ref{}, chart.Ref{}, err
+		}
 	}
-	return platformChart(charts["oidcDcr"], "global.okdp.charts.oidcDcr")
+	if charts["objects"] != nil {
+		if objects, err = platformChart(charts["objects"], "global.okdp.charts.objects"); err != nil {
+			return chart.Ref{}, chart.Ref{}, err
+		}
+	}
+	return dcr, objects, nil
 }
 
 // platformChart: a chart of global.okdp.charts, a map of strings
@@ -36,10 +58,10 @@ func platformChart(v any, where string) (chart.Ref, error) {
 }
 
 // ownChart: a chart key the compiler owns in a compile: the chart of each
-// OAuth client, in every mode. Neither Chart.yaml nor the values file may
-// list it (addOwnCharts). The compiler adds it to the compile when it has
-// values, rendered by source: no OKDP defaults, no instance upstream
-// values.
+// OAuth client, in every mode, and of the instance's objects. Neither
+// Chart.yaml nor the values file may list it (addOwnCharts). The compiler
+// adds it to the compile when it has values, rendered by source: no OKDP
+// defaults, no instance upstream values.
 type ownChart struct {
 	key    string
 	of     string    // what it is the chart of, for the messages: oidcClients[<i>] (<name>)

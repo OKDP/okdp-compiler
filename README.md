@@ -38,7 +38,7 @@ if err != nil {
 // res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
 //               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 // res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
-//               the mapping's objects section (okdp.objects.yaml)
+//               the mapping's objects section (under okdp-objects in instance.values.yaml)
 // res.Info: what the instance publishes: its url, its usage, the connections it provides (okdp.info.yaml)
 // res.Dependencies: the instances the connection references point to (compiler.Dependency): the graph's edges
 
@@ -126,10 +126,11 @@ maps every compiled key to the upstream chart that renders it
 ([chart index](docs/specs/01_inputs_outputs.md#chart-index)).
 
 `res.Objects`, OKDP's own objects, the generated Secrets among them,
-reach the cluster with the upstream charts: `Write` gives them as a YAML
-stream, `okdp.objects.yaml`, which the umbrella's own template renders as
-written, in the instance's release
-([the objects file](docs/specs/01_inputs_outputs.md#the-objects-file),
+reach the cluster with the upstream charts: `Write` gives them as one
+YAML stream, the `manifests` value of the `okdp-objects` chart, a
+dependency of the umbrella that renders them as written, in the
+instance's release
+([the objects chart](docs/specs/01_inputs_outputs.md#the-objects-chart),
 [OKDP's own objects](docs/03_okdp_objects.md)); none holds credentials
 in clear, a Secret with values, a `provides` secret without `generate`,
 unless the caller sets `Inputs.AllowPlainSecrets`
@@ -275,9 +276,8 @@ umbrella over the upstream charts of the index, each a dependency under
 its key, and `instance.values.yaml`, the final values of each chart under
 its key, given to Helm with `-f` ([`--output`](docs/01_usage.md#--output),
 [rendering with Helm](docs/01_usage.md#rendering-with-helm)),
-`okdp.objects.yaml`, OKDP's own objects, which the umbrella renders as
-written (`templates/okdp.yaml`), when the instance has any, and
-`okdp.info.yaml`, what the instance publishes, when it publishes
+OKDP's own objects among them, under `okdp-objects`, when the instance
+has any, and `okdp.info.yaml`, what the instance publishes, when it publishes
 something. The directory is created if needed; the command owns its
 `projects/`, which it marks, `projects/.okdp-compile`, removing what it
 does not write; a `projects/` it did not write, without the mark, is

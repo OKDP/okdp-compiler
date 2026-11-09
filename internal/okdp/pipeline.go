@@ -47,9 +47,28 @@ type Inputs struct {
 	// (generate, okdpGeneratedSecret) or read from the platform's secret
 	// store, never written to the deployments repository.
 	AllowPlainSecrets bool
+	// Finalize: what makes the final values of the charts of the compile
+	// from what it computed; nil, Helm's merge, chart.FinalValues.
+	Finalize Finalize
 
 	memo *instanceMemo // what the compiles of a set read once (Memo); nil: this compile reads its own
 }
+
+// FinalInput: what the final values of a compile are made from (Finalize).
+type FinalInput struct {
+	Charts     fs.FS               // Inputs.Charts, passed through unread
+	Files      fs.FS               // the package
+	Specs      chart.Specs         // the charts of the compile by key, the compiler's own among them
+	ValuesFile string              // the values file Output is read from, for the errors
+	Output     M                   // what the mapping computed, by chart key
+	Values     M                   // the instance's merged values: their global, their upstream values
+	Upstream   chart.UpstreamCheck // what is refused of the upstream values of every key; nil, nothing
+}
+
+// Finalize: the final values of each key of in.Output, the chart that
+// renders each, and the warnings. It runs inside the compile of the
+// instance: its error refuses the instance, as any other stage's.
+type Finalize func(in FinalInput) (values map[string]map[string]any, charts map[string]chart.Ref, warnings []string, err error)
 
 // ContextLayer: a values layer of the context (Inputs.Context), see
 // chart.ParseValues, at its level: 0, the platform's, then each level adds
@@ -69,6 +88,9 @@ type Result struct {
 	// template <Charts[chart]> -f <Values[chart]>`): its dependency of
 	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client.
 	Charts map[string]chart.Ref
+	// Computed: chart -> what the mapping computed for it, the compiler's
+	// own charts among them, before Finalize made Values of it.
+	Computed M
 	// Objects: OKDP's own objects, rendered whole: the credentials Secrets
 	// of the provided connections, then the objects section of the mapping,
 	// then the PushSecrets and ExternalSecrets of the credentials of claims
@@ -79,6 +101,9 @@ type Result struct {
 	// file, which it renders as written, in its release (helm.Write). nil
 	// when there is none.
 	Objects []map[string]any
+	// ObjectsSource: the chart that renders Objects in the umbrella, the
+	// platform's (global.okdp.charts.objects).
+	ObjectsSource chart.Ref
 	// Info: what the instance publishes, its instance and provides
 	// sections, checked (okdp.info.yaml, helm.Write).
 	Info Info
@@ -172,8 +197,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	// okdpGeneratedSecret evaluates its template in it too.
 	var session *cel2yaml.Session
 	session = cel2yaml.NewSession(ctx, in.CostLimit, functions(inst, &session)...)
-	// The chart the platform renders the OAuth client charts with.
-	dcrSource, err := platformCharts(inst.okdp)
+	// The charts the platform renders the OAuth clients and the objects with.
+	dcrSource, objectsSource, err := platformCharts(inst.okdp)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +224,12 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	if err != nil {
 		return nil, err
 	}
+	out.ObjectsSource = objectsSource
+	// The objects' key is reserved, its chart added by the writer of the
+	// umbrella: its values are the objects, not values of an upstream chart.
+	own := append(clientCharts(clients, dcrValues, dcrSource), ownChart{key: ObjectsChart, of: "the instance's objects", from: "the objects section", source: objectsSource})
 	// 9-10. Final values of the charts, checked against the upstream charts.
-	if err := finalValues(ctx, def, in, inst, svc, out, res, written, clientCharts(clients, dcrValues, dcrSource)); err != nil {
+	if err := finalValues(ctx, def, in, inst, svc, out, res, written, own); err != nil {
 		return nil, err
 	}
 	out.Cost = session.Used()
@@ -349,8 +378,15 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	out.Computed = value.AsMap(value.Copy(output))
 	var warnings []string
-	if out.Values, out.Charts, warnings, err = chart.FinalValues(in.memo.charts, def.Files, specs, def.valuesName(), output, inst.values, upstreamCheck(inst.okdp, in.Namespace, out.Privileged)); err != nil {
+	check := upstreamCheck(inst.okdp, in.Namespace, out.Privileged)
+	if in.Finalize != nil {
+		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Upstream: check})
+	} else {
+		out.Values, out.Charts, warnings, err = chart.FinalValues(in.memo.charts, def.Files, specs, def.valuesName(), output, inst.values, check)
+	}
+	if err != nil {
 		return err
 	}
 	out.Warnings = append(out.Warnings, warnings...)

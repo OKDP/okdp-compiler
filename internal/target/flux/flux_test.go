@@ -295,3 +295,17 @@ func TestFiles(t *testing.T) {
 		t.Error("a wrong option is refused first")
 	}
 }
+
+// TestFilesValuesLimit: values too large for the ConfigMap of the HelmRelease
+// are refused, naming the instance, not left for the cluster to refuse.
+func TestFilesValuesLimit(t *testing.T) {
+	res := &okdp.Result{Namespace: "demo", Release: "demo-web", Service: "web", Version: "1.0.0", Values: map[string]map[string]any{"app": {"a": strings.Repeat("x", ConfigMapMax)}}}
+	results := []*okdp.Result{res}
+	g, err := graph.New(results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Target{}).Files(results, g); err == nil || !strings.Contains(err.Error(), "demo/demo-web: instance.values.yaml is") {
+		t.Errorf("got %v, want the instance's values refused", err)
+	}
+}

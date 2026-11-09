@@ -1,3 +1,7 @@
 apiVersion: v2
 name: notebook
 version: 1.0.0
+dependencies:
+  - name: okdp-objects
+    repository: oci://quay.io/okdp/charts
+    version: 1.0.0

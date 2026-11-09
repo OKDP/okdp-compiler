@@ -156,7 +156,7 @@ func TestPlatformSchema(t *testing.T) {
 			"- at '/global/okdp/certificateIssuers': false schema\n- at '/global/okdp/tls': validation failed\n  - at '/global/okdp/tls/caBundleSecret': got null, want string\n  - at '/global/okdp/tls/clusterIssuer': got boolean, want string"},
 		"serviceCatalog": {M{"okdp": M{"serviceCatalog": M{"categories": []any{}}}}, "- at '/global/okdp/serviceCatalog': false schema"},
 		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "oidcDCR": M{}, "dcr": nil}}},
-			"- at '/global/okdp/charts': additional properties 'dcr', 'objects', 'oidcDCR' not allowed\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
+			"- at '/global/okdp/charts': additional properties 'dcr', 'oidcDCR' not allowed\n- at '/global/okdp/charts/objects': got string, want object\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
 		"classes": {M{"okdp": M{"provisioning": M{
 			"server":   M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg", "request": M{"size": "1Gi"}}}},
 			"database": M{"default": float64(1), "other": true, "classes": M{"Fast": M{"provider": "data/pg"}, "slow": M{"request": "1Gi", "tier": "b"}}},

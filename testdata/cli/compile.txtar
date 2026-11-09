@@ -9,7 +9,7 @@ cmp stderr $WORK/webapp.txt
 cmp $WORK/files/projects/demo/instances/demo-webapp/Chart.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/Chart.yaml
 cmp $WORK/files/projects/demo/instances/demo-webapp/instance.values.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/instance.values.yaml
 cmp $WORK/files/projects/demo/instances/demo-webapp/okdp.info.yaml examples/02_advanced/output/projects/demo/instances/demo-webapp/okdp.info.yaml
-! exists $WORK/files/projects/demo/instances/demo-webapp/okdp.objects.yaml $WORK/files/projects/demo/instances/demo-webapp/templates
+! grep okdp-objects $WORK/files/projects/demo/instances/demo-webapp/instance.values.yaml
 
 # The context by level: platform.yaml (0), the project's project.yaml (1),
 # the instance's connections.yaml (2), then its config.yaml.
@@ -17,8 +17,7 @@ status 0 okdp-compile --repository examples/03_full/input/db -o $WORK/full
 ! stdout .
 cmp stderr $WORK/workspace.txt
 cmp $WORK/full/projects/demo/instances/demo-workspace/instance.values.yaml examples/03_full/output/projects/demo/instances/demo-workspace/instance.values.yaml
-cmp $WORK/full/projects/demo/instances/demo-workspace/okdp.objects.yaml examples/03_full/output/projects/demo/instances/demo-workspace/okdp.objects.yaml
-cmp $WORK/full/projects/demo/instances/demo-workspace/templates/okdp.yaml examples/03_full/output/projects/demo/instances/demo-workspace/templates/okdp.yaml
+grep 'okdp-objects' $WORK/full/projects/demo/instances/demo-workspace/Chart.yaml
 
 # A tree that reads no contract and depends on nothing: nothing printed,
 # and an instance that publishes nothing has no okdp.info.yaml.

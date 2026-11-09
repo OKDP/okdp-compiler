@@ -349,7 +349,7 @@ for it are gone from the compile, and the package keeps what they held (a
 database's reclaim policy, `helm.sh/resource-policy: keep`, which the
 compiler gives Argo CD's equivalents, `argocd.argoproj.io/sync-options:
 Prune=false,Delete=false`, [the objects
-file](01_inputs_outputs.md#the-objects-file)): an operator removes it.
+chart](01_inputs_outputs.md#the-objects-chart)): an operator removes it.
 
 An instance of the package serves the claims of its own namespace, and
 of the platform's classes, which route every namespace to it; a claim
@@ -700,9 +700,9 @@ them (namespace and labels are the mapping's). After evaluation, every item
 must be a map with a non-empty `kind` and `metadata.name`
 (`- at '/objects/<i>': missing property 'kind'`). A value that is not a
 list fails; absent or null, there are none. They follow the credentials
-Secrets in `Result.Objects`, written to the objects file the umbrella
-renders as written:
-[the objects file](01_inputs_outputs.md#the-objects-file). The platform's
+Secrets in `Result.Objects`, written to the values of the chart that
+renders them as written:
+[the objects chart](01_inputs_outputs.md#the-objects-chart). The platform's
 policy then applies to them: unless the project is one of the platform's
 own (`global.okdp.policy.privileged`), every object stays in the
 instance's namespace (`namespace` unset, or `release.namespace`) and none

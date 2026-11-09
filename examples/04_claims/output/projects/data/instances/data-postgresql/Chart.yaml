@@ -5,3 +5,6 @@ dependencies:
   - name: cluster
     repository: https://charts.example.org
     version: 0.3.0
+  - name: okdp-objects
+    repository: oci://quay.io/okdp/charts
+    version: 1.0.0

@@ -519,7 +519,7 @@ func TestPartialRederives(t *testing.T) {
 	}
 	// The instance's own files as they were: its objects, refused now by
 	// the identity that applies them.
-	objects := path.Join(compiler.InstanceDir("ops", "ops-x"), compiler.ObjectsFile)
+	objects := path.Join(compiler.InstanceDir("ops", "ops-x"), compiler.UmbrellaValues)
 	if string(second[objects]) != string(first[objects]) || !strings.Contains(string(second[objects]), "ClusterRoleBinding") {
 		t.Errorf("the kept instance's objects changed:\n%s", second[objects])
 	}

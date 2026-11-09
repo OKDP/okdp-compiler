@@ -62,6 +62,10 @@ func ServiceAccountName(namespace string) string { return "project-" + namespace
 // DefaultSource: the GitRepository of the tree, okdp-gitops'.
 const DefaultSource = "flux-system/okdp-gitops"
 
+// ConfigMapMax: the most bytes Kubernetes takes in a ConfigMap, the values
+// of an instance, its objects among them.
+const ConfigMapMax = 1 << 20
+
 // Target: the flux target.
 type Target struct {
 	Source     string   // the GitRepository the HelmReleases read the charts from, <namespace>/<name>; DefaultSource when empty
@@ -102,6 +106,9 @@ func (t Target) Files(results []*okdp.Result, g *graph.Graph) (map[string][]byte
 	instances := map[string][]string{}
 	for _, res := range results {
 		dir := target.InstanceDir(res.Namespace, res.Release)
+		if n := len(files[path.Join(dir, helm.ValuesFile)]); n > ConfigMapMax {
+			return nil, fmt.Errorf("%s/%s: %s is %d bytes, more than the %d of the ConfigMap its HelmRelease reads it from", res.Namespace, res.Release, helm.ValuesFile, n, ConfigMapMax)
+		}
 		var dependsOn []string
 		for _, n := range g.DependsOn(graph.Node{Namespace: res.Namespace, Release: res.Release}) {
 			dependsOn = append(dependsOn, n.Release)

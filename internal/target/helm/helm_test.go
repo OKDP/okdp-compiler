@@ -140,12 +140,13 @@ func TestHelmUmbrella(t *testing.T) {
 			"spec": map[string]any{"template": "{{ .accessKey }}", "null": nil, "integer": uint64(12345678901234567890)}},
 		{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "objects"}},
 	}
+	res.ObjectsSource = chart.Ref{Repository: "file://../" + okdp.ObjectsChart, Chart: okdp.ObjectsChart, Version: "1.0.0"}
 	files, err := Write(res)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// What Helm renders.
-	for _, name := range []string{"Chart.yaml", ValuesFile, ObjectsFile, ObjectsTemplate} {
+	for _, name := range []string{"Chart.yaml", ValuesFile} {
 		b, golden := files[name], filepath.Join(dir, filepath.FromSlash(name))
 		if *update {
 			if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
@@ -205,20 +206,27 @@ func TestHelmUmbrella(t *testing.T) {
 	}
 }
 
-// TestHelmObjects: the objects file of the umbrella (testdata/helm/umbrella,
-// as Write writes it: TestHelmUmbrella), rendered by its template with
-// every Helm version (helm-objects.yaml, the manifests in Helm's install
-// order, the same for each): each document a manifest, as written.
+// TestHelmObjects: the objects of the umbrella (testdata/helm/umbrella, as
+// Write writes them: TestHelmUmbrella), one string value of its chart,
+// rendered with every Helm version (helm-objects.yaml, the manifests in
+// Helm's install order, the same for each): each document a manifest, as
+// written.
 func TestHelmObjects(t *testing.T) {
 	dir := filepath.Join(helmtest.Dir, "umbrella")
-	docs := func(name string) []string {
+	read := func(name string) []byte {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("%v (run testdata/helm/generate.sh)", err)
 		}
-		return slices.Sorted(slices.Values(strings.Split(string(b), "---\n")))
+		return b
 	}
-	if got, want := docs("helm-objects.yaml"), docs(ObjectsFile); !slices.Equal(got, want) {
-		t.Errorf("helm-objects.yaml: Helm renders\n%q\nthe documents of %s are\n%q", got, ObjectsFile, want)
+	values, err := chart.ParseValues(read(ValuesFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifests, _ := values[okdp.ObjectsChart].(map[string]any)[okdp.ObjectsValue].(string)
+	docs := func(s string) []string { return slices.Sorted(slices.Values(strings.Split(s, "---\n"))) }
+	if got, want := docs(string(read("helm-objects.yaml"))), docs(manifests); !slices.Equal(got, want) {
+		t.Errorf("helm-objects.yaml: Helm renders\n%q\nthe documents of the value are\n%q", got, want)
 	}
 }

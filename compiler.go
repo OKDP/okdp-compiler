@@ -80,6 +80,10 @@ type (
 	// ContextLayer: a values layer of the context (Inputs.Context) at its
 	// level: 0, the platform's, then each level adds to those below it.
 	ContextLayer = okdp.ContextLayer
+	// Finalize: Inputs.Finalize, what makes the final values of a compile.
+	Finalize = okdp.Finalize
+	// FinalInput: what a Finalize makes them from.
+	FinalInput = okdp.FinalInput
 	// Result: what a compile produces, its warnings among them (Warnings),
 	// which do not fail it.
 	Result = okdp.Result
@@ -255,13 +259,12 @@ const (
 	// usage, provides), written when it publishes something, for a control
 	// plane or a console that reads the deployments repository.
 	InfoFile = helm.InfoFile
-	// ObjectsFile: Result.Objects as a YAML stream, one document per object,
-	// written when there are objects: plain manifests, which ObjectsTemplate
-	// renders as written in the umbrella's release.
-	ObjectsFile = helm.ObjectsFile
-	// ObjectsTemplate: the umbrella's template of ObjectsFile, a path in
-	// the chart, written with it.
-	ObjectsTemplate = helm.ObjectsTemplate
+	// ObjectsChart: the key of the umbrella's values and dependencies that
+	// holds Result.Objects, when there are objects, under ObjectsValue, as
+	// one YAML stream.
+	ObjectsChart = okdp.ObjectsChart
+	// ObjectsValue: the value of ObjectsChart that holds the stream.
+	ObjectsValue = okdp.ObjectsValue
 )
 
 // The roles of a Repository (Repository.Role).
@@ -584,6 +587,8 @@ type BuildOptions struct {
 	// Charts: the chart cache CompileTree checks the final values against
 	// (StaticCharts, a cache that fetches what it lacks); nil, unchecked.
 	Charts ChartSource
+	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
+	Finalize Finalize
 }
 
 // Build: the tree repos make together (LoadRepository), each instance
@@ -606,6 +611,7 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 		instances[i].Inputs.CostLimit = opts.CostLimit
 		instances[i].Inputs.Timeout = opts.InstanceTimeout
 		instances[i].Inputs.AllowPlainSecrets = opts.AllowPlainSecrets
+		instances[i].Inputs.Finalize = opts.Finalize
 	}
 	t := CompileTree(ctx, instances, opts.Charts)
 	for _, r := range loaded.Refused {
@@ -758,9 +764,9 @@ func NewGraph(results []*Result) (*Graph, error) {
 // package's Chart.yaml with the dependencies compiled, an umbrella over the
 // upstream charts of its keys; UmbrellaValues, the final values of each key
 // under the key; InfoFile, when the instance publishes a URL, a usage
-// or a connection; and, when res has objects, ObjectsFile and
-// ObjectsTemplate. res is what Compile returned: Write does not check it
-// again. Every file is built before Write returns.
+// or a connection. When res has objects, UmbrellaValues holds them under
+// ObjectsChart, whose chart is one more dependency. res is what Compile
+// returned: Write does not check it again. Every file is built before Write returns.
 func Write(res *Result) (map[string][]byte, error) {
 	return helm.Write(res)
 }

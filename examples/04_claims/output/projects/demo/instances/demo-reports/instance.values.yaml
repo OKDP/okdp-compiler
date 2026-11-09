@@ -28,3 +28,45 @@ app:
             server: http://openbao.openbao.svc:8200
             version: v2
         store: okdp-secrets
+okdp-objects:
+  manifests: |
+    apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      labels:
+        app.kubernetes.io/instance: demo-reports
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/name: app
+        app.kubernetes.io/part-of: okdp
+        okdp.io/credentials-database-server: "true"
+        okdp.io/instance: demo-reports
+        okdp.io/service: app
+      name: demo-reports-demo.analytics-credentials
+      namespace: demo
+    spec:
+      data:
+        - remoteRef:
+            key: data/demo.analytics
+            property: password
+          secretKey: password
+        - remoteRef:
+            key: data/demo.analytics
+            property: username
+          secretKey: username
+      refreshInterval: 1h
+      secretStoreRef:
+        kind: SecretStore
+        name: okdp-secrets
+      target:
+        creationPolicy: Owner
+        name: demo-reports-demo.analytics-credentials
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/instance: demo-reports
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/name: app
+              app.kubernetes.io/part-of: okdp
+              okdp.io/credentials-database-server: "true"
+              okdp.io/instance: demo-reports
+              okdp.io/service: app

@@ -3,6 +3,7 @@ package helm
 import (
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
@@ -94,17 +95,18 @@ annotations:
 }
 
 // TestWrite: the umbrella's values, marked generated, what the instance
-// publishes, its empty keys left out, and the objects as a YAML stream,
-// marked generated, with the template that renders it, indented by 2
-// spaces; the dependencies in no file; publishing nothing, no instance
-// file, without objects, neither objects file.
+// publishes, its empty keys left out, and the objects as one YAML stream,
+// indented by 2 spaces, in the values of the chart that renders them, a
+// dependency; the dependencies of the instances in no file; publishing
+// nothing, no instance file; without objects, no such chart.
 func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &okdp.Result{
-		Values:       map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "app": {"b": 2}},
-		Charts:       map[string]chart.Ref{"oidc-dcr": okdp.DcrSource, "app": app},
-		Objects:      []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}, {"kind": "Secret", "data": nil}},
-		Dependencies: []okdp.Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[0].database"}},
+		Values:        map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "app": {"b": 2}},
+		Charts:        map[string]chart.Ref{"oidc-dcr": okdp.DcrSource, "app": app},
+		Objects:       []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}, {"kind": "Secret", "data": nil}},
+		ObjectsSource: okdp.ObjectsSource,
+		Dependencies:  []okdp.Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[0].database"}},
 		Info: okdp.Info{URL: "https://x", Usage: "use it\n", Provides: []okdp.Output{
 			{Name: "demo-app", Contract: "http", Values: map[string]any{"url": "https://x"}, SecretRef: &okdp.SecretRef{Name: "creds"}},
 		}},
@@ -114,10 +116,8 @@ func TestWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		ValuesFile:      target.Generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\n",
-		InfoFile:        "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
-		ObjectsFile:     target.Generated + "data:\n  t: '{{ .x }}'\nkind: ConfigMap\n---\ndata: null\nkind: Secret\n",
-		ObjectsTemplate: "{{- /* OKDP's own objects: okdp.objects.yaml, as okdp-compile wrote it, not templated. */ -}}\n{{ .Files.Get \"okdp.objects.yaml\" }}\n",
+		ValuesFile: target.Generated + "app:\n  b: 2\noidc-dcr:\n  a:\n    b:\n      - 1\nokdp-objects:\n  manifests: |\n    data:\n      t: '{{ .x }}'\n    kind: ConfigMap\n    ---\n    data: null\n    kind: Secret\n",
+		InfoFile:   "url: https://x\nusage: |\n  use it\nprovides:\n  - name: demo-app\n    contract: http\n    values:\n      url: https://x\n    secretRef:\n      name: creds\n",
 	}
 	if len(files) != len(want)+1 {
 		t.Errorf("got %d files, want %d and Chart.yaml", len(files), len(want))
@@ -127,6 +127,13 @@ func TestWrite(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", name, got, w)
 		}
 	}
+	chartDep := "- name: okdp-objects\n    repository: oci://quay.io/okdp/charts\n    version: 1.0.0\n"
+	if !strings.Contains(string(files["Chart.yaml"]), chartDep) {
+		t.Errorf("the chart of the objects is no dependency:\n%s", files["Chart.yaml"])
+	}
+	if _, ok := res.Values[okdp.ObjectsChart]; ok {
+		t.Errorf("Result.Values changed: %v", res.Values)
+	}
 	// No object, nothing published: Chart.yaml and the values only, the
 	// dependencies all the same.
 	res.Objects, res.Info = nil, okdp.Info{}
@@ -135,6 +142,9 @@ func TestWrite(t *testing.T) {
 	}
 	if got := slices.Sorted(maps.Keys(files)); !slices.Equal(got, []string{"Chart.yaml", ValuesFile}) {
 		t.Errorf("nothing but the chart: got %v", got)
+	}
+	if strings.Contains(string(files["Chart.yaml"]), okdp.ObjectsChart) {
+		t.Errorf("a chart of no objects:\n%s", files["Chart.yaml"])
 	}
 	// A usage alone is published, without the empty keys, of the instance
 	// and of an output.

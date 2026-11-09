@@ -1,6 +1,6 @@
 // Package helm writes a compile as the files of okdp-compile (Write):
 // one chart for the whole instance, an umbrella over the upstream charts of
-// its keys with OKDP's own objects, for one Helm release per instance under
+// its keys and the chart of OKDP's own objects, for one Helm release per instance under
 // the release name its values were compiled for, and what the instance
 // publishes. The caller writes them (the CLI to a directory, a server to
 // git).
@@ -31,88 +31,92 @@ const (
 	// deployments repository. Written when it publishes something. Helm
 	// ignores it.
 	InfoFile = "okdp.info.yaml"
-	// ObjectsFile: Result.Objects as a YAML stream, one document per object:
-	// OKDP's own objects, manifests as the compiler wrote them, which Helm
-	// does not template (ObjectsTemplate). Written when there are objects.
-	ObjectsFile = "okdp.objects.yaml"
-	// ObjectsTemplate: the umbrella's template that renders ObjectsFile, in
-	// the instance's release, as written (.Files.Get): objects hold {{ (an
-	// ExternalSecret's template) that Helm would execute as a template.
-	// Written with ObjectsFile.
-	ObjectsTemplate = "templates/okdp.yaml"
 )
-
-// objectsTemplate: the content of ObjectsTemplate.
-const objectsTemplate = `{{- /* OKDP's own objects: ` + ObjectsFile + `, as okdp-compile wrote it, not templated. */ -}}
-{{ .Files.Get "` + ObjectsFile + `" }}
-`
 
 // Write: what `okdp-compile -o <dir>` writes for res, path -> content:
 //
 //   - Chart.yaml, the chart of the instance: the package's Chart.yaml
 //     (Result.Chart), its fields kept, with one dependency per compiled
 //     key: first those of Chart.yaml, in its order, each as written; then
-//     the compiler's own charts, the OAuth clients', by key, rendered by
-//     the platform's charts (Result.Charts), each aliased to its key when
-//     the key is not the chart's name (Helm then names the subchart after
-//     the key: its .Chart.Name is the key);
+//     the compiler's own charts, the OAuth clients' and, when res has
+//     objects, the okdp-objects chart (Result.ObjectsSource), by key, each
+//     aliased to its key when the key is not the chart's name (Helm then
+//     names the subchart after the key: its .Chart.Name is the key);
 //   - ValuesFile, the final values of each key under the key, each with its
-//     own global, marked generated (target.Generated);
+//     own global, marked generated (target.Generated), and, when res has
+//     objects, Result.Objects as one YAML stream, one document per object,
+//     under okdp.ObjectsChart, okdp.ObjectsValue: a string, so that Helm
+//     changes neither the {{ of an ExternalSecret's template, nor a null,
+//     nor an integer beyond the precision of a float64;
 //   - InfoFile, when the instance publishes something: a URL, a usage
-//     or a connection;
-//   - ObjectsFile, marked generated, and ObjectsTemplate, when res has
-//     objects.
+//     or a connection.
 //
 // The YAML files are indented by 2 spaces. Every file is built before
 // Write returns: one that fails leaves the caller nothing to write. res is
 // what Compile returned: Write does not check it again.
 func Write(res *okdp.Result) (map[string][]byte, error) {
+	values, charts := maps.Collect(maps.All(res.Values)), maps.Collect(maps.All(res.Charts))
+	if len(res.Objects) > 0 {
+		var objects []any
+		for _, o := range res.Objects {
+			objects = append(objects, o)
+		}
+		stream, err := encode(objects)
+		if err != nil {
+			return nil, err
+		}
+		values[okdp.ObjectsChart] = map[string]any{okdp.ObjectsValue: string(stream)}
+		charts[okdp.ObjectsChart] = res.ObjectsSource
+	}
 	// The rendered dependencies of Chart.yaml, in its order.
 	c := res.Chart
 	c.Dependencies = nil
 	listed := map[string]bool{}
 	for _, d := range res.Chart.Dependencies {
 		listed[d.Key()] = true
-		if _, ok := res.Values[d.Key()]; ok {
+		if _, ok := values[d.Key()]; ok {
 			c.Dependencies = append(c.Dependencies, d)
 		}
 	}
 	// Then the compiler's own charts, by key.
-	for _, key := range slices.Sorted(maps.Keys(res.Values)) {
+	for _, key := range slices.Sorted(maps.Keys(values)) {
 		if listed[key] {
 			continue
 		}
-		ref := res.Charts[key]
+		ref := charts[key]
 		d := chart.Dependency{Name: ref.Chart, Repository: ref.Repository, Version: ref.Version}
 		if key != ref.Chart {
 			d.Alias = key
 		}
 		c.Dependencies = append(c.Dependencies, d)
 	}
-	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {res.Values}}
+	docs := map[string][]any{"Chart.yaml": {c}, ValuesFile: {values}}
 	if i := res.Info; i.URL != "" || i.Usage != "" || len(i.Provides) > 0 {
 		docs[InfoFile] = []any{i}
 	}
-	for _, o := range res.Objects {
-		docs[ObjectsFile] = append(docs[ObjectsFile], o)
-	}
 	files := map[string][]byte{}
 	for name, vs := range docs {
-		var buf bytes.Buffer
-		if name == ValuesFile || name == ObjectsFile {
-			buf.WriteString(target.Generated)
+		b, err := encode(vs)
+		if err != nil {
+			return nil, err
 		}
-		enc := yaml.NewEncoder(&buf)
-		enc.SetIndent(2)
-		for _, v := range vs {
-			if err := enc.Encode(v); err != nil {
-				return nil, err
-			}
+		if name == ValuesFile {
+			b = append([]byte(target.Generated), b...)
 		}
-		files[name] = buf.Bytes()
-	}
-	if len(res.Objects) > 0 {
-		files[ObjectsTemplate] = []byte(objectsTemplate)
+		files[name] = b
 	}
 	return files, nil
+}
+
+// encode: vs as a YAML stream, one document each, indented by 2 spaces.
+func encode(vs []any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	for _, v := range vs {
+		if err := enc.Encode(v); err != nil {
+			return nil, err
+		}
+	}
+	return buf.Bytes(), nil
 }

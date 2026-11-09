@@ -28,3 +28,6 @@ dependencies:
   - name: oidc-dcr
     repository: oci://registry.example.org/mirror
     version: 0.6.0
+  - name: okdp-objects
+    repository: oci://quay.io/okdp/charts
+    version: 1.0.0

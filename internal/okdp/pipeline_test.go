@@ -572,6 +572,41 @@ objects:
 	if res, err = Compile(context.Background(), &d, inputs()); err != nil || res.Values["okdp"]["replicaCount"] != float64(2) || res.Charts["okdp"] != appSource {
 		t.Errorf("the dependency okdp: %v %v", err, res)
 	}
+	// Finalize, in the compile: what it returns is the final values, its
+	// error refuses the instance, what was computed stays apart.
+	finalized := map[string]map[string]any{"app": {"final": true}}
+	d.Values = []byte("app: {replicaCount: 2}\n")
+	d.Chart.Dependencies = []chart.Dependency{appDep}
+	d.Okdp = nil
+	with := inputs()
+	with.Finalize = func(in FinalInput) (map[string]map[string]any, map[string]chart.Ref, []string, error) {
+		if _, ok := in.Specs["app"]; !ok || in.ValuesFile == "" || value.AsMap(in.Output["app"])["replicaCount"] != float64(2) {
+			t.Errorf("Finalize's input: %+v", in)
+		}
+		return finalized, map[string]chart.Ref{"app": appSource}, []string{"finalized"}, nil
+	}
+	if res, err = Compile(context.Background(), &d, with); err != nil || res.Values["app"]["final"] != true || !slices.Contains(res.Warnings, "finalized") || value.AsMap(res.Computed["app"])["replicaCount"] != float64(2) {
+		t.Errorf("Finalize: %v %+v", err, res)
+	}
+	with.Finalize = func(FinalInput) (map[string]map[string]any, map[string]chart.Ref, []string, error) {
+		return nil, nil, nil, errors.New("not final")
+	}
+	if _, err = Compile(context.Background(), &d, with); err == nil || err.Error() != "not final" {
+		t.Errorf("Finalize's error: got %v", err)
+	}
+	// The chart of the objects, by default and the platform's; its key the
+	// compiler's.
+	if res.ObjectsSource != ObjectsSource {
+		t.Errorf("the default chart of the objects: %v", res.ObjectsSource)
+	}
+	own := chart.Ref{Repository: "oci://registry.example.org/okdp", Chart: "own-objects", Version: "2.0.0"}
+	if res, err = Compile(context.Background(), &d, inputs(M{"global": M{"okdp": M{"charts": M{"objects": M{"repository": own.Repository, "chart": own.Chart, "version": own.Version}}}}})); err != nil || res.ObjectsSource != own {
+		t.Errorf("the platform's chart of the objects: %v %v", err, res)
+	}
+	d.Chart.Dependencies = append(d.Chart.Dependencies, chart.Dependency{Name: "app", Alias: ObjectsChart, Repository: appSource.Repository, Version: appSource.Version})
+	if _, err = Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), "the chart of the instance's objects is added by the compiler") {
+		t.Errorf("the key of the objects listed: got %v", err)
+	}
 	for name, tc := range map[string]struct {
 		okdp  string // okdp.yaml
 		layer M
@@ -579,7 +614,7 @@ objects:
 	}{
 		"not an object": {"objects: [{metadata: {name: x}}]\n", nil, "- at '/objects/0': missing property 'kind'"},
 		"null charts":   {"", M{"global": M{"okdp": M{"charts": nil}}}, "- at '/global/okdp/charts': got null, want object"},
-		"objects chart": {"", M{"global": M{"okdp": M{"charts": M{"objects": M{"repository": "oci://registry.example.org/okdp", "chart": "okdp-objects", "version": "1.0.0"}}}}}, "- at '/global/okdp/charts': additional properties 'objects' not allowed"},
+		"objects chart": {"", M{"global": M{"okdp": M{"charts": M{"objects": M{"repository": "quay.io"}}}}}, `global.okdp.charts.objects.repository "quay.io": the URL of a chart repository`},
 		"oidcDcr":       {"", M{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": "quay.io"}}}}}, `global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository`},
 	} {
 		t.Run(name, func(t *testing.T) {

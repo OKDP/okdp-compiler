@@ -22,3 +22,6 @@ dependencies:
   - name: yaml11
     repository: file://../yaml11
     version: 1.0.0
+  - name: okdp-objects
+    repository: file://../okdp-objects
+    version: 1.0.0

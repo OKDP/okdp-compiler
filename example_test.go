@@ -47,7 +47,7 @@ func Example() {
 	// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
 	//               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
 	// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
-	//               the mapping's objects section (okdp.objects.yaml)
+	//               the mapping's objects section (under okdp-objects in instance.values.yaml)
 	// res.Info: what the instance publishes: its url, its usage, the connections it provides (okdp.info.yaml)
 	// res.Dependencies: the instances the connection references point to (compiler.Dependency): the graph's edges
 
@@ -66,7 +66,7 @@ func Example() {
 	// [app oidc-dcr]
 	// map[limits:map[memory:512Mi] requests:map[cpu:100m memory:128Mi]]
 	// [{demo-db  database database demo.webapp.database}]
-	// 8 files
+	// 6 files
 }
 
 // The first program of docs/01_usage.md: the example, from a checkout.

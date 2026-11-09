@@ -72,6 +72,21 @@ nulls-alias:
       f: 5
     newNull: null
   topNull: null
+okdp-objects:
+  manifests: |
+    apiVersion: external-secrets.io/v1
+    kind: ExternalSecret
+    metadata:
+      name: objects
+    spec:
+      integer: 12345678901234567890
+      "null": null
+      template: '{{ .accessKey }}'
+    ---
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: objects
 yaml11:
   exposure:
     loadBalancer:

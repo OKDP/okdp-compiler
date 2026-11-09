@@ -414,7 +414,7 @@ provides:                  # the connections the instance publishes
   Any other value that is not a map fails the compile. OKDP's own objects
   are not values: they reach the cluster in the umbrella, whatever the
   file leaves out ([the objects
-  file](specs/01_inputs_outputs.md#the-objects-file)).
+  chart](specs/01_inputs_outputs.md#the-objects-chart)).
 - `errors` fails the compile with every message at once. A message is the
   `$value` of an item with its condition, `$if`; `$for` checks every
   element of a list.
@@ -661,8 +661,8 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
   directory refuses `Chart.lock` and `charts/`
   ([rendering with Helm](01_usage.md#rendering-with-helm)).
 - `-o` writes the final values, the input of `helm template`, under their
-  keys in `instance.values.yaml`, and OKDP's own objects in
-  `okdp.objects.yaml`, which the umbrella renders as written.
+  keys in `instance.values.yaml`, and OKDP's own objects there under
+  `okdp-objects`, which that chart renders as written.
 - A case whose first line is `# error: <message>` must fail with that message
   (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
   starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
@@ -895,7 +895,7 @@ objects:
 Helm and Flux keep what `helm.sh/resource-policy: keep` marks; the
 compiler adds Argo CD's equivalents, `argocd.argoproj.io/sync-options:
 Prune=false,Delete=false`, to each such object it writes ([the objects
-file](specs/01_inputs_outputs.md#the-objects-file)).
+chart](specs/01_inputs_outputs.md#the-objects-chart)).
 
 Point the upstream chart at the Secret (`*SecretName`, `existingSecret`) and
 protect that path: the chart's own templates would draw a new value on every
