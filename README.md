@@ -334,7 +334,7 @@ that is private.
 | `internal/target/` | the output formats of compiled instances (`Target`), what they share: the tree, `projects/<namespace>/instances/<release>/` |
 | `internal/target/flux/`, `internal/target/argocd/` | the flux and argocd targets: the umbrella charts with each instance's HelmRelease and Kustomizations, or its Application, okdp-gitops' format |
 | `internal/target/helm/` | the helm target; the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes |
-| `internal/compile/` | the mapping language: YAML + CEL templating, generic ([source map](docs/00_architecture.md#source-map)) |
+| `internal/compile/` | the top level of a mapping over github.com/okdp/cel2yaml, the YAML + CEL language: `vars`, `errors`, the sections, read from one file or several ([source map](docs/00_architecture.md#source-map)) |
 | `internal/chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
 | `internal/value/` | the values every package shares, and their helpers |
 | `internal/dirfs/` | a directory as an `fs.FS`, bounded, no symbolic link followed: what the CLI reads, and the chart cache of `chartcache` |

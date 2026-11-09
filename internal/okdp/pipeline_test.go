@@ -162,7 +162,7 @@ func TestValuesYAML(t *testing.T) {
 	for name, tc := range map[string]struct{ values, want string }{
 		"expression": {"app: {replicaCount: '${{ nope }}'}\n", "values.yaml: app: replicaCount: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
 		"key":        {"app: {}\ndb: {}\n", "values.yaml: db: not a dependency of Chart.yaml"},
-		"alias":      {"app: &a {replicaCount: 1}\ndb: *a\n", "values.yaml: line 2: aliases are not read: bind the value in vars"},
+		"alias":      {"app: &a {replicaCount: 1}\ndb: *a\n", "values.yaml: line 2: aliases are not read"},
 	} {
 		d := *d
 		d.Values = []byte(tc.values)

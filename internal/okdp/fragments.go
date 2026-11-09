@@ -15,8 +15,8 @@ import (
 	"fmt"
 
 	"cel.dev/cel-go/cel"
+	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -53,7 +53,7 @@ var fragments = []fragment{
 // call: the value of the fragment f for the arguments args (okdpPodSpec(args)...), in
 // the compile's session: args checked, the template evaluated with args, the
 // instance's release, labels, platform and global.
-func (f fragment) call(session *compile.Session, inst *instance, args any) (any, error) {
+func (f fragment) call(session *cel2yaml.Session, inst *instance, args any) (any, error) {
 	checked, err := schemaValues(mappingSchema, f.name+": the arguments don't meet the specifications of mapping.schema.json", M{f.name: args})
 	if err != nil {
 		return nil, err
@@ -77,12 +77,12 @@ func (f fragment) call(session *compile.Session, inst *instance, args any) (any,
 
 // fragmentFunctions: okdpPodSpec(args), okdpJob(args), okdpSignInProxy(args)
 // and okdpWebWorkload(args) for the instance inst, in the session *session.
-func fragmentFunctions(inst *instance, session **compile.Session) []cel.EnvOption {
+func fragmentFunctions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	var opts []cel.EnvOption
 	for _, f := range fragments {
 		id := f.name + "_map"
-		opts = append(opts, compile.Costed(cel.Function(f.name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
-			compile.Unary(func(v any) (any, error) {
+		opts = append(opts, cel2yaml.Costed(cel.Function(f.name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
+			cel2yaml.Unary(func(v any) (any, error) {
 				if _, ok := v.(M); !ok {
 					return nil, fmt.Errorf("%s: the arguments are a map, got %s", f.name, value.ShortAt("args", v))
 				}

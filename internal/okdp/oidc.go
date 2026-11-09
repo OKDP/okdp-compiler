@@ -19,9 +19,9 @@ import (
 	"maps"
 
 	"cel.dev/cel-go/cel"
+	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -88,8 +88,8 @@ func explicitSecret(release, name string) string {
 func oidcFunctions(inst *instance) []cel.EnvOption {
 	release, ns, dcr := inst.release, inst.namespace, inst.dcr
 	return []cel.EnvOption{
-		compile.Costed(cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-			compile.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))), "oidcClientSecret_dyn"),
+		cel2yaml.Costed(cel.Function("oidcClientSecret", cel.Overload("oidcClientSecret_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+			cel2yaml.Unary(func(v any) (any, error) { return clientSecret(release, ns, dcr, value.Str(v)), nil }))), "oidcClientSecret_dyn"),
 	}
 }
 
@@ -102,7 +102,7 @@ func oidcFunctions(inst *instance) []cel.EnvOption {
 // one Secret.
 // The template is evaluated in the compile's session, on what the mapping
 // of inst sees plus the client and its names.
-func oidcClients(session *compile.Session, inst *instance, section []any) ([]oidcClient, map[string]M, error) {
+func oidcClients(session *cel2yaml.Session, inst *instance, section []any) ([]oidcClient, map[string]M, error) {
 	var clients []oidcClient
 	seen := map[string]string{}
 	for i, v := range section {

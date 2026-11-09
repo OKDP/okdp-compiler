@@ -267,7 +267,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    `global.okdp` that must be set and not empty
    ([require](specs/02_service_definition.md#require)). A missing
    value is reported after the errors of stages 2 and 3. `Compile` then
-   opens the compile's CEL session (`compile.NewSession`): its context,
+   opens the compile's CEL session (`cel2yaml.NewSession`): its context,
    its cost limit, OKDP's host functions for the instance (`functions`,
    built from the `instance`) and the CEL environments built with them,
    shared by the mapping and the compiler's templates. It reads the
@@ -277,7 +277,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    checked as a source is ([Platform
    charts](specs/01_inputs_outputs.md#platform-charts)).
 5. **Mapping** (`runMapping`, `internal/okdp/mapping.go`, on
-   `compile.Session.Eval`, `internal/compile/cel.go` and `tree.go`). The
+   `compile.Eval`, `internal/compile/compile.go`, over `cel2yaml.Session`). The
    mapping, two sources (`compile.Source`, its name the first segment of
    its errors), each when present: `okdp.yaml`, its package keys skipped,
    and the values file, `values.cel.yaml` or `values.yaml` (its name
@@ -313,7 +313,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    mode, OIDC enabled, with at least one client, the platform's
    registration settings are checked, no two clients write one Secret, and
    the embedded template `internal/okdp/oidc-dcr.cel.yaml` is evaluated
-   once per client, in the compile's session (`compile.Session.Eval`, its
+   once per client, in the compile's session (`compile.Eval`, its
    section `values`), on the context plus `client` and `names`: the values
    of the client's chart, which stage 9 adds ([OAuth client
    charts](specs/01_inputs_outputs.md#oauth-client-charts)).
@@ -440,9 +440,7 @@ neither knows OKDP.
 | `value` | `value.go` | the data model (`M`) and its helpers: `Normalize` (a round trip through `encoding/json/v2`), `Copy`, `AsMap`, `AsList`, `Merge` (Helm's `MergeMaps`), `Truthy`, `Str`, `Dig`, `Short` (a value for a message, its sensitive keys redacted) | every package |
 | | `redact.go` | what a message does not print: `Sensitive`, a key whose value may be a credential (`password`, `token`, `clientSecret`, `apiKey`, a key ending with one, or with `Key`), `SensitivePath`, the key of a path, a list item's its list's, `Redact`, a value with those of its sensitive keys `Redacted` (`<redacted>`), `ShortAt`, a value of a key for a message | `Short`; `chart.Validate` |
 | | `path.go` | the path of a value, as messages write it (`Key`, `Index`): plain keys joined by dots, a key that is empty or holds a special character in brackets, the form of the `protect` paths; read back as its keys and indexes (`Split`, `Join`), a JSON pointer (`Pointer`) | `formatPath` and `NoTemplate` (`chart`); the parameter paths of the connections and `Dependency.Field`, the fields of the contract violations (`okdp`) |
-| `compile` | `cel.go` | the mapping language: `Session` (`NewSession`), what the evaluations of one compile share: its context, its CEL cost limit, the caller's host functions and the CEL environments built with them; documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) as ordered YAML 1.2 data, evaluated with the names of their sections: loaded, `vars` and `errors` evaluated, then the sections (`Session.Eval`, a `Doc`: their values, and the keys each writes, `Written`); an expression compiled once to a program in the CEL environment of its names, built once per set of names (`compile`), run under the session's context, its cost counted (`run`, `exec`); `toData`, a CEL value as data, as cel-go converts it to JSON | registers the functions of `functions.go`, then the caller's |
-| | `tree.go` | a document compiled into a tree of typed nodes (`builder`: text, list, plain map, `$if` with its `$else`, `$for` in a map and in a list item, `$spread`, `vars` and `$vars` bindings), which is its check: the top-level keys of each file, `vars`, `errors` and each section given by one file, the keys each section writes at its top level (`literals`), each directive of its place (`check`), `$for` with its keys, every expression compiled in its scope, in every branch; the evaluation, a method per node type | `Session.Eval` |
-| | `functions.go` | `str`, `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote` (`hostFunctions`), each the Go code of the Helm or sprig function; `Unary`, the binding of a host function, its argument as data (`toData`), `Func`, a host function of one argument bound with it, a CEL library whose programs count its calls (`hostCost`: 1, the bytes of its argument, about its serialisation, walked once (`byteSize`), the bytes of the string it returns), and `Costed`, a caller's function counted alike | `encoding/json`, `sigs.k8s.io/yaml` |
+| `compile` | `compile.go` | the top level of a mapping, over the language of github.com/okdp/cel2yaml (`cel2yaml.Session`, opened with `cel2yaml.NewSession`: the compile's context, its CEL cost limit, the caller's host functions and the CEL environments built with them); documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) with `cel2yaml.Parse`, each `vars` binding, `errors` and each section compiled to a `cel2yaml.Template` in the names in scope at its place, all before any is evaluated, then evaluated with the names of their sections: `vars` and `errors`, then the sections (`Eval`, a `Doc`: their values, and the keys each writes, `Written`), as one `cel2yaml.Session.Document` | `cel2yaml.Session.Template`, `cel2yaml.Template.Eval` |
 | `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
 | | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report), the value of a sensitive key not printed (`redactCauses`: a pattern, a format, a numeric bound, `<redacted>` in its place), each violation apart too (`Violation`, `violations`: the leaves of the report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
 | | `ref.go` | `Ref`, an upstream chart, its check, its repository's directory of the chart cache (`cacheDir`) and the chart's (`Dir`, the one layout, `chartcache.ChartDir` is it); SemVer precedence (`CompareVersions`); the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`) | the dependencies of `metadata.go`, the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`); the chart keys (`metadata.go`, `spec.go`); the release, the namespace and an internal reference (`okdp`) |
@@ -455,14 +453,14 @@ neither knows OKDP.
 | `okdp` | `doc.go` | the package doc | |
 | | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the values file's name, the package's files, the warnings of its load); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`, `provisions`, each a `Provision`, a contract and its claimers, read from its name or `{contract, claimers}`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` |
 | | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; the values file, `values.cel.yaml` or `values.yaml` (both refused), a `values.yaml` checked for expressions and `$`-keys, a warning (`holdsExpressions`); the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
-| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each (`checkInputs`; `platformInstance`, stages 1 to 4, the platform requirements among them; the compile's CEL session; `providedOutputs`, stage 7; `instanceObjects`, stage 8; `finalValues`, stages 9 and 10, the dependencies rendered by `rendered`) | calls `newInstance`, `compile.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
+| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, one call each (`checkInputs`; `platformInstance`, stages 1 to 4, the platform requirements among them; the compile's CEL session; `providedOutputs`, stage 7; `instanceObjects`, stage 8; `finalValues`, stages 9 and 10, the dependencies rendered by `rendered`) | calls `newInstance`, `cel2yaml.NewSession` (with `functions`), `platformCharts`, `runMapping`, `oidcClients`, `provided`, `published`, `clientCharts`, `addOwnCharts`, `chart.FinalValues` |
 | | `memo.go` | `Memo`: what the compiles of a set of instances read once, an instance's parameters (`paramsMemo`), the contracts of a file system (`contractCache`), the chart cache's upstream charts (`chart.ChartCache`); `CompileAllWith` (`tree.Compile` runs twice with a chart cache and shares one) | `Compile`, `claimsOf`, `newInstance`, `resolver` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, nothing of `global.okdp` but `provisioning` above level 0 (`platformOnly`), no key of `global` but those `policy.projectGlobals` lists (`projectGlobals`), checked by the upstream policy (`upstreamGlobals`), no `claims` at level 0, no `{{` above it; the context's `global.okdp`, level 0's and the classes above it) then the instance's, normalized (`value.Normalize`); `global`, `connections` and `claims` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` of the context's layers alone, `contextLayers`, checked against the embedded `platform.schema.json`, `platformSettings`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against an embedded schema, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; `oidc.go` for the oidc-dcr image and the main client's Secret; the `instance` is read by `mapping.go`, `oidc.go`, `provides.go` |
 | | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection, a named claim's or a claim template's output of `Inputs.Bindings`, or an output of `Inputs.Published` (`resolver`: `resolve`, then one resolution per source, `resolveNamed`, `resolveClaim`, `resolveExternal`, its contract's fields apart from its own keys (`connectionFields`), as written (`Connection`, `ParseConnection`, `MarshalYAML`), `resolveOutput`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled once for the compiles of a set (`readContract`, `contractCache`), its claim schema with it, `x-okdp-internal` refused, and the checks of values against one (`fields`, `complete`, `check`), of a claim's request against its claim schema (`contract.request`); every connection of an instance's context checked at its declaration, referenced or not (`declaredConnections`, `declared`, `declaration`, `CheckConnection`, `Connection.Entry`); what a reference requires (`requirement`, `require`): compiled (`readRequirement`), those of the parameter schema at stage 1, with the request each fixes (`requirements`), found as the walk finds them, one out of its reach refused (`schemaRefs`, `ConnectionRefs`), its fields against the contract (`contract.requires`), the connection against it (`requirement.check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
 | | `descriptor.go` | a contract as the compile reads it, for a caller that shows it (`ReadContract`, `ReadContracts`, `ContractDescriptor`, `ContractField`): `readContract`, its fields in the order of the file (`propertyOrder`) | `readContract` |
 | | `accessors.go` | the errors of a field (`FieldError`, `atField`: the references, the claims bound, the named claims); the names of the claims (`NamedClaimID`, `IsClaimID`, `CheckProvider`) | `connections.go`, `namespace.go`, `claims.go` |
-| | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Session.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
+| | `mapping.go` | stage 5: OKDP's sections (`runMapping`: the sources `okdp.yaml`, its package keys skipped, and the values file, the section `output`, named by `Definition.ValuesFile`, `values.cel.yaml` by default), checked against the embedded `mapping.schema.json` (`mappingSchema`), OKDP's host functions (`functions`: `okdpFullname`, `okdpGeneratedSecret`, and those of `labels.go` and `oidc.go`), built once per compile from its `instance`, for its session; `generatedSecret`, the objects of `okdpGeneratedSecret` and of a generated credentials Secret, and `evalTemplate`, a template of the compiler evaluated in the session, its errors under its file's name | `compile.Eval`; `functions` by `pipeline.go`; `fullname` (`truncName`, a name cut as charts cut it, `trunc n \| trimSuffix "-"`) also names the client charts' objects (`oidc.go`) |
 | | `fragments.go` | OKDP's workloads as CEL functions (`okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`): the arguments checked against the mapping schema under the function's name, then `fragment-pod.cel.yaml`, `fragment-job.cel.yaml`, `fragment-proxy.cel.yaml`, `fragment-web.cel.yaml` evaluated on them (`//go:embed`, `fragment.call`) in the session of the call; the hardened pod, Job, oauth2-proxy by digest with the project's groups, a web workload, as templates in the mapping language, in git with the compiler | `mapping.go: functions`, `evalTemplate`; `mapping.schema.json` |
 | | `labels.go` | the labels of OKDP's own objects, from the package's `name` and the release, the selector labels a subset (`labels`) | the context (`service`, `labels`, `selectorLabels`), the CEL functions, every object the compiler writes |
 | | `keep.go` | the objects Helm keeps (`helm.sh/resource-policy: keep`, `kept`) given Argo CD's sync options alike, `Prune=false` and `Delete=false`, merged with theirs (`keepSynced`) | `pipeline.go`, once the objects are assembled |
@@ -509,7 +507,7 @@ neither knows OKDP.
 | `chartcache` | `cache.go`, `oci.go` | a chart cache that pulls the charts it lacks (`Cache`, a `compiler.ChartSource`: `Ensure`, `File`, `Get`, one pull per chart at a time, a failure not tried again for a minute), from an OCI registry, the layer verified against its manifest's digest, or the `index.yaml` of an https chart repository, the archive and every redirect https but on `InsecureHosts`, none from https to http, an OCI registry's alike, every connection refused at a private, loopback or link-local address but for a host of `PrivateHosts` or `InsecureHosts` (`RepositoryPuller`, `dial`, `publicAddress`), every TLS connection trusting the system's certificates or the pool of `SetRootCAs`, unpacked in the layout `Inputs.Charts` reads, `Chart.yaml`, `values.yaml` and `values.schema.json` only, the `Chart.yaml` of the chart and version named, each directory 0755, bounded (`MaxChartSize`, `MaxUncompressedSize`, `MaxFileSize`, `FetchTimeout`); `File` one of `Files`; `FS` through `internal/dirfs` | `chart.Ref` (`Dir`), `internal/dirfs` |
 
 Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
-reproduce Helm and know nothing of OKDP; `internal/compile/functions.go`
+reproduce Helm and know nothing of OKDP; github.com/okdp/cel2yaml
 reproduces Helm's and sprig's functions, bound to CEL;
 `internal/chart/ref.go` holds the names Kubernetes and Helm accept;
 `internal/chart/cache.go` reads the chart cache; `internal/chart/merge.go`
@@ -581,7 +579,7 @@ template's `if` takes as true.
   ([Schema check](specs/01_inputs_outputs.md#schema-check)).
 - Functions: a host function that reproduces a Helm or sprig function is
   that function's Go code, in `hostFunctions`
-  (`internal/compile/functions.go`). Where Helm prints `""` for a value it
+  (`functions.go` of github.com/okdp/cel2yaml). Where Helm prints `""` for a value it
   cannot encode, the compile fails instead.
 - Reproduced, not imported: the helm module pulls in client-go and requires
   newer Go and Kubernetes versions than the programs that embed this
@@ -622,7 +620,7 @@ sees a copy of the parameters while the merges use them as written.
   line break is added, as Helm adds it: a block scalar ending the file
   keeps its newline.
 - A document is compiled once, when loaded, into a tree of typed nodes
-  (`tree.go`), before any evaluation and in the whole document: a
+  (`tree.go` of github.com/okdp/cel2yaml), before any evaluation and in the whole document: a
   misspelled `$` key or top-level key fails rather than being written to
   the values or ignored, and an expression that does not compile (a
   syntax error, an undeclared name, an unknown function) fails, in the
@@ -655,7 +653,7 @@ language embedded in the compiler (`//go:embed`), not by Go code:
   `values.yaml`, read side by side with it. When the chart changes (a new
   value, a renamed key), the change is to data, reviewed as such, not to
   code.
-- One engine: `compile.Session.Eval` evaluates the template as it does
+- One engine: `compile.Eval` evaluates the template as it does
   a mapping, in the compile's session, with the same host
   functions (`functions`), so the template is read as a mapping is (YAML
   1.2, ordered `vars`, `errors`), with the same directives, functions and
@@ -735,7 +733,7 @@ platform values, with a default (`DcrSource`)
 - `Compile` keeps no state between calls: each call parses and compiles
   the mapping, the oidc-dcr template once per client and the generated
   Secret template once per Secret, and opens its own CEL session
-  (`compile.NewSession`), whose host functions and environments serve its
+  (`cel2yaml.NewSession`), whose host functions and environments serve its
   mapping and templates, never another compile's (a session is
   not safe for concurrent use), and which counts their CEL cost, what the
   host functions build included, under the caller's limit. The
@@ -971,7 +969,7 @@ the compiler cannot enforce. The compiler enforces:
 | Control plane | `target.ControlPlane`, `target.ControlPlaneRules` | the optional control plane holds, in each project's namespace, the Role of what it does there (Secrets by name, never listed; pods, their logs and metrics; events; volumes; secret stores and ExternalSecrets; SparkApplications), bound to its ServiceAccount (`global.okdp.controlPlane.serviceAccount`) by the project's manifests: its cluster-wide role keeps `namespaces: get, create`, and a Secret of a namespace that is no project's is beyond it ([the control plane's role](specs/01_inputs_outputs.md#the-control-planes-role)) | `TestControlPlane`, `TestControlPlaneSetting`, `testdata/targets/<target>/projects/<namespace>/project/control-plane.yaml` |
 | Network policy | `target.NetworkPolicy`, `target.AddClaimers`, `okdp.network` | with `global.okdp.network.policy` (off by default: the compiler knows neither the ingress controller nor whether the network plugin enforces a policy), each project's namespace but the platform's own gets a NetworkPolicy, ingress from the namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and the namespaces whose claims its instances provide, as the compile bound them (`Result.Network`; for a project kept, the claimers of every instance of it, `rederive`), so that a provider stays reachable by its claimers; egress open, the namespace reached guarding itself ([the project's manifests](specs/01_inputs_outputs.md#the-projects-manifests)) | `testdata/cli/network.txtar`, `TestNetworkPolicy`, `TestClaimsNetwork` |
 | Objects Helm keeps | `keepSynced`, stage 8 | an object annotated `helm.sh/resource-policy: keep` (a claim's database) gets Argo CD's sync options `Prune=false,Delete=false`: Argo CD reads no Helm annotation, and would delete it, its data with it, when the render drops it or its Application goes | `TestCompileKeep` |
-| Bounded compile | `compile.Session`, `Inputs.CostLimit`; `--cost-limit`, `--timeout` | a package's expressions, and the instance values that make them iterate, run within a total CEL cost per instance, what a host function reads and builds counted, and a context the compile checks between stages and inside comprehensions (below) | `testdata/cli/limits.txtar` |
+| Bounded compile | `cel2yaml.Session`, `Inputs.CostLimit`; `--cost-limit`, `--timeout` | a package's expressions, and the instance values that make them iterate, run within a total CEL cost per instance, what a host function reads and builds counted, and a context the compile checks between stages and inside comprehensions (below) | `testdata/cli/limits.txtar` |
 | One project's failure (CLI) | `compiler.Partial`, `compiler.TreeFiles`, `--partial` | a refused instance fails its project, not the tree, and a release name two projects share fails those two: the projects whose instances all compile are written, the others' output kept as it was, so that a project's input does not hold back every deployment; the kept output read as a repository is, no symbolic link followed, its releases checked against those written; and what the platform decides of a kept project written of today's settings (D-5): its manifests, its instances' identity, a privilege revoked or a role taken back reaching it at once | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `TestPartialRederives` |
 | Edits of a tree | `treeedit`: `checkRef`, `Check.Verify` | a control plane edits the tree on a user's request: a name that is a dot segment, joined into a path, would address another directory (an instance `..`, the project, removed with every instance): it is not found; a change after which an instance it writes, or one that compiled before, does not compile is refused (`CompileError`), a removal of what an instance uses too (`ErrInUse`), a new instance whose release another project's instance has (`ErrReleaseTaken`), so that no edit of a console breaks what deploys | `TestDotSegmentNamesAreNotFound`, `TestAnEditThatDoesNotCompileIsRefused`, `TestARemovalRefusesWhatIsInUse`, `TestCreateRefusesACollidingReleaseName` |
 
@@ -979,9 +977,9 @@ What an expression computes is bounded only on request: a caller that
 compiles packages it does not review passes a context (cancelled between
 the stages and inside comprehensions) and a total CEL cost (`Compile`,
 `Inputs.CostLimit`), both held by the compile's session
-(`compile.Session`), the cost counted across the mapping and the
+(`cel2yaml.Session`), the cost counted across the mapping and the
 compiler's templates, and what each host function reads and builds
-counted in it (`compile.Func`, `compile.Costed`, `hostCost`: a call pays
+counted in it (`cel2yaml.Func`, `cel2yaml.Costed`, `hostCost`: a call pays
 the bytes of its argument, which it converts whole, and of the string it
 writes, a map of one key of a megabyte a megabyte), as are the elements
 of a `$for` and what its body builds (`Session.charge`, `Session.grow`).
@@ -1075,15 +1073,20 @@ all.
 Most source files have their `_test.go`, in memory (`fstest.MapFS`, as a
 server passes its inputs); the host functions copied from Helm and the
 schemas are tested against Helm, in `helm_test.go`.
-`internal/compile/cel_test.go` covers the language: directives, YAML 1.2,
-what the reader refuses (`FuzzMappingReader`: what it reads is values),
-the values of expressions, error paths, a document read from several
-files, its errors under each file's name (`TestSources`,
-`TestSourceErrors`), the mistakes a document is refused for when loaded,
-in the branches no evaluation takes too (`TestMistakes`: directives,
-unknown sections, expressions that do not compile), the cost limit and
+github.com/okdp/cel2yaml covers the language in its own tests: directives,
+YAML 1.2, what the reader refuses (`FuzzParse`: what it reads is values),
+the values of expressions, error paths, the mistakes a document is refused
+for when loaded, in the branches no evaluation takes too (`TestMistakes`:
+directives, expressions that do not compile), the cost limit and
 cancellation of a session over compiled programs (`TestSession`), and
 functions of the CEL libraries at their pinned versions (`TestLibraries`).
+`internal/compile/cel_test.go` covers the top level of a mapping: a
+document read from several files, its errors under each file's name
+(`TestSources`, `TestSourceErrors`), the mistakes of `vars`, `errors` and
+the sections (`TestMistakes`: unknown sections, `vars` that are not a
+map), the `errors` rules (`TestErrorRules`), and the keys a section writes
+(`TestWritten`). `TestHelmFunctions` (`internal/compile/helm_test.go`)
+compares the host functions of the language with Helm's.
 `internal/chart/metadata_test.go` covers the source checks
 (`TestMetadataCheck`), `internal/chart/spec_test.go` the upstream specs
 and the charts of a package, `internal/chart/cache_test.go` the chart
@@ -1305,12 +1308,12 @@ values layers (`TestConcurrentCompile`, meaningful under `go test -race`).
 ### Fuzz tests
 
 Go fuzz tests, beside the unit tests whose cases seed them, check a
-property on any input; `go test ./...` runs the seeds only:
+property on any input; `go test ./...` runs the seeds only. The fuzz tests
+of the language (`FuzzScan`, `FuzzParse`, `FuzzHostCost`) are those of
+github.com/okdp/cel2yaml:
 
 | Fuzz test | Property |
 |---|---|
-| `compile`: `FuzzScan` | the `${{ }}` scanner gives a string back whole, and an expression CEL parses is one expression, whatever its quoted strings and braces hold |
-| `compile`: `FuzzMappingReader` | the mapping reader returns on any document; what it reads is values |
 | `chart`: `FuzzParsePath`, `FuzzFormatPath` | a `protect` or `append` path written back reads as the same keys; any keys without a quote, a backslash or a star written as a path read back as themselves |
 | `chart`: `FuzzParseValues` | what it reads is values, and their YAML as the compiler writes it reads back the same |
 | `okdp`: `FuzzParseAccess` | a project's access gives the same answer twice: an error and no group, or groups `IsGroup` accepts with a role, a map read back whole, an absent access the default group an editor |
@@ -1321,7 +1324,7 @@ property on any input; `go test ./...` runs the seeds only:
 | `repository`: `FuzzLoad` | `Load` and `LoadProjects` agree: a tree `Load` accepts refuses no project, one it refuses is an `*Error`, a refused project has no instance |
 
 One at a time, a package at a time:
-`go test -run='^$' -fuzz=FuzzScan -fuzztime=60s ./internal/compile`;
+`go test -run='^$' -fuzz=FuzzParsePath -fuzztime=60s ./internal/chart`;
 `make fuzz` runs each in turn, `FUZZTIME` (30s) each, and
 `.github/workflows/fuzz.yml` every night, 60s each. An input that fails
 is written to the package's `testdata/fuzz/` (the nightly run uploads
@@ -1585,7 +1588,7 @@ versions supported and the disclosure.
 
 - **Host functions.** Plain Go, deterministic and hermetic. A function of
   its arguments alone, the same for any caller of the language, goes in
-  `hostFunctions` (`internal/compile/functions.go`); an OKDP function, or
+  `hostFunctions` (`functions.go` of github.com/okdp/cel2yaml); an OKDP function, or
   one that needs the compile context, goes in `functions`
   (`internal/okdp/mapping.go`), as `okdpFullname`, `okdpGeneratedSecret` and
   `oidcClientSecret` (`oidcFunctions`, `internal/okdp/oidc.go`) do. Names

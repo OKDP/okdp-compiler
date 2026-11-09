@@ -477,7 +477,7 @@ of them: both fail when it is loaded,
 - It is read as the mapping is, not as Helm reads a values file
   ([YAML reading](#yaml-reading)): YAML 1.2, and an alias refused, as in
   `values.cel.yaml`:
-  `values.yaml: line <n>: aliases are not read: bind the value in vars`.
+  `values.yaml: line <n>: aliases are not read`.
   Values copied from a chart that uses aliases are written out in full.
 - A `Definition` built in memory names its values file in `ValuesFile`;
   empty, it is `values.cel.yaml`.
@@ -990,7 +990,7 @@ break keeps its newline.
 
 Aliases are refused, where Helm resolves them, in the whole of `okdp.yaml`,
 its package keys included:
-`<file>: line <n>: aliases are not read: bind the value in vars`,
+`<file>: line <n>: aliases are not read`,
 `<n>` the line of the alias. A value used twice is a [`vars`](#vars)
 binding, read by name (`${{ small }}`, `${{ small.requests }}`). An anchor
 is ignored, and a merge key `<<` is a plain key.
@@ -1181,7 +1181,7 @@ Other errors of the mapping:
 | Message | Cause |
 |---|---|
 | `<file>: yaml: line <n>: <message>` | invalid YAML, often an unquoted expression holding `: ` ([quoting](#quoting)) |
-| `<file>: line <n>: aliases are not read: bind the value in vars` | an alias ([YAML reading](#yaml-reading)) |
+| `<file>: line <n>: aliases are not read` | an alias ([YAML reading](#yaml-reading)) |
 | ``<file>: line <n>: yaml: cannot decode !!str `<scalar>` as a !!bool``, `<file>: line <n>: json: cannot marshal from Go float64: unsupported value: NaN` | a tagged scalar of another form, `.nan`, `.inf`, `-.inf` ([YAML reading](#yaml-reading)) |
 | `okdp.yaml: vars: must be a map of bindings, got <value>` | [vars](#vars) |
 | `<where><key>: not allowed here (allowed: <directives>)`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` | a directive ([errors](03_control_flow.md#errors)) |

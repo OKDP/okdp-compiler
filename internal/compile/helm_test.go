@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/okdp/cel2yaml"
+	"go.yaml.in/yaml/v3"
+
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -31,7 +34,7 @@ func TestHelmFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := NewSession(context.Background(), 0)
+	s := cel2yaml.NewSession(context.Background(), 0)
 	for _, path := range helmtest.Renders(t, dir, "helm.json") {
 		helm := value.AsMap(helmtest.JSON(t, path))
 		for name, x := range value.AsMap(in["inputs"]) {
@@ -41,7 +44,7 @@ func TestHelmFunctions(t *testing.T) {
 				if !ok {
 					continue // sha256sum of a null: Helm's toString gives "<nil>"
 				}
-				got, err := s.eval(f+"(x)", M{"x": x})
+				got, err := evalExpr(t, s, f+"(x)", M{"x": x})
 				switch {
 				// Helm prints "" when the encoder fails; the compile fails.
 				case err != nil && w == "":
@@ -55,8 +58,24 @@ func TestHelmFunctions(t *testing.T) {
 	}
 	// What Helm cannot show: a null hashes as "", quotes as nothing.
 	for expr, want := range map[string]string{"sha256(null)": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "quote(null)": ""} {
-		if got, err := s.eval(expr, M{}); err != nil || got != want {
+		if got, err := evalExpr(t, s, expr, M{}); err != nil || got != want {
 			t.Errorf("%s: got %q (%v), want %q", expr, got, err, want)
 		}
 	}
+}
+
+// evalExpr: one expression, compiled on the names of scope and evaluated in
+// scope, in the session s.
+func evalExpr(t *testing.T, s *cel2yaml.Session, expr string, scope M) (any, error) {
+	t.Helper()
+	var names []string
+	for k := range scope {
+		names = append(names, k)
+	}
+	tpl, err := s.Template(&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "${{ " + expr + " }}"}, names)
+	if err != nil {
+		return nil, err
+	}
+	v, _, err := tpl.Eval(scope)
+	return v, err
 }

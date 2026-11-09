@@ -14,7 +14,7 @@
 // The compiler's own templates (oidc-dcr.cel.yaml,
 // generated-secret.cel.yaml) are written in the same
 // language, with the same functions: vars, errors, then the values they
-// compute (compile.Session.Eval), their errors under their file's name.
+// compute (compile.Eval), their errors under their file's name.
 
 package okdp
 
@@ -28,6 +28,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/compile"
@@ -85,8 +86,8 @@ var mappingSchema = sync.OnceValues(func() (*chart.Schema, error) {
 // secretRef?, secret?}]), objects (OKDP's own objects, whole manifests),
 // oidcClients (checked further by oidc.go). written: the keys output
 // writes at its top level (compile.Doc.Written), kept or not.
-func runMapping(session *compile.Session, scope M, srcs ...compile.Source) (res M, written []string, err error) {
-	doc, err := session.Eval(scope, sections, srcs...)
+func runMapping(session *cel2yaml.Session, scope M, srcs ...compile.Source) (res M, written []string, err error) {
+	doc, err := compile.Eval(session, scope, sections, srcs...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,18 +103,18 @@ func runMapping(session *compile.Session, scope M, srcs ...compile.Source) (res 
 // (oidc.go). They read only what the documents of a compile see alike (the
 // release, its namespace, the service, the OAuth client mode): the mapping
 // and the compiler's templates share them. Each call counts in the
-// session's cost as the compiler's own host functions (compile.Costed).
-func functions(inst *instance, session **compile.Session) []cel.EnvOption {
+// session's cost as the compiler's own host functions (cel2yaml.Costed).
+func functions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	release := inst.release
 	opts := []cel.EnvOption{
 		// okdpFullname, not fullname: mappings bind their own `fullname`.
-		compile.Costed(cel.Function("okdpFullname",
+		cel2yaml.Costed(cel.Function("okdpFullname",
 			cel.Overload("okdpFullname_void", []*cel.Type{}, cel.StringType,
 				cel.FunctionBinding(func(...ref.Val) ref.Val { return types.String(fullname(release, "")) })),
 			cel.Overload("okdpFullname_dyn", []*cel.Type{cel.DynType}, cel.StringType,
-				compile.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
-		compile.Costed(cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
-			compile.Unary(func(v any) (any, error) {
+				cel2yaml.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
+		cel2yaml.Costed(cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
+			cel2yaml.Unary(func(v any) (any, error) {
 				args, err := schemaValues(mappingSchema, "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
 				if err != nil {
 					return nil, err
@@ -136,7 +137,7 @@ var secretTemplate []byte
 // generatedSecret: okdpGeneratedSecret, the objects of a generated Secret
 // for the instance inst (secretTemplate), args checked against
 // mapping.schema.json (okdpGeneratedSecret), in the compile's session.
-func generatedSecret(session *compile.Session, inst *instance, args M) ([]any, error) {
+func generatedSecret(session *cel2yaml.Session, inst *instance, args M) ([]any, error) {
 	scope := M{"args": args, "release": M{"name": inst.release, "namespace": inst.namespace}, "labels": labels(inst.svc.Name, inst.release, "", false)}
 	v, err := evalTemplate(session, "generated-secret.cel.yaml", secretTemplate, scope)
 	return value.AsList(v["objects"]), err
@@ -146,8 +147,8 @@ func generatedSecret(session *compile.Session, inst *instance, args M) ([]any, e
 // mapping language: vars, errors, then its one section, values), evaluated
 // on scope in the compile's session: its values; its errors start with
 // name.
-func evalTemplate(session *compile.Session, name string, b []byte, scope M) (M, error) {
-	doc, err := session.Eval(scope, []string{"values"}, compile.Source{Name: name, Data: b})
+func evalTemplate(session *cel2yaml.Session, name string, b []byte, scope M) (M, error) {
+	doc, err := compile.Eval(session, scope, []string{"values"}, compile.Source{Name: name, Data: b})
 	if err != nil {
 		return nil, err
 	}

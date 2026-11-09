@@ -113,7 +113,7 @@ Each takes one argument (`okdpFullname`: zero or one; `okdpSqlName` and
 `str`, `first`,
 `sha256`, `toJson`, `json.encode`, `toPrettyJson`, `toYaml` and `quote`
 belong to the
-language (`internal/compile`); the `okdp` functions and `oidcClientSecret`
+language (github.com/okdp/cel2yaml); the `okdp` functions and `oidcClientSecret`
 to OKDP (the root package, `compiler`), which adds them to the compile's
 session.
 
@@ -176,7 +176,7 @@ joined by dots (`<namespace>.<name>`); replacing its dots and dashes by
 one character loses it, `a-b.c` and `a.b-c` both become `a_b_c`, and the
 claimer sorted last would own the role, the database or the keyspace of
 the other. Both functions refuse (fail the expression) an `id` that is not
-DNS-1123 labels joined by dots (253 characters at most), and a `max` out
+DNS-1123 labels joined by dots (63 characters at most), and a `max` out
 of 24 to 253.
 
 | Function | Result |

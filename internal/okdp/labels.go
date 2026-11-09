@@ -5,8 +5,8 @@ package okdp
 
 import (
 	"cel.dev/cel-go/cel"
+	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -34,8 +34,8 @@ func labels(name, release, component string, selector bool) M {
 // the labels with app.kubernetes.io/component.
 func labelFunctions(name, release string) []cel.EnvOption {
 	fn := func(fname string, selector bool) cel.EnvOption {
-		return compile.Costed(cel.Function(fname, cel.Overload(fname+"_dyn", []*cel.Type{cel.DynType}, cel.DynType,
-			compile.Unary(func(v any) (any, error) { return labels(name, release, value.Str(v), selector), nil }))), fname+"_dyn")
+		return cel2yaml.Costed(cel.Function(fname, cel.Overload(fname+"_dyn", []*cel.Type{cel.DynType}, cel.DynType,
+			cel2yaml.Unary(func(v any) (any, error) { return labels(name, release, value.Str(v), selector), nil }))), fname+"_dyn")
 	}
 	return []cel.EnvOption{fn("okdpLabels", false), fn("okdpSelectorLabels", true)}
 }

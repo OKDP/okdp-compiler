@@ -134,7 +134,7 @@ version before 1.0, a major one after.
 ## CEL libraries
 
 The mapping language enables CEL extensions at pinned versions
-(`Session.env` in `internal/compile/cel.go`), so that a cel-go update
+(`Session.compile` in github.com/okdp/cel2yaml, `session.go`), so that a cel-go update
 does not change what a mapping may call. A cel-go update keeps them as they
 are; a version is raised on purpose, only together with the "CEL libraries"
 table of

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/okdp/cel2yaml"
+
 	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
@@ -39,9 +41,9 @@ func testInstance(scope M) *instance {
 
 // newSession: the session of a compile on the instance whose mapping sees
 // scope (testInstance), as Compile opens it, without a cost limit.
-func newSession(scope M) *compile.Session {
-	var s *compile.Session
-	s = compile.NewSession(context.Background(), 0, functions(testInstance(scope), &s)...)
+func newSession(scope M) *cel2yaml.Session {
+	var s *cel2yaml.Session
+	s = cel2yaml.NewSession(context.Background(), 0, functions(testInstance(scope), &s)...)
 	return s
 }
 
@@ -60,7 +62,7 @@ func mapping(okdp, values string) []compile.Source {
 
 // eval: the CEL expression expr (without ${{ }}) on the variables of scope,
 // in the session s: the value v of the template {values: {v: ${{ expr }}}}.
-func eval(s *compile.Session, expr string, scope M) (any, error) {
+func eval(s *cel2yaml.Session, expr string, scope M) (any, error) {
 	v, err := evalTemplate(s, "v.cel.yaml", []byte("values:\n  v: |-\n    ${{ "+expr+" }}\n"), scope)
 	return v["v"], err
 }

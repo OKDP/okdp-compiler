@@ -11,8 +11,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/okdp/cel2yaml"
+
 	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/compile"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -169,8 +170,8 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	// instance: the mapping and the compiler's templates are evaluated in
 	// it, cancelled with ctx, their cost counted together;
 	// okdpGeneratedSecret evaluates its template in it too.
-	var session *compile.Session
-	session = compile.NewSession(ctx, in.CostLimit, functions(inst, &session)...)
+	var session *cel2yaml.Session
+	session = cel2yaml.NewSession(ctx, in.CostLimit, functions(inst, &session)...)
 	// The chart the platform renders the OAuth client charts with.
 	dcrSource, err := platformCharts(inst.okdp)
 	if err != nil {
@@ -272,7 +273,7 @@ func platformInstance(def *Definition, in Inputs, svc *Service) (*instance, map[
 // Secrets of their secret fields, an output for each claim bound to the
 // instance (claimed), and the PushSecrets of the credentials of claims of
 // another namespace (pushSecrets).
-func providedOutputs(session *compile.Session, inst *instance, in Inputs, res M) (outputs []Output, credentials, pushes []M, err error) {
+func providedOutputs(session *cel2yaml.Session, inst *instance, in Inputs, res M) (outputs []Output, credentials, pushes []M, err error) {
 	outputs, credentials, err = provided(session, inst, in.memo.contracts, value.AsList(res["provides"]), in.AllowPlainSecrets)
 	if err != nil {
 		return nil, nil, nil, err

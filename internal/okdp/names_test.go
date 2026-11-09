@@ -176,3 +176,19 @@ func TestNameFunctions(t *testing.T) {
 		}
 	}
 }
+
+// TestNamesIDLength: an ID of 63 characters is a claim's, one longer is not
+// (chart.IsClaimID).
+func TestNamesIDLength(t *testing.T) {
+	s := newSession(M{})
+	fits := strings.Repeat("a", 31) + "." + strings.Repeat("b", 31)
+	long := "a" + fits
+	for _, fn := range []string{"okdpSqlName", "okdpObjectName"} {
+		if _, err := eval(s, fn+"(id)", M{"id": fits}); err != nil {
+			t.Errorf("%s of %d characters: %v", fn, len(fits), err)
+		}
+		if _, err := eval(s, fn+"(id)", M{"id": long}); err == nil || !strings.Contains(err.Error(), "63 characters at most") {
+			t.Errorf("%s of %d characters: got %v, want it refused", fn, len(long), err)
+		}
+	}
+}

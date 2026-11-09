@@ -11,14 +11,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
+	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/compile"
+	"github.com/okdp/okdp-compiler/internal/chart"
 )
 
 const (
@@ -35,21 +35,13 @@ const (
 	systemEscape = "c___"
 )
 
-// dottedLabel: a DNS-1123 label, a part of a claim's ID.
-var dottedLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-
-// checkDotted: nil when id is DNS-1123 labels joined by dots, 253
-// characters at most (a claim's ID, an instance's name): the form the
-// names below are injective over. A label starts and ends with a letter or
-// a digit, so that a dot is never next to a dash.
+// checkDotted: nil when id is a claim's ID (chart.IsClaimID), DNS-1123
+// labels joined by dots, 63 characters at most: the form the names below
+// are injective over. A label starts and ends with a letter or a digit, so
+// that a dot is never next to a dash.
 func checkDotted(fn, id string) error {
-	if id == "" || len(id) > 253 {
-		return fmt.Errorf("%s: %q is not a claim's ID: DNS-1123 labels joined by dots, 253 characters at most", fn, id)
-	}
-	for l := range strings.SplitSeq(id, ".") {
-		if len(l) > 63 || !dottedLabel.MatchString(l) {
-			return fmt.Errorf("%s: %q is not a claim's ID: DNS-1123 labels joined by dots, 253 characters at most", fn, id)
-		}
+	if !chart.IsClaimID(id) {
+		return fmt.Errorf("%s: %q is not a claim's ID: DNS-1123 labels joined by dots, 63 characters at most", fn, id)
 	}
 	return nil
 }
@@ -137,7 +129,7 @@ func nameFunctions() []cel.EnvOption {
 	}
 	fn := func(name string, f func(string, int64) (string, error)) cel.EnvOption {
 		one, two := name+"_string", name+"_string_int"
-		return compile.Costed(cel.Function(name,
+		return cel2yaml.Costed(cel.Function(name,
 			cel.Overload(one, []*cel.Type{cel.StringType}, cel.StringType, cel.UnaryBinding(func(id ref.Val) ref.Val { return call(name, f, id, nil) })),
 			cel.Overload(two, []*cel.Type{cel.StringType, cel.IntType}, cel.StringType, cel.BinaryBinding(func(id, limit ref.Val) ref.Val { return call(name, f, id, limit) }))), one, two)
 	}

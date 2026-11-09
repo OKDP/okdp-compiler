@@ -1,5 +1,5 @@
 // Package okdp compiles an OKDP service instance into the values of its
-// upstream charts with a YAML + CEL mapping (internal/compile), and adds the
+// upstream charts with a YAML + CEL mapping (internal/compile, over github.com/okdp/cel2yaml), and adds the
 // OKDP objects of the instance (the credentials Secrets of the connections
 // it provides, and the objects section of the mapping) and what it
 // publishes (its URL, its usage, the connections it provides). It holds

@@ -10,7 +10,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/compile"
+	"github.com/okdp/cel2yaml"
+
 	"github.com/okdp/okdp-compiler/internal/value"
 )
 
@@ -67,7 +68,7 @@ func published(info M, outputs []Output) Info {
 // true) gets its credentials Secret, named after its secretRef (default
 // <name>-<contract>-credentials), a DNS-1123 subdomain (isSecretName).
 // Then two outputs of one contract and name fail (twice).
-func provided(session *compile.Session, inst *instance, contracts *contractCache, provides []any, plain bool) ([]Output, []M, error) {
+func provided(session *cel2yaml.Session, inst *instance, contracts *contractCache, provides []any, plain bool) ([]Output, []M, error) {
 	var outputs []Output
 	var credentials []M
 	for _, x := range provides {
@@ -151,7 +152,7 @@ func twice(outputs []Output) error {
 // values would be written in clear to the deployments repository; both
 // labelled okdp.io/credentials-<contract>, in the namespace of the
 // instance inst.
-func credentialsSecret(session *compile.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
+func credentialsSecret(session *cel2yaml.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
 	label := "okdp.io/credentials-" + contract
 	if value.Truthy(secret["generate"]) {
 		return generatedSecret(session, inst, M{
