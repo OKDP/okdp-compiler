@@ -1,0 +1,7 @@
+# A namespace the platform keeps from every project: a reservation wins over
+# a privilege. Input: field, ns, settings.
+vars:
+  privileged: ${{ ns in asList(dig(settings, "policy.privileged")).map(n, str(n)) }}
+errors:
+  - $if: ${{ ns in asList(dig(settings, "policy.reserved")).map(n, str(n)) }}
+    $value: "${{ field }} ${{ quote(ns) }}: the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it${{ privileged ? ', privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins' : '' }}"

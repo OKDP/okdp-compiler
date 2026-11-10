@@ -1,0 +1,38 @@
+# What a mapping sees as platform, of the platform's settings: the OIDC
+# provider with the client mode in effect, the Secret of the main OAuth
+# client, the annotations of every service's ingress, the proxy settings as
+# environment variables, the groups of each role. Input: settings, release,
+# items (the project's groups, by group, each its role).
+vars:
+  given: ${{ asMap(dig(settings, "oidc")) }}
+  givenDcr: ${{ asMap(dig(settings, "oidc.dcr")) }}
+  mode: ${{ str(dig(settings, "oidc.clientProvisioning")) }}
+  on: ${{ truthy(dig(settings, "oidc.enabled")) }}
+  # The CA bundle the oidc-dcr Jobs trust: the platform's, unless dcr sets one.
+  caSecret: >-
+    ${{ "caSecret" in givenDcr ? givenDcr.caSecret : str(dig(settings, "tls.caBundleSecret")) }}
+  oidc: >-
+    ${{ merge(given, {"existing": on && mode == "existing", "dcr": merge(givenDcr, {"enabled": on && mode == "dcr", "caSecret": caSecret})}) }}
+  admins: >-
+    ${{ asList(dig(settings, "access.admins")).map(g, str(g)) }}
+  # Each list holds the higher roles' groups and the platform's administrators.
+  editors: >-
+    ${{ keys(items).filter(g, items[g] in ["editor", "admin"]) }}
+  owners: >-
+    ${{ keys(items).filter(g, items[g] == "admin") }}
+values:
+  platform:
+    access:
+      viewers: ${{ (admins + keys(items)).sort().distinct() }}
+      editors: ${{ (admins + editors).sort().distinct() }}
+      admins: ${{ (admins + owners).sort().distinct() }}
+      platformAdmins: ${{ admins.sort().distinct() }}
+    oidc: ${{ oidc }}
+    oidcClientSecret: >-
+      ${{ rule("oidcSecret", {"arg": "", "release": release, "platform": {"oidc": oidc}}).secret }}
+    ingressAnnotations: >-
+      ${{ merge({"cert-manager.io/cluster-issuer": str(dig(settings, "tls.clusterIssuer"))}, asMap(dig(settings, "ingress.annotations"))) }}
+    proxyEnv:
+      HTTP_PROXY: {$if: '${{ truthy(dig(settings, "proxy.httpProxy")) }}', $value: '${{ dig(settings, "proxy.httpProxy") }}'}
+      HTTPS_PROXY: {$if: '${{ truthy(dig(settings, "proxy.httpsProxy")) }}', $value: '${{ dig(settings, "proxy.httpsProxy") }}'}
+      NO_PROXY: {$if: '${{ truthy(dig(settings, "proxy.noProxy")) }}', $value: '${{ dig(settings, "proxy.noProxy") }}'}

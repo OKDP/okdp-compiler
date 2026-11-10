@@ -13,20 +13,20 @@ import (
 // objects share unchanged; an item of a List alike; another object, without keep, without
 // annotations or metadata, left as it is.
 func TestKeepSynced(t *testing.T) {
-	shared := M{resourcePolicy: "keep"}
+	shared := M{defaultRules().keep.annotation: "keep"}
 	objects := []map[string]any{
-		{"kind": "Database", "metadata": M{"name": "a", "annotations": M{resourcePolicy: "keep"}}},
-		{"kind": "Secret", "metadata": M{"name": "b", "annotations": M{resourcePolicy: " Keep ", syncOptions: "ServerSideApply=true"}}},
-		{"kind": "Secret", "metadata": M{"name": "c", "annotations": M{resourcePolicy: "keep", syncOptions: "Prune=false, Replace=true"}}},
-		{"kind": "Secret", "metadata": M{"name": "d", "annotations": M{resourcePolicy: "keep", syncOptions: "Prune=confirm,Delete=false"}}},
+		{"kind": "Database", "metadata": M{"name": "a", "annotations": M{defaultRules().keep.annotation: "keep"}}},
+		{"kind": "Secret", "metadata": M{"name": "b", "annotations": M{defaultRules().keep.annotation: " Keep ", defaultRules().keep.syncOptions: "ServerSideApply=true"}}},
+		{"kind": "Secret", "metadata": M{"name": "c", "annotations": M{defaultRules().keep.annotation: "keep", defaultRules().keep.syncOptions: "Prune=false, Replace=true"}}},
+		{"kind": "Secret", "metadata": M{"name": "d", "annotations": M{defaultRules().keep.annotation: "keep", defaultRules().keep.syncOptions: "Prune=confirm,Delete=false"}}},
 		{"kind": "Secret", "metadata": M{"name": "e", "annotations": shared}},
 		{"kind": "Secret", "metadata": M{"name": "f", "annotations": shared}},
-		{"kind": "Secret", "metadata": M{"name": "g", "annotations": M{resourcePolicy: "delete"}}},
+		{"kind": "Secret", "metadata": M{"name": "g", "annotations": M{defaultRules().keep.annotation: "delete"}}},
 		{"kind": "Secret", "metadata": M{"name": "h"}},
 		{"kind": "Secret"},
-		{"kind": "List", "items": []any{M{"kind": "Database", "metadata": M{"name": "i", "annotations": M{resourcePolicy: "keep"}}}}},
+		{"kind": "List", "items": []any{M{"kind": "Database", "metadata": M{"name": "i", "annotations": M{defaultRules().keep.annotation: "keep"}}}}},
 	}
-	keepSynced(objects)
+	keepSynced(defaultRules().keep, objects)
 	want := map[string]any{
 		"a": "Prune=false,Delete=false",
 		"b": "ServerSideApply=true,Prune=false,Delete=false",
@@ -37,18 +37,18 @@ func TestKeepSynced(t *testing.T) {
 		"g": nil,
 		"h": nil,
 	}
-	if got := objects[9]["items"].([]any)[0].(M)["metadata"].(M)["annotations"].(M)[syncOptions]; got != "Prune=false,Delete=false" {
+	if got := objects[9]["items"].([]any)[0].(M)["metadata"].(M)["annotations"].(M)[defaultRules().keep.syncOptions]; got != "Prune=false,Delete=false" {
 		t.Errorf("an item of a List: got %v", got)
 	}
 	for _, o := range objects {
 		meta, _ := o["metadata"].(M)
 		name, _ := meta["name"].(string)
 		annotations, _ := meta["annotations"].(M)
-		if got := annotations[syncOptions]; name != "" && got != want[name] {
+		if got := annotations[defaultRules().keep.syncOptions]; name != "" && got != want[name] {
 			t.Errorf("%s: got %v, want %v", name, got, want[name])
 		}
 	}
-	if !reflect.DeepEqual(shared, M{resourcePolicy: "keep"}) {
+	if !reflect.DeepEqual(shared, M{defaultRules().keep.annotation: "keep"}) {
 		t.Errorf("a shared map changed: %v", shared)
 	}
 	if !reflect.DeepEqual(objects[8], map[string]any{"kind": "Secret"}) {
@@ -73,7 +73,7 @@ objects:
 	for _, o := range res.Objects {
 		got = append(got, o["metadata"].(M)["annotations"])
 	}
-	want := []any{M{resourcePolicy: "keep", syncOptions: "ServerSideApply=true,Prune=false,Delete=false"}, nil}
+	want := []any{M{defaultRules().keep.annotation: "keep", defaultRules().keep.syncOptions: "ServerSideApply=true,Prune=false,Delete=false"}, nil}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

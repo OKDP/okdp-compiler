@@ -409,11 +409,11 @@ func claimID(namespace, instance, field, name string) string {
 // joined, each at claims.<name> (FieldError); the global it sets checked by
 // the upstream policy (upstreamGlobals), as an instance's compile checks it.
 func CheckDeclarations(in Inputs) error {
-	layers, platform, err := contextLayers(in.Context)
+	layers, platform, err := contextLayers(in.rules(), in.Context)
 	if err != nil {
 		return err
 	}
-	settings, err := platformSettings(platform)
+	settings, err := platformSettings(in.rules(), platform)
 	if err != nil {
 		return err
 	}

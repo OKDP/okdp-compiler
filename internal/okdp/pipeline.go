@@ -47,6 +47,8 @@ type Inputs struct {
 	// (generate, okdpGeneratedSecret) or read from the platform's secret
 	// store, never written to the deployments repository.
 	AllowPlainSecrets bool
+	// Rules: the rule set of the compile; nil, the standard one.
+	Rules *RuleSet
 	// Finalize: what makes the final values of the charts of the compile
 	// from what it computed; nil, Helm's merge, chart.FinalValues.
 	Finalize Finalize
@@ -197,19 +199,18 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	// okdpGeneratedSecret evaluates its template in it too.
 	var session *cel2yaml.Session
 	session = cel2yaml.NewSession(ctx, in.CostLimit, functions(inst, &session)...)
-	// The charts the platform renders the OAuth clients and the objects with.
-	dcrSource, objectsSource, err := platformCharts(inst.okdp)
+	// The charts the platform renders the compiler's own charts with.
+	sources, err := platformCharts(in.rules(), inst.okdp)
 	if err != nil {
 		return nil, err
 	}
 	// 5. Mapping.
-	res, written, err := runMapping(session, inst.scope, def.sources()...)
+	res, written, err := runMapping(in.rules(), session, inst.scope, def.sources()...)
 	if err != nil {
 		return nil, err
 	}
-	// 6. OAuth clients (oidcClients, oidc.go): checked in every mode; in dcr
-	// mode, the values of the oidc-dcr chart of each.
-	clients, dcrValues, err := oidcClients(session, inst, value.AsList(res["oidcClients"]))
+	// 6. The charts the sections of the rule set add.
+	own, err := ownCharts(session, inst, res, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -224,10 +225,10 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	if err != nil {
 		return nil, err
 	}
-	out.ObjectsSource = objectsSource
+	out.ObjectsSource = sources["objects"]
 	// The objects' key is reserved, its chart added by the writer of the
 	// umbrella: its values are the objects, not values of an upstream chart.
-	own := append(clientCharts(clients, dcrValues, dcrSource), ownChart{key: ObjectsChart, of: "the instance's objects", from: "the objects section", source: objectsSource})
+	own = append(own, ownChart{key: ObjectsChart, of: "the instance's objects", from: "the objects section", source: sources["objects"]})
 	// 9-10. Final values of the charts, checked against the upstream charts.
 	if err := finalValues(ctx, def, in, inst, svc, out, res, written, own); err != nil {
 		return nil, err
@@ -244,8 +245,8 @@ func checkInputs(def *Definition, in Inputs) (*Service, error) {
 	switch {
 	case !chart.IsRelease(in.Release):
 		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
-	case checkNamespace("Inputs.Namespace", in.Namespace) != nil:
-		return nil, checkNamespace("Inputs.Namespace", in.Namespace)
+	case checkNamespace(in.rules(), "Inputs.Namespace", in.Namespace) != nil:
+		return nil, checkNamespace(in.rules(), "Inputs.Namespace", in.Namespace)
 	case in.Name != "" && !chart.IsDNSLabel(in.Name):
 		return nil, fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
 	}
@@ -277,11 +278,11 @@ func platformInstance(def *Definition, in Inputs, svc *Service) (*instance, map[
 	}
 	// The platform's reserved namespaces, of its settings: a reservation
 	// wins over a privilege.
-	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
+	if err := checkPlatformNamespace(in.rules(), "Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
 		return nil, nil, err
 	}
 	// A release named like an object the platform writes in the namespace.
-	if err := checkRelease("Inputs.Release", in.Release, inst.okdp); err != nil {
+	if err := checkRelease(in.rules(), "Inputs.Release", in.Release, inst.okdp); err != nil {
 		return nil, nil, err
 	}
 	groups, err := projectAccess(in.Context, in.Namespace)
@@ -329,7 +330,11 @@ func providedOutputs(session *cel2yaml.Session, inst *instance, in Inputs, res M
 // and name (checkDuplicateObjects); then the sync options of Argo CD of
 // those Helm keeps.
 func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, groups map[string]Role, res M, outputs []Output, credentials, pushes []M) (*Result, error) {
-	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: secretStore(inst.okdp), Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp), Network: network(inst.okdp)}
+	store, err := secretStore(in.rules(), inst.okdp)
+	if err != nil {
+		return nil, err
+	}
+	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: store, Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp), Network: network(inst.okdp)}
 	if out.Network != nil {
 		out.Network.Claimers = claimers(in.Namespace, in.Claims)
 	}
@@ -338,18 +343,22 @@ func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, g
 	}
 	out.Objects = append(out.Objects, pushes...)
 	for _, x := range inst.transfers {
-		out.Objects = append(out.Objects, pullSecret(inst, x))
-	}
-	if !out.Privileged {
-		if err := checkObjects(svc.Name, in.Namespace, out.Objects); err != nil {
+		o, err := pullSecret(inst, x)
+		if err != nil {
 			return nil, err
 		}
-		if err := checkIngressHosts(svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
+		out.Objects = append(out.Objects, o)
+	}
+	if !out.Privileged {
+		if err := checkObjects(in.rules(), svc.Name, in.Namespace, out.Objects); err != nil {
+			return nil, err
+		}
+		if err := checkIngressHosts(in.rules(), svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
 			return nil, err
 		}
 	}
 	if !in.AllowPlainSecrets {
-		if err := checkPlainSecrets(svc.Name, out.Objects); err != nil {
+		if err := checkPlainSecrets(in.rules(), svc.Name, out.Objects); err != nil {
 			return nil, err
 		}
 	}
@@ -357,7 +366,7 @@ func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, g
 		return nil, err
 	}
 	// Whatever wrote it, an object Helm keeps is kept by Argo CD alike.
-	keepSynced(out.Objects)
+	keepSynced(in.rules().keep, out.Objects)
 	return out, nil
 }
 
@@ -380,7 +389,7 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 	}
 	out.Computed = value.AsMap(value.Copy(output))
 	var warnings []string
-	check := upstreamCheck(inst.okdp, in.Namespace, out.Privileged)
+	check := upstreamCheck(in.rules(), inst.okdp, in.Namespace, out.Privileged)
 	if in.Finalize != nil {
 		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Upstream: check})
 	} else {
@@ -392,7 +401,7 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 	out.Warnings = append(out.Warnings, warnings...)
 	// The hosts of the charts' ingresses, those of the objects checked above.
 	if !out.Privileged {
-		if err := checkIngressValues(in.Namespace, inst.okdp, out.Values); err != nil {
+		if err := checkIngressValues(in.rules(), in.Namespace, inst.okdp, out.Values); err != nil {
 			return err
 		}
 	}

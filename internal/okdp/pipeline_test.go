@@ -596,7 +596,7 @@ objects:
 	}
 	// The chart of the objects, by default and the platform's; its key the
 	// compiler's.
-	if res.ObjectsSource != ObjectsSource {
+	if res.ObjectsSource != defaultRules().charts["objects"] {
 		t.Errorf("the default chart of the objects: %v", res.ObjectsSource)
 	}
 	own := chart.Ref{Repository: "oci://registry.example.org/okdp", Chart: "own-objects", Version: "2.0.0"}

@@ -2,6 +2,7 @@ package okdp
 
 import (
 	"context"
+	"github.com/okdp/okdp-compiler/internal/value"
 	"reflect"
 	"testing"
 )
@@ -31,13 +32,20 @@ func TestSecretStore(t *testing.T) {
 // ClusterSecretStore; the refresh interval, 1h unless set; a claim's key,
 // the provider's namespace then the claim's ID.
 func TestStoreRef(t *testing.T) {
+	of := func(okdp M) (M, string) {
+		v, err := storeOf(defaultRules(), okdp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value.AsMap(v["ref"]), value.Str(v["refreshInterval"])
+	}
 	store := M{"secrets": M{"store": "okdp-secrets"}}
-	if got := storeRef(store); !reflect.DeepEqual(got, M{"name": "okdp-secrets", "kind": "ClusterSecretStore"}) || refreshInterval(store) != "1h" {
-		t.Errorf("without a provider: %v, %s", got, refreshInterval(store))
+	if got, every := of(store); !reflect.DeepEqual(got, M{"name": "okdp-secrets", "kind": "ClusterSecretStore"}) || every != "1h" {
+		t.Errorf("without a provider: %v, %s", got, every)
 	}
 	store = M{"secrets": M{"store": "okdp-secrets", "refreshInterval": "15m", "provider": M{"vault": M{"server": "http://openbao.openbao.svc:8200"}}}}
-	if got := storeRef(store); !reflect.DeepEqual(got, M{"name": "okdp-secrets", "kind": "SecretStore"}) || refreshInterval(store) != "15m" {
-		t.Errorf("with a provider: %v, %s", got, refreshInterval(store))
+	if got, every := of(store); !reflect.DeepEqual(got, M{"name": "okdp-secrets", "kind": "SecretStore"}) || every != "15m" {
+		t.Errorf("with a provider: %v, %s", got, every)
 	}
 	if got := storeKey("data", "demo.app.db"); got != "data/demo.app.db" {
 		t.Errorf("storeKey: %s", got)

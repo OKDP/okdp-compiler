@@ -21,55 +21,27 @@ import (
 
 // hostRules: the hosts a project may serve (checkIngressHosts).
 type hostRules struct {
+	rules     *RuleSet
 	namespace string
-	suffix    string   // global.okdp.ingress.suffix, "" when unset
-	listed    []string // global.okdp.policy.ingressHosts of namespace, lower case
+	suffix    string // global.okdp.ingress.suffix, "" when unset
+	listed    M      // global.okdp.policy.ingressHosts of namespace, lower case, as a set
 }
 
 // newHostRules: the rules of the project of namespace, of okdp, the
 // platform's settings.
-func newHostRules(okdp M, namespace string) *hostRules {
-	r := &hostRules{namespace: namespace, suffix: strings.ToLower(strings.Trim(value.Str(value.Dig(okdp, "ingress.suffix")), "."))}
+func newHostRules(rules *RuleSet, okdp M, namespace string) *hostRules {
+	r := &hostRules{rules: rules, namespace: namespace, suffix: strings.ToLower(strings.Trim(value.Str(value.Dig(okdp, "ingress.suffix")), ".")), listed: M{}}
 	for _, h := range value.AsList(value.AsMap(value.Dig(okdp, "policy.ingressHosts"))[namespace]) {
-		r.listed = append(r.listed, strings.ToLower(value.Str(h)))
+		r.listed[strings.ToLower(value.Str(h))] = true
 	}
 	return r
 }
 
-// allowed: whether host may be served by the project: a host the platform
-// lists for it, or one that ends with -<namespace>.<suffix> (a name before
-// the dash). The case and a final dot do not count.
-func (r *hostRules) allowed(host string) bool {
-	host = strings.ToLower(strings.TrimSuffix(host, "."))
-	if slices.Contains(r.listed, host) {
-		return true
-	}
-	if r.suffix == "" {
-		return false
-	}
-	rest, ok := strings.CutSuffix(host, "-"+r.namespace+"."+r.suffix)
-	return ok && rest != "" && !strings.HasSuffix(rest, ".")
-}
-
-// refusal: the error of the host host, found at where, which the project
-// may not serve.
-func (r *hostRules) refusal(where, host string) error {
-	form := "a host that ends with -" + r.namespace + "." + r.suffix
-	if r.suffix == "" {
-		form = "any host, global.okdp.ingress.suffix being unset, but those listed"
-	}
-	return fmt.Errorf("%s: host %q is not served by %s: %s, or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), %s is not one of them", where, host, r.namespace, form, r.namespace)
-}
-
-// hostAnnotations: the annotations that name hosts, an Ingress's or a
-// Service's: cert-manager's common name and alternative names, ingress-nginx's
-// server aliases, external-dns's hostnames; their values lists of hosts
-// separated by commas and spaces.
-var hostAnnotations = map[string]bool{
-	"cert-manager.io/common-name":               true,
-	"cert-manager.io/alt-names":                 true,
-	"nginx.ingress.kubernetes.io/server-alias":  true,
-	"external-dns.alpha.kubernetes.io/hostname": true,
+// check: the error of the host, found at where, when the project may not
+// serve it (the rule set's host check). The case and a final dot do not
+// count.
+func (r *hostRules) check(where, host string) error {
+	return r.rules.refuse(checkHost, M{"at": where, "raw": host, "host": strings.ToLower(strings.TrimSuffix(host, ".")), "ns": r.namespace, "suffix": r.suffix, "listed": r.listed})
 }
 
 // annotationHosts: the first host of the annotations a (a map of
@@ -77,12 +49,12 @@ var hostAnnotations = map[string]bool{
 // they all hold.
 func (r *hostRules) annotationHosts(p string, a M) error {
 	for _, k := range slices.Sorted(maps.Keys(a)) {
-		if !hostAnnotations[k] {
+		if !r.rules.has(tableHostAnnotations, k) {
 			continue
 		}
 		for _, h := range strings.FieldsFunc(value.Str(a[k]), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\t' }) {
-			if !r.allowed(h) {
-				return r.refusal(value.Key(p, k), h)
+			if err := r.check(value.Key(p, k), h); err != nil {
+				return err
 			}
 		}
 	}
@@ -94,11 +66,11 @@ func (r *hostRules) annotationHosts(p string, a M) error {
 // serve the hosts the platform lets the project serve (hostRules): an
 // Ingress's rules (a rule without host answers every host) and tls hosts,
 // a cert-manager Certificate's dnsNames and commonName, a Gateway API
-// route's hostnames, and the annotations that name hosts (hostAnnotations)
+// route's hostnames, and the annotations that name hosts (the rule set's hostAnnotations)
 // of any object. The first refused, in order, fails, named <kind>/<name>,
 // its field named.
-func checkIngressHosts(svc, namespace string, okdp M, objects []M) error {
-	r := newHostRules(okdp, namespace)
+func checkIngressHosts(rules *RuleSet, svc, namespace string, okdp M, objects []M) error {
+	r := newHostRules(rules, okdp, namespace)
 	return eachObject(objects, func(o M) error {
 		kind, group, name := value.Str(o["kind"]), apiGroup(value.Str(o["apiVersion"])), value.Str(value.Dig(o, "metadata.name"))
 		at := func(p string) string { return fmt.Sprintf("%s: objects: %s/%s: %s", svc, kind, name, p) }
@@ -106,10 +78,7 @@ func checkIngressHosts(svc, namespace string, okdp M, objects []M) error {
 			return fmt.Errorf("%s: objects: %s/%s: %w", svc, kind, name, err)
 		}
 		host := func(p string, h any) error {
-			if s := value.Str(h); !r.allowed(s) {
-				return r.refusal(at(p), s)
-			}
-			return nil
+			return r.check(at(p), value.Str(h))
 		}
 		list := func(p string, v any) error {
 			for i, h := range value.AsList(v) {
@@ -149,26 +118,23 @@ func checkIngressHosts(svc, namespace string, okdp M, objects []M) error {
 	})
 }
 
-// ingressKeys: the keys of the values of a chart that hold its ingress.
-var ingressKeys = map[string]bool{"ingress": true, "ingresses": true}
-
 // checkIngressValues: the final values of the charts of an instance of
 // svc in namespace, one that is not privileged (Result.Values, by chart),
 // name no host the platform keeps from the project (hostRules) under a key
 // ingress (ingresses) at any depth: a host, hostname or commonName, the
 // strings of hosts, hostnames, dnsNames and extraHosts, the name of an
-// extraHosts item, and the annotations that name hosts (hostAnnotations).
+// extraHosts item, and the annotations that name hosts (the rule set's hostAnnotations).
 // The values are the package's computed ones and the instance's upstream
 // values over them: the upstream chart's own defaults are not seen. The
 // first refused, charts in name order, keys sorted, fails, named
 // <chart>: <path>.
-func checkIngressValues(namespace string, okdp M, values map[string]map[string]any) error {
-	r := newHostRules(okdp, namespace)
+func checkIngressValues(rules *RuleSet, namespace string, okdp M, values map[string]map[string]any) error {
+	r := newHostRules(rules, okdp, namespace)
 	for _, chart := range slices.Sorted(maps.Keys(values)) {
 		var walk func(v any, p, key string, in bool) error
 		check := func(p string, h any) error {
-			if s, ok := h.(string); ok && s != "" && !r.allowed(s) {
-				return r.refusal(chart+": "+p, s)
+			if s, ok := h.(string); ok && s != "" {
+				return r.check(chart+": "+p, s)
 			}
 			return nil
 		}
@@ -183,18 +149,18 @@ func checkIngressValues(namespace string, okdp M, values map[string]map[string]a
 				for _, k := range slices.Sorted(maps.Keys(t)) {
 					kp := value.Key(p, k)
 					if in {
-						switch k {
-						case "host", "hostname", "commonName":
+						switch {
+						case rules.has(tableIngressHostKeys, k):
 							if err := check(kp, t[k]); err != nil {
 								return err
 							}
-						case "name":
+						case k == "name":
 							if key == "extraHosts" {
 								if err := check(kp, t[k]); err != nil {
 									return err
 								}
 							}
-						case "hosts", "hostnames", "dnsNames", "extraHosts":
+						case rules.has(tableIngressHostListKeys, k):
 							for i, h := range value.AsList(t[k]) {
 								if err := check(value.Index(kp, i), h); err != nil {
 									return err
@@ -205,7 +171,7 @@ func checkIngressValues(namespace string, okdp M, values map[string]map[string]a
 							}
 						}
 					}
-					if err := walk(t[k], kp, k, in || ingressKeys[k]); err != nil {
+					if err := walk(t[k], kp, k, in || rules.has(tableIngressValueKeys, k)); err != nil {
 						return err
 					}
 				}

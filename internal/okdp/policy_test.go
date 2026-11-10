@@ -218,7 +218,7 @@ func TestPolicySchema(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
-			_, err := schemaValues(platformSchema, heading, M{"global": M{"okdp": M{"policy": tc.policy}}})
+			_, err := schemaValues(defaultRules().platformSchema, heading, M{"global": M{"okdp": M{"policy": tc.policy}}})
 			if want := heading + ":\n" + tc.want; (err == nil) != (tc.want == "") || err != nil && err.Error() != want {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}

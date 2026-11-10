@@ -9,6 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/okdp/cel2yaml"
+
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
 )
@@ -30,9 +32,35 @@ func dcrCtx(settings ...M) M {
 	}
 	return M{
 		"release":  M{"name": "demo-x", "namespace": "demo"},
-		"platform": M{"oidc": inst.oidc},
+		"platform": M{"oidc": value.Dig(inst.scope, "platform.oidc")},
 	}
 }
+
+// oidcClients: the charts of the section's OAuth clients, and the values of
+// those rendered, by key; none rendered, nil.
+func oidcClients(session *cel2yaml.Session, inst *instance, section []any) ([]ownChart, map[string]M, error) {
+	sources, err := platformCharts(inst.rules, M{})
+	if err != nil {
+		return nil, nil, err
+	}
+	own, err := ownCharts(session, inst, M{"oidcClients": section}, sources)
+	if err != nil {
+		return nil, nil, err
+	}
+	var values map[string]M
+	for _, c := range own {
+		if c.values != nil {
+			if values == nil {
+				values = map[string]M{}
+			}
+			values[c.key] = c.values
+		}
+	}
+	return own, values, nil
+}
+
+// dcrChart: the chart key of a service's main OAuth client.
+const dcrChart = "oidc-dcr"
 
 // dcrValues: the oidc-dcr values of these clients in ctx, by chart.
 func dcrValues(ctx M, clients ...M) (map[string]M, error) {
@@ -76,7 +104,7 @@ func TestDcrDefaults(t *testing.T) {
 		"commonLabels":     M{"app.kubernetes.io/instance": "demo-x"},
 		"backoffLimit":     float64(6),
 	}
-	if len(values) != 1 || !reflect.DeepEqual(values[DcrChart], want) {
+	if len(values) != 1 || !reflect.DeepEqual(values[dcrChart], want) {
 		t.Errorf("got  %#v\nwant %#v", values, want)
 	}
 }
@@ -147,7 +175,7 @@ func TestDcrArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := values[DcrChart]
+	out := values[dcrChart]
 	req := value.AsMap(out["request"])
 	if req["token_endpoint_auth_method"] != "none" || req["scope"] != "groups" || req["client_name"] != "console" || req["application_type"] != "native" {
 		t.Errorf("request: %#v", req)
@@ -167,11 +195,11 @@ func TestDcrArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out := values[DcrChart]; value.Dig(out, "request.scope") != "profile email" || value.Dig(out, "mapping.keyMapping.client_secret") != ".client_secret" {
+	if out := values[dcrChart]; value.Dig(out, "request.scope") != "profile email" || value.Dig(out, "mapping.keyMapping.client_secret") != ".client_secret" {
 		t.Errorf("defaults: %#v", out)
 	}
-	if _, ok := value.AsMap(values[DcrChart]["request"])["redirect_uris"]; ok {
-		t.Errorf("an empty redirectUris is left out: %#v", values[DcrChart]["request"])
+	if _, ok := value.AsMap(values[dcrChart]["request"])["redirect_uris"]; ok {
+		t.Errorf("an empty redirectUris is left out: %#v", values[dcrChart]["request"])
 	}
 }
 
@@ -187,7 +215,7 @@ func TestDcrPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := values[DcrChart]
+	out := values[dcrChart]
 	for k, v := range map[string]any{
 		"ttlSeconds":      float64(300),
 		"backoffLimit":    float64(2),
@@ -199,7 +227,7 @@ func TestDcrPlatform(t *testing.T) {
 			t.Errorf("%s: got %#v, want %#v", k, out[k], v)
 		}
 	}
-	if values, err = dcrValues(ctx, M{"grantTypes": grants, "caSecret": "ca"}); err != nil || value.Dig(values[DcrChart], "tls.certificate") != "ca" {
+	if values, err = dcrValues(ctx, M{"grantTypes": grants, "caSecret": "ca"}); err != nil || value.Dig(values[dcrChart], "tls.certificate") != "ca" {
 		t.Errorf("caSecret of the client: %v %#v", err, values)
 	}
 	// No image in the platform values: the chart's.
@@ -207,8 +235,8 @@ func TestDcrPlatform(t *testing.T) {
 	delete(value.AsMap(value.Dig(ctx, "platform.oidc.dcr")), "image")
 	if values, err = dcrValues(ctx, M{"grantTypes": grants}); err != nil {
 		t.Fatal(err)
-	} else if _, ok := values[DcrChart]["image"]; ok {
-		t.Errorf("image: %#v", values[DcrChart]["image"])
+	} else if _, ok := values[dcrChart]["image"]; ok {
+		t.Errorf("image: %#v", values[dcrChart]["image"])
 	}
 }
 
@@ -218,7 +246,7 @@ func TestDcrModes(t *testing.T) {
 	ctx := dcrCtx()
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = false
 	clients, values, err := oidcClients(newSession(ctx), testInstance(ctx), []any{M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}}})
-	if err != nil || values != nil || len(clients) != 2 || clients[1].chart != "console-oidc-dcr" {
+	if err != nil || values != nil || len(clients) != 2 || clients[1].key != "console-oidc-dcr" {
 		t.Errorf("existing mode: %v %#v %#v", err, values, clients)
 	}
 	if _, _, err := oidcClients(newSession(ctx), testInstance(ctx), []any{M{}, M{}}); err == nil || !strings.Contains(err.Error(), "has no name either") {
@@ -239,12 +267,9 @@ func TestDcrModes(t *testing.T) {
 		{false, "", "creds-demo-x-oauth2"},
 		{false, "console", "creds-demo-x-oauth2-console"},
 	} {
-		if got := clientSecret("demo-x", "demo", tc.dcr, tc.name); got != tc.want {
-			t.Errorf("clientSecret(dcr %v, %q): got %q, want %q", tc.dcr, tc.name, got, tc.want)
-		}
 		ctx := dcrCtx()
 		value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = tc.dcr
-		res, _, err := runMapping(newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
+		res, _, err := runMapping(defaultRules(), newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +314,7 @@ func TestDcrErrors(t *testing.T) {
 
 // TestDcrCompile: a mapping's oidcClients compiled with the service: in dcr
 // mode, one oidc-dcr chart per client, which Chart.yaml does not list,
-// rendered by DcrSource (its defaults merged, from the chart cache); the
+// rendered by defaultRules().charts["oidcDcr"] (its defaults merged, from the chart cache); the
 // compiler owns these charts: Chart.yaml and values.cel.yaml may not list
 // them.
 func TestDcrCompile(t *testing.T) {
@@ -332,8 +357,8 @@ app:
 		existing bool
 		charts   map[string]chart.Ref // Result.Charts
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": DcrSource, "console-oidc-dcr": DcrSource}},
-		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": DcrSource}},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().charts["oidcDcr"], "console-oidc-dcr": defaultRules().charts["oidcDcr"]}},
+		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().charts["oidcDcr"]}},
 		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -373,7 +398,7 @@ app:
 		want     string
 	}{
 		"in values":        {"oidc-dcr: {}", true, app, ch, "values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it"},
-		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: DcrSource.Repository, Version: DcrSource.Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
+		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: defaultRules().charts["oidcDcr"].Repository, Version: defaultRules().charts["oidcDcr"].Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
 		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0"},
 	} {
 		t.Run(name, func(t *testing.T) {

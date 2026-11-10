@@ -400,7 +400,7 @@ func TestFilesDropped(t *testing.T) {
 func TestPlatformObjectNames(t *testing.T) {
 	names := []string{flux.RoleName, target.NetworkPolicyName, target.ControlPlaneName, target.AccessName(okdp.RoleViewer), target.AccessName(okdp.RoleEditor), target.AccessName(okdp.RoleAdmin)}
 	for _, n := range names {
-		if !slices.Contains(okdp.PlatformObjectNames, n) {
+		if !slices.Contains(okdp.PlatformObjectNames(), n) {
 			t.Errorf("%s: written by a target in every namespace, not in okdp.PlatformObjectNames", n)
 		}
 	}

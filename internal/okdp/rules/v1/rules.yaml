@@ -1,0 +1,240 @@
+# The standard rule set of an OKDP platform: what the compiler refuses and
+# what it knows of the platform's names, as data. A table with addFrom also
+# reads the list global.okdp.<addFrom>: the platform adds to the table, it
+# never removes from it.
+apiVersion: okdp-compiler/rules.v1
+version: 1.0.0
+tables:
+  # The namespaces of the deployer engines and of the objects the targets
+  # write in them, which no project may have: a project's releases are
+  # installed with every verb of its namespace, and there they would rewrite
+  # the engine's sources, its Applications or HelmReleases, the other
+  # projects' identities.
+  engineNamespaces:
+    values: [argocd, flux-system, okdp-releases]
+  # The well-known cluster-scoped kinds, <group>/<kind>, the group of the
+  # apiVersion, empty for the core group: Kubernetes' own, and those of the
+  # operators OKDP's packages install objects of or that commonly run beside
+  # them. A kind that is not listed is assumed namespaced: the engine's
+  # identity, confined to the namespace, refuses it in the cluster.
+  clusterScopedKinds:
+    values:
+      - /Namespace
+      - /Node
+      - /PersistentVolume
+      - storage.k8s.io/StorageClass
+      - storage.k8s.io/CSIDriver
+      - storage.k8s.io/CSINode
+      - storage.k8s.io/VolumeAttachment
+      - storage.k8s.io/VolumeAttributesClass
+      - rbac.authorization.k8s.io/ClusterRole
+      - rbac.authorization.k8s.io/ClusterRoleBinding
+      - apiextensions.k8s.io/CustomResourceDefinition
+      - admissionregistration.k8s.io/ValidatingWebhookConfiguration
+      - admissionregistration.k8s.io/MutatingWebhookConfiguration
+      - admissionregistration.k8s.io/ValidatingAdmissionPolicy
+      - admissionregistration.k8s.io/ValidatingAdmissionPolicyBinding
+      - admissionregistration.k8s.io/MutatingAdmissionPolicy
+      - admissionregistration.k8s.io/MutatingAdmissionPolicyBinding
+      - scheduling.k8s.io/PriorityClass
+      - networking.k8s.io/IngressClass
+      - networking.k8s.io/IPAddress
+      - networking.k8s.io/ServiceCIDR
+      - node.k8s.io/RuntimeClass
+      - apiregistration.k8s.io/APIService
+      - certificates.k8s.io/CertificateSigningRequest
+      - certificates.k8s.io/ClusterTrustBundle
+      - flowcontrol.apiserver.k8s.io/FlowSchema
+      - flowcontrol.apiserver.k8s.io/PriorityLevelConfiguration
+      - policy/PodSecurityPolicy
+      - resource.k8s.io/DeviceClass
+      - resource.k8s.io/ResourceSlice
+      - snapshot.storage.k8s.io/VolumeSnapshotClass
+      - snapshot.storage.k8s.io/VolumeSnapshotContent
+      - gateway.networking.k8s.io/GatewayClass
+      - external-secrets.io/ClusterSecretStore
+      - external-secrets.io/ClusterExternalSecret
+      - external-secrets.io/ClusterPushSecret
+      - generators.external-secrets.io/ClusterGenerator
+      - cert-manager.io/ClusterIssuer
+      - trust.cert-manager.io/Bundle
+      - kyverno.io/ClusterPolicy
+      - kyverno.io/ClusterCleanupPolicy
+      - templates.gatekeeper.sh/ConstraintTemplate
+      - keda.sh/ClusterTriggerAuthentication
+      - cilium.io/CiliumClusterwideNetworkPolicy
+      - crd.projectcalico.org/GlobalNetworkPolicy
+      - projectcalico.org/GlobalNetworkPolicy
+      - security.openshift.io/SecurityContextConstraints
+      - quota.openshift.io/ClusterResourceQuota
+      - argoproj.io/ClusterWorkflowTemplate
+  # The API groups of the deployer engines' custom resources: such an object
+  # in a project's namespace lets it drive the engine with the engine's own
+  # identity.
+  deployerApiGroups:
+    values:
+      - helm.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - source.toolkit.fluxcd.io
+      - notification.toolkit.fluxcd.io
+      - image.toolkit.fluxcd.io
+      - fluxcd.controlplane.io
+      - source.extensions.fluxcd.io
+      - argoproj.io
+  # The keys the upstream values of an instance of a project that is not
+  # privileged set nowhere, at any depth, to any value: a pod's privileges
+  # on its node, its security context whole, its identity, and the containers
+  # and objects a chart adds from its values. The scheduling keys stay free.
+  deniedUpstreamKeys:
+    addFrom: policy.upstream.deny
+    values:
+      - privileged
+      - hostPath
+      - hostNetwork
+      - hostPID
+      - hostIPC
+      - hostPort
+      - allowPrivilegeEscalation
+      - capabilities
+      - seccompProfile
+      - sysctls
+      - securityContext
+      - podSecurityContext
+      - containerSecurityContext
+      - serviceAccountName
+      - serviceAccount
+      - automountServiceAccountToken
+      - extraContainers
+      - sidecars
+      - initContainers
+      - extraInitContainers
+      - extraObjects
+      - extraDeploy
+      - extraManifests
+  # What the name of a key ends with, in lower case, when the key holds an
+  # image, a registry or a repository of images by its own name. The key
+  # image itself is read with its sibling keys.
+  imageKeySuffixes:
+    values: [image, imageregistry, imagerepository, imagename]
+  # The names of the objects the platform writes in the namespace of every
+  # project besides its instances': a release may not take one.
+  platformObjectNames:
+    values:
+      - okdp-project
+      - okdp-control-plane
+      - okdp-access-viewer
+      - okdp-access-editor
+      - okdp-access-admin
+      - okdp-secrets
+      - okdp-dcr-token
+  # The annotations that name hosts, their values lists of hosts separated
+  # by commas and spaces.
+  hostAnnotations:
+    values:
+      - cert-manager.io/common-name
+      - cert-manager.io/alt-names
+      - nginx.ingress.kubernetes.io/server-alias
+      - external-dns.alpha.kubernetes.io/hostname
+  # The keys of the values of a chart that hold its ingress; under them, the
+  # keys that hold one host, and those that hold a list of hosts.
+  ingressValueKeys:
+    values: [ingress, ingresses]
+  ingressHostKeys:
+    values: [host, hostname, commonName]
+  ingressHostListKeys:
+    values: [hosts, hostnames, dnsNames, extraHosts]
+  # The keys of global a project sets when the platform lists none
+  # (global.okdp.policy.projectGlobals).
+  defaultProjectGlobals:
+    values: [project, storageClass]
+  # The paths of the context a level gives whole, or not at all: * stands for
+  # one key. A level may not change them piecemeal.
+  wholePaths:
+    values:
+      - connections.*
+      - claims.*
+      - global.okdp.provisioning.*.classes.*
+      - global.okdp.provisioning.*.default
+  # The keys of global.okdp a level above 0 may set, read as the platform's
+  # settings: the classes a project adds.
+  projectPlatformKeys:
+    values: [provisioning]
+  # The roles of a project's groups, least first.
+  projectRoles:
+    values: [viewer, editor, admin]
+# The checks: each a document of vars and errors (the mapping language),
+# applied by a walker of the compiler, the first message refusing. They see
+# their input and sets, each table as a set, and tables, as a list.
+checks:
+  namespace: checks/namespace.cel.yaml
+  platformNamespace: checks/platform-namespace.cel.yaml
+  release: checks/release.cel.yaml
+  object: checks/objects.cel.yaml
+  upstreamKey: checks/upstream-key.cel.yaml
+  plainSecret: checks/plain-secret.cel.yaml
+  host: checks/host.cel.yaml
+  contextLayer: checks/context-layer.cel.yaml
+  valuesLayer: checks/values-layer.cel.yaml
+# The JSON schemas of the platform's settings and of what a mapping writes.
+schemas:
+  platform: schemas/platform.schema.json
+  mapping: schemas/mapping.schema.json
+# The functions mappings call: each a fragment, a template evaluated on its
+# arguments, checked against the mapping schema under the function's name,
+# and the instance's context; result names the value it returns, all of them
+# when left out.
+functions:
+  okdpPodSpec: {fragment: fragments/fragment-pod.cel.yaml, result: spec}
+  okdpJob: {fragment: fragments/fragment-job.cel.yaml, result: objects}
+  okdpSignInProxy: {fragment: fragments/fragment-proxy.cel.yaml}
+  okdpWebWorkload: {fragment: fragments/fragment-web.cel.yaml, result: objects}
+  oidcClientSecret: {document: oidcSecret, result: secret}
+# The compiler's own templates: the objects of a generated Secret, and the
+# values of an OAuth client's chart.
+templates:
+  generatedSecret: fragments/generated-secret.cel.yaml
+  oidcDcr: charts/oidc-dcr.cel.yaml
+# The sections of a mapping besides the compiler's own (output, instance,
+# provides, objects).
+sections: [oidcClients]
+# The charts the compiler adds, each overridden by global.okdp.charts.<name>.
+charts:
+  oidcDcr: {repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.6.0}
+  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 1.0.0}
+# Documents the others call: rule(<name>, input) in a document, a function of
+# functions, scope (what a mapping sees as platform).
+documents:
+  oidcSecret: functions/oidc-secret.cel.yaml
+  oidcClients: charts/oidc-clients.cel.yaml
+  scope: scope.cel.yaml
+  secretStore: objects/secret-store.cel.yaml
+  pushSecret: objects/push-secret.cel.yaml
+  pullSecret: objects/pull-secret.cel.yaml
+# A section whose items add charts: list gives them, values the values of
+# each it says to render.
+ownCharts:
+  - {section: oidcClients, chart: oidcDcr, list: oidcClients, values: oidcDcr}
+# The names the compiler gives credentials: $<word> stands for the value.
+names:
+  credentialsSecret: $output-$contract-credentials
+  connectionSecret: $release.$connection-credentials
+  claimSecret: $release-$secret
+  credentialsLabel: okdp.io/credentials-$contract
+# An object Helm keeps is kept alike by Argo CD, which reads none of Helm's
+# annotations: its sync options are added, unless it sets one of that name.
+keepSync:
+  annotation: helm.sh/resource-policy
+  value: keep
+  syncOptions: argocd.argoproj.io/sync-options
+  options: [Prune=false, Delete=false]
+# The labels of OKDP's objects: $service and $release stand for the instance's.
+labels:
+  selector:
+    app.kubernetes.io/name: $service
+    app.kubernetes.io/instance: $release
+  component: app.kubernetes.io/component
+  common:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: okdp
+    okdp.io/instance: $release
+    okdp.io/service: $service

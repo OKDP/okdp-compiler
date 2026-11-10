@@ -40,7 +40,13 @@ const (
 )
 
 // Roles: the roles, least first.
-func Roles() []Role { return []Role{RoleViewer, RoleEditor, RoleAdmin} }
+func Roles() []Role {
+	var out []Role
+	for _, r := range defaultRules().list(tableProjectRoles) {
+		out = append(out, Role(r))
+	}
+	return out
+}
 
 // AccessKey: the key of a project's file, the context at level 1, that
 // gives the roles of its groups (Access.Groups): no instance receives it.
@@ -243,18 +249,18 @@ func CheckProject(in Inputs) error {
 // platformOf: the platform's settings of the context of in, global.okdp,
 // when the namespace of in may be a project's (CheckProject).
 func platformOf(in Inputs) (M, error) {
-	if err := checkNamespace("Inputs.Namespace", in.Namespace); err != nil {
+	if err := checkNamespace(in.rules(), "Inputs.Namespace", in.Namespace); err != nil {
 		return nil, &NamespaceError{err}
 	}
-	_, platform, err := contextLayers(in.Context)
+	_, platform, err := contextLayers(in.rules(), in.Context)
 	if err != nil {
 		return nil, err
 	}
-	settings, err := platformSettings(platform)
+	settings, err := platformSettings(in.rules(), platform)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkPlatformNamespace("Inputs.Namespace", in.Namespace, settings); err != nil {
+	if err := checkPlatformNamespace(in.rules(), "Inputs.Namespace", in.Namespace, settings); err != nil {
 		return nil, &NamespaceError{err}
 	}
 	return settings, nil
@@ -277,7 +283,11 @@ func ProjectOf(in Inputs) (Project, error) {
 	if err != nil {
 		return Project{}, err
 	}
-	p := Project{Namespace: in.Namespace, Privileged: privileged(settings, in.Namespace), SecretStore: secretStore(settings), Access: Access{GroupPrefix: groupPrefix(settings)}, ControlPlane: controlPlane(settings), Network: network(settings)}
+	store, err := secretStore(in.rules(), settings)
+	if err != nil {
+		return Project{}, err
+	}
+	p := Project{Namespace: in.Namespace, Privileged: privileged(settings, in.Namespace), SecretStore: store, Access: Access{GroupPrefix: groupPrefix(settings)}, ControlPlane: controlPlane(settings), Network: network(settings)}
 	if p.Network != nil {
 		p.Network.Claimers = claimers(in.Namespace, in.Claims)
 	}
@@ -298,11 +308,11 @@ func groupPrefix(okdp M) string { return value.Str(value.Dig(okdp, "access.group
 // binds them once, Argo CD's role:admin and the cluster's, for a program
 // that mirrors the platform's authority (a control plane).
 func PlatformAdmins(platform map[string]any) ([]string, error) {
-	_, settings, err := contextLayers([]ContextLayer{{Values: platform}})
+	_, settings, err := contextLayers(defaultRules(), []ContextLayer{{Values: platform}})
 	if err != nil {
 		return nil, err
 	}
-	okdp, err := platformSettings(settings)
+	okdp, err := platformSettings(defaultRules(), settings)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +324,7 @@ func PlatformAdmins(platform map[string]any) ([]string, error) {
 // the default when it gives none, for a program that mirrors the
 // project's authority (a control plane).
 func ProjectAccess(file []byte, namespace string) (map[string]Role, error) {
-	if err := checkNamespace("project", namespace); err != nil {
+	if err := checkNamespace(defaultRules(), "project", namespace); err != nil {
 		return nil, err
 	}
 	values, err := chart.ParseValues(file)

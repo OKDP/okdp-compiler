@@ -38,31 +38,18 @@ func privileged(okdp M, namespace string) bool {
 // argocd, Argo CD's and the argocd target's Applications and AppProjects
 // (argocd.Namespace). A target that writes in another (Flux.Source's)
 // refuses its projects too.
-func EngineNamespaces() []string { return []string{"argocd", "flux-system", "okdp-releases"} }
+func EngineNamespaces() []string { return defaultRules().list(tableEngineNamespaces) }
 
 // reservedNamespace: why namespace is no project's, those the compiler
-// reserves whatever the platform: platform, the segment of the platform's
-// keys of the store; kube-*, Kubernetes' own (kube-system, kube-public,
-// kube-node-lease); EngineNamespaces. Not default: a project may be
-// named so (the sandbox's confined demo). "" when it may be one; those of
-// global.okdp.policy.reserved are the platform's (Compile).
-func reservedNamespace(namespace string) string {
-	switch {
-	case namespace == platformKeys:
-		return fmt.Sprintf("%s/ holds the platform's keys of the secret store, which no project writes", platformKeys)
-	case strings.HasPrefix(namespace, "kube-"):
-		return "kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)"
-	case slices.Contains(EngineNamespaces(), namespace):
-		return fmt.Sprintf("a deployer engine's, or the namespace its target writes in (%s): a project's releases there would drive the engine", strings.Join(EngineNamespaces(), ", "))
+// reserves whatever the platform (the rule set's namespace check); those of
+// global.okdp.policy.reserved are the platform's (Compile). "" when it may
+// be one. A check that cannot be evaluated reserves it: it says so.
+func reservedNamespace(rules *RuleSet, namespace string) string {
+	why, err := rules.problem(checkNamespaceRule, M{"ns": namespace})
+	if err != nil {
+		return err.Error()
 	}
-	return ""
-}
-
-// reservedByPlatform: whether namespace is one of
-// global.okdp.policy.reserved, the namespaces the platform keeps from
-// every project.
-func reservedByPlatform(okdp M, namespace string) bool {
-	return slices.ContainsFunc(value.AsList(value.Dig(okdp, "policy.reserved")), func(v any) bool { return value.Str(v) == namespace })
+	return why
 }
 
 // The rule of a project's name, its namespace, in two parts, as the
@@ -73,12 +60,12 @@ func reservedByPlatform(okdp M, namespace string) bool {
 // checkNamespace: nil when namespace may be a project's whatever the
 // platform: a DNS label (chart.IsDNSLabel), none the compiler reserves
 // (reservedNamespace).
-func checkNamespace(field, namespace string) error {
+func checkNamespace(rules *RuleSet, field, namespace string) error {
 	switch {
 	case !chart.IsDNSLabel(namespace):
 		return fmt.Errorf("%s %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", field, namespace)
-	case reservedNamespace(namespace) != "":
-		return fmt.Errorf("%s %q: the namespace is reserved: %s", field, namespace, reservedNamespace(namespace))
+	case reservedNamespace(rules, namespace) != "":
+		return fmt.Errorf("%s %q: the namespace is reserved: %s", field, namespace, reservedNamespace(rules, namespace))
 	}
 	return nil
 }
@@ -86,15 +73,8 @@ func checkNamespace(field, namespace string) error {
 // checkPlatformNamespace: nil when namespace is none of the platform's
 // reserved namespaces, global.okdp.policy.reserved of okdp, the
 // platform's settings: a reservation wins over a privilege.
-func checkPlatformNamespace(field, namespace string, okdp M) error {
-	if !reservedByPlatform(okdp, namespace) {
-		return nil
-	}
-	also := ""
-	if privileged(okdp, namespace) {
-		also = ", privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins"
-	}
-	return fmt.Errorf("%s %q: the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it%s", field, namespace, also)
+func checkPlatformNamespace(rules *RuleSet, field, namespace string, okdp M) error {
+	return rules.refuse(checkPlatformNSRule, M{"field": field, "ns": namespace, "settings": okdp})
 }
 
 // CheckNamespace: nil when namespace may be a project's, okdp the
@@ -103,77 +83,10 @@ func checkPlatformNamespace(field, namespace string, okdp M) error {
 // (the flux target's Source) is the target's to refuse
 // (target.OwnNamespaces).
 func CheckNamespace(field, namespace string, okdp M) error {
-	if err := checkNamespace(field, namespace); err != nil {
+	if err := checkNamespace(defaultRules(), field, namespace); err != nil {
 		return err
 	}
-	return checkPlatformNamespace(field, namespace, okdp)
-}
-
-// clusterScoped: the well-known cluster-scoped kinds, <group>/<kind>, the
-// group of the apiVersion ("" for the core group): Kubernetes' own, and
-// those of the operators OKDP's packages install objects of or that
-// commonly run beside them (External Secrets, cert-manager, trust-manager,
-// Kyverno, Gatekeeper, KEDA, Cilium, Calico, OpenShift, Argo Workflows).
-// A kind that is not listed is assumed namespaced: the engine's identity,
-// confined to the namespace, refuses it in the cluster.
-var clusterScoped = func() map[string]bool {
-	out := map[string]bool{}
-	for group, kinds := range map[string][]string{
-		"":                               {"Namespace", "Node", "PersistentVolume"},
-		"storage.k8s.io":                 {"StorageClass", "CSIDriver", "CSINode", "VolumeAttachment", "VolumeAttributesClass"},
-		"rbac.authorization.k8s.io":      {"ClusterRole", "ClusterRoleBinding"},
-		"apiextensions.k8s.io":           {"CustomResourceDefinition"},
-		"admissionregistration.k8s.io":   {"ValidatingWebhookConfiguration", "MutatingWebhookConfiguration", "ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding", "MutatingAdmissionPolicy", "MutatingAdmissionPolicyBinding"},
-		"scheduling.k8s.io":              {"PriorityClass"},
-		"networking.k8s.io":              {"IngressClass", "IPAddress", "ServiceCIDR"},
-		"node.k8s.io":                    {"RuntimeClass"},
-		"apiregistration.k8s.io":         {"APIService"},
-		"certificates.k8s.io":            {"CertificateSigningRequest", "ClusterTrustBundle"},
-		"flowcontrol.apiserver.k8s.io":   {"FlowSchema", "PriorityLevelConfiguration"},
-		"policy":                         {"PodSecurityPolicy"},
-		"resource.k8s.io":                {"DeviceClass", "ResourceSlice"},
-		"snapshot.storage.k8s.io":        {"VolumeSnapshotClass", "VolumeSnapshotContent"},
-		"gateway.networking.k8s.io":      {"GatewayClass"},
-		"external-secrets.io":            {"ClusterSecretStore", "ClusterExternalSecret", "ClusterPushSecret"},
-		"generators.external-secrets.io": {"ClusterGenerator"},
-		"cert-manager.io":                {"ClusterIssuer"},
-		"trust.cert-manager.io":          {"Bundle"},
-		"kyverno.io":                     {"ClusterPolicy", "ClusterCleanupPolicy"},
-		"templates.gatekeeper.sh":        {"ConstraintTemplate"},
-		"keda.sh":                        {"ClusterTriggerAuthentication"},
-		"cilium.io":                      {"CiliumClusterwideNetworkPolicy"},
-		"crd.projectcalico.org":          {"GlobalNetworkPolicy"},
-		"projectcalico.org":              {"GlobalNetworkPolicy"},
-		"security.openshift.io":          {"SecurityContextConstraints"},
-		"quota.openshift.io":             {"ClusterResourceQuota"},
-		"argoproj.io":                    {"ClusterWorkflowTemplate"},
-	} {
-		for _, k := range kinds {
-			out[group+"/"+k] = true
-		}
-	}
-	return out
-}()
-
-// engineGroups: the API groups of the deployer engines' custom resources,
-// which a project that is not privileged may not install: a HelmRelease, a
-// GitRepository, a Kustomization or an Application in the project's
-// namespace lets it drive the engine with the engine's own identity, as
-// does an object of the Flux Operator (fluxcd.controlplane.io: a
-// FluxInstance, a ResourceSet) or of Flux's source extensions
-// (source.extensions.fluxcd.io). The
-// platform's lockdown of the engines (--no-cross-namespace-refs,
-// --default-service-account, Argo CD's application.namespaces) is the
-// second line.
-var engineGroups = map[string]bool{
-	"helm.toolkit.fluxcd.io":         true,
-	"kustomize.toolkit.fluxcd.io":    true,
-	"source.toolkit.fluxcd.io":       true,
-	"notification.toolkit.fluxcd.io": true,
-	"image.toolkit.fluxcd.io":        true,
-	"fluxcd.controlplane.io":         true,
-	"source.extensions.fluxcd.io":    true,
-	"argoproj.io":                    true,
+	return checkPlatformNamespace(defaultRules(), field, namespace, okdp)
 }
 
 // apiGroup: the group of an apiVersion, "" for the core group (v1).
@@ -190,26 +103,14 @@ func apiGroup(apiVersion string) string {
 // Secrets, the objects section, the generated Secrets, the PushSecrets and
 // ExternalSecrets): each in the instance's namespace, where its
 // metadata.namespace is set (unset, "" or null, the release's), and none
-// of a cluster-scoped kind (clusterScoped); the items of one that holds a
+// of a cluster-scoped kind (the rule set's clusterScopedKinds); the items of one that holds a
 // list of them (items: a List, which Helm installs item by item) checked
 // alike. The first refused, in order, fails, named <kind>/<name>: the
 // platform's projects alone (global.okdp.policy.privileged) install
 // cluster-scoped objects and write other namespaces.
-func checkObjects(svc, namespace string, objects []M) error {
+func checkObjects(rules *RuleSet, svc, namespace string, objects []M) error {
 	return eachObject(objects, func(o M) error {
-		meta := value.AsMap(o["metadata"])
-		id := value.Str(o["kind"]) + "/" + value.Str(meta["name"])
-		version := value.Str(o["apiVersion"])
-		if clusterScoped[apiGroup(version)+"/"+value.Str(o["kind"])] {
-			return fmt.Errorf("%s: objects: %s: a cluster-scoped kind (%s): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), %s is not one of them", svc, id, version, namespace)
-		}
-		if group := apiGroup(version); engineGroups[group] {
-			return fmt.Errorf("%s: objects: %s: an object of the deployer's kinds (%s) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), %s is not one of them", svc, id, version, namespace)
-		}
-		if ns, set := meta["namespace"]; set && ns != nil && ns != "" && ns != namespace {
-			return fmt.Errorf("%s: objects: %s: namespace %s, not the instance's (%s): the platform's projects write other namespaces (global.okdp.policy.privileged), %s is not one of them", svc, id, value.Str(ns), namespace, namespace)
-		}
-		return nil
+		return rules.refuse(checkObjectRule, M{"svc": svc, "ns": namespace, "object": objectInput(o)})
 	})
 }
 
@@ -284,54 +185,29 @@ func eachObject(objects []M, f func(o M) error) error {
 	return nil
 }
 
-// deniedKeys: the keys the upstream values of an instance of a project
-// that is not privileged set nowhere, at any depth, to any value: those of
-// a pod's privileges on its node (privileged, the host's namespaces, ports
-// and paths, capabilities, sysctls), its security context whole, its
-// identity (its ServiceAccount, its token), and the containers and objects
-// a chart adds from its values (sidecars, init containers, extra objects).
-// runAsUser 0 and runAsNonRoot false too (upstreamRules.key). The
-// scheduling keys (nodeSelector, tolerations, affinity) stay free.
-var deniedKeys = func() map[string]bool {
-	out := map[string]bool{}
-	for _, k := range []string{
-		"privileged", "hostPath", "hostNetwork", "hostPID", "hostIPC", "hostPort",
-		"allowPrivilegeEscalation", "capabilities", "seccompProfile", "sysctls",
-		"securityContext", "podSecurityContext", "containerSecurityContext",
-		"serviceAccountName", "serviceAccount", "automountServiceAccountToken",
-		"extraContainers", "sidecars", "initContainers", "extraInitContainers",
-		"extraObjects", "extraDeploy", "extraManifests",
-	} {
-		out[k] = true
-	}
-	return out
-}()
-
 // upstreamRules: what the upstream values of an instance of a project
 // that is not privileged may not set (upstreamCheck), for the messages its
 // namespace.
 type upstreamRules struct {
+	rules      *RuleSet
 	namespace  string
-	deny       map[string]bool // the platform's keys, global.okdp.policy.upstream.deny, beside deniedKeys
+	deny       map[string]bool // the platform's keys, global.okdp.policy.upstream.deny, beside the rule set's
 	registries []string        // global.okdp.policy.upstream.registries; nil: the images are not checked
 }
 
 // upstreamCheck: the platform's check of the upstream values of an
 // instance of namespace (chart.UpstreamCheck), of global.okdp.policy of
 // okdp: none for a privileged project, which sets any upstream value; for
-// the others, no key of deniedKeys nor of policy.upstream.deny, no
+// the others, no key of the rule set's deniedUpstreamKeys, no
 // runAsUser 0 nor runAsNonRoot false (upstreamRules.key), and, with
 // policy.upstream.registries, every image from one of them
 // (upstreamRules.image). The package's values are not checked: they are
 // reviewed with it.
-func upstreamCheck(okdp M, namespace string, privileged bool) chart.UpstreamCheck {
+func upstreamCheck(rules *RuleSet, okdp M, namespace string, privileged bool) chart.UpstreamCheck {
 	if privileged {
 		return nil
 	}
-	r := &upstreamRules{namespace: namespace, deny: map[string]bool{}}
-	for _, k := range value.AsList(value.Dig(okdp, "policy.upstream.deny")) {
-		r.deny[value.Str(k)] = true
-	}
+	r := &upstreamRules{rules: rules, namespace: namespace, deny: rules.added(tableDeniedUpstreamKeys, okdp)}
 	if v := value.Dig(okdp, "policy.upstream.registries"); v != nil {
 		r.registries = []string{}
 		for _, x := range value.AsList(v) {
@@ -399,23 +275,10 @@ func (r *upstreamRules) check(v, base any, k, p string, at func(string) string) 
 }
 
 // key: the error of the key k of the instance's upstream values, at the
-// path p, set to v: a key of deniedKeys or of the platform's deny list, to
+// path p, set to v: a key of the rule set's table or of the platform's deny list, to
 // any value; runAsUser 0, root; runAsNonRoot false.
 func (r *upstreamRules) key(k string, v any, p string, at func(string) string) error {
-	var why string
-	switch {
-	case deniedKeys[k]:
-		why = k + " is denied to the instance's upstream values (a pod's privileges, identity, containers or objects)"
-	case r.deny[k]:
-		why = k + " is denied to the instance's upstream values (global.okdp.policy.upstream.deny)"
-	case k == "runAsUser" && v == 0.0:
-		why = "runAsUser 0, root, is denied to the instance's upstream values"
-	case k == "runAsNonRoot" && v == false:
-		why = "runAsNonRoot false is denied to the instance's upstream values"
-	default:
-		return nil
-	}
-	return fmt.Errorf("%s: %s: the platform's projects set it (global.okdp.policy.privileged), %s is not one of them", at(p), why, r.namespace)
+	return r.rules.refuse(checkUpstreamKey, M{"key": k, "value": v, "at": at(p), "ns": r.namespace, "added": r.deny})
 }
 
 // image: the error of the images the instance sets in the map m of its
@@ -439,7 +302,7 @@ func (r *upstreamRules) image(m, base M, k, p string, at func(string) string) er
 	// defaultImageRegistry, sidecarImageRepository; its string, when not
 	// empty, is a reference as the image's.
 	for _, key := range slices.Sorted(maps.Keys(m)) {
-		if ref, ok := m[key].(string); ok && ref != "" && namesImage(key) && !r.allowed(ref) {
+		if ref, ok := m[key].(string); ok && ref != "" && r.namesImage(key) && !r.allowed(ref) {
 			return r.refused(ref, value.Key(p, key), at)
 		}
 	}
@@ -479,11 +342,11 @@ func (r *upstreamRules) image(m, base M, k, p string, at func(string) string) er
 
 // namesImage: whether the key k names an image, a registry or a
 // repository of images by its own name, as the charts spell them: it ends
-// in image, imageRegistry, imageRepository or imageName, whatever its case,
-// but image itself, which image reads with its sibling keys.
-func namesImage(k string) bool {
+// with one of the rule set's imageKeySuffixes, whatever its case, but image
+// itself, which image reads with its sibling keys.
+func (r *upstreamRules) namesImage(k string) bool {
 	l := strings.ToLower(k)
-	return l != "image" && slices.ContainsFunc([]string{"image", "imageregistry", "imagerepository", "imagename"}, func(suffix string) bool { return strings.HasSuffix(l, suffix) })
+	return l != "image" && slices.ContainsFunc(r.rules.list(tableImageKeySuffixes), func(suffix string) bool { return strings.HasSuffix(l, suffix) })
 }
 
 // isString: whether v is a string.
@@ -534,39 +397,9 @@ func (r *upstreamRules) refused(ref, p string, at func(string) string) error {
 // and type passes. The first refused, in order, fails, named
 // <kind>/<name>, its field named, data before stringData, the keys of a
 // template in order; the value is never printed.
-func checkPlainSecrets(svc string, objects []M) error {
-	const advice = "credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it"
+func checkPlainSecrets(rules *RuleSet, svc string, objects []M) error {
 	return eachObject(objects, func(o M) error {
-		kind, group, name := value.Str(o["kind"]), apiGroup(value.Str(o["apiVersion"])), value.Str(value.Dig(o, "metadata.name"))
-		var template, fake string
-		switch {
-		case kind == "Secret" && group == "":
-			for _, k := range []string{"data", "stringData"} {
-				if len(value.AsMap(o[k])) > 0 {
-					return fmt.Errorf("%s: objects: Secret/%s: a plain value (%s): %s", svc, name, k, advice)
-				}
-			}
-		case kind == "ExternalSecret" && group == "external-secrets.io":
-			template = "spec.target.template.data"
-		case kind == "ClusterExternalSecret" && group == "external-secrets.io":
-			template = "spec.externalSecretSpec.target.template.data"
-		case kind == "Fake" && group == "generators.external-secrets.io":
-			fake = "spec.data"
-		case kind == "ClusterGenerator" && group == "generators.external-secrets.io" && value.Str(value.Dig(o, "spec.kind")) == "Fake":
-			fake = "spec.generator.fakeSpec.data"
-		}
-		if template != "" {
-			data := value.AsMap(value.Dig(o, template))
-			for _, k := range slices.Sorted(maps.Keys(data)) {
-				if value.Sensitive(k) && !credentialReference(k) && credentialLiteral(data[k]) {
-					return fmt.Errorf("%s: objects: %s/%s: a plain value (%s): a literal at a sensitive key, not a template of what the store or a generator gives; %s", svc, kind, name, value.Key(template, k), advice)
-				}
-			}
-		}
-		if fake != "" && len(value.AsMap(value.Dig(o, fake))) > 0 {
-			return fmt.Errorf("%s: objects: %s/%s: a plain value (%s): a Fake generator gives the values it holds; %s", svc, kind, name, fake, advice)
-		}
-		return nil
+		return rules.refuse(checkPlainSecret, M{"svc": svc, "object": objectInput(o)})
 	})
 }
 

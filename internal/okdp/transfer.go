@@ -5,7 +5,6 @@
 package okdp
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 
@@ -37,32 +36,24 @@ type SecretStore struct {
 	Provider             map[string]any
 }
 
+// storeOf: the rule set's account of the secret store of global.okdp.secrets
+// in okdp: store, ref and refreshInterval (objects/secret-store.cel.yaml).
+func storeOf(rules *RuleSet, okdp M) (M, error) {
+	return rules.values("secretStore", M{"settings": okdp})
+}
+
 // secretStore: Result.SecretStore of global.okdp.secrets: nil without
-// store or provider; the ServiceAccount okdp-secrets when unset.
-func secretStore(okdp M) *SecretStore {
-	provider := value.AsMap(value.Dig(okdp, "secrets.provider"))
-	if storeName(okdp) == "" || len(provider) == 0 {
-		return nil
+// store or provider.
+func secretStore(rules *RuleSet, okdp M) (*SecretStore, error) {
+	v, err := storeOf(rules, okdp)
+	if err != nil {
+		return nil, err
 	}
-	return &SecretStore{Name: storeName(okdp), ServiceAccount: cmp.Or(value.Str(value.Dig(okdp, "secrets.serviceAccount")), "okdp-secrets"), Provider: value.Copy(provider).(map[string]any)}
-}
-
-// storeRef: the store as the PushSecrets and the ExternalSecrets
-// reference it, {name, kind}: the SecretStore of the namespace when the
-// platform gives the store's provider (secretStore), else the
-// ClusterSecretStore of that name.
-func storeRef(okdp M) M {
-	kind := "ClusterSecretStore"
-	if secretStore(okdp) != nil {
-		kind = "SecretStore"
+	s := value.AsMap(v["store"])
+	if len(s) == 0 {
+		return nil, nil
 	}
-	return M{"name": storeName(okdp), "kind": kind}
-}
-
-// refreshInterval: global.okdp.secrets.refreshInterval, how often the
-// PushSecrets push and the ExternalSecrets read the store; 1h when unset.
-func refreshInterval(okdp M) string {
-	return cmp.Or(value.Str(value.Dig(okdp, "secrets.refreshInterval")), "1h")
+	return &SecretStore{Name: value.Str(s["name"]), ServiceAccount: value.Str(s["serviceAccount"]), Provider: value.AsMap(s["provider"])}, nil
 }
 
 // platformKeys: the first segment of the platform's keys of the secret
@@ -108,24 +99,15 @@ func pushSecrets(inst *instance, contracts *contractCache, claims []Claim, outpu
 		if storeName(inst.okdp) == "" {
 			return nil, fmt.Errorf("claim %q (%s): claimed of namespace %s: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", c.ID, c.Contract, c.Namespace)
 		}
-		key := storeKey(inst.namespace, c.ID)
-		var data []any
-		for _, f := range fields {
-			data = append(data, M{"match": M{"secretKey": f, "remoteRef": M{"remoteKey": key, "property": f}}})
+		fieldList := make([]any, len(fields))
+		for k, f := range fields {
+			fieldList[k] = f
 		}
-		out = append(out, M{
-			"apiVersion": "external-secrets.io/v1alpha1",
-			"kind":       "PushSecret",
-			"metadata":   M{"name": c.ID, "namespace": inst.namespace, "labels": labels(inst.svc.Name, inst.release, "", false)},
-			"spec": M{
-				"refreshInterval": refreshInterval(inst.okdp),
-				"updatePolicy":    "Replace",
-				"deletionPolicy":  "Delete",
-				"secretStoreRefs": []any{storeRef(inst.okdp)},
-				"selector":        M{"secret": M{"name": outputs[i].SecretRef.Name}},
-				"data":            data,
-			},
-		})
+		o, err := storeObject(inst, "pushSecret", M{"id": c.ID, "key": storeKey(inst.namespace, c.ID), "secret": outputs[i].SecretRef.Name, "fields": fieldList, "labels": inst.rules.labels(inst.svc.Name, inst.release, "", false), "namespace": inst.namespace})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, o)
 	}
 	return out, nil
 }
@@ -137,22 +119,26 @@ func pushSecrets(inst *instance, contracts *contractCache, claims []Claim, outpu
 // of x's key; it carries the labels of a provider's credentials Secret,
 // okdp.io/credentials-<contract>, on the ExternalSecret and on the Secret
 // it writes.
-func pullSecret(inst *instance, x transfer) M {
-	var data []any
-	for _, f := range x.fields {
-		data = append(data, M{"secretKey": f, "remoteRef": M{"key": x.key, "property": f}})
+func pullSecret(inst *instance, x transfer) (M, error) {
+	l := inst.rules.labels(inst.svc.Name, inst.release, "", false)
+	l[inst.rules.name("credentialsLabel", "contract", x.contract)] = "true"
+	fields := make([]any, len(x.fields))
+	for i, f := range x.fields {
+		fields[i] = f
 	}
-	l := labels(inst.svc.Name, inst.release, "", false)
-	l["okdp.io/credentials-"+x.contract] = "true"
-	return M{
-		"apiVersion": "external-secrets.io/v1",
-		"kind":       "ExternalSecret",
-		"metadata":   M{"name": x.secret, "namespace": inst.namespace, "labels": l},
-		"spec": M{
-			"refreshInterval": refreshInterval(inst.okdp),
-			"secretStoreRef":  storeRef(inst.okdp),
-			"target":          M{"name": x.secret, "creationPolicy": "Owner", "template": M{"metadata": M{"labels": value.Copy(l)}}},
-			"data":            data,
-		},
+	return storeObject(inst, "pullSecret", M{"secret": x.secret, "key": x.key, "fields": fields, "labels": l, "namespace": inst.namespace})
+}
+
+// storeObject: the object of the document, of the rule set, for arg and the
+// platform's secret store.
+func storeObject(inst *instance, document string, arg M) (M, error) {
+	store, err := storeOf(inst.rules, inst.okdp)
+	if err != nil {
+		return nil, err
 	}
+	v, err := inst.rules.values(document, M{"arg": arg, "settings": store})
+	if err != nil {
+		return nil, err
+	}
+	return value.AsMap(v["object"]), nil
 }

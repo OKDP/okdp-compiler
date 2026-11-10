@@ -1200,7 +1200,7 @@ global.okdp.ingress.className is required. It is a context value: the platform's
 
 The settings of `global.okdp` the compiler reads are described by the
 platform schema the compiler embeds,
-[`internal/okdp/platform.schema.json`](../../internal/okdp/platform.schema.json):
+[`internal/okdp/rules/v1/schemas/platform.schema.json`](../../internal/okdp/rules/v1/schemas/platform.schema.json):
 their types, their defaults and, in its `description`s, what each means.
 It is the platform authors' reference; an editor can check a platform
 values file against it. Every key of `global.okdp`, described there or
@@ -1846,7 +1846,7 @@ A client chart is no dependency of `Chart.yaml`, and its key is reserved
 ([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
 and no instance upstream values ([merge precedence](#merge-precedence)).
 
-The computed values are not Go code: `internal/okdp/oidc-dcr.cel.yaml`, a
+The computed values are not Go code: `internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml`, a
 template in the mapping language embedded in the compiler, computes them
 for each client from the client (its keys, checked),
 its names (the chart key, the objects' name, the Secret) and the mapping's

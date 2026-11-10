@@ -1,0 +1,12 @@
+# A host a project serves: one the platform lists for it, or one that ends
+# with -<namespace>.<suffix>, a name before the dash. Input: at (where it is,
+# for the message), raw (as written), host (lower case, no final dot), ns,
+# suffix (global.okdp.ingress.suffix), listed (the hosts listed for it).
+vars:
+  tail: ${{ "-" + ns + "." + suffix }}
+  matches: ${{ suffix != "" && host.endsWith(tail) && size(host) > size(tail) && !host.substring(0, size(host) - size(tail)).endsWith(".") }}
+  form: >-
+    ${{ suffix == "" ? "any host, global.okdp.ingress.suffix being unset, but those listed" : "a host that ends with " + tail }}
+errors:
+  - $if: ${{ !(host in listed) && !matches }}
+    $value: "${{ at }}: host ${{ quote(raw) }} is not served by ${{ ns }}: ${{ form }}, or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), ${{ ns }} is not one of them"

@@ -16,26 +16,12 @@ import (
 // Helm as manager (the umbrella renders them), part of okdp, and the
 // instance and service OKDP finds the objects by. No helm.sh/chart: the
 // objects belong to no chart of the service.
-func labels(name, release, component string, selector bool) M {
-	out := M{"app.kubernetes.io/name": name, "app.kubernetes.io/instance": release}
-	if component != "" {
-		out["app.kubernetes.io/component"] = component
-	}
-	if !selector {
-		out["app.kubernetes.io/managed-by"] = "Helm"
-		out["app.kubernetes.io/part-of"] = "okdp"
-		out["okdp.io/instance"] = release
-		out["okdp.io/service"] = name
-	}
-	return out
-}
-
 // labelFunctions: okdpLabels(component) and okdpSelectorLabels(component),
 // the labels with app.kubernetes.io/component.
-func labelFunctions(name, release string) []cel.EnvOption {
+func labelFunctions(rules *RuleSet, name, release string) []cel.EnvOption {
 	fn := func(fname string, selector bool) cel.EnvOption {
 		return cel2yaml.Costed(cel.Function(fname, cel.Overload(fname+"_dyn", []*cel.Type{cel.DynType}, cel.DynType,
-			cel2yaml.Unary(func(v any) (any, error) { return labels(name, release, value.Str(v), selector), nil }))), fname+"_dyn")
+			cel2yaml.Unary(func(v any) (any, error) { return rules.labels(name, release, value.Str(v), selector), nil }))), fname+"_dyn")
 	}
 	return []cel.EnvOption{fn("okdpLabels", false), fn("okdpSelectorLabels", true)}
 }

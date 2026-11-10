@@ -164,7 +164,7 @@ by each service (`dcr`): in `dcr` mode, OIDC enabled, the compiler adds one
 chart per client, rendered by the oidc-dcr chart
 (`global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 by default), its values
 computed by an embedded template in the mapping language,
-[`internal/okdp/oidc-dcr.cel.yaml`](internal/okdp/oidc-dcr.cel.yaml)
+[`internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml`](internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml)
 ([oidcClients](docs/specs/02_service_definition.md#oidcclients), [their
 charts](docs/specs/01_inputs_outputs.md#oauth-client-charts), [their
 platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).
@@ -229,7 +229,7 @@ without its `Role`).
 
 The settings of `global.okdp` the compiler reads are described, typed
 and defaulted by
-[`internal/okdp/platform.schema.json`](internal/okdp/platform.schema.json),
+[`internal/okdp/rules/v1/schemas/platform.schema.json`](internal/okdp/rules/v1/schemas/platform.schema.json),
 the classes of the claims among them (`global.okdp.provisioning`: the
 platform's, with the default class, and a project's own,
 [classes](docs/specs/01_inputs_outputs.md#classes)), and the platform's

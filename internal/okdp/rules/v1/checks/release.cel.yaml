@@ -1,0 +1,10 @@
+# A release named like an object the platform writes in the namespace, or the
+# beginning of one up to a "-": a package names its objects after its release,
+# <release> or <release>-<x>, and would take its place. Input: field, release,
+# settings.
+vars:
+  given: ${{ ["secrets.store", "secrets.serviceAccount", "oidc.dcr.tokenSecret"].map(p, str(dig(settings, p))).filter(n, n != "") }}
+  taken: ${{ (tables.platformObjectNames + given).sort().distinct().filter(n, n == release || n.startsWith(release + "-")) }}
+errors:
+  - $if: ${{ size(taken) > 0 }}
+    $value: "${{ field }} ${{ quote(release) }}: the name of an object the platform writes in every namespace (${{ taken[0] }}), or its beginning up to a \"-\": the objects of a release are named <release> and <release>-<x>, and would take its place in the namespace"

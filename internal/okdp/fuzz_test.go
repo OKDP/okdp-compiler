@@ -148,10 +148,10 @@ func FuzzUpstreamCheck(f *testing.F) {
 			return
 		}
 		at := func(p string) string { return "upstream." + p }
-		if upstreamCheck(okdp, "demo", true) != nil {
+		if upstreamCheck(defaultRules(), okdp, "demo", true) != nil {
 			t.Fatal("a check for a privileged project")
 		}
-		check := upstreamCheck(okdp, "demo", false)
+		check := upstreamCheck(defaultRules(), okdp, "demo", false)
 		got, again := check(user, nil, at), check(user, nil, at)
 		if errorString(got) != errorString(again) {
 			t.Fatalf("%q: %v then %v", b, got, again)
@@ -198,8 +198,8 @@ func FuzzContextLayers(f *testing.F) {
 			layers = append(layers, ContextLayer{Level: uint(level), Values: v})
 			before = append(before, ContextLayer{Level: uint(level), Values: value.AsMap(value.Copy(v))})
 		}
-		out, platform, err := contextLayers(layers)
-		out2, platform2, err2 := contextLayers(layers)
+		out, platform, err := contextLayers(defaultRules(), layers)
+		out2, platform2, err2 := contextLayers(defaultRules(), layers)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(out, out2) || !reflect.DeepEqual(platform, platform2) {
 			t.Fatalf("%q: not the same twice: %v / %v", [][]byte{b0, b1, b2}, err, err2)
 		}

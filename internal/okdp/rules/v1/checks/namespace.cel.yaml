@@ -1,0 +1,9 @@
+# Why a namespace is no project's, whatever the platform; its one message is
+# the reason. Not default: a project may be named so. Input: ns.
+errors:
+  - $if: ${{ ns == "platform" }}
+    $value: "platform/ holds the platform's keys of the secret store, which no project writes"
+  - $if: ${{ ns.startsWith("kube-") }}
+    $value: "kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)"
+  - $if: ${{ ns in sets.engineNamespaces }}
+    $value: "a deployer engine's, or the namespace its target writes in (${{ tables.engineNamespaces.join(', ') }}): a project's releases there would drive the engine"

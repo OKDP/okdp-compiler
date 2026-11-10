@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -302,5 +303,39 @@ func TestVarsCost(t *testing.T) {
 	}
 	if _, err := Eval(cel2yaml.NewSession(context.Background(), 2*cost), mapCtx(), nil, mapping(two)); err != nil {
 		t.Errorf("within the limit: %v", err)
+	}
+}
+
+// TestPrepared: a document built once, evaluated on several inputs: its
+// vars, then its items in order, a text or a path and a message, those
+// that are empty left out; a failure to evaluate is an error.
+func TestPrepared(t *testing.T) {
+	s := cel2yaml.NewSession(context.Background(), 0)
+	p, err := Prepare(s, []string{"x"}, nil, Source{Name: "check.yaml", Data: []byte(`
+vars:
+  big: ${{ x > 1 }}
+errors:
+  - {$if: "${{ big }}", $value: "big: ${{ x }}"}
+  - {$if: "${{ x < 0 }}", path: a.b, message: negative}
+  - ""
+`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		x    any
+		want []Problem
+	}{
+		{1.0, nil},
+		{2.0, []Problem{{Message: "big: 2"}}},
+		{-1.0, []Problem{{Path: "a.b", Message: "negative"}}},
+	} {
+		_, got, err := p.Eval(M{"x": tc.x})
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("x %v: got %v (%v), want %v", tc.x, got, err, tc.want)
+		}
+	}
+	if _, _, err := p.Eval(M{"x": "text"}); err == nil || !strings.Contains(err.Error(), "check.yaml: vars big") {
+		t.Errorf("a failure to evaluate: got %v", err)
 	}
 }

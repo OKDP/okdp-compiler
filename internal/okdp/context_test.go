@@ -169,7 +169,7 @@ func TestPlatformSchema(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
-			_, err := schemaValues(platformSchema, heading, M{"global": value.Copy(tc.global)})
+			_, err := schemaValues(defaultRules().platformSchema, heading, M{"global": value.Copy(tc.global)})
 			want := heading + ":\n" + tc.want
 			if (err == nil) != (tc.want == "") || (err != nil && err.Error() != want) {
 				t.Errorf("got %v, want %q", err, tc.want)
@@ -324,7 +324,7 @@ func TestPlatformFromContext(t *testing.T) {
 					view = value.Merge(view, M{"global": M{"okdp": M{"provisioning": value.AsMap(okdp)["provisioning"]}}})
 				}
 			}
-			want, err := platformSettings(view)
+			want, err := platformSettings(defaultRules(), view)
 			if err != nil {
 				t.Fatal(err)
 			}

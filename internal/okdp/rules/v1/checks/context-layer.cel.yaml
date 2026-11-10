@@ -1,0 +1,33 @@
+# A layer of the context, level 0 the platform's, each level above adding to
+# those below. Input: name, level, layer, platform (the context's global.okdp
+# so far, under global).
+vars:
+  above: ${{ level > 0 }}
+  global: ${{ asMap(dig(layer, "global")) }}
+  okdp: ${{ dig(layer, "global.okdp") }}
+  okdpSet: ${{ "okdp" in global }}
+  # A key of global.okdp a project may not set; global.okdp itself when it
+  # is not a map.
+  platformOnly: >-
+    ${{ !above || !okdpSet ? ""
+      : type(okdp) != map ? "global.okdp"
+      : keys(okdp).exists(k, !(k in sets.projectPlatformKeys)) ? pathKey("global.okdp", keys(okdp).filter(k, !(k in sets.projectPlatformKeys))[0]) : "" }}
+  listed: ${{ dig(platform, "global.okdp.policy.projectGlobals") }}
+  allowed: >-
+    ${{ listed == null ? tables.defaultProjectGlobals : asList(listed).map(k, str(k)) }}
+  shown: >-
+    ${{ size(allowed) > 0 ? allowed.join(", ") : "none" }}
+errors:
+  - $if: ${{ platformOnly != "" }}
+    $value: "${{ name }}: ${{ platformOnly }}: a platform setting, level 0 only (Inputs.Context): a project sets ${{ tables.projectPlatformKeys.map(k, 'global.okdp.' + k).join(', ') }}, nothing else of global.okdp"
+  # The keys of global are the platform's to list.
+  - $for: "k in above ? keys(global) : []"
+    $each:
+      $if: ${{ k != "okdp" && !(k in allowed) }}
+      path: ${{ pathKey("global", k) }}
+      message: "${{ name }}: ${{ pathKey('global', k) }}: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists ${{ shown }}; every chart of the instances receives global, past their package's protect and the upstream policy"
+  - $if: ${{ "claims" in layer && level == 0 }}
+    $value: "${{ name }}: claims: a project's, of level 1 or above"
+  # The roles of the project's groups are its file's, level 1's.
+  - $if: ${{ "access" in layer && level != 1 }}
+    $value: "${{ name }}: access: the roles of a project's groups, its file's, of level 1 only"

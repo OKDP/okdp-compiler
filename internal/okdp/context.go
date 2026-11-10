@@ -8,14 +8,10 @@ package okdp
 
 import (
 	"cmp"
-	_ "embed"
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
-	"slices"
 	"sort"
-	"sync"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -25,13 +21,12 @@ import (
 // stages (newInstance) and read by the others: the typed facts they need,
 // and what the mapping sees (scope).
 type instance struct {
+	rules              *RuleSet     // Inputs.Rules
 	release, namespace string       // Inputs.Release, Inputs.Namespace
 	name               string       // Inputs.Name, the release when it is empty
 	svc                *Service     // the package: Chart.yaml's name and version
 	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
 	okdp               M            // the platform's settings: the context's global.okdp (contextLayers), checked against platform.schema.json, its defaults applied
-	oidc               M            // platform.oidc: global.okdp.oidc, its defaults applied, its mode derived
-	dcr                bool         // platform.oidc.dcr.enabled: OIDC enabled, the OAuth clients registered by DCR
 	deps               []Dependency // the instances the connection references point to, of the namespace or, for a claim, of its provider's, by parameter path
 	scope              M            // what the mapping sees
 	transfers          []transfer   // the credentials of its claims of another namespace, and of its connections in the platform's secret store, read into Secrets of its own (pullSecret)
@@ -85,25 +80,13 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	// The platform's settings come from the context's layers alone
 	// (contextLayers), never from the parameters: a package schema's
 	// defaults do not reach them.
-	inst := &instance{release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values, okdp: settings}
-	oidc := value.AsMap(settings["oidc"])
-	mode := value.Str(oidc["clientProvisioning"])
-	inst.dcr = value.Truthy(oidc["enabled"]) && mode == "dcr"
-	dcr := value.AsMap(oidc["dcr"])
-	dcr["enabled"] = inst.dcr
-	// The CA bundle the oidc-dcr Jobs trust: the platform's, tls.caBundleSecret,
-	// unless dcr sets its own; "" for none.
-	if _, set := dcr["caSecret"]; !set {
-		dcr["caSecret"] = value.Str(value.Dig(settings, "tls.caBundleSecret"))
-	}
-	oidc["existing"] = value.Truthy(oidc["enabled"]) && mode == "existing"
-	inst.oidc = oidc
+	inst := &instance{rules: in.rules(), release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values, okdp: settings}
 	named, err := namedClaims(values)
 	if err != nil {
 		return nil, err
 	}
 	params := value.AsMap(value.Copy(values))
-	r := resolver{contracts: contractCacheOf(in), conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), provider: len(value.AsMap(value.Dig(inst.okdp, "secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
+	r := resolver{rules: in.rules(), contracts: contractCacheOf(in), conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), provider: len(value.AsMap(value.Dig(inst.okdp, "secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
 	if r.walk(schema.Doc, params); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
@@ -118,85 +101,29 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	delete(params, "claims")
 	sort.Slice(r.deps, func(i, j int) bool { return r.deps[i].Field < r.deps[j].Field })
 	inst.deps, inst.transfers = r.deps, r.transfers
-	// Proxy settings, as environment variables.
-	proxy := value.AsMap(inst.okdp["proxy"])
-	proxyEnv := M{}
-	for k, env := range map[string]string{"httpProxy": "HTTP_PROXY", "httpsProxy": "HTTPS_PROXY", "noProxy": "NO_PROXY"} {
-		if value.Truthy(proxy[k]) {
-			proxyEnv[env] = proxy[k]
-		}
+	// What the mapping sees as platform, of the platform's settings.
+	release := M{"name": in.Release, "namespace": in.Namespace}
+	groups, _ := projectAccess(in.Context, in.Namespace) // a project file refused is Compile's to report: no group
+	roles := M{}
+	for g, role := range groups {
+		roles[g] = string(role)
 	}
+	derived, err := inst.rules.values("scope", M{"settings": inst.okdp, "release": release, "items": roles})
+	if err != nil {
+		return nil, err
+	}
+	platform := value.AsMap(derived["platform"])
 	inst.scope = M{
 		"service":        M{"name": svc.Name, "version": svc.Version},
-		"labels":         labels(svc.Name, in.Release, "", false),
-		"selectorLabels": labels(svc.Name, in.Release, "", true),
-		"release":        M{"name": in.Release, "namespace": in.Namespace},
+		"labels":         inst.rules.labels(svc.Name, in.Release, "", false),
+		"selectorLabels": inst.rules.labels(svc.Name, in.Release, "", true),
+		"release":        release,
 		"values":         params,
 		"claims":         claimsScope(in.Claims),
 		"global":         value.AsMap(value.Copy(values["global"])), // the platform's and the project's settings, as written
-		"platform": M{
-			"oidc": oidc,
-			// The Secret that holds the service's main OAuth client:
-			// provisioned, or registered by DCR (oidc.go; oidcClientSecret(name)
-			// for the others).
-			"oidcClientSecret":   clientSecret(in.Release, in.Namespace, inst.dcr, ""),
-			"ingressAnnotations": ingressAnnotations(inst.okdp),
-			"proxyEnv":           proxyEnv,
-			"access":             accessScope(in.Context, in.Namespace, inst.okdp),
-		},
+		"platform":       platform,
 	}
 	return inst, nil
-}
-
-// accessScope: platform.access, who may use a project's services: the
-// groups of the project (project.yaml access, DefaultGroup an editor when
-// it gives none) and the platform's administrators
-// (global.okdp.access.admins), for a package that restricts who signs in:
-// viewers, the groups with any role in the project, editors, those with
-// editor or admin, admins, those with admin, each list holding the higher
-// roles' groups and the platform's administrators, sorted, once each; and
-// platformAdmins, the administrators alone. The names the identity
-// provider's tokens give the groups (no prefix). A project file whose
-// access is refused (Compile reports it, projectAccess) gives no group.
-func accessScope(layers []ContextLayer, namespace string, okdp M) M {
-	groups, _ := projectAccess(layers, namespace)
-	platform := admins(okdp)
-	list := func(roles ...Role) []any {
-		set := map[string]bool{}
-		for _, g := range platform {
-			set[g] = true
-		}
-		for g, r := range groups {
-			if slices.Contains(roles, r) {
-				set[g] = true
-			}
-		}
-		out := []any{}
-		for _, g := range slices.Sorted(maps.Keys(set)) {
-			out = append(out, g)
-		}
-		return out
-	}
-	only := []any{}
-	for _, g := range slices.Compact(slices.Sorted(slices.Values(platform))) {
-		only = append(only, g)
-	}
-	return M{
-		"viewers":        list(RoleViewer, RoleEditor, RoleAdmin),
-		"editors":        list(RoleEditor, RoleAdmin),
-		"admins":         list(RoleAdmin),
-		"platformAdmins": only,
-	}
-}
-
-// ingressAnnotations: platform.ingressAnnotations, the annotations of
-// every service's ingress: cert-manager.io/cluster-issuer, the platform's
-// tls.clusterIssuer, then ingress.annotations of okdp (global.okdp, checked
-// against platformSchema: strings), the ingress controller's, over it.
-func ingressAnnotations(okdp M) M {
-	out := M{"cert-manager.io/cluster-issuer": value.Str(value.Dig(okdp, "tls.clusterIssuer"))}
-	maps.Copy(out, value.AsMap(value.Dig(okdp, "ingress.annotations")))
-	return out
 }
 
 // parameters: stage 1, the parameter schema of the package's files, the
@@ -232,7 +159,7 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 	case g != nil:
 		delete(g, "okdp")
 	}
-	settings, err := platformSettings(platform)
+	settings, err := platformSettings(in.rules(), platform)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -246,26 +173,13 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 // context's (contextLayers), checked against platformSchema, its defaults
 // applied: a value of another type is refused rather than read as not set
 // (oidc: false would leave OIDC enabled).
-func platformSettings(platform M) (M, error) {
-	settings, err := schemaValues(platformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
+func platformSettings(rules *RuleSet, platform M) (M, error) {
+	settings, err := schemaValues(rules.platformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}
 	return value.AsMap(value.Dig(settings, "global.okdp")), nil
 }
-
-// platformSchemaFile: the schema of the platform values the compiler reads
-// (global.okdp): their types and defaults; the reference of platform
-// authors, its descriptions their meaning.
-//
-//go:embed platform.schema.json
-var platformSchemaFile []byte
-
-// platformSchema: platformSchemaFile parsed once, for every compile
-// (chart.ParseSchema).
-var platformSchema = sync.OnceValues(func() (*chart.Schema, error) {
-	return chart.ParseSchema("platform.schema.json", platformSchemaFile)
-})
 
 // schemaValues: user, values the schema of an embedded file describes
 // (platformSchema, mappingSchema), coalesced over the schema's defaults and

@@ -108,20 +108,78 @@ func Eval(s *cel2yaml.Session, scope M, sections []string, srcs ...Source) (*Doc
 	return d, nil
 }
 
+// Prepared: a document of vars and errors built once (Prepare), evaluated on
+// many inputs, in its session: not safe for concurrent use.
+type Prepared struct {
+	s        *cel2yaml.Session
+	t        *document
+	sections []string
+}
+
+// Problem: an item of the errors of a document (Prepared.Problems): a
+// message, and the path of the field it is about, when the item names one.
+type Problem struct{ Path, Message string }
+
+// Prepare: the document of srcs, its vars, its errors and the sections
+// named, its expressions compiled once with the names in scope.
+func Prepare(s *cel2yaml.Session, names, sections []string, srcs ...Source) (*Prepared, error) {
+	t, err := build(s, srcs, slices.Sorted(slices.Values(names)), sections)
+	if err != nil {
+		return nil, err
+	}
+	return &Prepared{s, t, sections}, nil
+}
+
+// Eval: the document on scope: the items of its errors, in order, those
+// that are not empty, a text or a map of path and message; without any, the
+// values of its sections, by name. A failure to evaluate it is an error,
+// not a problem. It may be called while another document of the session is
+// being evaluated, by a host function.
+func (p *Prepared) Eval(scope M) (M, []Problem, error) {
+	var out []Problem
+	sections := M{}
+	err := p.s.Document(func() error {
+		bound, err := p.t.vars2scope(scope)
+		if err != nil {
+			return err
+		}
+		items, _, err := p.t.errors.Eval(bound)
+		if err != nil {
+			return p.t.at("errors", err)
+		}
+		for _, i := range value.AsList(items) {
+			if m, ok := i.(M); ok {
+				out = append(out, Problem{Path: value.Str(m["path"]), Message: value.Str(m["message"])})
+			} else if msg := value.Str(i); msg != "" {
+				out = append(out, Problem{Message: msg})
+			}
+		}
+		if len(out) > 0 {
+			return nil
+		}
+		for _, k := range p.sections {
+			if n, ok := p.t.sections[k]; ok {
+				v, _, err := n.Eval(bound)
+				if err != nil {
+					return p.t.at(k, err)
+				}
+				sections[k] = v
+			}
+		}
+		return nil
+	})
+	return sections, out, err
+}
+
 // bind: the scope of the sections of t: the context (outer), then the vars
 // bindings, in order (each sees the previous ones); then the errors
 // section, a list, every message collected before failing: each item it
 // gives that is not empty, as text (value.Str), a message, without the
 // name of its file.
 func (t *document) bind(outer M) (M, error) {
-	scope := make(M, len(outer)+len(t.vars))
-	maps.Copy(scope, outer)
-	for _, b := range t.vars {
-		v, _, err := b.t.Eval(scope)
-		if err != nil {
-			return nil, t.at("vars", atKey(b.at, err))
-		}
-		scope[b.name] = v
+	scope, err := t.vars2scope(outer)
+	if err != nil {
+		return nil, err
 	}
 	rules, _, err := t.errors.Eval(scope)
 	if err != nil {
@@ -135,6 +193,21 @@ func (t *document) bind(outer M) (M, error) {
 	}
 	if len(msgs) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
+	}
+	return scope, nil
+}
+
+// vars2scope: the context outer, then the vars bindings, in order, each
+// seeing the previous ones.
+func (t *document) vars2scope(outer M) (M, error) {
+	scope := make(M, len(outer)+len(t.vars))
+	maps.Copy(scope, outer)
+	for _, b := range t.vars {
+		v, _, err := b.t.Eval(scope)
+		if err != nil {
+			return nil, t.at("vars", atKey(b.at, err))
+		}
+		scope[b.name] = v
 	}
 	return scope, nil
 }

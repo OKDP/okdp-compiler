@@ -32,6 +32,7 @@ import (
 // namespace publish and the claims' bindings, recording those that point
 // to an instance.
 type resolver struct {
+	rules     *RuleSet             // the rule set: the names it gives credentials
 	contracts *contractCache       // Inputs.Contracts
 	conns     M                    // the external connections
 	levels    map[string]uint      // the level of the context each is given at, by name (connectionLevels)
@@ -166,7 +167,7 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 // checks of each instance before it binds the claims. nil when the
 // context's layers fail: the compile reports them (contextLayers).
 func declaredConnections(in Inputs) error {
-	layers, platform, err := contextLayers(in.Context)
+	layers, platform, err := contextLayers(in.rules(), in.Context)
 	if err != nil {
 		return nil //nolint:nilerr // the instance's compile reports it
 	}
@@ -176,7 +177,7 @@ func declaredConnections(in Inputs) error {
 			conns = value.Merge(conns, c)
 		}
 	}
-	r := resolver{contracts: contractCacheOf(in), conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), provider: len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace}
+	r := resolver{rules: in.rules(), contracts: contractCacheOf(in), conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), provider: len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace}
 	return r.declared()
 }
 
@@ -191,7 +192,7 @@ func CheckConnection(contracts fs.FS, name string, conn any, level uint, namespa
 	if err != nil {
 		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
 	}
-	r := resolver{contracts: newContractCache(contracts), conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
+	r := resolver{rules: defaultRules(), contracts: newContractCache(contracts), conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
 	return r.declared()
 }
 
@@ -381,7 +382,7 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 		if r.store == "" {
 			return nil, fmt.Errorf("%s: claim %q (%s): of %s, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", field, b.ID, contract, provider)
 		}
-		name := r.release + "-" + b.Output.SecretRef.Name
+		name := r.rules.name("claimSecret", "release", r.release, "secret", b.Output.SecretRef.Name)
 		r.addTransfer(transfer{secret: name, key: storeKey(b.Namespace, b.ID), contract: contract, fields: fields})
 		x.secretRef = M{"name": name}
 	}
@@ -569,7 +570,7 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
 		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
 	}
-	name := r.release + "." + ref + "-credentials"
+	name := r.rules.name("connectionSecret", "release", r.release, "connection", ref)
 	r.addTransfer(transfer{secret: name, key: key, contract: c.name, fields: fields})
 	return name, nil
 }

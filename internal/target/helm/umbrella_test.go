@@ -11,6 +11,12 @@ import (
 	"github.com/okdp/okdp-compiler/internal/target"
 )
 
+// The charts the compiler adds, as a compile's result names them.
+var (
+	dcrSource     = chart.Ref{Repository: "oci://quay.io/adaltas", Chart: "oidc-dcr", Version: "0.6.0"}
+	objectsSource = chart.Ref{Repository: "oci://quay.io/okdp/charts", Chart: okdp.ObjectsChart, Version: "1.0.0"}
+)
+
 // TestUmbrella: the package's Chart.yaml, every field kept, in Helm's
 // order; its dependencies those compiled: those of Chart.yaml in its order,
 // as written, okdp among them, then the compiler's own charts, the OAuth
@@ -23,7 +29,7 @@ func TestUmbrella(t *testing.T) {
 			"web": {"a": 1, "global": map[string]any{"g": 1}}, "app": {"a": nil},
 			"oidc-dcr": {}, "zeta-oidc-dcr": {}, "okdp": {},
 		},
-		Charts: map[string]chart.Ref{"web": app, "app": app, "oidc-dcr": okdp.DcrSource, "zeta-oidc-dcr": okdp.DcrSource, "okdp": app},
+		Charts: map[string]chart.Ref{"web": app, "app": app, "oidc-dcr": dcrSource, "zeta-oidc-dcr": dcrSource, "okdp": app},
 		Chart: chart.Metadata{
 			APIVersion: "v2", Name: "demo", Version: "1.2.3", KubeVersion: ">=1.28.0", Description: "A demo.", Type: "application",
 			Keywords: []string{"demo"}, Home: "https://example.org", Sources: []string{"https://example.org/src"},
@@ -103,9 +109,9 @@ func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &okdp.Result{
 		Values:        map[string]map[string]any{"oidc-dcr": {"a": map[string]any{"b": []any{1}}}, "app": {"b": 2}},
-		Charts:        map[string]chart.Ref{"oidc-dcr": okdp.DcrSource, "app": app},
+		Charts:        map[string]chart.Ref{"oidc-dcr": dcrSource, "app": app},
 		Objects:       []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}, {"kind": "Secret", "data": nil}},
-		ObjectsSource: okdp.ObjectsSource,
+		ObjectsSource: objectsSource,
 		Dependencies:  []okdp.Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[0].database"}},
 		Info: okdp.Info{URL: "https://x", Usage: "use it\n", Provides: []okdp.Output{
 			{Name: "demo-app", Contract: "http", Values: map[string]any{"url": "https://x"}, SecretRef: &okdp.SecretRef{Name: "creds"}},

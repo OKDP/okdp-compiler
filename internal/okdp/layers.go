@@ -21,9 +21,7 @@ package okdp
 import (
 	"cmp"
 	"fmt"
-	"maps"
 	"slices"
-	"strings"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -38,7 +36,7 @@ import (
 // access, to any value; then one with "{{" in a key or a string, anywhere
 // (chart.NoTemplate).
 func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
-	layers, platform, err := contextLayers(in.Context)
+	layers, platform, err := contextLayers(in.rules(), in.Context)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -50,23 +48,8 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 			return nil, nil, fmt.Errorf("%s: %w", name, err)
 		}
 		layer := value.AsMap(v)
-		g, isMap := layer["global"].(M)
-		if _, set := layer["global"]; set && !isMap {
-			return nil, nil, fmt.Errorf("%s: global is set by the context (Inputs.Context)", name)
-		}
-		for _, k := range slices.Sorted(maps.Keys(g)) {
-			if _, ok := declared[k]; !ok || k == "okdp" {
-				return nil, nil, fmt.Errorf("%s: global.%s is set by the context (Inputs.Context)", name, k)
-			}
-		}
-		if _, set := layer["connections"]; set {
-			return nil, nil, fmt.Errorf("%s: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level", name)
-		}
-		if _, set := layer["claims"]; set {
-			return nil, nil, fmt.Errorf("%s: claims are declared by the context (Inputs.Context): a project's, of level 1 or above", name)
-		}
-		if _, set := layer[AccessKey]; set {
-			return nil, nil, fmt.Errorf("%s: %s is the project's, its file's (the context at level 1)", name, AccessKey)
+		if err := in.rules().refuse(checkValuesLayer, M{"name": name, "layer": layer, "declared": declared}); err != nil {
+			return nil, nil, err
 		}
 		// No template code in what the instance gives, whatever key it is
 		// under: parameters, upstream values (chart.NoTemplate).
@@ -105,13 +88,8 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 // layers merged in order, then global.okdp.provisioning of each layer
 // above, merged in the same order; no other key of a higher level is read,
 // whatever the checks above let through.
-func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
+func contextLayers(rules *RuleSet, layers []ContextLayer) ([]map[string]any, M, error) {
 	order := levelOrder(layers)
-	whole := func(keys []string) bool {
-		class := len(keys) == 6 && keys[4] == "classes" || len(keys) == 5 && keys[4] == "default"
-		return len(keys) == 2 && (keys[0] == "connections" || keys[0] == "claims") ||
-			class && keys[0] == "global" && keys[1] == "okdp" && keys[2] == "provisioning"
-	}
 	var out []map[string]any
 	platform := M{}           // the context's global.okdp, under global
 	var levels []ContextLayer // the values each level set so far, merged, lowest first
@@ -127,34 +105,12 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
 			levels = append(levels, ContextLayer{Level: l.Level, Values: M{}})
 		}
 		for _, lower := range levels[:len(levels)-1] {
-			if p := chart.Overlap(lower.Values, layer, whole); p != "" {
+			if p := chart.Overlap(lower.Values, layer, rules.whole); p != "" {
 				return nil, nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
 			}
 		}
-		if l.Level > 0 {
-			if k := platformOnly(layer); k != "" {
-				return nil, nil, fmt.Errorf("%s: %s: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp", name, k)
-			}
-			// The keys of global are the platform's to list (level 0's
-			// policy.projectGlobals, read from the layers below).
-			allowed := projectGlobals(platform)
-			for _, k := range slices.Sorted(maps.Keys(value.AsMap(layer["global"]))) {
-				if k != "okdp" && !slices.Contains(allowed, k) {
-					listed := "none"
-					if len(allowed) > 0 {
-						listed = strings.Join(allowed, ", ")
-					}
-					return nil, nil, atField(value.Key("global", k), fmt.Errorf("%s: %s: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists %s; every chart of the instances receives global, past their package's protect and the upstream policy", name, value.Key("global", k), listed))
-				}
-			}
-		}
-		if _, set := layer["claims"]; set && l.Level == 0 {
-			return nil, nil, fmt.Errorf("%s: claims: a project's, of level 1 or above", name)
-		}
-		// The roles of the project's groups are its file's, level 1's, read
-		// apart (projectAccess): no value of the instances.
-		if _, set := layer[AccessKey]; set && l.Level != 1 {
-			return nil, nil, fmt.Errorf("%s: %s: the roles of a project's groups, its file's, of level 1 only", name, AccessKey)
+		if err := rules.refuse(checkContextLayer, M{"name": name, "level": int64(l.Level), "layer": layer, "platform": platform}); err != nil {
+			return nil, nil, err
 		}
 		delete(layer, AccessKey)
 		if l.Level > 0 {
@@ -169,33 +125,14 @@ func contextLayers(layers []ContextLayer) ([]map[string]any, M, error) {
 		case set && l.Level == 0:
 			platform = value.Merge(platform, M{"global": M{"okdp": okdp}})
 		case set:
-			if p, set := value.AsMap(okdp)["provisioning"]; set {
-				platform = value.Merge(platform, M{"global": M{"okdp": M{"provisioning": p}}})
+			for _, k := range rules.list(tablePlatformKeysAbove) {
+				if p, set := value.AsMap(okdp)[k]; set {
+					platform = value.Merge(platform, M{"global": M{"okdp": M{k: p}}})
+				}
 			}
 		}
 	}
 	return out, platform, nil
-}
-
-// defaultProjectGlobals: the keys of global a project sets when the
-// platform lists none (global.okdp.policy.projectGlobals): project, its own
-// settings, which its packages' mappings read, and storageClass.
-var defaultProjectGlobals = []string{"project", "storageClass"}
-
-// projectGlobals: the keys of global a layer above level 0 may set, the
-// platform's global.okdp.policy.projectGlobals of platform (the context's
-// {global: {okdp: ...}}, level 0's), defaultProjectGlobals when it sets
-// none; global.okdp is never one (platformOnly).
-func projectGlobals(platform M) []string {
-	v := value.Dig(platform, "global.okdp.policy.projectGlobals")
-	if v == nil {
-		return defaultProjectGlobals
-	}
-	var out []string
-	for _, k := range value.AsList(v) {
-		out = append(out, value.Str(k))
-	}
-	return out
 }
 
 // levelOrder: the positions of layers by level, lowest first, a level's in
@@ -218,7 +155,7 @@ func levelOrder(layers []ContextLayer) []int {
 // with it; a privileged project's are not checked. The first refused, in
 // layer order, fails, at its path.
 func upstreamGlobals(in Inputs, layers []map[string]any, okdp M) error {
-	check := upstreamCheck(okdp, in.Namespace, privileged(okdp, in.Namespace))
+	check := upstreamCheck(in.rules(), okdp, in.Namespace, privileged(okdp, in.Namespace))
 	if check == nil {
 		return nil
 	}
@@ -243,30 +180,4 @@ func upstreamGlobals(in Inputs, layers []map[string]any, okdp M) error {
 		}
 	}
 	return nil
-}
-
-// platformOnly: the first path of layer, a context layer above level 0,
-// that sets a platform setting, in path order: global.okdp itself, to
-// anything but a map, or a key of it but provisioning, the classes a
-// project adds; "" when it sets none. The settings of global.okdp are the
-// platform's, level 0's, those the compiler reads (charts, the chart the
-// OAuth clients are rendered with; oidc, where they register; policy, the
-// privileged projects; secrets, the store) and those it does not, which
-// the mappings read: a project adds none, whether the platform sets them
-// or not.
-func platformOnly(layer M) string {
-	okdp, set := value.AsMap(layer["global"])["okdp"]
-	if !set {
-		return ""
-	}
-	m, isMap := okdp.(M)
-	if !isMap {
-		return "global.okdp"
-	}
-	for _, k := range slices.Sorted(maps.Keys(m)) {
-		if k != "provisioning" {
-			return value.Key("global.okdp", k)
-		}
-	}
-	return ""
 }

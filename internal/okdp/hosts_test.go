@@ -139,7 +139,7 @@ func TestIngressHostsSchema(t *testing.T) {
 		"a name":     {M{"ingressHosts": M{"Demo_": []any{"a.example.org"}}}, "invalid propertyName 'Demo_'"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := platformSettings(M{"global": M{"okdp": M{"policy": tc.policy}}})
+			_, err := platformSettings(defaultRules(), M{"global": M{"okdp": M{"policy": tc.policy}}})
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}

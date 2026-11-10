@@ -1,0 +1,60 @@
+# The charts of the OAuth clients of a mapping's oidcClients section, checked
+# in every mode: one main client at most, unique names, a secret given named
+# <release>-... In dcr mode the platform must register them, and no two
+# clients write one Secret. Input: items, release, platform.
+vars:
+  names: ${{ items.map(c, str(c.?name.orValue(""))) }}
+  indexes: ${{ lists.range(size(items)) }}
+  where: >-
+    ${{ indexes.map(i, "oidcClients[" + string(i) + "]" + (names[i] == "" ? "" : " (" + names[i] + ")")) }}
+  dcr: ${{ platform.oidc.dcr.enabled }}
+  auth: ${{ str(platform.oidc.dcr.?authMethod.orValue("")) }}
+  url: ${{ platform.oidc.dcr.?registrationUrl.orValue(null) }}
+  charts: >-
+    ${{ names.map(n, n == "" ? "oidc-dcr" : n + "-oidc-dcr") }}
+  given: ${{ items.map(c, str(c.?secret.orValue(""))) }}
+  secrets: >-
+    ${{ indexes.map(i, given[i] != "" ? given[i] : rule("oidcSecret", {"arg": names[i], "release": release, "platform": platform}).secret) }}
+errors:
+  # The Job's Role writes the Secret: the release's, exactly, never another
+  # Secret of the namespace, another instance's credentials.
+  - $for: i in indexes
+    $vars:
+      same: ${{ indexes.filter(j, j < i && names[j] == names[i]) }}
+      want: >-
+        ${{ release.name + "-" + (names[i] == "" ? "oidc" : names[i]) }}
+    $each:
+      $if: ${{ size(same) > 0 || (given[i] != "" && given[i] != want) }}
+      $value: >-
+        ${{ size(same) > 0 && names[i] == "" ? where[i] + ": " + where[same[0]] + " has no name either: only the service's main client (chart oidc-dcr) has none, name the others"
+          : size(same) > 0 ? where[i] + ": " + where[same[0]] + " has the same name: client names must be unique"
+          : where[i] + ": secret " + quote(given[i]) + ": the Secret the client is written to is the release's, " + quote(want) + " (<release>-<client name>, <release>-oidc for the main client)" }}
+  - $if: ${{ size(items) > 0 && dcr && !(auth in ["anonymous", "initialAccessToken"]) }}
+    $value: 'global.okdp.oidc.dcr.authMethod ${{ quote(auth) }} is not supported: anonymous or initialAccessToken'
+  - $if: ${{ size(items) > 0 && dcr && (type(url) != string || url == "") }}
+    $value: 'global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at'
+  - $for: "i in dcr ? indexes : []"
+    $vars:
+      same: ${{ indexes.filter(j, j < i && secrets[j] == secrets[i]) }}
+    $each:
+      $if: ${{ size(same) > 0 }}
+      $value: '${{ where[i] }}: ${{ where[same[0]] }} writes the same Secret, ${{ quote(secrets[i]) }}: give each client its own secret'
+values:
+  charts:
+    - $for: i in indexes
+      $vars:
+        full: ${{ release.name + "-" + charts[i] }}
+        cut: >-
+          ${{ size(full) > 63 ? full.substring(0, 63) : full }}
+      $each:
+        key: ${{ charts[i] }}
+        of: ${{ where[i] }}
+        from: oidcClients
+        render: ${{ dcr }}
+        client: >-
+          ${{ merge(items[i], {"name": names[i]}) }}
+        names:
+          chart: ${{ charts[i] }}
+          fullname: >-
+            ${{ cut.endsWith("-") ? cut.substring(0, size(cut) - 1) : cut }}
+          secret: ${{ secrets[i] }}

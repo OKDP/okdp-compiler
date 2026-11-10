@@ -80,6 +80,8 @@ type (
 	// ContextLayer: a values layer of the context (Inputs.Context) at its
 	// level: 0, the platform's, then each level adds to those below it.
 	ContextLayer = okdp.ContextLayer
+	// RuleSet: Inputs.Rules, what the compiler refuses, as data (LoadRules).
+	RuleSet = okdp.RuleSet
 	// Finalize: Inputs.Finalize, what makes the final values of a compile.
 	Finalize = okdp.Finalize
 	// FinalInput: what a Finalize makes them from.
@@ -587,9 +589,15 @@ type BuildOptions struct {
 	// Charts: the chart cache CompileTree checks the final values against
 	// (StaticCharts, a cache that fetches what it lacks); nil, unchecked.
 	Charts ChartSource
+	// Rules: Inputs.Rules of each instance; nil, the standard rule set.
+	Rules *RuleSet
 	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
 	Finalize Finalize
 }
+
+// LoadRules: the rule set of fsys, rules.yaml at its root; a table missing
+// or unknown is an error, never a rule turned off.
+func LoadRules(fsys fs.FS) (*RuleSet, error) { return okdp.LoadRules(fsys) }
 
 // Build: the tree repos make together (LoadRepository), each instance
 // with the options' CostLimit, InstanceTimeout and AllowPlainSecrets, compiled
@@ -612,6 +620,7 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 		instances[i].Inputs.Timeout = opts.InstanceTimeout
 		instances[i].Inputs.AllowPlainSecrets = opts.AllowPlainSecrets
 		instances[i].Inputs.Finalize = opts.Finalize
+		instances[i].Inputs.Rules = opts.Rules
 	}
 	t := CompileTree(ctx, instances, opts.Charts)
 	for _, r := range loaded.Refused {

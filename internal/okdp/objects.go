@@ -1,14 +1,16 @@
 // Own charts: the charts the compiler adds beside the dependencies of
-// Chart.yaml, those of the OAuth clients (oidc.go) and of the instance's
-// objects, their keys reserved and the clients' charts added in one place
-// (addOwnCharts), and the platform's charts (global.okdp.charts) they are
-// rendered with.
+// Chart.yaml, those a section of the rule set adds and the instance's
+// objects', their keys reserved and added in one place (addOwnCharts), and
+// the platform's charts (global.okdp.charts) they are rendered with.
 
 package okdp
 
 import (
 	"fmt"
 	"maps"
+	"slices"
+
+	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/internal/chart"
 	"github.com/okdp/okdp-compiler/internal/value"
@@ -22,30 +24,52 @@ const (
 	ObjectsValue = "manifests"
 )
 
-// ObjectsSource: the chart that renders an instance's objects as written:
-// the default of global.okdp.charts.objects.
-var ObjectsSource = chart.Ref{Repository: "oci://quay.io/okdp/charts", Chart: ObjectsChart, Version: "1.0.0"}
-
 // platformCharts: the charts the platform renders the compiler's own charts
-// with (global.okdp.charts of okdp, of the form platform.schema.json gives
-// it: its keys, their types; another key is refused there, a misspelled
-// key would otherwise leave the default in place): oidcDcr, the chart of
-// the OAuth clients in dcr mode, DcrSource by default; objects, the chart
-// of the instance's objects, ObjectsSource by default.
-func platformCharts(okdp M) (dcr, objects chart.Ref, err error) {
-	charts := value.AsMap(okdp["charts"])
-	dcr, objects = DcrSource, ObjectsSource
-	if charts["oidcDcr"] != nil {
-		if dcr, err = platformChart(charts["oidcDcr"], "global.okdp.charts.oidcDcr"); err != nil {
-			return chart.Ref{}, chart.Ref{}, err
+// with: each of the rule set's, unless global.okdp.charts of okdp, of the
+// form the platform schema gives it, sets it. A misspelled key is refused
+// there: it would otherwise leave the default in place.
+func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
+	given := value.AsMap(okdp["charts"])
+	out := map[string]chart.Ref{}
+	for _, name := range slices.Sorted(maps.Keys(rules.charts)) {
+		out[name] = rules.charts[name]
+		if given[name] != nil {
+			r, err := platformChart(given[name], "global.okdp.charts."+name)
+			if err != nil {
+				return nil, err
+			}
+			out[name] = r
 		}
 	}
-	if charts["objects"] != nil {
-		if objects, err = platformChart(charts["objects"], "global.okdp.charts.objects"); err != nil {
-			return chart.Ref{}, chart.Ref{}, err
+	return out, nil
+}
+
+// ownCharts: the charts the sections of the mapping's result res add (the
+// rule set's ownCharts): each section's checked, then the values of those
+// it renders, in the compile's session; the source of each from sources.
+func ownCharts(session *cel2yaml.Session, inst *instance, res M, sources map[string]chart.Ref) ([]ownChart, error) {
+	var own []ownChart
+	for _, spec := range inst.rules.ownCharts {
+		items := []any{}
+		items = append(items, value.AsList(res[spec.section])...)
+		listed, err := inst.rules.values(spec.list, M{"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"]})
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range value.AsList(listed["charts"]) {
+			c := value.AsMap(v)
+			o := ownChart{key: value.Str(c["key"]), of: value.Str(c["of"]), from: value.Str(c["from"]), source: sources[spec.chart]}
+			if value.Truthy(c["render"]) {
+				scope := maps.Clone(inst.scope)
+				scope["client"], scope["names"] = c["client"], c["names"]
+				if o.values, err = evalTemplate(session, spec.values, scope); err != nil {
+					return nil, fmt.Errorf("%s: %w", o.of, err)
+				}
+			}
+			own = append(own, o)
 		}
 	}
-	return dcr, objects, nil
+	return own, nil
 }
 
 // platformChart: a chart of global.okdp.charts, a map of strings
@@ -57,17 +81,17 @@ func platformChart(v any, where string) (chart.Ref, error) {
 	return r, r.Check(where)
 }
 
-// ownChart: a chart key the compiler owns in a compile: the chart of each
-// OAuth client, in every mode, and of the instance's objects. Neither
+// ownChart: a chart key the compiler owns in a compile: one a section of
+// the rule set adds, and the instance's objects'. Neither
 // Chart.yaml nor the values file may list it (addOwnCharts). The compiler
 // adds it to the compile when it has values, rendered by source: no OKDP
 // defaults, no instance upstream values.
 type ownChart struct {
 	key    string
-	of     string    // what it is the chart of, for the messages: oidcClients[<i>] (<name>)
+	of     string    // what it is the chart of, for the messages
 	from   string    // what its values are compiled from, for the messages
 	source chart.Ref // the platform's chart that renders it
-	values M         // its values; nil: the key is reserved, no chart is added (a client outside dcr mode)
+	values M         // its values; nil: the key is reserved, no chart is added
 }
 
 // listed: the error of the chart c listed by Chart.yaml (deps, its

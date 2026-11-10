@@ -291,7 +291,10 @@ func TestResolveFromStore(t *testing.T) {
 	if !reflect.DeepEqual(inst.transfers, x) || inst.deps != nil {
 		t.Errorf("transfers %#v, dependencies %#v\nwant %#v, none", inst.transfers, inst.deps, x)
 	}
-	es := pullSecret(inst, inst.transfers[0])
+	es, err := pullSecret(inst, inst.transfers[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := value.Dig(es, "spec.data"); !reflect.DeepEqual(got, []any{
 		M{"secretKey": "accessKey", "remoteRef": M{"key": "platform.lake", "property": "accessKey"}},
 		M{"secretKey": "secretKey", "remoteRef": M{"key": "platform.lake", "property": "secretKey"}},
