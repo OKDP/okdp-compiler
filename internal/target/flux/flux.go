@@ -18,7 +18,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/target"

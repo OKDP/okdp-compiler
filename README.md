@@ -335,8 +335,8 @@ that is private.
 | `internal/target/flux/`, `internal/target/argocd/` | the flux and argocd targets: the umbrella charts with each instance's HelmRelease and Kustomizations, or its Application, okdp-gitops' format |
 | `internal/target/helm/` | the helm target; the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes |
 | `internal/compile/` | the top level of a mapping over github.com/okdp/cel2yaml, the YAML + CEL language: `vars`, `errors`, the sections, read from one file or several ([source map](docs/00_architecture.md#source-map)) |
-| `internal/chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
-| `internal/value/` | the values every package shares, and their helpers |
+| `chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
+| `value/` | the values every package shares, and their helpers |
 | `internal/dirfs/` | a directory as an `fs.FS`, bounded, no symbolic link followed: what the CLI reads, and the chart cache of `chartcache` |
 | `cmd/okdp-compile/main.go` | binary entrypoint: flags, the tree read bounded (`openDir`, `internal/dirfs`), `compiler.Build`, `compiler.TreeFiles`, and the files written to disk |
 | `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the packages in `catalog/<service>/<version>/`, the instances of the project `demo` in `projects/demo/instances/<instance>/`), what `-o <dir>` writes for each instance in `output/projects/demo/instances/demo-<instance>/`, its release, checked by `go test` ([example](docs/00_architecture.md#example)) |

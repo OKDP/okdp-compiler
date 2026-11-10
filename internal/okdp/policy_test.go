@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // TestPrivileged: Result.Privileged follows global.okdp.policy.privileged,

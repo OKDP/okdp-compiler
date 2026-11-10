@@ -10,7 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // Definition: a package, as LoadDefinition reads it: Chart.yaml, okdp.yaml

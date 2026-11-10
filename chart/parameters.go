@@ -14,7 +14,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // parameterSchema: the parameter schema of a package, the parameters'
@@ -136,7 +136,7 @@ func Parameters(schema *Schema, name string, layers []map[string]any) (M, error)
 		return nil, err
 	}
 	if v != "" {
-		return nil, &ValuesError{msg: schemaError("values", map[string]string{name: v}).Error(), Violations: leaves}
+		return nil, &ValuesError{msg: SchemaError("values", map[string]string{name: v}).Error(), Violations: leaves}
 	}
 	delete(values, "connections")
 	delete(values, "claims")
@@ -157,3 +157,6 @@ func schemaDefaults(s any) M {
 	}
 	return out
 }
+
+// Validate: the violations of v against the schema, under name (Validate).
+func (s *Schema) Validate(name string, v any) (string, error) { return Validate(name, s.root, v) }

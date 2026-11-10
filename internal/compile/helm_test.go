@@ -9,9 +9,9 @@ import (
 	"github.com/okdp/cel2yaml"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/helmtest"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // Tests against what Helm computes: the fixtures of testdata/helm are

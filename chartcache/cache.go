@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/dirfs"
 	"golang.org/x/sync/singleflight"
 	"sigs.k8s.io/yaml"

@@ -138,7 +138,7 @@ func IsFileName(s string) bool {
 
 // id: <chart>-<version>, the chart's name in the chart cache and in the
 // errors.
-func (r Ref) id() string {
+func (r Ref) ID() string {
 	return r.Chart + "-" + r.Version
 }
 
@@ -191,14 +191,14 @@ func (r Ref) Dir() (string, error) {
 			return "", fmt.Errorf("chart %q %q is no directory of the chart cache", r.Chart, r.Version)
 		}
 	}
-	return path.Join(repo, r.id(), r.Chart), nil
+	return path.Join(repo, r.ID(), r.Chart), nil
 }
 
 // pull: the command that downloads the chart and unpacks it into its entry
 // of the chart cache, <repository>/<chart>-<version>/<chart> (helm pull
 // --untar creates the directory).
-func (r Ref) pull() string {
-	to := path.Join("<chart cache>", r.cacheDir(), r.id())
+func (r Ref) Pull() string {
+	to := path.Join("<chart cache>", r.cacheDir(), r.ID())
 	if strings.HasPrefix(r.Repository, "oci://") {
 		return fmt.Sprintf("helm pull %s/%s --version %s --untar -d %s", strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version, to)
 	}

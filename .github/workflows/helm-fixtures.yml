@@ -10,7 +10,7 @@ on:
   pull_request:
     paths:
       - testdata/helm/**
-      - internal/chart/**
+      - chart/**
       - .github/workflows/helm-fixtures.yml
   workflow_dispatch:
 

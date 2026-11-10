@@ -12,7 +12,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // provisioner: def, a package that provisions api connections, one output

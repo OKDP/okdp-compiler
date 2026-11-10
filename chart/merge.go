@@ -20,7 +20,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // FinalValues: the final values of each chart key of the mapping's output
@@ -64,10 +64,10 @@ func FinalValues(charts *ChartCache, pkg fs.FS, specs Specs, file string, output
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
-		violations[key+" ("+spec.Source.id()+")"] = bad
+		violations[key+" ("+spec.Source.ID()+")"] = bad
 		warnings = append(warnings, w...)
 	}
-	if err := schemaError("compiled values", violations); err != nil {
+	if err := SchemaError("compiled values", violations); err != nil {
 		return nil, nil, nil, err
 	}
 	return out, refs, warnings, nil
@@ -89,7 +89,7 @@ func keyValues(files fs.FS, key string, spec Spec, computed M, values M, check U
 	okdpDefaults := M{}
 	if spec.Defaults != "" {
 		var err error
-		if okdpDefaults, err = readValues(files, path.Clean(spec.Defaults)); err != nil {
+		if okdpDefaults, err = ReadValues(files, path.Clean(spec.Defaults)); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -150,7 +150,7 @@ func checkKey(u *upstreamChart, key string, src Ref, final M, appended [][]strin
 		if lost == len(defaults) {
 			items = "all its items"
 		}
-		warnings = append(warnings, fmt.Sprintf("%s: appended to the package's list, not to the default list of %s, which Helm replaces: the final list lacks %s; restate them in the package's values of %s (its defaults or values file) to keep them", source{chart: key}.at(formatPath(p)), src.id(), items, key))
+		warnings = append(warnings, fmt.Sprintf("%s: appended to the package's list, not to the default list of %s, which Helm replaces: the final list lacks %s; restate them in the package's values of %s (its defaults or values file) to keep them", source{chart: key}.at(FormatPath(p)), src.ID(), items, key))
 	}
 	// Checked as the umbrella's subchart: Helm gives it a global, empty
 	// when the values have none.
@@ -178,7 +178,7 @@ func valueAt(v any, keys []string) any {
 // upstream.<chart> values of the instance.
 type source struct{ chart string }
 
-// at: the path p of the values of s (formatPath: a key in brackets joins
+// at: the path p of the values of s (FormatPath: a key in brackets joins
 // without a dot).
 func (s source) at(p string) string {
 	switch {
@@ -214,12 +214,12 @@ func applyUpstream(values, user M, src source, protect, appendPaths []string, ch
 	// (paths.go): the message names the key the value was found at, and the
 	// path that protects it.
 	for _, p := range append([]string{"global"}, protect...) {
-		segs, err := parsePath(p)
+		segs, err := ParsePath(p)
 		if err != nil {
 			return nil, fmt.Errorf("protect %q: %w", p, err)
 		}
 		if at := protectedAt(user, segs); at != nil {
-			return nil, fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(formatPath(at)), p)
+			return nil, fmt.Errorf("%s: %s is set by the platform and cannot be changed", src.at(FormatPath(at)), p)
 		}
 	}
 	if check != nil {
@@ -274,7 +274,7 @@ func noTemplate(v any, p string, at func(string) string) error {
 // a value base sets, "" when there is none: a key of both whose values are
 // not both maps (a null, a list, a map over a scalar), or whose path whole
 // names, a map then taken as one value. The path is written as NoTemplate
-// writes it (formatPath).
+// writes it (FormatPath).
 func Overlap(base, layer M, whole func(keys []string) bool) string {
 	return overlap(base, layer, nil, whole)
 }
@@ -290,7 +290,7 @@ func overlap(base, layer M, at []string, whole func([]string) bool) string {
 		bm, bok := b.(M)
 		lm, lok := layer[k].(M)
 		if !bok || !lok || whole(p) {
-			return formatPath(p)
+			return FormatPath(p)
 		}
 		if s := overlap(bm, lm, p, whole); s != "" {
 			return s
@@ -309,7 +309,7 @@ func mergeUpstream(values, user M, src source, appendPaths []string) ([][]string
 	// them; a path may name keys in brackets, globs included (paths.go).
 	var done [][]string
 	for _, p := range appendPaths {
-		segs, err := parsePath(p)
+		segs, err := ParsePath(p)
 		if err != nil {
 			return nil, fmt.Errorf("append %q: %w", p, err)
 		}

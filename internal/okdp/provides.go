@@ -12,7 +12,7 @@ import (
 
 	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // Info: what the instance publishes, the mapping's instance and

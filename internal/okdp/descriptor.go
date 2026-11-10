@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // ContractDescriptor: a contract of Inputs.Contracts, read and checked as

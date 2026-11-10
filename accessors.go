@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/repository"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // The accessors of the compile's rules, for a program that answers

@@ -7,23 +7,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // parsePathCases: paths and their keys, for TestParsePath and
 // FuzzParsePath.
-var parsePathCases = map[string][]pathSeg{
-	"fullnameOverride": {{key: "fullnameOverride"}},
-	"controller.extraArgs.enable-ssl-passthrough": {{key: "controller"}, {key: "extraArgs"}, {key: "enable-ssl-passthrough"}},
-	`config["spark.ui.filters"]`:                  {{key: "config"}, {key: "spark.ui.filters"}},
-	`config["spark.history.*"]`:                   {{key: "config"}, {key: "spark.history.", glob: true}},
+var parsePathCases = map[string][]PathSeg{
+	"fullnameOverride": {{Key: "fullnameOverride"}},
+	"controller.extraArgs.enable-ssl-passthrough": {{Key: "controller"}, {Key: "extraArgs"}, {Key: "enable-ssl-passthrough"}},
+	`config["spark.ui.filters"]`:                  {{Key: "config"}, {Key: "spark.ui.filters"}},
+	`config["spark.history.*"]`:                   {{Key: "config"}, {Key: "spark.history.", Glob: true}},
 	`filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]`: {
-		{key: "filer"}, {key: "ingresses"}, {key: "http"}, {key: "annotations"}, {key: "nginx.ingress.kubernetes.io/auth-", glob: true},
+		{Key: "filer"}, {Key: "ingresses"}, {Key: "http"}, {Key: "annotations"}, {Key: "nginx.ingress.kubernetes.io/auth-", Glob: true},
 	},
-	`["a.b"]`:             {{key: "a.b"}},
-	`["a.b"]["c"].d`:      {{key: "a.b"}, {key: "c"}, {key: "d"}},
-	`ingresses["*"].tls`:  {{key: "ingresses"}, {key: "", glob: true}, {key: "tls"}},
-	`env.VITE_OIDC_SCOPE`: {{key: "env"}, {key: "VITE_OIDC_SCOPE"}},
+	`["a.b"]`:             {{Key: "a.b"}},
+	`["a.b"]["c"].d`:      {{Key: "a.b"}, {Key: "c"}, {Key: "d"}},
+	`ingresses["*"].tls`:  {{Key: "ingresses"}, {Key: "", Glob: true}, {Key: "tls"}},
+	`env.VITE_OIDC_SCOPE`: {{Key: "env"}, {Key: "VITE_OIDC_SCOPE"}},
 }
 
 // parsePathErrors: malformed paths, for TestParsePath and FuzzParsePath.
@@ -36,7 +36,7 @@ var parsePathErrors = []string{
 // anywhere in the path; anything else is not a path.
 func TestParsePath(t *testing.T) {
 	for p, want := range parsePathCases {
-		got, err := parsePath(p)
+		got, err := ParsePath(p)
 		if err != nil {
 			t.Errorf("%s: %v", p, err)
 		} else if !reflect.DeepEqual(got, want) {
@@ -44,14 +44,14 @@ func TestParsePath(t *testing.T) {
 		}
 	}
 	for _, p := range parsePathErrors {
-		if _, err := parsePath(p); !errors.Is(err, errPath) {
+		if _, err := ParsePath(p); !errors.Is(err, errPath) {
 			t.Errorf("%q: got %v, want %v", p, err, errPath)
 		}
 	}
 }
 
-// FuzzParsePath: what parsePath reads is keys, none empty but a glob's
-// prefix; written back, plain where it can be (formatPath) and a glob as
+// FuzzParsePath: what ParsePath reads is keys, none empty but a glob's
+// prefix; written back, plain where it can be (FormatPath) and a glob as
 // ["<prefix>*"], it reads as the same keys. Seeds: the paths of
 // TestParsePath.
 func FuzzParsePath(f *testing.F) {
@@ -62,22 +62,22 @@ func FuzzParsePath(f *testing.F) {
 		f.Add(p)
 	}
 	f.Fuzz(func(t *testing.T, p string) {
-		segs, err := parsePath(p)
+		segs, err := ParsePath(p)
 		if err != nil {
 			return
 		}
 		written := ""
 		for _, s := range segs {
 			switch {
-			case s.glob:
-				written += `["` + s.key + `*"]`
-			case s.key == "":
+			case s.Glob:
+				written += `["` + s.Key + `*"]`
+			case s.Key == "":
 				t.Fatalf("%q: an empty key, in %#v", p, segs)
 			default:
-				written = value.Key(written, s.key)
+				written = value.Key(written, s.Key)
 			}
 		}
-		if back, err := parsePath(written); err != nil || !reflect.DeepEqual(back, segs) {
+		if back, err := ParsePath(written); err != nil || !reflect.DeepEqual(back, segs) {
 			t.Errorf("%q: read as %#v, written %s, read back as %#v (%v)", p, segs, written, back, err)
 		}
 	})
@@ -93,26 +93,26 @@ var formatPathCases = map[string][]string{
 }
 
 // TestFormatPath: the key a value was found at, as the errors show it;
-// parsePath reads it back as the same literal keys.
+// ParsePath reads it back as the same literal keys.
 func TestFormatPath(t *testing.T) {
 	for want, keys := range formatPathCases {
-		if got := formatPath(keys); got != want {
+		if got := FormatPath(keys); got != want {
 			t.Errorf("%q: got %s, want %s", keys, got, want)
 		}
 		if want == `a[""]` {
 			continue // an empty key is printed, never written in a path
 		}
-		segs, err := parsePath(want)
+		segs, err := ParsePath(want)
 		if err != nil {
 			t.Errorf("%s: %v", want, err)
 			continue
 		}
 		var back []string
 		for _, s := range segs {
-			if s.glob {
+			if s.Glob {
 				t.Errorf("%s: a glob", want)
 			}
-			back = append(back, s.key)
+			back = append(back, s.Key)
 		}
 		if !reflect.DeepEqual(back, keys) {
 			t.Errorf("%s: read back as %q", want, back)
@@ -120,7 +120,7 @@ func TestFormatPath(t *testing.T) {
 	}
 }
 
-// FuzzFormatPath: parsePath reads what formatPath writes of any keys without
+// FuzzFormatPath: ParsePath reads what FormatPath writes of any keys without
 // a quote, a backslash or a star (the fuzzed text split at \xff, a byte
 // UTF-8 never holds) as the same literal keys; with an empty key, which no
 // path names, it fails. Seeds: the keys of TestFormatPath.
@@ -133,8 +133,8 @@ func FuzzFormatPath(f *testing.F) {
 			return
 		}
 		keys := strings.Split(s, "\xff")
-		p := formatPath(keys)
-		segs, err := parsePath(p)
+		p := FormatPath(keys)
+		segs, err := ParsePath(p)
 		if slices.Contains(keys, "") {
 			if err == nil {
 				t.Errorf("%q: written %s, read as %#v, an empty key", keys, p, segs)
@@ -143,10 +143,10 @@ func FuzzFormatPath(f *testing.F) {
 		}
 		back := []string{}
 		for _, s := range segs {
-			if s.glob {
+			if s.Glob {
 				t.Errorf("%q: written %s, read with a glob", keys, p)
 			}
-			back = append(back, s.key)
+			back = append(back, s.Key)
 		}
 		if err != nil || !reflect.DeepEqual(back, keys) {
 			t.Errorf("%q: written %s, read back as %q (%v)", keys, p, back, err)

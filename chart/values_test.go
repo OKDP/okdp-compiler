@@ -11,7 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/helmtest"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // valuesFile: a values file of two documents, for TestParseValues and

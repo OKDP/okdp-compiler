@@ -30,14 +30,14 @@ import (
 
 	sigsyaml "sigs.k8s.io/yaml"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // M: a values map (value.M).
 type M = value.M
 
-// readValues: a values file of fsys, read as Helm reads values files.
-func readValues(fsys fs.FS, name string) (M, error) {
+// ReadValues: a values file of fsys, read as Helm reads values files.
+func ReadValues(fsys fs.FS, name string) (M, error) {
 	b, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return nil, err

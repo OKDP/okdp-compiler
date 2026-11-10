@@ -16,7 +16,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // fragment: a function of OKDP's templates: its arguments checked against

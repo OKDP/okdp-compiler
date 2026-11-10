@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // transfer: credentials read from the platform's secret store, a claim's

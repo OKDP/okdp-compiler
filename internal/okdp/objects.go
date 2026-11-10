@@ -12,8 +12,8 @@ import (
 
 	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // ObjectsChart: the chart key of the instance's objects, in the umbrella,

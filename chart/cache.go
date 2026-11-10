@@ -84,7 +84,7 @@ func (c *ChartCache) get(r Ref) (*upstreamChart, error) {
 	}
 	files, err := readEntry(c.fsys, entry)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("chart %s is not in the chart cache: %s", r.id(), r.pull())
+		return nil, fmt.Errorf("chart %s is not in the chart cache: %s", r.ID(), r.Pull())
 	}
 	if err != nil {
 		return nil, err

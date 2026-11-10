@@ -12,8 +12,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // dbContract: a database contract with defaults, a derived field, a

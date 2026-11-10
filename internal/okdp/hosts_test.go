@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // TestIngressHostsObjects: the objects of an instance of a project that is

@@ -27,7 +27,7 @@ import (
 	"github.com/okdp/cel2yaml"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // M: a values map (value.M).

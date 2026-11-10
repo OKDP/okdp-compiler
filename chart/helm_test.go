@@ -12,7 +12,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/internal/helmtest"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 var update = flag.Bool("update", false, "rewrite the final.yaml of testdata/helm/values from the current compiler")
@@ -46,7 +46,7 @@ func TestHelmValues(t *testing.T) {
 	}
 	for _, dir := range cases {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
-			defaults, err := readValues(os.DirFS(dir), "values.yaml")
+			defaults, err := ReadValues(os.DirFS(dir), "values.yaml")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,10 +85,10 @@ func TestHelmValues(t *testing.T) {
 			}
 			b, err := os.ReadFile(golden)
 			if err != nil {
-				t.Fatalf("%v (run go test ./internal/chart -run TestHelmValues -update)", err)
+				t.Fatalf("%v (run go test ./chart -run TestHelmValues -update)", err)
 			}
 			if g, err := ParseValues(b); err != nil || !reflect.DeepEqual(g, final) {
-				t.Errorf("%s differs from the final values (%v): run go test ./internal/chart -run TestHelmValues -update, then generate.sh", golden, err)
+				t.Errorf("%s differs from the final values (%v): run go test ./chart -run TestHelmValues -update, then generate.sh", golden, err)
 			}
 			if got := helmtest.JSON(t, filepath.Join(dir, "helm-final.json")); !reflect.DeepEqual(got, want) {
 				t.Errorf("Helm renders the final values differently:\n got %#v\nwant %#v", got, want)
@@ -156,7 +156,7 @@ func TestHelmSchema(t *testing.T) {
 	for _, dir := range cases {
 		t.Run(filepath.Base(dir), func(t *testing.T) {
 			fsys := os.DirFS(dir)
-			defaults, err := readValues(fsys, "values.yaml")
+			defaults, err := ReadValues(fsys, "values.yaml")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -198,7 +198,7 @@ func TestHelmSchema(t *testing.T) {
 				}
 				// Helm: "Error: <message>", "<chart>:", then the violations.
 				lines := strings.Split(helm, "\n")
-				got := schemaError("values", map[string]string{"schema": v})
+				got := SchemaError("values", map[string]string{"schema": v})
 				if got == nil {
 					t.Fatalf("%s: no violation, Helm reports:\n%s", name, helm)
 				}

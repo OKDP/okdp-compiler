@@ -134,7 +134,7 @@ func (s Specs) Check() error {
 			paths []string
 		}{{"protect", spec.Protect}, {"append", spec.Append}} {
 			for i, p := range l.paths {
-				if _, err := parsePath(p); err != nil {
+				if _, err := ParsePath(p); err != nil {
 					return fmt.Errorf("okdp.yaml: upstream.%s.%s[%d] %q: %w", key, l.name, i, p, err)
 				}
 			}

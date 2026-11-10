@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // TestRequireYAML: require in okdp.yaml, a list of keys; an entry of

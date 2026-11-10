@@ -114,24 +114,26 @@ func TestConcurrentCompile(t *testing.T) {
 func TestLayers(t *testing.T) {
 	const module = "github.com/okdp/okdp-compiler/"
 	imports := map[string][]string{} // a package of internal/, by directory: those of the module it imports
-	err := filepath.WalkDir("internal", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
-			return err
-		}
-		f, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.ImportsOnly)
-		if err != nil {
-			return err
-		}
-		dir := filepath.ToSlash(filepath.Dir(p))
-		for _, imp := range f.Imports {
-			if path := strings.Trim(imp.Path.Value, `"`); strings.HasPrefix(path, module) {
-				imports[dir] = append(imports[dir], strings.TrimPrefix(path, module))
+	for _, root := range []string{"internal", "chart", "value"} {
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+				return err
 			}
+			f, err := parser.ParseFile(token.NewFileSet(), p, nil, parser.ImportsOnly)
+			if err != nil {
+				return err
+			}
+			dir := filepath.ToSlash(filepath.Dir(p))
+			for _, imp := range f.Imports {
+				if path := strings.Trim(imp.Path.Value, `"`); strings.HasPrefix(path, module) {
+					imports[dir] = append(imports[dir], strings.TrimPrefix(path, module))
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	var deps func(pkg string, seen map[string]bool) map[string]bool
 	deps = func(pkg string, seen map[string]bool) map[string]bool {
@@ -148,8 +150,8 @@ func TestLayers(t *testing.T) {
 		"internal/graph":   {"internal/target", "internal/tree"},
 		"internal/tree":    {"internal/target", "internal/repository"},
 		"internal/output":  {"internal/repository"},
-		"internal/compile": {"internal/okdp", "internal/chart"},
-		"internal/chart":   {"internal/okdp", "internal/compile"},
+		"internal/compile": {"internal/okdp", "chart"},
+		"chart":            {"internal/okdp", "internal/compile"},
 	} {
 		if imports[pkg] == nil {
 			t.Fatalf("%s: no import read", pkg)

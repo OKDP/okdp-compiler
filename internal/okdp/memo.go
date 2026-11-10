@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // Memo: what the compiles of the instances of one set read once

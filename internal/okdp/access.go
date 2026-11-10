@@ -17,8 +17,8 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // Role: the role of a group within a project (project.yaml access).

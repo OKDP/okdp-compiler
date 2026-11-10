@@ -18,7 +18,7 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 const (

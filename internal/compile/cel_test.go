@@ -11,7 +11,7 @@ import (
 
 	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // mapCtx: a small context for document tests.

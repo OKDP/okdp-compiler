@@ -14,9 +14,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/compile"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // RulesFile: the file of a rule set, at the root of its file system.

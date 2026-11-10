@@ -2,7 +2,7 @@ package okdp
 
 import (
 	"context"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 	"reflect"
 	"testing"
 )

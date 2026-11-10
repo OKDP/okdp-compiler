@@ -106,7 +106,7 @@ flowchart TD
 ```
 
 `okdp.LoadDefinition` (`internal/okdp/load.go`) reads `Chart.yaml` into
-`chart.Metadata` (`chart.ReadMetadata`, `internal/chart/metadata.go`:
+`chart.Metadata` (`chart.ReadMetadata`, `chart/metadata.go`:
 strictly, an unknown field refused by yaml.v3's `KnownFields`, one YAML
 document; then `Metadata.Check`: `apiVersion: v2`, a name, a SemVer
 version, an application chart, and each dependency's name, key, repository
@@ -132,17 +132,17 @@ by each compile.
 
 `okdp.Compile` (`internal/okdp/pipeline.go`; a nil context, definition or
 file system panics) checks the release, a name Helm accepts
-(`chart.IsRelease`, `internal/chart/ref.go`: a DNS-1123 label of 53
+(`chart.IsRelease`, `chart/ref.go`: a DNS-1123 label of 53
 characters at most), and the namespace, a DNS-1123 label
 (`chart.IsDNSLabel`), then builds the `Service` again
 (`Definition.service`), for a `Definition` built in memory: a name and a
 SemVer version, each dependency key a DNS label (it names the umbrella's
 dependency alias), unique, each dependency a repository URL, a chart name
 and a pinned version (`Metadata.Check`, `chart.Ref.Check`,
-`internal/chart/ref.go`;
+`chart/ref.go`;
 [Dependencies](specs/02_service_definition.md#dependencies)), and the
 `protect` and `append` paths (`chart.NewSpecs`, `chart.Specs.Check`,
-`internal/chart/spec.go`). Then it runs the stages, one call each, in
+`chart/spec.go`). Then it runs the stages, one call each, in
 order. The first three, one call (`newInstance`), build the compile's
 `instance` (`internal/okdp/context.go`), the typed state the others read:
 the release and namespace, the service's name and version, the merged
@@ -150,7 +150,7 @@ values, `global.okdp`, its `ingress.suffix`, the OIDC settings and their
 mode, the dependencies, and what the mapping sees (its `scope`):
 
 1. **Parameters** (`newInstance`, `internal/okdp/context.go`, on
-   `chart.Parameters`, `internal/chart/parameters.go`).
+   `chart.Parameters`, `chart/parameters.go`).
    `config.schema.json` is read first, once for the compile, before the
    layers (`chart.ReadParameterSchema`; a missing one is the empty schema,
    `{}`), as any values schema is (`chart.ParseSchema`, a `chart.Schema`):
@@ -176,7 +176,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    an instance's own connections are a context layer of its level, the
    named claims its project's. A context layer above level 0 or an
    instance layer, normalized, with `{{` in a key or a string, at any
-   depth, fails (`chart.NoTemplate`, `internal/chart/merge.go`); the
+   depth, fails (`chart.NoTemplate`, `chart/merge.go`); the
    platform's level, 0, and the package's defaults are not checked. Each
    layer, those of `Inputs.Context` by level, then `Inputs.Values`, is
    normalized (`value.Normalize`: string keys, `[]any` lists, `float64`
@@ -355,7 +355,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    `stringData`, no ExternalSecret's template a literal at a sensitive
    key, no Fake generator values (`checkPlainSecrets`); a literal of the
    upstream values at a sensitive key a warning (`plainUpstream`).
-9. **Final values** (`chart.FinalValues`, `internal/chart/merge.go`), for
+9. **Final values** (`chart.FinalValues`, `chart/merge.go`), for
    each dependency of `Chart.yaml` the values file does not leave out
    (`rendered`, `internal/okdp/pipeline.go`, Helm's rule: every one, but a
    key it writes, `Doc.Written` or a key of its values, left out by `$if`
@@ -384,16 +384,16 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    source of each compiled key. The layers and the rules: [Merge
    precedence](specs/01_inputs_outputs.md#merge-precedence), [Upstream
    values](specs/01_inputs_outputs.md#upstream-values).
-10. **Upstream charts** (`checkKey`, `internal/chart/merge.go`), with a
+10. **Upstream charts** (`checkKey`, `chart/merge.go`), with a
     chart cache only (`Inputs.Charts`, `okdp-compile --check --charts`):
     without one, no chart is read. The cache (`chartCache.get`,
-    `internal/chart/cache.go`) reads each upstream chart once per compile
+    `chart/cache.go`) reads each upstream chart once per compile
     (its own `values.yaml` and `values.schema.json`, not its subcharts'),
     from `<repository>/<chart>-<version>/<chart>/` (`Ref.Dir`); a
     chart the cache does not hold there fails with the `helm pull --untar`
     command that fetches it there. The final values, coalesced over the
     chart defaults as Helm will coalesce them, are checked against the
-    chart's `values.schema.json` (`checkSchema`, `internal/chart/schema.go`)
+    chart's `values.schema.json` (`checkSchema`, `chart/schema.go`)
     when it has one; the violations of every chart are reported together,
     under the key and its upstream chart (`app (app-1.8.0)`). A list the
     instance appended to whose final list lacks items of the chart's
@@ -507,11 +507,11 @@ neither knows OKDP.
 | | `output.go` | the output in a tree a caller keeps: its directory and entry point (`CompiledDir`, `ArgoCDRootPath`), its targets (`OutputTargets`: Flux, Argo CD when the root says where it reads from; `compiler.ReadArgoRoot`), `compiled/` as an `fs.FS` read as it is opened (`OutputFS`), rewritten (`WriteOutput`) | `compiler.Flux`, `compiler.ArgoCD`, `compiler.ReadArgoRoot` |
 | `chartcache` | `cache.go`, `oci.go` | a chart cache that pulls the charts it lacks (`Cache`, a `compiler.ChartSource`: `Ensure`, `File`, `Get`, one pull per chart at a time, a failure not tried again for a minute), from an OCI registry, the layer verified against its manifest's digest, or the `index.yaml` of an https chart repository, the archive and every redirect https but on `InsecureHosts`, none from https to http, an OCI registry's alike, every connection refused at a private, loopback or link-local address but for a host of `PrivateHosts` or `InsecureHosts` (`RepositoryPuller`, `dial`, `publicAddress`), every TLS connection trusting the system's certificates or the pool of `SetRootCAs`, unpacked in the layout `Inputs.Charts` reads, `Chart.yaml`, `values.yaml` and `values.schema.json` only, the `Chart.yaml` of the chart and version named, each directory 0755, bounded (`MaxChartSize`, `MaxUncompressedSize`, `MaxFileSize`, `FetchTimeout`); `File` one of `Files`; `FS` through `internal/dirfs` | `chart.Ref` (`Dir`), `internal/dirfs` |
 
-Layers: `value`, `internal/chart/values.go` and `internal/chart/schema.go`
+Layers: `value`, `chart/values.go` and `chart/schema.go`
 reproduce Helm and know nothing of OKDP; github.com/okdp/cel2yaml
 reproduces Helm's and sprig's functions, bound to CEL;
-`internal/chart/ref.go` holds the names Kubernetes and Helm accept;
-`internal/chart/cache.go` reads the chart cache; `internal/chart/merge.go`
+`chart/ref.go` holds the names Kubernetes and Helm accept;
+`chart/cache.go` reads the chart cache; `chart/merge.go`
 applies the rules of the package's charts (`okdp.yaml`'s `defaults` and
 `upstream`); `internal/okdp` implements OKDP's rules,
 `internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml` the values of the oidc-dcr chart,
@@ -1029,7 +1029,7 @@ The tests read them through `internal/helmtest`, imported by
 tests only: the directory, the JSON renders, the versions of `SOURCE`, and
 the `helm<major>` files beside each reference file.
 
-To regenerate: `go test ./internal/chart -run TestHelmValues -update`
+To regenerate: `go test ./chart -run TestHelmValues -update`
 (writes each `final.yaml`), `go test ./internal/target/helm -run
 TestHelmUmbrella -update` (writes the umbrella), then `generate.sh` (bash
 3.2 or later, python3 with PyYAML; the GNU or the BSD tools), with the
@@ -1053,7 +1053,7 @@ differently fail. What a major version renders differently from the helm
 on the `PATH` goes beside the reference file, `helm` renamed
 `helm<major>`, removed when it renders the same. A new version or a new
 difference goes in `umbrellaRenders` (`internal/target/helm/helm_test.go`)
-or `helmFinalKnown` (`internal/chart/helm_test.go`), and in the spec
+or `helmFinalKnown` (`chart/helm_test.go`), and in the spec
 ([Umbrella chart](specs/01_inputs_outputs.md#umbrella-chart), [Equivalence
 with Helm](specs/01_inputs_outputs.md#equivalence-with-helm)). Without
 `UMBRELLA_HELMS`, the `helm<major>` files and the `helms` of `SOURCE` are
@@ -1061,7 +1061,7 @@ left as they are.
 
 The `helm-fixtures` workflow (`.github/workflows/helm-fixtures.yml`)
 regenerates them (`make fixtures`) on each pull request that touches
-`testdata/helm` or `internal/chart`, with the Helm versions of `SOURCE`,
+`testdata/helm` or `chart`, with the Helm versions of `SOURCE`,
 and fails when they differ from the
 committed ones.
 
@@ -1088,13 +1088,13 @@ the sections (`TestMistakes`: unknown sections, `vars` that are not a
 map), the `errors` rules (`TestErrorRules`), and the keys a section writes
 (`TestWritten`). `TestHelmFunctions` (`internal/compile/helm_test.go`)
 compares the host functions of the language with Helm's.
-`internal/chart/metadata_test.go` covers the source checks
-(`TestMetadataCheck`), `internal/chart/spec_test.go` the upstream specs
-and the charts of a package, `internal/chart/cache_test.go` the chart
+`chart/metadata_test.go` covers the source checks
+(`TestMetadataCheck`), `chart/spec_test.go` the upstream specs
+and the charts of a package, `chart/cache_test.go` the chart
 cache, a chart unpacked under its repository's directory, with subcharts,
 not at the root nor as an archive (`TestChartCache`), and the repository's
-directory (`TestRefCacheDir`), `internal/chart/merge_test.go` and
-`internal/chart/paths_test.go` the upstream values, `protect` and
+directory (`TestRefCacheDir`), `chart/merge_test.go` and
+`chart/paths_test.go` the upstream values, `protect` and
 `append`, and the checks of the final values against a chart cache, the
 same values without one (`TestFinalValuesCheck`).
 `internal/okdp/pipeline_test.go` runs the whole pipeline on a minimal
@@ -1110,7 +1110,7 @@ level may add, and the lower levels' values it may not change, whatever
 the order and the gaps of the levels (`TestContextLevels`), layers of Go
 types that merge as the same values read from a file, and the layer and
 path of what values cannot hold (`TestValuesLayersGoTypes`);
-`internal/value/value_test.go` the reading of each Go type
+`value/value_test.go` the reading of each Go type
 (`TestNormalize`, `TestNormalizeErrors`) and the paths of the messages
 (`TestPath`). `internal/okdp/namespace_test.go` compiles instances
 together in every order, each giving the same outcomes: a chain, an output
@@ -1246,7 +1246,7 @@ images of the platform's registries, a registry and a repository over the
 computed ones, a `null` (`TestUpstreamPolicy`), the keys of `policy`
 (`TestPolicySchema`), and in every project no Secret with values unless
 allowed, a `List`'s items included (`TestPlainSecrets`);
-`internal/chart/merge_test.go` the caller's check of `applyUpstream`,
+`chart/merge_test.go` the caller's check of `applyUpstream`,
 after `protect` (`TestApplyUpstreamCheck`).
 `internal/okdp/oidc_test.go` covers the OAuth clients: the values the
 oidc-dcr template computes (the defaults compared whole; the names, client
@@ -1325,7 +1325,7 @@ github.com/okdp/cel2yaml:
 | `repository`: `FuzzLoad` | `Load` and `LoadProjects` agree: a tree `Load` accepts refuses no project, one it refuses is an `*Error`, a refused project has no instance |
 
 One at a time, a package at a time:
-`go test -run='^$' -fuzz=FuzzParsePath -fuzztime=60s ./internal/chart`;
+`go test -run='^$' -fuzz=FuzzParsePath -fuzztime=60s ./chart`;
 `make fuzz` runs each in turn, `FUZZTIME` (30s) each, and
 `.github/workflows/fuzz.yml` every night, 60s each. An input that fails
 is written to the package's `testdata/fuzz/` (the nightly run uploads
@@ -1431,7 +1431,7 @@ file of `output/` that it does not write fails.
 writes them, a stale instance removed, the full example split into three
 repositories too.
 After a change, `go test . -update` rewrites them
-(`go test ./internal/chart -update` each `final.yaml` of the values
+(`go test ./chart -update` each `final.yaml` of the values
 fixtures; `make example` only them); the diff is the change's effect,
 reviewed as such.
 

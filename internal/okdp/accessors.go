@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // FieldError: an error of a compile about one field of the instance's

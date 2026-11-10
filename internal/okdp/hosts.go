@@ -16,7 +16,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // hostRules: the hosts a project may serve (checkIngressHosts).

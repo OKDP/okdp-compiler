@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // ErrNotInCatalog: a service, or a version of a service, that the catalog

@@ -80,7 +80,7 @@ UMBRELLA_HELMS="/path/to/helm-4.x /path/to/helm-3.19" make fixtures
 Helm versions): commit it with them. Review the diff of a regeneration as a
 change of Helm's behaviour; a new
 difference between Helm versions goes in `helmFinalKnown`
-(`internal/chart/helm_test.go`) for the values cases, or `umbrellaRenders`
+(`chart/helm_test.go`) for the values cases, or `umbrellaRenders`
 (`internal/target/helm/helm_test.go`) for the umbrella, and in the spec
 ([equivalence with Helm](docs/specs/01_inputs_outputs.md#equivalence-with-helm),
 [umbrella chart](docs/specs/01_inputs_outputs.md#umbrella-chart)).

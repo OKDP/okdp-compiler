@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // CatalogsFile: the catalogs of a tree, beside PlatformFile, which the

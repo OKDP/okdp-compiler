@@ -15,7 +15,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // Instance: an instance CompileAll compiles: its package and its inputs,

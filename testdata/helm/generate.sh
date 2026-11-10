@@ -3,7 +3,7 @@
 # binary on the PATH (Helm 4, the reference) and the helm binaries the
 # deployers embed ($UMBRELLA_HELMS). Run from anywhere:
 #
-#   go test ./internal/chart -run TestHelmValues -update   # values/<case>/final.yaml
+#   go test ./chart -run TestHelmValues -update   # values/<case>/final.yaml
 #   go test ./internal/target/helm -run TestHelmUmbrella -update  # umbrella/Chart.yaml, instance.values.yaml
 #   UMBRELLA_HELMS="<helm> ..." testdata/helm/generate.sh
 #

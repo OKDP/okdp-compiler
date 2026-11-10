@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // valuesLayers: the layers of in, the context's (contextLayers), then the

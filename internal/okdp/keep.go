@@ -9,7 +9,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // keepSync: the annotation and the value that say Helm keeps an object, the

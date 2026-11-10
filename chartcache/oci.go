@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"sigs.k8s.io/yaml"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"

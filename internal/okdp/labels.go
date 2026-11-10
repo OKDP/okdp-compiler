@@ -7,7 +7,7 @@ import (
 	"cel.dev/cel-go/cel"
 	"github.com/okdp/cel2yaml"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // labels: the labels of every object OKDP renders itself, of the service

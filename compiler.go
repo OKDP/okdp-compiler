@@ -56,7 +56,7 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/output"
@@ -66,7 +66,7 @@ import (
 	"github.com/okdp/okdp-compiler/internal/target/flux"
 	"github.com/okdp/okdp-compiler/internal/target/helm"
 	"github.com/okdp/okdp-compiler/internal/tree"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // The types a caller names.

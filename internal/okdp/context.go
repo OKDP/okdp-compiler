@@ -13,8 +13,8 @@ import (
 	"io/fs"
 	"sort"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // instance: what a compile knows of its instance, built once by the first

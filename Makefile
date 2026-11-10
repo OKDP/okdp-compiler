@@ -39,12 +39,12 @@ example: ## Rewrite the outputs of examples/ from the current compiler
 	go test . -run '^TestExample$$' -update
 
 fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
-	go test ./internal/chart -run '^TestHelmValues$$' -update
+	go test ./chart -run '^TestHelmValues$$' -update
 	go test ./internal/target/helm -run '^TestHelmUmbrella$$' -update
 	UMBRELLA_HELMS="$(UMBRELLA_HELMS)" testdata/helm/generate.sh
 
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.
-FUZZ := internal/chart:FuzzParsePath internal/chart:FuzzFormatPath internal/chart:FuzzParseValues \
+FUZZ := chart:FuzzParsePath chart:FuzzFormatPath chart:FuzzParseValues \
 	internal/okdp:FuzzParseAccess internal/okdp:FuzzClaimID internal/okdp:FuzzUpstreamCheck \
 	internal/okdp:FuzzContextLayers internal/okdp:FuzzValuesLayers internal/repository:FuzzLoad
 FUZZTIME ?= 30s

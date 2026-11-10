@@ -30,7 +30,7 @@ import (
 	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/internal/compile"
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // sections: the sections of a mapping the compiler reads itself, besides

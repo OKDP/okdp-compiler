@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/chart"
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
@@ -120,7 +120,7 @@ func TestHelmUmbrella(t *testing.T) {
 		c := keys[key]
 		b, err := os.ReadFile(filepath.Join(helmtest.Dir, "values", c, "final.yaml"))
 		if err != nil {
-			t.Fatalf("%v (run go test ./internal/chart -run TestHelmValues -update)", err)
+			t.Fatalf("%v (run go test ./chart -run TestHelmValues -update)", err)
 		}
 		if res.Values[key], err = chart.ParseValues(b); err != nil {
 			t.Fatal(err)

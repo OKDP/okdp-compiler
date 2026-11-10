@@ -14,7 +14,7 @@ import (
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // schemaURL: where a schema is compiled, for its $ref to itself.
@@ -186,9 +186,9 @@ type ValuesError struct {
 
 func (e *ValuesError) Error() string { return e.msg }
 
-// schemaError: the violations of the values of each chart, as Helm reports
+// SchemaError: the violations of the values of each chart, as Helm reports
 // them; what is the values checked ("values", "compiled values").
-func schemaError(what string, violations map[string]string) error {
+func SchemaError(what string, violations map[string]string) error {
 	charts := make([]string, 0, len(violations))
 	for c, v := range violations {
 		if v != "" {

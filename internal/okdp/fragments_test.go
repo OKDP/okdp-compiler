@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/value"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // fragmentScope: what the fragments see of an instance: the release demo-app
