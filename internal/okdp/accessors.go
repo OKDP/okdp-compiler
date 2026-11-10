@@ -7,32 +7,16 @@ package okdp
 
 import (
 	"fmt"
+	"github.com/okdp/okdp-compiler/value"
 	"strings"
 
 	"github.com/okdp/okdp-compiler/chart"
 )
 
-// FieldError: an error of a compile about one field of the instance's
-// values, its parameter path as the messages name it (value.Key,
-// value.Index: catalogs[1].storage, claims.analytics): a connection
-// reference that does not resolve, a claim that does not bind, a named
-// claim of the context. Its message is the error's, the path at its
-// head: the tag changes no message.
-type FieldError struct {
-	Field string
-	Err   error
-}
+// FieldError: value.FieldError.
+type FieldError = value.FieldError
 
-func (e *FieldError) Error() string { return e.Err.Error() }
-func (e *FieldError) Unwrap() error { return e.Err }
-
-// atField: err tagged with field, nil for nil.
-func atField(field string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &FieldError{Field: field, Err: err}
-}
+var atField = value.AtField
 
 // NamedClaimID: the ID of the named claim name of namespace, the name of
 // the output its provider publishes for it, <namespace>.<name> (claimID).

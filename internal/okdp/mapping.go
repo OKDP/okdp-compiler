@@ -20,6 +20,7 @@ package okdp
 
 import (
 	"cmp"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"slices"
 	"strings"
@@ -73,12 +74,12 @@ func (d *Definition) sources() []compile.Source {
 // oidcClients (checked further by oidc.go). written: the keys output
 // writes at its top level (compile.Doc.Written), kept or not.
 func runMapping(rules *RuleSet, session *cel2yaml.Session, scope M, srcs ...compile.Source) (res M, written []string, err error) {
-	doc, err := compile.Eval(session, scope, slices.Concat(sections, rules.sections), srcs...)
+	doc, err := compile.Eval(session, scope, slices.Concat(sections, rules.Sections), srcs...)
 	if err != nil {
 		return nil, nil, err
 	}
 	maps.DeleteFunc(doc.Sections, func(_ string, v any) bool { return v == nil })
-	res, err = schemaValues(rules.mappingSchema, "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
+	res, err = schemaValues(rules.MappingSchema, "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
 	return res, doc.Written["output"], err
 }
 
@@ -101,7 +102,7 @@ func functions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 				cel2yaml.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
 		cel2yaml.Costed(cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
 			cel2yaml.Unary(func(v any) (any, error) {
-				args, err := schemaValues(inst.rules.mappingSchema, "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
+				args, err := schemaValues(inst.rules.MappingSchema, "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
 				if err != nil {
 					return nil, err
 				}
@@ -118,8 +119,8 @@ func functions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 // for the instance inst (the rule set's template), args checked against
 // mapping.schema.json (okdpGeneratedSecret), in the compile's session.
 func generatedSecret(session *cel2yaml.Session, inst *instance, args M) ([]any, error) {
-	scope := M{"args": args, "release": M{"name": inst.release, "namespace": inst.namespace}, "labels": inst.rules.labels(inst.svc.Name, inst.release, "", false)}
-	v, err := evalTemplate(session, inst.rules.generatedSecret, scope)
+	scope := M{"args": args, "release": M{"name": inst.release, "namespace": inst.namespace}, "labels": inst.rules.Labels(inst.svc.Name, inst.release, "", false)}
+	v, err := evalTemplate(session, inst.rules.GeneratedSecret, scope)
 	return value.AsList(v["objects"]), err
 }
 
@@ -128,15 +129,15 @@ func generatedSecret(session *cel2yaml.Session, inst *instance, args M) ([]any, 
 // call counts in the session's cost as the compiler's own host functions.
 func documentFunctions(inst *instance) []cel.EnvOption {
 	var opts []cel.EnvOption
-	for _, f := range inst.rules.documentFuncs {
-		id := f.name + "_dyn"
-		opts = append(opts, cel2yaml.Costed(cel.Function(f.name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
+	for _, f := range inst.rules.DocumentFuncs {
+		id := f.Name + "_dyn"
+		opts = append(opts, cel2yaml.Costed(cel.Function(f.Name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
 			cel2yaml.Unary(func(v any) (any, error) {
-				values, err := inst.rules.values(f.document, M{"arg": v, "release": inst.scope["release"], "platform": inst.scope["platform"]})
+				values, err := inst.rules.Values(f.Document, M{"arg": v, "release": inst.scope["release"], "platform": inst.scope["platform"]})
 				if err != nil {
 					return nil, err
 				}
-				return values[f.result], nil
+				return values[f.Result], nil
 			}))), id))
 	}
 	return opts
@@ -146,8 +147,8 @@ func documentFunctions(inst *instance) []cel.EnvOption {
 // mapping language: vars, errors, then its one section, values), evaluated
 // on scope in the compile's session: its values; its errors start with
 // name.
-func evalTemplate(session *cel2yaml.Session, t template, scope M) (M, error) {
-	doc, err := compile.Eval(session, scope, []string{"values"}, compile.Source{Name: t.name, Data: t.data})
+func evalTemplate(session *cel2yaml.Session, t ruleset.Template, scope M) (M, error) {
+	doc, err := compile.Eval(session, scope, []string{"values"}, compile.Source{Name: t.Name, Data: t.Data})
 	if err != nil {
 		return nil, err
 	}

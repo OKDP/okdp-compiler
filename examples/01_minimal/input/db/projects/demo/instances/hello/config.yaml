@@ -1,3 +1,0 @@
-# The instance's parameters, over the defaults of the package's
-# config.schema.json.
-replicas: 2

@@ -74,7 +74,7 @@ func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
 // its connections, one at level 2, the instance's own, its claims, one at
 // level 1, the project's, the rest, an instance layer (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
-	in := Inputs{Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
+	in := Inputs{Finalize: testFinalize, Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
 	for _, l := range layers {
 		l = maps.Clone(l)
 		if g, ok := l["global"]; ok {
@@ -596,7 +596,7 @@ objects:
 	}
 	// The chart of the objects, by default and the platform's; its key the
 	// compiler's.
-	if res.ObjectsSource != defaultRules().charts["objects"] {
+	if res.ObjectsSource != defaultRules().Charts["objects"] {
 		t.Errorf("the default chart of the objects: %v", res.ObjectsSource)
 	}
 	own := chart.Ref{Repository: "oci://registry.example.org/okdp", Chart: "own-objects", Version: "2.0.0"}

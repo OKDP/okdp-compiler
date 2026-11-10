@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/okdp/okdp-compiler/chart"
 )
 
 // TestIngressHostsObjects: the objects of an instance of a project that is
@@ -61,67 +59,6 @@ func TestIngressHostsObjects(t *testing.T) {
 				t.Errorf("privileged: %v", err)
 			}
 		})
-	}
-}
-
-// TestIngressHostsValues: the final values of a chart, the package's and
-// the instance's upstream values, name under ingress (at any depth) the
-// hosts the project serves: host, hostname, commonName, the strings of
-// hosts, hostnames, dnsNames, extraHosts, the name of an extraHosts item,
-// the annotations that name hosts; a key outside an ingress is not a host.
-func TestIngressHostsValues(t *testing.T) {
-	const prefix = `app: `
-	for name, tc := range map[string]struct {
-		user M // upstream.app
-		want string
-	}{
-		"the project's":      {M{"ingress": M{"hostname": "app-demo.example.org", "hosts": []any{M{"host": "app-demo.example.org"}, "b-demo.example.org"}, "tls": []any{M{"hosts": []any{"app-demo.example.org"}}}}}, ""},
-		"outside an ingress": {M{"database": M{"host": "db.example.org", "hosts": []any{"x.example.org"}}, "name": "x"}, ""},
-		"a host":             {M{"master": M{"ingress": M{"host": "sso.example.org"}}}, prefix + `master.ingress.host: host "sso.example.org" is not served by demo`},
-		"a hostname":         {M{"ingress": M{"hostname": "sso.example.org"}}, prefix + `ingress.hostname: host "sso.example.org"`},
-		"hosts":              {M{"ingress": M{"web": M{"hosts": []any{"app-demo.example.org", "sso.example.org"}}}}, prefix + `ingress.web.hosts[1]: host "sso.example.org"`},
-		"an item's host":     {M{"ingress": M{"hosts": []any{M{"host": "sso.example.org", "paths": []any{"/"}}}}}, prefix + `ingress.hosts[0].host: host "sso.example.org"`},
-		"extra hosts":        {M{"ingress": M{"extraHosts": []any{M{"name": "sso.example.org"}}}}, prefix + `ingress.extraHosts[0].name: host "sso.example.org"`},
-		"extra tls":          {M{"ingress": M{"extraTls": []any{M{"hosts": []any{"sso.example.org"}}}}}, prefix + `ingress.extraTls[0].hosts[0]: host "sso.example.org"`},
-		"ingresses":          {M{"ingresses": M{"http": M{"host": "sso.example.org"}}}, prefix + `ingresses.http.host: host "sso.example.org"`},
-		"a name outside":     {M{"ingress": M{"name": "sso.example.org"}}, ""},
-		"an annotation":      {M{"ingress": M{"annotations": M{"cert-manager.io/alt-names": "a-demo.example.org sso.example.org"}}}, prefix + `ingress.annotations["cert-manager.io/alt-names"]: host "sso.example.org"`},
-		"a boolean":          {M{"ingress": M{"host": true, "hostname": ""}}, ""},
-		"listed":             {M{"ingress": M{"host": "sso.example.org"}}, ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := *def
-			d.Package.Upstream = chart.Upstream{All: true}
-			d.Values = []byte("app: {}\n")
-			ok := M{"okdp": M{"ingress": M{"suffix": "example.org"}}}
-			if name == "listed" {
-				ok = M{"okdp": M{"ingress": M{"suffix": "example.org"}, "policy": M{"ingressHosts": M{"demo": []any{"sso.example.org"}}}}}
-			}
-			_, err := Compile(context.Background(), &d, inputs(map[string]any{"global": ok, "upstream": M{"app": tc.user}}))
-			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
-				t.Errorf("got %v, want %q", err, tc.want)
-			}
-			// A privileged project: not checked.
-			ok["okdp"].(M)["policy"] = M{"privileged": []any{"demo"}}
-			if _, err := Compile(context.Background(), &d, inputs(map[string]any{"global": ok, "upstream": M{"app": tc.user}})); err != nil {
-				t.Errorf("privileged: %v", err)
-			}
-		})
-	}
-	// The package's own values are held to the rule: a host that does not
-	// end with -<namespace>.<suffix>, the package's default included.
-	d := *def
-	d.Values = []byte("app:\n  ingress: {hostname: '${{ release.name }}.example.org'}\n")
-	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), `app: ingress.hostname: host "demo-app.example.org" is not served by demo`) {
-		t.Errorf("a package's host: got %v", err)
-	}
-	// No suffix: only the listed hosts.
-	d.Values = []byte("app:\n  ingress: {hostname: app-demo.example.org}\n")
-	in := inputs()
-	in.Context = []ContextLayer{{Values: map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": ""}}}}}}
-	d.Package.Require = nil
-	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "any host, global.okdp.ingress.suffix being unset, but those listed") {
-		t.Errorf("no suffix: got %v", err)
 	}
 }
 

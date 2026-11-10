@@ -13,11 +13,11 @@ package okdp
 import (
 	"errors"
 	"fmt"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"regexp"
 	"slices"
 
-	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -42,7 +42,7 @@ const (
 // Roles: the roles, least first.
 func Roles() []Role {
 	var out []Role
-	for _, r := range defaultRules().list(tableProjectRoles) {
+	for _, r := range defaultRules().List(ruleset.TableProjectRoles) {
 		out = append(out, Role(r))
 	}
 	return out
@@ -67,15 +67,6 @@ var groupName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$`)
 
 // IsGroup: name may name a group (groupName).
 func IsGroup(name string) bool { return groupName.MatchString(name) }
-
-// Access: the roles of a project's groups, by group name, and the prefix
-// the Kubernetes API server gives the groups of its users (its
-// --oidc-groups-prefix, global.okdp.access.groupPrefix): a RoleBinding's
-// subject is the prefix and the name, an Argo CD role's group the name.
-type Access struct {
-	Groups      map[string]Role
-	GroupPrefix string
-}
 
 // ParseAccess: the roles of the groups of a project of namespace, v the
 // value of its file's access, as read: nil (absent or null) gives the
@@ -142,56 +133,6 @@ func projectAccess(layers []ContextLayer, namespace string) (map[string]Role, er
 	return groups, nil
 }
 
-// ServiceAccount: a ServiceAccount, by namespace and name.
-type ServiceAccount struct {
-	Namespace, Name string
-}
-
-// controlPlane: global.okdp.controlPlane.serviceAccount of okdp, the
-// platform's settings, the identity of the control plane; nil when not
-// set: the platform has none, and the targets bind none.
-func controlPlane(okdp M) *ServiceAccount {
-	sa := value.AsMap(value.Dig(okdp, "controlPlane.serviceAccount"))
-	if len(sa) == 0 {
-		return nil
-	}
-	return &ServiceAccount{Namespace: value.Str(sa["namespace"]), Name: value.Str(sa["name"])}
-}
-
-// Network: the network policy of a project's namespace (Project.Network),
-// global.okdp.network with policy true: every ingress to its pods denied
-// but from the namespace itself, from Ingress and from Claimers.
-type Network struct {
-	Ingress  []string // global.okdp.network.ingressNamespaces, in their order
-	Claimers []string // the namespaces of the claims the project's instances provide, sorted, once each, its own left out
-}
-
-// network: the Network of okdp, the platform's settings, without claimers;
-// nil unless global.okdp.network.policy is true.
-func network(okdp M) *Network {
-	if value.Dig(okdp, "network.policy") != true {
-		return nil
-	}
-	n := &Network{}
-	for _, ns := range value.AsList(value.Dig(okdp, "network.ingressNamespaces")) {
-		n.Ingress = append(n.Ingress, value.Str(ns))
-	}
-	return n
-}
-
-// claimers: the namespaces of claims, sorted, once each, namespace's left
-// out: those that reach a provider of namespace (Network.Claimers).
-func claimers(namespace string, claims []Claim) []string {
-	var out []string
-	for _, c := range claims {
-		if c.Namespace != namespace && !slices.Contains(out, c.Namespace) {
-			out = append(out, c.Namespace)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
 // admins: global.okdp.access.admins of okdp, the platform's settings: the
 // groups of the platform's administrators, in their order.
 func admins(okdp M) []string {
@@ -201,29 +142,6 @@ func admins(okdp M) []string {
 	}
 	return out
 }
-
-// Project: what the targets write a project's manifests from, the
-// platform's and the project's decisions, not its instances': its
-// namespace; whether it is one of the platform's own
-// (global.okdp.policy.privileged); the platform's secret store in it
-// (global.okdp.secrets with a provider); the roles of its groups
-// (Access); the control plane's identity (global.okdp.controlPlane); its
-// network policy (global.okdp.network), nil when the platform has none.
-type Project struct {
-	Namespace    string
-	Privileged   bool
-	SecretStore  *SecretStore
-	Access       Access
-	ControlPlane *ServiceAccount
-	Network      *Network
-}
-
-// AccessError: a project's access the compile refuses (ParseAccess):
-// ProjectOf gives the rest of the project all the same, no group a role.
-type AccessError struct{ Err error }
-
-func (e *AccessError) Error() string { return e.Err.Error() }
-func (e *AccessError) Unwrap() error { return e.Err }
 
 // NamespaceError: the namespace of a project is none a project may have
 // today: the compiler reserves it, or the platform does
@@ -266,41 +184,6 @@ func platformOf(in Inputs) (M, error) {
 	return settings, nil
 }
 
-// ProjectOf: the Project of the namespace of in, of its context alone,
-// as the compile of any of its instances gives it (Result): today's
-// settings of the platform and of the project, whether its instances
-// compile or not, for the targets to write the manifests of a project
-// whose instances are kept (output.Files). The context's layers checked
-// as a compile checks them (contextLayers, platformSettings), their
-// error the error; so is the namespace, as the compile checks it
-// (CheckProject): a *NamespaceError when the compiler or the platform
-// reserves it. An access that is refused is an *AccessError, the
-// Project given all the same, no group a role in it. Its network policy
-// has the claimers of in.Claims alone: the caller adds those of the
-// project's other providers.
-func ProjectOf(in Inputs) (Project, error) {
-	settings, err := platformOf(in)
-	if err != nil {
-		return Project{}, err
-	}
-	store, err := secretStore(in.rules(), settings)
-	if err != nil {
-		return Project{}, err
-	}
-	p := Project{Namespace: in.Namespace, Privileged: privileged(settings, in.Namespace), SecretStore: store, Access: Access{GroupPrefix: groupPrefix(settings)}, ControlPlane: controlPlane(settings), Network: network(settings)}
-	if p.Network != nil {
-		p.Network.Claimers = claimers(in.Namespace, in.Claims)
-	}
-	if p.Access.Groups, err = projectAccess(in.Context, in.Namespace); err != nil {
-		p.Access.Groups = map[string]Role{}
-		return p, &AccessError{err}
-	}
-	return p, nil
-}
-
-// groupPrefix: global.okdp.access.groupPrefix of okdp, "" when unset.
-func groupPrefix(okdp M) string { return value.Str(value.Dig(okdp, "access.groupPrefix")) }
-
 // PlatformAdmins: the groups of the platform's administrators,
 // global.okdp.access.admins of platform, the platform's values (level
 // 0), checked against the platform's schema as a compile checks them;
@@ -319,17 +202,20 @@ func PlatformAdmins(platform map[string]any) ([]string, error) {
 	return admins(okdp), nil
 }
 
-// ProjectAccess: the roles of the groups of the project of namespace,
-// file its project.yaml as written (nil: none): its access (ParseAccess),
-// the default when it gives none, for a program that mirrors the
-// project's authority (a control plane).
-func ProjectAccess(file []byte, namespace string) (map[string]Role, error) {
-	if err := checkNamespace(defaultRules(), "project", namespace); err != nil {
-		return nil, err
-	}
-	values, err := chart.ParseValues(file)
-	if err != nil {
-		return nil, err
-	}
-	return ParseAccess(values[AccessKey], namespace)
+// PlatformOf: the platform's settings of the context of in, global.okdp,
+// when the namespace of in may be a project's, as a compile checks them.
+func PlatformOf(in Inputs) (M, error) { return platformOf(in) }
+
+// ProjectGroups: the roles of the groups of the project of in, its file's
+// (the context at level 1).
+func ProjectGroups(in Inputs) (map[string]Role, error) {
+	return projectAccess(in.Context, in.Namespace)
 }
+
+// SecretStoreOf: the platform's secret store in settings, nil without one.
+func SecretStoreOf(in Inputs, settings M) (*SecretStore, error) {
+	return secretStore(in.rules(), settings)
+}
+
+// Privileged: whether namespace is one of the platform's own projects.
+func Privileged(settings M, namespace string) bool { return privileged(settings, namespace) }

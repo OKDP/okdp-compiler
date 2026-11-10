@@ -21,6 +21,7 @@ package okdp
 import (
 	"cmp"
 	"fmt"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"slices"
 
 	"github.com/okdp/okdp-compiler/chart"
@@ -48,7 +49,7 @@ func valuesLayers(schema M, in Inputs) ([]map[string]any, M, error) {
 			return nil, nil, fmt.Errorf("%s: %w", name, err)
 		}
 		layer := value.AsMap(v)
-		if err := in.rules().refuse(checkValuesLayer, M{"name": name, "layer": layer, "declared": declared}); err != nil {
+		if err := in.rules().Refuse(ruleset.CheckValuesLayer, M{"name": name, "layer": layer, "declared": declared}); err != nil {
 			return nil, nil, err
 		}
 		// No template code in what the instance gives, whatever key it is
@@ -105,11 +106,11 @@ func contextLayers(rules *RuleSet, layers []ContextLayer) ([]map[string]any, M, 
 			levels = append(levels, ContextLayer{Level: l.Level, Values: M{}})
 		}
 		for _, lower := range levels[:len(levels)-1] {
-			if p := chart.Overlap(lower.Values, layer, rules.whole); p != "" {
+			if p := chart.Overlap(lower.Values, layer, rules.Whole); p != "" {
 				return nil, nil, fmt.Errorf("%s: %s is set at level %d (Inputs.Context): a level adds values, it does not change a lower level's", name, p, lower.Level)
 			}
 		}
-		if err := rules.refuse(checkContextLayer, M{"name": name, "level": int64(l.Level), "layer": layer, "platform": platform}); err != nil {
+		if err := rules.Refuse(ruleset.CheckContextLayer, M{"name": name, "level": int64(l.Level), "layer": layer, "platform": platform}); err != nil {
 			return nil, nil, err
 		}
 		delete(layer, AccessKey)
@@ -125,7 +126,7 @@ func contextLayers(rules *RuleSet, layers []ContextLayer) ([]map[string]any, M, 
 		case set && l.Level == 0:
 			platform = value.Merge(platform, M{"global": M{"okdp": okdp}})
 		case set:
-			for _, k := range rules.list(tablePlatformKeysAbove) {
+			for _, k := range rules.List(ruleset.TablePlatformKeysAbove) {
 				if p, set := value.AsMap(okdp)[k]; set {
 					platform = value.Merge(platform, M{"global": M{"okdp": M{k: p}}})
 				}
@@ -146,20 +147,16 @@ func levelOrder(layers []ContextLayer) []int {
 	return order
 }
 
-// upstreamGlobals: the platform's check of the upstream values
-// (upstreamCheck) on the global of every layer above level 0 (layers,
-// valuesLayers' result for in): the keys of global a project sets, the
-// instance's own, as the upstream values of its charts, which every chart
-// receives: no key of deniedKeys or of the platform's deny list, and the
-// images from its registries. Level 0's global is the platform's, reviewed
-// with it; a privileged project's are not checked. The first refused, in
-// layer order, fails, at its path.
+// upstreamGlobals: the global of every layer above level 0 (layers,
+// valuesLayers' result for in) given to the host's policy
+// (Inputs.CheckGlobals): the keys of global a project sets, the instance's
+// own, which every chart receives. None without one.
 func upstreamGlobals(in Inputs, layers []map[string]any, okdp M) error {
-	check := upstreamCheck(in.rules(), okdp, in.Namespace, privileged(okdp, in.Namespace))
-	if check == nil {
+	if in.CheckGlobals == nil {
 		return nil
 	}
 	order := levelOrder(in.Context)
+	var named []GlobalLayer
 	for i, layer := range layers {
 		name := fmt.Sprintf("values layer %d", i-len(in.Context)+1)
 		if i < len(order) {
@@ -169,15 +166,9 @@ func upstreamGlobals(in Inputs, layers []map[string]any, okdp M) error {
 			}
 			name = fmt.Sprintf("context layer %d (level %d)", order[i]+1, l.Level)
 		}
-		g := value.AsMap(layer["global"])
-		if len(g) == 0 {
-			continue
-		}
-		var path string
-		at := func(p string) string { path = p; return name + ": " + p }
-		if err := check(M{"global": g}, nil, at); err != nil {
-			return atField(path, err)
+		if g := value.AsMap(layer["global"]); len(g) > 0 {
+			named = append(named, GlobalLayer{Name: name, Global: g})
 		}
 	}
-	return nil
+	return in.CheckGlobals(GlobalsInput{Rules: in.rules(), Settings: okdp, Namespace: in.Namespace, Privileged: privileged(okdp, in.Namespace), Layers: named})
 }

@@ -12,6 +12,7 @@ package okdp
 
 import (
 	"fmt"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"slices"
 	"strings"
@@ -41,7 +42,7 @@ func newHostRules(rules *RuleSet, okdp M, namespace string) *hostRules {
 // serve it (the rule set's host check). The case and a final dot do not
 // count.
 func (r *hostRules) check(where, host string) error {
-	return r.rules.refuse(checkHost, M{"at": where, "raw": host, "host": strings.ToLower(strings.TrimSuffix(host, ".")), "ns": r.namespace, "suffix": r.suffix, "listed": r.listed})
+	return r.rules.Refuse(ruleset.CheckHost, M{"at": where, "raw": host, "host": strings.ToLower(strings.TrimSuffix(host, ".")), "ns": r.namespace, "suffix": r.suffix, "listed": r.listed})
 }
 
 // annotationHosts: the first host of the annotations a (a map of
@@ -49,7 +50,7 @@ func (r *hostRules) check(where, host string) error {
 // they all hold.
 func (r *hostRules) annotationHosts(p string, a M) error {
 	for _, k := range slices.Sorted(maps.Keys(a)) {
-		if !r.rules.has(tableHostAnnotations, k) {
+		if !r.rules.Has(ruleset.TableHostAnnotations, k) {
 			continue
 		}
 		for _, h := range strings.FieldsFunc(value.Str(a[k]), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\t' }) {
@@ -116,77 +117,4 @@ func checkIngressHosts(rules *RuleSet, svc, namespace string, okdp M, objects []
 		}
 		return nil
 	})
-}
-
-// checkIngressValues: the final values of the charts of an instance of
-// svc in namespace, one that is not privileged (Result.Values, by chart),
-// name no host the platform keeps from the project (hostRules) under a key
-// ingress (ingresses) at any depth: a host, hostname or commonName, the
-// strings of hosts, hostnames, dnsNames and extraHosts, the name of an
-// extraHosts item, and the annotations that name hosts (the rule set's hostAnnotations).
-// The values are the package's computed ones and the instance's upstream
-// values over them: the upstream chart's own defaults are not seen. The
-// first refused, charts in name order, keys sorted, fails, named
-// <chart>: <path>.
-func checkIngressValues(rules *RuleSet, namespace string, okdp M, values map[string]map[string]any) error {
-	r := newHostRules(rules, okdp, namespace)
-	for _, chart := range slices.Sorted(maps.Keys(values)) {
-		var walk func(v any, p, key string, in bool) error
-		check := func(p string, h any) error {
-			if s, ok := h.(string); ok && s != "" {
-				return r.check(chart+": "+p, s)
-			}
-			return nil
-		}
-		walk = func(v any, p, key string, in bool) error {
-			switch t := v.(type) {
-			case M:
-				if in {
-					if err := r.annotationHosts(value.Key(p, "annotations"), value.AsMap(t["annotations"])); err != nil {
-						return fmt.Errorf("%s: %w", chart, err)
-					}
-				}
-				for _, k := range slices.Sorted(maps.Keys(t)) {
-					kp := value.Key(p, k)
-					if in {
-						switch {
-						case rules.has(tableIngressHostKeys, k):
-							if err := check(kp, t[k]); err != nil {
-								return err
-							}
-						case k == "name":
-							if key == "extraHosts" {
-								if err := check(kp, t[k]); err != nil {
-									return err
-								}
-							}
-						case rules.has(tableIngressHostListKeys, k):
-							for i, h := range value.AsList(t[k]) {
-								if err := check(value.Index(kp, i), h); err != nil {
-									return err
-								}
-							}
-							if err := check(kp, t[k]); err != nil {
-								return err
-							}
-						}
-					}
-					if err := walk(t[k], kp, k, in || rules.has(tableIngressValueKeys, k)); err != nil {
-						return err
-					}
-				}
-			case []any:
-				for i, x := range t {
-					if err := walk(x, value.Index(p, i), key, in); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}
-		if err := walk(values[chart], "", "", false); err != nil {
-			return err
-		}
-	}
-	return nil
 }

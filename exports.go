@@ -3,12 +3,19 @@ package compiler
 import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/repository"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/internal/tree"
 )
 
 // What the programs that write a tree's output and edit its files need of
 // its compile and its layout.
 type (
+	// GlobalLayer: the global a layer of a project sets.
+	GlobalLayer = okdp.GlobalLayer
+	// GlobalsInput: what Inputs.CheckGlobals checks.
+	GlobalsInput = okdp.GlobalsInput
+	// KeepSync: what a writer tells Argo CD of the objects Helm keeps.
+	KeepSync = ruleset.KeepSync
 	// InstanceSpec: an instance.yaml, as ParseInstance reads it.
 	InstanceSpec = repository.InstanceSpec
 	// CatalogRepository: a repository of catalogs.yaml.
@@ -19,12 +26,8 @@ type (
 	MenuCategory = repository.MenuCategory
 	// MenuService: a service of the console's menu.
 	MenuService = repository.MenuService
-	// Project: what the platform decides of a project (ProjectOf).
-	Project = okdp.Project
 	// SecretStore: the platform's secret store in a namespace.
 	SecretStore = okdp.SecretStore
-	// AccessError: the roles of a project's groups cannot be read.
-	AccessError = okdp.AccessError
 	// NamespaceError: a namespace no project may have.
 	NamespaceError = okdp.NamespaceError
 )
@@ -34,6 +37,21 @@ const (
 	CatalogsFile      = repository.CatalogsFile
 	DefaultCatalogRef = repository.DefaultCatalogRef
 )
+
+// What the host's policy reads of the rule set.
+const (
+	TableDeniedUpstreamKeys  = ruleset.TableDeniedUpstreamKeys
+	TableImageKeySuffixes    = ruleset.TableImageKeySuffixes
+	TableHostAnnotations     = ruleset.TableHostAnnotations
+	TableIngressValueKeys    = ruleset.TableIngressValueKeys
+	TableIngressHostKeys     = ruleset.TableIngressHostKeys
+	TableIngressHostListKeys = ruleset.TableIngressHostListKeys
+	CheckUpstreamKey         = ruleset.CheckUpstreamKey
+	CheckHost                = ruleset.CheckHost
+)
+
+// DefaultRules: the standard rule set. Temporary: the hosts will give it.
+func DefaultRules() *RuleSet { return ruleset.Default() }
 
 // ParseInstance: an instance.yaml.
 func ParseInstance(raw []byte) (InstanceSpec, error) { return repository.ParseInstance(raw) }
@@ -55,8 +73,27 @@ func PlatformObjectNames() []string { return okdp.PlatformObjectNames() }
 // CheckProject: nil when the instance's namespace may be a project's.
 func CheckProject(in Inputs) error { return okdp.CheckProject(in) }
 
-// ProjectOf: what the platform decides of the project of an instance.
-func ProjectOf(in Inputs) (Project, error) { return okdp.ProjectOf(in) }
+// PlatformOf: the platform's settings of the context of in, as a compile
+// checks them; an error when the namespace may be no project's.
+func PlatformOf(in Inputs) (map[string]any, error) { return okdp.PlatformOf(in) }
+
+// ProjectGroups: the roles of the groups of the project of in.
+func ProjectGroups(in Inputs) (map[string]AccessRole, error) { return okdp.ProjectGroups(in) }
+
+// SecretStoreOf: the platform's secret store in settings, nil without one.
+func SecretStoreOf(in Inputs, settings map[string]any) (*SecretStore, error) {
+	return okdp.SecretStoreOf(in, settings)
+}
+
+// Privileged: whether namespace is one of the platform's own projects.
+func Privileged(settings map[string]any, namespace string) bool {
+	return okdp.Privileged(settings, namespace)
+}
+
+// ParseAccess: the roles of the groups of a project, its file's access.
+func ParseAccess(v any, namespace string) (map[string]AccessRole, error) {
+	return okdp.ParseAccess(v, namespace)
+}
 
 // PartialWith: Partial, the instances of also refused too, each for its
 // error.

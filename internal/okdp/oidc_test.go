@@ -314,7 +314,7 @@ func TestDcrErrors(t *testing.T) {
 
 // TestDcrCompile: a mapping's oidcClients compiled with the service: in dcr
 // mode, one oidc-dcr chart per client, which Chart.yaml does not list,
-// rendered by defaultRules().charts["oidcDcr"] (its defaults merged, from the chart cache); the
+// rendered by defaultRules().Charts["oidcDcr"] (its defaults merged, from the chart cache); the
 // compiler owns these charts: Chart.yaml and values.cel.yaml may not list
 // them.
 func TestDcrCompile(t *testing.T) {
@@ -357,8 +357,8 @@ app:
 		existing bool
 		charts   map[string]chart.Ref // Result.Charts
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().charts["oidcDcr"], "console-oidc-dcr": defaultRules().charts["oidcDcr"]}},
-		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().charts["oidcDcr"]}},
+		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().Charts["oidcDcr"], "console-oidc-dcr": defaultRules().Charts["oidcDcr"]}},
+		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().Charts["oidcDcr"]}},
 		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -398,7 +398,7 @@ app:
 		want     string
 	}{
 		"in values":        {"oidc-dcr: {}", true, app, ch, "values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it"},
-		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: defaultRules().charts["oidcDcr"].Repository, Version: defaultRules().charts["oidcDcr"].Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
+		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: defaultRules().Charts["oidcDcr"].Repository, Version: defaultRules().Charts["oidcDcr"].Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
 		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0"},
 	} {
 		t.Run(name, func(t *testing.T) {

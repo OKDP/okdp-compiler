@@ -382,7 +382,7 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 		if r.store == "" {
 			return nil, fmt.Errorf("%s: claim %q (%s): of %s, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", field, b.ID, contract, provider)
 		}
-		name := r.rules.name("claimSecret", "release", r.release, "secret", b.Output.SecretRef.Name)
+		name := r.rules.Name("claimSecret", "release", r.release, "secret", b.Output.SecretRef.Name)
 		r.addTransfer(transfer{secret: name, key: storeKey(b.Namespace, b.ID), contract: contract, fields: fields})
 		x.secretRef = M{"name": name}
 	}
@@ -570,7 +570,7 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
 		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
 	}
-	name := r.rules.name("connectionSecret", "release", r.release, "connection", ref)
+	name := r.rules.Name("connectionSecret", "release", r.release, "connection", ref)
 	r.addTransfer(transfer{secret: name, key: key, contract: c.name, fields: fields})
 	return name, nil
 }

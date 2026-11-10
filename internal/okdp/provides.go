@@ -101,7 +101,7 @@ func provided(session *cel2yaml.Session, inst *instance, contracts *contractCach
 		if ref := value.AsMap(p["secretRef"]); len(ref) > 0 {
 			o.SecretRef = &SecretRef{Name: value.Str(ref["name"])}
 		} else if value.Truthy(secret) {
-			o.SecretRef = &SecretRef{Name: inst.rules.name("credentialsSecret", "output", out, "contract", contract)}
+			o.SecretRef = &SecretRef{Name: inst.rules.Name("credentialsSecret", "output", out, "contract", contract)}
 		}
 		if o.SecretRef != nil && !isSecretName(o.SecretRef.Name) {
 			return nil, nil, fmt.Errorf("%s: secretRef.name %q: not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most", where, o.SecretRef.Name)
@@ -153,7 +153,7 @@ func twice(outputs []Output) error {
 // labelled okdp.io/credentials-<contract>, in the namespace of the
 // instance inst.
 func credentialsSecret(session *cel2yaml.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
-	label := inst.rules.name("credentialsLabel", "contract", contract)
+	label := inst.rules.Name("credentialsLabel", "contract", contract)
 	if value.Truthy(secret["generate"]) {
 		return generatedSecret(session, inst, M{
 			"name":       name,
@@ -168,7 +168,7 @@ func credentialsSecret(session *cel2yaml.Session, inst *instance, contract, outp
 	if !plain {
 		return nil, fmt.Errorf("%s: output %q: secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it", inst.svc.Name, output)
 	}
-	l := inst.rules.labels(inst.svc.Name, inst.release, "", false)
+	l := inst.rules.Labels(inst.svc.Name, inst.release, "", false)
 	l[label] = "true"
 	return []any{M{
 		"apiVersion": "v1",

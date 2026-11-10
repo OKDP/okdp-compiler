@@ -3,7 +3,6 @@ package okdp
 import (
 	"context"
 	"errors"
-	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,8 +47,8 @@ func TestParseAccess(t *testing.T) {
 	}
 }
 
-// TestAccessCompile: Result.Access is the access of the project's file,
-// level 1, its layers merged, with the platform's group prefix; refused,
+// TestAccessCompile: Result.Groups is the access of the project's file,
+// level 1, its layers merged; refused,
 // it refuses the instance; access at another level of the context, or in
 // the instance's values, is refused; no instance receives it, and a
 // project sets nothing of global.okdp.access.
@@ -61,9 +60,9 @@ func TestAccessCompile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Access{Groups: map[string]Role{"analysts": RoleViewer, "okdp-project-demo": RoleAdmin}, GroupPrefix: "oidc:"}
-	if !reflect.DeepEqual(res.Access, want) {
-		t.Errorf("Access = %+v, want %+v", res.Access, want)
+	want := map[string]Role{"analysts": RoleViewer, "okdp-project-demo": RoleAdmin}
+	if !reflect.DeepEqual(res.Groups, want) {
+		t.Errorf("Access = %+v, want %+v", res.Groups, want)
 	}
 	for chart, v := range res.Values {
 		if _, set := v["access"]; set {
@@ -71,7 +70,7 @@ func TestAccessCompile(t *testing.T) {
 		}
 	}
 	res, err = Compile(context.Background(), def, inputs())
-	if err != nil || !reflect.DeepEqual(res.Access, Access{Groups: map[string]Role{"okdp-project-demo": RoleEditor}}) {
+	if err != nil || !reflect.DeepEqual(res.Groups, map[string]Role{"okdp-project-demo": RoleEditor}) {
 		t.Errorf("the default: %+v, %v", res, err)
 	}
 	for name, tc := range map[string]struct {
@@ -119,50 +118,18 @@ func TestAccessCompile(t *testing.T) {
 	}
 }
 
-// TestProjectOf: a project's settings of its context alone, as a compile
-// of its instances gives them; an access refused is an *AccessError, the
-// rest given, no group a role; the platform's settings refused, an error.
-func TestProjectOf(t *testing.T) {
-	platform := map[string]any{"global": M{"okdp": M{"access": M{"groupPrefix": "oidc:"}, "policy": M{"privileged": []any{"demo"}}, "secrets": M{"store": "platform", "provider": M{"fake": M{}}}}}}
-	in := inputs(platform)
-	res, err := Compile(context.Background(), def, in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := ProjectOf(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := Project{Namespace: "demo", Privileged: res.Privileged, SecretStore: res.SecretStore, Access: res.Access}
-	if !reflect.DeepEqual(p, want) || !p.Privileged || p.SecretStore == nil {
-		t.Errorf("ProjectOf = %+v, want %+v", p, want)
-	}
-	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"access": M{"a b": "viewer"}}})
-	p, err = ProjectOf(in)
-	if ae, ok := errors.AsType[*AccessError](err); !ok || !strings.Contains(ae.Error(), "access.a b: a group name") {
-		t.Errorf("an access refused: %v", err)
-	}
-	if !p.Privileged || p.SecretStore == nil || len(p.Access.Groups) != 0 || p.Access.GroupPrefix != "oidc:" {
-		t.Errorf("an access refused: %+v", p)
-	}
-	in = inputs(map[string]any{"global": M{"okdp": M{"policy": M{"privileged": "demo"}}}})
-	if _, err := ProjectOf(in); err == nil || errors.As(err, new(*AccessError)) {
-		t.Errorf("the platform's settings refused: %v", err)
-	}
-}
-
 // TestProjectOfNamespace: the namespace of a project is checked as the
 // compile of its instances checks it, the compiler's reserved names and
 // the platform's (global.okdp.policy.reserved), privileged or not, a
-// *NamespaceError, so that ProjectOf and Compile agree on which
+// *NamespaceError, so that PlatformOf and Compile agree on which
 // projects exist; CheckProject is that check alone.
 func TestProjectOfNamespace(t *testing.T) {
 	platform := map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}, "reserved": []any{"demo"}}}}}
 	in := inputs(platform)
 	_, cerr := Compile(context.Background(), def, in)
-	_, perr := ProjectOf(in)
+	_, perr := PlatformOf(in)
 	if cerr == nil || perr == nil || cerr.Error() != perr.Error() {
-		t.Fatalf("Compile: %v\nProjectOf: %v", cerr, perr)
+		t.Fatalf("Compile: %v\nPlatformOf: %v", cerr, perr)
 	}
 	for _, err := range []error{perr, CheckProject(in)} {
 		if _, ok := errors.AsType[*NamespaceError](err); !ok || !strings.Contains(err.Error(), "reserved by the platform (global.okdp.policy.reserved)") {
@@ -172,7 +139,7 @@ func TestProjectOfNamespace(t *testing.T) {
 	for _, ns := range []string{"kube-system", "argocd", "platform", "Not_A_Label"} {
 		in := inputs(nil)
 		in.Namespace = ns
-		if _, err := ProjectOf(in); !errors.As(err, new(*NamespaceError)) {
+		if _, err := PlatformOf(in); !errors.As(err, new(*NamespaceError)) {
 			t.Errorf("%s: %v", ns, err)
 		}
 	}
@@ -197,62 +164,5 @@ func TestPlatformAdmins(t *testing.T) {
 	}
 	if _, err := PlatformAdmins(map[string]any{"global": M{"okdp": M{"access": M{"admins": "ops"}}}}); err == nil {
 		t.Error("not a list: no error")
-	}
-}
-
-func TestProjectAccess(t *testing.T) {
-	got, err := ProjectAccess([]byte("description: the demo\naccess:\n  analysts: viewer\n  okdp-project-demo: admin\n"), "demo")
-	if want := map[string]Role{"analysts": RoleViewer, "okdp-project-demo": RoleAdmin}; err != nil || !maps.Equal(got, want) {
-		t.Errorf("got %v, %v, want %v", got, err, want)
-	}
-	if got, err := ProjectAccess(nil, "demo"); err != nil || !maps.Equal(got, map[string]Role{"okdp-project-demo": RoleEditor}) {
-		t.Errorf("no file: %v, %v", got, err)
-	}
-	if _, err := ProjectAccess([]byte("access: {a: owner}\n"), "demo"); err == nil {
-		t.Error("a role refused: no error")
-	}
-	if _, err := ProjectAccess(nil, "kube-system"); err == nil {
-		t.Error("a reserved project: no error")
-	}
-}
-
-// TestControlPlaneSetting: global.okdp.controlPlane.serviceAccount, the
-// control plane's identity, Result.ControlPlane and ProjectOf's; absent,
-// none; its namespace and name required, a DNS label and subdomain; the
-// platform's only.
-func TestControlPlaneSetting(t *testing.T) {
-	sa := func(v any) map[string]any {
-		return map[string]any{"global": M{"okdp": M{"controlPlane": M{"serviceAccount": v}}}}
-	}
-	in := inputs(sa(M{"namespace": "okdp-system", "name": "okdp-control-plane-server"}))
-	res, err := Compile(context.Background(), def, in)
-	want := &ServiceAccount{Namespace: "okdp-system", Name: "okdp-control-plane-server"}
-	if err != nil || !reflect.DeepEqual(res.ControlPlane, want) {
-		t.Fatalf("ControlPlane = %+v, %v", res, err)
-	}
-	if p, err := ProjectOf(in); err != nil || !reflect.DeepEqual(p.ControlPlane, want) {
-		t.Errorf("ProjectOf: %+v, %v", p, err)
-	}
-	if res, err := Compile(context.Background(), def, inputs()); err != nil || res.ControlPlane != nil {
-		t.Errorf("absent: %+v, %v", res, err)
-	}
-	for name, tc := range map[string]struct {
-		in   Inputs
-		want string
-	}{
-		"no name":     {inputs(sa(M{"namespace": "okdp-system"})), "missing property 'name'"},
-		"not a label": {inputs(sa(M{"namespace": "okdp.system", "name": "s"})), "/serviceAccount/namespace': 'okdp.system' does not match pattern"},
-		"another key": {inputs(sa(M{"namespace": "okdp-system", "name": "s", "token": "t"})), "additional properties 'token' not allowed"},
-		"a project's": {func() Inputs {
-			in := inputs()
-			in.Context = append(in.Context, ContextLayer{Level: 1, Values: sa(M{"namespace": "demo", "name": "s"})})
-			return in
-		}(), "global.okdp.controlPlane: a platform setting, level 0 only"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := Compile(context.Background(), def, tc.in); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error containing %q", err, tc.want)
-			}
-		})
 	}
 }

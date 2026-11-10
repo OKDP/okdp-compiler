@@ -1,4 +1,0 @@
-realm: default
-mode: a
-replicas: 1
-client: {}

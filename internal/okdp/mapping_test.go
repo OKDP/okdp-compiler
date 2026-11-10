@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"reflect"
 	"strings"
@@ -60,7 +61,7 @@ func mapping(okdp, values string) []compile.Source {
 // eval: the CEL expression expr (without ${{ }}) on the variables of scope,
 // in the session s: the value v of the template {values: {v: ${{ expr }}}}.
 func eval(s *cel2yaml.Session, expr string, scope M) (any, error) {
-	v, err := evalTemplate(s, template{"v.cel.yaml", []byte("values:\n  v: |-\n    ${{ " + expr + " }}\n")}, scope)
+	v, err := evalTemplate(s, ruleset.Template{Name: "v.cel.yaml", Data: []byte("values:\n  v: |-\n    ${{ " + expr + " }}\n")}, scope)
 	return v["v"], err
 }
 
@@ -117,7 +118,7 @@ x:
 // and $vars bindings and $for variables shadow them.
 func TestMappingService(t *testing.T) {
 	ctx := mapCtx()
-	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": defaultRules().labels("demo", "demo-x", "", false), "selectorLabels": defaultRules().labels("demo", "demo-x", "", true)})
+	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": defaultRules().Labels("demo", "demo-x", "", false), "selectorLabels": defaultRules().Labels("demo", "demo-x", "", true)})
 	src := `
 x:
   version: ${{ service.version }}

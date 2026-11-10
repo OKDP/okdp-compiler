@@ -627,7 +627,7 @@ Each section has a shape: the values file and `instance` are maps,
 `provides`, `objects` and `oidcClients` lists. So have the items and keys
 the compiler reads in them, described by the mapping schema the compiler
 embeds,
-[`internal/okdp/rules/v1/schemas/mapping.schema.json`](../../internal/okdp/rules/v1/schemas/mapping.schema.json),
+[`internal/rules/v1/schemas/mapping.schema.json`](../../internal/rules/v1/schemas/mapping.schema.json),
 where the values file is the section `output`:
 their types, the keys required, the keys allowed where another is
 refused, what each means in its `description`. It is the package authors'

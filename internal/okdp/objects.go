@@ -31,8 +31,8 @@ const (
 func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 	given := value.AsMap(okdp["charts"])
 	out := map[string]chart.Ref{}
-	for _, name := range slices.Sorted(maps.Keys(rules.charts)) {
-		out[name] = rules.charts[name]
+	for _, name := range slices.Sorted(maps.Keys(rules.Charts)) {
+		out[name] = rules.Charts[name]
 		if given[name] != nil {
 			r, err := platformChart(given[name], "global.okdp.charts."+name)
 			if err != nil {
@@ -49,20 +49,20 @@ func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 // it renders, in the compile's session; the source of each from sources.
 func ownCharts(session *cel2yaml.Session, inst *instance, res M, sources map[string]chart.Ref) ([]ownChart, error) {
 	var own []ownChart
-	for _, spec := range inst.rules.ownCharts {
+	for _, spec := range inst.rules.OwnCharts {
 		items := []any{}
-		items = append(items, value.AsList(res[spec.section])...)
-		listed, err := inst.rules.values(spec.list, M{"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"]})
+		items = append(items, value.AsList(res[spec.Section])...)
+		listed, err := inst.rules.Values(spec.List, M{"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"]})
 		if err != nil {
 			return nil, err
 		}
 		for _, v := range value.AsList(listed["charts"]) {
 			c := value.AsMap(v)
-			o := ownChart{key: value.Str(c["key"]), of: value.Str(c["of"]), from: value.Str(c["from"]), source: sources[spec.chart]}
+			o := ownChart{key: value.Str(c["key"]), of: value.Str(c["of"]), from: value.Str(c["from"]), source: sources[spec.Chart]}
 			if value.Truthy(c["render"]) {
 				scope := maps.Clone(inst.scope)
 				scope["client"], scope["names"] = c["client"], c["names"]
-				if o.values, err = evalTemplate(session, spec.values, scope); err != nil {
+				if o.values, err = evalTemplate(session, spec.Values, scope); err != nil {
 					return nil, fmt.Errorf("%s: %w", o.of, err)
 				}
 			}

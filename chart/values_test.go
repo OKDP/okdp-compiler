@@ -2,15 +2,12 @@ package chart
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/okdp/okdp-compiler/internal/helmtest"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -49,20 +46,6 @@ func TestCoalesceValues(t *testing.T) {
 	}
 }
 
-// TestMerged: the final values merge: layers in order, nulls kept, no
-// layer changed.
-func TestMerged(t *testing.T) {
-	first, second := M{"c": nil, "b": M{"c": float64(1)}}, M{"b": M{"c": nil}, "d": float64(1)}
-	got := merged(first, second)
-	want := M{"b": M{"c": nil}, "c": nil, "d": float64(1)}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %#v, want %#v", got, want)
-	}
-	if value.AsMap(first["b"])["c"] != float64(1) {
-		t.Errorf("a layer changed: %#v", first)
-	}
-}
-
 // parseValuesErrors: what Helm refuses in a values file, for
 // TestParseValuesErrors and FuzzParseValues.
 var parseValuesErrors = map[string]string{
@@ -83,20 +66,12 @@ func TestParseValuesErrors(t *testing.T) {
 // FuzzParseValues: what ParseValues reads is values (value.Normalize keeps
 // it as it is: string keys, float64 numbers, none NaN or infinite, UTF-8
 // text), and written as the compiler writes values (yaml.v3, fsio), it
-// reads back the same. Seeds: the files of TestParseValues,
-// TestParseValuesErrors and the values fixtures (TestHelmValues).
+// reads back the same. Seeds: the files of TestParseValues and
+// TestParseValuesErrors.
 func FuzzParseValues(f *testing.F) {
 	f.Add([]byte(valuesFile))
 	for in := range parseValuesErrors {
 		f.Add([]byte(in))
-	}
-	files, _ := filepath.Glob(filepath.Join(helmtest.Dir, "values", "*", "*.yaml"))
-	for _, name := range files {
-		b, err := os.ReadFile(name)
-		if err != nil {
-			f.Fatal(err)
-		}
-		f.Add(b)
 	}
 	f.Fuzz(func(t *testing.T, b []byte) {
 		v, err := ParseValues(b)

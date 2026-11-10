@@ -12,6 +12,7 @@ package okdp
 
 import (
 	"fmt"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 
 	"cel.dev/cel-go/cel"
 	"github.com/okdp/cel2yaml"
@@ -19,52 +20,43 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// fragment: a function of OKDP's templates: its arguments checked against
-// mappingSchema under the function's name, then the template evaluated
-// on them and the instance's context; result names the value it returns.
-type fragment struct {
-	name     string // the function: okdpPodSpec...
-	template template
-	result   string // the key of the template's values it returns
-}
-
 // call: the value of the fragment f for the arguments args (okdpPodSpec(args)...), in
 // the compile's session: args checked, the template evaluated with args, the
 // instance's release, labels, platform and global.
-func (f fragment) call(session *cel2yaml.Session, inst *instance, args any) (any, error) {
-	checked, err := schemaValues(inst.rules.mappingSchema, f.name+": the arguments don't meet the specifications of mapping.schema.json", M{f.name: args})
+func callFragment(f ruleset.Fragment, session *cel2yaml.Session, inst *instance, args any) (any, error) {
+	checked, err := schemaValues(inst.rules.MappingSchema, f.Name+": the arguments don't meet the specifications of mapping.schema.json", M{f.Name: args})
 	if err != nil {
 		return nil, err
 	}
 	scope := M{
-		"args":     checked[f.name],
+		"args":     checked[f.Name],
 		"release":  M{"name": inst.release, "namespace": inst.namespace},
-		"labels":   inst.rules.labels(inst.svc.Name, inst.release, "", false),
+		"labels":   inst.rules.Labels(inst.svc.Name, inst.release, "", false),
 		"platform": inst.scope["platform"],
 		"global":   inst.scope["global"],
 	}
-	v, err := evalTemplate(session, f.template, scope)
+	v, err := evalTemplate(session, f.Template, scope)
 	if err != nil {
 		return nil, err
 	}
-	if f.result == "" {
+	if f.Result == "" {
 		return v, nil
 	}
-	return v[f.result], nil
+	return v[f.Result], nil
 }
 
 // fragmentFunctions: okdpPodSpec(args), okdpJob(args), okdpSignInProxy(args)
 // and okdpWebWorkload(args) for the instance inst, in the session *session.
 func fragmentFunctions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	var opts []cel.EnvOption
-	for _, f := range inst.rules.fragments {
-		id := f.name + "_map"
-		opts = append(opts, cel2yaml.Costed(cel.Function(f.name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
+	for _, f := range inst.rules.Fragments {
+		id := f.Name + "_map"
+		opts = append(opts, cel2yaml.Costed(cel.Function(f.Name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
 			cel2yaml.Unary(func(v any) (any, error) {
 				if _, ok := v.(M); !ok {
-					return nil, fmt.Errorf("%s: the arguments are a map, got %s", f.name, value.ShortAt("args", v))
+					return nil, fmt.Errorf("%s: the arguments are a map, got %s", f.Name, value.ShortAt("args", v))
 				}
-				return f.call(*session, inst, v)
+				return callFragment(f, *session, inst, v)
 			}))), id))
 	}
 	return opts

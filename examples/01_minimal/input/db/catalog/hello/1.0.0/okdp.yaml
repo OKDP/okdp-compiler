@@ -1,3 +1,0 @@
-# What OKDP shows of the instance.
-instance:
-  usage: Says hello, from ${{ release.name }}.

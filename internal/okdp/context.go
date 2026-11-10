@@ -9,7 +9,6 @@ package okdp
 import (
 	"cmp"
 	"errors"
-	"fmt"
 	"io/fs"
 	"sort"
 
@@ -108,15 +107,15 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	for g, role := range groups {
 		roles[g] = string(role)
 	}
-	derived, err := inst.rules.values("scope", M{"settings": inst.okdp, "release": release, "items": roles})
+	derived, err := inst.rules.Values("scope", M{"settings": inst.okdp, "release": release, "items": roles})
 	if err != nil {
 		return nil, err
 	}
 	platform := value.AsMap(derived["platform"])
 	inst.scope = M{
 		"service":        M{"name": svc.Name, "version": svc.Version},
-		"labels":         inst.rules.labels(svc.Name, in.Release, "", false),
-		"selectorLabels": inst.rules.labels(svc.Name, in.Release, "", true),
+		"labels":         inst.rules.Labels(svc.Name, in.Release, "", false),
+		"selectorLabels": inst.rules.Labels(svc.Name, in.Release, "", true),
 		"release":        release,
 		"values":         params,
 		"claims":         claimsScope(in.Claims),
@@ -174,29 +173,9 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 // applied: a value of another type is refused rather than read as not set
 // (oidc: false would leave OIDC enabled).
 func platformSettings(rules *RuleSet, platform M) (M, error) {
-	settings, err := schemaValues(rules.platformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
+	settings, err := schemaValues(rules.PlatformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}
 	return value.AsMap(value.Dig(settings, "global.okdp")), nil
-}
-
-// schemaValues: user, values the schema of an embedded file describes
-// (platformSchema, mappingSchema), coalesced over the schema's defaults and
-// checked against it (chart.Schema.Values), as Helm reads a chart's: the
-// values, or every violation at once, by path, under heading, as the
-// parameters' are.
-func schemaValues(schema func() (*chart.Schema, error), heading string, user M) (M, error) {
-	s, err := schema()
-	if err != nil {
-		return nil, err
-	}
-	values, v, err := s.Values(user)
-	if err != nil {
-		return nil, err
-	}
-	if v != "" {
-		return nil, fmt.Errorf("%s:\n%s", heading, v)
-	}
-	return values, nil
 }

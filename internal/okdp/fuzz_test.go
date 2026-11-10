@@ -126,51 +126,6 @@ func FuzzClaimID(f *testing.F) {
 	})
 }
 
-// FuzzUpstreamCheck: the platform's check of an instance's upstream values,
-// whatever they hold: none for a privileged project; the same answer twice;
-// and for any other, a key of the denied ones refused wherever it is added:
-// beside the values, nested in them, or in a string a chart renders as YAML.
-// Seeds: the upstream values of TestUpstreamPolicy's cases and the denied
-// fixtures.
-func FuzzUpstreamCheck(f *testing.F) {
-	for _, s := range []string{
-		"", "{}", "image: {repository: reg.example.org/okdp/app, tag: v1}", "image: docker.io/library/nginx", "registry: evil.example.org\nrepository: app",
-		"securityContext: {runAsUser: 0}", "podSecurityContext: {runAsNonRoot: false}", "extraContainers: [{name: x}]",
-		"initImage: evil.example.org/x", "config: \"hostPath: /x\\n\"", "a: {b: [{c: {privileged: true}}]}",
-		"tpl: \"---\\nsidecars: []\\n---\\nimage: x\"", "image: null", "image: {name: reg.example.org/okdp/x}",
-	} {
-		f.Add([]byte(s))
-	}
-	okdp := M{"policy": M{"upstream": M{"deny": []any{"extraVolumes"}, "registries": []any{"reg.example.org/okdp"}}}}
-	f.Fuzz(func(t *testing.T, b []byte) {
-		user, ok := layer(b)
-		if !ok {
-			return
-		}
-		at := func(p string) string { return "upstream." + p }
-		if upstreamCheck(defaultRules(), okdp, "demo", true) != nil {
-			t.Fatal("a check for a privileged project")
-		}
-		check := upstreamCheck(defaultRules(), okdp, "demo", false)
-		got, again := check(user, nil, at), check(user, nil, at)
-		if errorString(got) != errorString(again) {
-			t.Fatalf("%q: %v then %v", b, got, again)
-		}
-		for name, with := range map[string]func(M){
-			"beside":    func(m M) { m["hostPath"] = "/x" },
-			"deny list": func(m M) { m["extraVolumes"] = []any{} },
-			"nested":    func(m M) { m["wrap"] = M{"list": []any{M{"sidecars": []any{}}}} },
-			"text":      func(m M) { m["rendered"] = "name: x\nextraContainers: []\n" },
-		} {
-			m := value.AsMap(value.Copy(user))
-			with(m)
-			if err := check(m, nil, at); err == nil {
-				t.Fatalf("%q: %s: %#v accepted", b, name, m)
-			}
-		}
-	})
-}
-
 // FuzzContextLayers: the context's layers, whatever the platform, a
 // project and an instance write: the same answer twice, the inputs
 // unchanged, and not shared with what is returned (a copy); and when they

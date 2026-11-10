@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"io/fs"
 	"slices"
 	"time"
@@ -50,21 +51,46 @@ type Inputs struct {
 	// Rules: the rule set of the compile; nil, the standard one.
 	Rules *RuleSet
 	// Finalize: what makes the final values of the charts of the compile
-	// from what it computed; nil, Helm's merge, chart.FinalValues.
+	// from what it computed; nil, Result.Values stays nil: Result.Computed is
+	// the compile's.
 	Finalize Finalize
+	// CheckGlobals: the host's policy on the keys of global a project sets,
+	// before the mapping runs; nil, none.
+	CheckGlobals func(GlobalsInput) error
 
 	memo *instanceMemo // what the compiles of a set read once (Memo); nil: this compile reads its own
 }
 
 // FinalInput: what the final values of a compile are made from (Finalize).
 type FinalInput struct {
-	Charts     fs.FS               // Inputs.Charts, passed through unread
-	Files      fs.FS               // the package
-	Specs      chart.Specs         // the charts of the compile by key, the compiler's own among them
-	ValuesFile string              // the values file Output is read from, for the errors
-	Output     M                   // what the mapping computed, by chart key
-	Values     M                   // the instance's merged values: their global, their upstream values
-	Upstream   chart.UpstreamCheck // what is refused of the upstream values of every key; nil, nothing
+	Charts            fs.FS       // Inputs.Charts, passed through unread
+	Files             fs.FS       // the package
+	Specs             chart.Specs // the charts of the compile by key, the compiler's own among them
+	ValuesFile        string      // the values file Output is read from, for the errors
+	Output            M           // what the mapping computed, by chart key
+	Values            M           // the instance's merged values: their global, their upstream values
+	Rules             *RuleSet    // the rule set of the compile
+	Settings          M           // the platform's settings
+	Namespace         string      // the instance's namespace
+	Privileged        bool        // the project is one of the platform's own
+	AllowPlainSecrets bool        // Inputs.AllowPlainSecrets
+}
+
+// GlobalLayer: the global a layer of a project sets, and the layer's name
+// for the errors.
+type GlobalLayer struct {
+	Name   string
+	Global M
+}
+
+// GlobalsInput: what the keys of global a project sets are checked from
+// (Inputs.CheckGlobals).
+type GlobalsInput struct {
+	Rules      *RuleSet
+	Settings   M
+	Namespace  string
+	Privileged bool
+	Layers     []GlobalLayer
 }
 
 // Finalize: the final values of each key of in.Output, the chart that
@@ -103,6 +129,9 @@ type Result struct {
 	// file, which it renders as written, in its release (helm.Write). nil
 	// when there is none.
 	Objects []map[string]any
+	// KeepSync: what the writer tells Argo CD of the objects Helm keeps, the
+	// rule set's.
+	KeepSync ruleset.KeepSync
 	// ObjectsSource: the chart that renders Objects in the umbrella, the
 	// platform's (global.okdp.charts.objects).
 	ObjectsSource chart.Ref
@@ -144,23 +173,14 @@ type Result struct {
 	// its releases the engine's own identity, the other projects' one
 	// confined to their namespace.
 	Privileged bool
-	// Access: the roles of the project's groups, its file's access (the
-	// context at level 1, ParseAccess: okdp-project-<namespace> an
-	// editor when it gives none), and the prefix the Kubernetes API server
-	// gives the groups (global.okdp.access.groupPrefix): the targets write
-	// them as Argo CD roles of the project's AppProject and RoleBindings of
-	// its namespace.
-	Access Access
-	// ControlPlane: the control plane's identity,
-	// global.okdp.controlPlane.serviceAccount, which the targets bind in
-	// the project's namespace to what it needs there; nil when the
-	// platform has no control plane.
-	ControlPlane *ServiceAccount
-	// Network: the network policy of the project's namespace,
-	// global.okdp.network with policy true, its claimers the namespaces
-	// of the claims bound to the instance (Inputs.Claims), which must
-	// reach it; nil when the platform has none.
-	Network *Network
+	// Groups: the roles of the project's groups, its file's access (the
+	// context at level 1, ParseAccess).
+	Groups map[string]Role
+	// Settings: the platform's settings, global.okdp, validated, its
+	// defaults applied, for the writers.
+	Settings M
+	// Claims: the claims bound to the instance (Inputs.Claims).
+	Claims []Claim
 }
 
 // Compile runs the mapping of def on one instance, cancelled with ctx
@@ -327,17 +347,13 @@ func providedOutputs(session *cel2yaml.Session, inst *instance, in Inputs, res M
 // its namespace, none cluster-scoped (checkObjects), serving no host the
 // platform keeps from them (checkIngressHosts); no Secret of credentials in
 // clear, unless allowed (checkPlainSecrets); no two of one kind, namespace
-// and name (checkDuplicateObjects); then the sync options of Argo CD of
-// those Helm keeps.
+// and name (checkDuplicateObjects).
 func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, groups map[string]Role, res M, outputs []Output, credentials, pushes []M) (*Result, error) {
 	store, err := secretStore(in.rules(), inst.okdp)
 	if err != nil {
 		return nil, err
 	}
-	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: store, Access: Access{Groups: groups, GroupPrefix: groupPrefix(inst.okdp)}, ControlPlane: controlPlane(inst.okdp), Network: network(inst.okdp)}
-	if out.Network != nil {
-		out.Network.Claimers = claimers(in.Namespace, in.Claims)
-	}
+	out := &Result{Objects: credentials, Info: published(value.AsMap(res["instance"]), outputs), Dependencies: inst.deps, Release: in.Release, Namespace: in.Namespace, Service: svc.Name, Version: svc.Version, Chart: def.Chart, Warnings: slices.Clone(def.Warnings), Privileged: privileged(inst.okdp, in.Namespace), SecretStore: store, Groups: groups, Settings: inst.okdp, Claims: in.Claims}
 	for _, o := range value.AsList(res["objects"]) {
 		out.Objects = append(out.Objects, value.AsMap(o))
 	}
@@ -365,8 +381,7 @@ func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, g
 	if err := checkDuplicateObjects(svc.Name, in.Namespace, out.Objects); err != nil {
 		return nil, err
 	}
-	// Whatever wrote it, an object Helm keeps is kept by Argo CD alike.
-	keepSynced(in.rules().keep, out.Objects)
+	out.KeepSync = in.rules().Keep
 	return out, nil
 }
 
@@ -389,27 +404,13 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 	}
 	out.Computed = value.AsMap(value.Copy(output))
 	var warnings []string
-	check := upstreamCheck(in.rules(), inst.okdp, in.Namespace, out.Privileged)
 	if in.Finalize != nil {
-		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Upstream: check})
-	} else {
-		out.Values, out.Charts, warnings, err = chart.FinalValues(in.memo.charts, def.Files, specs, def.valuesName(), output, inst.values, check)
+		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Rules: in.rules(), Settings: inst.okdp, Namespace: in.Namespace, Privileged: out.Privileged, AllowPlainSecrets: in.AllowPlainSecrets})
 	}
 	if err != nil {
 		return err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
-	// The hosts of the charts' ingresses, those of the objects checked above.
-	if !out.Privileged {
-		if err := checkIngressValues(in.rules(), in.Namespace, inst.okdp, out.Values); err != nil {
-			return err
-		}
-	}
-	// A literal of the instance's upstream values at a sensitive key, a
-	// credential in clear most likely: a warning, unless allowed.
-	if !in.AllowPlainSecrets {
-		out.Warnings = append(out.Warnings, plainUpstream(value.AsMap(inst.values["upstream"]))...)
-	}
 	return nil
 }
 

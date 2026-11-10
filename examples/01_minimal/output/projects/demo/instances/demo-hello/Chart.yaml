@@ -1,8 +1,0 @@
-apiVersion: v2
-name: hello
-version: 1.0.0
-dependencies:
-  - name: hello
-    alias: app
-    repository: https://charts.example.org
-    version: 1.0.0

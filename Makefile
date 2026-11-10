@@ -1,9 +1,4 @@
-.PHONY: build test race cover lint fmt tidy example fixtures fuzz check help
-
-# Version printed by `okdp-compile --version`, without the leading "v" of the
-# tag; empty outside a checkout, the binary then prints dev.
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
-LDFLAGS := -X main.version=$(VERSION)
+.PHONY: test race cover lint fmt tidy fuzz check help
 
 # golangci-lint at the version tools/go.mod pins: a module of its own, its
 # dependencies stay out of the library's go.mod.
@@ -11,9 +6,6 @@ GOLANGCI_LINT := go tool -modfile=tools/go.mod golangci-lint
 
 # The Go files, but those of dot directories (.claude/worktrees...).
 GOFILES = $(shell find . -name '*.go' -not -path './.*')
-
-build: ## Compile the CLI to bin/okdp-compile
-	go build -ldflags "$(LDFLAGS)" -o bin/okdp-compile ./cmd/okdp-compile
 
 test: ## Run all tests
 	go test ./...
@@ -35,17 +27,9 @@ tidy: ## Tidy go.mod and tools/go.mod
 	go mod tidy
 	go -C tools mod tidy
 
-example: ## Rewrite the outputs of examples/ from the current compiler
-	go test . -run '^TestExample$$' -update
-
-fixtures: ## Regenerate testdata/helm (helm, python3, UMBRELLA_HELMS)
-	go test ./chart -run '^TestHelmValues$$' -update
-	go test ./internal/target/helm -run '^TestHelmUmbrella$$' -update
-	UMBRELLA_HELMS="$(UMBRELLA_HELMS)" testdata/helm/generate.sh
-
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.
 FUZZ := chart:FuzzParsePath chart:FuzzFormatPath chart:FuzzParseValues \
-	internal/okdp:FuzzParseAccess internal/okdp:FuzzClaimID internal/okdp:FuzzUpstreamCheck \
+	internal/okdp:FuzzParseAccess internal/okdp:FuzzClaimID \
 	internal/okdp:FuzzContextLayers internal/okdp:FuzzValuesLayers internal/repository:FuzzLoad
 FUZZTIME ?= 30s
 

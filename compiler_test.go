@@ -7,9 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"maps"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -19,22 +17,32 @@ import (
 	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/finaltest"
 )
 
 // example: the example package
-// (examples/02_advanced/input/db/catalog/webapp/1.0.0), and the inputs of
+// (testdata/advanced/catalog/webapp/1.0.0), and the inputs of
 // its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
 // and its database's claim, bound to demo-db, with what demo-db publishes
 // for it.
+func finalize(in compiler.FinalInput) (map[string]map[string]any, map[string]compiler.ChartRef, []string, error) {
+	var cache *finaltest.ChartCache
+	if in.Charts != nil {
+		cache = finaltest.NewChartCache(in.Charts)
+	}
+	return finaltest.FinalValues(cache, in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, nil)
+}
+
 func example() (*compiler.Definition, compiler.Inputs) {
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/db/catalog/webapp/1.0.0"))
+	def, err := compiler.LoadDefinition(os.DirFS("testdata/advanced/catalog/webapp/1.0.0"))
 	if err != nil {
 		panic(err)
 	}
 	in := compiler.Inputs{
-		Contracts: os.DirFS("examples/02_advanced/input/db/contracts"),
-		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/db/platform.yaml")}},
-		Values:    []map[string]any{values("examples/02_advanced/input/db/projects/demo/instances/webapp/config.yaml")},
+		Finalize:  finalize,
+		Contracts: os.DirFS("testdata/advanced/contracts"),
+		Context:   []compiler.ContextLayer{{Values: values("testdata/advanced/platform.yaml")}},
+		Values:    []map[string]any{values("testdata/advanced/projects/demo/instances/webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 		Bindings: map[string]compiler.Binding{"database": {
@@ -149,7 +157,6 @@ func TestLayers(t *testing.T) {
 		"internal/okdp":    {"internal/graph", "internal/target", "internal/tree"},
 		"internal/graph":   {"internal/target", "internal/tree"},
 		"internal/tree":    {"internal/target", "internal/repository"},
-		"internal/output":  {"internal/repository"},
 		"internal/compile": {"internal/okdp", "chart"},
 		"chart":            {"internal/okdp", "internal/compile"},
 	} {
@@ -166,57 +173,12 @@ func TestLayers(t *testing.T) {
 	}
 }
 
-// TestTreeNames: a tree written with the names the package exports, read
-// by LoadRepository: its instance is the release ReleaseName of its
-// project and directory, in the project's namespace, and a target writes
-// it in InstanceDir, under ProjectDir.
-func TestTreeNames(t *testing.T) {
-	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
-	instance := path.Join(compiler.ProjectsDir, "demo", compiler.InstancesDir, "web")
-	tree := fstest.MapFS{
-		compiler.PlatformFile:                                         file("global: {okdp: {}}\n"),
-		path.Join(compiler.ContractsDir, "http.schema.json"):          file(`{"properties": {"url": {"type": "string"}}}`),
-		path.Join(compiler.CatalogDir, "web", "1.0.0", "Chart.yaml"):  file("apiVersion: v2\nname: web\nversion: 1.0.0\n"),
-		path.Join(compiler.ProjectsDir, "demo", compiler.ProjectFile): file("connections: {api: {contract: http, url: https://api.example.org}}\n"),
-		path.Join(instance, compiler.InstanceFile):                    file("service: web\nversion: 1.0.0\n"),
-		path.Join(instance, compiler.ConnectionsFile):                 file("connections: {own: {contract: http, url: https://own.example.org}}\n"),
-		path.Join(instance, compiler.ConfigFile):                      file("{}\n"),
-	}
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: tree, Role: compiler.RoleTree}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(instances) != 1 || len(instances[0].Inputs.Context) != 3 || len(instances[0].Inputs.Values) != 1 {
-		t.Fatalf("got %d instances, want one with its 3 context layers and its values", len(instances))
-	}
-	in := instances[0].Inputs
-	if want := compiler.ReleaseName("demo", "web"); in.Release != want || want != "demo-web" || in.Namespace != "demo" {
-		t.Errorf("release %s/%s, want demo/%s", in.Namespace, in.Release, want)
-	}
-	res, err := compiler.Compile(t.Context(), instances[0].Definition, in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	g, err := compiler.NewGraph([]*compiler.Result{res})
-	if err != nil {
-		t.Fatal(err)
-	}
-	files, err := compiler.Helm{}.Files([]*compiler.Result{res}, g)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := compiler.InstanceDir("demo", in.Release)
-	if _, ok := files[path.Join(dir, "Chart.yaml")]; !ok || dir != path.Join(compiler.ProjectDir("demo"), "instances", "demo-web") || compiler.ProjectDir("demo") != "projects/demo" {
-		t.Errorf("files %q, want the umbrella chart in %s", slices.Sorted(maps.Keys(files)), dir)
-	}
-}
-
 // TestCompileTree: the tree of the claims example compiled: its graph,
 // the claims bound to its provider, each with its claimer and what the
 // provider granted it, and the namespaces it lets claim of it, its
 // instance.yaml's claimers.
 func TestCompileTree(t *testing.T) {
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db"), Role: compiler.RoleTree}})
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("testdata/claims"), Role: compiler.RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,50 +202,6 @@ func TestCompileTree(t *testing.T) {
 	}
 	if want := []string{"demo.analytics by demo/dashboards", "demo.analytics by demo/reports", "demo.app.database by demo/app", "demo.metrics.database by demo/metrics"}; !reflect.DeepEqual(claims, want) {
 		t.Errorf("claims: got %q, want %q", claims, want)
-	}
-}
-
-// charts: a ChartSource that records what it is asked, and answers fsys,
-// or err.
-type charts struct {
-	refs []compiler.ChartRef
-	fsys fs.FS
-	err  error
-}
-
-func (c *charts) Ensure(_ context.Context, refs []compiler.ChartRef) (fs.FS, error) {
-	c.refs = refs
-	return c.fsys, c.err
-}
-
-// TestCompileTreeCharts: the charts the compile names fetched once each,
-// then the values checked against them; unchecked, and why, when one
-// cannot be fetched.
-func TestCompileTreeCharts(t *testing.T) {
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db"), Role: compiler.RoleTree}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	away := &charts{err: errors.New("the registry is away")}
-	tree := compiler.CompileTree(t.Context(), instances, away)
-	if !errors.Is(tree.ChartsErr, away.err) || tree.Problems() != nil || tree.Graph == nil {
-		t.Errorf("unchecked: ChartsErr %v, problems %q", tree.ChartsErr, tree.Problems())
-	}
-	if len(away.refs) == 0 || len(slices.Compact(slices.Clone(away.refs))) != len(away.refs) {
-		t.Errorf("refs: %v", away.refs)
-	}
-	empty := &charts{fsys: fstest.MapFS{}}
-	tree = compiler.CompileTree(t.Context(), instances, empty)
-	if tree.ChartsErr != nil || tree.Problems() == nil {
-		t.Errorf("checked against a cache without the charts: ChartsErr %v, no problem", tree.ChartsErr)
-	}
-	if !reflect.DeepEqual(empty.refs, away.refs) {
-		t.Errorf("refs: %v, then %v", away.refs, empty.refs)
-	}
-	for _, inst := range instances {
-		if inst.Inputs.Charts != nil {
-			t.Fatal("the instances given were changed")
-		}
 	}
 }
 
@@ -355,7 +273,7 @@ func TestCheckProjectName(t *testing.T) {
 // instance; one that does not load, a *LoadError of every problem, the
 // errors it is of unwrapped.
 func TestBuild(t *testing.T) {
-	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("examples/04_claims/input/db"), Role: compiler.RoleTree}}
+	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("testdata/claims"), Role: compiler.RoleTree}}
 	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{CostLimit: 1_000_000, AllowPlainSecrets: true})
 	if err != nil {
 		t.Fatal(err)
@@ -392,137 +310,5 @@ func TestBuild(t *testing.T) {
 	}
 	if compiler.LoadErrorOf(nil) != nil || compiler.LoadErrorOf(&compiler.Tree{}) != nil {
 		t.Error("LoadErrorOf a tree that loads")
-	}
-}
-
-// TestAccess: project.yaml's access, read from the project's file alone,
-// written by the targets as the Argo CD roles of its AppProject and the
-// RoleBindings of its namespace, the platform's group prefix on the
-// latter; the accessors a control plane mirrors them with.
-func TestAccess(t *testing.T) {
-	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
-	platform := "global: {okdp: {access: {admins: [platform_admin], groupPrefix: 'oidc:'}}}\n"
-	project := "description: the demo\naccess:\n  okdp-project-demo: admin\n  analysts: viewer\n"
-	tree := fstest.MapFS{
-		compiler.PlatformFile: file(platform),
-		path.Join(compiler.CatalogDir, "web", "1.0.0", "Chart.yaml"):                           file("apiVersion: v2\nname: web\nversion: 1.0.0\n"),
-		path.Join(compiler.ProjectsDir, "demo", compiler.ProjectFile):                          file(project),
-		path.Join(compiler.ProjectsDir, "demo", compiler.InstancesDir, "web", "instance.yaml"): file("service: web\nversion: 1.0.0\n"),
-		path.Join(compiler.ProjectsDir, "ops", compiler.InstancesDir, "web", "instance.yaml"):  file("service: web\nversion: 1.0.0\n"),
-	}
-	tr, err := compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: tree, Role: compiler.RoleTree}}, compiler.BuildOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if problems := tr.Problems(); problems != nil {
-		t.Fatal(problems)
-	}
-	files, _, err := compiler.TreeFiles(tr, []compiler.Target{compiler.ArgoCD{RepoURL: "https://git.example.org/o.git"}, compiler.Flux{}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	demo := string(files[path.Join(compiler.ProjectManifestsDir("demo"), "access.yaml")])
-	app := string(files[path.Join(compiler.ProjectManifestsDir("demo"), "appproject.yaml")])
-	ops := string(files[path.Join(compiler.ProjectManifestsDir("ops"), "access.yaml")])
-	for _, want := range []string{"name: okdp-access-viewer", `name: "oidc:analysts"`, "name: okdp-access-admin", `name: "oidc:okdp-project-demo"`} {
-		if !strings.Contains(demo, want) {
-			t.Errorf("demo's access.yaml lacks %q:\n%s", want, demo)
-		}
-	}
-	if !strings.Contains(app, "p, proj:project-demo:admin, applications, override, project-demo/*, allow") || !strings.Contains(app, `- "okdp-project-demo"`) || strings.Contains(app, "oidc:") {
-		t.Errorf("demo's AppProject:\n%s", app)
-	}
-	if !strings.Contains(ops, "name: okdp-access-editor") || !strings.Contains(ops, `name: "oidc:okdp-project-ops"`) {
-		t.Errorf("ops's access.yaml, the default:\n%s", ops)
-	}
-	for p, b := range files {
-		if strings.Contains(p, "/instances/") && strings.Contains(string(b), "analysts") {
-			t.Errorf("%s holds the access", p)
-		}
-	}
-	got, err := compiler.ProjectAccess([]byte(project), "demo")
-	if want := map[string]compiler.AccessRole{"okdp-project-demo": compiler.AccessAdmin, "analysts": compiler.AccessViewer}; err != nil || !maps.Equal(got, want) {
-		t.Errorf("ProjectAccess: %v, %v", got, err)
-	}
-	values, err := compiler.ParseValues([]byte(platform))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if admins, err := compiler.PlatformAdmins(values); err != nil || !slices.Equal(admins, []string{"platform_admin"}) {
-		t.Errorf("PlatformAdmins: %v, %v", admins, err)
-	}
-	if compiler.DefaultProjectGroup("demo") != "okdp-project-demo" || !compiler.IsGroupName("platform_admin") || compiler.IsGroupName("/platform_admin") {
-		t.Error("DefaultProjectGroup, IsGroupName")
-	}
-}
-
-// TestPartialRederives: a project kept (an instance of it refused) keeps
-// its instances as the previous output holds them, but its platform's
-// part is today's (D-5, CMP-07): a privilege revoked, its Namespace
-// baseline, its identity confined again, its kept HelmRelease impersonating
-// it, its AppProject confined; a role taken back, its RoleBinding gone.
-func TestPartialRederives(t *testing.T) {
-	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
-	tree := fstest.MapFS{
-		compiler.PlatformFile:                    file("global: {okdp: {policy: {privileged: [ops]}}}\n"),
-		"catalog/admin/1.0.0/Chart.yaml":         file("apiVersion: v2\nname: admin\nversion: 1.0.0\ndependencies:\n  - {name: hello, alias: app, repository: https://charts.example.org, version: 1.0.0}\n"),
-		"catalog/admin/1.0.0/okdp.yaml":          file("objects:\n  - {apiVersion: rbac.authorization.k8s.io/v1, kind: ClusterRoleBinding, metadata: {name: ops-admin}, roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}, subjects: [{kind: ServiceAccount, name: default, namespace: ops}]}\n"),
-		"catalog/admin/1.0.0/config.schema.json": file(`{"type": "object", "properties": {"n": {"type": "integer"}}}`),
-		"projects/ops/project.yaml":              file("access: {ops-team: admin}\n"),
-		"projects/ops/instances/x/instance.yaml": file("service: admin\nversion: 1.0.0\n"),
-	}
-	targets := []compiler.Target{compiler.Flux{}, compiler.ArgoCD{RepoURL: "https://git.example.org/out.git"}}
-	build := func() *compiler.Tree {
-		tr, err := compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: tree, Role: compiler.RoleTree}}, compiler.BuildOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return tr
-	}
-	first, _, err := compiler.TreeFiles(build(), targets, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifests := compiler.ProjectManifestsDir("ops")
-	hr := path.Join(compiler.InstanceDir("ops", "ops-x"), "helmrelease.yaml")
-	if ns := string(first[path.Join(manifests, "namespace.yaml")]); !strings.Contains(ns, "enforce: privileged") || strings.Contains(string(first[hr]), "serviceAccountName") {
-		t.Fatalf("before: privileged expected:\n%s", ns)
-	}
-	previous := fstest.MapFS{}
-	for p, b := range first {
-		previous[p] = &fstest.MapFile{Data: b}
-	}
-	// The platform revokes the privilege, the project takes its role back;
-	// an instance of it is refused, which keeps the project.
-	tree[compiler.PlatformFile] = file("global: {okdp: {policy: {privileged: []}}}\n")
-	tree["projects/ops/project.yaml"] = file("access: {}\n")
-	tree["projects/ops/instances/broken/instance.yaml"] = file("service: admin\nversion: 1.0.0\n")
-	tree["projects/ops/instances/broken/config.yaml"] = file("n: notanumber\n")
-	second, kept, err := compiler.TreeFiles(build(), targets, previous)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(kept) != 1 || kept[0].Namespace != "ops" {
-		t.Fatalf("kept: %+v", kept)
-	}
-	ns := string(second[path.Join(manifests, "namespace.yaml")])
-	app := string(second[path.Join(manifests, "appproject.yaml")])
-	switch {
-	case !strings.Contains(ns, "enforce: baseline") || strings.Contains(ns, "privileged"):
-		t.Errorf("the Namespace, the privilege revoked:\n%s", ns)
-	case second[path.Join(manifests, "service-account.yaml")] == nil:
-		t.Error("no confined identity")
-	case !strings.Contains(string(second[hr]), `serviceAccountName: "project-ops"`):
-		t.Errorf("the kept HelmRelease, not confined:\n%s", second[hr])
-	case !strings.Contains(app, "clusterResourceWhitelist: []") || strings.Contains(app, `namespace: "*"`) || strings.Contains(app, "roles:"):
-		t.Errorf("the AppProject, not confined:\n%s", app)
-	case second[path.Join(manifests, "access.yaml")] != nil:
-		t.Errorf("a role taken back kept:\n%s", second[path.Join(manifests, "access.yaml")])
-	}
-	// The instance's own files as they were: its objects, refused now by
-	// the identity that applies them.
-	objects := path.Join(compiler.InstanceDir("ops", "ops-x"), compiler.UmbrellaValues)
-	if string(second[objects]) != string(first[objects]) || !strings.Contains(string(second[objects]), "ClusterRoleBinding") {
-		t.Errorf("the kept instance's objects changed:\n%s", second[objects])
 	}
 }

@@ -1,8 +1,7 @@
 // Memo: the inputs a compile reads that do not change while the compiles
 // of a set of instances run, read once for all of them: an instance's
 // parameters (its schema, the layers merged and checked), a contract
-// (read, decoded and compiled), an upstream chart (read, its schema
-// compiled).
+// (read, decoded and compiled).
 
 package okdp
 
@@ -17,7 +16,7 @@ import (
 
 // Memo: what the compiles of the instances of one set read once
 // (CompileAllWith): per instance, its parameters, and for the instances
-// that read the same contracts and the same chart cache, those. It is
+// that read the same contracts, those. It is
 // valid for the same instances, whose files and layers do not change, and
 // for the contracts and charts file systems not to change: one run of
 // compiles, not kept beyond it. Safe for concurrent use.
@@ -25,7 +24,6 @@ type Memo struct {
 	mu        sync.Mutex
 	params    map[int]*paramsMemo
 	contracts []*contractCache
-	charts    []*chart.ChartCache
 }
 
 // NewMemo: an empty Memo.
@@ -36,7 +34,6 @@ func NewMemo() *Memo { return &Memo{params: map[int]*paramsMemo{}} }
 type instanceMemo struct {
 	params    *paramsMemo
 	contracts *contractCache
-	charts    *chart.ChartCache
 }
 
 // forInstance: the memo of the compile of instance i of the set, def its
@@ -60,19 +57,6 @@ func (m *Memo) forInstance(i int, def *Definition, in Inputs) *instanceMemo {
 	if out.contracts == nil {
 		out.contracts = newContractCache(in.Contracts)
 		m.contracts = append(m.contracts, out.contracts)
-	}
-	if in.Charts == nil {
-		return out
-	}
-	for _, c := range m.charts {
-		if sameFS(c.FS(), in.Charts) {
-			out.charts = c
-			break
-		}
-	}
-	if out.charts == nil {
-		out.charts = chart.NewChartCache(in.Charts)
-		m.charts = append(m.charts, out.charts)
 	}
 	return out
 }

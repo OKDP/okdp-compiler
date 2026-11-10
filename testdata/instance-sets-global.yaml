@@ -1,7 +1,0 @@
-# error: values layer 1: global.okdp is set by the context (Inputs.Context)
-# global is the platform's: an instance may not move its host, where its
-# OAuth clients register, nor set a global value of every chart.
-global:
-  okdp:
-    ingress:
-      suffix: other.example.org

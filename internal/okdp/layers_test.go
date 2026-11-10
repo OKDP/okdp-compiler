@@ -205,9 +205,6 @@ func TestProjectGlobals(t *testing.T) {
 		"the platform's list":            {policy(M{"projectGlobals": []any{"imageRegistry"}}), M{"imageRegistry": "registry.example.org"}, "", ""},
 		"the list replaces the defaults": {policy(M{"projectGlobals": []any{"imageRegistry"}}), M{"storageClass": "fast"}, "global.storageClass: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists imageRegistry", "global.storageClass"},
 		"none":                           {policy(M{"projectGlobals": []any{}}), M{"project": M{}}, "projectGlobals lists none", "global.project"},
-		"a denied key":                   {policy(M{}), M{"project": M{"hostNetwork": true}}, "context layer 3 (level 1): global.project.hostNetwork: hostNetwork is denied to the instance's upstream values", "global.project.hostNetwork"},
-		"a denied key of the platform":   {policy(M{"upstream": M{"deny": []any{"rbac"}}}), M{"project": M{"a": M{"rbac": M{}}}}, "global.project.a.rbac: rbac is denied", "global.project.a.rbac"},
-		"an unlisted registry":           {policy(M{"projectGlobals": []any{"image"}, "upstream": M{"registries": []any{"registry.example.org"}}}), M{"image": M{"registry": "docker.io", "repository": "evil/app"}}, "global.image.registry: image docker.io/evil/app is not from a registry", "global.image.registry"},
 		"a listed registry":              {policy(M{"projectGlobals": []any{"image"}, "upstream": M{"registries": []any{"registry.example.org"}}}), M{"image": M{"registry": "registry.example.org", "repository": "app"}}, "", ""},
 		"a privileged project":           {policy(M{"privileged": []any{"demo"}}), M{"project": M{"hostNetwork": true}}, "", ""},
 		"a privileged project's keys":    {policy(M{"privileged": []any{"demo"}}), M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set", "global.imageRegistry"},
@@ -245,9 +242,13 @@ func TestProjectGlobals(t *testing.T) {
 	in = inputs()
 	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"upstream": M{"registries": []any{"registry.example.org"}}}}}}})
 	in.Values = []map[string]any{{"global": M{"image": M{"repository": "docker.io/evil/app"}}}}
-	var fe *FieldError
-	if _, err := Compile(context.Background(), withFiles(files), in); err == nil || !strings.Contains(err.Error(), "values layer 1: global.image.repository: image docker.io/evil/app is not from a registry") || !errors.As(err, &fe) || fe.Field != "global.image.repository" {
-		t.Errorf("an instance's global: got %v", err)
+	var named []GlobalLayer
+	in.CheckGlobals = func(g GlobalsInput) error { named = g.Layers; return nil }
+	if _, err := Compile(context.Background(), withFiles(files), in); err != nil {
+		t.Fatal(err)
+	}
+	if len(named) != 1 || named[0].Name != "values layer 1" || value.Dig(named[0].Global, "image.repository") != "docker.io/evil/app" {
+		t.Errorf("an instance's global: got %+v", named)
 	}
 }
 
@@ -260,9 +261,8 @@ func TestDeclarationsGlobals(t *testing.T) {
 		global M
 		want   string
 	}{
-		"listed":       {M{"storageClass": "fast", "project": M{"name": "demo"}}, ""},
-		"unlisted":     {M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set"},
-		"a denied key": {M{"project": M{"rbac": M{}}}, "global.project.rbac: rbac is denied"},
+		"listed":   {M{"storageClass": "fast", "project": M{"name": "demo"}}, ""},
+		"unlisted": {M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := CheckDeclarations(Inputs{Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
@@ -270,5 +270,26 @@ func TestDeclarationsGlobals(t *testing.T) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestCheckGlobalsHook: the host's policy sees the global of each layer
+// above level 0, by the layer's name; what it refuses refuses the compile.
+func TestCheckGlobalsHook(t *testing.T) {
+	in := inputs()
+	in.Context = append(in.Context, ContextLayer{Level: 1, Values: M{"global": M{"project": M{"a": "b"}}}})
+	var got []GlobalLayer
+	in.CheckGlobals = func(g GlobalsInput) error {
+		got = g.Layers
+		if g.Namespace != "demo" || g.Rules == nil {
+			t.Errorf("the input: %+v", g)
+		}
+		return errors.New("refused")
+	}
+	if _, err := Compile(context.Background(), def, in); err == nil || err.Error() != "refused" {
+		t.Errorf("got %v", err)
+	}
+	if len(got) != 1 || !strings.Contains(got[0].Name, "level 1") || value.Dig(got[0].Global, "project.a") != "b" {
+		t.Errorf("the layers: %+v", got)
 	}
 }

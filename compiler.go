@@ -59,12 +59,7 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
-	"github.com/okdp/okdp-compiler/internal/output"
 	"github.com/okdp/okdp-compiler/internal/repository"
-	"github.com/okdp/okdp-compiler/internal/target"
-	"github.com/okdp/okdp-compiler/internal/target/argocd"
-	"github.com/okdp/okdp-compiler/internal/target/flux"
-	"github.com/okdp/okdp-compiler/internal/target/helm"
 	"github.com/okdp/okdp-compiler/internal/tree"
 	"github.com/okdp/okdp-compiler/value"
 )
@@ -179,30 +174,6 @@ type (
 	// (Ensure), unpacked as Inputs.Charts reads them: what CompileTree
 	// checks the final values against.
 	ChartSource = tree.ChartSource
-	// Target: an output format of compiled instances (Helm, Flux, ArgoCD):
-	// their files, path -> content, under projects/, each instance's
-	// umbrella chart in InstanceDir: all an engine needs of the compiled
-	// tree, which a deployer commits as they are.
-	Target = target.Target
-	// Helm: the helm target: the umbrella chart of each instance, the files
-	// of Write.
-	Helm = helm.Target
-	// Flux: the flux target: the helm target's files, each instance's Flux
-	// HelmRelease, waiting for the releases it depends on, and the
-	// Kustomizations, each instance's, each project's and the root's,
-	// projects/kustomization.yaml, which a Flux Kustomization of the path
-	// projects/ syncs; okdp-gitops' format. Its fields are its options.
-	Flux = flux.Target
-	// ArgoCD: the argocd target: the helm target's files, and each
-	// instance's Argo CD Application, its sync wave after those of the
-	// releases it depends on, which an Application of the directory
-	// projects/ applies (recurse, include */instances/*/application.yaml);
-	// okdp-gitops' format. Its fields are its options.
-	ArgoCD = argocd.Target
-	// ReleaseError: a release name in two namespaces or more, which the
-	// Flux and ArgoCD targets refuse (CheckReleases): their objects, named
-	// after the releases, share one namespace.
-	ReleaseError = target.ReleaseError
 	// LoadError: the problems of a tree that does not load (LoadRepository,
 	// Build), each naming its repository and path, one problem a whole
 	// message (Problems); Error gives them one per line, Unwrap the errors
@@ -220,47 +191,15 @@ type (
 	// *ReleaseError), or a release of a kept project it depends on
 	// (Depends).
 	KeptInstance = tree.KeptInstance
-	// ArgoSource: the repository and revision Argo CD reads a tree from
-	// (ReadArgoRoot), ArgoCD.RepoURL and ArgoCD.Revision.
-	ArgoSource = argocd.Source
-	// Published: what a compiled instance publishes, read back from a
-	// target's output (ReadPublished): its release, its package, the name
-	// and version of its Chart.yaml, and its InfoFile.
-	Published = helm.Published
-	// Compiled: an instance's umbrella chart, read back from a target's
-	// output (ReadCompiled): what it publishes, its Chart.yaml as written,
-	// its UmbrellaValues.
-	Compiled = helm.Compiled
 	// ChartRef: an upstream chart, pinned: what renders the values of a key.
 	ChartRef = chart.Ref
 	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
 	// Result.Chart).
 	ChartMetadata = chart.Metadata
-	// Access: the roles of a project's groups and the API server's group
-	// prefix (Result.Access), what the targets write as the Argo CD roles
-	// of its AppProject and the RoleBindings of its namespace.
-	Access = okdp.Access
-	// ServiceAccount: a ServiceAccount by namespace and name: the control
-	// plane's identity (Result.ControlPlane,
-	// global.okdp.controlPlane.serviceAccount), which the targets bind in
-	// each project's namespace to the Role okdp-control-plane.
-	ServiceAccount = okdp.ServiceAccount
-	// Network: the network policy of a project's namespace
-	// (Result.Network, global.okdp.network with policy true): the
-	// platform's ingress namespaces and the namespaces of the claims the
-	// instance provides, which the targets let in.
-	Network = okdp.Network
 )
 
 // The files Write gives besides Chart.yaml.
 const (
-	// UmbrellaValues: the umbrella's values, given to Helm as user values
-	// (helm -f, Argo CD valueFiles, Flux valuesFrom).
-	UmbrellaValues = helm.ValuesFile
-	// InfoFile: Result.Info, what the instance publishes (url,
-	// usage, provides), written when it publishes something, for a control
-	// plane or a console that reads the deployments repository.
-	InfoFile = helm.InfoFile
 	// ObjectsChart: the key of the umbrella's values and dependencies that
 	// holds Result.Objects, when there are objects, under ObjectsValue, as
 	// one YAML stream.
@@ -280,10 +219,6 @@ const (
 	// that its maintainers add no project nor the platform's values.
 	RoleCatalog = repository.RoleCatalog
 )
-
-// DefaultFluxSource: the GitRepository of the flux target when
-// Flux.Source is empty, okdp-gitops'.
-const DefaultFluxSource = flux.DefaultSource
 
 // The names of the tree LoadRepository reads (docs/01_usage.md, repository
 // layout), for a caller that writes or lists its parts:
@@ -334,15 +269,6 @@ const (
 // CheckReleases does.
 func ReleaseName(project, instance string) string {
 	return repository.ReleaseName(project, instance)
-}
-
-// CheckReleases: nil when every release name of results is in one
-// namespace, as the Flux and ArgoCD targets need them, their objects
-// sharing one namespace; else a *ReleaseError per release, in name order,
-// what those targets refuse. A caller that adds an instance to a tree
-// those targets write checks it before the write.
-func CheckReleases(results []*Result) error {
-	return target.Releases(results)
 }
 
 // IsName: name may name a part of a tree, a project (its namespace), an
@@ -411,16 +337,6 @@ func DefaultProjectGroup(project string) string { return okdp.DefaultGroup(proje
 // path.
 func IsGroupName(name string) bool { return okdp.IsGroup(name) }
 
-// ProjectAccess: the roles of the groups of project, by group name, file
-// its ProjectFile as written (nil: none): its access, DefaultProjectGroup
-// an editor when it gives none (absent or null), no group for {}; the
-// compile's errors, every problem at once. What the targets write, for a
-// program that mirrors the project's authority (a control plane): who
-// sees, operates and administers the project, without the program.
-func ProjectAccess(file []byte, project string) (map[string]AccessRole, error) {
-	return okdp.ProjectAccess(file, project)
-}
-
 // PlatformAdmins: the groups of the platform's administrators,
 // global.okdp.access.admins of platform, its values (PlatformFile, the
 // context at level 0), checked against the platform's schema as the
@@ -430,29 +346,6 @@ func ProjectAccess(file []byte, project string) (map[string]AccessRole, error) {
 // platform's authority.
 func PlatformAdmins(platform map[string]any) ([]string, error) {
 	return okdp.PlatformAdmins(platform)
-}
-
-// ProjectDir: projects/<namespace>, where every target writes the files of
-// the instances of a namespace, the flux target its kustomization.yaml.
-func ProjectDir(namespace string) string { return target.ProjectDir(namespace) }
-
-// InstanceDir: projects/<namespace>/instances/<release>, where every
-// target writes an instance's umbrella chart (the files of Write), the
-// flux and argocd targets its engine's files beside it.
-func InstanceDir(namespace, release string) string {
-	return target.InstanceDir(namespace, release)
-}
-
-// ProjectManifestsDir: projects/<namespace>/project, where the flux and
-// argocd targets write a project's own manifests, for every project that
-// has an instance: its Namespace, the platform's secret store in it, the
-// roles of its groups (ProjectAccess), the control plane's role in it
-// (global.okdp.controlPlane), and the identity its releases are confined
-// to its namespace with
-// (docs/specs/01_inputs_outputs.md, targets); what the platform's entry
-// point applies before the instances.
-func ProjectManifestsDir(namespace string) string {
-	return target.ProjectManifests(namespace)
 }
 
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
@@ -591,8 +484,10 @@ type BuildOptions struct {
 	Charts ChartSource
 	// Rules: Inputs.Rules of each instance; nil, the standard rule set.
 	Rules *RuleSet
-	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
+	// Finalize: Inputs.Finalize of each instance; nil, no final values.
 	Finalize Finalize
+	// CheckGlobals: Inputs.CheckGlobals of each instance; nil, none.
+	CheckGlobals func(GlobalsInput) error
 }
 
 // LoadRules: the rule set of fsys, rules.yaml at its root; a table missing
@@ -621,6 +516,7 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 		instances[i].Inputs.AllowPlainSecrets = opts.AllowPlainSecrets
 		instances[i].Inputs.Finalize = opts.Finalize
 		instances[i].Inputs.Rules = opts.Rules
+		instances[i].Inputs.CheckGlobals = opts.CheckGlobals
 	}
 	t := CompileTree(ctx, instances, opts.Charts)
 	for _, r := range loaded.Refused {
@@ -665,70 +561,11 @@ func Partial(t *Tree) (results []*Result, g *Graph, kept []KeptProject) {
 	return tree.Partial(t)
 }
 
-// TreeFiles: the output of t, path -> content: the files each of targets
-// writes for the projects Partial writes, merged (a path two targets write
-// differently fails it); for each project kept, the files previous, the
-// output written before (nil: none), holds under its ProjectDir, its
-// instances' as they are, but what the platform decides of it, which the
-// flux and argocd targets write of today's settings (the project's
-// context: privileged or not, its secret store, the roles of its groups,
-// the control plane): its ProjectManifestsDir whole, the manifests
-// previous holds there replaced, and its instances' identity (a Flux
-// HelmRelease's serviceAccountName), each path in
-// KeptProject.Rederived; kept says why. A privilege revoked or a role
-// taken back reaches a kept project at once: its instances are applied
-// with today's identity, which refuses what it no longer allows. A Flux target lists in its root Kustomization
-// (Flux.Keep) each kept project whose kustomization.yaml previous holds:
-// the Flux Kustomization of projects/ would prune it otherwise. For a Flux
-// or an Argo CD target, whose objects share one namespace, a release name
-// two namespaces of t share (CheckReleases), compiled or not, keeps the
-// projects of it too, each instance of it that compiled a KeptInstance
-// whose Err wraps a *ReleaseError, and, round after round, those that
-// depend on a release of them, the others written; then every release of
-// the projects written and of the kept projects' output is in one
-// namespace, else an error wrapping a *ReleaseError per release: one
-// release name is never written twice. Bytes only: the caller writes
-// them, and removes what it wrote before that they do not hold, the kept
-// projects' directories included (every file of theirs it keeps is in
-// files); previous holds what it wrote last: a caller that records the
-// revision of its sources it compiled names a kept project's instances
-// as of that revision.
-func TreeFiles(t *Tree, targets []Target, previous fs.FS) (files map[string][]byte, kept []KeptProject, err error) {
-	return output.Files(t, targets, previous)
-}
-
 // Regressions: the instances of after that do not deploy
 // (TreeInstance.Err) though they did in before, matched by namespace and
 // name, in after's order: what a change from before to after broke.
 func Regressions(before, after *Tree) []*TreeInstance {
 	return tree.Regressions(before, after)
-}
-
-// ReleaseTaken: the compiled instance of t, of another namespace than
-// namespace, whose release the compiled instance name of namespace has
-// too (CheckReleases: a-b/c and a/b-c are both a-b-c), nil when none.
-func ReleaseTaken(t *Tree, namespace, name string) *TreeInstance {
-	return output.ReleaseTaken(t, namespace, name)
-}
-
-// ReadArgoRoot: the ArgoSource of an Argo CD entry point, raw, a YAML
-// stream written by hand: the spec.source of its first Application that
-// has a repoURL, its targetRevision HEAD when it has none.
-func ReadArgoRoot(raw []byte) (*ArgoSource, error) { return argocd.ReadRoot(raw) }
-
-// ReadPublished: what the compiled instances of namespace publish in
-// output, a tree a target wrote (projects/ at its root): each InstanceDir
-// that holds a Chart.yaml, by release; none when output has no instance
-// of namespace.
-func ReadPublished(output fs.FS, namespace string) ([]Published, error) {
-	return helm.ReadPublished(output, namespace)
-}
-
-// ReadCompiled: the umbrella chart of the instance of release of
-// namespace in output, a tree a target wrote; an error wrapping
-// fs.ErrNotExist when it has no Chart.yaml there (not compiled yet).
-func ReadCompiled(output fs.FS, namespace, release string) (*Compiled, error) {
-	return helm.ReadCompiled(output, namespace, release)
 }
 
 // ParseConnection: the external connection name of connections, v, as
@@ -766,18 +603,6 @@ func LoadCatalog(repos []Repository) (*Catalog, error) {
 // does not provide what is referenced; a cycle; a release given twice.
 func NewGraph(results []*Result) (*Graph, error) {
 	return graph.New(results)
-}
-
-// Write: what `okdp-compile -o <dir>` writes for res, path in the
-// directory -> content: Chart.yaml, the instance as one chart, the
-// package's Chart.yaml with the dependencies compiled, an umbrella over the
-// upstream charts of its keys; UmbrellaValues, the final values of each key
-// under the key; InfoFile, when the instance publishes a URL, a usage
-// or a connection. When res has objects, UmbrellaValues holds them under
-// ObjectsChart, whose chart is one more dependency. res is what Compile
-// returned: Write does not check it again. Every file is built before Write returns.
-func Write(res *Result) (map[string][]byte, error) {
-	return helm.Write(res)
 }
 
 // ParseValues: a values file as Helm 3 reads it (its first document, YAML

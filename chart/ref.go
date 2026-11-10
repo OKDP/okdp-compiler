@@ -104,7 +104,7 @@ func compareNumbers(a, b string) int {
 }
 
 // Check: a repository URL, https:// or oci://, never http://, the chart
-// fetched in clear, that names a directory of the chart cache (cacheDir),
+// fetched in clear, that names a directory of the chart cache (CacheDir),
 // the name of a chart, a pinned version. where names the reference in the
 // errors.
 func (r Ref) Check(where string) error {
@@ -113,7 +113,7 @@ func (r Ref) Check(where string) error {
 		return fmt.Errorf("%s is required: the upstream chart (repository, chart, version)", where)
 	case strings.HasPrefix(r.Repository, "http://"):
 		return fmt.Errorf("%s.repository %q: http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
-	case r.cacheDir() == "":
+	case r.CacheDir() == "":
 		return fmt.Errorf("%s.repository %q: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
 	case !isChartName(r.Chart):
 		return fmt.Errorf("%s.chart %q: the name of a chart of the repository", where, r.Chart)
@@ -168,10 +168,10 @@ func (r Ref) repoDir(http bool) string {
 	return ""
 }
 
-// cacheDir: the directory of the chart cache that holds the charts of the
+// CacheDir: the directory of the chart cache that holds the charts of the
 // repository (repoDir) of a chart that is fetched: "" for http:// among
 // others. Check refuses such a repository.
-func (r Ref) cacheDir() string { return r.repoDir(false) }
+func (r Ref) CacheDir() string { return r.repoDir(false) }
 
 // Dir: the directory of the chart in the chart cache, slash-separated:
 // <repository without scheme>/<chart>-<version>/<chart>, the layout of the
@@ -198,7 +198,7 @@ func (r Ref) Dir() (string, error) {
 // of the chart cache, <repository>/<chart>-<version>/<chart> (helm pull
 // --untar creates the directory).
 func (r Ref) Pull() string {
-	to := path.Join("<chart cache>", r.cacheDir(), r.ID())
+	to := path.Join("<chart cache>", r.CacheDir(), r.ID())
 	if strings.HasPrefix(r.Repository, "oci://") {
 		return fmt.Sprintf("helm pull %s/%s --version %s --untar -d %s", strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version, to)
 	}

@@ -190,7 +190,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    `name` of `Chart.yaml`. Nothing below runs on invalid parameters.
 2. **Platform context** (`newInstance`). The settings of
    `global.okdp` the compiler reads are described by a schema it embeds,
-   `internal/okdp/rules/v1/schemas/platform.schema.json` (`platformSchema`, parsed once per
+   `internal/rules/v1/schemas/platform.schema.json` (`platformSchema`, parsed once per
    process by `chart.ParseSchema`): their types, the maps on the way to
    them, `clientProvisioning`'s values, the oidc-dcr Jobs' whole numbers,
    the keys of `charts`, the defaults. The settings are read from the
@@ -298,7 +298,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    each writes at its top level, kept or not (`Doc.Written`: those of its
    map as written, not those its `$merge` or a `$for` gives). They are
    checked together against a schema the compiler embeds,
-   `internal/okdp/rules/v1/schemas/mapping.schema.json` (`mappingSchema`, parsed once per
+   `internal/rules/v1/schemas/mapping.schema.json` (`mappingSchema`, parsed once per
    process by `chart.ParseSchema`), as `global.okdp` is (`schemaValues`; a
    null section is not set, another null refused where no default exists),
    every violation at once: the values a map of maps or nulls; `instance`
@@ -307,13 +307,13 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    `provides` item and an OAuth client of their keys and types; another
    shape fails rather than reads as empty or is printed
    ([sections](specs/02_service_definition.md#evaluation-order)).
-6. **OAuth clients** (`oidcClients`, `internal/okdp/rules/v1/charts/oidc-clients.cel.yaml`). The
+6. **OAuth clients** (`oidcClients`, `internal/rules/v1/charts/oidc-clients.cel.yaml`). The
    clients, of the form the mapping schema checks, are checked across
    clients in every mode, their names unique
    ([oidcClients](specs/02_service_definition.md#oidcclients)). In `dcr`
    mode, OIDC enabled, with at least one client, the platform's
    registration settings are checked, no two clients write one Secret, and
-   the embedded template `internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml` is evaluated
+   the embedded template `internal/rules/v1/charts/oidc-dcr.cel.yaml` is evaluated
    once per client, in the compile's session (`compile.Eval`, its
    section `values`), on the context plus `client` and `names`: the values
    of the client's chart, which stage 9 adds ([OAuth client
@@ -365,7 +365,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    dependencies](specs/02_service_definition.md#rendered-dependencies)).
    The compiler's own charts are then added, in one place (`ownChart`,
    `addOwnCharts`, `internal/okdp/objects.go`): the chart of each OAuth
-   client (`clientCharts`, `internal/okdp/rules/v1/charts/oidc-clients.cel.yaml`), its key reserved in
+   client (`clientCharts`, `internal/rules/v1/charts/oidc-clients.cel.yaml`), its key reserved in
    every mode, compiled in `dcr` mode. Neither `Chart.yaml` nor the values
    file may list one of these keys, the first in that order failing with a
    message naming what adds the chart; their specs
@@ -467,7 +467,7 @@ neither knows OKDP.
 | | `keep.go` | the objects Helm keeps (`helm.sh/resource-policy: keep`, `kept`) given Argo CD's sync options alike, `Prune=false` and `Delete=false`, merged with theirs (`keepSynced`) | `pipeline.go`, once the objects are assembled |
 | | `mapping.schema.json` | what a mapping writes that the compiler reads: the sections, their items and keys, and the argument of `okdpGeneratedSecret`, their types and meaning, embedded (`//go:embed`, `mappingSchema`); the package authors' reference | read by `mapping.go` (`runMapping`, `okdpGeneratedSecret`) |
 | | `generated-secret.cel.yaml` | the objects of `okdpGeneratedSecret`, on arguments the mapping schema checked: a template in the mapping language, embedded (`//go:embed`, `secretTemplate`): the Password generators and the ExternalSecret, their names, the defaults applied as Helm's `default` does, the `{{` of static keys escaped, the keys of one generator name refused | evaluated by `generatedSecret` (`mapping.go`), for the CEL function and `provides.go` |
-| | `rules.go`, `rulecheck.go` | the rule set (`LoadRules`, `RuleSet`): the tables, the schemas, the fragments and templates, the labels, the charts the compiler adds; its documents prepared once and kept free between compiles (`checker`), evaluated by the walkers (`refuse`, `values`), each failing closed | `compile.Prepare`; `internal/okdp/rules/v1`, the standard set |
+| | `rules.go`, `rulecheck.go` | the rule set (`LoadRules`, `RuleSet`): the tables, the schemas, the fragments and templates, the labels, the charts the compiler adds; its documents prepared once and kept free between compiles (`checker`), evaluated by the walkers (`refuse`, `values`), each failing closed | `compile.Prepare`; `internal/rules/v1`, the standard set |
 | | `platform.schema.json` | the settings of `global.okdp` the compiler reads: their types, their defaults, their meaning, embedded (`//go:embed`, `platformSchema`); the platform authors' reference | read by `context.go` (`newInstance`) |
 | | `oidc-dcr.cel.yaml` | the values of a client chart: a template in the mapping language, embedded (`//go:embed`, `dcrTemplate`) | reads the context, with `platform.oidc.dcr` built by `context.go`, and the `client` and `names` given by `oidc.go` |
 | | `provides.go` | stage 7: `Info`, `Output`, `SecretRef`, what the instance publishes (`published`); the outputs, each checked against its contract, two of one contract and name refused (`provided`, `twice`), the credentials Secrets (`credentialsSecret`), a plain one refused unless `Inputs.AllowPlainSecrets` | `connections.go` (the contracts, the resolver), `generatedSecret` (`mapping.go`) |
@@ -514,8 +514,8 @@ reproduces Helm's and sprig's functions, bound to CEL;
 `chart/cache.go` reads the chart cache; `chart/merge.go`
 applies the rules of the package's charts (`okdp.yaml`'s `defaults` and
 `upstream`); `internal/okdp` implements OKDP's rules,
-`internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml` the values of the oidc-dcr chart,
-`internal/okdp/rules/v1/fragments/generated-secret.cel.yaml` the objects of a generated
+`internal/rules/v1/charts/oidc-dcr.cel.yaml` the values of the oidc-dcr chart,
+`internal/rules/v1/fragments/generated-secret.cel.yaml` the objects of a generated
 Secret, `internal/okdp/fragment-*.cel.yaml` those of the fragments, and
 `internal/okdp/pipeline.go` orders the stages. Each rule is
 computed in one place and reused: the labels of the context, of
@@ -647,7 +647,7 @@ sees a copy of the parameters while the merges use them as written.
 
 The values of an OAuth client's chart
 ([OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts))
-are computed by `internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml`, a template in the mapping
+are computed by `internal/rules/v1/charts/oidc-dcr.cel.yaml`, a template in the mapping
 language embedded in the compiler (`//go:embed`), not by Go code:
 
 - They are values of the oidc-dcr chart: YAML shaped like its
@@ -669,16 +669,16 @@ language embedded in the compiler (`//go:embed`), not by Go code:
   compile stays hermetic
   ([Everything through fs.FS](#everything-through-fsfs)).
 
-What stays Go (`internal/okdp/rules/v1/charts/oidc-clients.cel.yaml`) is what a per-client template cannot
+What stays Go (`internal/rules/v1/charts/oidc-clients.cel.yaml`) is what a per-client template cannot
 express, or what more than one reader needs:
 
 - the checks across clients
   ([oidcClients](specs/02_service_definition.md#oidcclients)), with errors
   naming the client; the form of each client is the mapping schema's,
-  `internal/okdp/rules/v1/schemas/mapping.schema.json`;
+  `internal/rules/v1/schemas/mapping.schema.json`;
 - the mode (no chart in `existing` mode) and what `dcr` mode requires of
   the platform's settings (their types and defaults are the platform
-  schema's, `internal/okdp/rules/v1/schemas/platform.schema.json`);
+  schema's, `internal/rules/v1/schemas/platform.schema.json`);
 - the names: the chart key, the objects' full name (cut to 63 characters,
   as `okdpFullname`), the Secret.
   The Secret name is also what
@@ -691,7 +691,7 @@ express, or what more than one reader needs:
   one place (`addOwnCharts`).
 
 The objects of `okdpGeneratedSecret` are a template too,
-`internal/okdp/rules/v1/fragments/generated-secret.cel.yaml`, for the same reasons: the
+`internal/rules/v1/fragments/generated-secret.cel.yaml`, for the same reasons: the
 Password generators and the ExternalSecret are manifests, written as YAML,
 their names and defaults as expressions. The function evaluates it at each
 call (`generatedSecret`), in the session running the expression that calls
@@ -1592,13 +1592,13 @@ versions supported and the disclosure.
   `hostFunctions` (`functions.go` of github.com/okdp/cel2yaml); an OKDP function, or
   one that needs the compile context, goes in `functions`
   (`internal/okdp/mapping.go`), as `okdpFullname`, `okdpGeneratedSecret` and
-  `oidcClientSecret` (`oidcFunctions`, `internal/okdp/rules/v1/charts/oidc-clients.cel.yaml`) do. Names
+  `oidcClientSecret` (`oidcFunctions`, `internal/rules/v1/charts/oidc-clients.cel.yaml`) do. Names
   mappings bind themselves are avoided (`okdpFullname`, since mappings bind
   `fullname`). A function reproducing a Helm or sprig one gets a
   `generate.sh` case and a `TestHelm*` comparison; every function
   gets an entry in [Functions](specs/04_functions.md).
 - **Platform context.** A new setting of `global.okdp` the compiler reads
-  is a property of `internal/okdp/rules/v1/schemas/platform.schema.json`: its type, its
+  is a property of `internal/rules/v1/schemas/platform.schema.json`: its type, its
   default, its meaning in its `description`, checked and defaulted with
   the others (`newInstance`), with a test case in `context_test.go`, and a
   row of [Fields the compiler
@@ -1611,10 +1611,10 @@ versions supported and the disclosure.
   read by the template as `platform.oidc.dcr`, and a row of [OAuth client
   settings](specs/01_inputs_outputs.md#oauth-client-settings).
 - **The oidc-dcr values.** A value of the oidc-dcr chart (a new one, a key
-  a new version renames) is set in `internal/okdp/rules/v1/charts/oidc-dcr.cel.yaml`, with its
+  a new version renames) is set in `internal/rules/v1/charts/oidc-dcr.cel.yaml`, with its
   expectations in `oidc_test.go`, not in Go
   ([The oidc-dcr template](#the-oidc-dcr-template)). A new client key also
-  goes in `internal/okdp/rules/v1/schemas/mapping.schema.json`, with its type and its
+  goes in `internal/rules/v1/schemas/mapping.schema.json`, with its type and its
   `description`, and in
   [oidcClients](specs/02_service_definition.md#oidcclients).
 - **Contracts** are data: a new contract, or new `x-okdp-secret`,

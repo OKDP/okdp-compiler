@@ -66,7 +66,7 @@ func TestConnectionRefs(t *testing.T) {
 // A contract as the compile reads it: its fields in the order of the
 // file, the secret ones apart.
 func TestReadContract(t *testing.T) {
-	contracts := os.DirFS("examples/02_advanced/input/db/contracts")
+	contracts := os.DirFS("testdata/advanced/contracts")
 	d, err := compiler.ReadContract(contracts, "database")
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestValuesAndNames(t *testing.T) {
 // A connection is checked at its declaration as the compile of a tree
 // checks it, whatever references it.
 func TestCheckConnection(t *testing.T) {
-	contracts := os.DirFS("examples/02_advanced/input/db/contracts")
+	contracts := os.DirFS("testdata/advanced/contracts")
 	c := compiler.Connection{Name: "pg", Contract: "database", Values: map[string]any{"host": "db", "dbName": "app"}, SecretRef: "pg"}
 	if err := compiler.CheckConnection(contracts, "demo", c, nil); err != nil {
 		t.Fatal(err)
