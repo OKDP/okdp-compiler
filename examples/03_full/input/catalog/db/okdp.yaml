@@ -1,0 +1,21 @@
+# OKDP's part of the db package: it provisions database connections, a
+# database of the server for each claim bound to its instance (claims: id,
+# contract, namespace, name, request), and publishes each, an output named
+# after the claim's ID, the size it requested granted (request.size, the
+# contract's claim schema's default when it asks none), its credentials
+# Secret (<id>-credentials) generated.
+
+provisions: [database]
+
+provides:
+  - $for: c in claims
+    $each:
+      contract: database
+      name: ${{ c.id }}
+      values:
+        host: ${{ release.name }}-db.${{ release.namespace }}.svc
+        dbName: ${{ c.id.replace('.', '_').replace('-', '_') }}
+        size: ${{ c.request.size }}
+      secretRef: {name: '${{ c.id }}-credentials'}
+      secret:
+        generate: [{key: password}]

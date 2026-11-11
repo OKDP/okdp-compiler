@@ -1,0 +1,9 @@
+# OKDP's defaults for the scheduler, the second render of the workspace
+# chart: its own, not those of api.
+image:
+  tag: 3.2.0
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 512Mi}
+config:
+  workspace.scheduler.maxConcurrentRuns: "4"

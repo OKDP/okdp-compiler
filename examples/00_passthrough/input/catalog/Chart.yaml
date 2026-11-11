@@ -1,0 +1,9 @@
+# The package of the echo service: its name, its version, and the upstream
+# chart it deploys, under its own name, echo, no alias. No okdp.yaml, no
+# config.schema.json: the instance has no parameter, OKDP adds nothing.
+
+apiVersion: v2
+name: echo
+version: 1.2.0
+dependencies:
+  - {name: echo, repository: https://charts.example.org, version: 1.2.0}

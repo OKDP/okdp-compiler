@@ -1,0 +1,131 @@
+# The values of each dependency of Chart.yaml, by key, the charts' values
+# the mapping computes: they see the bindings of okdp.yaml (vars). Every
+# dependency is rendered, but one whose key is left out ($if) or null.
+api:
+  fullnameOverride: ${{ api }}
+  mode: server
+  replicaCount: ${{ values.replicas }}           # a lone expression keeps its type: a number
+  resources: ${{ sizes[values.size] }}
+  podLabels: ${{ labels }}                       # the binding, with the cost center
+  podAnnotations:
+    checksum/settings: ${{ sha256(toJson(settings)) }}   # toJson sorts the keys
+    workspace.example.org/catalogs: ${{ base64.encode(bytes(json.encode(catalogNames))) }}
+  nodeSelector:
+    okdp.io/node-pool: {$if: "${{ project.?nodePool.hasValue() }}", $value: "${{ project.?nodePool.orValue('') }}"}
+  tolerations:
+    - $for: "pool in [project.?nodePool.orValue('')].filter(p, p != '')"
+      $each: {key: okdp.io/node-pool, operator: Equal, value: "${{ pool }}", effect: NoSchedule}
+  env: ${{ env }}
+  ingress:
+    enabled: true
+    className: ${{ global.okdp.ingress.className }}
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: 64m
+      nginx.ingress.kubernetes.io/whitelist-source-range: {$if: "${{ ranges.size() > 0 }}", $value: "${{ ranges.join(',') }}"}
+      $merge: ${{ platform.ingressAnnotations }}  # cert-manager.io/cluster-issuer, over the keys above
+    hosts:
+      - host: ${{ host }}
+        paths: [{path: /, pathType: Prefix}]
+    tls:
+      - hosts: ["${{ host }}"]
+        secretName: ${{ okdpFullname('tls') }}
+  config:                                        # keys with dots
+    workspace.auth.issuer: ${{ global.okdp.oidc.issuerUri }}
+    workspace.auth.realm: ${{ global.okdp.oidc.issuerUri.split('/').filter(s, s != '').last().orValue('') }}
+    workspace.auth.scope: ${{ platform.oidc.scope }} offline_access
+    workspace.auth.consoleSecret: ${{ oidcClientSecret('console') }}   # a named client's Secret
+    workspace.storage.endpoint: ${{ storage.?endpoint.orValue('') }}
+    workspace.storage.bucket: ${{ storage.?bucket.orValue('') }}
+    workspace.storage.pathStyle: ${{ str(storage.?pathStyle.orValue(false)) }}
+    workspace.notifications.url: ${{ webhook.?internalUrl.orValue('') }}
+    workspace.notifications.channels: ${{ values.notifications.channels.join(',') }}
+    $merge: >-
+      ${{ values.extraEnv.transformMapEntry(k, v,
+          {'workspace.env.' + k.lowerAscii().replace('workspace_', ''): v}) }}
+  # A map, one key per element: $for with $key and $value.
+  catalogs:
+    $for: c in values.catalogs
+    $vars:
+      cdb: '${{ type(c.?database.orValue("")) == map ? c.database : {} }}'
+    $key: ${{ c.name }}
+    $value:
+      storage:
+        endpoint: ${{ c.storage.endpoint }}
+        bucket: ${{ c.storage.bucket }}
+        region: ${{ c.storage.region }}
+        pathStyle: ${{ c.storage.?pathStyle.orValue(false) }}
+        credentials: ${{ c.storage.?secretRef.name.orValue('') }}
+      database:
+        $if: ${{ cdb.size() > 0 }}               # left out for a catalog without one
+        url: jdbc:${{ cdb.engine }}://${{ cdb.host }}:${{ str(cdb.port) }}/${{ cdb.dbName }}
+        driver: ${{ cdb.driver }}
+        credentials: ${{ cdb.secretRef.name }}
+        from: ${{ cdb.okdp.source }}             # external, output or claim
+      properties: ${{ c.?properties.orValue({}) }}
+
+scheduler:                                       # the second render of the workspace chart
+  fullnameOverride: ${{ okdpFullname('scheduler') }}
+  mode: scheduler
+  podLabels: ${{ labels }}
+  env:
+    - $spread: ${{ env }}
+    - name: WORKSPACE_API_URL
+      value: ${{ internalUrl }}
+    - $for: "s in (values.admins.size() > 0 ? [okdpFullname('automation')] : [])"
+      $each:                                     # the automation client's Secret, a name it sets
+        - name: AUTOMATION_CLIENT_ID
+          valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_id}}
+        - name: AUTOMATION_CLIENT_SECRET
+          valueFrom: {secretKeyRef: {name: "${{ s }}", key: client_secret}}
+  config:
+    workspace.pipeline.template: ${{ pipelineTemplate }}
+  schedules:
+    - $for: c in values.catalogs
+      $vars:
+        slug: ${{ c.name.replace('_', '-') }}
+      $each:
+        - name: sync-${{ slug }}
+          cron: "0 * * * *"
+          catalog: ${{ c.name }}
+          notify:                                # a $for in an $each sees the outer variable
+            - $for: ch in values.notifications.channels
+              $each: {channel: "${{ ch }}", when: failure, subject: "${{ c.name }} sync failed"}
+        - $if: ${{ c.?properties.?format.orValue('') == 'parquet' }}
+          name: compact-${{ slug }}
+          cron: "30 4 * * 0"
+          catalog: ${{ c.name }}
+
+gateway:
+  fullnameOverride: ${{ gateway }}
+  replicaCount: ${{ int(values.replicas) + 1 }}  # values numbers are doubles: int() for int arithmetic
+  upstreams: ${{ apiPods.map(p, p + ':8080') }}
+  routes:                                        # a map from a list
+    $for: r in routes
+    $key: ${{ r.path }}
+    $value: ${{ r.target }}
+  headers: >-                                    # an optional entry: left out when none
+    ${{ {'X-Workspace-Instance': release.name, ?'X-Workspace-Cost-Center': optional.ofNonZeroValue(costCenter)} }}
+  rateLimit: ${{ '%d/s'.format([int(values.replicas) * 50]) }}
+  config: |
+    # gateway.conf: a file with expressions in it
+    server_name ${{ gatewayHost }};
+    banner ${{ strings.quote('Workspace ' + release.name + ' of ' + projectName) }};
+    upstream ${{ api }} { ${{ apiPods.map(p, 'server ' + p + ':8080;').join(' ') }} }
+
+metrics:
+  $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
+  fullnameOverride: ${{ okdpFullname('metrics') }}
+  interval: ${{ values.features.metrics.interval }}
+  scrapeTimeout: ${{ duration(values.features.metrics.interval) - duration('5s') }}   # a duration, as text
+  labels: ${{ okdpSelectorLabels('metrics') }}
+  targets: >-
+    ${{ [apiPods.map(p, 'http://' + p + ':9090/metrics'),
+         ['http://' + gateway + ':9090/metrics', 'http://' + gateway + ':9090/metrics']].flatten().distinct() }}
+  serviceMonitor:
+    enabled: true
+    labels: ${{ labels }}
+
+backup:
+  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read from the chart cache
+  schedule: ${{ values.features.backup.schedule }}
+  bucket: ${{ storage.?bucket.orValue('') }}

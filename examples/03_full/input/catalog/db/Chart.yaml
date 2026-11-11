@@ -1,0 +1,9 @@
+# A minimal package of the db service, a database server that provisions
+# a database for each claim bound to its instance: one upstream chart,
+# under the key postgresql; no parameter.
+
+apiVersion: v2
+name: db
+version: 1.0.0
+dependencies:
+  - {name: postgresql, repository: https://charts.example.org, version: 16.0.0}

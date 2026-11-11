@@ -1,0 +1,14 @@
+# The platform values: the ingress's suffix and class, the OIDC provider the
+# sign-in proxy of a workload uses (its OAuth client is the instance's, the
+# main one, existing: the platform registers it beforehand), the CA bundle
+# it trusts.
+global:
+  okdp:
+    ingress:
+      suffix: okdp.example.org
+      className: nginx
+    tls:
+      clusterIssuer: okdp-ca
+      caBundleSecret: okdp-ca-bundle
+    oidc:
+      issuerUri: https://sso.okdp.example.org/realms/okdp

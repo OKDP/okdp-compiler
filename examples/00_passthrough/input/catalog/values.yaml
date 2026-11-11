@@ -1,0 +1,9 @@
+# The values of the echo chart the platform sets, under its key, as an
+# umbrella chart's values.yaml holds them: plain YAML, no expression. The
+# compile writes them over the chart's defaults, every instance alike.
+echo:
+  image:
+    tag: 1.2.0
+  resources:
+    requests: {cpu: 10m, memory: 16Mi}
+    limits: {memory: 32Mi}

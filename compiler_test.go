@@ -21,7 +21,7 @@ import (
 )
 
 // example: the example package
-// (testdata/advanced/catalog/webapp/1.0.0), and the inputs of
+// (examples/02_advanced/input/catalog/webapp), and the inputs of
 // its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
 // and its database's claim, bound to demo-db, with what demo-db publishes
 // for it.
@@ -34,15 +34,15 @@ func finalize(in compiler.FinalInput) (map[string]map[string]any, map[string]com
 }
 
 func example() (*compiler.Definition, compiler.Inputs) {
-	def, err := compiler.LoadDefinition(os.DirFS("testdata/advanced/catalog/webapp/1.0.0"))
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"))
 	if err != nil {
 		panic(err)
 	}
 	in := compiler.Inputs{
 		Finalize:  finalize,
-		Contracts: os.DirFS("testdata/advanced/contracts"),
-		Context:   []compiler.ContextLayer{{Values: values("testdata/advanced/platform.yaml")}},
-		Values:    []map[string]any{values("testdata/advanced/projects/demo/instances/webapp/config.yaml")},
+		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
+		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/config/platform.yaml")}},
+		Values:    []map[string]any{values("examples/02_advanced/input/config/demo/webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 		Bindings: map[string]compiler.Binding{"database": {
@@ -178,7 +178,7 @@ func TestLayers(t *testing.T) {
 // provider granted it, and the namespaces it lets claim of it, its
 // instance.yaml's claimers.
 func TestCompileTree(t *testing.T) {
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: os.DirFS("testdata/claims"), Role: compiler.RoleTree}})
+	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestCheckProjectName(t *testing.T) {
 // instance; one that does not load, a *LoadError of every problem, the
 // errors it is of unwrapped.
 func TestBuild(t *testing.T) {
-	repos := []compiler.Repository{{Name: "db", FS: os.DirFS("testdata/claims"), Role: compiler.RoleTree}}
+	repos := []compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}}
 	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{CostLimit: 1_000_000, AllowPlainSecrets: true})
 	if err != nil {
 		t.Fatal(err)

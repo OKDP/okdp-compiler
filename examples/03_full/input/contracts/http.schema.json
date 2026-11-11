@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HTTP endpoint",
+  "description": "Example contract: an HTTP service, its public URL and its URL in the cluster.",
+  "type": "object",
+  "x-okdp-contract": "http",
+  "properties": {
+    "url": {"type": "string", "pattern": "^https://"},
+    "internalUrl": {"type": "string", "pattern": "^http://"}
+  },
+  "required": ["url", "internalUrl"],
+  "additionalProperties": false
+}

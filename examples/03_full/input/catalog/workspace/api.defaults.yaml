@@ -1,0 +1,10 @@
+# OKDP's defaults for the api chart, the same for every instance: over the
+# chart's values.yaml, under the values the mapping computes.
+image:
+  tag: 3.2.0                           # pinned, the chart's default follows its appVersion
+  pullPolicy: IfNotPresent
+persistence:
+  size: 20Gi
+config:
+  workspace.server.port: "8080"
+  workspace.session.timeout: 8h
