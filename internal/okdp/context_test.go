@@ -155,15 +155,15 @@ func TestPlatformSchema(t *testing.T) {
 		"tls": {M{"okdp": M{"tls": M{"clusterIssuer": true, "caBundleSecret": nil}, "certificateIssuers": M{"selfSigned": M{"name": "ca"}}}},
 			"- at '/global/okdp/certificateIssuers': false schema\n- at '/global/okdp/tls': validation failed\n  - at '/global/okdp/tls/caBundleSecret': got null, want string\n  - at '/global/okdp/tls/clusterIssuer': got boolean, want string"},
 		"serviceCatalog": {M{"okdp": M{"serviceCatalog": M{"categories": []any{}}}}, "- at '/global/okdp/serviceCatalog': false schema"},
-		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "oidcDCR": M{}, "dcr": nil}}},
-			"- at '/global/okdp/charts': additional properties 'dcr', 'oidcDCR' not allowed\n- at '/global/okdp/charts/objects': got string, want object\n- at '/global/okdp/charts/oidcDcr/version': got number, want string"},
+		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "dcr": nil}}},
+			"- at '/global/okdp/charts': additional properties 'dcr', 'oidcDcr' not allowed\n- at '/global/okdp/charts/objects': got string, want object"},
 		"classes": {M{"okdp": M{"provisioning": M{
 			"server":   M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg", "request": M{"size": "1Gi"}}}},
 			"database": M{"default": float64(1), "other": true, "classes": M{"Fast": M{"provider": "data/pg"}, "slow": M{"request": "1Gi", "tier": "b"}}},
 		}}},
 			"- at '/global/okdp/provisioning/database': additional properties 'other' not allowed\n- at '/global/okdp/provisioning/database/classes': validation failed\n  - at '/global/okdp/provisioning/database/classes': additional properties 'Fast' not allowed\n  - at '/global/okdp/provisioning/database/classes/slow': validation failed\n    - at '/global/okdp/provisioning/database/classes/slow': additional properties 'tier' not allowed\n    - at '/global/okdp/provisioning/database/classes/slow': missing property 'provider'\n    - at '/global/okdp/provisioning/database/classes/slow/request': got string, want object\n- at '/global/okdp/provisioning/database/default': got number, want string"},
 		"null, a default":  {M{"okdp": M{"oidc": M{"scope": "", "clientProvisioning": nil, "dcr": M{"caSecret": "", "ttlSeconds": nil}}}}, ""},
-		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "ingress": nil, "charts": M{"oidcDcr": nil}}}, "- at '/global/okdp/charts/oidcDcr': got null, want object\n- at '/global/okdp/ingress': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
+		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "ingress": nil, "charts": M{"objects": nil}}}, "- at '/global/okdp/charts/objects': got null, want object\n- at '/global/okdp/ingress': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
 		"no global":        {nil, ""},
 		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}, "oidc": M{"dcr": M{"registrationUrl": 1}}}, "imageRegistry": 1}, ""},
 	} {

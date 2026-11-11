@@ -197,10 +197,12 @@ templates:
 # The sections of a mapping besides the compiler's own (output, instance,
 # provides, objects).
 sections: [oidcClients]
-# The charts the compiler adds, each overridden by global.okdp.charts.<name>.
+# The charts the compiler adds. objects is overridden by
+# global.okdp.charts.objects; oidcDcr is what the OAuth clients' values are
+# checked against, the version okdp-objects holds.
 charts:
   oidcDcr: {repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.6.0}
-  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 1.0.0}
+  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 2.0.0}
 # Documents the others call: rule(<name>, input) in a document, a function of
 # functions, scope (what a mapping sees as platform).
 documents:

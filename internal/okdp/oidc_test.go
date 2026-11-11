@@ -408,14 +408,6 @@ app:
 			}
 		})
 	}
-	// The platform may name another oidc-dcr chart, a mirror.
-	mirror := chart.Ref{Repository: "oci://mirror.example.org/adaltas", Chart: "oidc-dcr", Version: "0.5.1"}
-	mirrored := maps.Clone(charts)
-	mirrored["mirror.example.org/adaltas/oidc-dcr-0.5.1/oidc-dcr/values.yaml"] = ch["quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml"]
-	res, err := compile("", false, app, mirrored, M{"replicas": 1, "global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": mirror.Repository, "chart": mirror.Chart, "version": mirror.Version}}}}})
-	if err != nil || res.Charts["oidc-dcr"] != mirror {
-		t.Errorf("global.okdp.charts.oidcDcr: %v %#v", err, res)
-	}
 	// In existing mode, the chart cache needs no oidc-dcr chart.
 	if _, err := compile("", true, app, charts, M{"replicas": 2}); err != nil {
 		t.Errorf("existing mode without oidc-dcr: %v", err)

@@ -29,6 +29,8 @@ errors:
         ${{ size(same) > 0 && names[i] == "" ? where[i] + ": " + where[same[0]] + " has no name either: only the service's main client (chart oidc-dcr) has none, name the others"
           : size(same) > 0 ? where[i] + ": " + where[same[0]] + " has the same name: client names must be unique"
           : where[i] + ": secret " + quote(given[i]) + ": the Secret the client is written to is the release's, " + quote(want) + " (<release>-<client name>, <release>-oidc for the main client)" }}
+  - $if: ${{ dcr && size(items) > 5 }}
+    $value: 'oidcClients: ${{ string(size(items)) }} OAuth clients: the okdp-objects chart holds 5'
   - $if: ${{ size(items) > 0 && dcr && !(auth in ["anonymous", "initialAccessToken"]) }}
     $value: 'global.okdp.oidc.dcr.authMethod ${{ quote(auth) }} is not supported: anonymous or initialAccessToken'
   - $if: ${{ size(items) > 0 && dcr && (type(url) != string || url == "") }}

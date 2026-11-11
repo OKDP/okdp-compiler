@@ -615,7 +615,6 @@ objects:
 		"not an object": {"objects: [{metadata: {name: x}}]\n", nil, "- at '/objects/0': missing property 'kind'"},
 		"null charts":   {"", M{"global": M{"okdp": M{"charts": nil}}}, "- at '/global/okdp/charts': got null, want object"},
 		"objects chart": {"", M{"global": M{"okdp": M{"charts": M{"objects": M{"repository": "quay.io"}}}}}, `global.okdp.charts.objects.repository "quay.io": the URL of a chart repository`},
-		"oidcDcr":       {"", M{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"repository": "quay.io"}}}}}, `global.okdp.charts.oidcDcr.repository "quay.io": the URL of a chart repository`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := *def

@@ -92,7 +92,7 @@ func TestMetadataCheck(t *testing.T) {
 		"no chart name":  {chart(app, with(func(d *Dependency) { d.Name, d.Alias = "", "api" })), "Chart.yaml: dependencies[1].name is required"},
 		"a path":         {chart(with(func(d *Dependency) { d.Name = "a/b" })), `Chart.yaml: dependencies[0].name "a/b": the name of a chart of the repository`},
 		"..":             {chart(with(func(d *Dependency) { d.Name, d.Alias = "..", "app" })), `Chart.yaml: dependencies[0].name "..": the name of a chart of the repository`},
-		"condition":      {chart(app, with(func(d *Dependency) { d.Alias, d.Condition = "api", "api.enabled" })), "Chart.yaml: dependencies[1] (api): condition: the values decide what is rendered ($if on api in values.cel.yaml)"},
+		"condition":      {chart(app, with(func(d *Dependency) { d.Alias, d.Condition = "api", "other.enabled" })), "Chart.yaml: dependencies[1] (api): condition: the values decide what is rendered ($if on api in values.cel.yaml)"},
 		"tags":           {chart(with(func(d *Dependency) { d.Tags = []any{"a"} })), "Chart.yaml: dependencies[0] (app): tags: the values decide what is rendered ($if on app in values.cel.yaml)"},
 		"enabled false":  {chart(with(func(d *Dependency) { d.Enabled = false })), "Chart.yaml: dependencies[0] (app): enabled: the values decide what is rendered"},
 		"import-values":  {chart(with(func(d *Dependency) { d.ImportValues = []any{"data"} })), "Chart.yaml: dependencies[0] (app): import-values: the values decide what is rendered"},
@@ -132,5 +132,18 @@ func TestDependencyKeys(t *testing.T) {
 		if want := fmt.Sprintf("Chart.yaml: dependencies[0] (%s): key %q: a DNS label", key, key); ok && err != nil || !ok && (err == nil || !strings.HasPrefix(err.Error(), want)) {
 			t.Errorf("%q: got %v", key, err)
 		}
+	}
+}
+
+// TestConditionEnabled: a dependency the chart, installed as it is, may leave
+// out: <key>.enabled, of its key alone.
+func TestConditionEnabled(t *testing.T) {
+	d := Dependency{Name: "app", Alias: "api", Condition: "api.enabled"}
+	if name, refused := d.refused(); refused {
+		t.Errorf("%s refused", name)
+	}
+	d.Condition = "app.enabled"
+	if _, refused := d.refused(); !refused {
+		t.Error("the condition of another key accepted")
 	}
 }

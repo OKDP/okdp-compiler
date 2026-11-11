@@ -94,6 +94,11 @@ func (d Dependency) refused() (string, bool) {
 		name string
 		v    any
 	}{{"condition", d.Condition}, {"tags", d.Tags}, {"enabled", d.Enabled}, {"import-values", d.ImportValues}} {
+		// <key>.enabled: how the chart, installed as it is, leaves out a
+		// dependency the mapping leaves out.
+		if f.name == "condition" && f.v == d.Key()+".enabled" {
+			continue
+		}
 		if f.v != nil {
 			return f.name, true
 		}

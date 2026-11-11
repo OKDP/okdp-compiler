@@ -80,7 +80,7 @@ func TestRequire(t *testing.T) {
 		"empty":                  {[]map[string]any{{"global": M{"okdp": M{"oidc": M{"issuerUri": ""}}}}}, missing},
 		"in order":               {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}}}}}, "global.okdp.ingress.suffix is required"},
 		"before the mapping":     {[]map[string]any{{"replicas": 11}}, missing},
-		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"oidcDcr": M{"version": "1.x"}}}}}}, missing},
+		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}}, missing},
 		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}, "oidc": M{"enabled": "yes"}}}}}, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/oidc/enabled': got string, want boolean"},
 	} {
 		_, err := Compile(context.Background(), &d, inputs(tc.layers...))

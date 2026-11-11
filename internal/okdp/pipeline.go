@@ -129,6 +129,9 @@ type Result struct {
 	// file, which it renders as written, in its release (helm.Write). nil
 	// when there is none.
 	Objects []map[string]any
+	// OwnCharts: the keys of Values the compiler added itself, sorted: the
+	// OAuth clients', which the okdp-objects chart renders.
+	OwnCharts []string
 	// KeepSync: what the writer tells Argo CD of the objects Helm keeps, the
 	// rule set's.
 	KeepSync ruleset.KeepSync
@@ -403,6 +406,12 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 		return err
 	}
 	out.Computed = value.AsMap(value.Copy(output))
+	for _, c := range own {
+		if c.values != nil {
+			out.OwnCharts = append(out.OwnCharts, c.key)
+		}
+	}
+	slices.Sort(out.OwnCharts)
 	var warnings []string
 	if in.Finalize != nil {
 		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Rules: in.rules(), Settings: inst.okdp, Namespace: in.Namespace, Privileged: out.Privileged, AllowPlainSecrets: in.AllowPlainSecrets})
