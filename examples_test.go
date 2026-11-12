@@ -121,9 +121,6 @@ func TestExample(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for i := range instances {
-				instances[i].Inputs.Finalize = finalize
-			}
 			_, statErr := os.Stat(filepath.Join("examples", e.Name(), "input", "catalog", "Chart.yaml"))
 			single := statErr == nil
 			got := map[string][]byte{}

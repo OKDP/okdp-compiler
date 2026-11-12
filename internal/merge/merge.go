@@ -9,7 +9,7 @@
 // mapping sees them as written (values.upstream.<chart>), and they are
 // applied with their checks after it (FinalValues), the package's
 // (protect) and the caller's (UpstreamCheck: the platform's policy).
-package finaltest
+package merge
 
 import (
 	"fmt"

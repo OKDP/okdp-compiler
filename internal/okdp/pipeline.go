@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/okdp/okdp-compiler/internal/merge"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"io/fs"
 	"slices"
@@ -51,8 +52,8 @@ type Inputs struct {
 	// Rules: the rule set of the compile; nil, the standard one.
 	Rules *RuleSet
 	// Finalize: what makes the final values of the charts of the compile
-	// from what it computed; nil, Result.Values stays nil: Result.Computed is
-	// the compile's.
+	// from what it computed; nil, Helm's merge, no policy over the upstream
+	// values: a host adds it (okdp-gitops).
 	Finalize Finalize
 	// CheckGlobals: the host's policy on the keys of global a project sets,
 	// before the mapping runs; nil, none.
@@ -415,6 +416,8 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 	var warnings []string
 	if in.Finalize != nil {
 		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Rules: in.rules(), Settings: inst.okdp, Namespace: in.Namespace, Privileged: out.Privileged, AllowPlainSecrets: in.AllowPlainSecrets})
+	} else {
+		out.Values, out.Charts, warnings, err = merge.FinalValues(in.memo.charts, def.Files, specs, def.valuesName(), output, inst.values, nil)
 	}
 	if err != nil {
 		return err

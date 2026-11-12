@@ -27,7 +27,7 @@
 //	filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]
 //	config["spark.ui.filters"]
 //	config["spark.history.*"]
-package finaltest
+package merge
 
 import (
 	"fmt"

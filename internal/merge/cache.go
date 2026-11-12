@@ -4,7 +4,7 @@
 // <cache>/<repository>/<chart>-<version>` writes it:
 // <repository>/<chart>-<version>/<chart>/. The compiler reads nothing else
 // of a chart: a deployer renders it from its repository.
-package finaltest
+package merge
 
 import (
 	"bytes"

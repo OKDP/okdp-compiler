@@ -484,7 +484,7 @@ type BuildOptions struct {
 	Charts ChartSource
 	// Rules: Inputs.Rules of each instance; nil, the standard rule set.
 	Rules *RuleSet
-	// Finalize: Inputs.Finalize of each instance; nil, no final values.
+	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
 	Finalize Finalize
 	// CheckGlobals: Inputs.CheckGlobals of each instance; nil, none.
 	CheckGlobals func(GlobalsInput) error

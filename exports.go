@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/internal/merge"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/repository"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
@@ -14,6 +16,8 @@ type (
 	GlobalLayer = okdp.GlobalLayer
 	// GlobalsInput: what Inputs.CheckGlobals checks.
 	GlobalsInput = okdp.GlobalsInput
+	// ChartCaches: the chart caches of a set of compiles, for a Finalize.
+	ChartCaches = merge.Caches
 	// KeepSync: what a writer tells Argo CD of the objects Helm keeps.
 	KeepSync = ruleset.KeepSync
 	// InstanceSpec: an instance.yaml, as ParseInstance reads it.
@@ -49,6 +53,13 @@ const (
 	CheckUpstreamKey         = ruleset.CheckUpstreamKey
 	CheckHost                = ruleset.CheckHost
 )
+
+// FinalValues: Helm's merge of the final values of the input, check what is
+// refused of the upstream values of every key (nil, nothing): what a compile
+// does without a Finalize, for one that adds a policy to it.
+func FinalValues(caches *ChartCaches, in FinalInput, check chart.UpstreamCheck) (map[string]map[string]any, map[string]ChartRef, []string, error) {
+	return merge.FinalValues(caches.Get(in.Charts), in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, check)
+}
 
 // DefaultRules: the standard rule set. Temporary: the hosts will give it.
 func DefaultRules() *RuleSet { return ruleset.Default() }

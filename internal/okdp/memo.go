@@ -1,7 +1,8 @@
 // Memo: the inputs a compile reads that do not change while the compiles
 // of a set of instances run, read once for all of them: an instance's
 // parameters (its schema, the layers merged and checked), a contract
-// (read, decoded and compiled).
+// (read, decoded and compiled), an upstream chart (read, its schema
+// compiled).
 
 package okdp
 
@@ -11,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/internal/merge"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -24,6 +26,7 @@ type Memo struct {
 	mu        sync.Mutex
 	params    map[int]*paramsMemo
 	contracts []*contractCache
+	charts    merge.Caches
 }
 
 // NewMemo: an empty Memo.
@@ -34,6 +37,7 @@ func NewMemo() *Memo { return &Memo{params: map[int]*paramsMemo{}} }
 type instanceMemo struct {
 	params    *paramsMemo
 	contracts *contractCache
+	charts    *merge.ChartCache
 }
 
 // forInstance: the memo of the compile of instance i of the set, def its
@@ -58,6 +62,7 @@ func (m *Memo) forInstance(i int, def *Definition, in Inputs) *instanceMemo {
 		out.contracts = newContractCache(in.Contracts)
 		m.contracts = append(m.contracts, out.contracts)
 	}
+	out.charts = m.charts.Get(in.Charts)
 	return out
 }
 

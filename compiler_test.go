@@ -17,7 +17,6 @@ import (
 	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
-	"github.com/okdp/okdp-compiler/internal/finaltest"
 )
 
 // example: the example package
@@ -25,21 +24,12 @@ import (
 // its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
 // and its database's claim, bound to demo-db, with what demo-db publishes
 // for it.
-func finalize(in compiler.FinalInput) (map[string]map[string]any, map[string]compiler.ChartRef, []string, error) {
-	var cache *finaltest.ChartCache
-	if in.Charts != nil {
-		cache = finaltest.NewChartCache(in.Charts)
-	}
-	return finaltest.FinalValues(cache, in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, nil)
-}
-
 func example() (*compiler.Definition, compiler.Inputs) {
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"))
 	if err != nil {
 		panic(err)
 	}
 	in := compiler.Inputs{
-		Finalize:  finalize,
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/config/platform.yaml")}},
 		Values:    []map[string]any{values("examples/02_advanced/input/config/demo/webapp/config.yaml")},
