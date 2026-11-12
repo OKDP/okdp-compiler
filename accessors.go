@@ -185,7 +185,7 @@ func CheckProvider(where, provider string) error { return okdp.CheckProvider(whe
 // secretRef (a remoteKey of the store of platform, the platform's values,
 // a project's under <project>/), no "{{". The compile's error otherwise,
 // at connections.<name> (FieldErrors).
-func CheckConnection(contracts fs.FS, project string, c Connection, platform map[string]any) error {
+func CheckConnection(rules *RuleSet, contracts fs.FS, project string, c Connection, platform map[string]any) error {
 	v, err := value.Normalize(platform)
 	if err != nil {
 		return fmt.Errorf("the platform's values (%s): %w", PlatformFile, err)
@@ -194,5 +194,5 @@ func CheckConnection(contracts fs.FS, project string, c Connection, platform map
 	if project != "" {
 		level = 1
 	}
-	return okdp.CheckConnection(contracts, c.Name, c.Entry(), level, project, value.Str(value.Dig(value.AsMap(v), "global.okdp.secrets.store")))
+	return okdp.CheckConnection(rules, contracts, c.Name, c.Entry(), level, project, value.Str(value.Dig(value.AsMap(v), "global.okdp.secrets.store")))
 }

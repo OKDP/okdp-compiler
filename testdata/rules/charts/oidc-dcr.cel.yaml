@@ -4,7 +4,7 @@
 # dcr): the chart's Job, a pre-install/pre-upgrade hook, registers the client
 # by anonymous dynamic client registration and writes it to a Secret.
 #
-# Embedded in the compiler and evaluated once per client (oidc.go) by the
+# Evaluated by okdp-compiler once per client (ownCharts, objects.go) with the
 # mapping engine: ${{ CEL }} expressions, the same directives and
 # functions.
 #

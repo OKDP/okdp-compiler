@@ -49,7 +49,7 @@ type Inputs struct {
 	// (generate, okdpGeneratedSecret) or read from the platform's secret
 	// store, never written to the deployments repository.
 	AllowPlainSecrets bool
-	// Rules: the rule set of the compile; nil, the standard one.
+	// Rules: the rule set of the compile; nil, no rule.
 	Rules *RuleSet
 	// Finalize: what makes the final values of the charts of the compile
 	// from what it computed; nil, Helm's merge, no policy over the upstream
@@ -70,7 +70,7 @@ type FinalInput struct {
 	ValuesFile        string      // the values file Output is read from, for the errors
 	Output            M           // what the mapping computed, by chart key
 	Values            M           // the instance's merged values: their global, their upstream values
-	Rules             *RuleSet    // the rule set of the compile
+	Rules             *RuleSet    // the rule set of the compile; nil, no rule
 	Settings          M           // the platform's settings
 	Namespace         string      // the instance's namespace
 	Privileged        bool        // the project is one of the platform's own
@@ -309,7 +309,7 @@ func platformInstance(def *Definition, in Inputs, svc *Service) (*instance, map[
 	if err := checkRelease(in.rules(), "Inputs.Release", in.Release, inst.okdp); err != nil {
 		return nil, nil, err
 	}
-	groups, err := projectAccess(in.Context, in.Namespace)
+	groups, err := projectAccess(in.rules(), in.Context, in.Namespace)
 	if err != nil {
 		return nil, nil, err
 	}

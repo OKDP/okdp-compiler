@@ -2,19 +2,21 @@ package rules
 
 import (
 	"io/fs"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
 
+// standardDir: a copy of the standard rule set, which okdp-gitops holds.
+const standardDir = "../../testdata/rules"
+
 // standardFS: the files of the standard rule set, rules.yaml edited by
 // edit.
 func standardFS(t *testing.T, edit func(string) string) fstest.MapFS {
 	t.Helper()
-	sub, err := fs.Sub(standardRules, "v1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	sub := os.DirFS(standardDir)
 	out := fstest.MapFS{}
 	if err := fs.WalkDir(sub, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -32,7 +34,11 @@ func standardFS(t *testing.T, edit func(string) string) fstest.MapFS {
 
 // TestLoadRules: the standard set loads; a rule set fails closed.
 func TestLoadRules(t *testing.T) {
-	if r := Default(); r.Version() == "" || !r.Has(TableDeniedUpstreamKeys, "hostPath") || r.List(TableEngineNamespaces)[0] != "argocd" {
+	r, err := LoadRules(os.DirFS(standardDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Version() == "" || !r.Has(TableDeniedUpstreamKeys, "hostPath") || r.List(TableEngineNamespaces)[0] != "argocd" {
 		t.Errorf("the standard set: %+v", r)
 	}
 	same := func(s string) string { return s }
@@ -50,6 +56,7 @@ func TestLoadRules(t *testing.T) {
 			return strings.Replace(s, "  host: checks/host.cel.yaml\n", "  host: checks/host.cel.yaml\n  extra: checks/objects.cel.yaml\n", 1)
 		}, "checks: unknown extra"},
 		"missing check": {func(s string) string { return strings.Replace(s, "  release: checks/release.cel.yaml\n", "", 1) }, "checks: missing release"},
+		"unknown role":  {func(s string) string { return strings.Replace(s, "[viewer, editor, admin]", "[viewer, owner]", 1) }, `projectRoles: "owner" is no role`},
 		"no such file":  {func(s string) string { return strings.Replace(s, "checks/release.cel.yaml", "checks/none.cel.yaml", 1) }, "checks: release"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -99,5 +106,36 @@ func TestCheckFailsClosed(t *testing.T) {
 	}
 	if err := r.Refuse(CheckObjectRule, M{"svc": "svc", "ns": "demo", "object": M{"kind": "ConfigMap"}}); err == nil || !strings.Contains(err.Error(), "the rule set:") {
 		t.Errorf("got %v, want the rule set's error", err)
+	}
+}
+
+// TestEmpty: the empty set refuses nothing, computes nothing, and keeps what
+// claims need.
+func TestEmpty(t *testing.T) {
+	r := Empty()
+	if err := r.Refuse(CheckNamespaceRule, M{"ns": "kube-system"}); err != nil {
+		t.Errorf("a check of the empty set refused: %v", err)
+	}
+	if v, err := r.Values("scope", M{}); err != nil || len(v) != 0 {
+		t.Errorf("a document of the empty set: %v, %v", v, err)
+	}
+	if r.Has(TableEngineNamespaces, "argocd") || len(r.List(TableProjectRoles)) != 0 {
+		t.Error("the empty set holds a platform's table")
+	}
+	if !r.Whole([]string{"claims", "db"}) || !slices.Contains(r.List(TablePlatformKeysAbove), "provisioning") {
+		t.Error("the empty set lost the claim format's tables")
+	}
+	if got := r.Name("credentialsSecret", "output", "o", "contract", "c"); got != "o-c-credentials" {
+		t.Errorf("a credentials Secret of the empty set: %q", got)
+	}
+	if got := r.Labels("svc", "rel", "web", false); len(got) != 0 {
+		t.Errorf("the labels of the empty set: %v", got)
+	}
+	if r.Keep.Kept(M{"": ""}) {
+		t.Error("the empty set keeps an object")
+	}
+	in := M{"a": 1}
+	if got, err := SchemaValues(r.PlatformSchema, "h", in); err != nil || got["a"] != 1 {
+		t.Errorf("values without a schema: %v, %v", got, err)
 	}
 }

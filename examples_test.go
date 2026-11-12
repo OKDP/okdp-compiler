@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 var update = flag.Bool("update", false, "rewrite the examples' outputs from the current compiler")
@@ -120,6 +121,9 @@ func TestExample(t *testing.T) {
 			instances, err := compiler.LoadRepository([]compiler.Repository{{Name: e.Name(), FS: exampleRepository(e.Name()), Role: compiler.RoleTree}})
 			if err != nil {
 				t.Fatal(err)
+			}
+			for i := range instances {
+				instances[i].Inputs.Rules = testrules.Standard()
 			}
 			_, statErr := os.Stat(filepath.Join("examples", e.Name(), "input", "catalog", "Chart.yaml"))
 			single := statErr == nil

@@ -7,8 +7,8 @@
 # (platform.access.editors): the groups claim, never the realm's roles,
 # which every project's people hold. It never skips the check of the
 # email: a user whose email the provider has not verified is not let in.
-# Embedded in the compiler and evaluated at each call (fragment,
-# fragments.go), by the mapping engine: ${{ CEL }} expressions, the same
+# Evaluated by okdp-compiler at each call (fragment,
+# fragments.go), with the mapping engine: ${{ CEL }} expressions, the same
 # directives and functions.
 #
 # It returns the proxy's container (the arguments of okdpPodSpec's

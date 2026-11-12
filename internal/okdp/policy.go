@@ -35,7 +35,9 @@ func privileged(okdp M, namespace string) bool {
 // argocd, Argo CD's and the argocd target's Applications and AppProjects
 // (argocd.Namespace). A target that writes in another (Flux.Source's)
 // refuses its projects too.
-func EngineNamespaces() []string { return defaultRules().List(ruleset.TableEngineNamespaces) }
+func EngineNamespaces(rules *RuleSet) []string {
+	return rulesOr(rules).List(ruleset.TableEngineNamespaces)
+}
 
 // reservedNamespace: why namespace is no project's, those the compiler
 // reserves whatever the platform (the rule set's namespace check); those of
@@ -79,11 +81,12 @@ func checkPlatformNamespace(rules *RuleSet, field, namespace string, okdp M) err
 // checkPlatformNamespace. A namespace a target writes in by its options
 // (the flux target's Source) is the target's to refuse
 // (target.OwnNamespaces).
-func CheckNamespace(field, namespace string, okdp M) error {
-	if err := checkNamespace(defaultRules(), field, namespace); err != nil {
+func CheckNamespace(rules *RuleSet, field, namespace string, okdp M) error {
+	rules = rulesOr(rules)
+	if err := checkNamespace(rules, field, namespace); err != nil {
 		return err
 	}
-	return checkPlatformNamespace(defaultRules(), field, namespace, okdp)
+	return checkPlatformNamespace(rules, field, namespace, okdp)
 }
 
 // apiGroup: the group of an apiVersion, "" for the core group (v1).

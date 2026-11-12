@@ -187,12 +187,12 @@ func declaredConnections(in Inputs) error {
 // declaration (declared), store the platform's secret store
 // (global.okdp.secrets.store), contracts the contracts: the error at
 // connections.<name>, nil when it holds.
-func CheckConnection(contracts fs.FS, name string, conn any, level uint, namespace, store string) error {
+func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, level uint, namespace, store string) error {
 	v, err := value.Normalize(conn)
 	if err != nil {
 		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
 	}
-	r := resolver{rules: defaultRules(), contracts: newContractCache(contracts), conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
+	r := resolver{rules: rulesOr(rules), contracts: newContractCache(contracts), conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
 	return r.declared()
 }
 

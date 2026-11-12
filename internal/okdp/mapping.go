@@ -20,6 +20,7 @@ package okdp
 
 import (
 	"cmp"
+	"errors"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"slices"
@@ -102,6 +103,9 @@ func functions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 				cel2yaml.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
 		cel2yaml.Costed(cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
 			cel2yaml.Unary(func(v any) (any, error) {
+				if inst.rules.GeneratedSecret.Data == nil {
+					return nil, errors.New("okdpGeneratedSecret: the rule set of the compile has no such template")
+				}
 				args, err := schemaValues(inst.rules.MappingSchema, "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
 				if err != nil {
 					return nil, err

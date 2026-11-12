@@ -12,17 +12,20 @@ type RuleSet = ruleset.RuleSet
 // LoadRules: the rule set of a file system.
 var LoadRules = ruleset.LoadRules
 
-// defaultRules: the rule set of a compile that gives none. Temporary: a
-// compile without one is refused once the hosts give it.
-var defaultRules = ruleset.Default
+// defaultRules: the rule set of a compile that gives none, the empty one. A
+// variable for this package's tests, whose compiles read the standard set.
+var defaultRules = ruleset.Empty
 
 // schemaValues: ruleset.SchemaValues.
 var schemaValues = ruleset.SchemaValues
 
 // rules: the rule set of the compile.
-func (in Inputs) rules() *RuleSet {
-	if in.Rules != nil {
-		return in.Rules
+func (in Inputs) rules() *RuleSet { return rulesOr(in.Rules) }
+
+// rulesOr: r, or the rule set of a compile that gives none.
+func rulesOr(r *RuleSet) *RuleSet {
+	if r != nil {
+		return r
 	}
 	return defaultRules()
 }

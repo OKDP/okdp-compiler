@@ -28,21 +28,21 @@ type Role string
 const (
 	// RoleViewer: sees the project: its Argo CD Applications, its
 	// namespace's objects but its Secrets (Kubernetes' view).
-	RoleViewer Role = "viewer"
+	RoleViewer Role = ruleset.RoleViewer
 	// RoleEditor: operates the project: syncs its Applications, runs their
 	// actions, reads their logs; edits its namespace's objects
 	// (Kubernetes' edit).
-	RoleEditor Role = "editor"
+	RoleEditor Role = ruleset.RoleEditor
 	// RoleAdmin: an editor who also deletes and overrides its
 	// Applications, and administers its namespace, its RoleBindings among
 	// it (Kubernetes' admin).
-	RoleAdmin Role = "admin"
+	RoleAdmin Role = ruleset.RoleAdmin
 )
 
 // Roles: the roles, least first.
-func Roles() []Role {
+func Roles(rules *RuleSet) []Role {
 	var out []Role
-	for _, r := range defaultRules().List(ruleset.TableProjectRoles) {
+	for _, r := range rulesOr(rules).List(ruleset.TableProjectRoles) {
 		out = append(out, Role(r))
 	}
 	return out
@@ -73,8 +73,15 @@ func IsGroup(name string) bool { return groupName.MatchString(name) }
 // default, DefaultGroup an editor; else a map of group names (IsGroup) to
 // a role, viewer, editor or admin; {} gives no group a role. Every
 // problem at once, by group in name order.
-func ParseAccess(v any, namespace string) (map[string]Role, error) {
+func ParseAccess(rules *RuleSet, v any, namespace string) (map[string]Role, error) {
+	roles := Roles(rules)
+	if len(roles) == 0 { // no role to give: the rule set has no access
+		return nil, nil
+	}
 	if v == nil {
+		if !slices.Contains(roles, RoleEditor) { // never a role the rule set does not hold
+			return map[string]Role{}, nil
+		}
 		return map[string]Role{DefaultGroup(namespace): RoleEditor}, nil
 	}
 	m, ok := v.(M)
@@ -89,7 +96,7 @@ func ParseAccess(v any, namespace string) (map[string]Role, error) {
 		switch {
 		case !IsGroup(group):
 			errs = append(errs, fmt.Errorf("%s: a group name, a letter or a digit then letters, digits, \".\", \"_\", \"@\", \":\" or \"-\", 255 characters at most (no \"/\": the group's name, not its path)", where))
-		case !isString || !slices.Contains(Roles(), Role(role)):
+		case !isString || !slices.Contains(roles, Role(role)):
 			errs = append(errs, fmt.Errorf("%s: a role, %s, got %s", where, roleList(), value.ShortAt(where, m[group])))
 		default:
 			out[group] = Role(role)
@@ -107,7 +114,7 @@ func roleList() string { return fmt.Sprintf("%s, %s or %s", RoleViewer, RoleEdit
 // projectAccess: the roles of the groups of the project of namespace,
 // the access of its context's layers at level 1, its file's, merged in
 // order (ParseAccess); contextLayers refuses it at another level.
-func projectAccess(layers []ContextLayer, namespace string) (map[string]Role, error) {
+func projectAccess(rules *RuleSet, layers []ContextLayer, namespace string) (map[string]Role, error) {
 	var access any
 	for i, l := range layers {
 		v, set := l.Values[AccessKey]
@@ -126,7 +133,7 @@ func projectAccess(layers []ContextLayer, namespace string) (map[string]Role, er
 			access = value.Copy(n)
 		}
 	}
-	groups, err := ParseAccess(access, namespace)
+	groups, err := ParseAccess(rules, access, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("the project's file (level 1): %w", err)
 	}
@@ -190,12 +197,13 @@ func platformOf(in Inputs) (M, error) {
 // none when not set. The compiler writes nothing of them: the bootstrap
 // binds them once, Argo CD's role:admin and the cluster's, for a program
 // that mirrors the platform's authority (a control plane).
-func PlatformAdmins(platform map[string]any) ([]string, error) {
-	_, settings, err := contextLayers(defaultRules(), []ContextLayer{{Values: platform}})
+func PlatformAdmins(rules *RuleSet, platform map[string]any) ([]string, error) {
+	rules = rulesOr(rules)
+	_, settings, err := contextLayers(rules, []ContextLayer{{Values: platform}})
 	if err != nil {
 		return nil, err
 	}
-	okdp, err := platformSettings(defaultRules(), settings)
+	okdp, err := platformSettings(rules, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +217,7 @@ func PlatformOf(in Inputs) (M, error) { return platformOf(in) }
 // ProjectGroups: the roles of the groups of the project of in, its file's
 // (the context at level 1).
 func ProjectGroups(in Inputs) (map[string]Role, error) {
-	return projectAccess(in.Context, in.Namespace)
+	return projectAccess(in.rules(), in.Context, in.Namespace)
 }
 
 // SecretStoreOf: the platform's secret store in settings, nil without one.

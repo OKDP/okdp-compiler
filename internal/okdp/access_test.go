@@ -30,7 +30,7 @@ func TestParseAccess(t *testing.T) {
 		"every error":  {M{"a b": "viewer", "analysts": nil}, nil, "access.a b: a group name"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := ParseAccess(tc.access, "demo")
+			got, err := ParseAccess(nil, tc.access, "demo")
 			if tc.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("got %v, want an error containing %q", err, tc.err)
@@ -155,14 +155,14 @@ func TestProjectOfNamespace(t *testing.T) {
 // TestPlatformAdmins and TestProjectAccess: the accessors of a program
 // that mirrors the platform's authority.
 func TestPlatformAdmins(t *testing.T) {
-	got, err := PlatformAdmins(map[string]any{"global": M{"okdp": M{"access": M{"admins": []any{"platform_admin", "ops"}}}}})
+	got, err := PlatformAdmins(nil, map[string]any{"global": M{"okdp": M{"access": M{"admins": []any{"platform_admin", "ops"}}}}})
 	if err != nil || !reflect.DeepEqual(got, []string{"platform_admin", "ops"}) {
 		t.Errorf("got %v, %v", got, err)
 	}
-	if got, err := PlatformAdmins(nil); err != nil || got != nil {
+	if got, err := PlatformAdmins(nil, nil); err != nil || got != nil {
 		t.Errorf("none: %v, %v", got, err)
 	}
-	if _, err := PlatformAdmins(map[string]any{"global": M{"okdp": M{"access": M{"admins": "ops"}}}}); err == nil {
+	if _, err := PlatformAdmins(nil, map[string]any{"global": M{"okdp": M{"access": M{"admins": "ops"}}}}); err == nil {
 		t.Error("not a list: no error")
 	}
 }

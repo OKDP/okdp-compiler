@@ -5,7 +5,7 @@
 package rules
 
 import (
-	"embed"
+	_ "embed"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -39,6 +39,15 @@ const (
 	TableWholePaths            = "wholePaths"
 	TableProjectRoles          = "projectRoles"
 	TablePlatformKeysAbove     = "projectPlatformKeys"
+)
+
+// The roles a project's group may hold (TableProjectRoles): what each may do
+// is written in the code of the targets, so a rule set lists some of these,
+// and no other.
+const (
+	RoleViewer = "viewer"
+	RoleEditor = "editor"
+	RoleAdmin  = "admin"
 )
 
 // ruleTables: the names of the tables of a rule set, sorted.
@@ -287,24 +296,21 @@ func LoadRules(fsys fs.FS) (*RuleSet, error) {
 	if err := exactKeys("checks", checks, ruleChecks); err != nil {
 		return nil, err
 	}
-	r := &RuleSet{version: value.Str(doc["version"]), tables: map[string]*ruleTable{}, sets: M{}, lists: M{}}
+	r := newRuleSet()
+	r.version = value.Str(doc["version"])
 	for _, name := range ruleTables {
 		t := value.AsMap(tables[name])
-		rt := &ruleTable{set: map[string]bool{}, addFrom: value.Str(t["addFrom"])}
+		var values []string
 		for _, v := range value.AsList(t["values"]) {
-			rt.values = append(rt.values, value.Str(v))
-			rt.set[value.Str(v)] = true
+			values = append(values, value.Str(v))
 		}
-		r.tables[name] = rt
-		set := make(M, len(rt.set))
-		list := make([]any, len(rt.values))
-		for i, v := range rt.values {
-			set[v], list[i] = true, v
-		}
-		r.sets[name], r.lists[name] = set, list
+		r.addTable(name, values, value.Str(t["addFrom"]))
 	}
-	for _, p := range r.List(TableWholePaths) {
-		r.wholePaths = append(r.wholePaths, strings.Split(p, "."))
+	r.splitWholePaths()
+	for _, role := range r.List(TableProjectRoles) {
+		if !slices.Contains([]string{RoleViewer, RoleEditor, RoleAdmin}, role) {
+			return nil, fmt.Errorf("%s: tables: %s: %q is no role: %s, %s or %s", RulesFile, TableProjectRoles, role, RoleViewer, RoleEditor, RoleAdmin)
+		}
 	}
 	if err := r.loadChecks(fsys, checks, value.AsMap(doc["documents"])); err != nil {
 		return nil, err
@@ -351,7 +357,7 @@ func (r *RuleSet) Labels(name, release, component string, selector bool) M {
 	for k, v := range r.selectorLabels {
 		out[k] = expand(v)
 	}
-	if component != "" {
+	if component != "" && r.componentLabel != "" {
 		out[r.componentLabel] = component
 	}
 	if !selector {
@@ -385,28 +391,65 @@ func exactKeys(what string, m M, want []string) error {
 	return nil
 }
 
-//go:embed v1
-var standardRules embed.FS
-
-// Default: the rule set of a compile that gives none. Temporary: it
-// goes when the hosts give the rule set, and a compile without one is
-// refused.
-var Default = sync.OnceValue(func() *RuleSet {
-	sub, err := fs.Sub(standardRules, "v1")
-	if err != nil {
-		panic(err)
+// Empty: the rule set of a compile that gives none: no check refuses, no
+// schema reads the values, no function nor section is added. What is left is
+// the claim format's own: the names of the Secrets that carry credentials,
+// a project's classes, and what a level may not change of a lower one.
+var Empty = sync.OnceValue(func() *RuleSet {
+	r := newRuleSet()
+	r.names = claimNames
+	for _, name := range ruleTables {
+		r.addTable(name, claimTables[name], "")
 	}
-	r, err := LoadRules(sub)
-	if err != nil {
-		panic(err)
-	}
+	r.splitWholePaths()
 	return r
 })
+
+// claimNames: the names Empty gives credentials.
+var claimNames = map[string]string{
+	"credentialsSecret": "$output-$contract-credentials",
+	"connectionSecret":  "$release.$connection-credentials",
+	"claimSecret":       "$release-$secret",
+	"credentialsLabel":  "okdp.io/credentials-$contract",
+}
+
+// claimTables: the values of the tables of Empty; every other table is empty.
+var claimTables = map[string][]string{
+	TablePlatformKeysAbove: {"provisioning"},
+	TableWholePaths:        {"connections.*", "claims.*", "global.okdp.provisioning.*.classes.*", "global.okdp.provisioning.*.default"},
+}
+
+// newRuleSet: a rule set without tables.
+func newRuleSet() *RuleSet {
+	return &RuleSet{tables: map[string]*ruleTable{}, sets: M{}, lists: M{}}
+}
+
+// addTable: the table name of the rule set, and its forms the checks read.
+func (r *RuleSet) addTable(name string, values []string, addFrom string) {
+	rt := &ruleTable{values: values, set: make(map[string]bool, len(values)), addFrom: addFrom}
+	set := make(M, len(values))
+	list := make([]any, len(values))
+	for i, v := range values {
+		rt.set[v], set[v], list[i] = true, true, v
+	}
+	r.tables[name], r.sets[name], r.lists[name] = rt, set, list
+}
+
+// splitWholePaths: TableWholePaths as Whole reads it.
+func (r *RuleSet) splitWholePaths() {
+	for _, p := range r.List(TableWholePaths) {
+		r.wholePaths = append(r.wholePaths, strings.Split(p, "."))
+	}
+}
 
 // SchemaValues: user, values a schema describes, coalesced over the schema's
 // defaults and checked against it (chart.Schema.Values), as Helm reads a
 // chart's: the values, or every violation at once, by path, under heading.
+// No schema (Empty): user as it is.
 func SchemaValues(schema func() (*chart.Schema, error), heading string, user M) (M, error) {
+	if schema == nil {
+		return user, nil
+	}
 	s, err := schema()
 	if err != nil {
 		return nil, err
@@ -424,5 +467,5 @@ func SchemaValues(schema func() (*chart.Schema, error), heading string, user M) 
 // Kept: annotations say Helm keeps the object, as Helm reads it: trimmed, in
 // any case.
 func (k KeepSync) Kept(annotations M) bool {
-	return strings.EqualFold(strings.TrimSpace(value.Str(annotations[k.Annotation])), k.Value)
+	return k.Annotation != "" && strings.EqualFold(strings.TrimSpace(value.Str(annotations[k.Annotation])), k.Value)
 }

@@ -140,5 +140,9 @@ func storeObject(inst *instance, document string, arg M) (M, error) {
 	if err != nil {
 		return nil, err
 	}
-	return value.AsMap(v["object"]), nil
+	o := value.AsMap(v["object"])
+	if len(o) == 0 {
+		return nil, fmt.Errorf("the rule set of the compile has no %s: the credentials of another namespace go through the platform's secret store", document)
+	}
+	return o, nil
 }

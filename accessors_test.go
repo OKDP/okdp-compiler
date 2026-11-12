@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	compiler "github.com/okdp/okdp-compiler"
+	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 // The field errors of a compile: a violation of the parameter schema at
@@ -120,19 +121,19 @@ func TestValuesAndNames(t *testing.T) {
 func TestCheckConnection(t *testing.T) {
 	contracts := os.DirFS("examples/02_advanced/input/contracts")
 	c := compiler.Connection{Name: "pg", Contract: "database", Values: map[string]any{"host": "db", "dbName": "app"}, SecretRef: "pg"}
-	if err := compiler.CheckConnection(contracts, "demo", c, nil); err != nil {
+	if err := compiler.CheckConnection(testrules.Standard(), contracts, "demo", c, nil); err != nil {
 		t.Fatal(err)
 	}
 	c.Values = map[string]any{"host": "db", "password": "x"}
-	err := compiler.CheckConnection(contracts, "demo", c, nil)
+	err := compiler.CheckConnection(testrules.Standard(), contracts, "demo", c, nil)
 	if fields := compiler.FieldErrors(err); len(fields) != 1 || fields[0].Path != "connections.pg" || !strings.Contains(fields[0].Message, `"password" is a secret field`) {
 		t.Fatalf("a secret field: %v", err)
 	}
 	c.Values, c.SecretRef, c.RemoteKey = map[string]any{"host": "db", "dbName": "app"}, "", "platform/pg"
-	if err := compiler.CheckConnection(contracts, "demo", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err == nil || !strings.Contains(err.Error(), `names a key under "demo/"`) {
+	if err := compiler.CheckConnection(testrules.Standard(), contracts, "demo", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err == nil || !strings.Contains(err.Error(), `names a key under "demo/"`) {
 		t.Fatalf("a project's key of the platform's: %v", err)
 	}
-	if err := compiler.CheckConnection(contracts, "", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err != nil {
+	if err := compiler.CheckConnection(testrules.Standard(), contracts, "", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err != nil {
 		t.Fatalf("the platform's: %v", err)
 	}
 }

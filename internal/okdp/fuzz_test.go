@@ -46,8 +46,8 @@ func FuzzParseAccess(f *testing.F) {
 			return
 		}
 		access := doc[AccessKey]
-		got, err := ParseAccess(access, namespace)
-		again, err2 := ParseAccess(access, namespace)
+		got, err := ParseAccess(nil, access, namespace)
+		again, err2 := ParseAccess(nil, access, namespace)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(got, again) {
 			t.Fatalf("%q: not the same twice: %v %v / %v %v", b, got, err, again, err2)
 		}
@@ -68,7 +68,7 @@ func FuzzParseAccess(f *testing.F) {
 			t.Fatalf("%q: read as %v", b, got)
 		}
 		for group, role := range got {
-			if !IsGroup(group) || !slices.Contains(Roles(), role) || m[group] != string(role) {
+			if !IsGroup(group) || !slices.Contains(Roles(nil), role) || m[group] != string(role) {
 				t.Fatalf("%q: group %q role %q of %v", b, group, role, m)
 			}
 		}

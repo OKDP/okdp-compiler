@@ -291,12 +291,12 @@ func IsName(name string) bool { return chart.IsDNSLabel(name) }
 // options (Flux.Source's) is refused when the target writes the tree.
 // For a program that creates projects, before it creates any of a
 // project's parts.
-func CheckProjectName(name string, platform map[string]any) error {
+func CheckProjectName(rules *RuleSet, name string, platform map[string]any) error {
 	v, err := value.Normalize(platform)
 	if err != nil {
 		return fmt.Errorf("the platform's values (%s): %w", PlatformFile, err)
 	}
-	return okdp.CheckNamespace("project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
+	return okdp.CheckNamespace(rules, "project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
 }
 
 // AccessRole: the role of a group within a project, its project.yaml's
@@ -344,8 +344,8 @@ func IsGroupName(name string) bool { return okdp.IsGroup(name) }
 // them: the platform's bootstrap binds them once (Argo CD's role:admin,
 // the cluster's administration); for a program that mirrors the
 // platform's authority.
-func PlatformAdmins(platform map[string]any) ([]string, error) {
-	return okdp.PlatformAdmins(platform)
+func PlatformAdmins(rules *RuleSet, platform map[string]any) ([]string, error) {
+	return okdp.PlatformAdmins(rules, platform)
 }
 
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
@@ -482,7 +482,7 @@ type BuildOptions struct {
 	// Charts: the chart cache CompileTree checks the final values against
 	// (StaticCharts, a cache that fetches what it lacks); nil, unchecked.
 	Charts ChartSource
-	// Rules: Inputs.Rules of each instance; nil, the standard rule set.
+	// Rules: Inputs.Rules of each instance; nil, no rule.
 	Rules *RuleSet
 	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
 	Finalize Finalize
@@ -520,6 +520,7 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 	}
 	t := CompileTree(ctx, instances, opts.Charts)
 	for _, r := range loaded.Refused {
+		r.Inputs.Rules = opts.Rules // what CheckProject reads of a project that does not load
 		t.Refused = append(t.Refused, RefusedProject{Namespace: r.Project, Problems: r.Problems, Errs: r.Errs, Inputs: r.Inputs, Own: r.Own})
 	}
 	return t, nil

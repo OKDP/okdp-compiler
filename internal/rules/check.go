@@ -124,6 +124,9 @@ func (r *RuleSet) put(c checker) {
 // eval: the document on input, with the sets and tables of the rule set:
 // the first of its messages, "" when it has none, and its values.
 func (r *RuleSet) eval(document string, input M) (compile.Problem, M, error) {
+	if len(r.sources) == 0 { // Empty: nothing to refuse, nothing computed
+		return compile.Problem{}, M{}, nil
+	}
 	c := r.get()
 	defer r.put(c)
 	scope := make(M, len(input)+2)

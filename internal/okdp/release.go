@@ -10,7 +10,9 @@ import ruleset "github.com/okdp/okdp-compiler/internal/rules"
 // names the platform's settings give the store, its ServiceAccount and the
 // token are added to them (platformObjects). The targets' own constants
 // are checked against them (output.TestPlatformObjectNames).
-func PlatformObjectNames() []string { return defaultRules().List(ruleset.TablePlatformObjectNames) }
+func PlatformObjectNames(rules *RuleSet) []string {
+	return rulesOr(rules).List(ruleset.TablePlatformObjectNames)
+}
 
 // checkRelease: nil when release is none of the platform's objects, nor
 // the prefix of one up to a "-" (the rule set's release check); okdp is the

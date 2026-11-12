@@ -5,8 +5,8 @@
 # platform's ingress class and annotations) and the sign-in proxy of
 # okdpSignInProxy in front of it as a sidecar of the pod: the Service then
 # reaches the proxy alone, and a NetworkPolicy lets in nothing else. The
-# first container of the pod is the application. Embedded in the compiler
-# and evaluated at each call (fragment, fragments.go), by the mapping
+# first container of the pod is the application. Evaluated by
+# okdp-compiler at each call (fragment, fragments.go), with the mapping
 # engine: ${{ CEL }} expressions, the same directives and functions.
 #
 # Inputs:

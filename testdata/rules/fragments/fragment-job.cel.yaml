@@ -1,7 +1,7 @@
 # The objects of okdpJob(args): a Job on the hardened pod of okdpPodSpec,
 # retried backoffLimit times (1), kept ttlSecondsAfterFinished seconds
-# (300) for its logs, a Helm and Argo CD hook when asked. Embedded in the
-# compiler and evaluated at each call (fragment, fragments.go), by the
+# (300) for its logs, a Helm and Argo CD hook when asked. Evaluated by
+# okdp-compiler at each call (fragment, fragments.go), with the
 # mapping engine: ${{ CEL }} expressions, the same directives and functions.
 #
 # Inputs:

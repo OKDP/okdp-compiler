@@ -1,7 +1,7 @@
 # The pod spec of okdpPodSpec(args): the containers and volumes of a
-# workload, hardened. Embedded in the compiler and evaluated at each call
+# workload, hardened. Evaluated by okdp-compiler at each call
 # (fragment, fragments.go), also for the pod of okdpJob and okdpWebWorkload,
-# by the mapping engine: ${{ CEL }} expressions, the same directives and
+# with the mapping engine: ${{ CEL }} expressions, the same directives and
 # functions.
 #
 # Every container, init containers included, gets the security context a

@@ -102,7 +102,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	inst.deps, inst.transfers = r.deps, r.transfers
 	// What the mapping sees as platform, of the platform's settings.
 	release := M{"name": in.Release, "namespace": in.Namespace}
-	groups, _ := projectAccess(in.Context, in.Namespace) // a project file refused is Compile's to report: no group
+	groups, _ := projectAccess(in.rules(), in.Context, in.Namespace) // a project file refused is Compile's to report: no group
 	roles := M{}
 	for g, role := range groups {
 		roles[g] = string(role)
