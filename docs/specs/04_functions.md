@@ -46,8 +46,9 @@ The host functions are plain Go, and share these properties:
   ([context](02_service_definition.md#context)).
 - **Helm's output.** A function reproducing a Helm or sprig one is compared
   with what `helm template` prints for the same inputs (`testdata/helm`):
-  `TestHelmFunctions` for `sha256`, `toJson`, `toPrettyJson`, `toYaml` and
-  `quote` ([testing](../00_architecture.md#helm-fixtures)).
+  `testdata/helm/functions` of okdp-gitops for `sha256`, `toJson`,
+  `toPrettyJson`, `toYaml` and `quote`
+  ([testing](../00_architecture.md#helm-fixtures)).
 
 Adding a function: [extension points](../00_architecture.md#extension-points).
 
@@ -85,6 +86,12 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 ([iterating a map](03_control_flow.md#iterating-a-map)).
 
 ## Host functions
+
+`okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload` and
+`oidcClientSecret` are declared by the rule set, `okdpGeneratedSecret`'s
+template is its too: the standard set, okdp-gitops'
+([rule set](01_inputs_outputs.md#rule-set)). Without a rule set the first
+five are not declared, and `okdpGeneratedSecret` fails when called.
 
 | Function | Returns | Helm equivalent |
 |---|---|---|
@@ -311,7 +318,7 @@ proxy's cookie secret. The first container of the pod is the application.
 | `labels`, `annotations`, `podAnnotations` | maps | over OKDP's labels; the Deployment's and the pod's annotations |
 
 ```yaml
-# okdp.yaml (examples/05_fragments/input/db/catalog/notebook/1.0.0/okdp.yaml)
+# okdp.yaml (examples/05_fragments/input/catalog/okdp.yaml)
 objects:
   - $spread: >-
       ${{ okdpWebWorkload({'component': 'web', 'port': 8888,

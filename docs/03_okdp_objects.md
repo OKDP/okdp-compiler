@@ -3,10 +3,15 @@
 Besides the upstream charts, a compile deploys objects of OKDP's own: the
 credentials Secrets of the connections an instance provides, and the
 mapping's `objects` section. This note explains how they reach the
-cluster, in the instance's umbrella, and why so. It records the
+cluster, in the `okdp-objects` chart, and why so. It records the
 trade-offs; it changes nothing. The formats are specified in
 [the objects chart](specs/01_inputs_outputs.md#the-objects-chart) and
 [credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets).
+
+Rules quoted here are those of the standard rule set, which okdp-gitops
+holds (`rules/v1`; [`testdata/rules`](../testdata/rules) is its copy). A
+compile with no rule set refuses none of these objects, and has no
+default for the chart.
 
 What the instance publishes, its URL, its usage and the connections it
 provides, is no object: it stays in git, `okdp.info.yaml`, which a
@@ -17,10 +22,9 @@ control plane or a console reads in the deployments repository
 
 ### What it holds
 
-`Result.Objects`, which `compiler.Write` (`okdp-compile -o`) writes in the
-umbrella's values, the string `manifests` of the key `okdp-objects`, when
-the instance has objects: a YAML stream, one document per object, in this
-order:
+`Result.Objects`, which `compiler.Write` writes in
+`okdp-objects.values.yaml`, the string `manifests`, when the instance has
+objects: a YAML stream, one document per object, in this order:
 
 - the credentials Secrets of the connections the instance provides: an
   ExternalSecret and its External Secrets `Password` generators, or a plain
@@ -38,8 +42,12 @@ order:
   itself: what it must enforce is in [What the store must
   enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
 
-An instance with neither has no `okdp-objects` chart: its umbrella is
-the upstream charts alone. Unless the project is one of the platform's own
+The same file holds the instance's OAuth clients in `dcr` mode, each the
+values of an `oidc-dcr` chart, `client<i>` with `enabled: true`: the chart
+has five such slots, `client0` to `client4`, each an alias of oidc-dcr.
+
+An instance with neither has no `okdp-objects.values.yaml`: the catalog's
+chart alone is installed. Unless the project is one of the platform's own
 (`global.okdp.policy.privileged`), every object stays in the instance's
 namespace and none is of a cluster-scoped kind: the compile refuses them
 ([objects section](specs/01_inputs_outputs.md#objects-section)). And no
@@ -73,10 +81,16 @@ and Services.
 OKDP does not modify an upstream chart ([values for unmodified upstream
 charts](00_architecture.md#values-for-unmodified-upstream-charts)): what
 an upstream chart cannot produce needs a vehicle. The vehicle is the
-`okdp-objects` chart, one more dependency of the instance's umbrella when
-it has objects, pinned as the oidc-dcr chart is
-(`global.okdp.charts.objects`). Its one template writes its value as it
-is, `{{- .Values.manifests }}`.
+`okdp-objects` chart, its source `Result.ObjectsSource`, pinned in the
+rule set and overridden by `global.okdp.charts.objects`. Its one template
+writes its value as it is, `{{- .Values.manifests }}`. The compiler writes
+its values and no chart: `helm install` takes the chart and those values,
+before the catalog's chart, whose pods read the Secrets it creates.
+
+```bash
+helm install <release>-okdp <okdp-objects chart> -n <namespace> -f okdp-objects.values.yaml
+helm install <release> <package> -n <namespace> -f values.yaml
+```
 
 - **One string.** Objects hold `{{` that is not Helm's: the template of
   an ExternalSecret (`{{ index . "password" }}`), any string of the
@@ -84,37 +98,40 @@ is, `{{- .Values.manifests }}`.
   executed by Helm. As structured values, an integer would become a float
   and a null would be deleted against the chart's defaults. A string
   reaches the template as written: Helm renders each document as one
-  manifest, its strings, nulls and numbers unchanged
-  (`testdata/helm/umbrella`, [Helm fixtures](00_architecture.md#helm-fixtures)).
-- **One release.** The objects are rendered with the upstream charts,
-  under the release name and namespace of the compile, by the same
-  deployer (one HelmRelease or Application per instance,
-  [GitOps](01_usage.md#gitops)), and pruned with them: an object the next
-  compile no longer writes, or the whole instance removed, is deleted with
-  the release, but one Helm keeps (`helm.sh/resource-policy: keep`),
-  which Flux's helm-controller leaves as Helm does, and Argo CD through
-  the sync options the compiler adds to it, `Prune=false` and
-  `Delete=false` ([the objects
+  manifest, its strings, nulls and numbers unchanged.
+- **Under Flux and Argo CD: one release.** okdp-gitops writes an umbrella
+  over the catalog's dependencies and this chart, one HelmRelease or
+  Application per instance
+  ([output](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/03_output.md)):
+  the objects are rendered with the upstream charts, under the release
+  name and namespace of the compile, by the same deployer, and pruned with
+  them. An object the next compile no longer writes, or the whole instance
+  removed, is deleted with the release, but one Helm keeps
+  (`helm.sh/resource-policy: keep`), which Flux's helm-controller leaves
+  as Helm does, and Argo CD through the sync options `Write` adds to it,
+  `Prune=false` and `Delete=false` ([the objects
   chart](specs/01_inputs_outputs.md#the-objects-chart)). The chart gets
   no `global`, and a check does not read it.
-- **Helm's install order.** Helm installs a release's manifests sorted by
-  kind, the umbrella's and its subcharts' together: Namespaces,
-  ServiceAccounts, Secrets and ConfigMaps before the workloads, the kinds
-  it does not know (an ExternalSecret, a `Password` generator) last, by
-  kind. It does not wait between them: a pod whose Secret an ExternalSecret
-  writes starts once External Secrets has written it. Argo CD applies a
-  render in its own order, by sync wave then by kind. The label OKDP's
-  objects carry, `app.kubernetes.io/managed-by: Helm`, holds.
+- **Helm's install order.** Within a release, Helm installs the manifests
+  sorted by kind: Namespaces, ServiceAccounts, Secrets and ConfigMaps
+  before the workloads, the kinds it does not know (an ExternalSecret, a
+  `Password` generator) last, by kind. It does not wait between them: a
+  pod whose Secret an ExternalSecret writes starts once External Secrets
+  has written it. Argo CD applies a render in its own order, by sync wave
+  then by kind. The label OKDP's objects carry,
+  `app.kubernetes.io/managed-by: Helm`, holds.
 - **Reach.** Every deployer must reach the chart. A site that cannot
   reach the default repository sets `global.okdp.charts.objects`, to a
-  chart that renders its `manifests` value as written.
+  chart that renders its `manifests` value as written and holds the OAuth
+  clients' slots.
 - **Under Flux.** The objects travel with the values, in the ConfigMap
-  `values-<release>` of the namespace `okdp-releases`, at most 1 MiB, which
-  `--target flux` enforces. With `Inputs.AllowPlainSecrets`, the data of a
-  plain Secret is in that ConfigMap too.
+  `values-<release>` of the namespace `okdp-releases`, at most 1 MiB,
+  which okdp-gitops' flux target enforces. With
+  `Inputs.AllowPlainSecrets`, the data of a plain Secret is in that
+  ConfigMap too.
 - **Plain manifests.** The value is the objects as applied: a deployer
-  that does not render the umbrella applies it as it is,
-  `yq '.["okdp-objects"].manifests' instance.values.yaml | kubectl apply -f -`.
+  that does not render the chart applies it as it is,
+  `yq .manifests okdp-objects.values.yaml | kubectl apply -f -`.
 
 ### Other vehicles
 
@@ -125,12 +142,13 @@ would change at every render, which GitOps tools do at every sync
 External Secrets generates them in the cluster. Only the vehicle can
 change.
 
-**A file of the umbrella**, `okdp.objects.yaml`, that a template the
-compiler writes includes with `.Files.Get`.
+**A file of an umbrella the compiler writes**, that one of its templates
+includes with `.Files.Get`.
 
 - Pros: no chart for a deployer to reach.
-- Cons: the compiler writes a template in every output; a subchart cannot
-  read the file, as `.Files` is each chart's own.
+- Cons: the compiler writes a chart for every output, where the catalog's
+  would do; a subchart cannot read the file, as `.Files` is each chart's
+  own.
 
 **The file applied by the deployer**, not by the umbrella: Flux applies it
 with a Kustomization, Argo CD with a directory source.
@@ -145,7 +163,7 @@ with a Kustomization, Argo CD with a directory source.
 
 **An upstream chart's `extraObjects` or `extraDeploy` value.**
 
-- Pros: no template of the umbrella.
+- Pros: no chart of OKDP's.
 - Cons: not every chart has such a value, and its name differs from one
   chart to the next; the objects live and die with that chart (a chart the
   mapping leaves out with `$if` takes them along). It does not generalize.
@@ -154,10 +172,9 @@ with a Kustomization, Argo CD with a directory source.
 
 The NetworkPolicy of a project's namespace (`global.okdp.network.policy`)
 is no object of an instance: it is the platform's decision, as the
-Namespace and the roles are, and the targets write it with the project's
-manifests, `projects/<namespace>/project/network-policy.yaml`, for a
-project kept too ([the project's
-manifests](specs/01_inputs_outputs.md#the-projects-manifests)). An
+Namespace and the roles are, and okdp-gitops' targets write it with the
+project's manifests, `projects/<namespace>/project/network-policy.yaml`,
+for a project kept too. An
 instance's own NetworkPolicy, of its `objects` section, adds to it (the
 policies of a namespace are a union): it may open its pods further, to
 another namespace, never close what the platform's lets in. Its ingress

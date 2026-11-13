@@ -2,15 +2,22 @@
 
 Normative reference of a service definition: the files at the root of a
 package that `compiler.LoadDefinition(fsys)` reads. A package is laid out
-as a Helm umbrella chart over the service's upstream charts, plus OKDP's
-own files.
+as a Helm chart over the service's upstream charts, plus OKDP's own
+files; it is installed as it is, with the values of a compile.
+
+The `oidcClients` section, the functions `okdpPodSpec`, `okdpJob`,
+`okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret` and
+`okdpGeneratedSecret`, the shape of the mapping's sections and what the
+mapping sees as `platform` come from the standard rule set, okdp-gitops'
+([rule set](01_inputs_outputs.md#rule-set)): a compile without a rule set
+has none of them.
 
 | File | Required | Content |
 |---|---|---|
 | [`Chart.yaml`](#chartyaml) | yes | Helm's chart metadata: the service's name and version, and its upstream charts, the `dependencies`, each by its name, repository and pinned version |
 | [`okdp.yaml`](#okdpyaml) | no | OKDP's part: the platform values the service needs, catalog metadata, OKDP's defaults for each dependency, the instance upstream values each accepts; then the sections of the mapping that are not chart values: `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` |
 | [`values.cel.yaml`](#valuescelyaml) | no | the values file: the values of each dependency, by key, YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives |
-| [`values.yaml`](#valuesyaml) | no | the values file under the name of an umbrella chart's values, conventionally without expressions: a package has one of them |
+| [`values.yaml`](#valuesyaml) | no | the values file under the name of a chart's values, conventionally without expressions: a package has one of them |
 
 The mapping is the sections of `okdp.yaml` and the values file
 ([sections](#sections)): it computes the values of each chart, OKDP's own
@@ -36,10 +43,9 @@ the chart cache of a check) and its outputs are specified in
 
 ## Chart.yaml
 
-Helm's chart metadata (`apiVersion: v2`): the package is an umbrella chart
-over its upstream charts, its `dependencies`. The compiler writes it back
-as the instance's chart, its metadata kept and its dependencies those
-compiled ([umbrella chart](01_inputs_outputs.md#umbrella-chart)).
+Helm's chart metadata (`apiVersion: v2`): the package is a chart over its
+upstream charts, its `dependencies`, and is installed as it is
+([the files of a compile](01_inputs_outputs.md#the-files-of-a-compile)).
 
 Decoded by `go.yaml.in/yaml/v3`: YAML 1.2, unlike values files. Strictly: a
 field Helm does not define fails rather than being ignored, each reported,
@@ -58,11 +64,11 @@ The file is one YAML document: a second one, after `---`, fails
 | Field | Type | Meaning |
 |---|---|---|
 | `apiVersion` | string | Required: `v2`. |
-| `name` | string | Required. The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, heading of the parameter schema violations, the umbrella chart's name. |
-| `version` | string | Required, SemVer, as a [dependency's](#dependencies) is: the package's version, `<upstream>-<okdp semver>` by convention: `service.version`, the umbrella chart's version. |
+| `name` | string | Required. The service: [`service.name`](#context), labels `app.kubernetes.io/name` and `okdp.io/service`, heading of the parameter schema violations, the chart's name. |
+| `version` | string | Required, SemVer, as a [dependency's](#dependencies) is: the package's version, `<upstream>-<okdp semver>` by convention: `service.version`, the chart's version. |
 | `type` | string | Absent or `application`: a package is an application chart. |
 | `dependencies` | list of [dependencies](#dependencies) | The upstream charts of the service. |
-| `kubeVersion`, `description`, `keywords`, `home`, `sources`, `maintainers` (`name`, `email`, `url`), `icon`, `appVersion`, `deprecated`, `annotations` (strings) | as Helm defines them | Not read by the compiler: written back to the umbrella's `Chart.yaml`. |
+| `kubeVersion`, `description`, `keywords`, `home`, `sources`, `maintainers` (`name`, `email`, `url`), `icon`, `appVersion`, `deprecated`, `annotations` (strings) | as Helm defines them | Not read by the compiler. |
 
 The fields are checked when the file is loaded, in this order, then the
 dependencies, in order ([dependencies](#dependencies)); the first failing
@@ -107,7 +113,7 @@ Its key is its `alias`, else its `name`: a [chart key](#chart-keys). The
 key names the dependency's values everywhere: its key in the
 [values file](#valuescelyaml), in `defaults` and `upstream` of
 [`okdp.yaml`](#okdpyaml), in the instance's `upstream` values,
-`Result.Values`, and the umbrella's dependency alias.
+`Result.Values` and `values.yaml`.
 
 A deployer renders the chart from its repository, the final values over
 its defaults ([merge precedence](01_inputs_outputs.md#merge-precedence)).
@@ -143,7 +149,7 @@ key:
 | `condition` set (`tags`, `enabled`, `import-values` alike) | `Chart.yaml: dependencies[<i>] (<key>): condition: the values decide what is rendered ($if on <key> in values.cel.yaml)` |
 | no `name` | `Chart.yaml: dependencies[<i>].name is required` |
 | a key that is not a DNS label ([chart keys](#chart-keys)) | `Chart.yaml: dependencies[<i>] (<key>): key "<key>": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` |
-| the key `global`, an `alias` or a `name`: Helm's values of every chart of the umbrella, which a dependency's values would replace | `Chart.yaml: dependencies[<i>] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias` |
+| the key `global`, an `alias` or a `name`: Helm's values of every chart of the package, which a dependency's values would replace | `Chart.yaml: dependencies[<i>] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias` |
 | the key of an earlier dependency (a chart rendered twice without an alias) | `Chart.yaml: dependencies[<i>] (<key>): the key of dependencies[<j>] too: give one of them an alias` |
 | `repository` starting with `http://`, the chart fetched in clear | `Chart.yaml: dependencies[<i>].repository "<repository>": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)` |
 | `repository` not starting with `https://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
@@ -157,11 +163,12 @@ that declares the client ([oidcClients](#oidcclients)).
 
 A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
 a letter or a digit at each end, 63 characters at most (`app`,
-`admin-users`). It names the umbrella's dependency alias
-([umbrella chart](01_inputs_outputs.md#umbrella-chart)). Another key
+`admin-users`). It names the values of the chart in `values.yaml`
+([the files of a compile](01_inputs_outputs.md#the-files-of-a-compile)).
+Another key
 (`../app`, `my_app`, `App`), an `alias` or, without one, a `name`, fails
-when `Chart.yaml` is loaded, and so does `global`: the umbrella's values
-under it are Helm's global values, which every chart reads:
+when `Chart.yaml` is loaded, and so does `global`: the values under it
+are Helm's global values, which every chart reads:
 
 ```text
 Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias
@@ -431,8 +438,9 @@ values file leaves it out. A dependency is left out when the file writes
 its key at its top level and the key is left out by `$if`
 (`{$if: false, ...}`, or the whole file under a top-level `$if` false) or
 null (`backup: ~`, `backup: ${{ null }}`). It has no `Result.Values`
-entry and no dependency of the umbrella, and the chart cache of a check
-need not hold its chart.
+entry, `<key>: {enabled: false}` of `values.yaml`, for which `Chart.yaml`
+says `condition: <key>.enabled`, and the chart cache of a check need not
+hold its chart.
 
 - A dependency the file does not write is rendered with `{}` as its
   computed values: its OKDP defaults (`defaults`), the instance's upstream
@@ -455,8 +463,8 @@ backup: ~                                       # left out
 ```
 ### values.yaml
 
-The values file may be named `values.yaml` instead, as an umbrella
-chart's values are, by dependency key: plain YAML, for a package whose
+The values file may be named `values.yaml` instead, as a chart's values
+are, by dependency key: plain YAML, for a package whose
 values compute nothing. It is read exactly as `values.cel.yaml` is, by the
 same reader, in the same language, and its messages name it:
 `values.yaml: ` where this page writes `values.cel.yaml: `
@@ -468,8 +476,8 @@ of them: both fail when it is loaded,
   an expression, a directive or an escape, compiles all the same, with a
   warning: `LoadDefinition` gives it once (`Definition.Warnings`), each
   compile with its result (`Result.Warnings`:
-  [outputs](01_inputs_outputs.md#outputs)), and the binary prints it on
-  stderr, `warning: <message>`, still exiting with status 0: `values.yaml
+  [outputs](01_inputs_outputs.md#outputs)), okdp-gitops printing it,
+  `warning: <message>`, and succeeding: `values.yaml
   holds expressions or directives (${{ }}, $-keys): name it
   values.cel.yaml`. The check reads the YAML only: a string holding `${{`
   (`$${{` included), a key starting with `$` (`$if`, `$$key`), at any
@@ -484,7 +492,7 @@ of them: both fail when it is loaded,
 
 ## Example
 
-`examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/`, abridged: the
+`examples/03_full/input/catalog/workspace/`, abridged: the
 package of the `workspace` service, five dependencies, two of them renders
 of one chart.
 
@@ -840,7 +848,7 @@ registers its own by OIDC Dynamic Client Registration, per
 
 | Mode | The compiler |
 |---|---|
-| `dcr` (`platform.oidc.dcr.enabled`) | adds one chart per client, rendered by the platform's oidc-dcr chart (`global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 by default: [platform charts](01_inputs_outputs.md#platform-charts)): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
+| `dcr` (`platform.oidc.dcr.enabled`) | adds the values of one oidc-dcr chart per client, rendered by the [okdp-objects chart](01_inputs_outputs.md#the-objects-chart): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
 | otherwise (`existing`, or `platform.oidc.enabled` false) | adds no chart: the platform provides each client's Secret |
 
 | Key | Type | Default | Meaning |
@@ -1065,7 +1073,7 @@ the labels of every object OKDP renders itself:
 | `app.kubernetes.io/name` | `service.name` | yes |
 | `app.kubernetes.io/instance` | `release.name` | yes |
 | `app.kubernetes.io/component` | the component, when not empty (functions only) | yes |
-| `app.kubernetes.io/managed-by` | `Helm` (the umbrella renders them) | no |
+| `app.kubernetes.io/managed-by` | `Helm` (the okdp-objects chart renders them) | no |
 | `app.kubernetes.io/part-of` | `okdp` | no |
 | `okdp.io/instance` | `release.name` | no |
 | `okdp.io/service` | `service.name` | no |
@@ -1205,5 +1213,4 @@ evaluated list, followed by ` (<name>)` for a named client.
 platform's `global.okdp.oidc.dcr` settings:
 [OAuth client settings](01_inputs_outputs.md#oauth-client-settings).
 
-The `okdp-compile` binary prints them after `error: `
-([usage](../01_usage.md)).
+okdp-gitops' commands print them after `error: `.

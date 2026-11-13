@@ -1,112 +1,118 @@
 # okdp-compiler
 
 Compiles an OKDP service instance into the values of its upstream charts
-with a YAML + CEL mapping. A service is a package, a directory in git, not a
-chart: its upstream charts are rendered as published, from their own
+with a YAML + CEL mapping. A service is a package, a directory in git, not
+a chart: its upstream charts are rendered as published, from their own
 repositories, with the values the compiler writes.
 
-Two ways to use it:
-
-- **as a Go library** (`github.com/okdp/okdp-compiler`, package `compiler`):
-  no binary to call,
-  everything is read through `fs.FS` and in-memory values;
-- **as a binary** (`okdp-compile`), for CI and/or scripts.
+It is a Go library (`github.com/okdp/okdp-compiler`, package `compiler`):
+no binary to call, everything is read through `fs.FS` and in-memory
+values. It holds the claims and their providers, the compile of a whole
+tree they require, Helm's merge of the final values and the errors, on
+[cel2yaml](https://github.com/OKDP/cel2yaml). The `okdp-compile` command
+line, the Flux and Argo CD outputs, the chart cache that pulls charts, the
+edits of a tree and the standard rule set are
+[okdp-gitops](https://github.com/OKDP/okdp-gitops)'s.
 
 ## Library
 
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-instances, err := compiler.LoadRepository([]compiler.Repository{
+rules, err := compiler.LoadRules(rulesFS) // the rule set; none, and no platform rule applies
+if err != nil {
+	log.Fatal(err)
+}
+tree, err := compiler.Build(ctx, []compiler.Repository{
 	{Name: "db", FS: treeFS, Role: compiler.RoleTree}, // the tree, in one or more repositories: platform.yaml, contracts/, catalog/, projects/; a catalog of its own, RoleCatalog, catalog/ and contracts/ only
-})
+}, compiler.BuildOptions{Rules: rules, CostLimit: compiler.DefaultCostLimit})
 if err != nil {
-	log.Fatal(err) // every problem of the tree, each naming its path
+	log.Fatal(err) // a tree whose platform does not load: every problem, each naming its path
 }
-var results []*compiler.Result
-for i, o := range compiler.CompileAll(context.Background(), instances) { // each after those whose outputs it references, each claim bound to its provider
-	if o.Err != nil {
-		log.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err) // the whole report, e.g. every schema violation
-	}
-	results = append(results, o.Result)
+if problems := tree.Problems(); problems != nil {
+	log.Fatal(strings.Join(problems, "\n")) // why each instance does not deploy: every schema violation, each claim that binds to nothing
 }
-g, err := compiler.NewGraph(results) // every dependency checked, the releases ordered
-if err != nil {
-	log.Fatal(err)
-}
-// res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
-// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version):
-//               its Chart.yaml dependency, the platform's oidc-dcr chart for the OAuth clients (oidcClients)
-// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections,
-//               the mapping's objects section (under okdp-objects in instance.values.yaml)
-// res.Info: what the instance publishes: its url, its usage, the connections it provides (okdp.info.yaml)
-// res.Dependencies: the instances the connection references point to (compiler.Dependency): the graph's edges
+for _, ti := range tree.Instances {
+	res := ti.Outcome.Result
+	// res.Values:   chart -> final values of the upstream chart (helm template <res.Charts[chart]> -f them)
+	// res.Charts:   chart -> the upstream chart that renders them (compiler.ChartRef: repository, chart, version)
+	// res.Objects:  OKDP's own objects: the credentials Secrets of the provided connections, the mapping's objects section
+	// res.Info:     what the instance publishes: its url, its usage, the connections it provides
+	// res.Dependencies: the instances the connection references point to (compiler.Dependency): the graph's edges
 
-// What okdp-compile -o <dir> writes, path -> content: each instance's umbrella chart
-// (compiler.Flux{}, compiler.ArgoCD{RepoURL: ...}: with the engine's objects).
-files, err := compiler.Helm{}.Files(results, g)
-if err != nil {
-	log.Fatal(err)
+	files, err := compiler.Write(res) // values.yaml, okdp-objects.values.yaml, okdp.info.yaml
+	if err != nil {
+		log.Fatal(err)
+	}
+	_ = files
 }
+// tree.Graph: every dependency checked, the releases ordered
 ```
 
-`example_test.go` runs this program on the advanced example (`Example`).
-`compiler.LoadRepository` reads a tree, `compiler.CompileAll` compiles its
-instances together: each claim bound to its provider, which a claim or a
-class names by its instance or its release (`data/postgresql`,
-`data/data-postgresql`), each instance of a namespace after the instances
-whose outputs it references, with what they publish as `Published`.
-`compiler.NewGraph` checks their dependencies and orders their releases,
-and a target writes them for a deployer: the umbrella chart of each
-(`compiler.Helm`), with its Flux HelmRelease (`compiler.Flux`) or its
-Argo CD Application (`compiler.ArgoCD`).
-`compiler.Build` is the compile of a tree as both command lines run it,
-the load, then `CompileTree` (`compiler.LoadError`, every problem of a
-tree whose platform does not load; a project that does not load is
-`Tree.Refused`, the others compiled), `compiler.TreeFiles` its output for one or
-more targets, the projects that do not deploy kept as the output written
-before holds them, their manifests and identity of today's settings
-(`compiler.Partial`, the rule of `okdp-compile --partial`). Package
-`treeedit` reads and edits a tree for a control plane, every rule of an
-edit its own: an instance, a connection, a named claim, a project or the
-catalog menu created, updated or removed is an `Edit`, pure, its `Change`
-the files to write and its `Check` by the compile of the tree before and
-after it (an instance written that does not compile, one that compiled and
-does not, a removal of what is in use, a release taken refused:
-`compiler.Regressions`, `compiler.ReleaseTaken`), `treeedit.Apply` runs it
-on a transaction; it reads an output back (`compiler.ReadCompiled`,
-`compiler.ReadPublished`), chooses what a compile reads of a tree
-(`treeedit.ReadSources`, bounded) and writes of its output
-(`treeedit.OutputTargets`, `OutputFS`, `WriteOutput`), and edits the files
-as written, their comments kept; `treeedit.Validate` gives the compile's
-verdict on an edit without writing it, field by field (`ValidateInstance`,
-`ValidateClaim`, `compiler.FieldErrors`). A program that answers before it
-compiles asks the compile's rules of the library, none written again: the
-connection references of a schema (`compiler.ConnectionRefs`), the
-contracts as the compile reads them (`compiler.ReadContract`), a
-connection at its declaration (`compiler.CheckConnection`), the layering
-of values (`compiler.MergeValues`, `compiler.CoalesceValues`), the names
-of the claims (`compiler.NamedClaimID`, `IsClaimID`, `CheckProvider`).
-Package `chartcache` keeps a chart cache that pulls the upstream charts of
-a check, OCI or https ([Go library](docs/01_usage.md#go-library)).
-`compiler.Compile` compiles one instance, given its inputs, as
-`CompileAll` does each; it keeps no state between calls and is safe for
-concurrent use. Any `fs.FS` works: `os.DirFS`, `embed.FS`, a git tree,
-`fstest.MapFS` (see `internal/okdp/pipeline_test.go`). The names of the
-tree (`compiler.ProjectsDir`, `compiler.InstanceFile`...), its release
-rule (`compiler.ReleaseName`) and where a target writes an instance
-(`compiler.InstanceDir`) are exported: a caller does not spell them; the
-rule of a project's name, `compiler.CheckProjectName`, is the compile's,
-for a program that creates a project before any compile.
+`compiler.Build` is the load of a tree, then `CompileTree`: a project that
+does not load is `Tree.Refused`, the others compiled, and a tree whose
+platform does not load a `compiler.LoadError`. Underneath,
+`compiler.LoadRepository` reads a tree and `compiler.CompileAll` compiles
+its instances together: each claim bound to its provider, which a claim or
+a class names by its instance or its release (`data/postgresql`,
+`data/data-postgresql`), one of another project through a class of
+`platform.yaml` or with its consent, the `claimers` of its `instance.yaml`
+([providers](docs/specs/01_inputs_outputs.md#providers)), each instance of
+a namespace after those whose outputs it references, with what they
+publish as `Published`. `compiler.NewGraph` checks their dependencies and
+orders the releases. `compiler.Compile` compiles one instance, given its
+inputs, as `CompileAll` does each; it keeps no state between calls and is
+safe for concurrent use. Any `fs.FS` works: `os.DirFS`, `embed.FS`, a git
+tree, `fstest.MapFS` (see `internal/okdp/pipeline_test.go`).
 
-What Helm does, the compiler does the same way, checked against `helm
-template` (`testdata/helm`): every values file is read as Helm
-reads it (YAML 1.1), the layers are merged and coalesced as Helm does, the
-parameters are checked against the package's `config.schema.json`, and
-`res.Values[chart]`, OKDP's defaults, the computed values and the
-instance's upstream values merged, rendered by Helm, gives what Helm gives
-with them as `-f` files: Helm applies the chart's own defaults, which
-`res.Values` leaves out
+A program that answers before it compiles asks the compile's rules of the
+library, none written again: the connection references of a schema
+(`compiler.ConnectionRefs`), the contracts as the compile reads them
+(`compiler.ReadContract`), a connection at its declaration
+(`compiler.CheckConnection`), the layering of values
+(`compiler.MergeValues`, `compiler.CoalesceValues`), the names of the
+claims (`compiler.NamedClaimID`, `IsClaimID`, `CheckProvider`), a
+compile's error field by field (`compiler.FieldErrors`). The names of the
+tree (`compiler.ProjectsDir`, `compiler.InstanceFile`...) and its release
+rule (`compiler.ReleaseName`) are exported: a caller does not spell them;
+the rule of a project's name, `compiler.CheckProjectName`, is the
+compile's, for a program that creates a project before any compile.
+
+## Output
+
+`compiler.Write` gives the files of a compile, for `helm install`, without
+a chart: the catalog's package is installed as it is.
+
+| File | Holds |
+|---|---|
+| `values.yaml` | the final values of each dependency of the package, `enabled: false` for one the mapping leaves out, which must declare `condition: <key>.enabled` |
+| `okdp-objects.values.yaml` | the values of the `okdp-objects` chart: `Result.Objects` as one YAML stream, `manifests`, and each OAuth client, `client<i>`; written when the instance has either |
+| `okdp.info.yaml` | what the instance publishes: its URL, its usage, the connections it provides; written when it publishes something |
+
+```bash
+helm dependency build <package>
+helm install <release>-okdp <okdp-objects chart> -n <namespace> -f okdp-objects.values.yaml
+helm install <release> <package> -n <namespace> -f values.yaml
+```
+
+The objects go first: the instance's pods read the Secrets they create.
+`Result.ObjectsSource` names the chart
+([OKDP's own objects](docs/03_okdp_objects.md)). None of the objects holds
+credentials in clear, a Secret with values, a `provides` secret without
+`generate`, unless the caller sets `Inputs.AllowPlainSecrets`
+([credentials
+Secrets](docs/specs/01_inputs_outputs.md#credentials-secrets)). The one
+release a Flux HelmRelease or an Argo CD Application deploys, an umbrella
+over both charts, is okdp-gitops'
+([output](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/03_output.md)).
+
+What Helm does, the compiler does the same way: every values file is read
+as Helm reads it (YAML 1.1), the layers are merged and coalesced as Helm
+does, the parameters are checked against the package's
+`config.schema.json`, and `res.Values[chart]`, OKDP's defaults, the
+computed values and the instance's upstream values merged, rendered by
+Helm, gives what Helm gives with them as `-f` files: Helm applies the
+chart's own defaults, which `res.Values` leaves out
 ([Helm fidelity](docs/00_architecture.md#helm-fidelity)).
 
 A package is a Helm `Chart.yaml` and OKDP's files: each of its
@@ -115,30 +121,65 @@ that renders its values, `{name, repository, version}`, pinned. Two
 dependencies may name one chart, each with its alias, for a chart rendered
 more than once
 ([dependencies](docs/specs/02_service_definition.md#dependencies)). A
-compile reads no chart. A check (`Inputs.Charts`, `okdp-compile --check
---charts`) reads the chart's `values.yaml` and `values.schema.json`, from a
-chart cache the caller fills with `helm pull --untar`, each chart unpacked
-under its repository's directory, the URL without its scheme
+compile reads no chart. A check (`Inputs.Charts`) reads the chart's
+`values.yaml` and `values.schema.json`, from a chart cache the caller
+fills with `helm pull --untar`, each chart unpacked under its repository's
+directory, the URL without its scheme
 (`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`): the final values, over the
 chart's defaults, must meet its schema
-([chart cache](docs/specs/01_inputs_outputs.md#chart-cache)). `res.Charts`
-maps every compiled key to the upstream chart that renders it
-([chart index](docs/specs/01_inputs_outputs.md#chart-index)).
+([chart cache](docs/specs/01_inputs_outputs.md#chart-cache)).
 
-`res.Objects`, OKDP's own objects, the generated Secrets among them,
-reach the cluster with the upstream charts: `Write` gives them as one
-YAML stream, the `manifests` value of the `okdp-objects` chart, a
-dependency of the umbrella that renders them as written, in the
-instance's release
-([the objects chart](docs/specs/01_inputs_outputs.md#the-objects-chart),
-[OKDP's own objects](docs/03_okdp_objects.md)); none holds credentials
-in clear, a Secret with values, a `provides` secret without `generate`,
-unless the caller sets `Inputs.AllowPlainSecrets`
-([credentials Secrets](docs/specs/01_inputs_outputs.md#credentials-secrets)).
-`res.Info`, what the instance publishes, its URL, its usage and the
-connections it provides, stays in git, `okdp.info.yaml`, for a control
-plane or a console to read
-([the info file](docs/specs/01_inputs_outputs.md#the-info-file)).
+## Rules
+
+What a platform refuses and what the compiler knows of its names are data,
+a rule set (`compiler.RuleSet`, `compiler.LoadRules`, given as
+`Inputs.Rules` or `BuildOptions.Rules`): its tables, its checks, the
+schemas of the platform's settings and of a mapping, the workload
+fragments, the OAuth clients and the charts the compiler adds. The walkers
+that apply them stay in Go. okdp-gitops holds the standard set,
+`rules/v1`, and gives it to its compiles;
+[`testdata/rules`](testdata/rules) is its copy, for this module's tests.
+
+With no rule set a compile applies none: no namespace, object or host is
+refused, no schema reads the platform's values or a mapping's, there is no
+fragment, no OAuth client, no project role. The claim format stays, so
+claims bind within a namespace; a claim of another namespace is refused,
+as the objects that carry its credentials are the rule set's.
+
+A host adds what depends on the merged values with `Inputs.Finalize` and
+`Inputs.CheckGlobals`: okdp-gitops' `deploy.Build` sets the upstream and
+ingress policy there. A compile without them applies Helm's merge alone.
+
+The settings of `global.okdp` the standard set reads are described, typed
+and defaulted by its
+[`schemas/platform.schema.json`](testdata/rules/schemas/platform.schema.json):
+the classes of the claims
+([classes](docs/specs/01_inputs_outputs.md#classes)), the platform's
+secret store (`global.okdp.secrets`), through which the credentials of
+claims cross namespaces, under `<provider namespace>/<claim ID>`, keys a
+path-based store scopes per namespace ([what the store must
+enforce](docs/specs/01_inputs_outputs.md#what-the-store-must-enforce)),
+and the platform's policy (`global.okdp.policy`): its own projects,
+`privileged`, and the namespaces no project may have, `reserved`, beside
+those the standard set reserves: `platform`, `kube-*`, and the deployer
+engines' and the targets', `flux-system`, `argocd`, `okdp-releases`
+([upstream policy](docs/specs/01_inputs_outputs.md#upstream-policy)).
+
+Whatever the rule set, an instance's `config.yaml` that sets `connections`
+or `claims`, or `global` but for the keys the package's parameter schema
+declares under it, fails
+([context values](docs/specs/01_inputs_outputs.md#context-values)), and a
+context file that changes a value of a lower level, one of its
+connections, named claims or classes, or its default class, fails
+([levels](docs/specs/01_inputs_outputs.md#levels)). The compiler reads the
+platform's settings of the context's files alone, never of a package's
+defaults: a `config.schema.json` that declares `global.okdp` or gives it a
+default fails ([defaults](docs/specs/01_inputs_outputs.md#defaults)).
+
+What a package computes is bounded: `Inputs.CostLimit`, the CEL cost of
+each instance's expressions, the bytes a host function reads and builds
+counted, past which the instance is refused, and `Inputs.Timeout`, one
+instance's compile.
 
 ## Mapping
 
@@ -149,206 +190,57 @@ expressions), and the sections of `okdp.yaml`, after its package keys
 (`require`, `roles`, `dependsOn`, `defaults`, `upstream`): `vars`,
 `errors`, `instance` (url, usage), `provides` (the connections the
 instance publishes), `objects` (OKDP's own objects, whole manifests) and
-`oidcClients` (the service's OAuth clients).
-Expressions see `release`, `values`, `global.okdp`, `platform`, `service`,
-`labels` and `selectorLabels`, and call host functions, Helm's and OKDP's
-(`str`, `sha256`, `toJson`, `okdpFullname`, `okdpGeneratedSecret`,
-`oidcClientSecret`...):
+what the rule set adds, `oidcClients` (the service's OAuth clients) in the
+standard set. Expressions see `release`, `values`, `global.okdp`,
+`platform`, `service`, `labels` and `selectorLabels`, and call host
+functions, Helm's and OKDP's (`str`, `sha256`, `toJson`, `okdpFullname`;
+`okdpGeneratedSecret`, `oidcClientSecret` and the fragments of the
+standard set...):
 [service definition](docs/specs/02_service_definition.md),
 [control flow](docs/specs/03_control_flow.md),
 [functions](docs/specs/04_functions.md).
 
-The OAuth clients are provisioned by the platform
-(`global.okdp.oidc.clientProvisioning: existing`, the default) or registered
-by each service (`dcr`): in `dcr` mode, OIDC enabled, the compiler adds one
-chart per client, rendered by the oidc-dcr chart
-(`global.okdp.charts.oidcDcr`, oidc-dcr 0.6.0 by default), its values
-computed by an embedded template in the mapping language,
-[`testdata/rules/charts/oidc-dcr.cel.yaml`](testdata/rules/charts/oidc-dcr.cel.yaml)
+With the standard set, the OAuth clients are provisioned by the platform
+(`global.okdp.oidc.clientProvisioning: existing`, the default) or
+registered by each service (`dcr`): in `dcr` mode, OIDC enabled, each
+client is one `client<i>` of the okdp-objects chart, an oidc-dcr chart,
+its values computed by a template in the mapping language,
+[`charts/oidc-dcr.cel.yaml`](testdata/rules/charts/oidc-dcr.cel.yaml)
 ([oidcClients](docs/specs/02_service_definition.md#oidcclients), [their
-charts](docs/specs/01_inputs_outputs.md#oauth-client-charts), [their
 platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).
 
-## Binary
+## Command line
 
-Each GitHub release attaches `okdp-compile` for Linux, macOS and Windows,
-amd64 and arm64, as archives with their SHA-256 sums
-(`okdp-compile_<version>_<os>_<arch>.tar.gz`, `.zip` for Windows), built by
-goreleaser ([releases](https://github.com/OKDP/okdp-compiler/releases)),
-an SBOM each; the checksums are signed keyless with cosign by the release
-workflow and each archive's build provenance is attested: `cosign
-verify-blob --bundle okdp-compile_<version>_checksums.txt.sigstore.json`,
-then `sha256sum -c`, or `gh attestation verify <archive> --repo
-OKDP/okdp-compiler` ([release archives](docs/01_usage.md#release-archives)).
-`go install` installs a release by its module path:
-`go install github.com/okdp/okdp-compiler/cmd/okdp-compile@vX.Y.Z`. From a
-checkout, `make build` ([install](docs/01_usage.md#install)).
-
-`--repository <dir>`, repeatable, compiles every instance of a tree
-together, each directory any part of it ([repository
-layout](docs/01_usage.md#repository-layout)): each instance,
-`projects/<project>/instances/<instance>/`, the release
-`<project>-<instance>` of the namespace `<project>`, with the context its
-tree gives, `platform.yaml` at level 0, its project's `project.yaml` at
-level 1, its own `connections.yaml` at level 2, then its values,
-`config.yaml`; with what the others of its namespace publish, compiled
-after them; each claim bound to its provider, `<project>/<instance>` or
-`<project>/<release>`, one of another project through a class of
-`platform.yaml`, or with its consent, the `claimers` of its
-`instance.yaml` ([providers](docs/specs/01_inputs_outputs.md#providers));
-their dependencies checked; written for
-`--target`: `helm` (the default), each instance's umbrella chart, `flux`
-with its HelmRelease or `argocd` with its Application, and, for both,
-each project's own manifests, `projects/<project>/project/`: its
-Namespace, the platform's secret store in it, and the identity its
-releases are installed with, confined to its namespace
-([`--repository`](docs/01_usage.md#--repository),
-[targets](docs/specs/01_inputs_outputs.md#targets)):
-
-```bash
-make build    # bin/okdp-compile
-bin/okdp-compile --repository examples/03_full/input/db -o out/tree
-# demo/demo-workspace: catalogs[1].database: claim demo.marketing (database) bound to demo/demo-db, the default class standard
-# demo/demo-workspace: database: claim demo.workspace.database (database) bound to demo/demo-db, the default class standard
-# demo/demo-workspace: depends on demo-db (database demo.marketing, catalogs[1].database)
-# demo/demo-workspace: depends on demo-db (database demo.workspace.database, database)
-# demo/demo-workspace: depends on demo-alerts (http alerts, notifications.webhook)
-# out/tree now holds examples/03_full/output/, byte for byte
-bin/okdp-compile --repository examples/03_full/input/db -o out/flux --target flux
-# out/flux holds the same charts, with each instance's HelmRelease and the Kustomizations
-bin/okdp-compile --repository examples/03_full/input/db --check --charts examples/03_full/.charts
-# nothing written: the tree checked, and its final values against the upstream charts
-```
-
-`--catalog <dir>`, repeatable, adds a catalog of packages, `catalog/`
-and `contracts/` only: a catalog that holds `platform.yaml` or
-`projects/` is refused, its maintainers adding no project nor the
-platform's values (`compiler.RoleCatalog`; a `--repository` is
-`compiler.RoleTree`, and the library refuses a `compiler.Repository`
-without its `Role`).
-
-The settings of `global.okdp` the compiler reads are described, typed
-and defaulted by
-[`testdata/rules/schemas/platform.schema.json`](testdata/rules/schemas/platform.schema.json),
-the classes of the claims among them (`global.okdp.provisioning`: the
-platform's, with the default class, and a project's own,
-[classes](docs/specs/01_inputs_outputs.md#classes)), and the platform's
-secret store (`global.okdp.secrets`: its name, its provider for a
-SecretStore of each namespace), through which the credentials of claims
-cross namespaces, under `<provider namespace>/<claim ID>`, keys a
-path-based store scopes per namespace ([what the store must
-enforce](docs/specs/01_inputs_outputs.md#what-the-store-must-enforce)),
-and where a connection may keep its own, `secretRef: {remoteKey:
-<key>}`, read into a Secret of each referencing instance's namespace
-([connections](docs/specs/01_inputs_outputs.md#connections)), and the
-platform's policy (`global.okdp.policy`): its own projects, `privileged`,
-the only ones whose instances install cluster-scoped objects, write
-other namespaces and set any upstream value, the others' objects refused
-([objects section](docs/specs/01_inputs_outputs.md#objects-section)),
-and their upstream values denied the keys of a pod's privileges,
-identity, containers or objects, their images held to the platform's
-registries, `upstream.registries`
-([upstream policy](docs/specs/01_inputs_outputs.md#upstream-policy)),
-and the namespaces no project may have, `reserved`, beside those the
-compiler reserves: `platform`, `kube-*`, and the deployer engines' and
-the targets', `flux-system`, `argocd`, `okdp-releases`
-([inputs](docs/specs/01_inputs_outputs.md#inputs-and-outputs)). The
-platform's own objects in the engines' namespaces take a name with a dot
-(`okdp.instances`), which no release, `<project>-<instance>`, can take
-([targets](docs/specs/01_inputs_outputs.md#targets)). An instance's
-`config.yaml` that sets `connections` or `claims`, or `global` but for the
-keys the package's parameter schema declares under it, fails
-([context values](docs/specs/01_inputs_outputs.md#context-values)); a
-context file that changes a value of a lower level, one of its
-connections, named claims or classes, or its default class, fails, and so
-does a project's `project.yaml` that sets a platform setting, anything of
-`global.okdp` but its classes, `provisioning`
-([levels](docs/specs/01_inputs_outputs.md#levels)). The compiler reads
-the platform's settings of the context's files alone, never of a
-package's defaults: a `config.schema.json` that declares `global.okdp`
-or gives it a default fails
-([defaults](docs/specs/01_inputs_outputs.md#defaults)).
-
-`-o <dir>` (`--output`), required, writes each instance as one chart, for
-one Helm release per instance, in
-`<dir>/projects/<namespace>/instances/<release>/`: `Chart.yaml`, an
-umbrella over the upstream charts of the index, each a dependency under
-its key, and `instance.values.yaml`, the final values of each chart under
-its key, given to Helm with `-f` ([`--output`](docs/01_usage.md#--output),
-[rendering with Helm](docs/01_usage.md#rendering-with-helm)),
-OKDP's own objects among them, under `okdp-objects`, when the instance
-has any, and `okdp.info.yaml`, what the instance publishes, when it publishes
-something. The directory is created if needed; the command owns its
-`projects/`, which it marks, `projects/.okdp-compile`, removing what it
-does not write; a `projects/` it did not write, without the mark, is
-refused but with `--force`; a tree that fails writes nothing. The
-instances the connection references point to are printed on stderr, one
-line each, `<namespace>/<release>: depends on <instance> (<contract>
-<output>, <field>)`; the deployment graph orders the releases with them
-([GitOps](docs/01_usage.md#gitops)).
-
-`--check`, without `-o`, compiles and writes nothing: what fails a compile
-fails it, its warnings printed. With it, `--charts <dir>` (`$OKDP_CHARTS`),
-a chart cache, checks the final values against each upstream chart: over
-its defaults, they must meet its `values.schema.json`, as Helm checks them
-when it renders; an instance list appended to (`append`) that leaves out
-items of the chart's default list is warned of, Helm replacing that list.
-A compile reads no chart: `--charts` without `--check` fails
-([`--check`](docs/01_usage.md#--check)). `--report <file>` (`-` for
-stdout) writes what the compile gives as JSON, with `--check` too and
-when it fails: each instance, its status (`compiled`, `refused`,
-`skipped`), its error, warnings, dependencies, claims and charts, and the
-tree's errors ([`--report`](docs/01_usage.md#--report)). `--partial`
-writes the projects whose instances all compile and keeps what the
-output holds of the others, and of two projects that share a release
-name, failing all the same ([`--partial`](docs/01_usage.md#--partial)).
-
-What a package computes is bounded: `--cost-limit` (1000000, 0 for
-none), the CEL cost of each instance's expressions, the bytes a host
-function reads and builds counted, past which the instance is refused,
-`--instance-timeout` (1m, 0 for none), one instance's compile, past which
-that instance is refused, and `--timeout` (10m, 0 for none), the whole
-compile, past which nothing is written
-([command line](docs/01_usage.md#command-line)). What the command reads
-is too: a symbolic link in a repository or the chart cache
-is not followed but refused, a file over 4 MiB, or a directory's files
-over 64 MiB together (a chart's, in the chart cache), refused.
-Credentials written in clear fail the
-compile, but with `--allow-plain-secrets`, for a deployments repository
-that is private.
+`okdp-compile` compiles a tree from directories, for CI and scripts. It
+is built from okdp-gitops, whose
+[usage](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md)
+documents it.
 
 ## Layout
 
 | Path | Description |
 |---|---|
-| `compiler.go` | the Go library's public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `NewGraph`, `Build`, `Partial`, `TreeFiles`, the targets, `Write`, the readers of an output... |
+| `compiler.go`, `exports.go` | the public API, package `compiler`: `LoadDefinition`, `Compile`, `LoadRepository`, `CompileAll`, `CompileTree`, `NewGraph`, `Build`, `Partial`, `LoadRules`, what okdp-gitops needs of a compile |
 | `accessors.go` | the compile's rules for a caller that answers before it writes: `FieldErrors`, `ConnectionRefs`, `ReadContract`, `CheckConnection`, `MergeValues`, `CoalesceValues`, the names of the claims |
-| `treeedit/` | the reads and the edits of a tree, for a caller that edits it (a control plane), and the verdict of the compile on an edit, field by field, without writing it (`Validate`, `ValidateInstance`, `ValidateClaim`): the readers (`ReadInstance`, `ListConnections`, `ListClaims`, `ListProjects`, `ReadCatalogRepositories`, `ListPublished`, `ReadCompiled`...) over a `Reader`; the edits (`CreateInstance`, `PutConnection`, `DeleteClaim`, `CreateProject`, `UpdateCatalog`...), each an `Edit` whose `Change` lists the files to write and its `Check`, the verdict of the compile of the tree before and after it (`Check.Verify`: `CompileError`, `ErrInUse`, `ErrReleaseTaken`), `Apply` running it on a `Writer`; the files as written: `instance.yaml`, the values files, an entry of `connections` or `claims`, a project's description, `projects.yaml`, a document merged key by key, each edited in place |
-| `chartcache/` | a chart cache that pulls the upstream charts from their repositories (OCI, https), a `compiler.ChartSource`: the control plane's and okdp-gitops' |
-| `example_test.go`, `compiler_test.go`, `examples_test.go` | the Go programs of the documentation, run on the example as examples; the concurrent use, raced; `examples/` compiled through the public API |
-| `internal/okdp/` | OKDP's rules (`global.okdp`, connections and contracts, the outputs, claims, classes and providers, the OAuth clients), `LoadDefinition` and `Compile`, the order of the stages, `CompileAll` |
+| `write.go` | the files of a compile: `Write`, `ChartValues`, `ObjectsChartValues` |
+| `internal/okdp/` | the claims, classes and providers, the connections and contracts, the outputs, the layers, `LoadDefinition` and `Compile`, the order of the stages, `CompileAll`; the walkers the rule set drives |
+| `internal/rules/` | the rule engine: `RuleSet`, `LoadRules`, `Empty`, `rules.schema.json` |
+| `internal/merge/` | Helm's merge of the final values, the instance's upstream values, the check against a chart cache |
 | `internal/repository/` | the tree of a deployment, in one or more repositories, read as the instances `CompileAll` compiles; the problems of one that does not load |
 | `internal/tree/` | a tree compiled (`CompileTree`), its instances read as a caller asks of them; its projects written and kept (`Partial`) |
-| `internal/output/` | the output of a tree for its targets (`TreeFiles`): the projects kept as a previous output holds them, their platform's part of today's settings, those of a release name two projects share too, the releases of the output in one namespace |
 | `internal/graph/` | the deployment graph of compiled instances: their dependencies checked, what each release waits for, its sync wave |
-| `internal/target/` | the output formats of compiled instances (`Target`), what they share: the tree, `projects/<namespace>/instances/<release>/` |
-| `internal/target/flux/`, `internal/target/argocd/` | the flux and argocd targets: the umbrella charts with each instance's HelmRelease and Kustomizations, or its Application, okdp-gitops' format |
-| `internal/target/helm/` | the helm target; the files a compile is written as (`Write`, `-o`): the umbrella chart, its values, OKDP's own objects, what the instance publishes |
 | `internal/compile/` | the top level of a mapping over github.com/okdp/cel2yaml, the YAML + CEL language: `vars`, `errors`, the sections, read from one file or several ([source map](docs/00_architecture.md#source-map)) |
-| `chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the final values, their check against the chart cache |
+| `internal/testrules/` | the rule set of this module's tests |
+| `chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the references to charts |
 | `value/` | the values every package shares, and their helpers |
-| `internal/dirfs/` | a directory as an `fs.FS`, bounded, no symbolic link followed: what the CLI reads, and the chart cache of `chartcache` |
-| `cmd/okdp-compile/main.go` | binary entrypoint: flags, the tree read bounded (`openDir`, `internal/dirfs`), `compiler.Build`, `compiler.TreeFiles`, and the files written to disk |
-| `examples/<example>/` | each example a repository tree ([repository layout](docs/01_usage.md#repository-layout)): its sources under `input/db/` (`platform.yaml`, `contracts/`, the packages in `catalog/<service>/<version>/`, the instances of the project `demo` in `projects/demo/instances/<instance>/`), what `-o <dir>` writes for each instance in `output/projects/demo/instances/demo-<instance>/`, its release, checked by `go test` ([example](docs/00_architecture.md#example)) |
-| `examples/00_passthrough/` | a package that computes nothing, `echo`: `Chart.yaml`, one chart, and a plain `values.yaml`, the chart's values the platform sets; no `okdp.yaml`, no parameter, no instance values |
-| `examples/01_minimal/` | the smallest package with a mapping, `hello`: one chart, a mapping that sets three of its values and the instance's usage; no platform values, none needed |
-| `examples/02_advanced/` | an example compile, `webapp`: the package, the contracts, the platform values (`platform.yaml`: `global.okdp` in `dcr` mode and a connection every instance may reference, the instance's audit database), the instance's values (`config.yaml`), its database a claim; `demo-db`, the database server the claim binds to, a minimal package, `db`, that provisions a database for each claim |
-| `examples/03_full/` | a package, `workspace`, that uses every part of the mapping language, each commented: five charts (two renders of one, one left out by `$if`), three OAuth clients in `dcr` mode, contracts with derived and conditional defaults; the platform's values (`platform.yaml`) and a project's (`project.yaml`, level 1), each with connections, the instance's own connections (`connections.yaml`, level 2) and its values (`config.yaml`), two claims of a database among its references, one of its own, one the project's named claim; the instances it depends on, `demo-db`, their provider, and `demo-alerts`, whose output it references, minimal packages, `db` and `alerts`; its chart cache in `.charts/`, for `--check --charts` |
-| `examples/04_claims/` | claims: a database server, `postgresql` in the project `data`, the provider of the platform's default class (`global.okdp.provisioning`) and of the project's class `large`, each naming it `data/postgresql`, the latter with its consent (`claimers: [demo]` of its `instance.yaml`), that provisions a database for each claim bound to it; an application, `app`, whose database is a claim by default, a PostgreSQL one with credentials (`require`): `demo-app` claims one of its own by default, `demo-metrics` one it writes out (`config.yaml`: a class and a request, a size and extensions), `demo-reports` and `demo-dashboards` reference one the project declares (`project.yaml`, a named claim of the class `large`); the contract's two sides, what a claim requests (`x-okdp-claim`: a size, extensions) and what the provider publishes, its `okdp.info.yaml` showing what it granted; the platform's secret store, the credentials crossing namespaces |
-| `testdata/` | instance values that must fail on the example, context values of level `<l>` in `testdata/context/<l>/`, each with its expected error on the first line ([failure cases](docs/00_architecture.md#failure-cases)) |
-| `testdata/cli/` | the binary run as a process (testscript): exit statuses, `--check`, `--repository` and its targets, claims, `$OKDP_CHARTS`, the limits, symbolic links, the output's mark, the report, `--partial` and the projects it keeps, `--allow-plain-secrets`, the platform's policy, the secret store's keys, an OAuth client's Secret, the chart sources, stdout and stderr; with `testdata/`, a case that must fail per boundary of the [threat model](docs/04_threat_model.md) |
-| `testdata/targets/` | the files of each target for three instances (`go test ./internal/target -update`) |
-| `testdata/helm/` | what `helm template` computes on the same inputs, regenerated by `generate.sh` ([Helm fixtures](docs/00_architecture.md#helm-fixtures)) |
+| `examples/<example>/` | each example: `input/catalog/` the package or its services, `input/contracts/`, `input/config/` the platform, projects and instances, `output/` what `Write` gives, checked by `go test` ([examples](docs/00_architecture.md#examples)) |
+| `examples/00_passthrough/` | a package that computes nothing, `echo`: `Chart.yaml`, one chart, and a plain `values.yaml`; no `okdp.yaml`, no parameter |
+| `examples/01_minimal/` | the smallest package with a mapping, `hello` |
+| `examples/02_advanced/` | `webapp`: the contracts, the platform's values, a claim of a database bound to `demo-db`, OAuth clients in `dcr` mode |
+| `examples/03_full/` | `workspace`, every part of the mapping language, commented: five charts, three OAuth clients, connections at each level, two claims |
+| `examples/04_claims/` | claims across namespaces: a provider in the project `data`, its claimers in `demo`, the classes and the consent, the platform's secret store |
+| `examples/05_fragments/` | workloads written with the fragments of the standard set |
+| `testdata/rules/` | the copy of okdp-gitops' standard rule set |
 | `docs/` | the documentation |
 
 ## Documentation
@@ -363,7 +255,7 @@ supported, the disclosure process.
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md): the requirements, the `make` targets,
-the tests and their data, the Helm fixtures, the commits and releases.
+the tests and their data, the commits and releases.
 
 ## License
 

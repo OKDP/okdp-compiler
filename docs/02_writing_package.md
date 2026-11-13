@@ -2,25 +2,24 @@
 
 How to package an upstream application for OKDP: a directory of
 parameters, OKDP's defaults and a service definition, compiled by
-`okdp-compile`. The steps follow a `webapp` service, of which the example
-of this repository is a smaller version
-(`examples/02_advanced/input/db/catalog/webapp/1.0.0/`;
-`examples/00_passthrough/input/db/catalog/echo/1.2.0/` is the smallest
-package, a chart and its values,
-`examples/01_minimal/input/db/catalog/hello/1.0.0/` the smallest with a
-mapping, `examples/03_full/input/db/catalog/workspace/3.2.0-1.4.0/` one
-that uses every part of the mapping language, each commented); the recipes
-and pitfalls come from the services packaged in `OKDP/platform-charts` and
-`OKDP/sandbox-charts`. What each file may contain is specified in
-[the service definition](specs/02_service_definition.md), its [control
+okdp-compiler (the `okdp-compile` command is okdp-gitops'). The steps
+follow a `webapp` service, of which the example of this repository is a
+smaller version (`examples/02_advanced/input/catalog/webapp/`;
+`examples/00_passthrough/input/catalog/` is the smallest package, a chart
+and its values, `examples/01_minimal/input/catalog/` the smallest with a
+mapping, `examples/03_full/input/catalog/workspace/` one that uses every
+part of the mapping language, each commented); the recipes and pitfalls
+come from the services packaged in `OKDP/platform-charts` and
+`OKDP/sandbox-charts`. What each file may contain is specified in [the
+service definition](specs/02_service_definition.md), its [control
 flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
 and [inputs and outputs](specs/01_inputs_outputs.md), the command line in
 [usage](01_usage.md), the internals in [architecture](00_architecture.md).
 
 ## What a package is
 
-A package is a directory of a git repository, laid out as a Helm umbrella
-chart, not published as one. It carries the
+A package is a directory of a git repository, laid out as a Helm chart
+over its upstream charts, not published as one. It carries the
 parameters an instance sets (`config.schema.json`, their defaults
 included), OKDP's defaults for each upstream chart
 (`<key>.defaults.yaml`), and the service definition. `Chart.yaml` names
@@ -32,7 +31,7 @@ values: `vars`, `errors`, the OAuth clients, OKDP's own objects, the
 instance's URL and usage, and the provided connections; `values.cel.yaml`,
 the values file, says how the values of each chart follow from the
 parameters, the platform values (`global.okdp`) and the connections.
-`okdp-compile` turns the values of one instance into the final values of
+A compile turns the values of one instance into the final values of
 every chart, OKDP's own objects and what the instance publishes
 (`okdp.info.yaml`); a deployer then renders each upstream chart from its
 repository with its values, as the
@@ -53,17 +52,18 @@ the package is published as a chart.
 
 A package is a version directory of a catalog,
 `catalog/<service>/<version>/`, which its `Chart.yaml` names
-([repository layout](01_usage.md#repository-layout)); `okdp-compile
---repository` compiles the instances of a tree, and `--check --charts`
-checks them against the upstream charts' defaults and schemas, from a
-chart cache ([`--check`](01_usage.md#--check)).
+([repository layout](01_usage.md#repository-layout)); okdp-gitops'
+`okdp-compile --repository` compiles the instances of a tree, and `--check
+--charts` checks them against the upstream charts' defaults and schemas,
+from a chart cache
+([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ## Integrating a chart
 
 Start from `Chart.yaml`, the chart as a dependency, and a plain
 `values.yaml`: the chart's values the platform sets, under the
-dependency's key, as an umbrella chart's `values.yaml` holds them
-(`examples/00_passthrough/input/db/catalog/echo/1.2.0/`). Every
+dependency's key, as a chart's `values.yaml` holds them
+(`examples/00_passthrough/input/catalog/`). Every
 dependency is rendered, with its chart's defaults when the file does not
 write its key: `Chart.yaml` alone is a package
 ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
@@ -92,8 +92,8 @@ Each upstream chart the service is made of is a dependency of
 `Chart.yaml`: the chart's name, its chart repository (`https://`) or OCI
 registry path (`oci://`), and a pinned version. The package holds
 no copy of it: a deployer renders the chart from its repository, over its
-defaults. A compile reads none of it; a check (`okdp-compile --check
---charts`) reads its `values.yaml` and `values.schema.json` from a chart
+defaults. A compile reads none of it; a check (okdp-gitops' `okdp-compile
+--check --charts`) reads its `values.yaml` and `values.schema.json` from a chart
 cache, filled with `helm pull --untar`, each chart unpacked under its
 repository's directory, the URL without its scheme
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
@@ -112,8 +112,8 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d 
 
 - The key, the `alias` when given, else the chart's `name`, names the
   chart's values everywhere (the values file, `defaults` and `upstream` of
-  `okdp.yaml`, the instance's `upstream.<key>`, the umbrella's dependency
-  alias and its values in `instance.values.yaml`). It is a DNS label:
+  `okdp.yaml`, the instance's `upstream.<key>`, its values in
+  `values.yaml`). It is a DNS label:
   lowercase letters, digits and `-`, 63 characters at most
   ([chart keys](specs/02_service_definition.md#chart-keys)).
 - `Chart.yaml` is read strictly, as Helm defines it: a field it does not
@@ -164,15 +164,14 @@ dependsOn:                # the platform services it needs
 ```
 
 `apiVersion: v2`, `name` and `version` are required, and `version` is
-SemVer: the umbrella chart (`-o`) takes it as its version, and the console
-compares versions. Its upstream half stays SemVer (`480.0.0-1.0.0` for
-Trino 480); release-please owns the OKDP half. Helm's other fields
-(`description`, `maintainers`, `annotations`...) are written back to the
-umbrella's `Chart.yaml`, not read. The mapping sees `name` and `version`
-as `service` (`service.name`, `service.version`); the labels of OKDP's
-objects take `app.kubernetes.io/name` and `okdp.io/service` from the name.
-`roles` and `dependsOn`, in
-`okdp.yaml`, are the console's: the compiler does not read them
+SemVer: Helm requires it of the chart, and the console compares versions.
+Its upstream half stays SemVer (`480.0.0-1.0.0` for Trino 480);
+release-please owns the OKDP half. Helm's other fields (`description`,
+`maintainers`, `annotations`...) are Helm's, not read. The mapping sees
+`name` and `version` as `service` (`service.name`, `service.version`); the
+labels of OKDP's objects take `app.kubernetes.io/name` and
+`okdp.io/service` from the name. `roles` and `dependsOn`, in `okdp.yaml`,
+are the console's: the compiler does not read them
 ([Chart.yaml](specs/02_service_definition.md#chartyaml),
 [okdp.yaml](specs/02_service_definition.md#okdpyaml)).
 
@@ -412,8 +411,8 @@ provides:                  # the connections the instance publishes
   ([rendered
   dependencies](specs/02_service_definition.md#rendered-dependencies)).
   Any other value that is not a map fails the compile. OKDP's own objects
-  are not values: they reach the cluster in the umbrella, whatever the
-  file leaves out ([the objects
+  are not values: they reach the cluster through the okdp-objects chart,
+  whatever the file leaves out ([the objects
   chart](specs/01_inputs_outputs.md#the-objects-chart)).
 - `errors` fails the compile with every message at once. A message is the
   `$value` of an item with its condition, `$if`; `$for` checks every
@@ -422,9 +421,9 @@ provides:                  # the connections the instance publishes
 - `oidcClients` declares the service's OAuth clients; the mapping reads each
   from its Secret, `platform.oidcClientSecret` for the main client
   ([recipe](#oauth-clients)).
-- `objects` are whole manifests (a `kind` and a `metadata.name` at least) the
-  umbrella renders as written, after the credentials Secrets (a `{{` in
-  them is not Helm's): generated Secrets, hooks, custom
+- `objects` are whole manifests (a `kind` and a `metadata.name` at least)
+  the okdp-objects chart renders as written, after the credentials Secrets
+  (a `{{` in them is not Helm's): generated Secrets, hooks, custom
   resources, a workload the upstream charts lack. A component without an
   upstream chart (cnpg-postgresql) declares no dependency, has no values
   file, and writes everything here.
@@ -478,11 +477,11 @@ own, which `demo-db`, the provider of the platform's default class of
 database connections, publishes under the claim's ID: host
 `demo-db-db.demo.svc`, Secret `demo.webapp.database-credentials`, and
 a dependency (`Result.Dependencies`), which the deployment graph orders
-the releases with (Flux `dependsOn`, Argo CD sync waves,
-[GitOps](01_usage.md#gitops); claims below). The mapping reads both the
+the releases with (Flux `dependsOn`, Argo CD sync waves, in okdp-gitops;
+claims below). The mapping reads both the
 same way, credentials through a `secretKeyRef` on `secretRef.name`; the
 reference requires them, `"require": {"required": ["secretRef"]}`
-(`examples/02_advanced/input/db/catalog/webapp/1.0.0/config.schema.json`),
+(`examples/02_advanced/input/catalog/webapp/config.schema.json`),
 and a connection without a Secret is refused before the mapping runs.
 cnpg-postgresql publishes one `database-server` output per database: an
 instance of the namespace references it by that name (`database:
@@ -577,7 +576,7 @@ connection needs, as the claim requests it (`c.request`, the claim
 schema's defaults applied), publishing it under the claim's ID, with what
 it granted. Keep what it holds
 when the claim is gone: the claimer may come back, under the same ID
-(`examples/04_claims/input/db/catalog/postgresql/1.0.0/okdp.yaml`):
+(`examples/04_claims/input/catalog/postgresql/okdp.yaml`):
 
 ```yaml
 provisions: [database-server]
@@ -640,9 +639,10 @@ output.
 
 ```bash
 export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of --check, filled with helm pull --untar
+# okdp-compile is okdp-gitops'
 # /tmp/polaris-dcr: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
 okdp-compile --repository . --repository /tmp/polaris-dcr --check   # against the upstream charts' defaults and schemas
-okdp-compile --repository . --repository /tmp/polaris-dcr -o /tmp/out
+okdp-compile --repository . --repository /tmp/polaris-dcr --target umbrella -o /tmp/out
 i=/tmp/out/projects/demo/instances/demo-polaris
 yq '.dependencies' $i/Chart.yaml   # the source of each key
 chart=$(mktemp -d) && cp -R $i/. "$chart" && helm dependency build "$chart"
@@ -653,22 +653,22 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 - Render with the release name and namespace of the compile,
   `<project>-<instance>` and the project's directory, `demo-polaris` and
   `demo`: the upstream charts derive their names from the release.
-- Render the umbrella as a deployment installs it: its
-  dependencies are the sources the index names for the keys, the clients'
-  charts the platform's oidc-dcr chart, `polaris-admin-principals` the
-  source of `polaris-admin` under its own alias; `helm dependency build`
-  fetches them, in a copy of the directory, since the next compile into the
-  directory refuses `Chart.lock` and `charts/`
-  ([rendering with Helm](01_usage.md#rendering-with-helm)).
-- `-o` writes the final values, the input of `helm template`, under their
-  keys in `instance.values.yaml`, and OKDP's own objects there under
-  `okdp-objects`, which that chart renders as written.
-- A case whose first line is `# error: <message>` must fail with that message
-  (`scripts/compile-charts.sh`, and `testdata/` here: `protected-upstream.yaml`
-  starts with `# error: upstream.app.ingress.hosts: ingress.hosts is set by
-  the platform`; `testdata/context/0/` holds the platform files that must
-  fail). Add one per `errors` entry, per protected path that matters, per
-  schema rule.
+- `--target umbrella` is okdp-gitops' single release of an instance: its
+  dependencies are the sources the index names for the keys,
+  `polaris-admin-principals` the source of `polaris-admin` under its own
+  alias, and the okdp-objects chart, which holds the OAuth clients and
+  renders OKDP's own objects as written; `helm dependency build` fetches
+  them, in a copy of the directory, since the next compile into the
+  directory refuses `Chart.lock` and `charts/`.
+- The library gives the final values alone, `values.yaml` and
+  `okdp-objects.values.yaml`, for the catalog's chart as it is
+  ([installing an instance](01_usage.md#installing-an-instance)).
+- A case whose first line is `# error: <message>` must fail with that
+  message (`scripts/compile-charts.sh`, and okdp-gitops' `testdata/`:
+  `protected-upstream.yaml` starts with `# error:
+  upstream.app.ingress.hosts: ingress.hosts is set by the platform`;
+  `testdata/context/0/` holds the platform files that must fail). Add one
+  per `errors` entry, per protected path that matters, per schema rule.
 
 [Troubleshooting](01_usage.md#troubleshooting) explains the error messages.
 
@@ -863,8 +863,8 @@ polaris-admin-principals:
 
 Both keys render with the chart, over its defaults, and a check holds both
 to its `values.schema.json`, each with its own values file: the index maps
-both to the same chart ([rendering with
-Helm](01_usage.md#rendering-with-helm)). Everything else is keyed by the
+both to the same chart ([chart
+index](specs/01_inputs_outputs.md#chart-index)). Everything else is keyed by the
 key ([dependencies](specs/02_service_definition.md#dependencies)). Without
 an alias, the second would have the key of the first, and fail the load.
 The second render accepts no instance upstream values: an entry of its key
@@ -969,7 +969,7 @@ exceptions a pod may ask for (`readOnlyRootFilesystem: false`, a token),
 are in
 [functions](specs/04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload);
 a complete package is
-`examples/05_fragments/input/db/catalog/notebook/1.0.0/okdp.yaml`.
+`examples/05_fragments/input/catalog/okdp.yaml`.
 
 ```yaml
 # okdp.yaml

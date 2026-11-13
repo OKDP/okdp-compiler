@@ -14,9 +14,9 @@ Three kinds of document share the directives, the
 | Document | Directives |
 |---|---|
 | the mapping: the sections of `okdp.yaml` and the values file, `values.cel.yaml` ([service definition](02_service_definition.md#sections)) | all |
-| the values of an OAuth client's chart, `testdata/rules/charts/oidc-dcr.cel.yaml`, embedded in the compiler ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
-| the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `testdata/rules/fragments/generated-secret.cel.yaml`, embedded in the compiler | all |
-| the objects of the [fragments](04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload), `internal/okdp/fragment-*.cel.yaml`, embedded in the compiler | all |
+| the values of an OAuth client's chart, `rules/v1/charts/oidc-dcr.cel.yaml` of the standard rule set, okdp-gitops' ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)) | all |
+| the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `rules/v1/fragments/generated-secret.cel.yaml` of the standard rule set | all |
+| the objects of the [fragments](04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload), `rules/v1/fragments/fragment-*.cel.yaml` of the standard rule set | all |
 
 ## Directives
 
@@ -501,8 +501,8 @@ reads and builds: a call costs 1, a unit a byte of its argument, about its
 serialisation (a string's bytes, a map's keys and values, a list's
 elements), and the bytes of the string it returns (`sha256`, `toJson`,
 `toYaml`, `quote` of a large value). Once the total passes
-`Inputs.CostLimit` (checked after each expression; `--cost-limit` of
-`okdp-compile`, 1000000 by default), the compile fails with
+`Inputs.CostLimit` (checked after each expression; 1000000 in
+okdp-gitops), the compile fails with
 `the expressions of the compile exceed its CEL cost limit (<n>)`
 ([usage](../01_usage.md)). A `$for` counts too, as it repeats its body
 without an evaluation of CEL's own: each element costs 1, and what its

@@ -113,7 +113,8 @@ opens rather than text it shows. The info file keeps `url` and
 - **Argo CD has none.** It renders the umbrella with `helm template`,
   which leaves `NOTES.txt` out, and keeps no release: the notes are
   neither printed nor stored, and the instance's usage would be nowhere.
-  The compiler targets Flux and Argo CD alike ([GitOps](01_usage.md#gitops));
+  okdp-gitops targets Flux and Argo CD alike
+  ([the engines](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md#the-engines));
   so is any deployer that renders the manifests and applies them itself.
 - **A failed release for a sentence.** A mistake in `NOTES.txt`, a value
   path a chart bump moved (`nil pointer evaluating interface {}.ingress`),

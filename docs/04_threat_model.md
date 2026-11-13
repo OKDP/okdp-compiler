@@ -1,17 +1,27 @@
 # Threat model
 
 Who writes what in an OKDP tree, what each author may reach, and what
-the compiler refuses of each, as it enforces it now. The [security
+is refused of each, as it is enforced now. The [security
 boundaries](00_architecture.md#security-boundaries) list the checks by
 mechanism; this document lists them by author. Each refusal names the
 code that enforces it, `<file>: <function>`, and the fixture that proves
-it, a case that must fail: `testdata/<case>.yaml` and
-`testdata/context/<level>/<case>.yaml`, which `TestExampleErrors`
-compiles on the example `02_advanced`, and the scripts of
-`testdata/cli/`, which `TestScript` runs
-([failure cases](00_architecture.md#failure-cases)); a unit test where
-no fixture is. [What the compiler cannot
-enforce](#what-the-compiler-cannot-enforce) closes it.
+it, a case that must fail, or a unit test where no fixture is. [What
+cannot be enforced](#what-cannot-be-enforced) closes it.
+
+The compiler applies these rules only as far as its rule set says so. The
+walkers of `internal/okdp` (`policy.go`, `hosts.go`, `release.go`) run the
+checks of the rule set a compile is given (`Inputs.Rules`); this document
+is the standard set's, okdp-gitops' `rules/v1`, which
+`deploy.Build` gives its compiles. A compile with no rule set refuses
+none of what these walkers look for.
+
+okdp-gitops holds part of what is named here: `target`, `flux`,
+`argocd`, `output`, `outdir`, `dirfs`, `chartcache`, `treeedit`,
+`okdp-compile`'s flags, its `policy` package (`policy.UpstreamCheck`,
+`policy.CheckIngressValues`, `policy.PlainUpstream`, set by `deploy.Build`
+through `Inputs.Finalize` and `Inputs.CheckGlobals`), and the fixtures
+`testdata/<case>.yaml`, `testdata/context/<level>/<case>.yaml` and
+`testdata/cli/*.txtar`, which compile whole trees with the standard set.
 
 ## What is at stake
 
@@ -36,8 +46,8 @@ enforce](#what-the-compiler-cannot-enforce) closes it.
 The compiler does not know who wrote a file: it trusts a file for its
 place in the tree ([repository layout](01_usage.md#repository-layout)) and
 for its repository's role: a repository of the tree holds any part of it,
-a catalog `catalog/` and `contracts/` only (`--catalog`,
-`compiler.RoleCatalog`). `platform.yaml` is level 0, the platform's;
+a catalog `catalog/` and `contracts/` only (`compiler.RoleCatalog`).
+`platform.yaml` is level 0, the platform's;
 `project.yaml`, level 1, a project's; an instance's `connections.yaml`,
 level 2, and its `config.yaml`, the instance values. Who writes each is
 decided by the hosting of the repositories: their write access and their
@@ -74,16 +84,16 @@ route every namespace to their providers, consenting for them.
 | may | reserve namespaces no project may have, its own components' (`policy.reserved`), a reservation winning over `policy.privileged` | `policy.go: checkPlatformNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/context/0/reserved-namespace.yaml`, `reserved-and-privileged.yaml`, `testdata/cli/policy.txtar`, `TestCheckProjectName` |
 | may | name the platform's own projects, `policy.privileged` | `policy.go: privileged` | `testdata/cli/policy.txtar` (a privileged project's ClusterRole written) |
 | may | name its administrators' groups and the API server's group prefix (`access`): the bootstrap binds the administrators, the compiler writes nothing of them | `platform.schema.json`, `access.go: PlatformAdmins` | `TestPlatformAdmins`, `TestAccessCompile` |
-| may | name the control plane's identity (`controlPlane.serviceAccount`), bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | `target.ControlPlane` | `TestControlPlane`, `TestControlPlaneSetting` |
-| may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | `target.NetworkPolicy`, `okdp.network` | `testdata/cli/network.txtar`, `TestNetworkPolicy`, `TestClaimsNetwork` |
+| may | name the control plane's identity (`controlPlane.serviceAccount`), bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | `target.ControlPlane` | `TestControlPlane` |
+| may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | `target.NetworkPolicy` | `testdata/cli/network.txtar`, `TestNetworkPolicy` |
 | may | give a connection of any key of the store, `platform/<key>` of a ClusterSecretStore; with `secrets.provider`, a key a namespace reads, `<namespace>/<key>`, read through the project's connection | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
 | may not | give a connection a key under `platform/` when the platform gives `secrets.provider`: no namespace reads it, the platform's credentials are copied under the keys of the namespaces that use them | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`provider`) |
 | may | route any namespace to a provider of any namespace (a class) | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | `testdata/context/0/http-chart-repository.yaml` |
 | may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (the menu is `catalogs.yaml`'s), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
 | may not | a `catalogs.yaml` the compile does not read: an unknown key, at any level, a value of another type, a catalog or a category named twice, a service listed twice, of no catalog, or of a default version its catalog lacks | `repository/catalogs.go: ParseCatalogs`, `checkCatalogs`; `treeedit.ReadCatalogRepositories`, `UpdateCatalog`, `CheckCatalogs` | `TestParseCatalogs`, `TestLoadCatalogsFile`, `TestCheckCatalogs` |
-| may not | `{{` in a connection or in upstream values | `connections.go: resolver.resolve`, `chart/merge.go: applyUpstream` (`chart.NoTemplate`) | `TestResolveTemplate` |
-| may not | upstream values the policy denies, for a project that is not privileged | `policy.go: upstreamCheck` | `testdata/context/0/unlisted-registry.yaml` |
+| may not | `{{` in a connection or in upstream values | `connections.go: resolver.resolve`, `merge.go: applyUpstream` (`chart.NoTemplate`) | `TestResolveTemplate` |
+| may not | upstream values the policy denies, for a project that is not privileged | `policy.UpstreamCheck` | `testdata/context/0/unlisted-registry.yaml` |
 
 ## A project author (level 1)
 
@@ -121,7 +131,7 @@ and, a provider, its `claimers`.
 |---|---|---|---|
 | may | any package of the catalog, `service` and `version` | `repository.go: parts.definition` | `examples/02_advanced` |
 | may | parameters the package's schema accepts, the keys of `global` it declares | `layers.go: valuesLayers`, `chart.Parameters` | `examples/02_advanced` |
-| may | upstream values of the keys its package opens (`upstream`) | `chart/merge.go: applyUpstream` | `examples/02_advanced` |
+| may | upstream values of the keys its package opens (`upstream`) | `merge.go: applyUpstream` | `examples/02_advanced` |
 | may | connections of its own, their credentials under `<project>/` of the store | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`demo/own`) |
 | may | claims of a class, or of a provider of its namespace or with its consent; a request the contract's claim schema accepts | `namespace.go: compilation.provider`, `compilation.consent`, `compilation.request` | `testdata/cli/claims.txtar` |
 | may not | `global` but the keys the parameter schema declares, never `okdp` | `layers.go: valuesLayers` | `testdata/instance-sets-global.yaml` |
@@ -130,10 +140,10 @@ and, a provider, its `claimers`.
 | may not | a file in its directory but `instance.yaml`, `config.yaml` and `connections.yaml` (a `values.yaml` no compile reads) | `repository.go: instanceFiles` | `TestInstanceFiles` (`instance_test.go`), `testdata/cli/layout.txtar` |
 | may not | template code, in a key or a string | `layers.go: valuesLayers` (`chart.NoTemplate`) | `testdata/template-code.yaml` |
 | may not | a parameter the schema refuses | `chart.Parameters` | `testdata/schema-violation.yaml` |
-| may not | `global` or a path its package protects in upstream values | `chart/merge.go: applyUpstream` | `testdata/protected-upstream.yaml` |
-| may not | a key of a pod's privileges, security context, identity, containers or objects in upstream values, in a string read as YAML too | `policy.go: upstreamCheck` | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml` |
-| may not | an image of none of the platform's registries, set as an `image` string, a `registry` and a `repository`, or by a key that names one (`initImage`, `imageRegistry`, `defaultImageRegistry`, `imageName`, `...ImageRepository`) | `policy.go: upstreamCheck`, `namesImage` | `testdata/context/0/unlisted-registry.yaml`, `unlisted-image-registry.yaml`, `unlisted-default-image-registry.yaml`, `unlisted-image-name.yaml`, `unlisted-init-image.yaml`, `unlisted-sidecar-image-repository.yaml` |
-| may not | serve a host that does not end with `-<namespace>.<ingress.suffix>` and that the platform does not list for the project (`policy.ingressHosts`): an Ingress's rules (one without host) and tls, a Certificate's `dnsNames` and `commonName`, a route's `hostnames`, the cert-manager, ingress-nginx `server-alias` and external-dns annotations, the `ingress` hosts of a chart's values: a host is shared by every project, the identity provider's traffic and certificates for its name are not the project's | `hosts.go: checkIngressHosts`, `checkIngressValues` | `testdata/denied-ingress-host.yaml`, `denied-ingress-annotation.yaml`, `TestIngressHostsObjects`, `TestIngressHostsValues` |
+| may not | `global` or a path its package protects in upstream values | `merge.go: applyUpstream` | `testdata/protected-upstream.yaml` |
+| may not | a key of a pod's privileges, security context, identity, containers or objects in upstream values, in a string read as YAML too | `policy.UpstreamCheck` | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml` |
+| may not | an image of none of the platform's registries, set as an `image` string, a `registry` and a `repository`, or by a key that names one (`initImage`, `imageRegistry`, `defaultImageRegistry`, `imageName`, `...ImageRepository`) | `policy.UpstreamCheck`, `namesImage` | `testdata/context/0/unlisted-registry.yaml`, `unlisted-image-registry.yaml`, `unlisted-default-image-registry.yaml`, `unlisted-image-name.yaml`, `unlisted-init-image.yaml`, `unlisted-sidecar-image-repository.yaml` |
+| may not | serve a host that does not end with `-<namespace>.<ingress.suffix>` and that the platform does not list for the project (`policy.ingressHosts`): an Ingress's rules (one without host) and tls, a Certificate's `dnsNames` and `commonName`, a route's `hostnames`, the cert-manager, ingress-nginx `server-alias` and external-dns annotations, the `ingress` hosts of a chart's values: a host is shared by every project, the identity provider's traffic and certificates for its name are not the project's | `hosts.go: checkIngressHosts`, `policy.CheckIngressValues` | `testdata/denied-ingress-host.yaml`, `denied-ingress-annotation.yaml`, `TestIngressHostsObjects`, `TestIngressValues` |
 | may not | a connection of another contract, a field the contract does not declare, a secret field | `connections.go: resolver.resolve`, `contract.fields` | `testdata/context/2/wrong-contract.yaml`, `unknown-field.yaml`, `secret-in-connection.yaml` |
 | may not | a connection that does not hold at its declaration, referenced or not, its own or its project's (a name, a contract, a field, a required field, a type, a `secretRef`) | `connections.go: declaredConnections`, `namespace.go: CompileAll` | `TestCompileAllDeclaredConnections`, `testdata/cli/layout.txtar` |
 | may not | a store key outside `<project>/` | `connections.go: storeSecret` | `testdata/context/2/remote-key-of-another-namespace.yaml` |
@@ -157,19 +167,19 @@ which an instance's list replaces.
 | may | consent for its instances to serve other namespaces (`provisions[].claimers`), unless an instance lists its own | `namespace.go: Instance.Claimers` | `testdata/cli/claims.txtar` |
 | may not | hold `platform.yaml` or `projects/` in its repository, a catalog's (`--catalog`, `RoleCatalog`): a project, privileged or in a reserved namespace, or the platform's values, added from a catalog; nor a repository given without a role | `repository.go: index` | `testdata/cli/repository.txtar` (`--catalog`), `TestLoadRoles` |
 | may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the context's layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: contextLayers`, `context.go: parameters` | `testdata/cli/policy.txtar` (`schema-okdp`, `schema-default`), `TestPlatformFromContext` |
-| may | write a workload with the fragments (`okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`): containers with no privilege escalation, no capability, non-root, the runtime's seccomp profile, a read-only root filesystem unless asked, no service account token unless asked, no `hostPath` volume, no host namespace; a sign-in proxy of oauth2-proxy by digest that lets in the project's groups, never the realm's roles, never an unverified email | `fragments.go`, `fragment-*.cel.yaml`, `mapping.schema.json` | `TestPodSpec`, `TestJob`, `TestSignInProxy`, `TestWebWorkload`, `examples/05_fragments` |
+| may | write a workload with the fragments (`okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`): containers with no privilege escalation, no capability, non-root, the runtime's seccomp profile, a read-only root filesystem unless asked, no service account token unless asked, no `hostPath` volume, no host namespace; a sign-in proxy of oauth2-proxy by digest that lets in the project's groups, never the realm's roles, never an unverified email | `fragments.go`, `fragments/fragment-*.cel.yaml`, `mapping.schema.json` | `TestPodSpec`, `TestJob`, `TestSignInProxy`, `TestWebWorkload`, `examples/05_fragments` |
 | may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (an ExternalSecret of another namespace) |
 | may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: checkObjects` | `testdata/cli/policy.txtar` (a ClusterRole) |
-| may not | an object of the deployer engines' API groups (Flux's toolkit, the Flux Operator's `fluxcd.controlplane.io`, `source.extensions.fluxcd.io`, Argo CD's `argoproj.io`), for a project that is not privileged: it would drive the engine with the engine's identity | `policy.go: checkObjects`, `engineGroups` | `testdata/cli/policy.txtar` (a HelmRelease), `TestObjectsPolicy` |
+| may not | an object of the deployer engines' API groups (Flux's toolkit, the Flux Operator's `fluxcd.controlplane.io`, `source.extensions.fluxcd.io`, Argo CD's `argoproj.io`), for a project that is not privileged: it would drive the engine with the engine's identity | `policy.go: checkObjects`, the table `deployerApiGroups` | `testdata/cli/policy.txtar` (a HelmRelease), `TestObjectsPolicy` |
 | may not | a dependency of key `global`, its values Helm's global values, which every chart of the umbrella reads | `chart/metadata.go: Metadata.Check` | `TestMetadataCheck` |
 | may not | two objects of one API group, kind, namespace and name in an instance's objects, the second would replace the first: two claimers' objects whose name a provider derived from the claim's ID by a lossy mapping (`a-b.c`, `a.b-c`); the names are `okdpSqlName(id)`, `okdpObjectName(id)`, injective over the IDs | `policy.go: checkDuplicateObjects`, `names.go: sqlName`, `objectName` | `testdata/cli/policy.txtar` (`duplicate`), `TestDuplicateObjects`, `TestNamesInjective` |
 | may not | a Secret of the objects with `data` or `stringData`, unless the caller allows it | `policy.go: checkPlainSecrets` | `testdata/cli/plain-secrets.txtar` (an objects' Secret) |
 | may not | an ExternalSecret (or ClusterExternalSecret) whose `target.template.data` holds a literal at a sensitive key, an `okdpGeneratedSecret` `stringData`'s included, nor a Fake generator (or ClusterGenerator of kind Fake) with values, unless the caller allows it | `policy.go: checkPlainSecrets`, `credentialLiteral`, `credentialReference` | `TestPlainSecrets` |
 | may not | a `provides` secret without `generate`, unless the caller allows it | `provides.go: credentialsSecret` | `testdata/cli/plain-secrets.txtar` (a `provides` secret) |
 | may not | a dependency over `http://`, a version range | `chart/ref.go: Ref.Check` | `testdata/cli/chart-sources.txtar` |
-| may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `chart.FinalValues` | `TestDcrCompile` |
+| may not | values for a chart `Chart.yaml` does not declare, an OAuth client chart of its own | `objects.go: addOwnCharts`, `merge.FinalValues` | `TestDcrCompile` |
 | may not | a release named like an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-*`, the secret store, its ServiceAccount, the DCR token's Secret), or the beginning of one up to a `-`: the project `okdp`'s instance `project` would write the Role `okdp-project` that confines every release of the namespace | `release.go: checkRelease`, `PlatformObjectNames` | `TestReleaseNamedLikeAPlatformObject`, `TestPlatformObjectNames` |
-| may not | an OAuth client's Secret that is not the release's, `<release>-<client name>` exactly (`<release>-oidc` for the main client), not any name that starts with `<release>-`: that prefix is the instances' `web-x` as much as `web`'s | `oidc.go: oidcClients` | `testdata/cli/oidc.txtar` |
+| may not | an OAuth client's Secret that is not the release's, `<release>-<client name>` exactly (`<release>-oidc` for the main client), not any name that starts with `<release>-`: that prefix is the instances' `web-x` as much as `web`'s | `charts/oidc-clients.cel.yaml` | `testdata/cli/oidc.txtar` |
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart.CompileSchema` | `TestCompileSchemas` |
 | may not | a connection reference out of the compile's reach (under `allOf`, `$defs`, `additionalProperties`...), which a reader of the schema, a console, would take for one the compile resolves and checks | `connections.go: requirements` (`schemaRefs`) | `TestRequirementsOutOfReach` |
 | may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
@@ -183,7 +193,7 @@ The engine renders each instance's chart, with every object it holds,
 the upstream charts' included, which the compiler does not read. The
 Flux and Argo CD targets confine each project to its namespace, with the
 manifests of `projects/<namespace>/project/`
-([the project's manifests](specs/01_inputs_outputs.md#the-projects-manifests)):
+([output](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/03_output.md)):
 
 | | A project | A privileged project (`policy.privileged`) |
 |---|---|---|
@@ -193,7 +203,7 @@ manifests of `projects/<namespace>/project/`
 | People | the roles of its groups (`access`): Argo CD roles of its AppProject, its Applications only, no `exec`; RoleBindings of its namespace to `view`, `edit`, `admin` | the same |
 | Control plane | when the platform names its identity (`controlPlane.serviceAccount`): the Role `okdp-control-plane` of the namespace, what the server does there, Secrets by name and never listed | the same |
 | Network | with `network.policy`: the NetworkPolicy `okdp-project`, ingress from the namespace, the platform's ingress namespaces and the namespaces of the claims it provides, egress open; written for a project kept too, of today's settings and claims | none: the platform's own |
-| Kept | the Namespace when the project goes (Flux's prune label, Argo CD's `Delete=false`); the objects Helm keeps, Argo CD's `Prune=false,Delete=false` (`keep.go: keepSynced`) | the same |
+| Kept | the Namespace when the project goes (Flux's prune label, Argo CD's `Delete=false`); the objects Helm keeps, Argo CD's `Prune=false,Delete=false` (`write.go: keepSynced`) | the same |
 
 A chart that writes another namespace or a ClusterRole is refused by
 the API server (Flux) or by Argo CD, not by the compiler; Pod Security
@@ -247,8 +257,9 @@ sees no store policy.
 
 ## okdp-gitops and the runner
 
-[okdp-gitops](https://github.com/OKDP/okdp-gitops) compiles the tree
-with this library and commits the files of a target to the output
+Everything in this section is enforced in okdp-gitops, not in this
+module. [okdp-gitops](https://github.com/OKDP/okdp-gitops) compiles the
+tree with this library and commits the files of a target to the output
 repository, which the engines reconcile. Its CI job runs each compile
 in a new container of its image, with nothing of the runner's (no file,
 no credentials, no Docker socket) and one volume, the chart cache, on a
@@ -285,12 +296,12 @@ the tree it reads:
 | may not | make it read a file out of a repository (a symbolic link), block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openDir`, `internal/dirfs: FS.Open` | `testdata/cli/symlink.txtar`, `TestDirFSBounds` |
 | may not | exhaust the chart cache's reads with the charts its packages name, refusing another project's instances: each chart's files 64 MiB together, the cache unbounded but by its charts | `internal/dirfs: NewCharts`, `chartcache.Cache.FS`, `--charts` | `TestChartsBounds`, `TestEachChartHasItsBudget` |
 | may not | make it run without end, or hold the tree for long: the CEL cost of an instance's expressions is bounded (the default limit about ten times the dearest case of the catalogs), one expression may cost what is left of the limit, not the limit again, one instance's compile is bounded in time and refused alone past it, the whole compile too | `--cost-limit`, `--instance-timeout`, `--timeout` (`cel2yaml.Session`: `program`, `okdp.Compile`: `Inputs.Timeout`) | `testdata/cli/limits.txtar`, `TestSession` (cel2yaml), `TestCompileTimeout` |
-| may not | make it delete an output it did not write, or write through a symbolic link of the output, at any depth under `projects/`, in the output or out of it (every link there removed before a file is written) | `main.go: checkOutput`, `writeTree`, `removeLinks` | `testdata/cli/output.txtar`, `TestWriteTree` |
+| may not | make it delete an output it did not write, or write through a symbolic link of the output, at any depth under `projects/`, in the output or out of it (every link there removed before a file is written) | `outdir.Check`, `outdir.Write`, `removeLinks` | `testdata/cli/output.txtar`, `TestWrite` (`outdir`) |
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Validate` | `testdata/cli/errors.txtar` |
 | may not | have one project's failure keep the others from deploying (`--partial`): a refused instance, a release name it shares with another project, a file of its own that does not load (a stray file, an unknown key, a `project.yaml` that does not parse), each refusing that project and keeping its output | `repository.go: LoadProjects`, `compiler.Partial` (`internal/tree/partial.go`), `compiler.TreeFiles` (`internal/output`) | `testdata/cli/partial.txtar`, `testdata/cli/kept.txtar`, `testdata/cli/load.txtar`, `TestLoadProjects`, `TestAReleaseCollisionKeepsItsProjects` |
 | may not | make `--partial` read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | `openDir` of `--output`, `compiler.TreeFiles` | `testdata/cli/kept.txtar` |
-| may not | keep a privilege revoked, a role taken back or a policy tightened by keeping one instance of a project refused (`--partial`): the kept project's Namespace, identity, AppProject, RoleBindings and Flux HelmReleases are of today's settings, its instances kept applied with them | `output.go: rederive`, `target.Keeper` (`flux.Target.Kept`, `argocd.Target.Kept`), `okdp.ProjectOf` | `testdata/cli/partial.txtar` (`ops`), `TestPartialRederives`, `TestFilesRederive`, `TestKept` |
-| may not | keep a project in a namespace reserved after it was written, by the platform (`policy.reserved`) or by the compiler (a release that reserves a name): a project kept by `--partial` whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor re-derived, said so; the tree does not fail for it | `access.go: CheckProject` (`ProjectOf`, one view with `Compile`), `output.go: rederive`, `Kept.Dropped` | `testdata/cli/reserved.txtar`, `TestProjectOfNamespace`, `TestFilesDropped` |
+| may not | keep a privilege revoked, a role taken back or a policy tightened by keeping one instance of a project refused (`--partial`): the kept project's Namespace, identity, AppProject, RoleBindings and Flux HelmReleases are of today's settings, its instances kept applied with them | `output.go: rederive`, `target.Keeper` (`flux.Target.Kept`, `argocd.Target.Kept`), `target.ProjectOf` | `testdata/cli/partial.txtar` (`ops`), `TestPartialRederives`, `TestFilesRederive`, `TestKept` |
+| may not | keep a project in a namespace reserved after it was written, by the platform (`policy.reserved`) or by the compiler (a release that reserves a name): a project kept by `--partial` whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor re-derived, said so; the tree does not fail for it | `access.go: CheckProject` (`target.ProjectOf`, one view with `Compile`), `output.go: rederive`, `Kept.Dropped` | `testdata/cli/reserved.txtar`, `TestProjectOfNamespace`, `TestFilesDropped` |
 
 A control plane edits the tree with package `treeedit`, okdp-gitops
 committing each edit: whatever the API in front of it, an edit holds
@@ -302,8 +313,14 @@ these lines.
 | may not | write a change after which an instance it writes, or one that compiled before, does not compile, nor remove what an instance uses | `treeedit: Check.Verify` (`compiler.AddedProblems`, `compiler.Regressions`) | `TestAnEditThatDoesNotCompileIsRefused`, `TestARemovalRefusesWhatIsInUse` |
 | may not | create an instance whose release another project's instance has, nor a project of a name the compile refuses | `Check.Verify` (`compiler.ReleaseTaken`), `treeedit.CheckProjectName` | `TestCreateRefusesACollidingReleaseName`, `TestAProjectOfAReservedNameIsRefused` |
 
-## What the compiler cannot enforce
+## What cannot be enforced
 
+- **A compile with no rule set.** A caller that gives none
+  (`Inputs.Rules` nil) gets no namespace, object, host or plain-secret
+  refusal, and no schema check of the platform's values: only the claim
+  format holds. It is the caller's to give a rule set, as okdp-gitops
+  does. A compile without its `Inputs.Finalize` applies no upstream or
+  ingress policy either.
 - **Who writes a file.** The compiler trusts a file for its place in the
   tree and its repository's role, which the caller gives: a catalog given
   as a repository of the tree (`--repository`, `RoleTree`) adds projects
@@ -318,8 +335,8 @@ these lines.
   when it reads as YAML whole, not a fragment its template completes.
   The engine's identity and Pod Security Admission are the second line.
 - **The OAuth client Jobs.** In `dcr` mode the Job that registers an
-  OAuth client is rendered by the platform's oidc-dcr chart
-  (`global.okdp.charts.oidcDcr`), not by the compiler: its pod has no
+  OAuth client is rendered by an oidc-dcr chart the `okdp-objects` chart
+  holds (`global.okdp.charts.objects`), not by the compiler: its pod has no
   security context, mounts its service account's token and runs its image
   by tag, none of which the chart's values reach. The Job holds the
   namespace's initial access token. The chart is the platform's to
@@ -402,16 +419,16 @@ these lines.
 - **Credentials under a name that does not say so.** A message redacts
   the values of keys named as credentials (`password`, `token`,
   `...Key`); another key's value, and a store key, are printed.
-- **Credentials in clear allowed.** `--allow-plain-secrets`
-  (`Inputs.AllowPlainSecrets`) accepts them, for a caller that knows its
-  deployments repository private.
+- **Credentials in clear allowed.** `Inputs.AllowPlainSecrets`
+  (okdp-compile's `--allow-plain-secrets`) accepts them, for a caller
+  that knows its deployments repository private.
 - **The scope of the plain-secrets rule.** Refused: a `v1` Secret's
   `data` or `stringData`; an ExternalSecret's (a ClusterExternalSecret's)
   `target.template.data` literal (a non-empty string without `{{` nor
   `${`, a number) at a key `value.Sensitive` names, a reference to a
   credential (`existing...`, `...Ref`, `passwordKey`) excepted; a Fake
   generator's values. Warned of, not refused: such a literal at a
-  sensitive key of an instance's upstream values (`plainUpstream`,
+  sensitive key of an instance's upstream values (`policy.PlainUpstream`,
   `TestPlainUpstream`). Not seen: a credential under another key name,
   in a template's literal or a template of a constant, in a ConfigMap,
   an annotation, an environment variable's `value`, any other kind or
@@ -419,12 +436,12 @@ these lines.
   key names are a guess, the review of a package and of the values its
   instances give is the rest.
 - **Bounds the caller sets.** The CEL cost is bounded when the caller
-  passes a limit (`Inputs.CostLimit`: the CLI and okdp-gitops do), one
-  instance's time when it passes `Inputs.Timeout` (the CLI does); the
-  files read are bounded by the CLI's reader and okdp-gitops's, a
-  library caller's `fs.FS` being its own.
+  passes a limit (`Inputs.CostLimit`: okdp-gitops does), one instance's
+  time when it passes `Inputs.Timeout` (`okdp-compile` does); the files
+  read are bounded by okdp-gitops' reader, a library caller's `fs.FS`
+  being its own.
 - **The upstream schemas** are checked with a chart cache only
-  (`--check --charts`), else by Helm when it renders.
+  (`Inputs.Charts`), else by Helm when it renders.
 - **The token of the CI.** Whoever can push a workflow to a repository
   of the sources reads `OKDP_GITOPS_TOKEN`, which writes the output
   repository: the repositories of the sources are the platform's, their
