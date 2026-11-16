@@ -86,7 +86,7 @@ a chart: the catalog's package is installed as it is.
 | File | Holds |
 |---|---|
 | `values.yaml` | the final values of each dependency of the package, `enabled: false` for one the mapping leaves out, which must declare `condition: <key>.enabled` |
-| `okdp-objects.values.yaml` | the values of the `okdp-objects` chart: `Result.Objects` as one YAML stream, `manifests`, and each OAuth client, `client<i>`; written when the instance has either |
+| `okdp-objects.values.yaml` | the values of the `okdp-objects` chart: `Result.Objects` as one YAML stream, `manifests`; written when the instance has objects |
 | `okdp.info.yaml` | what the instance publishes: its URL, its usage, the connections it provides; written when it publishes something |
 
 ```bash
@@ -203,8 +203,8 @@ standard set...):
 With the standard set, the OAuth clients are provisioned by the platform
 (`global.okdp.oidc.clientProvisioning: existing`, the default) or
 registered by each service (`dcr`): in `dcr` mode, OIDC enabled, each
-client is one `client<i>` of the okdp-objects chart, an oidc-dcr chart,
-its values computed by a template in the mapping language,
+client is registered by a Job among the instance's objects, computed by
+a template in the mapping language,
 [`charts/oidc-dcr.cel.yaml`](testdata/rules/charts/oidc-dcr.cel.yaml)
 ([oidcClients](docs/specs/02_service_definition.md#oidcclients), [their
 platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).

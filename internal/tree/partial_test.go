@@ -43,7 +43,7 @@ func TestPartial(t *testing.T) {
 	add("e", "e1", compiled("e", "e1", on("", "e-gone")))
 	add("f", "f1", compiled("f", "f1"))
 	add("g", "g1", compiled("g", "g1", on("a", "a-a1")))
-	tr := build(instances, outcomes)
+	tr := build(instances, outcomes, nil)
 
 	results, g, kept := Partial(tr)
 	if g == nil || len(results) != 1 || results[0].Release != "f-f1" {
@@ -78,7 +78,7 @@ func TestPartial(t *testing.T) {
 	}
 
 	// Nothing refused, no problem: everything written, nothing kept.
-	results, g, kept = Partial(build(instances[7:8], outcomes[7:8]))
+	results, g, kept = Partial(build(instances[7:8], outcomes[7:8], nil))
 	if g == nil || len(results) != 1 || kept != nil {
 		t.Errorf("a tree that deploys: %v %v %v", results, g, kept)
 	}
@@ -90,7 +90,7 @@ func TestPartial(t *testing.T) {
 func TestPartialRefused(t *testing.T) {
 	instances := []okdp.Instance{instance("b", "b1"), instance("f", "f1")}
 	outcomes := []okdp.Outcome{compiled("b", "b1", on("a", "a-a1")), compiled("f", "f1")}
-	tr := build(instances, outcomes)
+	tr := build(instances, outcomes, nil)
 	tr.Refused = []Refused{{Namespace: "a", Problems: []string{"db/projects/a/instances/x/values.yaml: not a file"}}}
 	results, g, kept := Partial(tr)
 	if g == nil || len(results) != 1 || results[0].Release != "f-f1" {
@@ -106,8 +106,8 @@ func TestPartialRefused(t *testing.T) {
 // in after's order; a new one, or one that did not deploy before, is none.
 func TestRegressions(t *testing.T) {
 	ok, refused := compiled("demo", "x"), okdp.Outcome{Err: errors.New("refused")}
-	before := build([]okdp.Instance{instance("demo", "x"), instance("demo", "y"), instance("demo", "z")}, []okdp.Outcome{ok, ok, refused})
-	after := build([]okdp.Instance{instance("demo", "w"), instance("demo", "y"), instance("demo", "x"), instance("demo", "z")}, []okdp.Outcome{refused, refused, ok, refused})
+	before := build([]okdp.Instance{instance("demo", "x"), instance("demo", "y"), instance("demo", "z")}, []okdp.Outcome{ok, ok, refused}, nil)
+	after := build([]okdp.Instance{instance("demo", "w"), instance("demo", "y"), instance("demo", "x"), instance("demo", "z")}, []okdp.Outcome{refused, refused, ok, refused}, nil)
 	var names []string
 	for _, ti := range Regressions(before, after) {
 		names = append(names, ti.Name)
@@ -135,7 +135,7 @@ func TestDir(t *testing.T) {
 	if got := tr.Instances[0].Inputs.Charts; !reflect.DeepEqual(got, charts) || instances[0].Inputs.Charts != nil {
 		t.Errorf("charts: %v, given %v", got, instances[0].Inputs.Charts)
 	}
-	if err := tr.Instances[0].Err(); err != nil || tr.ChartsErr != nil {
-		t.Errorf("compiled: %v %v", err, tr.ChartsErr)
+	if err := tr.Instances[0].Err(); err != nil || tr.ChartFailures != nil {
+		t.Errorf("compiled: %v %v", err, tr.ChartFailures)
 	}
 }

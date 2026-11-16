@@ -21,33 +21,31 @@
 // renders the upstream chart from its repository, the final values over its
 // defaults. A compile reads no chart; with a chart cache (Inputs.Charts), it
 // checks the final values against each chart's defaults and schema. Write gives
-// the instance as one chart, an umbrella over these upstream charts, its
-// values and OKDP's own objects, and what the instance publishes, whose
-// outputs the other instances of the namespace reference by name
-// (Inputs.Published); the instances it depends on are for a deployer
-// (Result.Dependencies). CompileAll compiles instances together, each with
-// what the others publish (a tree's, LoadRepository), NewGraph orders
-// their releases, the dependencies checked, and a Target writes them for
-// a deployer.
+// the files of the instance: the final values of its charts, those of
+// OKDP's own objects and what it publishes (InfoFile), whose outputs the
+// other instances of the namespace reference by name (Inputs.Published);
+// the instances it depends on are for a deployer (Result.Dependencies).
+// CompileAll compiles instances together, each with what the others
+// publish (a tree's, LoadRepository), and NewGraph orders their releases,
+// the dependencies checked.
 //
 // Build is the compile of a tree as a CLI or a control plane asks for it,
-// TreeFiles its output for one or more targets, the projects that do not
-// deploy kept as a previous output holds them (Partial).
+// Partial the projects of the outcome that deploy and those kept as a
+// previous output holds them. What writes a tree for a deployer (the Helm,
+// Flux and Argo CD targets, the output of a tree) is okdp-gitops'; the
+// standard rule set too (Inputs.Rules).
 //
 // Everything is read through fs.FS and in-memory values, so a caller (a
 // server, a CLI) can compile from a checkout, an embedded filesystem or a
 // git tree without touching the disk.
 //
 // This package is the public API; the implementation is under internal/:
-// OKDP's rules and the order of the stages (okdp), the tree of a
-// deployment read (repository), the deployment graph of compiled
-// instances (graph), a tree compiled and the projects of it kept (tree),
-// the formats compiled instances are written in (target: helm, the
-// umbrella of Write, flux, argocd), the output of a tree for its targets
-// (output), the mapping language (compile), what the compiler reproduces
-// of Helm (chart), and the values they share (value). Beside it, package
-// treeedit edits the files of a tree as written, package chartcache
-// fetches the upstream charts of a check (a ChartSource).
+// OKDP's rules and the order of the stages (okdp), the rule sets (rules),
+// the tree of a deployment read (repository), the deployment graph of
+// compiled instances (graph), a tree compiled and the projects of it kept
+// (tree), the merge of the final values (merge) and the mapping language
+// (compile). What the compiler reproduces of Helm (chart) and the values
+// they share (value) are public beside it.
 package compiler
 
 import (
@@ -291,12 +289,12 @@ func IsName(name string) bool { return chart.IsDNSLabel(name) }
 // options (Flux.Source's) is refused when the target writes the tree.
 // For a program that creates projects, before it creates any of a
 // project's parts.
-func CheckProjectName(rules *RuleSet, name string, platform map[string]any) error {
+func CheckProjectName(ctx context.Context, rules *RuleSet, name string, platform map[string]any) error {
 	v, err := value.Normalize(platform)
 	if err != nil {
 		return fmt.Errorf("the platform's values (%s): %w", PlatformFile, err)
 	}
-	return okdp.CheckNamespace(rules, "project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
+	return okdp.CheckNamespace(ctx, rules, "project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
 }
 
 // AccessRole: the role of a group within a project, its project.yaml's
@@ -344,8 +342,8 @@ func IsGroupName(name string) bool { return okdp.IsGroup(name) }
 // them: the platform's bootstrap binds them once (Argo CD's role:admin,
 // the cluster's administration); for a program that mirrors the
 // platform's authority.
-func PlatformAdmins(rules *RuleSet, platform map[string]any) ([]string, error) {
-	return okdp.PlatformAdmins(rules, platform)
+func PlatformAdmins(ctx context.Context, rules *RuleSet, platform map[string]any) ([]string, error) {
+	return okdp.PlatformAdmins(ctx, rules, platform)
 }
 
 // LoadDefinition reads the package at the root of fsys: Chart.yaml, then
@@ -378,10 +376,10 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 //   - connections: of their contract, a store key under the project's
 //     own, and the claims bound by CompileAll;
 //   - objects, of a project that is not privileged: its namespace's, none
-//     cluster-scoped nor of the engines' API groups, hosts that end with
-//     -<namespace>.<ingress.suffix> or that the platform lists for it
-//     (global.okdp.policy.ingressHosts), in the objects and in the values
-//     of its charts' ingresses; of any project, no two of one kind,
+//     cluster-scoped nor of the engines' API groups, hosts of the form
+//     <label>.<namespace>.<ingress.suffix> or that the platform lists for
+//     it (global.okdp.policy.ingressHosts), in the objects and in the
+//     values of its charts' ingresses; of any project, no two of one kind,
 //     namespace and name, and no credential in clear unless
 //     Inputs.AllowPlainSecrets;
 //   - cost: the CEL cost of the expressions (Inputs.CostLimit) and the
@@ -425,8 +423,13 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 // each claim is bound and what its provider granted. With charts, the
 // upstream charts the compile names (Result.Charts) are fetched, and the
 // instances compiled again with them, their final values checked against
-// them (Inputs.Charts); a chart that cannot be fetched leaves the values
-// unchecked, and says why (Tree.ChartsErr). instances are not changed.
+// them (Inputs.Charts); a chart that cannot be fetched is unchecked alone:
+// the keys of the instances that name it take no check against it, said
+// per chart (Tree.ChartFailures) and per instance
+// (TreeInstance.ChartFailures), and a project that is not privileged,
+// giving upstream values to it when the host requires rendering
+// (Inputs.RequireRender), is refused, that instance alone. instances are
+// not changed.
 func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) *Tree {
 	return tree.Compile(ctx, instances, charts)
 }
@@ -450,8 +453,8 @@ func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) 
 // instance checked as an instance's compile checks them, and the catalogs'
 // roles. Any problem fails the whole load; Build refuses a project that
 // does not load alone.
-func LoadRepository(repos []Repository) ([]Instance, error) {
-	return repository.Load(repos)
+func LoadRepository(ctx context.Context, repos []Repository) ([]Instance, error) {
+	return repository.Load(ctx, repos)
 }
 
 // AddedProblems: the problems of after that before has not, in after's
@@ -487,7 +490,7 @@ type BuildOptions struct {
 	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
 	Finalize Finalize
 	// CheckGlobals: Inputs.CheckGlobals of each instance; nil, none.
-	CheckGlobals func(GlobalsInput) error
+	CheckGlobals func(context.Context, GlobalsInput) error
 }
 
 // LoadRules: the rule set of fsys, rules.yaml at its root; a table missing
@@ -505,7 +508,7 @@ func LoadRules(fsys fs.FS) (*RuleSet, error) { return okdp.LoadRules(fsys) }
 // An instance refused is the tree's answer (TreeInstance.Err), not an
 // error.
 func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, error) {
-	loaded, err := repository.LoadProjects(repos)
+	loaded, err := repository.LoadProjects(ctx, repos)
 	if err != nil {
 		return nil, err
 	}

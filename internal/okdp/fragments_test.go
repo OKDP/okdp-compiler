@@ -185,7 +185,7 @@ func TestJob(t *testing.T) {
 // claim, never the realm's roles, and never an unverified email.
 func TestSignInProxy(t *testing.T) {
 	s := newSession(fragmentScope(true))
-	got, err := eval(s, "okdpSignInProxy(x)", M{"x": M{"host": "app-demo.example.org", "upstream": "http://127.0.0.1:8080/", "upstreamTimeout": "1h"}})
+	got, err := eval(s, "okdpSignInProxy(x)", M{"x": M{"host": "app.demo.example.org", "upstream": "http://127.0.0.1:8080/", "upstreamTimeout": "1h"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestSignInProxy(t *testing.T) {
 	}
 	for _, want := range []string{
 		"--upstream=http://127.0.0.1:8080/", "--provider=oidc", "--oidc-issuer-url=https://sso.example.org/realms/okdp",
-		"--redirect-url=https://app-demo.example.org/oauth2/callback", "--code-challenge-method=S256", "--provider-ca-file=/cacerts/ca.crt",
+		"--redirect-url=https://app.demo.example.org/oauth2/callback", "--code-challenge-method=S256", "--provider-ca-file=/cacerts/ca.crt",
 		"--oidc-groups-claim=groups", "--allowed-group=okdp-project-demo", "--allowed-group=ops", "--upstream-timeout=1h", "--cookie-secure=true",
 		"--cookie-name=_demo-app-oauth2-proxy_oauth2",
 	} {
@@ -293,7 +293,7 @@ func TestWebWorkload(t *testing.T) {
 		"component": "web", "name": "hop-web", "port": 8080.0, "replicas": 2.0, "servicePort": 8080.0,
 		"pod":     M{"containers": []any{container("app")}, "runAsUser": 501.0, "fsGroup": 501.0, "volumes": []any{M{"name": "tmp", "emptyDir": M{}}}},
 		"storage": M{"size": "10Gi", "storageClassName": "fast"},
-		"ingress": M{"host": "web-demo.example.org", "annotations": M{"nginx.ingress.kubernetes.io/proxy-body-size": "0"}},
+		"ingress": M{"host": "web.demo.example.org", "annotations": M{"nginx.ingress.kubernetes.io/proxy-body-size": "0"}},
 		"signIn":  M{"allowedGroups": []any{"ops"}},
 		"labels":  M{"team": "data"}, "podAnnotations": M{"checksum": "x"},
 	}})
@@ -320,14 +320,14 @@ func TestWebWorkload(t *testing.T) {
 		t.Errorf("volumes: %s", vols)
 	}
 	if !strings.Contains(value.Str(value.AsMap(containers[1])["args"]), "--allowed-group=ops") || !strings.Contains(value.Str(value.AsMap(containers[1])["args"]), "--upstream=http://127.0.0.1:8080/") ||
-		!strings.Contains(value.Str(value.AsMap(containers[1])["args"]), "--redirect-url=https://web-demo.example.org/oauth2/callback") {
+		!strings.Contains(value.Str(value.AsMap(containers[1])["args"]), "--redirect-url=https://web.demo.example.org/oauth2/callback") {
 		t.Errorf("proxy: %#v", containers[1])
 	}
 	if value.Str(value.Dig(svc, "spec.ports")) != "[map[name:http port:8080 targetPort:proxy]]" {
 		t.Errorf("service: %#v", svc)
 	}
 	if ann := value.AsMap(value.Dig(ing, "metadata.annotations")); ann["cert-manager.io/cluster-issuer"] != "ca" || ann["nginx.ingress.kubernetes.io/proxy-body-size"] != "0" ||
-		value.Dig(ing, "spec.ingressClassName") != "nginx" || value.Str(value.Dig(ing, "spec.tls")) != "[map[hosts:[web-demo.example.org] secretName:hop-web-tls]]" {
+		value.Dig(ing, "spec.ingressClassName") != "nginx" || value.Str(value.Dig(ing, "spec.tls")) != "[map[hosts:[web.demo.example.org] secretName:hop-web-tls]]" {
 		t.Errorf("ingress: %#v", ing)
 	}
 	if value.Str(value.Dig(np, "spec.ingress")) != "[map[ports:[map[port:proxy protocol:TCP]]]]" {
@@ -337,7 +337,7 @@ func TestWebWorkload(t *testing.T) {
 	// its selector without a component label, its proxy named okdpFullname.
 	got, err = eval(s, "okdpWebWorkload(x)", M{"x": M{
 		"port": 8080.0, "pod": M{"containers": []any{container("app")}},
-		"ingress": M{"host": "web-demo.example.org"}, "signIn": M{"cookieName": "_session"},
+		"ingress": M{"host": "web.demo.example.org"}, "signIn": M{"cookieName": "_session"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -382,7 +382,7 @@ func TestFragmentsCompile(t *testing.T) {
 objects:
   - $spread: >-
       ${{ okdpWebWorkload({'component': 'web', 'port': 8080, 'pod': {'containers': [{'name': 'app', 'image': 'registry.example.org/app@sha256:0'}]},
-          'ingress': {'host': 'app-demo.example.org'}, 'signIn': {}}) }}
+          'ingress': {'host': 'app.demo.example.org'}, 'signIn': {}}) }}
   - $spread: >-
       ${{ okdpJob({'name': okdpFullname('init'), 'pod': {'containers': [{'name': 'init', 'image': 'registry.example.org/app@sha256:0'}]},
           'hook': {'helm': 'post-install'}}) }}

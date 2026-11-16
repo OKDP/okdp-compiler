@@ -181,7 +181,7 @@ func claimedInstance(values M, bindings map[string]Binding) (*instance, error) {
 		"main": {"x-okdp-connection-ref": {"contract": "database"}}}}`)}
 	in := inputs(values)
 	in.Contracts, in.Bindings = outputContracts, bindings
-	return newInstance(ch, in, defService)
+	return newInstance(context.Background(), ch, in, defService)
 }
 
 // pgOutput: what data/demo-pg publishes for the claim demo.demo-app.db.
@@ -251,7 +251,7 @@ func TestResolveClaimRequirement(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"db": tc.claim}, M{"global": M{"okdp": M{"provisioning": M{"server": M{"default": "standard", "classes": M{"standard": M{"provider": "demo-pg"}}}}}}})
 			in.Contracts, in.Bindings = outputContracts, b
-			if _, err := newInstance(ch, in, defService); err == nil || err.Error() != tc.want {
+			if _, err := newInstance(context.Background(), ch, in, defService); err == nil || err.Error() != tc.want {
 				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})

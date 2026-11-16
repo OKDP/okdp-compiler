@@ -19,6 +19,8 @@
 package compile
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -80,20 +82,20 @@ type binding struct {
 // the section (okdp.yaml: objects[1]: ...) but in a source that is the
 // section (values.cel.yaml: app: env[2]: ...). The evaluations are one
 // document of the session (cel2yaml.Session.Document).
-func Eval(s *cel2yaml.Session, scope M, sections []string, srcs ...Source) (*Doc, error) {
+func Eval(ctx context.Context, s *cel2yaml.Session, scope M, sections []string, srcs ...Source) (*Doc, error) {
 	var d *Doc
 	err := s.Document(func() error {
 		t, err := build(s, srcs, slices.Sorted(maps.Keys(scope)), sections)
 		if err != nil {
 			return err
 		}
-		if scope, err = t.bind(scope); err != nil {
+		if scope, err = t.bind(ctx, scope); err != nil {
 			return err
 		}
 		d = &Doc{Sections: M{}, Written: t.written}
 		for _, k := range sections {
 			if n, ok := t.sections[k]; ok {
-				v, _, err := n.Eval(scope)
+				v, _, err := n.Eval(ctx, scope)
 				if err != nil {
 					return t.at(k, err)
 				}
@@ -134,16 +136,16 @@ func Prepare(s *cel2yaml.Session, names, sections []string, srcs ...Source) (*Pr
 // that are not empty, a text or a map of path and message; without any, the
 // values of its sections, by name. A failure to evaluate it is an error,
 // not a problem. It may be called while another document of the session is
-// being evaluated, by a host function.
-func (p *Prepared) Eval(scope M) (M, []Problem, error) {
+// being evaluated, by a host function. Cancelled with ctx.
+func (p *Prepared) Eval(ctx context.Context, scope M) (M, []Problem, error) {
 	var out []Problem
 	sections := M{}
 	err := p.s.Document(func() error {
-		bound, err := p.t.vars2scope(scope)
+		bound, err := p.t.vars2scope(ctx, scope)
 		if err != nil {
 			return err
 		}
-		items, _, err := p.t.errors.Eval(bound)
+		items, _, err := p.t.errors.Eval(ctx, bound)
 		if err != nil {
 			return p.t.at("errors", err)
 		}
@@ -159,7 +161,7 @@ func (p *Prepared) Eval(scope M) (M, []Problem, error) {
 		}
 		for _, k := range p.sections {
 			if n, ok := p.t.sections[k]; ok {
-				v, _, err := n.Eval(bound)
+				v, _, err := n.Eval(ctx, bound)
 				if err != nil {
 					return p.t.at(k, err)
 				}
@@ -175,37 +177,44 @@ func (p *Prepared) Eval(scope M) (M, []Problem, error) {
 // bindings, in order (each sees the previous ones); then the errors
 // section, a list, every message collected before failing: each item it
 // gives that is not empty, as text (value.Str), a message, without the
-// name of its file.
-func (t *document) bind(outer M) (M, error) {
-	scope, err := t.vars2scope(outer)
+// name of its file (a Refusal each, joined).
+func (t *document) bind(ctx context.Context, outer M) (M, error) {
+	scope, err := t.vars2scope(ctx, outer)
 	if err != nil {
 		return nil, err
 	}
-	rules, _, err := t.errors.Eval(scope)
+	rules, _, err := t.errors.Eval(ctx, scope)
 	if err != nil {
 		return nil, t.at("errors", err)
 	}
-	var msgs []string
+	var refused []error
 	for _, r := range value.AsList(rules) {
 		if msg := value.Str(r); msg != "" {
-			msgs = append(msgs, msg)
+			refused = append(refused, Refusal{msg})
 		}
 	}
-	if len(msgs) > 0 {
-		return nil, fmt.Errorf("%s", strings.Join(msgs, "\n"))
+	if len(refused) > 0 {
+		return nil, errors.Join(refused...)
 	}
 	return scope, nil
 }
 
+// Refusal: a message of the errors section of a document (Eval, joined with
+// errors.Join when it gives several, one a line).
+type Refusal struct{ Message string }
+
+// Error: the message.
+func (r Refusal) Error() string { return r.Message }
+
 // vars2scope: the context outer, then the vars bindings, in order, each
 // seeing the previous ones.
-func (t *document) vars2scope(outer M) (M, error) {
+func (t *document) vars2scope(ctx context.Context, outer M) (M, error) {
 	scope := make(M, len(outer)+len(t.vars))
 	maps.Copy(scope, outer)
 	for _, b := range t.vars {
-		v, _, err := b.t.Eval(scope)
+		v, _, err := b.t.Eval(ctx, scope)
 		if err != nil {
-			return nil, t.at("vars", atKey(b.at, err))
+			return nil, t.at("vars", cel2yaml.AtKey(b.at, err))
 		}
 		scope[b.name] = v
 	}
@@ -218,7 +227,7 @@ func (t *document) vars2scope(outer M) (M, error) {
 func (t *document) at(k string, err error) error {
 	src := t.srcs[k]
 	if k != "vars" && src.Section == "" {
-		err = atKey(k, err)
+		err = cel2yaml.AtKey(k, err)
 	}
 	return fmt.Errorf("%s: %w", src.Name, err)
 }
@@ -296,7 +305,7 @@ func bindings(s *cel2yaml.Session, v *yaml.Node, names []string) ([]binding, []s
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, nil, atKey("vars", fmt.Errorf("must be a map of bindings, got %s", shape(d)))
+		return nil, nil, cel2yaml.AtKey("vars", fmt.Errorf("must be a map of bindings, got %s", cel2yaml.Shape(d)))
 	}
 	out := make([]binding, 0, len(v.Content)/2)
 	for i := 0; i < len(v.Content); i += 2 {
@@ -304,10 +313,10 @@ func bindings(s *cel2yaml.Session, v *yaml.Node, names []string) ([]binding, []s
 		at := "vars " + name
 		t, err := s.Template(v.Content[i+1], names)
 		if err != nil {
-			return nil, nil, atKey(at, err)
+			return nil, nil, cel2yaml.AtKey(at, err)
 		}
 		out = append(out, binding{name, at, t})
-		names = withName(names, name)
+		names = cel2yaml.WithName(names, name)
 	}
 	return out, names, nil
 }
@@ -332,46 +341,9 @@ func literals(n *yaml.Node) []string {
 	}
 	for i := 0; i < len(n.Content); i += 2 {
 		k := n.Content[i].Value
-		if literal(k) && !slices.Contains(keys, strings.TrimPrefix(k, "$")) {
+		if cel2yaml.Literal(k) && !slices.Contains(keys, strings.TrimPrefix(k, "$")) {
 			keys = append(keys, strings.TrimPrefix(k, "$"))
 		}
 	}
 	return keys
-}
-
-// literal: k is a key, not a directive: it does not start with $, or it
-// starts with $$ (the key is written with one $ less).
-func literal(k string) bool { return !strings.HasPrefix(k, "$") || strings.HasPrefix(k, "$$") }
-
-// withName: names, sorted, with n.
-func withName(names []string, n string) []string {
-	i, found := slices.BinarySearch(names, n)
-	if found {
-		return names
-	}
-	return slices.Insert(slices.Clip(names), i, n)
-}
-
-// shape: a value for a message: a map or a list by its kind, null, else
-// the scalar as Go's %#v prints it.
-func shape(v any) string {
-	switch v.(type) {
-	case M:
-		return "a map"
-	case []any:
-		return "a list"
-	case nil:
-		return "null"
-	}
-	return value.Short(v)
-}
-
-// atKey: err, under the key k (a section, "vars <name>"): its path in the
-// document, down to the expression (output: app: env[2]: value: ...); a
-// list position follows the key before it without a separator.
-func atKey(k string, err error) error {
-	if strings.HasPrefix(err.Error(), "[") {
-		return fmt.Errorf("%s%w", k, err)
-	}
-	return fmt.Errorf("%s: %w", k, err)
 }

@@ -7,6 +7,7 @@
 package okdp
 
 import (
+	"context"
 	"io/fs"
 	"reflect"
 	"sync"
@@ -67,7 +68,8 @@ func (m *Memo) forInstance(i int, def *Definition, in Inputs) *instanceMemo {
 }
 
 // sameFS reports whether a and b are the same file system: of one type
-// and equal, or the same map (a fstest.MapFS). Two that cannot be compared
+// and equal, or the same map (the contracts LoadRepository reads, a test's
+// fstest.MapFS). Two that cannot be compared
 // are not.
 func sameFS(a, b fs.FS) bool {
 	if a == nil || b == nil {
@@ -93,14 +95,18 @@ type paramsMemo struct {
 	err              error
 }
 
-// get: parameters(files, in, svc), computed once. The schema is shared,
-// never changed by its readers; the values and the settings are copies:
-// the compile changes them. A nil p computes them.
-func (p *paramsMemo) get(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
+// get: parameters(ctx, files, in, svc), computed once. The schema is
+// shared, never changed by its readers; the values and the settings are
+// copies: the compile changes them. A nil p computes them. What is computed
+// once does not stop with the compile that happens to ask first: another
+// compile of the instance reads the same result.
+func (p *paramsMemo) get(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	if p == nil {
-		return parameters(files, in, svc)
+		return parameters(ctx, files, in, svc)
 	}
-	p.once.Do(func() { p.schema, p.values, p.settings, p.err = parameters(files, in, svc) })
+	p.once.Do(func() {
+		p.schema, p.values, p.settings, p.err = parameters(context.WithoutCancel(ctx), files, in, svc)
+	})
 	if p.err != nil {
 		return nil, nil, nil, p.err
 	}

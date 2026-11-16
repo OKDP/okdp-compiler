@@ -2,12 +2,13 @@ package merge
 
 import (
 	"errors"
-	"github.com/okdp/okdp-compiler/value"
 	"maps"
 	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // TestApplyUpstream: instance upstream values over the computed ones, with
@@ -111,7 +112,7 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 	specs := Specs{"": {Source: src, Upstream: true}, "app": {Source: src}}
 	values := M{"upstream": M{"": M{"a": 1.0}}}
 	cache := fstest.MapFS{"x/app-1.0.0/app/values.yaml": {Data: []byte("b: 2\n")}}
-	out, _, _, err := FinalValues(NewChartCache(cache), fstest.MapFS{}, specs, "values.cel.yaml", M{"app": M{}}, values, nil)
+	out, _, _, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, specs, "values.cel.yaml", M{"app": M{}}, values, nil)
 	if err != nil || out["app"]["a"] != nil {
 		t.Errorf("app: %v %#v", err, out["app"])
 	}
@@ -145,11 +146,11 @@ func TestFinalValuesCheck(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			values := M{"upstream": M{"app": tc.user}, "global": tc.global}
-			out, refs, warnings, err := FinalValues(nil, fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
+			out, refs, warnings, err := FinalValues(nil, nil, fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
 			if err != nil || warnings != nil || refs["app"] != src || !reflect.DeepEqual(out["app"], tc.want) {
 				t.Fatalf("without the cache: %v %q %#v", err, warnings, out["app"])
 			}
-			checked, _, warnings, err := FinalValues(NewChartCache(cache), fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
+			checked, _, warnings, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
 			if err != nil || !reflect.DeepEqual(checked, out) {
 				t.Errorf("with the cache: %v %#v", err, checked["app"])
 			}
@@ -160,11 +161,11 @@ func TestFinalValuesCheck(t *testing.T) {
 	}
 	// The schema, over the chart's defaults (replicas required, set by
 	// them); a chart missing from the cache.
-	_, _, _, err := FinalValues(NewChartCache(cache), fstest.MapFS{}, specs, "values.yaml", M{"app": M{"replicas": float64(5)}}, M{}, nil)
+	_, _, _, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, specs, "values.yaml", M{"app": M{"replicas": float64(5)}}, M{}, nil)
 	if want := "compiled values don't meet the specifications of the schema(s) in the following chart(s):\napp (app-1.0.0):\n- at '/replicas': maximum: got 5, want 3"; err == nil || err.Error() != want {
 		t.Errorf("schema: got %v, want %q", err, want)
 	}
-	_, _, _, err = FinalValues(NewChartCache(fstest.MapFS{}), fstest.MapFS{}, specs, "values.yaml", M{"app": M{}}, M{}, nil)
+	_, _, _, err = FinalValues(NewChartCache(fstest.MapFS{}), nil, fstest.MapFS{}, specs, "values.yaml", M{"app": M{}}, M{}, nil)
 	if want := "app: chart app-1.0.0 is not in the chart cache: "; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("no chart: got %v, want an error starting with %q", err, want)
 	}
@@ -175,7 +176,7 @@ func TestFinalValuesCheck(t *testing.T) {
 func TestFinalValuesCheckGlobal(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	cache := fstest.MapFS{"x/app-1.0.0/app/values.schema.json": {Data: []byte(`{"additionalProperties": false, "properties": {"a": {}}}`)}}
-	out, _, _, err := FinalValues(NewChartCache(cache), fstest.MapFS{}, Specs{"app": {Source: src}}, "values.yaml", M{"app": M{"a": 1.0}}, M{}, nil)
+	out, _, _, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, Specs{"app": {Source: src}}, "values.yaml", M{"app": M{"a": 1.0}}, M{}, nil)
 	if want := "- at '': additional properties 'global' not allowed"; err == nil || !strings.HasSuffix(err.Error(), want) || out != nil {
 		t.Errorf("got %v, want an error ending with %q", err, want)
 	}
@@ -261,5 +262,24 @@ func TestMerged(t *testing.T) {
 	}
 	if value.AsMap(first["b"])["c"] != float64(1) {
 		t.Errorf("a layer changed: %#v", first)
+	}
+}
+
+// TestFinalValuesUnfetched: a chart that could not be fetched takes no
+// check, its final values the same; the other keys are checked.
+func TestFinalValuesUnfetched(t *testing.T) {
+	ok, gone := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}, Ref{Repository: "https://x", Chart: "gone", Version: "1.0.0"}
+	specs := Specs{"app": {Source: ok}, "gone": {Source: gone}}
+	output := M{"app": M{}, "gone": M{"a": 1.0}}
+	cache := fstest.MapFS{"x/app-1.0.0/app/values.schema.json": {Data: []byte(`{"required": ["needed"]}`)}}
+	unfetched := map[Ref]error{gone: errors.New("away")}
+	_, _, _, err := FinalValues(NewChartCache(cache), unfetched, fstest.MapFS{}, specs, "values.yaml", output, M{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "needed") {
+		t.Fatalf("the fetched chart's schema: %v", err)
+	}
+	cache["x/app-1.0.0/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{}`)}
+	out, refs, _, err := FinalValues(NewChartCache(cache), unfetched, fstest.MapFS{}, specs, "values.yaml", output, M{}, nil)
+	if err != nil || out["gone"]["a"] != 1.0 || refs["gone"] != gone {
+		t.Errorf("got %v %v %v", err, out, refs)
 	}
 }

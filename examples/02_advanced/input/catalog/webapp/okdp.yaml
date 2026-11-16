@@ -22,9 +22,9 @@ upstream:
     append: [env]
 
 vars:
-  # <service>-<namespace>.<suffix>: a host of a project ends with
-  # -<namespace>.<suffix> (global.okdp.policy.ingressHosts lists exceptions).
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  # <label>.<namespace>.<suffix>, a host of a project: one DNS label,
+  # then its namespace (global.okdp.policy.ingressHosts lists exceptions).
+  host: ${{ service.name }}.${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # The database parameter: the resolved connection, or {} when not set.
   db: '${{ type(values.database) == map ? values.database : {} }}'
   dbSecret: ${{ db.?secretRef.name.orValue('') }}
@@ -40,7 +40,7 @@ errors:
     $value: "webapp: replicas > 1 needs a database, sessions are stored there"
 
 # The service's OAuth client: provisioned by the platform (the default), or
-# registered by an oidc-dcr chart the compiler adds (clientProvisioning: dcr).
+# registered by a Job the compile adds (clientProvisioning: dcr).
 oidcClients:
   - redirectUris: ['https://${{ host }}/oauth2/callback']
     grantTypes: [authorization_code, refresh_token]

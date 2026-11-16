@@ -36,10 +36,9 @@
 //
 // A mapping's oidcClients section declares the service's OAuth clients
 // (oidc.go): when the platform registers them by dynamic client
-// registration, the compiler adds one chart per client, rendered by the
-// oidc-dcr chart (oidc-dcr for the main client, <name>-oidc-dcr for a named
-// one), which Chart.yaml does not list; their values come from a template
-// in the mapping language embedded in the compiler (oidc-dcr.cel.yaml).
+// registration, the compile adds one Job per client and the objects it
+// needs to the instance's objects, from a template of the rule set in the
+// mapping language (oidc-dcr.cel.yaml).
 //
 // An instance may set any value of a chart that okdp.yaml's upstream
 // accepts, under upstream.<chart> of its values. The mapping sees them

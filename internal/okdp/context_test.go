@@ -1,6 +1,7 @@
 package okdp
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"math/rand/v2"
@@ -10,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -17,7 +19,7 @@ import (
 // global.okdp values.
 func platformCtx(t *testing.T, okdp M) (M, error) {
 	t.Helper()
-	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": okdp}}), defService)
+	inst, err := newInstance(context.Background(), pkg, inputs(M{"global": M{"okdp": okdp}}), defService)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +171,7 @@ func TestPlatformSchema(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
-			_, err := schemaValues(defaultRules().PlatformSchema, heading, M{"global": value.Copy(tc.global)})
+			_, err := schemaValues(testrules.Standard().PlatformSchema(), heading, M{"global": value.Copy(tc.global)})
 			want := heading + ":\n" + tc.want
 			if (err == nil) != (tc.want == "") || (err != nil && err.Error() != want) {
 				t.Errorf("got %v, want %q", err, tc.want)
@@ -194,7 +196,7 @@ func TestContextErrors(t *testing.T) {
 	ch := maps.Clone(pkg)
 	delete(ch, "config.schema.json")
 	ch["config.schema.json/x"] = &fstest.MapFile{}
-	if _, err := newInstance(ch, inputs(), defService); err == nil || !strings.Contains(err.Error(), "read config.schema.json") {
+	if _, err := newInstance(context.Background(), ch, inputs(), defService); err == nil || !strings.Contains(err.Error(), "read config.schema.json") {
 		t.Errorf("config.schema.json a directory: got %v", err)
 	}
 }
@@ -205,7 +207,7 @@ func TestContextErrors(t *testing.T) {
 func TestContextValues(t *testing.T) {
 	in := inputs(M{"replicas": float64(2), "connections": M{}})
 	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"global": M{"project": M{"name": "demo"}}}})
-	inst, err := newInstance(pkg, in, defService)
+	inst, err := newInstance(context.Background(), pkg, in, defService)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +235,7 @@ func TestContextUpstream(t *testing.T) {
 		"other": {},
 	}}
 	up := M{"app": M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}}, "other": M{"y": float64(2)}}
-	inst, err := newInstance(pkg, inputs(M{"upstream": up}), svc)
+	inst, err := newInstance(context.Background(), pkg, inputs(M{"upstream": up}), svc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +306,7 @@ func TestPlatformFromContext(t *testing.T) {
 		for j, ctx := range contexts {
 			in := inputs()
 			in.Context = ctx
-			inst, err := newInstance(files, in, defService)
+			inst, err := newInstance(context.Background(), files, in, defService)
 			if err != nil {
 				if !strings.Contains(err.Error(), "config.schema.json: global.okdp is the platform's settings") {
 					t.Errorf("shape %d %s, context %d: %v", i, doc, j, err)
@@ -324,7 +326,7 @@ func TestPlatformFromContext(t *testing.T) {
 					view = value.Merge(view, M{"global": M{"okdp": M{"provisioning": value.AsMap(okdp)["provisioning"]}}})
 				}
 			}
-			want, err := platformSettings(defaultRules(), view)
+			want, err := platformSettings(testrules.Standard(), view)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -393,7 +395,7 @@ func TestPlatformAccess(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"global": M{"okdp": tc.okdp}})
 			in.Context = append(in.Context, tc.layers...)
-			inst, err := newInstance(pkg, in, defService)
+			inst, err := newInstance(context.Background(), pkg, in, defService)
 			if err != nil {
 				t.Fatal(err)
 			}

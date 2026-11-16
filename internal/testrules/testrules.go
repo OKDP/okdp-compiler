@@ -19,7 +19,10 @@ func Dir() string {
 }
 
 // Standard: the rule set of testdata/rules, read once.
-var Standard = sync.OnceValue(func() *ruleset.RuleSet {
+func Standard() *ruleset.RuleSet { return standard() }
+
+// standard: Standard's rule set, read once.
+var standard = sync.OnceValue(func() *ruleset.RuleSet {
 	r, err := ruleset.LoadRules(os.DirFS(Dir()))
 	if err != nil {
 		panic(err)

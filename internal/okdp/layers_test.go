@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -243,7 +244,7 @@ func TestProjectGlobals(t *testing.T) {
 	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"upstream": M{"registries": []any{"registry.example.org"}}}}}}})
 	in.Values = []map[string]any{{"global": M{"image": M{"repository": "docker.io/evil/app"}}}}
 	var named []GlobalLayer
-	in.CheckGlobals = func(g GlobalsInput) error { named = g.Layers; return nil }
+	in.CheckGlobals = func(_ context.Context, g GlobalsInput) error { named = g.Layers; return nil }
 	if _, err := Compile(context.Background(), withFiles(files), in); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +266,7 @@ func TestDeclarationsGlobals(t *testing.T) {
 		"unlisted": {M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := CheckDeclarations(Inputs{Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
+			err := CheckDeclarations(context.Background(), Inputs{Rules: testrules.Standard(), Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
@@ -279,7 +280,7 @@ func TestCheckGlobalsHook(t *testing.T) {
 	in := inputs()
 	in.Context = append(in.Context, ContextLayer{Level: 1, Values: M{"global": M{"project": M{"a": "b"}}}})
 	var got []GlobalLayer
-	in.CheckGlobals = func(g GlobalsInput) error {
+	in.CheckGlobals = func(_ context.Context, g GlobalsInput) error {
 		got = g.Layers
 		if g.Namespace != "demo" || g.Rules == nil {
 			t.Errorf("the input: %+v", g)

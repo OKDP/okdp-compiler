@@ -1,6 +1,10 @@
 package okdp
 
-import ruleset "github.com/okdp/okdp-compiler/internal/rules"
+import (
+	"context"
+
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
+)
 
 // PlatformObjectNames: the names of the objects the platform writes in the
 // namespace of every project besides its instances' (the targets'): the
@@ -17,6 +21,6 @@ func PlatformObjectNames(rules *RuleSet) []string {
 // checkRelease: nil when release is none of the platform's objects, nor
 // the prefix of one up to a "-" (the rule set's release check); okdp is the
 // platform's settings.
-func checkRelease(rules *RuleSet, field, release string, okdp M) error {
-	return rules.Refuse(ruleset.CheckReleaseRule, M{"field": field, "release": release, "settings": okdp})
+func checkRelease(ctx context.Context, rules *RuleSet, field, release string, okdp M) error {
+	return rules.Refuse(ctx, ruleset.CheckReleaseRule, M{"field": field, "release": release, "settings": okdp})
 }

@@ -169,7 +169,7 @@ as it is. `compiler.Write(res)` gives, by file name:
 | File | When | What |
 |---|---|---|
 | `values.yaml` (`compiler.ValuesFile`) | the instance has charts | the final values of the package's charts, by key; a dependency the mapping leaves out switched off (`<key>: {enabled: false}`) |
-| `okdp-objects.values.yaml` (`compiler.ObjectsValuesFile`) | the instance has objects or OAuth clients | the values of the [okdp-objects chart](specs/01_inputs_outputs.md#the-objects-chart): `manifests`, the objects as one YAML stream, and `client0` to `client4` |
+| `okdp-objects.values.yaml` (`compiler.ObjectsValuesFile`) | the instance has objects | the values of the [okdp-objects chart](specs/01_inputs_outputs.md#the-objects-chart): `manifests`, the objects as one YAML stream |
 | `okdp.info.yaml` (`compiler.InfoFile`) | the instance publishes something | [what it publishes](specs/01_inputs_outputs.md#the-info-file), for the instances that reference it |
 
 Each instance is two Helm releases, in the namespace of its project, the
@@ -280,10 +280,9 @@ func main() {
 ```
 
 ```text
-charts: 2 outputs: 1
+charts: 1 outputs: 1
 replicaCount: 2
 app: https://charts.example.org app 1.8.0
-oidc-dcr: oci://quay.io/adaltas oidc-dcr 0.6.0
 dependency: database -> demo-db (database)
 ```
 
@@ -372,8 +371,7 @@ sets](#rule-sets), [hosts](#hosts)). `Release`, `Namespace` and
 `Contracts` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)).
 
-`Result.Values` is the final values by chart key, those of the OAuth
-clients among them (`Result.OwnCharts`), `Result.Charts` the upstream
+`Result.Values` is the final values by chart key, `Result.Charts` the upstream
 chart of each key, `Result.Info` what the instance publishes,
 `Result.Objects` OKDP's objects, and `Result.Dependencies` what a deployer
 orders the releases with, in no file
@@ -422,9 +420,10 @@ Mind that a program compiling through this library with no rule set
 applies no platform policy at all. The helpers that read rules take the
 set first, nil being the empty one: `compiler.Roles(rules)`,
 `EngineNamespaces(rules)`, `PlatformObjectNames(rules)`,
-`ParseAccess(rules, v, namespace)`, `CheckProjectName(rules, name,
-platform)`, `PlatformAdmins(rules, platform)` and `CheckConnection(rules,
-contracts, project, c, platform)`.
+`ParseAccess(rules, v, namespace)`,
+`CheckProjectName(ctx, rules, name, platform)`,
+`PlatformAdmins(ctx, rules, platform)` and
+`CheckConnection(rules, contracts, project, c, platform)`.
 
 ### Hosts
 
@@ -435,7 +434,12 @@ the compile of the instance, and an error of either refuses it:
   the charts from what the compile computed. Nil, it is Helm's merge, with
   no policy over the upstream values. A host that adds one wraps
   `compiler.FinalValues(caches, in, check)`, `check` what it refuses of
-  the upstream values.
+  the upstream values, and may render each chart key with `FinalInput`'s
+  `Release`, `Namespace` and `Specs[key].Source` and check the manifests
+  with `compiler.CheckObjects` and `compiler.CheckIngressHosts`.
+  `Inputs.RequireRender` refuses, at the compile, a project that is not
+  privileged giving upstream values to a chart that could not be fetched
+  (a chart source's failure).
 - `Inputs.CheckGlobals` (`BuildOptions.CheckGlobals`) checks the keys of
   `global` a project sets, before the mapping runs; nil, none.
 
@@ -458,7 +462,7 @@ its `internal/policy`.
   the claim's ID
   ([dependencies](specs/01_inputs_outputs.md#dependencies)): what a
   deployer orders the releases with. `Write` writes them in no file.
-- `compiler.LoadRepository(repos)` reads a tree, in one or more
+- `compiler.LoadRepository(ctx, repos)` reads a tree, in one or more
   repositories, each a `compiler.Repository` (its name in messages, its
   `fs.FS`), as the instances `CompileAll` compiles, by project then
   instance, each named after its directory (`Instance.Name`), the name of
@@ -496,7 +500,7 @@ its `internal/policy`.
   `compiler.ReleaseName(project, instance)` is the release of an instance
   of the tree, `<project>-<instance>`; `compiler.IsName(name)` whether a
   name may be a project's, an instance's, a connection's or a named
-  claim's, a DNS-1123 label; `compiler.CheckProjectName(rules, name,
+  claim's, a DNS-1123 label; `compiler.CheckProjectName(ctx, rules, name,
   platform)`, `platform` the values of `platform.yaml`, why the compile
   would refuse every instance of a project of that name, in its words
   (`project "kube-foo": the namespace is reserved: ...`): not a name, or,
@@ -512,7 +516,7 @@ its `internal/policy`.
   `map[string]compiler.AccessRole` (`AccessViewer`, `AccessEditor`,
   `AccessAdmin`), the default `compiler.DefaultProjectGroup(project)`,
   `okdp-project-<project>`, an editor, when it gives none, the compile's
-  errors; `compiler.PlatformAdmins(rules, platform)`, the groups of the
+  errors; `compiler.PlatformAdmins(ctx, rules, platform)`, the groups of the
   platform's administrators of the values of `platform.yaml`, checked as
   the compile checks them; `compiler.IsGroupName(name)`, whether a name
   may be a group's ([access](specs/01_inputs_outputs.md#access)).
@@ -549,8 +553,13 @@ its `internal/policy`.
   (`Ensure(ctx, refs)`), the upstream charts the compile names
   (`Result.Charts`, the OAuth clients' among them) are fetched, then the
   instances compiled again with them (`Inputs.Charts`), their final
-  values checked; a chart that cannot be fetched leaves them unchecked,
-  `Tree.ChartsErr` saying why. It is a `compiler.Tree`, its `Instances`
+  values checked. The failure of a chart is its own: a chart that cannot
+  be fetched leaves the keys of the instances that name it unchecked
+  (`Inputs.ChartFailures`), named per chart (`Tree.ChartFailures`) and per
+  instance (`TreeInstance.ChartFailures`, by chart key); a host that
+  renders the charts says so (`Inputs.RequireRender`) and a project that
+  is not privileged, giving upstream values to such a chart, is refused
+  for it, that instance alone. It is a `compiler.Tree`, its `Instances`
   in their order, each a `compiler.TreeInstance`, the `Instance` with its
   `Outcome`, the problem of the graph at its release (`GraphErr`), why it
   does not deploy (`Err`), the claims bound to it as a provider, by ID
@@ -652,12 +661,9 @@ its `internal/policy`.
   a dependency of `Chart.yaml` (its `repository`, `name`, `version`), an
   entry of `Result.Charts`. `compiler.ChartMetadata` is a `Chart.yaml`, the
   package's in `Result.Chart`.
-- `oidc-dcr` is the chart key of a service's main
-  [OAuth client](specs/01_inputs_outputs.md#oauth-client-charts), and the
-  suffix of the others; oidc-dcr 0.6.0 of `oci://quay.io/adaltas`, the
-  standard rule set's, is the chart they are checked against, the chart
-  the chart cache of a check needs for a `dcr` platform; they are rendered
-  by the okdp-objects chart, a slot each.
+- A service's OAuth clients are `Result.Objects`, a Job and what it needs
+  per client
+  ([OAuth client objects](specs/01_inputs_outputs.md#oauth-client-objects)).
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
   the inputs are not changed (`TestConcurrentCompile`, under `go test
@@ -832,11 +838,8 @@ the cause or the fix is not in the message:
 | `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer` | a platform setting of the wrong type, here a quoted number; the types of the settings are checked in every mode, with or without a client | fix the platform values; `null` takes the default |
 | `- at '/oidcClients/0': additional properties 'redirectUri' not allowed` | a typo, or a registration field written as a client key | use a client key (`mapping.schema.json`); a registration field goes under `request` |
 | `global.okdp.oidc.dcr.authMethod "" is not supported: OKDP registers its OAuth clients anonymously` | `dcr` mode, at least one client, and `authMethod` unset (`""`, as when the platform sets no `dcr` settings) or not `anonymous` | `authMethod: anonymous` in the platform values |
-| `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` | set it in the platform values |
-| `Chart.yaml: dependencies[1] (oidc-dcr): the chart of oidcClients[0] is added by the compiler: remove it` | `Chart.yaml` lists the chart key of a client | remove it: the compiler adds the client charts; give the dependency another key (`alias`), or rename the client, when it is another chart |
-| `values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it` | the values file computes values for the chart key of a client | remove it; set registration fields with the client's `request` |
+| `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the registration Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` | set it in the platform values |
 | `oidcClients[0] (console): secret "console-creds": the Secret the client is written to is the release's, "demo-webapp-console" (<release>-<client name>, <release>-oidc for the main client)` | a client's `secret` names a Secret of the namespace that is not the release's, exactly: its Job's Role would write another instance's Secret | name it after the release and the client, `${{ release.name }}-console`, or drop `secret` for the default, `oidcClientSecret(<name>)` |
-| `oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0` | with a chart cache (`Inputs.Charts`), `dcr` mode, at least one client, and the chart cache lacks the platform's oidc-dcr chart (`existing` mode does not need it) | pull it into the chart cache ([platform charts](specs/01_inputs_outputs.md#platform-charts)) |
 
 ### Repositories and the graph
 

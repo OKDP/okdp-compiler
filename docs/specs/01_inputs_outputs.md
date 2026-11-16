@@ -24,6 +24,7 @@ the `TestHelm*` tests named below are okdp-gitops', but `testdata/rules`.
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
 | The rule set | `Inputs.Rules` (`*RuleSet`) | no: the empty set | [Rule set](#rule-set) |
 | The final values, and what a project sets of `global` | `Inputs.Finalize`, `Inputs.CheckGlobals` | no: Helm's merge, no policy | [Rule set](#rule-set) |
+| The charts that could not be fetched, and whether the host renders the charts | `Inputs.ChartFailures` (`map[chart.Ref]error`), `Inputs.RequireRender` | no: every chart in the cache, no rendering; `CompileTree` sets `ChartFailures` | [Hosts](#hosts) |
 | Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret, of a `provides` `secret` or of the objects, fails | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
@@ -82,6 +83,14 @@ values is no rule of the compile: it is the host's, through two hooks.
 `Inputs.Finalize` makes the final values from what the compile computed,
 Helm's merge when nil, with no policy; `Inputs.CheckGlobals` checks the
 keys of `global` a project sets, before the mapping, none when nil.
+`FinalInput` gives a `Finalize` what it renders one chart key with: the
+chart (`Specs[key].Source`), the `Release` and the `Namespace`, the final
+values it returns and `ChartFailures` (the charts it cannot render).
+`compiler.CheckObjects` and `compiler.CheckIngressHosts`
+check the manifests it renders with the rule set of the compile, the
+walks a compile runs on its own objects; a project that is not
+privileged giving upstream values to a chart that could not be fetched is
+refused when the host requires rendering (`Inputs.RequireRender`).
 okdp-gitops sets both (`internal/policy`, `deploy.Build`): the
 [upstream policy](#upstream-policy) and the hosts in upstream values below
 are enforced there.
@@ -117,7 +126,7 @@ files, and no other:
 
 `<key>`: a chart key, the key of a `Chart.yaml` dependency (its `alias`,
 else its `name`) or the chart of an
-OAuth client ([OAuth client charts](#oauth-client-charts)); it names the
+OAuth client ([OAuth client objects](#oauth-client-objects)); it names the
 chart's values. A
 compiled chart: a dependency the values file does not leave out (every
 one, but a key it writes that is left out by `$if` or null:
@@ -240,12 +249,11 @@ no longer does, nor does the compiler: such a chart compiles, and fails to
 render with them. A UTF-8 byte order mark at the start of either file is
 dropped, as Helm drops it. Each chart is read once
 per compile, whatever the number of keys it renders, and only when a chart
-it renders is compiled: the oidc-dcr chart in `dcr` mode with a client.
+it renders is compiled.
 `examples/03_full/.charts/` of okdp-gitops holds the
 full example's charts unpacked, their `values.yaml` and the workspace
 chart's `values.schema.json` only: enough to check, not to render
-(`charts.example.org/workspace-3.2.0/workspace/`,
-`registry.example.org/mirror/oidc-dcr-0.6.0/oidc-dcr/`...).
+(`charts.example.org/workspace-3.2.0/workspace/`...).
 
 A chart its directory does not hold, even when the cache holds its archive
 or the chart elsewhere, fails with the command that downloads it there,
@@ -1254,11 +1262,11 @@ not, is the platform's, set at level 0: a project's layer sets
 | `tls.clusterIssuer` | the cert-manager ClusterIssuer of the services' certificates, whichever cert-manager runs it (OKDP's self-signed CA, an ACME or a corporate one): `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`), `""` when unset |
 | `ingress.annotations` | no default: annotations of every service's ingress, strings, those the cluster's ingress controller reads (Traefik's middlewares, HAProxy's timeouts, ingress-nginx's), merged over `cert-manager.io/cluster-issuer` in `platform.ingressAnnotations`: a platform whose controller is not the one a package tunes its ingress for adds its own equivalents once |
 | `tls.caBundleSecret` | no default: the Secret, in each namespace, of the platform's CA bundle, `ca.crt` (PEM) and `bundle.p12` (PKCS#12), as a trust-manager Bundle writes one, whichever tool fills it; the packages mount it to trust the platform's certificates (unset: they mount none, the certificates being a public CA's), and it is the default of `oidc.dcr.caSecret` ([OAuth client settings](#oauth-client-settings)) |
-| `charts.objects` | the chart of the instance's objects and its OAuth clients ([Platform charts](#platform-charts)) |
-| `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client charts](#oauth-client-charts) are compiled |
-| `oidc.scope` | `platform.oidc.scope`; the scope a client chart registers when its client sets none |
-| `oidc.dcr` | `platform.oidc.dcr`, the values of the OAuth client charts ([OAuth client settings](#oauth-client-settings)) |
-| `oidc.issuerUri` | the OAuth client charts' wait for the provider (`waitForProvider.discoveryUrl`) |
+| `charts.objects` | the chart of the instance's objects ([Platform charts](#platform-charts)) |
+| `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client objects](#oauth-client-objects) are compiled |
+| `oidc.scope` | `platform.oidc.scope`; the scope a client registers when it sets none |
+| `oidc.dcr` | `platform.oidc.dcr`, the settings of the registration Jobs ([OAuth client settings](#oauth-client-settings)) |
+| `oidc.issuerUri` | the registration Jobs' wait for the provider's discovery document |
 | `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | `platform.proxyEnv` |
 | `provisioning.<contract>` | the classes of the claims of the contract, each a provider and what it fixes of the request, and the default class, of the claims that name neither a class nor a provider ([classes](#classes)): the platform's route every namespace to their providers, a project's reach a provider of another namespace with its consent only ([providers](#providers)) |
 | `secrets.store` | the name of the secret store the credentials of claims across namespaces go through, under `<provider namespace>/<id>` ([credentials across namespaces](#credentials-across-namespaces)), and where a connection may keep its own, the platform's under `platform/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) |
@@ -1266,7 +1274,7 @@ not, is the platform's, set at level 0: a project's layer sets
 | `secrets.refreshInterval` | `1h` by default: how often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it |
 | `policy.privileged` | the namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to the [upstream policy](#upstream-policy); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
 | `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
-| `policy.ingressHosts` | per namespace, the exact host names the project serves beside those that end with `-<namespace>.<ingress.suffix>` (the rule, [hosts](#hosts)); none by default; a privileged project's are not checked |
+| `policy.ingressHosts` | per namespace, the exact host names the project serves beside those of the form `<label>.<namespace>.<ingress.suffix>`, one DNS label (the rule, [hosts](#hosts)); none by default; a privileged project's are not checked |
 | `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's `project.yaml`, an instance's `connections.yaml`), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to the [upstream policy](#upstream-policy) |
 | `policy.upstream.deny` | key names the upstream values of the other projects' instances set nowhere, beside the compiler's ([upstream policy](#upstream-policy)) |
 | `policy.upstream.registries` | the registries the images of the other projects' upstream values come from, each a host, its port and a path prefix optional; unset, the images are not checked ([upstream policy](#upstream-policy)) |
@@ -1317,11 +1325,7 @@ compiler adds itself, each an upstream chart, checked as a dependency of
 
 | Key | Renders |
 |---|---|
-| `objects` | [the objects chart](#the-objects-chart), the objects and the OAuth clients of the instance: a chart that renders its `manifests` value as written and holds an oidc-dcr chart per client; the rule set's default, `oci://quay.io/okdp/charts` `okdp-objects` 2.0.0, when unset |
-
-The oidc-dcr chart itself is the chart the okdp-objects chart holds: the
-platform does not name it, the rule set does for a check (`charts.oidcDcr`
-of `rules.yaml`).
+| `objects` | [the objects chart](#the-objects-chart), the objects of the instance, the registration Jobs of its OAuth clients among them: a chart that renders its `manifests` value as written; the rule set's default, `oci://quay.io/okdp/charts` `okdp-objects` 0.1.0, when unset |
 
 Their form is checked with the other [settings the compiler
 reads](#fields-the-compiler-reads), against the platform schema: `charts`
@@ -1341,14 +1345,11 @@ global.okdp.charts.objects.repository "quay.io": the URL of a chart repository (
 global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range
 ```
 
-The [chart cache](#chart-cache) of a check holds the oidc-dcr chart in
-`dcr` mode with a client.
-
 ### OAuth client settings
 
-`global.okdp.oidc.dcr`: the settings of the oidc-dcr Jobs that register the
+`global.okdp.oidc.dcr`: the settings of the Jobs that register the
 OAuth clients of a service in `dcr` mode
-([OAuth client charts](#oauth-client-charts)). The mapping sees them as
+([OAuth client objects](#oauth-client-objects)). The mapping sees them as
 `platform.oidc.dcr`, defaults applied, `enabled` set by the compiler
 ([Context](02_service_definition.md#context)). For example:
 
@@ -1382,16 +1383,20 @@ whole and `>= 0` (`0` is a value), a quoted number (`"600"`) a string:
 - at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer
 ```
 
-`image`: the camelCase keys of oidc-dcr >= 0.5.0 (`pullPolicy`,
-`pullSecrets`); those of an earlier version, `pull_policy` and
-`pull_secrets`, are refused (`- at
-'/global/okdp/oidc/dcr/image/pull_policy': false schema`). Its other keys
-are passed as written. The other keys of `oidc.dcr` are kept in
+`image`: the image of the Jobs, `registry`, `repository`, `tag`, `digest`,
+`pullPolicy` and `pullSecrets` (a list of Secret names), each over the
+default, `quay.io/adaltas/oidc-dcr-job:0.6.0` by digest. The Jobs always
+run by digest: a mirror that changes only the registry or the repository
+keeps the default digest (copy the image unchanged); a `tag` needs its
+`digest` (`global.okdp.oidc.dcr.image: tag <tag> without a digest`). The
+snake_case keys `pull_policy` and `pull_secrets` are refused (`- at
+'/global/okdp/oidc/dcr/image/pull_policy': false schema`). The other keys
+of `oidc.dcr` are kept in
 `platform.oidc.dcr` and not used. `registrationUrl` and `authMethod` are
 left as written (the schema gives them no type), and checked only in `dcr`
 mode with a client.
 
-In `dcr` mode ([OAuth client charts](#oauth-client-charts)), when the
+In `dcr` mode ([OAuth client objects](#oauth-client-objects)), when the
 mapping declares at least one OAuth client (after `$if`, once the clients
 are checked), `authMethod` must be `anonymous` (unset, it is reported as
 `""`), then `registrationUrl` a non-empty string
@@ -1450,8 +1455,7 @@ accepts them, by `upstream` of `okdp.yaml`
 ([upstream](02_service_definition.md#upstream)). Upstream values are keyed
 by the chart key, not by its chart
 ([dependencies](02_service_definition.md#dependencies)). Values for a
-chart that accepts none (an [OAuth client chart](#oauth-client-charts)
-included), or for a name that is not a chart, are
+chart that accepts none, or for a name that is not a chart, are
 ignored without error. The mapping sees them as written
 (`values.upstream.<key>`).
 
@@ -1517,20 +1521,25 @@ path `/realms`, takes part of the identity provider's traffic), and
 cert-manager signs a certificate for any name from the platform's issuer
 (`default-issuer`, `cert-manager.io/cluster-issuer`). The compile of an
 instance of a project that is not privileged
-(`global.okdp.policy.privileged`) therefore refuses a host that does not
-end with `-<namespace>.<global.okdp.ingress.suffix>`
-(`seaweedfs-demo.okdp.sandbox` for the project `demo`: a name before the
-dash, a package names its hosts `<service>-<namespace>`) and is not listed
+(`global.okdp.policy.privileged`) therefore refuses a host that is not
+one DNS label, then the namespace, then the suffix:
+`<label>.<namespace>.<global.okdp.ingress.suffix>`
+(`seaweedfs.demo.okdp.sandbox` for the project `demo`; a package names
+its hosts `${{ instance }}.${{ release.namespace }}.${{ suffix }}`) and
+is not listed
 for the project in `global.okdp.policy.ingressHosts`
 (`{demo: [sso.okdp.sandbox]}`, exact host names, no wildcard). The case
 and a final dot do not count. The rule holds for:
 
 - the instance's objects (every source, the items of a `List` alike): an
-  `Ingress`'s `spec.rules[].host` (a rule without host answers every host
-  and is refused) and `spec.tls[].hosts`; a cert-manager `Certificate`'s
-  `spec.dnsNames` and `spec.commonName`; a Gateway API `HTTPRoute`,
-  `GRPCRoute` or `TLSRoute`'s `spec.hostnames`; and, on any object, the
-  annotations that name hosts: `cert-manager.io/common-name`,
+  `Ingress`'s `spec.rules[].host` (a rule without host and a
+  `spec.defaultBackend` answer every host and are refused) and
+  `spec.tls[].hosts`; a cert-manager `Certificate`'s `spec.dnsNames` and
+  `spec.commonName`; a Gateway API `HTTPRoute`, `GRPCRoute` or
+  `TLSRoute`'s `spec.hostnames` and a `Gateway`'s
+  `spec.listeners[].hostname` (a listener of a protocol that matches
+  hosts, `HTTP`, `HTTPS`, `TLS`, without hostname answers every host and
+  is refused); and, on any object, the annotations that name hosts: `cert-manager.io/common-name`,
   `cert-manager.io/alt-names`,
   `nginx.ingress.kubernetes.io/server-alias`,
   `external-dns.alpha.kubernetes.io/hostname` (commas and spaces
@@ -1549,7 +1558,7 @@ refused fails the compile, objects before values, in order, named
 `TestIngressHostsObjects`):
 
 ```
-web: objects: Ingress/demo-web: spec.rules[0].host: host "sso.okdp.sandbox" is not served by demo: a host that ends with -demo.okdp.sandbox, or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), demo is not one of them
+web: objects: Ingress/demo-web: spec.rules[0].host: host "sso.okdp.sandbox" is not served by demo: a host <label>.demo.okdp.sandbox (one DNS label), or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), demo is not one of them
 seaweedfs: master.ingress.host: host "sso.okdp.sandbox" is not served by demo: ...
 ```
 
@@ -1557,9 +1566,8 @@ What the rule does not see: a host a chart builds from values that are not
 under an `ingress` key, or from its templates; an Ingress an upstream chart
 renders from other values than the ones above. The platform's admission
 policy and cert-manager's approver policy for the issuer are the second
-line. Two namespaces of which one is a dashed suffix of the other (`demo`
-and `team-demo`) share a form: `x-team-demo.okdp.sandbox` fits both, the
-platform avoids such pairs or lists the hosts.
+line. A namespace is one DNS label of the host, so two projects never
+share a form.
 
 ### Upstream policy
 
@@ -1679,9 +1687,6 @@ each layer over the previous ones:
 | 2 | computed values | `<key>` of the values file, `values.cel.yaml` or `values.yaml`; `{}` when the file does not write the key ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
 | 3 | upstream values | `upstream.<key>` of the parameters ([Upstream values](#upstream-values)) |
 
-The chart of an OAuth client has layer 2 only (the values the compiler
-computes for it: [OAuth client charts](#oauth-client-charts)).
-
 Then `global` is replaced by the `global` of the parameters (the
 context's, [Context values](#context-values)), under the `global` of layer
 2, and left out when empty: Helm gives every chart one. The `global` of
@@ -1793,7 +1798,6 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml` |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written |
-| `OwnCharts` | `[]string` | the keys of `Values` the compiler added, sorted: the [OAuth clients'](#oauth-client-charts), which the okdp-objects chart renders |
 | `ObjectsSource` | `compiler.ChartRef` | the chart of the objects and clients, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)); empty without a rule set |
 | `Computed` | `map[string]any` | chart key -> what the mapping computed for it, before `Finalize` made `Values` of it |
 | `Groups`, `Privileged`, `SecretStore`, `Settings`, `KeepSync`, `Claims` | | what okdp-gitops' writers read: the project's groups, whether it is one of the platform's own, the platform's store and settings, what Argo CD is told of the objects Helm keeps, the claims bound to the instance |
@@ -1812,9 +1816,8 @@ compile](#the-files-of-a-compile), name -> content;
 ([Example](#example)).
 
 The keys of a compile are the keys of the `Chart.yaml` dependencies, DNS
-labels ([chart keys](02_service_definition.md#chart-keys)), and the compiler's
-(the OAuth client charts). `Write` takes a `Result` as `Compile` returns
-it: its keys, charts, release and namespace are not checked again.
+labels ([chart keys](02_service_definition.md#chart-keys)). `Write` takes
+a `Result` as `Compile` returns it: its keys, charts, release and namespace are not checked again.
 
 ### Chart index
 
@@ -1832,7 +1835,6 @@ type ChartRef struct {
 | Compiled chart | `Result.Charts[<key>]` |
 |---|---|
 | a dependency of `Chart.yaml` | its `repository`, its `name` as `Chart`, its `version` ([dependencies](02_service_definition.md#dependencies)) |
-| the chart of an OAuth client | the rule set's `oidcDcr`, oidc-dcr 0.6.0 of `oci://quay.io/adaltas` in the standard set: what a check reads, the okdp-objects chart rendering the client ([OAuth client charts](#oauth-client-charts)) |
 
 The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
@@ -1845,108 +1847,114 @@ app:
   repository: https://charts.example.org
   chart: app
   version: 1.8.0
-oidc-dcr:
-  repository: oci://quay.io/adaltas
-  chart: oidc-dcr
-  version: 0.6.0
 ```
 
 Everything else is keyed by the key
 ([dependencies](02_service_definition.md#dependencies)); installing them:
 [installing an instance](../01_usage.md#installing-an-instance).
 
-### OAuth client charts
+### OAuth client objects
 
 In `dcr` mode (`platform.oidc.dcr.enabled`: `global.okdp.oidc.enabled`, true
-by default, and `clientProvisioning: dcr`), the compiler adds one chart per
-OAuth client of the mapping's `oidcClients` section
-([oidcClients](02_service_definition.md#oidcclients)), the values of an
-oidc-dcr chart, oidc-dcr 0.6.0 of `oci://quay.io/adaltas` in the standard
-rule set, rendered by the [okdp-objects chart](#the-objects-chart), a slot
-`client<i>` per client: its Job, a pre-install/pre-upgrade
-hook, registers the client anonymously at the platform's `registrationUrl`
-and writes it to a Secret. In `existing` mode, or with OIDC disabled, no
-chart is added and the [chart cache](#chart-cache) of a check needs no
-oidc-dcr chart; the clients are checked all the same.
+by default, and `clientProvisioning: dcr`), the compile adds the objects
+that register each OAuth client of the mapping's `oidcClients` section
+([oidcClients](02_service_definition.md#oidcclients)) to the instance's
+`Objects`, as many clients as it declares, under the policy over objects
+([the objects chart](#the-objects-chart) renders them). In `existing` mode,
+or with OIDC disabled, none is added; the clients are checked all the same.
 
-| Client | Chart key | Job, ServiceAccount, Role | Secret, `dcr` | Secret, `existing` |
-|---|---|---|---|---|
-| main (no `name`) | `oidc-dcr` | `<release>-oidc-dcr` | `<release>-<namespace>-dcr` | `creds-<release>-oauth2` |
-| `name: n` | `n-oidc-dcr` | `<release>-n-oidc-dcr` | `<release>-<namespace>-n-dcr` | `creds-<release>-oauth2-n` |
+| Client | Objects | Secret, `dcr` | Secret, `existing` |
+|---|---|---|---|
+| main (no `name`) | `<release>-oidc-dcr` | `<release>-<namespace>-dcr` | `creds-<release>-oauth2` |
+| `name: n` | `<release>-n-oidc-dcr` | `<release>-<namespace>-n-dcr` | `creds-<release>-oauth2-n` |
 
-The objects' name, `<release>-<chart key>` cut to 63 characters without a
-trailing `-` (as `okdpFullname`), is set as `fullnameOverride`,
-`security.serviceAccount` and `security.role`; a client name has at most
-54 characters, its chart key a DNS-1123 label. In `dcr`
-mode a client's `secret` replaces the Secret name, which
+The objects' name is cut to 56 characters without a trailing `-`, room for
+the suffix of the removal's objects. Each client has:
+
+- a ServiceAccount, Role, RoleBinding and ConfigMap (the script), and a
+  headless Service `<name>-headless`, for providers that reverse-resolve the
+  caller: Helm hooks of weight -10 and Argo CD `PreSync` hooks of sync wave
+  -10;
+- the Job `<name>` of [`okdpJob`](04_functions.md#okdpjob), hook weight and
+  sync wave -5, `pre-install,pre-upgrade` and `PreSync`, before the
+  package's objects and Sync hooks, so that the Secret exists when they
+  start;
+- the same set, but the Service, named `<name>-delete`: a `pre-delete`
+  Helm hook, an Argo CD `PostDelete` hook, created only at uninstall.
+
+The Jobs run on the hardened pod of `okdpJob`: non-root (UID 65534, the
+image's default user being root), no privilege escalation, every
+capability dropped, a read-only root filesystem, the image by digest
+([OAuth client settings](#oauth-client-settings)), memory bounded. They
+mount their ServiceAccount's token, the one thing that writes the Secret.
+The Role of the registration has `create` on Secrets, which Kubernetes
+cannot limit by name, the name being unknown when it authorizes, and
+`get` and `patch` on the client's Secret by name; the Role of the removal
+has `get` and `delete` on it by name. The initial access token
+(`authMethod: initialAccessToken`) is a volume, read by the kubelet, not by
+the Role.
+
+The Job's lifecycle:
+
+- First install: `POST` to `registrationUrl`, the answer written to the
+  Secret: `client_id`, `client_secret` unless `public`,
+  `registration_client_uri` and `registration_access_token`.
+- Every sync: `GET` on `registration_client_uri` with the token. As asked:
+  nothing changes. A field differs (a changed `redirect_uris` above all):
+  `PUT` on `registration_client_uri`, RFC 7592, the rotated token written
+  back to the Secret.
+- A client deleted at the provider (`404`): registered again.
+- A token the provider refuses (`401`, `403`), or a Secret holding none: a
+  new client is registered and its Secret replaces the old one's content;
+  the old client stays at the provider, named in the Job's log, for an
+  administrator to remove. A provider that does not answer fails the Job,
+  which retries (`backoffLimit`) and registers nothing.
+- Uninstall: `DELETE` on `registration_client_uri`, then the Secret is
+  deleted. The removal never fails, a failed pre-delete hook would stop the
+  uninstall: with no Secret there is nothing to do; with a token the
+  provider refuses the client stays, named in the log, and the Secret
+  goes; with a provider that does not answer the Secret stays and so does
+  the client, for a later uninstall or an administrator.
+
+The Job's log holds no answer of the provider, no `client_secret` and no
+token: a failure says the HTTP status and the provider's `error` code.
+
+In `dcr` mode a client's `secret` replaces the Secret name, which
 [`oidcClientSecret`](04_functions.md#oidcclientsecret) does not
 follow, and two clients may not write one Secret
 ([compile errors](02_service_definition.md#compile-errors)). The
 Secret is the release's, the default names above and a `secret` given
 alike: a `secret` is `<release>-<name>` exactly (`<release>-oidc` for the
 main client), checked in every mode, so
-that the Job, whose Role writes it, cannot overwrite another Secret of
+that the Job, whose Role changes it, cannot overwrite another Secret of
 the namespace, another instance's credentials
 (`testdata/cli/oidc.txtar`).
 
-A client chart is no dependency of `Chart.yaml`, and its key is reserved
-([oidcClients](02_service_definition.md#oidcclients)): it takes no OKDP defaults
-and no instance upstream values ([merge precedence](#merge-precedence)).
+A client's `redirectUris`, of a project that is not privileged, are http or
+https URLs with a host and no user information, each host one the project
+serves: the form of its Ingresses, `<label>.<namespace>.<suffix>`, or listed
+for it in `global.okdp.policy.ingressHosts`, in `dcr` mode. A client's
+`request` may not set a URL the provider trusts: `redirect_uris`,
+`post_logout_redirect_uris`, `request_uris`, `sector_identifier_uri`,
+`jwks_uri`, `initiate_login_uri`, `backchannel_logout_uri` and
+`frontchannel_logout_uri` are refused, in every mode.
 
-The computed values are not Go code: `rules/v1/charts/oidc-dcr.cel.yaml`
-of okdp-gitops, a template in the mapping language of the rule set,
-computes them for each client from the client (its keys, checked), its
-names (the chart key, the objects' name, the Secret) and the mapping's
-context ([why](../00_architecture.md#the-oidc-dcr-template)):
-
-| Value | From |
-|---|---|
-| `registrationUrl`, `ttlSeconds`, `backoffLimit`, `image` (when set) | the [OAuth client settings](#oauth-client-settings) |
-| `request` | the registration request, OIDC Dynamic Client Registration fields: `application_type: web`; `client_name`: `clientName`; `grant_types`: `grantTypes`; `scope`: `scope` without `openid` (Keycloak refuses it as a client scope); `redirect_uris`: `redirectUris`, when not empty; `token_endpoint_auth_method: none` for a `public` client; then the client's `request` merged over them |
-| `tls` | `insecure: false`; `certificate`: the client's `caSecret`, else the platform's |
-| `secret`, `fullnameOverride`, `security.serviceAccount`, `security.role` | the names above |
-| `mapping` | `useDefault: false`; `keyMapping`: `client_id`, and `client_secret` unless the client is `public` |
-| `commonLabels` | `app.kubernetes.io/instance: <release>` |
-| `waitForProvider` | when `global.okdp.oidc.issuerUri` is set: `discoveryUrl`, the issuer (one trailing `/` dropped) followed by `/.well-known/openid-configuration`; `ttlSeconds` when `waitTtlSeconds` is set |
+The objects are not Go code: `rules/v1/charts/oidc-dcr.cel.yaml` of
+okdp-gitops, a template in the mapping language of the rule set, computes
+them for each client from the client (its keys, checked), its names (the
+objects' name, the Secret) and the mapping's context
+([why](../00_architecture.md#the-oidc-dcr-template)). The registration
+request holds the OIDC Dynamic Client Registration fields:
+`application_type: web`; `client_name`: `clientName`, else
+`<release>-<namespace>[-<name>]`; `grant_types`: `grantTypes`; `scope`:
+`scope` without `openid` (Keycloak refuses it as a client scope);
+`redirect_uris`: `redirectUris`, when not empty;
+`token_endpoint_auth_method: none` for a `public` client; then the client's
+`request` merged over them.
 
 The client keys, their types and defaults:
-[oidcClients](02_service_definition.md#oidcclients). Helm merges these
-maps over the chart's defaults: its default `mapping.keyMapping` entries
-stay, so the Secret also holds `registration_client_uri` and
-`registration_access_token` of the registration response (oidc-dcr
-0.6.0). The example's final values in `dcr` mode ([Example](#example)),
-with the platform's settings above (its `platform.yaml`), trimmed:
-
-```yaml
-# app
-env:
-  - name: OIDC_CLIENT_ID
-    valueFrom: {secretKeyRef: {key: client_id, name: demo-webapp-demo-dcr}}   # platform.oidcClientSecret
-  ...
-# oidc-dcr
-backoffLimit: 6                        # default of the settings
-commonLabels: {app.kubernetes.io/instance: demo-webapp}
-fullnameOverride: demo-webapp-oidc-dcr
-global: {okdp: ...}
-mapping:
-  keyMapping:                          # over the chart's default entries
-    client_id: .client_id
-    client_secret: .client_secret
-  useDefault: false
-registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
-request:
-  application_type: web
-  client_name: demo-webapp-demo
-  grant_types: [authorization_code, refresh_token]
-  redirect_uris: [https://webapp-demo.okdp.example.org/oauth2/callback]
-  scope: profile email groups          # platform.oidc.scope, without openid
-secret: demo-webapp-demo-dcr
-security: {role: demo-webapp-oidc-dcr, serviceAccount: demo-webapp-oidc-dcr}
-tls: {certificate: certs-bundle, insecure: false}   # global.okdp.tls.caBundleSecret
-ttlSeconds: 300                        # global.okdp.oidc.dcr.ttlSeconds
-waitForProvider:
-  discoveryUrl: https://sso.okdp.example.org/realms/okdp/.well-known/openid-configuration
-```
+[oidcClients](02_service_definition.md#oidcclients). The Secret keys the
+service reads: `client_id` and `client_secret`.
 
 ### The info file
 
@@ -2250,19 +2258,14 @@ upstream.app.auth.password: a literal at a sensitive key, a credential in clear 
 
 ### The objects chart
 
-`Objects` and the OAuth clients are the values of one chart beside the
-package's, `okdp-objects`, reserved as a chart key
-(`compiler.ObjectsChart`): `global.okdp.charts.objects`, by default, in
-the standard rule set, `oci://quay.io/okdp/charts`, `okdp-objects`,
-`2.0.0`. `compiler.ObjectsChartValues` (`okdp-objects.values.yaml` of
-`Write`) gives, when there is at least one of either:
-
-- `manifests` (`compiler.ObjectsValue`), when there are objects: a string,
-  a YAML stream, one document per object, in the order of `Objects`, `---`
-  between them, indented by 2 spaces, the keys of each map sorted;
-- `client0` to `client4`, one per [OAuth client
-  chart](#oauth-client-charts), in the order of their keys
-  (`Result.OwnCharts`): its values, with `enabled: true`.
+`Objects` are the values of one chart beside the package's, `okdp-objects`,
+reserved as a chart key (`compiler.ObjectsChart`):
+`global.okdp.charts.objects`, by default, in the standard rule set,
+`oci://quay.io/okdp/charts`, `okdp-objects`, `0.1.0`.
+`compiler.ObjectsChartValues` (`okdp-objects.values.yaml` of `Write`) gives,
+when there are objects, `manifests` (`compiler.ObjectsValue`): a string, a
+YAML stream, one document per object, in the order of `Objects`, `---`
+between them, indented by 2 spaces, the keys of each map sorted.
 
 The chart gets no `global` and no upstream values, and a check does not
 read it. It renders the value as written, in its own release:
@@ -2409,11 +2412,11 @@ example: release `demo-webapp`, namespace
 entries in `upstream.app`), over the context
 `examples/02_advanced/input/config/platform.yaml`, level 0 (`dcr` mode;
 `platform-db`, the connection the instance's `audit` references): the
-OAuth client's chart, `oidc-dcr` ([its values](#oauth-client-charts)),
+objects of the OAuth client ([OAuth client objects](#oauth-client-objects))
 in `okdp-objects.values.yaml`, its Job a pre-install hook that runs
 before the release's other resources. The `existing` mode has no example
-output: no OAuth client chart, and the client's Secret is
-`creds-demo-webapp-oauth2` ([OAuth client charts](#oauth-client-charts)).
+output: no such object, and the client's Secret is
+`creds-demo-webapp-oauth2` ([OAuth client objects](#oauth-client-objects)).
 
 `values.yaml`, annotated: the values of `app`:
 
@@ -2468,13 +2471,13 @@ app:
       memory: 128Mi
 ```
 
-`okdp-objects.values.yaml`: the OAuth client, no objects:
+`okdp-objects.values.yaml`: the objects of the OAuth client:
 
 ```yaml
 # Code generated by okdp-compile. DO NOT EDIT.
-client0:
-  enabled: true
-  # ... computed by the template (OAuth client charts)
+manifests: |
+  # ... the ServiceAccount, the Role, the Job...
+  # (OAuth client objects)
 ```
 
 `okdp.info.yaml` ([the info file](#the-info-file)): its URL,
@@ -2482,15 +2485,15 @@ its usage and its one output, under the release name, without
 credentials:
 
 ```yaml
-url: https://webapp-demo.okdp.example.org
+url: https://webapp.demo.okdp.example.org
 usage: |
-  A web application. Open https://webapp-demo.okdp.example.org
+  A web application. Open https://webapp.demo.okdp.example.org
 provides:
   - name: demo-webapp
     contract: http
     values:
       internalUrl: http://demo-webapp-app.demo.svc:8080
-      url: https://webapp-demo.okdp.example.org
+      url: https://webapp.demo.okdp.example.org
 ```
 
 The instance has no objects, no credentials Secret and no `objects`
@@ -2503,7 +2506,7 @@ depends on demo-db (database demo.webapp.database, database)
 
 `examples/03_full/` compiles the workspace service, a package written to use
 every part of the mapping language, with four values layers:
-`platform.yaml` (level 0: `global.okdp` in `dcr` mode, the oidc-dcr
+`platform.yaml` (level 0: `global.okdp` in `dcr` mode, the registration
 objects chart from a mirror, a proxy, two connections), `project.yaml` (level 1:
 the project's settings under `global`, two connections of its own, a
 named claim),

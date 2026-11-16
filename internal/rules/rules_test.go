@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"slices"
@@ -88,7 +89,7 @@ func TestRulesTables(t *testing.T) {
 		"added":    "(global.okdp.policy.upstream.deny)",
 		"hostPath": "",
 	} {
-		err := r.Refuse(CheckUpstreamKey, M{"key": key, "value": true, "at": key, "ns": "demo", "added": added})
+		err := r.Refuse(context.Background(), CheckUpstreamKey, M{"key": key, "value": true, "at": key, "ns": "demo", "added": added})
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
 			t.Errorf("%s: got %v, want %q", key, err, want)
 		}
@@ -104,7 +105,7 @@ func TestCheckFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Refuse(CheckObjectRule, M{"svc": "svc", "ns": "demo", "object": M{"kind": "ConfigMap"}}); err == nil || !strings.Contains(err.Error(), "the rule set:") {
+	if err := r.Refuse(context.Background(), CheckObjectRule, M{"svc": "svc", "ns": "demo", "object": M{"kind": "ConfigMap"}}); err == nil || !strings.Contains(err.Error(), "the rule set:") {
 		t.Errorf("got %v, want the rule set's error", err)
 	}
 }
@@ -113,10 +114,10 @@ func TestCheckFailsClosed(t *testing.T) {
 // claims need.
 func TestEmpty(t *testing.T) {
 	r := Empty()
-	if err := r.Refuse(CheckNamespaceRule, M{"ns": "kube-system"}); err != nil {
+	if err := r.Refuse(context.Background(), CheckNamespaceRule, M{"ns": "kube-system"}); err != nil {
 		t.Errorf("a check of the empty set refused: %v", err)
 	}
-	if v, err := r.Values("scope", M{}); err != nil || len(v) != 0 {
+	if v, err := r.Values(context.Background(), "scope", M{}); err != nil || len(v) != 0 {
 		t.Errorf("a document of the empty set: %v, %v", v, err)
 	}
 	if r.Has(TableEngineNamespaces, "argocd") || len(r.List(TableProjectRoles)) != 0 {
@@ -131,11 +132,11 @@ func TestEmpty(t *testing.T) {
 	if got := r.Labels("svc", "rel", "web", false); len(got) != 0 {
 		t.Errorf("the labels of the empty set: %v", got)
 	}
-	if r.Keep.Kept(M{"": ""}) {
+	if r.Keep().Kept(M{"": ""}) {
 		t.Error("the empty set keeps an object")
 	}
 	in := M{"a": 1}
-	if got, err := SchemaValues(r.PlatformSchema, "h", in); err != nil || got["a"] != 1 {
+	if got, err := SchemaValues(r.PlatformSchema(), "h", in); err != nil || got["a"] != 1 {
 		t.Errorf("values without a schema: %v, %v", got, err)
 	}
 }

@@ -5,6 +5,7 @@
 package okdp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -17,7 +18,7 @@ import (
 
 // Info: what the instance publishes, the mapping's instance and
 // provides sections, checked: what a control plane or a console reads of it
-// in the deployments repository (okdp.info.yaml, helm.Write). An
+// in the deployments repository (okdp.info.yaml, compiler.Write). An
 // empty field is not written, nor one of its outputs'.
 type Info struct {
 	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none
@@ -68,7 +69,7 @@ func published(info M, outputs []Output) Info {
 // true) gets its credentials Secret, named after its secretRef (default
 // <name>-<contract>-credentials), a DNS-1123 subdomain (isSecretName).
 // Then two outputs of one contract and name fail (twice).
-func provided(session *cel2yaml.Session, inst *instance, contracts *contractCache, provides []any, plain bool) ([]Output, []M, error) {
+func provided(ctx context.Context, session *cel2yaml.Session, inst *instance, contracts *contractCache, provides []any, plain bool) ([]Output, []M, error) {
 	var outputs []Output
 	var credentials []M
 	for _, x := range provides {
@@ -109,7 +110,7 @@ func provided(session *cel2yaml.Session, inst *instance, contracts *contractCach
 		outputs = append(outputs, o)
 		// The credentials Secret, when the mapping describes it.
 		if value.Truthy(secret) {
-			objs, err := credentialsSecret(session, inst, contract, out, o.SecretRef.Name, secret, plain)
+			objs, err := credentialsSecret(ctx, session, inst, contract, out, o.SecretRef.Name, secret, plain)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -133,16 +134,13 @@ func twice(outputs []Output) error {
 		}
 		count[k]++
 	}
-	var msgs []string
+	var errs []error
 	for _, k := range names {
 		if count[k] > 1 {
-			msgs = append(msgs, fmt.Sprintf("two %s outputs are named %q", k[0], k[1]))
+			errs = append(errs, fmt.Errorf("two %s outputs are named %q", k[0], k[1]))
 		}
 	}
-	if msgs == nil {
-		return nil
-	}
-	return errors.New(strings.Join(msgs, "\n"))
+	return errors.Join(errs...)
 }
 
 // credentialsSecret: the credentials Secret of an output published with a
@@ -152,10 +150,10 @@ func twice(outputs []Output) error {
 // values would be written in clear to the deployments repository; both
 // labelled okdp.io/credentials-<contract>, in the namespace of the
 // instance inst.
-func credentialsSecret(session *cel2yaml.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
+func credentialsSecret(ctx context.Context, session *cel2yaml.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
 	label := inst.rules.Name("credentialsLabel", "contract", contract)
 	if value.Truthy(secret["generate"]) {
-		return generatedSecret(session, inst, M{
+		return generatedSecret(ctx, session, inst, M{
 			"name":       name,
 			"keys":       secret["generate"],
 			"stringData": value.AsMap(secret["stringData"]),

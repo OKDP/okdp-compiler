@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -50,13 +51,13 @@ func FuzzLoad(f *testing.F) {
 			"projects/other/instances/b/instance.yaml":             {Data: []byte("service: app\nversion: 1.0.0\n")},
 		}
 		repos := []Repository{{Name: "db", FS: tree, Role: RoleTree}}
-		got, err := Load(repos)
-		again, err2 := Load(repos)
+		got, err := Load(context.Background(), repos)
+		again, err2 := Load(context.Background(), repos)
 		if errorString(err) != errorString(err2) || len(got) != len(again) {
 			t.Fatalf("Load: not the same twice: %v / %v", err, err2)
 		}
-		l, lerr := LoadProjects(repos)
-		if lerr2 := func() error { _, e := LoadProjects(repos); return e }(); errorString(lerr) != errorString(lerr2) {
+		l, lerr := LoadProjects(context.Background(), repos)
+		if lerr2 := func() error { _, e := LoadProjects(context.Background(), repos); return e }(); errorString(lerr) != errorString(lerr2) {
 			t.Fatalf("LoadProjects: not the same twice: %v / %v", lerr, lerr2)
 		}
 		if err != nil {

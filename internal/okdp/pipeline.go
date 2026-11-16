@@ -7,15 +7,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/okdp/okdp-compiler/internal/merge"
-	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"io/fs"
+	"maps"
 	"slices"
 	"time"
 
 	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/internal/merge"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -42,6 +43,18 @@ type Inputs struct {
 	Bindings  map[string]Binding // the provider each claim of a reference is bound to, by parameter path, and the output it publishes for it (CompileAll sets them); nil: no claim resolves
 	CostLimit uint64             // the total CEL cost the expressions of the compile may use, the mapping's and the compiler's templates' (0: no limit): past it, the compile fails; an expression may cost what is left of it, not the limit again; a server bounds what a package's expressions compute over the values an instance gives
 	Timeout   time.Duration      // how long this compile may take (0: no limit), beside ctx's deadline: past it the instance is refused, the others of a tree compiled all the same
+	// ChartFailures: the charts a chart source could not fetch, why, by
+	// chart (CompileTree sets them, tree.ChartSource): the final values of
+	// their keys take no check against them, the others do, and no instance
+	// fails for it alone; nil, none.
+	ChartFailures map[chart.Ref]error
+	// RequireRender: the host renders the charts of the compile (Finalize,
+	// okdp-gitops): an instance of a project that is not privileged is
+	// refused when it gives upstream values to a chart of ChartFailures,
+	// which nothing can check, the others of the tree compiled all the
+	// same; false, the compile accepts them unchecked, as it does without a
+	// chart cache.
+	RequireRender bool
 	// AllowPlainSecrets: credentials written in clear accepted, a
 	// provides secret without generate (a plain Secret of its stringData)
 	// and a Secret of the objects with data or stringData; false, they
@@ -57,24 +70,29 @@ type Inputs struct {
 	Finalize Finalize
 	// CheckGlobals: the host's policy on the keys of global a project sets,
 	// before the mapping runs; nil, none.
-	CheckGlobals func(GlobalsInput) error
+	CheckGlobals func(context.Context, GlobalsInput) error
 
 	memo *instanceMemo // what the compiles of a set read once (Memo); nil: this compile reads its own
 }
 
-// FinalInput: what the final values of a compile are made from (Finalize).
+// FinalInput: what the final values of a compile are made from (Finalize),
+// and what a host renders one chart key of them with: the chart
+// Specs[key].Source, the final values its Finalize gets back, Release,
+// Namespace; ChartFailures says which charts a render skips.
 type FinalInput struct {
-	Charts            fs.FS       // Inputs.Charts, passed through unread
-	Files             fs.FS       // the package
-	Specs             chart.Specs // the charts of the compile by key, the compiler's own among them
-	ValuesFile        string      // the values file Output is read from, for the errors
-	Output            M           // what the mapping computed, by chart key
-	Values            M           // the instance's merged values: their global, their upstream values
-	Rules             *RuleSet    // the rule set of the compile; nil, no rule
-	Settings          M           // the platform's settings
-	Namespace         string      // the instance's namespace
-	Privileged        bool        // the project is one of the platform's own
-	AllowPlainSecrets bool        // Inputs.AllowPlainSecrets
+	Charts            fs.FS               // Inputs.Charts, passed through unread
+	Files             fs.FS               // the package
+	Specs             chart.Specs         // the charts of the compile by key, the compiler's own among them
+	ValuesFile        string              // the values file Output is read from, for the errors
+	Output            M                   // what the mapping computed, by chart key
+	Values            M                   // the instance's merged values: their global, their upstream values
+	Rules             *RuleSet            // the rule set of the compile; nil, no rule
+	Settings          M                   // the platform's settings
+	Release           string              // the instance's release: the Helm release name its charts render with
+	Namespace         string              // the instance's namespace
+	Privileged        bool                // the project is one of the platform's own
+	AllowPlainSecrets bool                // Inputs.AllowPlainSecrets
+	ChartFailures     map[chart.Ref]error // Inputs.ChartFailures: the charts a host cannot render, unfetched (nil: none)
 }
 
 // GlobalLayer: the global a layer of a project sets, and the layer's name
@@ -97,7 +115,7 @@ type GlobalsInput struct {
 // Finalize: the final values of each key of in.Output, the chart that
 // renders each, and the warnings. It runs inside the compile of the
 // instance: its error refuses the instance, as any other stage's.
-type Finalize func(in FinalInput) (values map[string]map[string]any, charts map[string]chart.Ref, warnings []string, err error)
+type Finalize func(ctx context.Context, in FinalInput) (values map[string]map[string]any, charts map[string]chart.Ref, warnings []string, err error)
 
 // ContextLayer: a values layer of the context (Inputs.Context), see
 // chart.ParseValues, at its level: 0, the platform's, then each level adds
@@ -115,10 +133,10 @@ type Result struct {
 	Values map[string]map[string]any
 	// Charts: chart -> the upstream chart that renders its values (`helm
 	// template <Charts[chart]> -f <Values[chart]>`): its dependency of
-	// Chart.yaml, the platform's oidc-dcr chart for an OAuth client.
+	// Chart.yaml.
 	Charts map[string]chart.Ref
-	// Computed: chart -> what the mapping computed for it, the compiler's
-	// own charts among them, before Finalize made Values of it.
+	// Computed: chart -> what the mapping computed for it, before Finalize
+	// made Values of it.
 	Computed M
 	// Objects: OKDP's own objects, rendered whole: the credentials Secrets
 	// of the provided connections, then the objects section of the mapping,
@@ -127,12 +145,9 @@ type Result struct {
 	// credentials are in the platform's secret store; each that Helm keeps
 	// (helm.sh/resource-policy: keep) with Argo CD's sync options alike,
 	// Prune=false and Delete=false (keepSynced); the umbrella's objects
-	// file, which it renders as written, in its release (helm.Write). nil
+	// file, which it renders as written, in its release (compiler.Write). nil
 	// when there is none.
 	Objects []map[string]any
-	// OwnCharts: the keys of Values the compiler added itself, sorted: the
-	// OAuth clients', which the okdp-objects chart renders.
-	OwnCharts []string
 	// KeepSync: what the writer tells Argo CD of the objects Helm keeps, the
 	// rule set's.
 	KeepSync ruleset.KeepSync
@@ -140,7 +155,7 @@ type Result struct {
 	// platform's (global.okdp.charts.objects).
 	ObjectsSource chart.Ref
 	// Info: what the instance publishes, its instance and provides
-	// sections, checked (okdp.info.yaml, helm.Write).
+	// sections, checked (okdp.info.yaml, compiler.Write).
 	Info Info
 	// Dependencies: the instances the connection references point to, by
 	// one of their outputs (Inputs.Published) or a claim (Inputs.Bindings),
@@ -173,7 +188,7 @@ type Result struct {
 	// Privileged: the namespace is one of the platform's own projects,
 	// global.okdp.policy.privileged: its instances install cluster-scoped
 	// objects, write other namespaces and set any upstream value, which the
-	// compile refuses the other projects' (checkObjects); a target gives
+	// compile refuses the other projects' (CheckObjects); a target gives
 	// its releases the engine's own identity, the other projects' one
 	// confined to their namespace.
 	Privileged bool
@@ -203,7 +218,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 		}()
 	}
 	// ctx, def and the file systems are required: nil panics.
-	svc, err := checkInputs(def, in)
+	svc, err := checkInputs(ctx, def, in)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +228,7 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	// 1-4. Parameters, platform context, connections, platform
 	// requirements: the instance of the compile, which the stages below
 	// read (context.go).
-	inst, groups, err := platformInstance(def, in, svc)
+	inst, groups, err := platformInstance(ctx, def, in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -222,39 +237,40 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	// it, cancelled with ctx, their cost counted together;
 	// okdpGeneratedSecret evaluates its template in it too.
 	var session *cel2yaml.Session
-	session = cel2yaml.NewSession(ctx, in.CostLimit, functions(inst, &session)...)
+	session = cel2yaml.NewSession(in.CostLimit, functions(ctx, inst, &session)...)
 	// The charts the platform renders the compiler's own charts with.
 	sources, err := platformCharts(in.rules(), inst.okdp)
 	if err != nil {
 		return nil, err
 	}
 	// 5. Mapping.
-	res, written, err := runMapping(in.rules(), session, inst.scope, def.sources()...)
+	res, written, err := runMapping(ctx, in.rules(), session, inst.scope, def.sources()...)
 	if err != nil {
 		return nil, err
 	}
-	// 6. The charts the sections of the rule set add.
-	own, err := ownCharts(session, inst, res, sources)
+	// 6. The objects the sections of the rule set add, among the mapping's:
+	// the policy over the objects reads them too.
+	own, err := ownObjects(ctx, session, inst, res)
 	if err != nil {
 		return nil, err
+	}
+	if len(own) > 0 {
+		res["objects"] = append(value.AsList(res["objects"]), own...)
 	}
 	// 7. Provides: the outputs, checked against the contracts, and their
 	// credentials Secrets; an output for each claim (claimed).
-	outputs, credentials, pushes, err := providedOutputs(session, inst, in, res)
+	outputs, credentials, pushes, err := providedOutputs(ctx, session, inst, in, res)
 	if err != nil {
 		return nil, err
 	}
 	// 8. Objects, and the platform's policy over them.
-	out, err := instanceObjects(def, in, inst, svc, groups, res, outputs, credentials, pushes)
+	out, err := instanceObjects(ctx, def, in, inst, svc, groups, res, outputs, credentials, pushes)
 	if err != nil {
 		return nil, err
 	}
 	out.ObjectsSource = sources["objects"]
-	// The objects' key is reserved, its chart added by the writer of the
-	// umbrella: its values are the objects, not values of an upstream chart.
-	own = append(own, ownChart{key: ObjectsChart, of: "the instance's objects", from: "the objects section", source: sources["objects"]})
 	// 9-10. Final values of the charts, checked against the upstream charts.
-	if err := finalValues(ctx, def, in, inst, svc, out, res, written, own); err != nil {
+	if err := finalValues(ctx, def, in, inst, svc, out, res, written); err != nil {
 		return nil, err
 	}
 	out.Cost = session.Used()
@@ -265,12 +281,14 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 // (Definition.service), checked before anything is read: the release, the
 // namespace and the name, the claims bound to the instance and the
 // namespaces that may claim of it.
-func checkInputs(def *Definition, in Inputs) (*Service, error) {
+func checkInputs(ctx context.Context, def *Definition, in Inputs) (*Service, error) {
 	switch {
+	case in.Rules != nil && !in.Rules.Loaded():
+		return nil, fmt.Errorf("Inputs.Rules: %w", ruleset.ErrNotLoaded)
 	case !chart.IsRelease(in.Release):
 		return nil, fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
-	case checkNamespace(in.rules(), "Inputs.Namespace", in.Namespace) != nil:
-		return nil, checkNamespace(in.rules(), "Inputs.Namespace", in.Namespace)
+	case checkNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace) != nil:
+		return nil, checkNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace)
 	case in.Name != "" && !chart.IsDNSLabel(in.Name):
 		return nil, fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
 	}
@@ -295,18 +313,18 @@ func checkInputs(def *Definition, in Inputs) (*Service, error) {
 // instance of the project (projectAccess), and the global.okdp keys the
 // service requires, in order, each set and not empty (not null, false, "",
 // 0, [] or {}).
-func platformInstance(def *Definition, in Inputs, svc *Service) (*instance, map[string]Role, error) {
-	inst, err := newInstance(def.Files, in, svc)
+func platformInstance(ctx context.Context, def *Definition, in Inputs, svc *Service) (*instance, map[string]Role, error) {
+	inst, err := newInstance(ctx, def.Files, in, svc)
 	if err != nil {
 		return nil, nil, err
 	}
 	// The platform's reserved namespaces, of its settings: a reservation
 	// wins over a privilege.
-	if err := checkPlatformNamespace(in.rules(), "Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
+	if err := checkPlatformNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
 		return nil, nil, err
 	}
 	// A release named like an object the platform writes in the namespace.
-	if err := checkRelease(in.rules(), "Inputs.Release", in.Release, inst.okdp); err != nil {
+	if err := checkRelease(ctx, in.rules(), "Inputs.Release", in.Release, inst.okdp); err != nil {
 		return nil, nil, err
 	}
 	groups, err := projectAccess(in.rules(), in.Context, in.Namespace)
@@ -327,15 +345,15 @@ func platformInstance(def *Definition, in Inputs, svc *Service) (*instance, map[
 // Secrets of their secret fields, an output for each claim bound to the
 // instance (claimed), and the PushSecrets of the credentials of claims of
 // another namespace (pushSecrets).
-func providedOutputs(session *cel2yaml.Session, inst *instance, in Inputs, res M) (outputs []Output, credentials, pushes []M, err error) {
-	outputs, credentials, err = provided(session, inst, in.memo.contracts, value.AsList(res["provides"]), in.AllowPlainSecrets)
+func providedOutputs(ctx context.Context, session *cel2yaml.Session, inst *instance, in Inputs, res M) (outputs []Output, credentials, pushes []M, err error) {
+	outputs, credentials, err = provided(ctx, session, inst, in.memo.contracts, value.AsList(res["provides"]), in.AllowPlainSecrets)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if err := claimed(in.Claims, outputs); err != nil {
 		return nil, nil, nil, err
 	}
-	pushes, err = pushSecrets(inst, in.memo.contracts, in.Claims, outputs)
+	pushes, err = pushSecrets(ctx, inst, in.memo.contracts, in.Claims, outputs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -348,12 +366,12 @@ func providedOutputs(session *cel2yaml.Session, inst *instance, in Inputs, res M
 // namespace, read for its own of another; and read for its connections
 // whose credentials are in the platform's secret store. Then the platform's
 // policy over them all: those of a project that is not privileged stay in
-// its namespace, none cluster-scoped (checkObjects), serving no host the
-// platform keeps from them (checkIngressHosts); no Secret of credentials in
+// its namespace, none cluster-scoped (CheckObjects), serving no host the
+// platform keeps from them (CheckIngressHosts); no Secret of credentials in
 // clear, unless allowed (checkPlainSecrets); no two of one kind, namespace
 // and name (checkDuplicateObjects).
-func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, groups map[string]Role, res M, outputs []Output, credentials, pushes []M) (*Result, error) {
-	store, err := secretStore(in.rules(), inst.okdp)
+func instanceObjects(ctx context.Context, def *Definition, in Inputs, inst *instance, svc *Service, groups map[string]Role, res M, outputs []Output, credentials, pushes []M) (*Result, error) {
+	store, err := secretStore(ctx, in.rules(), inst.okdp)
 	if err != nil {
 		return nil, err
 	}
@@ -363,66 +381,79 @@ func instanceObjects(def *Definition, in Inputs, inst *instance, svc *Service, g
 	}
 	out.Objects = append(out.Objects, pushes...)
 	for _, x := range inst.transfers {
-		o, err := pullSecret(inst, x)
+		o, err := pullSecret(ctx, inst, x)
 		if err != nil {
 			return nil, err
 		}
 		out.Objects = append(out.Objects, o)
 	}
 	if !out.Privileged {
-		if err := checkObjects(in.rules(), svc.Name, in.Namespace, out.Objects); err != nil {
+		if err := CheckObjects(ctx, in.rules(), svc.Name, in.Namespace, out.Objects); err != nil {
 			return nil, err
 		}
-		if err := checkIngressHosts(in.rules(), svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
+		if err := CheckIngressHosts(ctx, in.rules(), svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
 			return nil, err
 		}
 	}
 	if !in.AllowPlainSecrets {
-		if err := checkPlainSecrets(in.rules(), svc.Name, out.Objects); err != nil {
+		if err := checkPlainSecrets(ctx, in.rules(), svc.Name, out.Objects); err != nil {
 			return nil, err
 		}
 	}
 	if err := checkDuplicateObjects(svc.Name, in.Namespace, out.Objects); err != nil {
 		return nil, err
 	}
-	out.KeepSync = in.rules().Keep
+	out.KeepSync = in.rules().Keep()
 	return out, nil
 }
 
 // finalValues: stages 9 and 10 of the mapping's result res (written: the
 // literal keys of its values file), set in out: the final values of each
-// chart the umbrella renders, first the dependencies of Chart.yaml (rendered):
-// all but those the values file leaves out. Then the compiler's own charts
-// (own): the chart of each OAuth client, compiled in dcr mode; neither
-// Chart.yaml nor the values file may list them. Added to the dependencies of
-// Chart.yaml, without changing them. Then the final values of each chart
-// rendered; with a chart cache, checked against its upstream chart.
-func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance, svc *Service, out *Result, res M, written []string, own []ownChart) error {
+// chart the umbrella renders, the dependencies of Chart.yaml: all but those
+// the values file leaves out. Neither Chart.yaml nor the values file may
+// list the chart of the instance's objects, which the umbrella's writer
+// adds. Then the final values of each chart rendered; with a chart cache,
+// checked against its upstream chart.
+func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance, svc *Service, out *Result, res M, written []string) error {
 	output := rendered(svc.Charts, written, value.AsMap(res["output"]))
-	specs, err := addOwnCharts(def.Chart.Dependencies, svc.Charts, def.valuesName(), output, own)
-	if err != nil {
+	if err := checkObjectsChart(def.Chart.Dependencies, def.valuesName(), output); err != nil {
 		return err
 	}
+	specs := svc.Charts
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	out.Computed = value.AsMap(value.Copy(output))
-	for _, c := range own {
-		if c.values != nil {
-			out.OwnCharts = append(out.OwnCharts, c.key)
+	if in.RequireRender && !out.Privileged {
+		if err := unrenderedUpstream(specs, inst.values, in.ChartFailures); err != nil {
+			return err
 		}
 	}
-	slices.Sort(out.OwnCharts)
 	var warnings []string
+	var err error
 	if in.Finalize != nil {
-		out.Values, out.Charts, warnings, err = in.Finalize(FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Rules: in.rules(), Settings: inst.okdp, Namespace: in.Namespace, Privileged: out.Privileged, AllowPlainSecrets: in.AllowPlainSecrets})
+		out.Values, out.Charts, warnings, err = in.Finalize(ctx, FinalInput{Charts: in.Charts, Files: def.Files, Specs: specs, ValuesFile: def.valuesName(), Output: output, Values: inst.values, Rules: in.rules(), Settings: inst.okdp, Release: in.Release, Namespace: in.Namespace, Privileged: out.Privileged, AllowPlainSecrets: in.AllowPlainSecrets, ChartFailures: in.ChartFailures})
 	} else {
-		out.Values, out.Charts, warnings, err = merge.FinalValues(in.memo.charts, def.Files, specs, def.valuesName(), output, inst.values, nil)
+		out.Values, out.Charts, warnings, err = merge.FinalValues(in.memo.charts, in.ChartFailures, def.Files, specs, def.valuesName(), output, inst.values, nil)
 	}
 	if err != nil {
 		return err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
+	return nil
+}
+
+// unrenderedUpstream: the upstream values of values, an instance's that is
+// not privileged, on a chart of failed, a chart that could not be fetched:
+// what the checks of its render would read does not exist (Inputs.RequireRender);
+// the first key, in order, that takes upstream values and holds some.
+func unrenderedUpstream(specs chart.Specs, values M, failed map[chart.Ref]error) error {
+	for _, key := range slices.Sorted(maps.Keys(specs)) {
+		spec := specs[key]
+		if why := failed[spec.Source]; why != nil && spec.Upstream && len(value.AsMap(value.AsMap(values["upstream"])[key])) > 0 {
+			return fmt.Errorf("upstream.%s: the chart %s could not be fetched (%v): its upstream values are refused, nothing can check them", key, spec.Source.ID(), why)
+		}
+	}
 	return nil
 }
 
@@ -432,8 +463,8 @@ func finalValues(ctx context.Context, def *Definition, in Inputs, inst *instance
 // output, as a top-level $merge or $for gives it) that is absent from
 // output ($if) or null; one it does not write computed {}: its chart's
 // defaults, OKDP's defaults and its upstream values still apply. A key of
-// output that is not a dependency is kept, null or not, for addOwnCharts
-// and chart.FinalValues to refuse. output is not changed.
+// output that is not a dependency is kept, null or not, for
+// checkObjectsChart and chart.FinalValues to refuse. output is not changed.
 func rendered(specs chart.Specs, written []string, output M) M {
 	out := M{}
 	for k, v := range output {

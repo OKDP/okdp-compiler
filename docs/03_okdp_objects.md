@@ -42,9 +42,10 @@ objects: a YAML stream, one document per object, in this order:
   itself: what it must enforce is in [What the store must
   enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
 
-The same file holds the instance's OAuth clients in `dcr` mode, each the
-values of an `oidc-dcr` chart, `client<i>` with `enabled: true`: the chart
-has five such slots, `client0` to `client4`, each an alias of oidc-dcr.
+In `dcr` mode the objects hold what registers the instance's OAuth clients:
+one Job per client and the objects it needs
+([OAuth client objects](specs/01_inputs_outputs.md#oauth-client-objects)),
+as many clients as the mapping declares.
 
 An instance with neither has no `okdp-objects.values.yaml`: the catalog's
 chart alone is installed. Unless the project is one of the platform's own

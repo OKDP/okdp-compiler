@@ -108,7 +108,7 @@ func CompileAllWith(ctx context.Context, instances []Instance, memo *Memo) []Out
 			t.out[i].Err = fmt.Errorf("instance name %q is given twice in namespace %q", inst.name(), in.Namespace)
 		default:
 			// Every connection of its context, referenced or not.
-			if err := declaredConnections(in); err != nil {
+			if err := declaredConnections(ctx, in); err != nil {
 				t.out[i].Err = err
 				continue
 			}
@@ -365,7 +365,7 @@ func (t *compilation) newBinder(idx []int) *binder {
 func (b *binder) instance(i int) {
 	t := b.t
 	in := t.inputs(i)
-	c := claimsOf(t.all[i].Definition, in)
+	c := claimsOf(t.ctx, t.all[i].Definition, in)
 	b.classes[i], b.platform[i] = c.classes, c.platform
 	b.rank[i] = map[string]int{}
 	for k, ref := range c.refs {

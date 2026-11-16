@@ -25,6 +25,7 @@ postgresql:
           authMethod: anonymous
           backoffLimit: 3
           image:
+            digest: sha256:38e21cbb15124b102b55581f74b30413633df98d291b2341a2d9a6fef480f06c
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job

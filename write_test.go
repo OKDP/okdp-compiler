@@ -66,10 +66,9 @@ func TestKeepSynced(t *testing.T) {
 func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &Result{
-		Values:    map[string]map[string]any{"app": {"b": nil}, "oidc-dcr": {"fullnameOverride": "x"}},
-		Charts:    map[string]chart.Ref{"app": app, "oidc-dcr": chart.Ref{Chart: "oidc-dcr"}},
-		OwnCharts: []string{"oidc-dcr"},
-		Objects:   []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}},
+		Values:  map[string]map[string]any{"app": {"b": nil}},
+		Charts:  map[string]chart.Ref{"app": app},
+		Objects: []map[string]any{{"kind": "ConfigMap", "data": map[string]any{"t": "{{ .x }}"}}},
 		Chart: chart.Metadata{Dependencies: []chart.Dependency{
 			{Name: "app", Repository: app.Repository, Version: app.Version},
 			{Name: "opa", Repository: app.Repository, Version: app.Version, Condition: "opa.enabled"},
@@ -81,7 +80,7 @@ func TestWrite(t *testing.T) {
 	}
 	want := map[string]string{
 		ValuesFile:        Generated + "app:\n  b: null\nopa:\n  enabled: false\n",
-		ObjectsValuesFile: Generated + "client0:\n  enabled: true\n  fullnameOverride: x\nmanifests: |\n  data:\n    t: '{{ .x }}'\n  kind: ConfigMap\n",
+		ObjectsValuesFile: Generated + "manifests: |\n  data:\n    t: '{{ .x }}'\n  kind: ConfigMap\n",
 	}
 	if len(files) != len(want) {
 		t.Errorf("files %v, want no chart", slices.Sorted(maps.Keys(files)))

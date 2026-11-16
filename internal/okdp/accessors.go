@@ -7,16 +7,17 @@ package okdp
 
 import (
 	"fmt"
-	"github.com/okdp/okdp-compiler/value"
 	"strings"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // FieldError: value.FieldError.
 type FieldError = value.FieldError
 
-var atField = value.AtField
+// atField: value.AtField.
+func atField(field string, err error) error { return value.AtField(field, err) }
 
 // NamedClaimID: the ID of the named claim name of namespace, the name of
 // the output its provider publishes for it, <namespace>.<name> (claimID).

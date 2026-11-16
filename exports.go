@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"context"
+
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/merge"
 	"github.com/okdp/okdp-compiler/internal/okdp"
@@ -58,7 +60,33 @@ const (
 // refused of the upstream values of every key (nil, nothing): what a compile
 // does without a Finalize, for one that adds a policy to it.
 func FinalValues(caches *ChartCaches, in FinalInput, check chart.UpstreamCheck) (map[string]map[string]any, map[string]ChartRef, []string, error) {
-	return merge.FinalValues(caches.Get(in.Charts), in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, check)
+	return merge.FinalValues(caches.Get(in.Charts), in.ChartFailures, in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, check)
+}
+
+// CheckObjects: the objects of an instance of svc in namespace, that of a
+// project that is not privileged, rendered from a chart, for example: each
+// in the instance's namespace, where its metadata.namespace is set (unset,
+// "" or null, the release's), none of a cluster-scoped kind nor an API
+// group of the deployer engines (the rule set's check object), the items of
+// a list checked alike. nil when they all hold; the first refused, in
+// order, fails, named <kind>/<name>. What a compile does with its own
+// objects (Result.Objects), for a host that adds a chart's: a privileged
+// project takes no such check.
+func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, objects []map[string]any) error {
+	return okdp.CheckObjects(ctx, rules, svc, namespace, objects)
+}
+
+// CheckIngressHosts: the objects of an instance of svc in namespace, that
+// of a project that is not privileged, rendered from a chart, for example,
+// serve only the hosts the project may serve, settings the platform's
+// (Result.Settings, global.okdp): an Ingress's rules (no spec.defaultBackend,
+// no rule without host) and tls hosts, a cert-manager Certificate's
+// dnsNames and commonName, a Gateway API route's hostnames, a Gateway's
+// listeners' hostname, the annotations that name hosts (the rule set's
+// hostAnnotations) of any object, the items of a list alike. The same
+// check as a compile's on its own objects.
+func CheckIngressHosts(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, objects []map[string]any) error {
+	return okdp.CheckIngressHosts(ctx, rules, svc, namespace, settings, objects)
 }
 
 // ParseInstance: an instance.yaml.
@@ -79,18 +107,20 @@ func EngineNamespaces(rules *RuleSet) []string { return okdp.EngineNamespaces(ru
 func PlatformObjectNames(rules *RuleSet) []string { return okdp.PlatformObjectNames(rules) }
 
 // CheckProject: nil when the instance's namespace may be a project's.
-func CheckProject(in Inputs) error { return okdp.CheckProject(in) }
+func CheckProject(ctx context.Context, in Inputs) error { return okdp.CheckProject(ctx, in) }
 
 // PlatformOf: the platform's settings of the context of in, as a compile
 // checks them; an error when the namespace may be no project's.
-func PlatformOf(in Inputs) (map[string]any, error) { return okdp.PlatformOf(in) }
+func PlatformOf(ctx context.Context, in Inputs) (map[string]any, error) {
+	return okdp.PlatformOf(ctx, in)
+}
 
 // ProjectGroups: the roles of the groups of the project of in.
 func ProjectGroups(in Inputs) (map[string]AccessRole, error) { return okdp.ProjectGroups(in) }
 
 // SecretStoreOf: the platform's secret store in settings, nil without one.
-func SecretStoreOf(in Inputs, settings map[string]any) (*SecretStore, error) {
-	return okdp.SecretStoreOf(in, settings)
+func SecretStoreOf(ctx context.Context, in Inputs, settings map[string]any) (*SecretStore, error) {
+	return okdp.SecretStoreOf(ctx, in, settings)
 }
 
 // Privileged: whether namespace is one of the platform's own projects.

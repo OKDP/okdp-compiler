@@ -43,14 +43,15 @@ upstream:                              # the instance's upstream.api: api's only
 # context and the vars bindings, none sees another section.
 
 vars:
-  # Text and expressions: a string. A host ends with -<namespace>.<suffix>:
+  # Text and expressions: a string. A host is one DNS label, then its
+  # namespace and the suffix, <label>.<namespace>.<suffix>:
   # the platform keeps the others from a project
   # (global.okdp.policy.ingressHosts lists the exceptions).
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}.${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # okdpFullname(suffix): <release>-<suffix>, cut to 63 characters.
   api: ${{ okdpFullname('api') }}
   gateway: ${{ okdpFullname('gateway') }}
-  gatewayHost: ${{ service.name }}-gateway-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  gatewayHost: ${{ service.name }}-gateway.${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
   # cel.bind: a name inside one expression.
   apiUrl: ${{ cel.bind(base, 'https://' + host, base + '/api') }}
   internalUrl: http://${{ api }}.${{ release.namespace }}.svc:8080
@@ -277,21 +278,20 @@ objects:
             - $for: cidr in ranges
               $each: {ipBlock: {cidr: "${{ cidr }}"}}
 
-# The service's OAuth clients: in dcr mode (platform.yaml), one oidc-dcr
-# chart each, added by the compiler.
+# The service's OAuth clients: in dcr mode (platform.yaml), a registration
+# Job each, added by the compile.
 oidcClients:
-  - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client: chart oidc-dcr
+  - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client
     grantTypes: [authorization_code, refresh_token]
     scope: ${{ platform.oidc.scope }} offline_access
   - $if: ${{ values.features.console }}                      # a client left out when false
-    name: console                                            # chart console-oidc-dcr
+    name: console                                            # objects <release>-console-oidc-dcr
     public: true                                             # a browser application: no secret
     clientName: ${{ release.name }} console
     redirectUris: ['https://${{ host }}/console/callback', 'https://${{ gatewayHost }}/console/callback']
     grantTypes: [authorization_code]
     request:                                                 # registration fields, over the computed ones
       logo_uri: https://${{ host }}/console/logo.svg
-      post_logout_redirect_uris: ['https://${{ host }}/console']
   # Clients computed in an expression: a machine client when there are
   # admins, writing a Secret of its own name.
   - $spread: >-

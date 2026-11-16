@@ -269,7 +269,8 @@ one), `component` (the component label), `backoffLimit` (1),
 `labels`, `podLabels`, `annotations`, `podAnnotations`, and `hook`: `helm`
 (the events, `post-install,post-upgrade`: `helm.sh/hook`), `weight`,
 `deletePolicy` (`before-hook-creation`), `argocd` (`PreSync`, `Sync`,
-`PostSync`, `SyncFail`, `Skip`: `argocd.argoproj.io/hook`),
+`PostSync`, `SyncFail`, `PostDelete`, `Skip`:
+`argocd.argoproj.io/hook`),
 `argocdDeletePolicy` (`BeforeHookCreation`). The labels are OKDP's
 ([context](02_service_definition.md#context)), the arguments' over them.
 
@@ -400,10 +401,10 @@ okdpGeneratedSecret: <name>: keys "<a>" and "<b>" give the same generator name "
 `oidcClientSecret(name)`: the name of the Secret holding the OAuth client
 `name` of [`oidcClients`](02_service_definition.md#oidcclients), `''` (or
 null) for the main client; `name` is converted with `str`. In `dcr` mode
-(`platform.oidc.dcr.enabled`), the Secret its oidc-dcr Job writes,
+(`platform.oidc.dcr.enabled`), the Secret its registration Job writes,
 `<release>-<namespace>[-<name>]-dcr`; otherwise, the Secret the platform
 provides, `creds-<release>-oauth2[-<name>]`
-([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)).
+([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)).
 `oidcClientSecret('')` is `platform.oidcClientSecret`.
 
 ```yaml

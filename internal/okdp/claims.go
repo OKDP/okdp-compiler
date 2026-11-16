@@ -5,6 +5,7 @@
 package okdp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -309,12 +310,12 @@ func platformClasses(layers []ContextLayer) M {
 // instance's, nor the package schema's defaults).
 // None when the parameters, the platform values (platformSchema) or a
 // claim fail: the compile says why.
-func claimsOf(def *Definition, in Inputs) instanceClaims {
+func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
 	svc, err := def.service()
 	if err != nil {
 		return instanceClaims{}
 	}
-	schema, values, settings, err := in.memo.paramsOf().get(def.Files, in, svc)
+	schema, values, settings, err := in.memo.paramsOf().get(ctx, def.Files, in, svc)
 	if err != nil {
 		return instanceClaims{}
 	}
@@ -408,8 +409,8 @@ func claimID(namespace, instance, field, name string) string {
 // compile checks them, and the platform's settings; every claim's error
 // joined, each at claims.<name> (FieldError); the global it sets checked by
 // the upstream policy (upstreamGlobals), as an instance's compile checks it.
-func CheckDeclarations(in Inputs) error {
-	layers, platform, err := contextLayers(in.rules(), in.Context)
+func CheckDeclarations(ctx context.Context, in Inputs) error {
+	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
 		return err
 	}
@@ -417,10 +418,10 @@ func CheckDeclarations(in Inputs) error {
 	if err != nil {
 		return err
 	}
-	if err := upstreamGlobals(in, layers, settings); err != nil {
+	if err := upstreamGlobals(ctx, in, layers, settings); err != nil {
 		return err
 	}
-	if err := declaredConnections(in); err != nil {
+	if err := declaredConnections(ctx, in); err != nil {
 		return err
 	}
 	merged := M{}

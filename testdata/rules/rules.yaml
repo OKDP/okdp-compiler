@@ -111,6 +111,10 @@ tables:
       - extraObjects
       - extraDeploy
       - extraManifests
+      - extraResources
+      - extraSecrets
+      - extraConfigMaps
+      - externalIPs
   # What the name of a key ends with, in lower case, when the key holds an
   # image, a registry or a repository of images by its own name. The key
   # image itself is read with its sibling keys.
@@ -189,20 +193,18 @@ functions:
   okdpSignInProxy: {fragment: fragments/fragment-proxy.cel.yaml}
   okdpWebWorkload: {fragment: fragments/fragment-web.cel.yaml, result: objects}
   oidcClientSecret: {document: oidcSecret, result: secret}
-# The compiler's own templates: the objects of a generated Secret, and the
-# values of an OAuth client's chart.
+# The compiler's own templates: the objects of a generated Secret, and those
+# that register an OAuth client.
 templates:
   generatedSecret: fragments/generated-secret.cel.yaml
-  oidcDcr: charts/oidc-dcr.cel.yaml
+  oidcClient: charts/oidc-dcr.cel.yaml
 # The sections of a mapping besides the compiler's own (output, instance,
 # provides, objects).
 sections: [oidcClients]
-# The charts the compiler adds. objects is overridden by
-# global.okdp.charts.objects; oidcDcr is what the OAuth clients' values are
-# checked against, the version okdp-objects holds.
+# The charts the compiler adds: objects, overridden by
+# global.okdp.charts.objects.
 charts:
-  oidcDcr: {repository: oci://quay.io/adaltas, chart: oidc-dcr, version: 0.6.0}
-  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 2.0.0}
+  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 0.1.0}
 # Documents the others call: rule(<name>, input) in a document, a function of
 # functions, scope (what a mapping sees as platform).
 documents:
@@ -210,12 +212,13 @@ documents:
   oidcClients: charts/oidc-clients.cel.yaml
   scope: scope.cel.yaml
   secretStore: objects/secret-store.cel.yaml
+  deployerRole: objects/deployer-role.cel.yaml
   pushSecret: objects/push-secret.cel.yaml
   pullSecret: objects/pull-secret.cel.yaml
-# A section whose items add charts: list gives them, values the values of
-# each it says to render.
-ownCharts:
-  - {section: oidcClients, chart: oidcDcr, list: oidcClients, values: oidcDcr}
+# A section whose items add objects: list gives them, objects the template
+# of the objects of each it says to render.
+ownObjects:
+  - {section: oidcClients, list: oidcClients, objects: oidcClient}
 # The names the compiler gives credentials: $<word> stands for the value.
 names:
   credentialsSecret: $output-$contract-credentials

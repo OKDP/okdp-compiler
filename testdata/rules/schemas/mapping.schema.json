@@ -76,14 +76,14 @@
             "type": "string",
             "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$",
             "maxLength": 54,
-            "description": "\"\" or absent: the service's main client. Else the client's name, a DNS label of 54 characters at most: it names the chart <name>-oidc-dcr (a DNS label), its objects and its Secret."
+            "description": "\"\" or absent: the service's main client. Else the client's name, a DNS label of 54 characters at most: it names the client's objects and its Secret."
           },
           "grantTypes": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "description": "The OAuth grant types the client registers."},
-          "redirectUris": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Its redirect URIs."},
+          "redirectUris": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Its redirect URIs: http or https, with a host, no user information. In dcr mode, for a project that is not privileged, each host is one the project serves: <label>.<namespace>.<suffix>, or listed for it in global.okdp.policy.ingressHosts."},
           "scope": {"type": "string", "description": "The scope it requests; \"\" or absent: platform.oidc.scope."},
           "clientName": {"type": "string", "description": "Its name at the identity provider; \"\" or absent: <release>-<namespace>[-<name>]."},
           "public": {"type": "boolean", "description": "A public client, without a client secret; absent: false."},
-          "request": {"type": "object", "description": "Fields of the registration request, over the computed ones."},
+          "request": {"type": "object", "description": "Fields of the registration request, over the computed ones. Not the URLs the provider trusts (redirect_uris, post_logout_redirect_uris, request_uris, sector_identifier_uri, jwks_uri, initiate_login_uri, backchannel_logout_uri, frontchannel_logout_uri): refused."},
           "secret": {"type": "string", "description": "The Secret the Job writes the client to, the release's, <release>-<client name> exactly (<release>-oidc for the main client); \"\" or absent: oidcClientSecret(<name>)."},
           "caSecret": {"type": "string", "description": "The Secret holding the CA bundle the Job trusts; \"\" or absent: platform.oidc.dcr.caSecret."}
         }
@@ -110,7 +110,7 @@
             "helm": {"type": "string", "minLength": 1, "description": "helm.sh/hook: the events, comma separated (post-install,post-upgrade)."},
             "weight": {"type": ["integer", "string"], "description": "helm.sh/hook-weight."},
             "deletePolicy": {"type": "string", "description": "helm.sh/hook-delete-policy; absent: before-hook-creation."},
-            "argocd": {"type": "string", "enum": ["PreSync", "Sync", "PostSync", "SyncFail", "Skip"], "description": "argocd.argoproj.io/hook."},
+            "argocd": {"type": "string", "enum": ["PreSync", "Sync", "PostSync", "SyncFail", "PostDelete", "Skip"], "description": "argocd.argoproj.io/hook."},
             "argocdDeletePolicy": {"type": "string", "enum": ["HookSucceeded", "HookFailed", "BeforeHookCreation"], "description": "argocd.argoproj.io/hook-delete-policy; absent: BeforeHookCreation."}
           }
         },

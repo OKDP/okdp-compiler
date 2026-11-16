@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"reflect"
 	"strings"
@@ -13,6 +12,8 @@ import (
 	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/internal/compile"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
+	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -29,7 +30,7 @@ func mapCtx() M {
 // testInstance: the instance whose mapping sees scope, as a test writes
 // it: its release, service and OAuth client mode read back from it.
 func testInstance(scope M) *instance {
-	return &instance{rules: defaultRules(),
+	return &instance{rules: testrules.Standard(),
 		release:   value.Str(value.Dig(scope, "release.name")),
 		namespace: value.Str(value.Dig(scope, "release.namespace")),
 		svc:       &Service{Name: value.Str(value.Dig(scope, "service.name")), Version: value.Str(value.Dig(scope, "service.version"))},
@@ -41,7 +42,7 @@ func testInstance(scope M) *instance {
 // scope (testInstance), as Compile opens it, without a cost limit.
 func newSession(scope M) *cel2yaml.Session {
 	var s *cel2yaml.Session
-	s = cel2yaml.NewSession(context.Background(), 0, functions(testInstance(scope), &s)...)
+	s = cel2yaml.NewSession(0, functions(context.Background(), testInstance(scope), &s)...)
 	return s
 }
 
@@ -61,14 +62,14 @@ func mapping(okdp, values string) []compile.Source {
 // eval: the CEL expression expr (without ${{ }}) on the variables of scope,
 // in the session s: the value v of the template {values: {v: ${{ expr }}}}.
 func eval(s *cel2yaml.Session, expr string, scope M) (any, error) {
-	v, err := evalTemplate(s, ruleset.Template{Name: "v.cel.yaml", Data: []byte("values:\n  v: |-\n    ${{ " + expr + " }}\n")}, scope)
+	v, err := evalTemplate(context.Background(), s, ruleset.Template{Name: "v.cel.yaml", Data: []byte("values:\n  v: |-\n    ${{ " + expr + " }}\n")}, scope)
 	return v["v"], err
 }
 
 // TestMappingSections: vars in order, output, instance and provides, read
 // from okdp.yaml, its package keys skipped, and values.cel.yaml.
 func TestMappingSections(t *testing.T) {
-	res, _, err := runMapping(defaultRules(), newSession(mapCtx()), mapCtx(), mapping(`
+	res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping(`
 roles: [web]
 require: [a.b]
 upstream: {x: {protect: [a]}}
@@ -99,7 +100,7 @@ provides:
 // TestMappingFunctions: OKDP's host functions beside the language's, next
 // to a vars binding named fullname (the function is okdpFullname).
 func TestMappingFunctions(t *testing.T) {
-	res, _, err := runMapping(defaultRules(), newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
+	res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
 x:
   name: ${{ fullname }}
   okdp: ${{ okdpFullname('app') }}
@@ -118,7 +119,7 @@ x:
 // and $vars bindings and $for variables shadow them.
 func TestMappingService(t *testing.T) {
 	ctx := mapCtx()
-	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": defaultRules().Labels("demo", "demo-x", "", false), "selectorLabels": defaultRules().Labels("demo", "demo-x", "", true)})
+	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": testrules.Standard().Labels("demo", "demo-x", "", false), "selectorLabels": testrules.Standard().Labels("demo", "demo-x", "", true)})
 	src := `
 x:
   version: ${{ service.version }}
@@ -126,7 +127,7 @@ x:
   selector: ${{ okdpSelectorLabels('db') }}
   loop: [{$for: "service in ['a']", $vars: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
 `
-	res, _, err := runMapping(defaultRules(), newSession(ctx), ctx, mapping("", src)...)
+	res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(ctx), ctx, mapping("", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ x:
 		t.Errorf("$for and $vars shadow service and selectorLabels: %#v", x["loop"])
 	}
 	// A mapping's own labels binding wins over the context's.
-	res, _, err = runMapping(defaultRules(), newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
+	res, _, err = runMapping(context.Background(), testrules.Standard(), newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +163,7 @@ x:
 // kept, which Compile leaves out, with the keys output writes; a null key of
 // a client is refused by its type.
 func TestMappingNulls(t *testing.T) {
-	res, written, err := runMapping(defaultRules(), newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "{x: '${{ null }}', web: ~, z: {}}\n")...)
+	res, written, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "{x: '${{ null }}', web: ~, z: {}}\n")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +177,7 @@ func TestMappingNulls(t *testing.T) {
 		t.Errorf("sections: %#v", res)
 	}
 	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/oidcClients/0/scope': got null, want string"
-	if _, _, err := runMapping(defaultRules(), newSession(mapCtx()), mapCtx(), mapping("oidcClients: [{grantTypes: [a], scope: ~}]\n", "")...); err == nil || err.Error() != want {
+	if _, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("oidcClients: [{grantTypes: [a], scope: ~}]\n", "")...); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
@@ -203,7 +204,7 @@ func TestMappingErrors(t *testing.T) {
 		"output in okdp.yaml":    {"output: {}\n", "{}\n", "values.cel.yaml: output: okdp.yaml gives it too"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := runMapping(defaultRules(), newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
+			_, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}

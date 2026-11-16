@@ -10,10 +10,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/okdp/okdp-compiler/chart"
 	"io/fs"
 	"path"
 	"sync"
+
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // utf8BOM: the byte order mark Helm's loader strips from a chart's files.

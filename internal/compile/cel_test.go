@@ -2,6 +2,7 @@ package compile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -37,7 +38,7 @@ func runOutput(src string) (M, error) { return evalOutput(mapping(src)) }
 // evalOutput: evaluates the document of srcs on mapCtx and returns its
 // output section.
 func evalOutput(srcs ...Source) (M, error) {
-	d, err := Eval(cel2yaml.NewSession(context.Background(), 0), mapCtx(), []string{"output"}, srcs...)
+	d, err := Eval(context.Background(), cel2yaml.NewSession(0), mapCtx(), []string{"output"}, srcs...)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +176,7 @@ func TestMistakes(t *testing.T) {
 // TestTemplateErrors: an error of a template's values names its file and
 // its path.
 func TestTemplateErrors(t *testing.T) {
-	_, err := Eval(cel2yaml.NewSession(context.Background(), 0), mapCtx(), []string{"values"}, Source{Name: "t.cel.yaml", Data: []byte("values: {a: [1, '${{ nope }}']}\n")})
+	_, err := Eval(context.Background(), cel2yaml.NewSession(0), mapCtx(), []string{"values"}, Source{Name: "t.cel.yaml", Data: []byte("values: {a: [1, '${{ nope }}']}\n")})
 	if want := "t.cel.yaml: values: a[1]: ${{ nope }}:"; err == nil || !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("got %v, want an error containing %q", err, want)
 	}
@@ -192,7 +193,7 @@ func TestSources(t *testing.T) {
 	if want := (M{"a": float64(2), "b": float64(2)}); err != nil || !reflect.DeepEqual(out, want) {
 		t.Errorf("got %#v (%v), want %#v", out, err, want)
 	}
-	d, err := Eval(cel2yaml.NewSession(context.Background(), 0), mapCtx(), []string{"output"}, okdp, values("$if: ${{ n > 2.0 }}\na: 1\n"))
+	d, err := Eval(context.Background(), cel2yaml.NewSession(0), mapCtx(), []string{"output"}, okdp, values("$if: ${{ n > 2.0 }}\na: 1\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +225,7 @@ func TestWritten(t *testing.T) {
 		"in a mapping":  {mapping("output: {a: 1}\n"), []string{"a"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d, err := Eval(cel2yaml.NewSession(context.Background(), 0), mapCtx(), []string{"output"}, tc.src)
+			d, err := Eval(context.Background(), cel2yaml.NewSession(0), mapCtx(), []string{"output"}, tc.src)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -233,7 +234,7 @@ func TestWritten(t *testing.T) {
 			}
 		})
 	}
-	d, err := Eval(cel2yaml.NewSession(context.Background(), 0), mapCtx(), []string{"output"}, mapping("vars: {}\n"))
+	d, err := Eval(context.Background(), cel2yaml.NewSession(0), mapCtx(), []string{"output"}, mapping("vars: {}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,8 +282,8 @@ func TestSourceErrors(t *testing.T) {
 func TestVarsCost(t *testing.T) {
 	one := "vars:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n"
 	two := one + "  b: ${{ values.items.map(i, i.n * 2.0) }}\n"
-	s := cel2yaml.NewSession(context.Background(), math.MaxUint64)
-	if _, err := Eval(s, mapCtx(), nil, mapping(one)); err != nil {
+	s := cel2yaml.NewSession(math.MaxUint64)
+	if _, err := Eval(context.Background(), s, mapCtx(), nil, mapping(one)); err != nil {
 		t.Fatal(err)
 	}
 	cost := s.Used()
@@ -290,18 +291,18 @@ func TestVarsCost(t *testing.T) {
 		t.Fatal("no cost counted")
 	}
 	limit := 2*cost - 1
-	_, err := Eval(cel2yaml.NewSession(context.Background(), limit), mapCtx(), nil, mapping(two))
+	_, err := Eval(context.Background(), cel2yaml.NewSession(limit), mapCtx(), nil, mapping(two))
 	if want := fmt.Sprintf("values.cel.yaml: vars b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", limit); err == nil || err.Error() != want {
 		t.Errorf("past the limit: got %v, want %q", err, want)
 	}
-	s = cel2yaml.NewSession(context.Background(), limit)
-	if _, err := Eval(s, mapCtx(), nil, mapping(one)); err != nil {
+	s = cel2yaml.NewSession(limit)
+	if _, err := Eval(context.Background(), s, mapCtx(), nil, mapping(one)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Eval(s, mapCtx(), nil, mapping(one)); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
+	if _, err := Eval(context.Background(), s, mapCtx(), nil, mapping(one)); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
 		t.Errorf("past the limit, in a second document: got %v", err)
 	}
-	if _, err := Eval(cel2yaml.NewSession(context.Background(), 2*cost), mapCtx(), nil, mapping(two)); err != nil {
+	if _, err := Eval(context.Background(), cel2yaml.NewSession(2*cost), mapCtx(), nil, mapping(two)); err != nil {
 		t.Errorf("within the limit: %v", err)
 	}
 }
@@ -310,7 +311,7 @@ func TestVarsCost(t *testing.T) {
 // vars, then its items in order, a text or a path and a message, those
 // that are empty left out; a failure to evaluate is an error.
 func TestPrepared(t *testing.T) {
-	s := cel2yaml.NewSession(context.Background(), 0)
+	s := cel2yaml.NewSession(0)
 	p, err := Prepare(s, []string{"x"}, nil, Source{Name: "check.yaml", Data: []byte(`
 vars:
   big: ${{ x > 1 }}
@@ -330,12 +331,25 @@ errors:
 		{2.0, []Problem{{Message: "big: 2"}}},
 		{-1.0, []Problem{{Path: "a.b", Message: "negative"}}},
 	} {
-		_, got, err := p.Eval(M{"x": tc.x})
+		_, got, err := p.Eval(context.Background(), M{"x": tc.x})
 		if err != nil || !slices.Equal(got, tc.want) {
 			t.Errorf("x %v: got %v (%v), want %v", tc.x, got, err, tc.want)
 		}
 	}
-	if _, _, err := p.Eval(M{"x": "text"}); err == nil || !strings.Contains(err.Error(), "check.yaml: vars big") {
+	if _, _, err := p.Eval(context.Background(), M{"x": "text"}); err == nil || !strings.Contains(err.Error(), "check.yaml: vars big") {
 		t.Errorf("a failure to evaluate: got %v", err)
+	}
+}
+
+// TestRefusals: the messages of a document's errors, one error each,
+// joined: one a line, each a Refusal.
+func TestRefusals(t *testing.T) {
+	_, err := Eval(context.Background(), cel2yaml.NewSession(0), M{}, []string{"output"}, Source{Name: "m.yaml", Data: []byte("errors:\n  - first\n  - second\n")})
+	if err == nil || err.Error() != "first\nsecond" {
+		t.Fatalf("got %v", err)
+	}
+	var r Refusal
+	if !errors.As(err, &r) || r.Message != "first" {
+		t.Errorf("a Refusal: %v %v", r, err)
 	}
 }

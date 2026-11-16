@@ -2,20 +2,21 @@
 // project may have (reserved), which projects are the platform's own
 // (privileged), and what the others' instances may not
 // do: their objects stay in their namespace, no cluster-scoped kind
-// (checkObjects); their upstream values set no key of a pod's privileges,
-// identity, containers or objects, and their images come from the
-// platform's registries (upstreamCheck). And for every project, no Secret
-// of credentials in clear unless the caller allows it (checkPlainSecrets).
+// (CheckObjects). What they give upstream charts is a host's to check
+// (Inputs.Finalize, Inputs.CheckGlobals: okdp-gitops' policy). And for
+// every project, no Secret of credentials in clear unless the caller
+// allows it (checkPlainSecrets).
 
 package okdp
 
 import (
+	"context"
 	"fmt"
-	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"slices"
 	"strings"
 
 	"github.com/okdp/okdp-compiler/chart"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -41,14 +42,10 @@ func EngineNamespaces(rules *RuleSet) []string {
 
 // reservedNamespace: why namespace is no project's, those the compiler
 // reserves whatever the platform (the rule set's namespace check); those of
-// global.okdp.policy.reserved are the platform's (Compile). "" when it may
-// be one. A check that cannot be evaluated reserves it: it says so.
-func reservedNamespace(rules *RuleSet, namespace string) string {
-	why, err := rules.Problem(ruleset.CheckNamespaceRule, M{"ns": namespace})
-	if err != nil {
-		return err.Error()
-	}
-	return why
+// global.okdp.policy.reserved are the platform's (Compile). nil when it may
+// be one. A check that cannot be evaluated reserves it: its error says so.
+func reservedNamespace(ctx context.Context, rules *RuleSet, namespace string) error {
+	return rules.Refuse(ctx, ruleset.CheckNamespaceRule, M{"ns": namespace})
 }
 
 // The rule of a project's name, its namespace, in two parts, as the
@@ -59,12 +56,12 @@ func reservedNamespace(rules *RuleSet, namespace string) string {
 // checkNamespace: nil when namespace may be a project's whatever the
 // platform: a DNS label (chart.IsDNSLabel), none the compiler reserves
 // (reservedNamespace).
-func checkNamespace(rules *RuleSet, field, namespace string) error {
-	switch {
-	case !chart.IsDNSLabel(namespace):
+func checkNamespace(ctx context.Context, rules *RuleSet, field, namespace string) error {
+	if !chart.IsDNSLabel(namespace) {
 		return fmt.Errorf("%s %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", field, namespace)
-	case reservedNamespace(rules, namespace) != "":
-		return fmt.Errorf("%s %q: the namespace is reserved: %s", field, namespace, reservedNamespace(rules, namespace))
+	}
+	if err := reservedNamespace(ctx, rules, namespace); err != nil {
+		return fmt.Errorf("%s %q: the namespace is reserved: %w", field, namespace, err)
 	}
 	return nil
 }
@@ -72,8 +69,8 @@ func checkNamespace(rules *RuleSet, field, namespace string) error {
 // checkPlatformNamespace: nil when namespace is none of the platform's
 // reserved namespaces, global.okdp.policy.reserved of okdp, the
 // platform's settings: a reservation wins over a privilege.
-func checkPlatformNamespace(rules *RuleSet, field, namespace string, okdp M) error {
-	return rules.Refuse(ruleset.CheckPlatformNSRule, M{"field": field, "ns": namespace, "settings": okdp})
+func checkPlatformNamespace(ctx context.Context, rules *RuleSet, field, namespace string, okdp M) error {
+	return rules.Refuse(ctx, ruleset.CheckPlatformNSRule, M{"field": field, "ns": namespace, "settings": okdp})
 }
 
 // CheckNamespace: nil when namespace may be a project's, okdp the
@@ -81,12 +78,12 @@ func checkPlatformNamespace(rules *RuleSet, field, namespace string, okdp M) err
 // checkPlatformNamespace. A namespace a target writes in by its options
 // (the flux target's Source) is the target's to refuse
 // (target.OwnNamespaces).
-func CheckNamespace(rules *RuleSet, field, namespace string, okdp M) error {
+func CheckNamespace(ctx context.Context, rules *RuleSet, field, namespace string, okdp M) error {
 	rules = rulesOr(rules)
-	if err := checkNamespace(rules, field, namespace); err != nil {
+	if err := checkNamespace(ctx, rules, field, namespace); err != nil {
 		return err
 	}
-	return checkPlatformNamespace(rules, field, namespace, okdp)
+	return checkPlatformNamespace(ctx, rules, field, namespace, okdp)
 }
 
 // apiGroup: the group of an apiVersion, "" for the core group (v1).
@@ -98,7 +95,7 @@ func apiGroup(apiVersion string) string {
 	return group
 }
 
-// checkObjects: the objects of an instance of svc in namespace, one that
+// CheckObjects: the objects of an instance of svc in namespace, one that
 // is not privileged (Result.Objects, every source: the credentials
 // Secrets, the objects section, the generated Secrets, the PushSecrets and
 // ExternalSecrets): each in the instance's namespace, where its
@@ -108,9 +105,9 @@ func apiGroup(apiVersion string) string {
 // alike. The first refused, in order, fails, named <kind>/<name>: the
 // platform's projects alone (global.okdp.policy.privileged) install
 // cluster-scoped objects and write other namespaces.
-func checkObjects(rules *RuleSet, svc, namespace string, objects []M) error {
+func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, objects []M) error {
 	return eachObject(objects, func(o M) error {
-		return rules.Refuse(ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": objectInput(o)})
+		return rules.Refuse(ctx, ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": objectInput(o)})
 	})
 }
 
@@ -164,7 +161,7 @@ func apiGroupName(apiVersion string) string {
 // eachObject: f on each object of objects, in order, each followed by the
 // items of the list it holds, at any depth (items: a List, which Helm and
 // Argo CD install item by item, an item that is not a map skipped): the
-// one walk of the rules on an instance's objects (checkObjects,
+// one walk of the rules on an instance's objects (CheckObjects,
 // checkPlainSecrets, refuseSecretTargets, keepSynced), so that an object
 // wrapped in a List escapes none. The first error of f stops it.
 func eachObject(objects []M, f func(o M) error) error {
@@ -205,8 +202,8 @@ func eachObject(objects []M, f func(o M) error) error {
 // and type passes. The first refused, in order, fails, named
 // <kind>/<name>, its field named, data before stringData, the keys of a
 // template in order; the value is never printed.
-func checkPlainSecrets(rules *RuleSet, svc string, objects []M) error {
+func checkPlainSecrets(ctx context.Context, rules *RuleSet, svc string, objects []M) error {
 	return eachObject(objects, func(o M) error {
-		return rules.Refuse(ruleset.CheckPlainSecret, M{"svc": svc, "object": objectInput(o)})
+		return rules.Refuse(ctx, ruleset.CheckPlainSecret, M{"svc": svc, "object": objectInput(o)})
 	})
 }

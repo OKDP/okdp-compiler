@@ -2,9 +2,11 @@ package okdp
 
 import (
 	"context"
-	"github.com/okdp/okdp-compiler/value"
 	"reflect"
 	"testing"
+
+	"github.com/okdp/okdp-compiler/internal/testrules"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // TestSecretStore: Result.SecretStore of global.okdp.secrets: a store with
@@ -33,7 +35,7 @@ func TestSecretStore(t *testing.T) {
 // the provider's namespace then the claim's ID.
 func TestStoreRef(t *testing.T) {
 	of := func(okdp M) (M, string) {
-		v, err := storeOf(defaultRules(), okdp)
+		v, err := storeOf(context.Background(), testrules.Standard(), okdp)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,6 +1,7 @@
 // Hosts: the host names a project that is not privileged serves, the
-// platform's rule: <something>-<namespace>.<global.okdp.ingress.suffix>, or
-// a host the platform lists for the project
+// platform's rule (the rule set's check host): one DNS label, then the
+// namespace, then the suffix, <label>.<namespace>.<global.okdp.ingress.suffix>,
+// or a host the platform lists for the project
 // (global.okdp.policy.ingressHosts). A host is a name in a namespace shared
 // by every project (ingress-nginx merges the rules of one host across
 // namespaces, cert-manager signs the certificate of any name from the
@@ -11,16 +12,17 @@
 package okdp
 
 import (
+	"context"
 	"fmt"
-	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"slices"
 	"strings"
 
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// hostRules: the hosts a project may serve (checkIngressHosts).
+// hostRules: the hosts a project may serve (CheckIngressHosts).
 type hostRules struct {
 	rules     *RuleSet
 	namespace string
@@ -41,20 +43,20 @@ func newHostRules(rules *RuleSet, okdp M, namespace string) *hostRules {
 // check: the error of the host, found at where, when the project may not
 // serve it (the rule set's host check). The case and a final dot do not
 // count.
-func (r *hostRules) check(where, host string) error {
-	return r.rules.Refuse(ruleset.CheckHost, M{"at": where, "raw": host, "host": strings.ToLower(strings.TrimSuffix(host, ".")), "ns": r.namespace, "suffix": r.suffix, "listed": r.listed})
+func (r *hostRules) check(ctx context.Context, where, host string) error {
+	return r.rules.Refuse(ctx, ruleset.CheckHost, M{"at": where, "raw": host, "host": strings.ToLower(strings.TrimSuffix(host, ".")), "ns": r.namespace, "suffix": r.suffix, "listed": r.listed})
 }
 
 // annotationHosts: the first host of the annotations a (a map of
 // annotations) that the rules refuse, by annotation key order; nil when
 // they all hold.
-func (r *hostRules) annotationHosts(p string, a M) error {
+func (r *hostRules) annotationHosts(ctx context.Context, p string, a M) error {
 	for _, k := range slices.Sorted(maps.Keys(a)) {
 		if !r.rules.Has(ruleset.TableHostAnnotations, k) {
 			continue
 		}
 		for _, h := range strings.FieldsFunc(value.Str(a[k]), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\t' }) {
-			if err := r.check(value.Key(p, k), h); err != nil {
+			if err := r.check(ctx, value.Key(p, k), h); err != nil {
 				return err
 			}
 		}
@@ -62,24 +64,26 @@ func (r *hostRules) annotationHosts(p string, a M) error {
 	return nil
 }
 
-// checkIngressHosts: the objects of an instance of svc in namespace, one
+// CheckIngressHosts: the objects of an instance of svc in namespace, one
 // that is not privileged (Result.Objects, the items of a list alike),
 // serve the hosts the platform lets the project serve (hostRules): an
-// Ingress's rules (a rule without host answers every host) and tls hosts,
-// a cert-manager Certificate's dnsNames and commonName, a Gateway API
-// route's hostnames, and the annotations that name hosts (the rule set's hostAnnotations)
-// of any object. The first refused, in order, fails, named <kind>/<name>,
-// its field named.
-func checkIngressHosts(rules *RuleSet, svc, namespace string, okdp M, objects []M) error {
+// Ingress's rules (a rule without host, like its spec.defaultBackend,
+// answers every host, refused) and tls hosts, a cert-manager Certificate's
+// dnsNames and commonName, a Gateway API route's hostnames, a Gateway's
+// listeners' (a listener that matches hosts without a hostname answers
+// every host), and the annotations that name hosts (the rule set's
+// hostAnnotations) of any object. The first refused, in order, fails, named
+// <kind>/<name>, its field named.
+func CheckIngressHosts(ctx context.Context, rules *RuleSet, svc, namespace string, okdp M, objects []M) error {
 	r := newHostRules(rules, okdp, namespace)
 	return eachObject(objects, func(o M) error {
 		kind, group, name := value.Str(o["kind"]), apiGroup(value.Str(o["apiVersion"])), value.Str(value.Dig(o, "metadata.name"))
 		at := func(p string) string { return fmt.Sprintf("%s: objects: %s/%s: %s", svc, kind, name, p) }
-		if err := r.annotationHosts("metadata.annotations", value.AsMap(value.Dig(o, "metadata.annotations"))); err != nil {
+		if err := r.annotationHosts(ctx, "metadata.annotations", value.AsMap(value.Dig(o, "metadata.annotations"))); err != nil {
 			return fmt.Errorf("%s: objects: %s/%s: %w", svc, kind, name, err)
 		}
 		host := func(p string, h any) error {
-			return r.check(at(p), value.Str(h))
+			return r.check(ctx, at(p), value.Str(h))
 		}
 		list := func(p string, v any) error {
 			for i, h := range value.AsList(v) {
@@ -89,12 +93,18 @@ func checkIngressHosts(rules *RuleSet, svc, namespace string, okdp M, objects []
 			}
 			return nil
 		}
+		every := func(p, what string) error {
+			return fmt.Errorf("%s: %s answers every host; the platform's projects serve any host (global.okdp.policy.privileged), %s is not one of them", at(p), what, namespace)
+		}
 		switch {
 		case group == "networking.k8s.io" && kind == "Ingress":
+			if value.Dig(o, "spec.defaultBackend") != nil {
+				return every("spec.defaultBackend", "the default backend")
+			}
 			for i, rule := range value.AsList(value.Dig(o, "spec.rules")) {
 				p := value.Key(value.Index("spec.rules", i), "host")
 				if value.Str(value.AsMap(rule)["host"]) == "" {
-					return fmt.Errorf("%s: a rule without host answers every host; the platform's projects serve any host (global.okdp.policy.privileged), %s is not one of them", at(p), namespace)
+					return every(p, "a rule without host")
 				}
 				if err := host(p, value.AsMap(rule)["host"]); err != nil {
 					return err
@@ -114,7 +124,29 @@ func checkIngressHosts(rules *RuleSet, svc, namespace string, okdp M, objects []
 			}
 		case group == "gateway.networking.k8s.io" && (kind == "HTTPRoute" || kind == "GRPCRoute" || kind == "TLSRoute"):
 			return list("spec.hostnames", value.Dig(o, "spec.hostnames"))
+		case group == "gateway.networking.k8s.io" && kind == "Gateway":
+			return listeners(ctx, r, at, o, every)
 		}
 		return nil
 	})
+}
+
+// listeners: the listeners of the Gateway o serve only hosts the project
+// may serve: those of a protocol that matches hosts (HTTP, HTTPS, TLS) name
+// a hostname, one that holds (a listener without one answers every host,
+// every); a listener of another protocol matches no host.
+func listeners(ctx context.Context, r *hostRules, at func(string) string, o M, every func(p, what string) error) error {
+	for i, l := range value.AsList(value.Dig(o, "spec.listeners")) {
+		m := value.AsMap(l)
+		p := value.Key(value.Index("spec.listeners", i), "hostname")
+		switch h := value.Str(m["hostname"]); {
+		case h != "":
+			if err := r.check(ctx, at(p), h); err != nil {
+				return err
+			}
+		case slices.Contains([]string{"HTTP", "HTTPS", "TLS"}, value.Str(m["protocol"])):
+			return every(p, "a listener without hostname")
+		}
+	}
+	return nil
 }

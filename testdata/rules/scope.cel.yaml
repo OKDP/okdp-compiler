@@ -8,7 +8,7 @@ vars:
   givenDcr: ${{ asMap(dig(settings, "oidc.dcr")) }}
   mode: ${{ str(dig(settings, "oidc.clientProvisioning")) }}
   on: ${{ truthy(dig(settings, "oidc.enabled")) }}
-  # The CA bundle the oidc-dcr Jobs trust: the platform's, unless dcr sets one.
+  # The CA bundle the registration Jobs trust: the platform's, unless dcr sets one.
   caSecret: >-
     ${{ "caSecret" in givenDcr ? givenDcr.caSecret : str(dig(settings, "tls.caBundleSecret")) }}
   oidc: >-

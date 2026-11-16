@@ -9,10 +9,10 @@ require:
   - oidc.issuerUri
 
 vars:
-  # The image is by digest; the host ends with -<namespace>.<suffix>, the
+  # The image is by digest; the host is <label>.<namespace>.<suffix>, the
   # form the compile requires of a project's hosts.
   image: registry.example.org/okdp/notebook:1.0.0@sha256:5f285c86523439ab3859f1b75e1fab1b4d7d958daa0349e609ef45be403a854d
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}.${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
 
 # The main OAuth client: the sign-in proxy of the workload uses it
 # (platform.oidcClientSecret).

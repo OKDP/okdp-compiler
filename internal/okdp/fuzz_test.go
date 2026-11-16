@@ -1,12 +1,14 @@
 package okdp
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -46,8 +48,8 @@ func FuzzParseAccess(f *testing.F) {
 			return
 		}
 		access := doc[AccessKey]
-		got, err := ParseAccess(nil, access, namespace)
-		again, err2 := ParseAccess(nil, access, namespace)
+		got, err := ParseAccess(testrules.Standard(), access, namespace)
+		again, err2 := ParseAccess(testrules.Standard(), access, namespace)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(got, again) {
 			t.Fatalf("%q: not the same twice: %v %v / %v %v", b, got, err, again, err2)
 		}
@@ -68,7 +70,7 @@ func FuzzParseAccess(f *testing.F) {
 			t.Fatalf("%q: read as %v", b, got)
 		}
 		for group, role := range got {
-			if !IsGroup(group) || !slices.Contains(Roles(nil), role) || m[group] != string(role) {
+			if !IsGroup(group) || !slices.Contains(Roles(testrules.Standard()), role) || m[group] != string(role) {
 				t.Fatalf("%q: group %q role %q of %v", b, group, role, m)
 			}
 		}
@@ -153,8 +155,8 @@ func FuzzContextLayers(f *testing.F) {
 			layers = append(layers, ContextLayer{Level: uint(level), Values: v})
 			before = append(before, ContextLayer{Level: uint(level), Values: value.AsMap(value.Copy(v))})
 		}
-		out, platform, err := contextLayers(defaultRules(), layers)
-		out2, platform2, err2 := contextLayers(defaultRules(), layers)
+		out, platform, err := contextLayers(context.Background(), testrules.Standard(), layers)
+		out2, platform2, err2 := contextLayers(context.Background(), testrules.Standard(), layers)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(out, out2) || !reflect.DeepEqual(platform, platform2) {
 			t.Fatalf("%q: not the same twice: %v / %v", [][]byte{b0, b1, b2}, err, err2)
 		}
@@ -218,9 +220,9 @@ func FuzzValuesLayers(f *testing.F) {
 			return
 		}
 		before := value.Copy(M{"c": c, "v": v})
-		in := Inputs{Context: []ContextLayer{{Values: c}}, Values: []map[string]any{v}}
-		got, _, err := valuesLayers(schema, in)
-		got2, _, err2 := valuesLayers(schema, in)
+		in := Inputs{Rules: testrules.Standard(), Context: []ContextLayer{{Values: c}}, Values: []map[string]any{v}}
+		got, _, err := valuesLayers(context.Background(), schema, in)
+		got2, _, err2 := valuesLayers(context.Background(), schema, in)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(got, got2) {
 			t.Fatalf("%q %q: not the same twice: %v / %v", bc, bv, err, err2)
 		}

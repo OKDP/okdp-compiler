@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 // TestParseAccess: a project's access maps group names to a role, every
@@ -30,7 +32,7 @@ func TestParseAccess(t *testing.T) {
 		"every error":  {M{"a b": "viewer", "analysts": nil}, nil, "access.a b: a group name"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := ParseAccess(nil, tc.access, "demo")
+			got, err := ParseAccess(testrules.Standard(), tc.access, "demo")
 			if tc.err != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.err) {
 					t.Fatalf("got %v, want an error containing %q", err, tc.err)
@@ -127,11 +129,11 @@ func TestProjectOfNamespace(t *testing.T) {
 	platform := map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}, "reserved": []any{"demo"}}}}}
 	in := inputs(platform)
 	_, cerr := Compile(context.Background(), def, in)
-	_, perr := PlatformOf(in)
+	_, perr := PlatformOf(context.Background(), in)
 	if cerr == nil || perr == nil || cerr.Error() != perr.Error() {
 		t.Fatalf("Compile: %v\nPlatformOf: %v", cerr, perr)
 	}
-	for _, err := range []error{perr, CheckProject(in)} {
+	for _, err := range []error{perr, CheckProject(context.Background(), in)} {
 		if _, ok := errors.AsType[*NamespaceError](err); !ok || !strings.Contains(err.Error(), "reserved by the platform (global.okdp.policy.reserved)") {
 			t.Errorf("reserved by the platform: %v", err)
 		}
@@ -139,15 +141,15 @@ func TestProjectOfNamespace(t *testing.T) {
 	for _, ns := range []string{"kube-system", "argocd", "platform", "Not_A_Label"} {
 		in := inputs(nil)
 		in.Namespace = ns
-		if _, err := PlatformOf(in); !errors.As(err, new(*NamespaceError)) {
+		if _, err := PlatformOf(context.Background(), in); !errors.As(err, new(*NamespaceError)) {
 			t.Errorf("%s: %v", ns, err)
 		}
 	}
-	if err := CheckProject(inputs(map[string]any{"global": M{"okdp": M{"policy": M{"reserved": []any{"other"}}}}})); err != nil {
+	if err := CheckProject(context.Background(), inputs(map[string]any{"global": M{"okdp": M{"policy": M{"reserved": []any{"other"}}}}})); err != nil {
 		t.Errorf("a namespace nothing reserves: %v", err)
 	}
 	// The platform's settings refused are no namespace problem.
-	if err := CheckProject(inputs(map[string]any{"global": M{"okdp": M{"policy": M{"privileged": "demo"}}}})); err == nil || errors.As(err, new(*NamespaceError)) {
+	if err := CheckProject(context.Background(), inputs(map[string]any{"global": M{"okdp": M{"policy": M{"privileged": "demo"}}}})); err == nil || errors.As(err, new(*NamespaceError)) {
 		t.Errorf("the platform's settings refused: %v", err)
 	}
 }
@@ -155,14 +157,14 @@ func TestProjectOfNamespace(t *testing.T) {
 // TestPlatformAdmins and TestProjectAccess: the accessors of a program
 // that mirrors the platform's authority.
 func TestPlatformAdmins(t *testing.T) {
-	got, err := PlatformAdmins(nil, map[string]any{"global": M{"okdp": M{"access": M{"admins": []any{"platform_admin", "ops"}}}}})
+	got, err := PlatformAdmins(context.Background(), testrules.Standard(), map[string]any{"global": M{"okdp": M{"access": M{"admins": []any{"platform_admin", "ops"}}}}})
 	if err != nil || !reflect.DeepEqual(got, []string{"platform_admin", "ops"}) {
 		t.Errorf("got %v, %v", got, err)
 	}
-	if got, err := PlatformAdmins(nil, nil); err != nil || got != nil {
+	if got, err := PlatformAdmins(context.Background(), testrules.Standard(), nil); err != nil || got != nil {
 		t.Errorf("none: %v, %v", got, err)
 	}
-	if _, err := PlatformAdmins(nil, map[string]any{"global": M{"okdp": M{"access": M{"admins": "ops"}}}}); err == nil {
+	if _, err := PlatformAdmins(context.Background(), testrules.Standard(), map[string]any{"global": M{"okdp": M{"access": M{"admins": "ops"}}}}); err == nil {
 		t.Error("not a list: no error")
 	}
 }

@@ -156,9 +156,6 @@ key:
 | `name` holding a `/`, `.` or `..`, or with leading or trailing spaces | `Chart.yaml: dependencies[<i>].name "<name>": the name of a chart of the repository` |
 | `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `Chart.yaml: dependencies[<i>].version "<version>": a pinned chart version (1.2.3), not a range` |
 
-The key of a declared OAuth client's chart is refused by each compile
-that declares the client ([oidcClients](#oidcclients)).
-
 ### Chart keys
 
 A chart key is a DNS label (RFC 1123): lowercase letters, digits and `-`,
@@ -174,8 +171,8 @@ are Helm's global values, which every chart reads:
 Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias
 ```
 
-`oidc-dcr` and the `<name>-oidc-dcr` of a declared client are the
-compiler's keys ([oidcClients](#oidcclients)).
+`okdp-objects` is the compiler's key, the chart of the instance's
+objects.
 
 ## okdp.yaml
 
@@ -287,8 +284,7 @@ The dependencies that accept the instance's upstream values,
 | `false` | accepts none |
 | `{protect: [...], append: [...]}`, either optional | accepts them, with these paths: [protect and append](#protect-and-append) |
 
-The compiler's own charts, the OAuth client charts, never accept
-upstream values. The instance's values for a dependency that accepts none
+The instance's values for a dependency that accepts none
 are ignored. How they are written and applied:
 [upstream values](01_inputs_outputs.md#upstream-values). Whatever the
 package accepts, the upstream values of a project that is not one of the
@@ -426,7 +422,7 @@ sections: `vars` or `errors` there is a dependency key.
   list is refused, not compiled as the chart's defaults alone.
 - Every key must be a dependency's key, null or not:
   `values.cel.yaml: <key>: not a dependency of Chart.yaml`. A key may not be
-  the chart of a declared OAuth client ([oidcClients](#oidcclients)).
+  `okdp-objects`, the compiler's.
 - An error of the file starts with `values.cel.yaml: `, then the path from
   the dependency's key (`values.cel.yaml: app: env[2]: value: `:
   [compile errors](#compile-errors)).
@@ -451,8 +447,6 @@ hold its chart.
   dependency it does not give is rendered. To leave a dependency out,
   write its key.
 - Without the file, or empty, every dependency is rendered.
-- The compiler's own charts, the OAuth clients' in `dcr` mode, are added
-  after ([oidcClients](#oidcclients)).
 
 ```yaml
 gateway: {}                                     # rendered: its defaults, OKDP's, the upstream values
@@ -622,11 +616,11 @@ mistake fails the compile before anything is evaluated. Then:
 3. The values file, `instance`, `provides`, `objects`, `oidcClients`, in
    this order: each sees the context and every `vars` binding. Then they
    are checked together for their shapes.
-4. The OAuth clients are checked across clients, their charts added in
+4. The OAuth clients are checked across clients, their objects added in
    `dcr` mode ([oidcClients](#oidcclients)); then the
    compile checks `provides` against the contracts, renders the
    credentials Secrets, and computes the final values of each dependency
-   the values file gives and of each client chart.
+   the values file gives.
 
 A section does not see the others: there is no variable of the values or
 of `instance`. A value used by several sections is a `vars` binding.
@@ -833,7 +827,7 @@ oidcClients:
     grantTypes: [authorization_code, refresh_token]
     scope: ${{ platform.oidc.scope }} offline_access
   - $if: ${{ values.console.enabled }}                       # the client is left out when false
-    name: console                                            # chart console-oidc-dcr
+    name: console                                            # objects <release>-console-oidc-dcr
     public: true
     redirectUris: ['https://${{ consoleHost }}/auth/callback']
     grantTypes: [authorization_code]
@@ -848,8 +842,8 @@ registers its own by OIDC Dynamic Client Registration, per
 
 | Mode | The compiler |
 |---|---|
-| `dcr` (`platform.oidc.dcr.enabled`) | adds the values of one oidc-dcr chart per client, rendered by the [okdp-objects chart](01_inputs_outputs.md#the-objects-chart): `oidc-dcr` for the main client, `<name>-oidc-dcr` for a named one. Its Job registers the client and writes its Secret ([OAuth client charts](01_inputs_outputs.md#oauth-client-charts)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
-| otherwise (`existing`, or `platform.oidc.enabled` false) | adds no chart: the platform provides each client's Secret |
+| `dcr` (`platform.oidc.dcr.enabled`) | adds one Job per client and the objects it needs to the instance's objects: `<release>-oidc-dcr` for the main client, `<release>-<name>-oidc-dcr` for a named one. Its Job registers the client, keeps it as asked and writes its Secret ([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
+| otherwise (`existing`, or `platform.oidc.enabled` false) | adds no object: the platform provides each client's Secret |
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -865,8 +859,8 @@ registers its own by OIDC Dynamic Client Registration, per
 
 A key left out by `$if` is not set, a null one is refused by its type,
 and `""` takes the default of a string key. Only `dcr` mode uses the
-keys; how they become the values of the client's chart:
-[OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
+keys; how they become the client's objects:
+[OAuth client objects](01_inputs_outputs.md#oauth-client-objects).
 
 Every mode checks the clients, after the mapping: each client is a map,
 its `name` of the form above, of these keys only, each of its type,
@@ -876,21 +870,17 @@ the release's, `<release>-<name>` exactly (`<release>-oidc` for the main
 client): the Job's Role writes it, and would write another Secret of the
 namespace, another instance's credentials, were any name that starts with
 `<release>-` accepted (the instances `web` and `web-x` share the prefix).
-In `dcr` mode, no two clients write one Secret. As soon as the mapping
-declares a client, its chart key belongs to the compiler: `Chart.yaml`
-may not list it, nor the values file compute it (`Chart.yaml:
-dependencies[<i>] (<key>): the chart of <client> is added by the
-compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is
-compiled from oidcClients: remove it`). Only
-`dcr` mode checks against the oidc-dcr chart, in the chart cache of a
-check ([chart cache](01_inputs_outputs.md#chart-cache)). The first failing
+A client's `request` sets no URL the provider trusts (`redirect_uris`
+and its kind). In `dcr` mode, no two clients write one Secret, and the
+hosts of a client's `redirectUris`, of a project that is not privileged,
+are the project's. The first failing
 check stops the compile ([compile errors](#compile-errors)).
 
 The mapping reads the name of a client's Secret with
 [`oidcClientSecret(name)`](04_functions.md#oidcclientsecret) (the main
 client's is also `platform.oidcClientSecret`), in any section; a client
 that sets `secret` references that name itself. The keys the Secret holds:
-[OAuth client charts](01_inputs_outputs.md#oauth-client-charts).
+[OAuth client objects](01_inputs_outputs.md#oauth-client-objects).
 
 ## Expressions
 
@@ -1202,8 +1192,11 @@ Other errors of the mapping:
 | `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
 | `<client>: secret "<secret>": the Secret the client is written to is the release's, "<release>-<name>" (<release>-<client name>, <release>-oidc for the main client)` | a client's `secret` that is not that name, in every mode |
 | `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
-| `Chart.yaml: dependencies[<i>] (<key>): the chart of <client> is added by the compiler: remove it`, `values.cel.yaml: <key>: the chart of <client> is compiled from oidcClients: remove it` | a client's chart key, `oidc-dcr` or `<name>-oidc-dcr`, a dependency of `Chart.yaml` or a key of the values file |
-| `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client chart's values template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
+| `Chart.yaml: dependencies[<i>] (okdp-objects): the chart of the instance's objects is added by the compiler: remove it`, `values.cel.yaml: okdp-objects: the chart of the instance's objects is compiled from the objects section: remove it` | the compiler's chart key, a dependency of `Chart.yaml` or a key of the values file |
+| `<client>: request.<field>: a URL the provider trusts is not set through request` | a client's `request` sets `redirect_uris` or its kind, in every mode |
+| `<client>: redirectUris[<i>]: "<url>": an http or https URL with a host and no user information`, `<client>: redirectUris[<i>]: host "<host>" is not served by <namespace>: ...` | `dcr` mode, a project that is not privileged: the URI has no host to check, or a host the project does not serve |
+| `global.okdp.oidc.dcr.image: tag <tag> without a digest: the Jobs run by digest, give it too` | `dcr` mode, at least one client: the platform's image names a tag and no digest |
+| `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client's objects template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
 `<file>`: `okdp.yaml` or the values file, `values.cel.yaml` or
 `values.yaml`. `<client>`, `<other>`:

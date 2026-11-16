@@ -12,6 +12,7 @@ package okdp
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,8 +167,8 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 // its contracts, the store of its platform's settings: what CompileAll
 // checks of each instance before it binds the claims. nil when the
 // context's layers fail: the compile reports them (contextLayers).
-func declaredConnections(in Inputs) error {
-	layers, platform, err := contextLayers(in.rules(), in.Context)
+func declaredConnections(ctx context.Context, in Inputs) error {
+	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
 		return nil //nolint:nilerr // the instance's compile reports it
 	}
@@ -1080,16 +1081,13 @@ func (c *contract) complete(out M, where string) error {
 	}
 	// false is a value: only missing or empty fails. A secret field is never
 	// set: it is not in required.
-	var lines []string
+	var errs []error
 	for _, f := range c.required {
 		if !value.Truthy(out[f]) && out[f] != false {
-			lines = append(lines, fmt.Sprintf("%s: field %q is required by the %s contract", where, f, c.label))
+			errs = append(errs, fmt.Errorf("%s: field %q is required by the %s contract", where, f, c.label))
 		}
 	}
-	if len(lines) > 0 {
-		return errors.New(strings.Join(lines, "\n"))
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // check: values, the fields of a connection or an output once completed,

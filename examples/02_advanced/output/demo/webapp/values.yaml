@@ -61,13 +61,13 @@ app:
     className: nginx
     enabled: true
     hosts:
-      - host: webapp-demo.okdp.example.org
+      - host: webapp.demo.okdp.example.org
         paths:
           - path: /
             pathType: Prefix
     tls:
       - hosts:
-          - webapp-demo.okdp.example.org
+          - webapp.demo.okdp.example.org
         secretName: demo-webapp-tls
   replicaCount: 2
   resources:

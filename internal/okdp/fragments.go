@@ -11,20 +11,21 @@
 package okdp
 
 import (
+	"context"
 	"fmt"
-	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 
 	"cel.dev/cel-go/cel"
 	"github.com/okdp/cel2yaml"
 
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
 // call: the value of the fragment f for the arguments args (okdpPodSpec(args)...), in
 // the compile's session: args checked, the template evaluated with args, the
 // instance's release, labels, platform and global.
-func callFragment(f ruleset.Fragment, session *cel2yaml.Session, inst *instance, args any) (any, error) {
-	checked, err := schemaValues(inst.rules.MappingSchema, f.Name+": the arguments don't meet the specifications of mapping.schema.json", M{f.Name: args})
+func callFragment(ctx context.Context, f ruleset.Fragment, session *cel2yaml.Session, inst *instance, args any) (any, error) {
+	checked, err := schemaValues(inst.rules.MappingSchema(), f.Name+": the arguments don't meet the specifications of mapping.schema.json", M{f.Name: args})
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +36,7 @@ func callFragment(f ruleset.Fragment, session *cel2yaml.Session, inst *instance,
 		"platform": inst.scope["platform"],
 		"global":   inst.scope["global"],
 	}
-	v, err := evalTemplate(session, f.Template, scope)
+	v, err := evalTemplate(ctx, session, f.Template, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -47,16 +48,16 @@ func callFragment(f ruleset.Fragment, session *cel2yaml.Session, inst *instance,
 
 // fragmentFunctions: okdpPodSpec(args), okdpJob(args), okdpSignInProxy(args)
 // and okdpWebWorkload(args) for the instance inst, in the session *session.
-func fragmentFunctions(inst *instance, session **cel2yaml.Session) []cel.EnvOption {
+func fragmentFunctions(ctx context.Context, inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	var opts []cel.EnvOption
-	for _, f := range inst.rules.Fragments {
+	for _, f := range inst.rules.Fragments() {
 		id := f.Name + "_map"
 		opts = append(opts, cel2yaml.Costed(cel.Function(f.Name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
 			cel2yaml.Unary(func(v any) (any, error) {
 				if _, ok := v.(M); !ok {
 					return nil, fmt.Errorf("%s: the arguments are a map, got %s", f.Name, value.ShortAt("args", v))
 				}
-				return callFragment(f, *session, inst, v)
+				return callFragment(ctx, f, *session, inst, v)
 			}))), id))
 	}
 	return opts

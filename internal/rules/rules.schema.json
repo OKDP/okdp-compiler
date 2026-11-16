@@ -3,7 +3,7 @@
   "type": "object",
   "description": "A rule set: rules.yaml, at the root of its file system (LoadRules).",
   "additionalProperties": false,
-  "required": ["apiVersion", "version", "tables", "checks", "schemas", "functions", "templates", "sections", "charts", "documents", "ownCharts", "labels", "names", "keepSync"],
+  "required": ["apiVersion", "version", "tables", "checks", "schemas", "functions", "templates", "sections", "charts", "documents", "ownObjects", "labels", "names", "keepSync"],
   "properties": {
     "apiVersion": {"const": "okdp-compiler/rules.v1"},
     "version": {"type": "string", "minLength": 1},
@@ -37,13 +37,13 @@
       }
     },
     "documents": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
-    "ownCharts": {
+    "ownObjects": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["section", "chart", "list", "values"],
-        "properties": {"section": {"type": "string"}, "chart": {"type": "string"}, "list": {"type": "string"}, "values": {"type": "string"}}
+        "required": ["section", "list", "objects"],
+        "properties": {"section": {"type": "string"}, "list": {"type": "string"}, "objects": {"type": "string"}}
       }
     },
     "names": {

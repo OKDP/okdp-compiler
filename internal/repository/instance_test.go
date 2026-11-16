@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"maps"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ func TestInstanceFiles(t *testing.T) {
 	tree["projects/demo/instances/a/config.yaml/x"] = file("")
 	tree["projects/demo/instances/b/.keep"] = file("")
 	delete(tree, "projects/demo/instances/a/config.yaml")
-	_, err := Load([]Repository{{"db", tree, RoleTree}})
+	_, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}})
 	want := []string{
 		"db/projects/demo/instances/a/config.yaml: not a file of an instance, which holds instance.yaml, config.yaml and connections.yaml only: no compile reads it",
 		"db/projects/demo/instances/a/values.yaml: not a file of an instance, which holds instance.yaml, config.yaml and connections.yaml only: no compile reads it",

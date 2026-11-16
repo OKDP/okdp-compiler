@@ -133,10 +133,10 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d 
   another package. CRDs upgraded with the release (spark-operator) are a
   deployer setting: `upgrade.crds: CreateReplace` on the Flux HelmRelease;
   Argo CD applies `crds/` on every sync.
-- `oidc-dcr` is not a dependency of the package: the compiler adds one
-  oidc-dcr chart per OAuth client in `dcr` mode, and the platform names the
-  chart that renders them (`global.okdp.charts`:
-  [platform charts](specs/01_inputs_outputs.md#platform-charts)).
+- The registration of the OAuth clients is no dependency of the package:
+  the compile adds a Job per client in `dcr` mode, among the instance's
+  objects ([OAuth client
+  objects](specs/01_inputs_outputs.md#oauth-client-objects)).
 
 Flux (`helm install`) and Argo CD (`helm template`) must render the same
 objects. An upstream feature built on `lookup`, a random function, `genCA` or
@@ -676,12 +676,12 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 
 ### Ingress and TLS
 
-The host follows the platform suffix and the namespace,
-`<service>-<namespace>.<suffix>`
-(`${{ service.name }}-${{ release.namespace }}`; `-server` or `-api` goes
-before the namespace, never after it): a project
-that is not privileged serves the hosts that end with
-`-<namespace>.<suffix>`, or that the platform lists for it
+The host is one DNS label, then the namespace, then the platform suffix,
+`<label>.<namespace>.<suffix>`
+(`${{ service.name }}.${{ release.namespace }}.${{ suffix }}`; `-server`
+or `-api` goes in the label, never after it, and a host has no deeper
+name): a project that is not privileged serves the hosts of that form, or
+that the platform lists for it
 (`global.okdp.policy.ingressHosts`), in the objects and in the `ingress`
 keys of the charts' values, and the compile refuses the others, the
 package's defaults and a host parameter included
@@ -770,24 +770,27 @@ return it, in any section, `vars` included:
 - `existing`, the default: the platform registers the clients and creates
   their Secrets beforehand. The compiler checks the section and adds
   nothing.
-- `dcr`: the compiler adds one chart per client, `oidc-dcr` and
-  `console-oidc-dcr`, both rendered by the platform's oidc-dcr chart, whose
-  Job registers the client and writes its Secret.
+- `dcr`: the compile adds one Job per client to the instance's objects,
+  which registers the client and writes its Secret, and keeps it as the
+  mapping asks: a changed `redirect_uris` reaches the provider at the next
+  sync, and uninstalling removes the client.
 
 Write the redirect URIs and the scope the application actually sends
 (airflow and spark-history-server pass their login scope, `offline_access`
 included); `request` adds or overrides registration fields (trino's
-`logo_uri`). The compiler computes the rest of the registration and the
-values of each oidc-dcr chart from the client and the platform's
+`logo_uri`), never a URL the provider trusts (`redirect_uris` and its
+kind are refused there). The hosts of `redirectUris` are the project's own
+(`<label>.<namespace>.<suffix>`, or listed for it in
+`global.okdp.policy.ingressHosts`). The compiler computes the rest of the
+registration from the client and the platform's
 [OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings).
-The mapping writes nothing else for the clients: no chart entry
-([pitfalls](#pitfalls)), no `$if` on the mode, no Job, ServiceAccount or
-Secret name. The keys of a client and their checks:
+The mapping writes nothing else for the clients: no `$if` on the mode, no
+Job, ServiceAccount or Secret name. The keys of a client and their checks:
 [oidcClients](specs/02_service_definition.md#oidcclients); the names of
-the charts, objects and Secrets in each mode, and the keys of the Secret:
-[OAuth client charts](specs/01_inputs_outputs.md#oauth-client-charts).
+the objects and Secrets in each mode, and the keys of the Secret:
+[OAuth client objects](specs/01_inputs_outputs.md#oauth-client-objects).
 
-With OIDC off (`global.okdp.oidc.enabled: false`) no chart is added and no
+With OIDC off (`global.okdp.oidc.enabled: false`) no object is added and no
 Secret exists: read the Secrets under `platform.oidc.enabled`
 ([conditional items](#conditional-items-maps-from-lists)) when the service
 supports it.
@@ -1157,9 +1160,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   when the chart is bumped.
 - **An unset connection is `""`.** `values.database.host` fails on an empty
   reference: test `type(...) == map` first, or report it in `errors`.
-- **Some chart keys are the compiler's.** `oidc-dcr` and `<name>-oidc-dcr`
-  name the charts of the declared clients: a `Chart.yaml` dependency or a
-  key of the values file of the same key fails, in every mode.
+- **`okdp-objects` is the compiler's chart key.** A `Chart.yaml` dependency
+  or a key of the values file of that name fails, in every mode.
 - **A client's `secret` is not followed.** It renames the Secret the Job
   writes, in `dcr` mode only; `oidcClientSecret(name)` still returns the
   mode's name, and in `existing` mode the platform's Secret keeps its own.
@@ -1175,8 +1177,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
 - [ ] Every dependency of `Chart.yaml` has its name, repository and
   version, pinned; a bundled subchart the package does not use is disabled
   by values; no `lookup`, random or `.Capabilities` feature is on.
-- [ ] `Chart.yaml` and the values file use no chart key of the compiler
-  (`oidc-dcr`, `<name>-oidc-dcr`); a second render of a chart is a
+- [ ] `Chart.yaml` and the values file do not use the compiler's chart key
+  (`okdp-objects`); a second render of a chart is a
   dependency of the same chart with its alias.
 - [ ] `Chart.yaml`: `apiVersion: v2`, `name`, `version`
   `<upstream>-<okdp semver>`; `okdp.yaml`: `roles` and `dependsOn`.

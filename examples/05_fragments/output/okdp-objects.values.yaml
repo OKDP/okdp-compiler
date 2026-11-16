@@ -89,7 +89,7 @@ manifests: |
               - --upstream=http://127.0.0.1:8888/
               - --provider=oidc
               - --oidc-issuer-url=https://sso.okdp.example.org/realms/okdp
-              - --redirect-url=https://notebook-demo.okdp.example.org/oauth2/callback
+              - --redirect-url=https://notebook.demo.okdp.example.org/oauth2/callback
               - --scope=openid profile email groups
               - --code-challenge-method=S256
               - --provider-ca-file=/cacerts/ca.crt
@@ -209,7 +209,7 @@ manifests: |
   spec:
     ingressClassName: nginx
     rules:
-      - host: notebook-demo.okdp.example.org
+      - host: notebook.demo.okdp.example.org
         http:
           paths:
             - backend:
@@ -221,7 +221,7 @@ manifests: |
               pathType: Prefix
     tls:
       - hosts:
-          - notebook-demo.okdp.example.org
+          - notebook.demo.okdp.example.org
         secretName: demo-notebook-web-tls
   ---
   apiVersion: networking.k8s.io/v1

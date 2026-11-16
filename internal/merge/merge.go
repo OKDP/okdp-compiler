@@ -13,13 +13,13 @@ package merge
 
 import (
 	"fmt"
-	"github.com/okdp/okdp-compiler/chart"
 	"io/fs"
 	"maps"
 	"path"
 	"reflect"
 	"slices"
 
+	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -38,8 +38,11 @@ import (
 // values file the output is read from, for the errors of its keys. values:
 // the instance's merged values (their global, and their upstream values).
 // check: what the caller refuses of the upstream values of every key,
-// beside its protect paths (UpstreamCheck); nil, nothing.
-func FinalValues(charts *ChartCache, pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (map[string]map[string]any, map[string]Ref, []string, error) {
+// beside its protect paths (UpstreamCheck); nil, nothing. unfetched: the
+// charts a chart source could not fetch (Inputs.ChartFailures, nil: none):
+// their keys take no check against their chart, the rest of the checks and
+// the final values all the same.
+func FinalValues(charts *ChartCache, unfetched map[Ref]error, pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (map[string]map[string]any, map[string]Ref, []string, error) {
 	out, refs := map[string]map[string]any{}, map[string]Ref{}
 	violations := map[string]string{}
 	var warnings []string
@@ -53,7 +56,7 @@ func FinalValues(charts *ChartCache, pkg fs.FS, specs Specs, file string, output
 			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
 		out[key], refs[key] = f, spec.Source
-		if charts == nil {
+		if charts == nil || unfetched[spec.Source] != nil {
 			continue
 		}
 		u, err := charts.get(spec.Source)

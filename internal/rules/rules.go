@@ -65,29 +65,62 @@ type ruleTable struct {
 	addFrom string
 }
 
-// RuleSet: a rule set read (LoadRules). Safe for concurrent use: it does
-// not change once read.
+// RuleSet: a rule set read (LoadRules) or the empty one (Empty). Safe for
+// concurrent use: it does not change once read. The zero value holds no
+// rule: its tables are empty and its checks fail (ErrNotLoaded), never a
+// rule passed.
 type RuleSet struct {
+	loaded  bool
 	version string
 	tables  map[string]*ruleTable
 	sets    M // each table as a set, as the checks read it
 	lists   M // each table as a list, as the checks read it
 	sources map[string]compile.Source
-	free    chan checker
+	free    chan *checker
 
-	PlatformSchema, MappingSchema func() (*chart.Schema, error) // what schemaValues reads
-	Fragments                     []Fragment                    // the functions, by name
-	GeneratedSecret               Template                      // the objects of a generated Secret
-	names                         map[string]string             // the names the compiler gives credentials
-	Keep                          KeepSync                      // what Argo CD is told of the objects Helm keeps
-	DocumentFuncs                 []DocumentFunc                // the functions a document computes, by name
-	Sections                      []string                      // the sections of a mapping
-	Charts                        map[string]chart.Ref          // the defaults of global.okdp.charts, by name
-	OwnCharts                     []OwnChartSpec                // the sections whose items add charts
+	platformSchema, mappingSchema *chart.Schema        // what SchemaValues reads; nil, none
+	fragments                     []Fragment           // the functions, by name
+	generatedSecret               Template             // the objects of a generated Secret
+	names                         map[string]string    // the names the compiler gives credentials
+	keep                          KeepSync             // what Argo CD is told of the objects Helm keeps
+	documentFuncs                 []DocumentFunc       // the functions a document computes, by name
+	sections                      []string             // the sections of a mapping
+	charts                        map[string]chart.Ref // the defaults of global.okdp.charts, by name
+	ownObjects                    []OwnObjectsSpec     // the sections whose items add objects
 	selectorLabels, commonLabels  map[string]string
 	componentLabel                string
 	wholePaths                    [][]string // TableWholePaths, split
 }
+
+// Loaded: r was read (LoadRules) or is Empty: false for the zero value.
+func (r *RuleSet) Loaded() bool { return r != nil && r.loaded }
+
+// PlatformSchema: the schema of global.okdp; nil, none (Empty).
+func (r *RuleSet) PlatformSchema() *chart.Schema { return r.platformSchema }
+
+// MappingSchema: the schema of a mapping's sections; nil, none (Empty).
+func (r *RuleSet) MappingSchema() *chart.Schema { return r.mappingSchema }
+
+// Fragments: the functions of mappings, a template each, by name.
+func (r *RuleSet) Fragments() []Fragment { return r.fragments }
+
+// GeneratedSecret: the template of the objects of a generated Secret.
+func (r *RuleSet) GeneratedSecret() Template { return r.generatedSecret }
+
+// Keep: what Argo CD is told of the objects Helm keeps.
+func (r *RuleSet) Keep() KeepSync { return r.keep }
+
+// DocumentFuncs: the functions of mappings a document computes, by name.
+func (r *RuleSet) DocumentFuncs() []DocumentFunc { return r.documentFuncs }
+
+// Sections: the sections of a mapping the rule set adds.
+func (r *RuleSet) Sections() []string { return r.sections }
+
+// Charts: the defaults of global.okdp.charts, by name; not to be changed.
+func (r *RuleSet) Charts() map[string]chart.Ref { return r.charts }
+
+// OwnObjects: the sections whose items add objects.
+func (r *RuleSet) OwnObjects() []OwnObjectsSpec { return r.ownObjects }
 
 // whole: whether the path keys is one a level gives whole (TableWholePaths).
 func (r *RuleSet) Whole(keys []string) bool {
@@ -108,12 +141,11 @@ func (r *RuleSet) Whole(keys []string) bool {
 // rule set, its argument arg: the value at result.
 type DocumentFunc struct{ Name, Document, Result string }
 
-// OwnChartSpec: a section whose items add charts: list, the document that
-// gives them, of the source chart; values, the template of the values of
-// each it renders.
-type OwnChartSpec struct {
-	Section, Chart, List string
-	Values               Template
+// OwnObjectsSpec: a section whose items add objects: list, the document
+// that gives them; objects, the template of the objects of each it renders.
+type OwnObjectsSpec struct {
+	Section, List string
+	Objects       Template
 }
 
 // Template: a template of a rule set: the name of its file, the first
@@ -148,9 +180,9 @@ func readTemplate(fsys fs.FS, file string) (Template, error) {
 	return Template{Name: path.Base(file), Data: b}, nil
 }
 
-// readSchema: the JSON schema file of fsys, parsed once, as schemaValues
+// readSchema: the JSON schema file of fsys, parsed once, as SchemaValues
 // reads it.
-func readSchema(fsys fs.FS, file string) (func() (*chart.Schema, error), error) {
+func readSchema(fsys fs.FS, file string) (*chart.Schema, error) {
 	t, err := readTemplate(fsys, file)
 	if err != nil {
 		return nil, err
@@ -159,20 +191,20 @@ func readSchema(fsys fs.FS, file string) (func() (*chart.Schema, error), error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", RulesFile, err)
 	}
-	return func() (*chart.Schema, error) { return s, nil }, nil
+	return s, nil
 }
 
 // loadFiles: the schemas, the functions and the templates of doc, each
 // file of fsys read and parsed: one missing or invalid refuses the set.
 func (r *RuleSet) loadFiles(fsys fs.FS, doc M) (err error) {
 	schemas, templates := value.AsMap(doc["schemas"]), value.AsMap(doc["templates"])
-	if r.PlatformSchema, err = readSchema(fsys, value.Str(schemas["platform"])); err != nil {
+	if r.platformSchema, err = readSchema(fsys, value.Str(schemas["platform"])); err != nil {
 		return err
 	}
-	if r.MappingSchema, err = readSchema(fsys, value.Str(schemas["mapping"])); err != nil {
+	if r.mappingSchema, err = readSchema(fsys, value.Str(schemas["mapping"])); err != nil {
 		return err
 	}
-	if r.GeneratedSecret, err = readTemplate(fsys, value.Str(templates["generatedSecret"])); err != nil {
+	if r.generatedSecret, err = readTemplate(fsys, value.Str(templates["generatedSecret"])); err != nil {
 		return err
 	}
 	byName := map[string]Template{}
@@ -183,42 +215,39 @@ func (r *RuleSet) loadFiles(fsys fs.FS, doc M) (err error) {
 	}
 	r.names = stringMap(doc["names"])
 	k := value.AsMap(doc["keepSync"])
-	r.Keep = KeepSync{Annotation: value.Str(k["annotation"]), Value: value.Str(k["value"]), SyncOptions: value.Str(k["syncOptions"])}
+	r.keep = KeepSync{Annotation: value.Str(k["annotation"]), Value: value.Str(k["value"]), SyncOptions: value.Str(k["syncOptions"])}
 	for _, o := range value.AsList(k["options"]) {
-		r.Keep.Options = append(r.Keep.Options, value.Str(o))
+		r.keep.Options = append(r.keep.Options, value.Str(o))
 	}
 	documents := value.AsMap(doc["documents"])
 	for _, v := range value.AsList(doc["sections"]) {
-		r.Sections = append(r.Sections, value.Str(v))
+		r.sections = append(r.sections, value.Str(v))
 	}
-	r.Charts = map[string]chart.Ref{}
+	r.charts = map[string]chart.Ref{}
 	for name, v := range value.AsMap(doc["charts"]) {
 		m := value.AsMap(v)
 		ref := chart.Ref{Repository: value.Str(m["repository"]), Chart: value.Str(m["chart"]), Version: value.Str(m["version"])}
 		if err := ref.Check(RulesFile + ": charts." + name); err != nil {
 			return err
 		}
-		r.Charts[name] = ref
+		r.charts[name] = ref
 	}
-	for _, v := range value.AsList(doc["ownCharts"]) {
+	for _, v := range value.AsList(doc["ownObjects"]) {
 		m := value.AsMap(v)
-		spec := OwnChartSpec{Section: value.Str(m["section"]), Chart: value.Str(m["chart"]), List: value.Str(m["list"])}
-		t, ok := byName[value.Str(m["values"])]
+		spec := OwnObjectsSpec{Section: value.Str(m["section"]), List: value.Str(m["list"])}
+		t, ok := byName[value.Str(m["objects"])]
 		if !ok {
-			return fmt.Errorf("%s: ownCharts: %s: values %s is no template", RulesFile, spec.Section, value.Str(m["values"]))
+			return fmt.Errorf("%s: ownObjects: %s: objects %s is no template", RulesFile, spec.Section, value.Str(m["objects"]))
 		}
-		spec.Values = t
+		spec.Objects = t
 		if _, ok := documents[spec.List]; !ok {
-			return fmt.Errorf("%s: ownCharts: %s: list %s is no document", RulesFile, spec.Section, spec.List)
+			return fmt.Errorf("%s: ownObjects: %s: list %s is no document", RulesFile, spec.Section, spec.List)
 		}
-		if _, ok := r.Charts[spec.Chart]; !ok {
-			return fmt.Errorf("%s: ownCharts: %s: chart %s is none of charts", RulesFile, spec.Section, spec.Chart)
-		}
-		r.OwnCharts = append(r.OwnCharts, spec)
+		r.ownObjects = append(r.ownObjects, spec)
 	}
 	labels := value.AsMap(doc["labels"])
 	r.componentLabel, r.selectorLabels, r.commonLabels = value.Str(labels["component"]), stringMap(labels["selector"]), stringMap(labels["common"])
-	if _, ok := r.Charts["objects"]; !ok {
+	if _, ok := r.charts["objects"]; !ok {
 		return fmt.Errorf("%s: charts: objects is required", RulesFile)
 	}
 	if _, ok := documents["scope"]; !ok {
@@ -231,14 +260,14 @@ func (r *RuleSet) loadFiles(fsys fs.FS, doc M) (err error) {
 			if _, ok := documents[d]; !ok {
 				return fmt.Errorf("%s: functions: %s: document %s is none of documents", RulesFile, name, d)
 			}
-			r.DocumentFuncs = append(r.DocumentFuncs, DocumentFunc{name, d, value.Str(spec["result"])})
+			r.documentFuncs = append(r.documentFuncs, DocumentFunc{name, d, value.Str(spec["result"])})
 			continue
 		}
 		t, err := readTemplate(fsys, value.Str(spec["fragment"]))
 		if err != nil {
 			return err
 		}
-		r.Fragments = append(r.Fragments, Fragment{Name: name, Template: t, Result: value.Str(spec["result"])})
+		r.fragments = append(r.fragments, Fragment{Name: name, Template: t, Result: value.Str(spec["result"])})
 	}
 	return nil
 }
@@ -246,17 +275,28 @@ func (r *RuleSet) loadFiles(fsys fs.FS, doc M) (err error) {
 // Version: the version the rule set gives itself.
 func (r *RuleSet) Version() string { return r.version }
 
-// has: whether v is in the table.
-func (r *RuleSet) Has(table, v string) bool { return r.tables[table].set[v] }
+// table: the table name; an empty one for a table the rule set does not
+// hold (the zero value, a name of no table).
+func (r *RuleSet) table(name string) *ruleTable {
+	if r != nil {
+		if t, ok := r.tables[name]; ok {
+			return t
+		}
+	}
+	return &ruleTable{}
+}
 
-// list: the values of the table, in order; not to be changed.
-func (r *RuleSet) List(table string) []string { return r.tables[table].values }
+// Has: whether v is in the table.
+func (r *RuleSet) Has(table, v string) bool { return r.table(table).set[v] }
 
-// added: what the platform adds to the table, the list of okdp, its
+// List: the values of the table, in order; not to be changed.
+func (r *RuleSet) List(table string) []string { return r.table(table).values }
+
+// Added: what the platform adds to the table, the list of okdp, its
 // settings, at the table's addFrom.
 func (r *RuleSet) Added(table string, okdp M) map[string]bool {
 	out := map[string]bool{}
-	for _, v := range value.AsList(value.Dig(okdp, r.tables[table].addFrom)) {
+	for _, v := range value.AsList(value.Dig(okdp, r.table(table).addFrom)) {
 		out[value.Str(v)] = true
 	}
 	return out
@@ -285,7 +325,11 @@ func LoadRules(fsys fs.FS) (*RuleSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", RulesFile, err)
 	}
-	doc, err := SchemaValues(rulesSchema, RulesFile+" doesn't meet the specifications of rules.schema.json", user)
+	schema, err := rulesSchema()
+	if err != nil {
+		return nil, err
+	}
+	doc, err := SchemaValues(schema, RulesFile+" doesn't meet the specifications of rules.schema.json", user)
 	if err != nil {
 		return nil, err
 	}
@@ -395,7 +439,10 @@ func exactKeys(what string, m M, want []string) error {
 // schema reads the values, no function nor section is added. What is left is
 // the claim format's own: the names of the Secrets that carry credentials,
 // a project's classes, and what a level may not change of a lower one.
-var Empty = sync.OnceValue(func() *RuleSet {
+func Empty() *RuleSet { return emptySet() }
+
+// emptySet: Empty's rule set, built once.
+var emptySet = sync.OnceValue(func() *RuleSet {
 	r := newRuleSet()
 	r.names = claimNames
 	for _, name := range ruleTables {
@@ -421,7 +468,7 @@ var claimTables = map[string][]string{
 
 // newRuleSet: a rule set without tables.
 func newRuleSet() *RuleSet {
-	return &RuleSet{tables: map[string]*ruleTable{}, sets: M{}, lists: M{}}
+	return &RuleSet{loaded: true, tables: map[string]*ruleTable{}, sets: M{}, lists: M{}}
 }
 
 // addTable: the table name of the rule set, and its forms the checks read.
@@ -444,25 +491,30 @@ func (r *RuleSet) splitWholePaths() {
 
 // SchemaValues: user, values a schema describes, coalesced over the schema's
 // defaults and checked against it (chart.Schema.Values), as Helm reads a
-// chart's: the values, or every violation at once, by path, under heading.
-// No schema (Empty): user as it is.
-func SchemaValues(schema func() (*chart.Schema, error), heading string, user M) (M, error) {
+// chart's: the values, or every violation at once, by path, under heading
+// (a *SchemaError). No schema (Empty): user as it is.
+func SchemaValues(schema *chart.Schema, heading string, user M) (M, error) {
 	if schema == nil {
 		return user, nil
 	}
-	s, err := schema()
-	if err != nil {
-		return nil, err
-	}
-	values, v, err := s.Values(user)
+	values, v, err := schema.Values(user)
 	if err != nil {
 		return nil, err
 	}
 	if v != "" {
-		return nil, fmt.Errorf("%s:\n%s", heading, v)
+		return nil, &SchemaError{Heading: heading, Violations: v}
 	}
 	return values, nil
 }
+
+// SchemaError: values that violate a schema (SchemaValues): the heading,
+// then the violations, one line each, as Helm prints them.
+type SchemaError struct {
+	Heading, Violations string
+}
+
+// Error: the heading, a colon, and the violations on the lines below it.
+func (e *SchemaError) Error() string { return e.Heading + ":\n" + e.Violations }
 
 // Kept: annotations say Helm keeps the object, as Helm reads it: trimmed, in
 // any case.

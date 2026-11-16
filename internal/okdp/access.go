@@ -11,13 +11,14 @@
 package okdp
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"maps"
 	"regexp"
 	"slices"
 
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -166,18 +167,18 @@ func (e *NamespaceError) Unwrap() error { return e.Err }
 // checks them); a *NamespaceError otherwise, any other error the
 // settings'. The one view of the platform's namespaces for Compile and
 // ProjectOf.
-func CheckProject(in Inputs) error {
-	_, err := platformOf(in)
+func CheckProject(ctx context.Context, in Inputs) error {
+	_, err := platformOf(ctx, in)
 	return err
 }
 
 // platformOf: the platform's settings of the context of in, global.okdp,
 // when the namespace of in may be a project's (CheckProject).
-func platformOf(in Inputs) (M, error) {
-	if err := checkNamespace(in.rules(), "Inputs.Namespace", in.Namespace); err != nil {
+func platformOf(ctx context.Context, in Inputs) (M, error) {
+	if err := checkNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace); err != nil {
 		return nil, &NamespaceError{err}
 	}
-	_, platform, err := contextLayers(in.rules(), in.Context)
+	_, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +186,7 @@ func platformOf(in Inputs) (M, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkPlatformNamespace(in.rules(), "Inputs.Namespace", in.Namespace, settings); err != nil {
+	if err := checkPlatformNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace, settings); err != nil {
 		return nil, &NamespaceError{err}
 	}
 	return settings, nil
@@ -197,9 +198,9 @@ func platformOf(in Inputs) (M, error) {
 // none when not set. The compiler writes nothing of them: the bootstrap
 // binds them once, Argo CD's role:admin and the cluster's, for a program
 // that mirrors the platform's authority (a control plane).
-func PlatformAdmins(rules *RuleSet, platform map[string]any) ([]string, error) {
+func PlatformAdmins(ctx context.Context, rules *RuleSet, platform map[string]any) ([]string, error) {
 	rules = rulesOr(rules)
-	_, settings, err := contextLayers(rules, []ContextLayer{{Values: platform}})
+	_, settings, err := contextLayers(ctx, rules, []ContextLayer{{Values: platform}})
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +213,7 @@ func PlatformAdmins(rules *RuleSet, platform map[string]any) ([]string, error) {
 
 // PlatformOf: the platform's settings of the context of in, global.okdp,
 // when the namespace of in may be a project's, as a compile checks them.
-func PlatformOf(in Inputs) (M, error) { return platformOf(in) }
+func PlatformOf(ctx context.Context, in Inputs) (M, error) { return platformOf(ctx, in) }
 
 // ProjectGroups: the roles of the groups of the project of in, its file's
 // (the context at level 1).
@@ -221,8 +222,8 @@ func ProjectGroups(in Inputs) (map[string]Role, error) {
 }
 
 // SecretStoreOf: the platform's secret store in settings, nil without one.
-func SecretStoreOf(in Inputs, settings M) (*SecretStore, error) {
-	return secretStore(in.rules(), settings)
+func SecretStoreOf(ctx context.Context, in Inputs, settings M) (*SecretStore, error) {
+	return secretStore(ctx, in.rules(), settings)
 }
 
 // Privileged: whether namespace is one of the platform's own projects.

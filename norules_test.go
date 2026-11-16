@@ -14,7 +14,7 @@ import (
 // each compiled with rules.
 func compileExample(t *testing.T, name string, rules *compiler.RuleSet) map[string]compiler.Outcome {
 	t.Helper()
-	instances, err := compiler.LoadRepository([]compiler.Repository{{Name: name, FS: exampleRepository(name), Role: compiler.RoleTree}})
+	instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: name, FS: exampleRepository(name), Role: compiler.RoleTree}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,4 +85,31 @@ func TestCompileWithoutRules(t *testing.T) {
 			t.Errorf("the standard set, kube-system: %v", err)
 		}
 	})
+}
+
+// TestCheckRendered: what a host checks of the manifests it renders, the
+// walks a compile runs on its own objects, through the module root: an
+// object without a namespace is the release's; a cluster-scoped kind, an
+// object of another namespace and a host the project may not serve are
+// refused, named.
+func TestCheckRendered(t *testing.T) {
+	rules := testrules.Standard()
+	settings := map[string]any{"ingress": map[string]any{"suffix": "example.org"}}
+	if err := compiler.CheckObjects(context.Background(), rules, "web", "demo", []map[string]any{{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "a"}}}); err != nil {
+		t.Errorf("an object of the namespace: %v", err)
+	}
+	err := compiler.CheckObjects(context.Background(), rules, "web", "demo", []map[string]any{{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": map[string]any{"name": "a"}}})
+	if err == nil || !strings.Contains(err.Error(), "web: objects: ClusterRole/a") {
+		t.Errorf("a cluster-scoped kind: %v", err)
+	}
+	ingress := func(host string) []map[string]any {
+		return []map[string]any{{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "i"}, "spec": map[string]any{"rules": []any{map[string]any{"host": host}}}}}
+	}
+	if err := compiler.CheckIngressHosts(context.Background(), rules, "web", "demo", settings, ingress("web.demo.example.org")); err != nil {
+		t.Errorf("the project's host: %v", err)
+	}
+	err = compiler.CheckIngressHosts(context.Background(), rules, "web", "demo", settings, ingress("sso.example.org"))
+	if err == nil || !strings.Contains(err.Error(), `web: objects: Ingress/i: spec.rules[0].host: host "sso.example.org"`) {
+		t.Errorf("a host: %v", err)
+	}
 }

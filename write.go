@@ -71,50 +71,35 @@ func Write(res *Result) (map[string][]byte, error) {
 	return files, nil
 }
 
-// ChartValues: the values of the charts of the package, those of res the
-// compiler did not add itself, in a new map.
+// ChartValues: the values of the charts of the package, in a new map.
 func ChartValues(res *Result) map[string]map[string]any {
-	values := maps.Collect(maps.All(res.Values))
-	for _, k := range res.OwnCharts {
-		delete(values, k)
-	}
-	return values
+	return maps.Collect(maps.All(res.Values))
 }
 
 // ObjectsChartValues: the values of the okdp-objects chart of res: its
 // objects as one YAML stream, a string, so that Helm changes neither the {{
 // of an ExternalSecret's template, nor a null, nor an integer beyond the
-// precision of a float64; and the values of each OAuth client, client<i>, in
-// the order of their keys. nil without either.
+// precision of a float64. nil without objects.
 func ObjectsChartValues(res *Result) (map[string]any, error) {
-	out := map[string]any{}
-	if len(res.Objects) > 0 {
-		// Copies: what Argo CD is told of the objects Helm keeps changes
-		// them, the Result stays as Compile returned it.
-		kept := make([]map[string]any, len(res.Objects))
-		for i, o := range res.Objects {
-			kept[i] = value.AsMap(value.Copy(o))
-		}
-		keepSynced(res.KeepSync, kept)
-		var stream bytes.Buffer
-		enc := yaml.NewEncoder(&stream)
-		enc.SetIndent(2)
-		for _, o := range kept {
-			if err := enc.Encode(o); err != nil {
-				return nil, err
-			}
-		}
-		out[ObjectsValue] = stream.String()
-	}
-	for i, key := range res.OwnCharts {
-		client := maps.Clone(res.Values[key])
-		client["enabled"] = true
-		out[fmt.Sprintf("client%d", i)] = client
-	}
-	if len(out) == 0 {
+	if len(res.Objects) == 0 {
 		return nil, nil
 	}
-	return out, nil
+	// Copies: what Argo CD is told of the objects Helm keeps changes
+	// them, the Result stays as Compile returned it.
+	kept := make([]map[string]any, len(res.Objects))
+	for i, o := range res.Objects {
+		kept[i] = value.AsMap(value.Copy(o))
+	}
+	keepSynced(res.KeepSync, kept)
+	var stream bytes.Buffer
+	enc := yaml.NewEncoder(&stream)
+	enc.SetIndent(2)
+	for _, o := range kept {
+		if err := enc.Encode(o); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{ObjectsValue: stream.String()}, nil
 }
 
 // encode: v as YAML, indented by 2 spaces.

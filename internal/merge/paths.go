@@ -31,10 +31,11 @@ package merge
 
 import (
 	"fmt"
-	"github.com/okdp/okdp-compiler/chart"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // matchKeys: the keys of m a segment names, sorted: its key when m has it,

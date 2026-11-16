@@ -118,7 +118,7 @@ func TestExample(t *testing.T) {
 	}
 	for _, e := range dirs {
 		t.Run(e.Name(), func(t *testing.T) {
-			instances, err := compiler.LoadRepository([]compiler.Repository{{Name: e.Name(), FS: exampleRepository(e.Name()), Role: compiler.RoleTree}})
+			instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: e.Name(), FS: exampleRepository(e.Name()), Role: compiler.RoleTree}})
 			if err != nil {
 				t.Fatal(err)
 			}

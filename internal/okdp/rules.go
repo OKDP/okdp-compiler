@@ -1,6 +1,9 @@
 package okdp
 
 import (
+	"io/fs"
+
+	"github.com/okdp/okdp-compiler/chart"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
@@ -10,14 +13,12 @@ import (
 type RuleSet = ruleset.RuleSet
 
 // LoadRules: the rule set of a file system.
-var LoadRules = ruleset.LoadRules
-
-// defaultRules: the rule set of a compile that gives none, the empty one. A
-// variable for this package's tests, whose compiles read the standard set.
-var defaultRules = ruleset.Empty
+func LoadRules(fsys fs.FS) (*RuleSet, error) { return ruleset.LoadRules(fsys) }
 
 // schemaValues: ruleset.SchemaValues.
-var schemaValues = ruleset.SchemaValues
+func schemaValues(schema *chart.Schema, heading string, user M) (M, error) {
+	return ruleset.SchemaValues(schema, heading, user)
+}
 
 // rules: the rule set of the compile.
 func (in Inputs) rules() *RuleSet { return rulesOr(in.Rules) }
@@ -27,7 +28,7 @@ func rulesOr(r *RuleSet) *RuleSet {
 	if r != nil {
 		return r
 	}
-	return defaultRules()
+	return ruleset.Empty()
 }
 
 // objectInput: an object as the checks read it: what its fields are as

@@ -56,7 +56,7 @@ func resolveCtx(values M, platform ...ContextLayer) (M, []Dependency, error) {
 	in := inputs(values)
 	in.Context = append(in.Context, platform...)
 	in.Contracts, in.Published = dbContract, pgPublished
-	inst, err := newInstance(ch, in, defService)
+	inst, err := newInstance(context.Background(), ch, in, defService)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,7 +200,7 @@ func TestResolveRedacted(t *testing.T) {
 	want := `adminToken: a connection reference must be a string, got <redacted>
 apiKeys[0]: a connection reference must be a string, got <redacted>
 main: a connection reference must be a string, got map[string]interface {}{"password":"<redacted>"}`
-	if _, err := newInstance(ch, in, defService); err == nil || err.Error() != want {
+	if _, err := newInstance(context.Background(), ch, in, defService); err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
 	}
 }
@@ -268,7 +268,7 @@ func storeCtxAt(values, connections M, level uint, store bool) (*instance, error
 			"secretKey": {"type": "string", "x-okdp-secret": true}, "accessKey": {"type": "string", "x-okdp-secret": true}}}`)},
 		"queue.schema.json": {Data: []byte(`{"properties": {"url": {"type": "string"}}}`)},
 	}
-	return newInstance(ch, in, defService)
+	return newInstance(context.Background(), ch, in, defService)
 }
 
 // TestResolveFromStore: a connection whose credentials are in the
@@ -291,7 +291,7 @@ func TestResolveFromStore(t *testing.T) {
 	if !reflect.DeepEqual(inst.transfers, x) || inst.deps != nil {
 		t.Errorf("transfers %#v, dependencies %#v\nwant %#v, none", inst.transfers, inst.deps, x)
 	}
-	es, err := pullSecret(inst, inst.transfers[0])
+	es, err := pullSecret(context.Background(), inst, inst.transfers[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestResolveUnreadableContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"q": "demo-mq"})
 			in.Contracts = tc.contracts
-			if _, err := newInstance(ch, in, defService); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, err := newInstance(context.Background(), ch, in, defService); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error starting with %q", err, tc.want)
 			}
 		})
@@ -433,7 +433,7 @@ func outputCtx(values M, published map[string]Info) (M, []Dependency, error) {
 		"main": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)}
 	in := inputs(values)
 	in.Contracts, in.Published = outputContracts, published
-	inst, err := newInstance(ch, in, defService)
+	inst, err := newInstance(context.Background(), ch, in, defService)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -550,7 +550,7 @@ func requireCtx(require string, values M) error {
 		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database", "require": ` + require + `}}}}`)}
 	in := inputs(values)
 	in.Contracts, in.Published = dbContract, pgPublished
-	_, err := newInstance(ch, in, defService)
+	_, err := newInstance(context.Background(), ch, in, defService)
 	return err
 }
 

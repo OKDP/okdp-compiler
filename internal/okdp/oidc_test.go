@@ -2,16 +2,16 @@ package okdp
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
-	"testing/fstest"
-
-	"github.com/okdp/cel2yaml"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -26,7 +26,7 @@ func dcrCtx(settings ...M) M {
 	for _, s := range settings {
 		dcr = value.Merge(dcr, s)
 	}
-	inst, err := newInstance(pkg, inputs(M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "scope": "openid profile email", "dcr": dcr}}}}), defService)
+	inst, err := newInstance(context.Background(), pkg, inputs(M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "scope": "openid profile email", "dcr": dcr}}}}), defService)
 	if err != nil {
 		panic(err)
 	}
@@ -36,40 +36,36 @@ func dcrCtx(settings ...M) M {
 	}
 }
 
-// oidcClients: the charts of the section's OAuth clients, and the values of
-// those rendered, by key; none rendered, nil.
-func oidcClients(session *cel2yaml.Session, inst *instance, section []any) ([]ownChart, map[string]M, error) {
-	sources, err := platformCharts(inst.rules, M{})
-	if err != nil {
-		return nil, nil, err
+// dcrDigest: the digest of the registration Jobs' default image.
+const dcrDigest = "sha256:38e21cbb15124b102b55581f74b30413633df98d291b2341a2d9a6fef480f06c"
+
+// dcrInstance: the instance of ctx, of a privileged project unless
+// tenant: no host to check.
+func dcrInstance(ctx M, tenant bool) *instance {
+	inst := testInstance(ctx)
+	inst.okdp = M{"ingress": M{"suffix": "example.org"}}
+	if !tenant {
+		inst.okdp["policy"] = M{"privileged": []any{"demo"}}
 	}
-	own, err := ownCharts(session, inst, M{"oidcClients": section}, sources)
-	if err != nil {
-		return nil, nil, err
-	}
-	var values map[string]M
-	for _, c := range own {
-		if c.values != nil {
-			if values == nil {
-				values = map[string]M{}
-			}
-			values[c.key] = c.values
-		}
-	}
-	return own, values, nil
+	return inst
 }
 
-// dcrChart: the chart key of a service's main OAuth client.
-const dcrChart = "oidc-dcr"
-
-// dcrValues: the oidc-dcr values of these clients in ctx, by chart.
-func dcrValues(ctx M, clients ...M) (map[string]M, error) {
+// dcrObjects: the objects of these clients in ctx, by "<kind>/<name>".
+func dcrObjects(ctx M, clients ...M) (map[string]M, error) {
 	section := []any{}
 	for _, c := range clients {
 		section = append(section, value.Copy(c))
 	}
-	_, values, err := oidcClients(newSession(ctx), testInstance(ctx), section)
-	return values, err
+	objects, err := ownObjects(context.Background(), newSession(ctx), dcrInstance(ctx, false), M{"oidcClients": section})
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]M{}
+	for _, o := range objects {
+		m := value.AsMap(o)
+		out[fmt.Sprintf("%s/%s", m["kind"], value.Dig(m, "metadata.name"))] = m
+	}
+	return out, nil
 }
 
 // setIssuer: the platform's issuerUri.
@@ -77,93 +73,207 @@ func setIssuer(ctx M, issuer string) {
 	value.AsMap(value.AsMap(ctx["platform"])["oidc"])["issuerUri"] = issuer
 }
 
-// TestDcrDefaults: the main client, confidential, named after the release,
-// with the instance label and 6 retries; no issuerUri, no wait for the
-// provider; no CA bundle, the chart's default ("").
+// jobContainer: the container of a Job.
+func jobContainer(t *testing.T, job M) M {
+	t.Helper()
+	cs := value.AsList(value.Dig(job, "spec.template.spec.containers"))
+	if len(cs) != 1 {
+		t.Fatalf("containers: %#v", cs)
+	}
+	return value.AsMap(cs[0])
+}
+
+// jobEnv: the literal environment of a container, by name.
+func jobEnv(c M) map[string]any {
+	out := map[string]any{}
+	for _, v := range value.AsList(c["env"]) {
+		out[value.Str(value.AsMap(v)["name"])] = value.AsMap(v)["value"]
+	}
+	return out
+}
+
+// jobRequest: the registration request the Job sends.
+func jobRequest(t *testing.T, c M) M {
+	t.Helper()
+	var req M
+	if err := json.Unmarshal([]byte(value.Str(jobEnv(c)["REQUEST"])), &req); err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
+// TestDcrDefaults: the main client, confidential, named after the release:
+// its Job, hardened, by digest, a hook before the package's; the Role that
+// changes its one Secret; the removal at uninstall.
 func TestDcrDefaults(t *testing.T) {
-	values, err := dcrValues(dcrCtx(), M{"grantTypes": []any{"authorization_code"}, "redirectUris": []any{"https://x/cb"}})
+	objects, err := dcrObjects(dcrCtx(), M{"grantTypes": []any{"authorization_code"}, "redirectUris": []any{"https://x/cb"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := M{
-		"ttlSeconds":      float64(30),
-		"registrationUrl": "https://idp.example.org/register",
-		"request": M{
-			"application_type": "web",
-			"client_name":      "demo-x-demo",
-			"grant_types":      []any{"authorization_code"},
-			"scope":            "profile email",
-			"redirect_uris":    []any{"https://x/cb"},
-		},
-		"tls":              M{"insecure": false, "certificate": ""},
-		"secret":           "demo-x-demo-dcr",
-		"mapping":          M{"useDefault": false, "keyMapping": M{"client_id": ".client_id", "client_secret": ".client_secret"}},
-		"security":         M{"serviceAccount": "demo-x-oidc-dcr", "role": "demo-x-oidc-dcr"},
-		"image":            M{"repository": "example/dcr"},
-		"fullnameOverride": "demo-x-oidc-dcr",
-		"commonLabels":     M{"app.kubernetes.io/instance": "demo-x"},
-		"backoffLimit":     float64(6),
+	kinds := sortedKeys(objects)
+	for _, want := range []string{"ServiceAccount/demo-x-oidc-dcr", "Role/demo-x-oidc-dcr", "RoleBinding/demo-x-oidc-dcr", "ConfigMap/demo-x-oidc-dcr", "Service/demo-x-oidc-dcr-headless", "Job/demo-x-oidc-dcr",
+		"ServiceAccount/demo-x-oidc-dcr-delete", "Role/demo-x-oidc-dcr-delete", "RoleBinding/demo-x-oidc-dcr-delete", "ConfigMap/demo-x-oidc-dcr-delete", "Job/demo-x-oidc-dcr-delete"} {
+		if objects[want] == nil {
+			t.Errorf("no %s in %v", want, kinds)
+		}
 	}
-	if len(values) != 1 || !reflect.DeepEqual(values[dcrChart], want) {
-		t.Errorf("got  %#v\nwant %#v", values, want)
+	if len(objects) != 11 {
+		t.Errorf("objects: %v", kinds)
+	}
+	job := objects["Job/demo-x-oidc-dcr"]
+	pod := value.AsMap(value.Dig(job, "spec.template.spec"))
+	c := jobContainer(t, job)
+	if pod["automountServiceAccountToken"] != true || pod["serviceAccountName"] != "demo-x-oidc-dcr" {
+		t.Errorf("identity: %#v", pod)
+	}
+	if value.Dig(pod, "securityContext.runAsNonRoot") != true || value.Dig(pod, "securityContext.runAsUser") != float64(65534) || value.Dig(c, "securityContext.readOnlyRootFilesystem") != true || value.Dig(c, "securityContext.allowPrivilegeEscalation") != false {
+		t.Errorf("security context: %#v %#v", pod["securityContext"], c["securityContext"])
+	}
+	if c["image"] != "quay.io/example/dcr:0.6.0@"+dcrDigest || c["imagePullPolicy"] != "IfNotPresent" {
+		t.Errorf("image: %#v", c["image"])
+	}
+	if value.Dig(c, "resources.requests.memory") == nil || value.Dig(c, "resources.limits.memory") == nil {
+		t.Errorf("resources: %#v", c["resources"])
+	}
+	if value.Dig(job, "spec.backoffLimit") != float64(6) || value.Dig(job, "spec.ttlSecondsAfterFinished") != float64(30) {
+		t.Errorf("job: %#v", job["spec"])
+	}
+	want := M{"application_type": "web", "client_name": "demo-x-demo", "grant_types": []any{"authorization_code"}, "scope": "profile email", "redirect_uris": []any{"https://x/cb"}}
+	if got := jobRequest(t, c); !reflect.DeepEqual(got, want) {
+		t.Errorf("request: got %#v, want %#v", got, want)
+	}
+	env := jobEnv(c)
+	if env["SECRET_NAME"] != "demo-x-demo-dcr" || env["MODE"] != "register" || env["PUBLIC"] != "false" || env["DCR_REGISTRATION_URL"] != "https://idp.example.org/register" {
+		t.Errorf("env: %#v", env)
+	}
+	if _, ok := env["REGISTRATION_TOKEN_FILE"]; ok {
+		t.Errorf("anonymous, no token: %#v", env)
+	}
+	if _, ok := env["DISCOVERY_URL"]; ok {
+		t.Errorf("no issuer, no wait: %#v", env)
+	}
+	annotations := value.AsMap(value.Dig(job, "metadata.annotations"))
+	for k, v := range map[string]string{"helm.sh/hook": "pre-install,pre-upgrade", "helm.sh/hook-weight": "-5", "argocd.argoproj.io/hook": "PreSync", "argocd.argoproj.io/sync-wave": "-5"} {
+		if annotations[k] != v {
+			t.Errorf("%s: %#v", k, annotations[k])
+		}
+	}
+	if got := value.Dig(objects["ConfigMap/demo-x-oidc-dcr"], "metadata.annotations"); value.AsMap(got)["helm.sh/hook-weight"] != "-10" {
+		t.Errorf("before the Job: %#v", got)
+	}
+	rules := value.AsList(objects["Role/demo-x-oidc-dcr"]["rules"])
+	wantRules := []any{
+		M{"apiGroups": []any{""}, "resources": []any{"secrets"}, "verbs": []any{"create"}},
+		M{"apiGroups": []any{""}, "resources": []any{"secrets"}, "resourceNames": []any{"demo-x-demo-dcr"}, "verbs": []any{"get", "patch"}},
+	}
+	if !reflect.DeepEqual(rules, wantRules) {
+		t.Errorf("role: %#v", rules)
+	}
+	removal := objects["Job/demo-x-oidc-dcr-delete"]
+	if a := value.AsMap(value.Dig(removal, "metadata.annotations")); a["helm.sh/hook"] != "pre-delete" || a["argocd.argoproj.io/hook"] != "PostDelete" {
+		t.Errorf("removal: %#v", a)
+	}
+	if got := jobEnv(jobContainer(t, removal)); got["MODE"] != "delete" || got["SECRET_NAME"] != "demo-x-demo-dcr" {
+		t.Errorf("removal env: %#v", got)
+	}
+	if got := value.AsList(objects["Role/demo-x-oidc-dcr-delete"]["rules"]); !reflect.DeepEqual(got, []any{M{"apiGroups": []any{""}, "resources": []any{"secrets"}, "resourceNames": []any{"demo-x-demo-dcr"}, "verbs": []any{"get", "delete"}}}) {
+		t.Errorf("removal role: %#v", got)
+	}
+	script := value.Str(value.Dig(objects["ConfigMap/demo-x-oidc-dcr"], "data")) + value.Str(value.AsMap(objects["ConfigMap/demo-x-oidc-dcr"]["data"])["oidc-dcr.sh"])
+	if strings.Contains(script, "set -x") || !strings.Contains(script, "PUT") {
+		t.Errorf("script: %q", script)
 	}
 }
 
-// TestDcrNames: the main client's chart and objects are named after the
-// release, a named client's after the release and its name (cut as
-// okdpFullname), and so are its Secret and client name; the wait for the
-// provider uses its discovery URL (one trailing slash of issuerUri dropped).
+// TestDcrScriptLogsNoSecret: nothing the script prints reads an answer of
+// the provider, a client secret or a token.
+func TestDcrScriptLogsNoSecret(t *testing.T) {
+	objects, err := dcrObjects(dcrCtx(), M{"grantTypes": []any{"client_credentials"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := value.Str(value.AsMap(objects["ConfigMap/demo-x-oidc-dcr"]["data"])["oidc-dcr.sh"])
+	for line := range strings.SplitSeq(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(line, "echo") && (strings.Contains(line, "$body") || strings.Contains(line, "$current") || strings.Contains(line, "$token") || strings.Contains(line, "$REQUEST") || strings.Contains(line, "$initial")) {
+			t.Errorf("printed: %s", line)
+		}
+		if strings.Contains(line, "Authorization") && !strings.Contains(line, `>"$headers"`) {
+			t.Errorf("a token outside the header file: %s", line)
+		}
+	}
+}
+
+// TestDcrNames: the objects are named after the release, a named client's
+// after the release and its name, cut with room for the suffixes, and so
+// is its Secret and client name; the wait for the provider uses its
+// discovery URL (one trailing slash of issuerUri dropped).
 func TestDcrNames(t *testing.T) {
 	ctx := dcrCtx()
 	setIssuer(ctx, "https://idp.example.org/realms/data/")
 	long := "demo-" + strings.Repeat("x", 48) // the longest release, 53 characters
 	for name, tc := range map[string]struct {
-		release, client                    string
-		chart, fullname, secret, clientNam string
+		release, client, fullname, secret, clientName string
 	}{
-		"main":           {"demo-x", "", "oidc-dcr", "demo-x-oidc-dcr", "demo-x-demo-dcr", "demo-x-demo"},
-		"named":          {"demo-x", "console", "console-oidc-dcr", "demo-x-console-oidc-dcr", "demo-x-demo-console-dcr", "demo-x-demo-console"},
-		"a long release": {long, "consoles", "consoles-oidc-dcr", long + "-consoles", long + "-demo-consoles-dcr", long + "-demo-consoles"},
+		"main":           {"demo-x", "", "demo-x-oidc-dcr", "demo-x-demo-dcr", "demo-x-demo"},
+		"named":          {"demo-x", "console", "demo-x-console-oidc-dcr", "demo-x-demo-console-dcr", "demo-x-demo-console"},
+		"a long release": {long, "consoles", long + "-co", long + "-demo-consoles-dcr", long + "-demo-consoles"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			value.AsMap(ctx["release"])["name"] = tc.release
-			values, err := dcrValues(ctx, M{"grantTypes": []any{"client_credentials"}, "name": tc.client})
+			objects, err := dcrObjects(ctx, M{"grantTypes": []any{"client_credentials"}, "name": tc.client})
 			if err != nil {
 				t.Fatal(err)
 			}
-			out, ok := values[tc.chart]
-			if !ok || len(values) != 1 {
-				t.Fatalf("charts: %v", slices.Collect(maps.Keys(values)))
+			job := objects["Job/"+tc.fullname]
+			if job == nil || objects["Role/"+tc.fullname] == nil || objects["Job/"+tc.fullname+"-delete"] == nil {
+				t.Fatalf("objects: %v", sortedKeys(objects))
 			}
-			if out["fullnameOverride"] != tc.fullname || value.Dig(out, "security.role") != tc.fullname || value.Dig(out, "security.serviceAccount") != tc.fullname {
-				t.Errorf("names: %#v %#v", out["fullnameOverride"], out["security"])
+			c := jobContainer(t, job)
+			if env := jobEnv(c); env["SECRET_NAME"] != tc.secret || env["DISCOVERY_URL"] != "https://idp.example.org/realms/data/.well-known/openid-configuration" || env["WAIT_TTL_SECONDS"] != "600" {
+				t.Errorf("env: %#v", env)
 			}
-			if out["secret"] != tc.secret || value.Dig(out, "request.client_name") != tc.clientNam {
-				t.Errorf("secret %#v, client name %#v", out["secret"], value.Dig(out, "request.client_name"))
+			if got := jobRequest(t, c)["client_name"]; got != tc.clientName {
+				t.Errorf("client name %#v", got)
 			}
-			if got := value.AsMap(out["commonLabels"])["app.kubernetes.io/instance"]; got != tc.release {
-				t.Errorf("commonLabels: %#v", out["commonLabels"])
-			}
-			if want := (M{"discoveryUrl": "https://idp.example.org/realms/data/.well-known/openid-configuration"}); !reflect.DeepEqual(out["waitForProvider"], want) {
-				t.Errorf("waitForProvider: %#v", out["waitForProvider"])
+			for k := range objects {
+				if n := k[strings.Index(k, "/")+1:]; len(n) > 63 {
+					t.Errorf("%s is longer than a DNS label", k)
+				}
 			}
 		})
 	}
-	// Two clients, one chart each.
-	value.AsMap(ctx["release"])["name"] = "demo-x"
-	values, err := dcrValues(ctx, M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}})
+}
+
+// sortedKeys: the keys of objects, sorted, for the messages.
+func sortedKeys(objects map[string]M) []string {
+	return slices.Sorted(maps.Keys(objects))
+}
+
+// TestDcrManyClients: any number of clients, a Job each.
+func TestDcrManyClients(t *testing.T) {
+	var clients []M
+	for i := range 7 {
+		clients = append(clients, M{"grantTypes": []any{"client_credentials"}, "name": fmt.Sprintf("c%d", i)})
+	}
+	objects, err := dcrObjects(dcrCtx(), clients...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(values) != 2 || values["oidc-dcr"]["secret"] != "demo-x-demo-dcr" || values["console-oidc-dcr"]["secret"] != "demo-x-demo-console-dcr" {
-		t.Errorf("two clients: %#v", values)
+	for i := range 7 {
+		if objects[fmt.Sprintf("Job/demo-x-c%d-oidc-dcr", i)] == nil {
+			t.Errorf("client %d: %v", i, sortedKeys(objects))
+		}
 	}
 }
 
 // TestDcrArgs: a public client with every name given, a scope without
 // openid, the CA Secret given and a request override.
 func TestDcrArgs(t *testing.T) {
-	values, err := dcrValues(dcrCtx(), M{
+	objects, err := dcrObjects(dcrCtx(), M{
 		"grantTypes": []any{"authorization_code"},
 		"public":     true,
 		"scope":      "openid groups",
@@ -175,88 +285,121 @@ func TestDcrArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := values[dcrChart]
-	req := value.AsMap(out["request"])
+	job := objects["Job/demo-x-oidc-dcr"]
+	c := jobContainer(t, job)
+	req := jobRequest(t, c)
 	if req["token_endpoint_auth_method"] != "none" || req["scope"] != "groups" || req["client_name"] != "console" || req["application_type"] != "native" {
 		t.Errorf("request: %#v", req)
 	}
 	if _, ok := req["redirect_uris"]; ok {
 		t.Errorf("no redirect URI: %#v", req)
 	}
-	if keys := value.Dig(out, "mapping.keyMapping"); !reflect.DeepEqual(keys, M{"client_id": ".client_id"}) {
-		t.Errorf("a public client has no secret: %#v", keys)
+	env := jobEnv(c)
+	if env["PUBLIC"] != "true" || env["SECRET_NAME"] != "demo-x-oidc" {
+		t.Errorf("env: %#v", env)
 	}
-	if out["secret"] != "demo-x-oidc" || value.Dig(out, "security.role") != "demo-x-oidc-dcr" || value.Dig(out, "tls.certificate") != "ca" {
-		t.Errorf("names: %#v", out)
+	found := false
+	for _, v := range value.AsList(value.Dig(job, "spec.template.spec.volumes")) {
+		found = found || value.Dig(value.AsMap(v), "secret.secretName") == "ca"
+	}
+	if !found {
+		t.Errorf("volumes: %#v", value.Dig(job, "spec.template.spec.volumes"))
 	}
 	// The scope is the platform's when the client has none; public: false
-	// is a confidential client.
-	values, err = dcrValues(dcrCtx(), M{"grantTypes": []any{"client_credentials"}, "public": false, "redirectUris": []any{}})
+	// is a confidential client; an empty redirectUris is left out.
+	objects, err = dcrObjects(dcrCtx(), M{"grantTypes": []any{"client_credentials"}, "public": false, "redirectUris": []any{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out := values[dcrChart]; value.Dig(out, "request.scope") != "profile email" || value.Dig(out, "mapping.keyMapping.client_secret") != ".client_secret" {
-		t.Errorf("defaults: %#v", out)
+	c = jobContainer(t, objects["Job/demo-x-oidc-dcr"])
+	req = jobRequest(t, c)
+	if req["scope"] != "profile email" || jobEnv(c)["PUBLIC"] != "false" {
+		t.Errorf("defaults: %#v", req)
 	}
-	if _, ok := value.AsMap(values[dcrChart]["request"])["redirect_uris"]; ok {
-		t.Errorf("an empty redirectUris is left out: %#v", values[dcrChart]["request"])
+	if _, ok := req["redirect_uris"]; ok {
+		t.Errorf("an empty redirectUris is left out: %#v", req)
 	}
 }
 
 // TestDcrPlatform: the platform's DCR settings (platform.oidc.dcr): the Job
-// TTL and retries, the CA Secret (the client's caSecret wins), the wait for
-// the provider and the image.
+// TTL and retries, the CA Secret (the client's caSecret wins), the
+// initial access token, the wait for the provider and the image.
 func TestDcrPlatform(t *testing.T) {
-	ctx := dcrCtx(M{"ttlSeconds": float64(300), "backoffLimit": float64(2), "caSecret": "corp-ca", "waitTtlSeconds": float64(120),
-		"image": M{"registry": "mirror.example.org", "pullPolicy": "Always"}})
+	ctx := dcrCtx(M{"ttlSeconds": float64(300), "backoffLimit": float64(2), "caSecret": "corp-ca", "waitTtlSeconds": float64(120), "authMethod": "initialAccessToken",
+		"image": M{"registry": "mirror.example.org", "pullPolicy": "Always", "pullSecrets": []any{"regcred"}}})
 	setIssuer(ctx, "https://idp.example.org/realms/data")
 	grants := []any{"client_credentials"}
-	values, err := dcrValues(ctx, M{"grantTypes": grants})
+	objects, err := dcrObjects(ctx, M{"grantTypes": grants})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := values[dcrChart]
-	for k, v := range map[string]any{
-		"ttlSeconds":      float64(300),
-		"backoffLimit":    float64(2),
-		"tls":             M{"insecure": false, "certificate": "corp-ca"},
-		"waitForProvider": M{"discoveryUrl": "https://idp.example.org/realms/data/.well-known/openid-configuration", "ttlSeconds": float64(120)},
-		"image":           M{"registry": "mirror.example.org", "repository": "example/dcr", "pullPolicy": "Always"},
-	} {
-		if !reflect.DeepEqual(out[k], v) {
-			t.Errorf("%s: got %#v, want %#v", k, out[k], v)
+	job := objects["Job/demo-x-oidc-dcr"]
+	c := jobContainer(t, job)
+	if value.Dig(job, "spec.ttlSecondsAfterFinished") != float64(300) || value.Dig(job, "spec.backoffLimit") != float64(2) {
+		t.Errorf("job: %#v", job["spec"])
+	}
+	env := jobEnv(c)
+	if env["DISCOVERY_URL"] != "https://idp.example.org/realms/data/.well-known/openid-configuration" || env["WAIT_TTL_SECONDS"] != "120" || env["REGISTRATION_TOKEN_FILE"] != "/etc/okdp/token/token" {
+		t.Errorf("env: %#v", env)
+	}
+	if c["image"] != "mirror.example.org/example/dcr:0.6.0@"+dcrDigest || c["imagePullPolicy"] != "Always" {
+		t.Errorf("image: %#v %#v", c["image"], c["imagePullPolicy"])
+	}
+	if got := value.Dig(job, "spec.template.spec.imagePullSecrets"); !reflect.DeepEqual(got, []any{M{"name": "regcred"}}) {
+		t.Errorf("pull secrets: %#v", got)
+	}
+	secrets := map[string]bool{}
+	for _, v := range value.AsList(value.Dig(job, "spec.template.spec.volumes")) {
+		if s := value.Str(value.Dig(value.AsMap(v), "secret.secretName")); s != "" {
+			secrets[s] = true
 		}
 	}
-	if values, err = dcrValues(ctx, M{"grantTypes": grants, "caSecret": "ca"}); err != nil || value.Dig(values[dcrChart], "tls.certificate") != "ca" {
-		t.Errorf("caSecret of the client: %v %#v", err, values)
+	if !secrets["corp-ca"] || !secrets["okdp-dcr-token"] {
+		t.Errorf("volumes: %v", secrets)
 	}
-	// No image in the platform values: the chart's.
+	// The removal needs no initial access token.
+	for _, v := range value.AsList(value.Dig(objects["Job/demo-x-oidc-dcr-delete"], "spec.template.spec.volumes")) {
+		if value.Dig(value.AsMap(v), "secret.secretName") == "okdp-dcr-token" {
+			t.Errorf("the removal mounts the initial access token")
+		}
+	}
+	// No image in the platform values: the default, by digest.
 	ctx = dcrCtx()
 	delete(value.AsMap(value.Dig(ctx, "platform.oidc.dcr")), "image")
-	if values, err = dcrValues(ctx, M{"grantTypes": grants}); err != nil {
+	if objects, err = dcrObjects(ctx, M{"grantTypes": grants}); err != nil {
 		t.Fatal(err)
-	} else if _, ok := values[dcrChart]["image"]; ok {
-		t.Errorf("image: %#v", values[dcrChart]["image"])
+	} else if got := jobContainer(t, objects["Job/demo-x-oidc-dcr"])["image"]; got != "quay.io/adaltas/oidc-dcr-job:0.6.0@"+dcrDigest {
+		t.Errorf("default image: %#v", got)
+	}
+	if _, err := dcrObjects(dcrCtx(M{"image": M{"tag": "1.0.0"}}), M{"grantTypes": grants}); err == nil || !strings.Contains(err.Error(), "tag 1.0.0 without a digest") {
+		t.Errorf("a tag without a digest: %v", err)
+	}
+	objects, err = dcrObjects(dcrCtx(M{"image": M{"repository": "m/j", "tag": "1.0.0", "digest": "sha256:ab"}}), M{"grantTypes": grants})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := jobContainer(t, objects["Job/demo-x-oidc-dcr"])["image"]; got != "quay.io/m/j:1.0.0@sha256:ab" {
+		t.Errorf("image: %#v", got)
 	}
 }
 
-// TestDcrModes: outside dcr mode no chart is compiled, but the clients are
+// TestDcrModes: outside dcr mode no object is compiled, but the clients are
 // still checked; the Secret of each client in both modes.
 func TestDcrModes(t *testing.T) {
 	ctx := dcrCtx()
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = false
-	clients, values, err := oidcClients(newSession(ctx), testInstance(ctx), []any{M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}}})
-	if err != nil || values != nil || len(clients) != 2 || clients[1].key != "console-oidc-dcr" {
-		t.Errorf("existing mode: %v %#v %#v", err, values, clients)
+	objects, err := dcrObjects(ctx, M{"grantTypes": []any{"client_credentials"}}, M{"name": "console", "grantTypes": []any{"authorization_code"}})
+	if err != nil || len(objects) != 0 {
+		t.Errorf("existing mode: %v %#v", err, objects)
 	}
-	if _, _, err := oidcClients(newSession(ctx), testInstance(ctx), []any{M{}, M{}}); err == nil || !strings.Contains(err.Error(), "has no name either") {
+	if _, err := dcrObjects(ctx, M{}, M{}); err == nil || !strings.Contains(err.Error(), "has no name either") {
 		t.Errorf("existing mode, checked: %v", err)
 	}
 	// No client: nothing to check on the platform.
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = true
 	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["authMethod"] = "bearer"
-	if _, values, err := oidcClients(newSession(ctx), testInstance(ctx), nil); err != nil || values != nil {
-		t.Errorf("no client: %v %#v", err, values)
+	if objects, err := dcrObjects(ctx); err != nil || len(objects) != 0 {
+		t.Errorf("no client: %v %#v", err, objects)
 	}
 	for _, tc := range []struct {
 		dcr        bool
@@ -269,7 +412,7 @@ func TestDcrModes(t *testing.T) {
 	} {
 		ctx := dcrCtx()
 		value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = tc.dcr
-		res, _, err := runMapping(defaultRules(), newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
+		res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(ctx), ctx, mapping("", "x: {s: '${{ oidcClientSecret(\""+tc.name+"\") }}'}\n")...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -288,23 +431,27 @@ func TestDcrErrors(t *testing.T) {
 	grants := []any{"client_credentials"}
 	for name, tc := range map[string]struct {
 		dcr     M // the platform's settings, over dcrCtx's
-		clients []any
+		clients []M
 		want    string
 	}{
-		"auth method":      {M{"authMethod": "bearer"}, []any{M{"grantTypes": grants}}, `global.okdp.oidc.dcr.authMethod "bearer" is not supported`},
-		"registration url": {M{"registrationUrl": ""}, []any{M{"grantTypes": grants}}, "global.okdp.oidc.dcr.registrationUrl is required"},
-		"same name":        {nil, []any{M{"grantTypes": grants, "name": "a"}, M{"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
-		"same secret":      {nil, []any{M{"grantTypes": grants, "secret": "demo-x-oidc"}, M{"grantTypes": grants, "name": "oidc", "secret": "demo-x-oidc"}}, `oidcClients[1] (oidc): oidcClients[0] writes the same Secret, "demo-x-oidc": give each client its own secret`},
-		"another Secret":   {nil, []any{M{"grantTypes": grants, "name": "b", "secret": "demo-db-credentials"}}, `oidcClients[0] (b): secret "demo-db-credentials": the Secret the client is written to is the release's, "demo-x-b" (<release>-<client name>, <release>-oidc for the main client)`},
-		"another's prefix": {nil, []any{M{"grantTypes": grants, "name": "b", "secret": "demo-x-b-credentials"}}, `oidcClients[0] (b): secret "demo-x-b-credentials": the Secret the client is written to is the release's, "demo-x-b"`},
-		"another mode":     {M{"enabled": false}, []any{M{"grantTypes": grants, "secret": "demo-x"}}, `oidcClients[0]: secret "demo-x": the Secret the client is written to is the release's, "demo-x-oidc"`},
-		"two main clients": {nil, []any{M{"grantTypes": grants}, M{"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
-		"template error":   {nil, []any{M{"grantTypes": grants, "scope": float64(1)}}, "oidcClients[0]: oidc-dcr.cel.yaml: vars scope: ${{ first("},
+		"auth method":      {M{"authMethod": "bearer"}, []M{{"grantTypes": grants}}, `global.okdp.oidc.dcr.authMethod "bearer" is not supported`},
+		"registration url": {M{"registrationUrl": ""}, []M{{"grantTypes": grants}}, "global.okdp.oidc.dcr.registrationUrl is required"},
+		"same name":        {nil, []M{{"grantTypes": grants, "name": "a"}, {"grantTypes": grants, "name": "a"}}, "oidcClients[1] (a): oidcClients[0] (a) has the same name: client names must be unique"},
+		"same secret":      {nil, []M{{"grantTypes": grants, "secret": "demo-x-oidc"}, {"grantTypes": grants, "name": "oidc", "secret": "demo-x-oidc"}}, `oidcClients[1] (oidc): oidcClients[0] writes the same Secret, "demo-x-oidc": give each client its own secret`},
+		"another Secret":   {nil, []M{{"grantTypes": grants, "name": "b", "secret": "demo-db-credentials"}}, `oidcClients[0] (b): secret "demo-db-credentials": the Secret the client is written to is the release's, "demo-x-b" (<release>-<client name>, <release>-oidc for the main client)`},
+		"another's prefix": {nil, []M{{"grantTypes": grants, "name": "b", "secret": "demo-x-b-credentials"}}, `oidcClients[0] (b): secret "demo-x-b-credentials": the Secret the client is written to is the release's, "demo-x-b"`},
+		"another mode":     {M{"enabled": false}, []M{{"grantTypes": grants, "secret": "demo-x"}}, `oidcClients[0]: secret "demo-x": the Secret the client is written to is the release's, "demo-x-oidc"`},
+		"two main clients": {nil, []M{{"grantTypes": grants}, {"grantTypes": grants, "name": ""}}, "oidcClients[1]: oidcClients[0] has no name either: only the service's main client (chart oidc-dcr) has none"},
+		"template error":   {nil, []M{{"grantTypes": grants, "scope": float64(1)}}, "oidcClients[0]: oidc-dcr.cel.yaml: vars scope: ${{ first("},
+		"request widens":   {nil, []M{{"grantTypes": grants, "request": M{"redirect_uris": []any{"https://evil/cb"}}}}, "oidcClients[0]: request.redirect_uris: a URL the provider trusts is not set through request: use redirectUris"},
+		"request logout":   {nil, []M{{"grantTypes": grants, "request": M{"post_logout_redirect_uris": []any{"https://evil/"}}}}, "oidcClients[0]: request.post_logout_redirect_uris"},
+		"request keys":     {nil, []M{{"grantTypes": grants, "request": M{"jwks_uri": "https://evil/jwks"}}}, "oidcClients[0]: request.jwks_uri"},
+		"existing mode":    {M{"enabled": false}, []M{{"grantTypes": grants, "request": M{"redirect_uris": []any{"https://evil/cb"}}}}, "request.redirect_uris"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := dcrCtx()
 			maps.Copy(value.AsMap(value.Dig(ctx, "platform.oidc.dcr")), tc.dcr)
-			_, _, err := oidcClients(newSession(ctx), testInstance(ctx), tc.clients)
+			_, err := dcrObjects(ctx, tc.clients...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
@@ -312,18 +459,55 @@ func TestDcrErrors(t *testing.T) {
 	}
 }
 
+// TestDcrRedirectHosts: a project that is not privileged registers redirect
+// URIs only on hosts it serves, the rule of its Ingresses; a privileged
+// project any; outside dcr mode nothing is registered, nothing checked.
+func TestDcrRedirectHosts(t *testing.T) {
+	check := func(ctx M, tenant bool, uris ...any) error {
+		inst := dcrInstance(ctx, tenant)
+		inst.okdp["policy"] = value.Merge(value.AsMap(inst.okdp["policy"]), M{"ingressHosts": M{"demo": []any{"listed.example.net"}}})
+		_, err := ownObjects(context.Background(), newSession(ctx), inst, M{"oidcClients": []any{M{"grantTypes": []any{"authorization_code"}, "redirectUris": uris}}})
+		return err
+	}
+	for _, ok := range []string{"https://app.demo.example.org/cb", "https://app.demo.example.org:8443/a/*", "https://LISTED.example.net/cb", "http://app.demo.example.org/cb"} {
+		if err := check(dcrCtx(), true, ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for uri, want := range map[string]string{
+		"https://keycloak.example.org/cb":          "is not served by demo",
+		"https://a.b.demo.example.org/cb":          "is not served by demo",
+		"https://app.other.example.org/cb":         "is not served by demo",
+		"https://*.demo.example.org/cb":            "is not served by demo",
+		"https://app.demo.example.org@evil.net/cb": "no user information",
+		"myapp://callback":                         "an http or https URL",
+		"/relative":                                "an http or https URL",
+		"https://evil.net\\@app.demo.example.org/": "an http or https URL",
+	} {
+		err := check(dcrCtx(), true, uri)
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "oidcClients[0]: redirectUris[0]") {
+			t.Errorf("%s: got %v, want an error containing %q", uri, err, want)
+		}
+	}
+	if err := check(dcrCtx(), false, "https://keycloak.example.org/cb"); err != nil {
+		t.Errorf("a privileged project: %v", err)
+	}
+	ctx := dcrCtx()
+	value.AsMap(value.Dig(ctx, "platform.oidc.dcr"))["enabled"] = false
+	if err := check(ctx, true, "https://keycloak.example.org/cb"); err != nil {
+		t.Errorf("existing mode: %v", err)
+	}
+}
+
 // TestDcrCompile: a mapping's oidcClients compiled with the service: in dcr
-// mode, one oidc-dcr chart per client, which Chart.yaml does not list,
-// rendered by defaultRules().Charts["oidcDcr"] (its defaults merged, from the chart cache); the
-// compiler owns these charts: Chart.yaml and values.cel.yaml may not list
-// them.
+// mode, the objects of each client among the instance's, under the policy
+// over them, and no chart; the chart of the objects is the compiler's:
+// Chart.yaml and values.cel.yaml may not list it.
 func TestDcrCompile(t *testing.T) {
-	ch := maps.Clone(charts)
-	ch["quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/values.yaml"] = &fstest.MapFile{Data: []byte("ttlSeconds: 0\nmapping: {useDefault: true, keyMapping: {registration_client_uri: .registration_client_uri}}\n")}
 	platform := M{"global": M{"okdp": M{"oidc": M{"clientProvisioning": "dcr", "dcr": M{"authMethod": "anonymous", "registrationUrl": "https://idp/register"}}}}}
 	okdpYAML := `
 vars:
-  host: app.${{ global.okdp.ingress.suffix }}
+  host: app.${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
 oidcClients:
   - redirectUris: ['https://${{ host }}/callback']
     grantTypes: [authorization_code]
@@ -339,7 +523,7 @@ app:
     console: ${{ oidcClientSecret('console') }}
 %s
 `
-	compile := func(output string, existing bool, deps []chart.Dependency, cache fstest.MapFS, values M) (*Result, error) {
+	compile := func(output string, existing bool, deps []chart.Dependency, values M) (*Result, error) {
 		d := *def
 		d.Okdp, d.Values = []byte(okdpYAML), []byte(strings.Replace(valuesYAML, "%s", output, 1))
 		d.Chart.Dependencies = deps
@@ -348,26 +532,38 @@ app:
 			value.Dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
 		}
 		in := inputs(p, values)
-		in.Charts = cache
+		in.Charts = charts
 		return Compile(context.Background(), &d, in)
 	}
 	app := []chart.Dependency{appDep}
+	jobs := func(res *Result) []string {
+		var out []string
+		for _, o := range res.Objects {
+			if o["kind"] == "Job" {
+				out = append(out, value.Str(value.Dig(o, "metadata.name")))
+			}
+		}
+		return out
+	}
 	for name, tc := range map[string]struct {
 		values   M
 		existing bool
-		charts   map[string]chart.Ref // Result.Charts
+		jobs     []string
 	}{
-		"dcr mode":          {M{"replicas": 2}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().Charts["oidcDcr"], "console-oidc-dcr": defaultRules().Charts["oidcDcr"]}},
-		"a client left out": {M{"replicas": 1}, false, map[string]chart.Ref{"app": appSource, "oidc-dcr": defaultRules().Charts["oidcDcr"]}},
-		"existing mode":     {M{"replicas": 2}, true, map[string]chart.Ref{"app": appSource}},
+		"dcr mode":          {M{"replicas": 2}, false, []string{"demo-app-oidc-dcr", "demo-app-oidc-dcr-delete", "demo-app-console-oidc-dcr", "demo-app-console-oidc-dcr-delete"}},
+		"a client left out": {M{"replicas": 1}, false, []string{"demo-app-oidc-dcr", "demo-app-oidc-dcr-delete"}},
+		"existing mode":     {M{"replicas": 2}, true, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			res, err := compile("", tc.existing, app, ch, tc.values)
+			res, err := compile("", tc.existing, app, tc.values)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(res.Charts, tc.charts) || len(res.Values) != len(tc.charts) {
-				t.Errorf("charts: got %v (values of %v), want %v", res.Charts, slices.Sorted(maps.Keys(res.Values)), tc.charts)
+			if !reflect.DeepEqual(jobs(res), tc.jobs) {
+				t.Errorf("jobs: got %v, want %v", jobs(res), tc.jobs)
+			}
+			if want := map[string]chart.Ref{"app": appSource}; !reflect.DeepEqual(res.Charts, want) || len(res.Values) != 1 {
+				t.Errorf("charts: got %v", res.Charts)
 			}
 			wantLabels := M{"main": "demo-app-demo-dcr", "console": "demo-app-demo-console-dcr"}
 			if tc.existing {
@@ -376,44 +572,21 @@ app:
 			if got := res.Values["app"]["labels"]; !reflect.DeepEqual(got, wantLabels) {
 				t.Errorf("Secrets: got %#v, want %#v", got, wantLabels)
 			}
-			if tc.existing {
-				return
-			}
-			// The computed values, without the chart's defaults: Helm
-			// merges keyMapping over them.
-			dcr := res.Values["oidc-dcr"]
-			if dcr["ttlSeconds"] != float64(30) || value.Dig(dcr, "request.redirect_uris") == nil || value.Dig(dcr, "mapping.keyMapping.registration_client_uri") != nil {
-				t.Errorf("oidc-dcr values: %#v", dcr)
-			}
-			if c := res.Values["console-oidc-dcr"]; len(tc.charts) == 3 && (c["fullnameOverride"] != "demo-app-console-oidc-dcr" || value.Dig(c, "mapping.keyMapping.registration_client_uri") != nil) {
-				t.Errorf("console-oidc-dcr values: %#v", c)
-			}
 		})
 	}
 	for name, tc := range map[string]struct {
-		output   string
-		existing bool
-		deps     []chart.Dependency
-		files    fstest.MapFS
-		want     string
+		output string
+		deps   []chart.Dependency
+		want   string
 	}{
-		"in values":        {"oidc-dcr: {}", true, app, ch, "values.cel.yaml: oidc-dcr: the chart of oidcClients[0] is compiled from oidcClients: remove it"},
-		"in Chart.yaml":    {"", false, []chart.Dependency{appDep, {Name: "oidc-dcr", Alias: "console-oidc-dcr", Repository: defaultRules().Charts["oidcDcr"].Repository, Version: defaultRules().Charts["oidcDcr"].Version}}, ch, "Chart.yaml: dependencies[1] (console-oidc-dcr): the chart of oidcClients[1] (console) is added by the compiler: remove it"},
-		"not in the cache": {"", false, app, charts, "oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0"},
+		"in values":     {"okdp-objects: {}", app, "values.cel.yaml: okdp-objects: the chart of the instance's objects is compiled from the objects section: remove it"},
+		"in Chart.yaml": {"", []chart.Dependency{appDep, {Name: "okdp-objects", Repository: "https://charts.example.org", Version: "1.0.0"}}, "Chart.yaml: dependencies[1] (okdp-objects): the chart of the instance's objects is added by the compiler: remove it"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := compile(tc.output, tc.existing, tc.deps, tc.files, M{"replicas": 2})
+			_, err := compile(tc.output, false, tc.deps, M{"replicas": 2})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
-	}
-	// In existing mode, the chart cache needs no oidc-dcr chart.
-	if _, err := compile("", true, app, charts, M{"replicas": 2}); err != nil {
-		t.Errorf("existing mode without oidc-dcr: %v", err)
-	}
-	// The dependencies of Chart.yaml are left as they were.
-	if _, err := compile("", false, app, ch, M{"replicas": 2}); err != nil || len(app) != 1 {
-		t.Errorf("Chart.yaml changed: %v %v", err, app)
 	}
 }

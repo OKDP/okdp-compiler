@@ -54,7 +54,7 @@ api:
     workspace.ui.theme: dark
   env:
     - name: WORKSPACE_URL
-      value: https://workspace-demo.okdp.example.org
+      value: https://workspace.demo.okdp.example.org
     - name: WORKSPACE_INSTANCE
       value: demo-workspace
     - name: WORKSPACE_PROJECT
@@ -144,6 +144,7 @@ api:
           authMethod: anonymous
           backoffLimit: 3
           image:
+            digest: sha256:38e21cbb15124b102b55581f74b30413633df98d291b2341a2d9a6fef480f06c
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
@@ -186,13 +187,13 @@ api:
     className: nginx
     enabled: true
     hosts:
-      - host: workspace-demo.okdp.example.org
+      - host: workspace.demo.okdp.example.org
         paths:
           - path: /
             pathType: Prefix
     tls:
       - hosts:
-          - workspace-demo.okdp.example.org
+          - workspace.demo.okdp.example.org
         secretName: demo-workspace-tls
   mode: server
   nodeSelector:
@@ -201,7 +202,7 @@ api:
     enabled: true
     size: 50Gi
   podAnnotations:
-    checksum/settings: 52bfb99f566046709272e9f3f3534216eb19088347d151ffa9cc18005068812c
+    checksum/settings: 42b3e9e021f39605675a9ed0ed2aaab721bf3c32e29fe80ab0c72e3b97a7611f
     workspace.example.org/catalogs: WyJhcmNoaXZlIiwibWFya2V0aW5nIiwic2FsZXMiXQ==
   podLabels:
     app.kubernetes.io/instance: demo-workspace
@@ -228,7 +229,7 @@ backup:
 gateway:
   config: |
     # gateway.conf: a file with expressions in it
-    server_name workspace-gateway-demo.okdp.example.org;
+    server_name workspace-gateway.demo.okdp.example.org;
     banner "Workspace demo-workspace of demo";
     upstream demo-workspace-api { server demo-workspace-api-0.demo-workspace-api.demo.svc:8080; server demo-workspace-api-1.demo-workspace-api.demo.svc:8080; }
   fullnameOverride: demo-workspace-gateway
@@ -249,6 +250,7 @@ gateway:
           authMethod: anonymous
           backoffLimit: 3
           image:
+            digest: sha256:38e21cbb15124b102b55581f74b30413633df98d291b2341a2d9a6fef480f06c
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
@@ -311,6 +313,7 @@ metrics:
           authMethod: anonymous
           backoffLimit: 3
           image:
+            digest: sha256:38e21cbb15124b102b55581f74b30413633df98d291b2341a2d9a6fef480f06c
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job
@@ -370,7 +373,7 @@ scheduler:
     workspace.scheduler.maxConcurrentRuns: "4"
   env:
     - name: WORKSPACE_URL
-      value: https://workspace-demo.okdp.example.org
+      value: https://workspace.demo.okdp.example.org
     - name: WORKSPACE_INSTANCE
       value: demo-workspace
     - name: WORKSPACE_PROJECT
@@ -470,6 +473,7 @@ scheduler:
           authMethod: anonymous
           backoffLimit: 3
           image:
+            digest: sha256:38e21cbb15124b102b55581f74b30413633df98d291b2341a2d9a6fef480f06c
             pullPolicy: Always
             registry: registry.example.org
             repository: mirror/oidc-dcr-job

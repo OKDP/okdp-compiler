@@ -8,6 +8,7 @@ package okdp
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"io/fs"
 	"sort"
@@ -49,7 +50,7 @@ type instance struct {
 // (platformSettings): a value of another type is refused rather than read
 // as not set, oidc: false would leave OIDC enabled. The
 // OIDC settings are derived from them: the client provisioning mode in
-// effect (existing or dcr), and the CA bundle of the oidc-dcr Jobs,
+// effect (existing or dcr), and the CA bundle of the registration Jobs,
 // tls.caBundleSecret unless oidc.dcr.caSecret is set.
 //
 // 3. Connections: the connection references of the parameters
@@ -71,8 +72,8 @@ type instance struct {
 // from global.okdp: oidc, the Secret of the main OAuth client, the ingress
 // annotations, the proxy environment), and the package: service (name,
 // version), labels and selectorLabels (without component).
-func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
-	schema, values, settings, err := in.memo.paramsOf().get(files, in, svc)
+func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*instance, error) {
+	schema, values, settings, err := in.memo.paramsOf().get(ctx, files, in, svc)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +108,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	for g, role := range groups {
 		roles[g] = string(role)
 	}
-	derived, err := inst.rules.Values("scope", M{"settings": inst.okdp, "release": release, "items": roles})
+	derived, err := inst.rules.Values(ctx, "scope", M{"settings": inst.okdp, "release": release, "items": roles})
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +134,7 @@ func newInstance(files fs.FS, in Inputs, svc *Service) (*instance, error) {
 // its defaults applied (platformSettings). global.okdp of the parameters
 // is the context's, as written, whatever the package's schema gives: the
 // mapping and the charts read the platform's settings, never a package's.
-func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
+func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	schema, err := chart.ReadParameterSchema(files)
 	if err != nil {
 		return nil, nil, nil, err
@@ -141,7 +142,7 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 	if err := requirements(schema.Doc); err != nil {
 		return nil, nil, nil, err
 	}
-	layers, platform, err := valuesLayers(schema.Doc, in)
+	layers, platform, err := valuesLayers(ctx, schema.Doc, in)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -162,7 +163,7 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err := upstreamGlobals(in, layers, settings); err != nil {
+	if err := upstreamGlobals(ctx, in, layers, settings); err != nil {
 		return nil, nil, nil, err
 	}
 	return schema, values, settings, nil
@@ -173,7 +174,7 @@ func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, erro
 // applied: a value of another type is refused rather than read as not set
 // (oidc: false would leave OIDC enabled).
 func platformSettings(rules *RuleSet, platform M) (M, error) {
-	settings, err := schemaValues(rules.PlatformSchema, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
+	settings, err := schemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}

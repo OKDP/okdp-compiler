@@ -1,13 +1,15 @@
-// Own charts: the charts the compiler adds beside the dependencies of
-// Chart.yaml, those a section of the rule set adds and the instance's
-// objects', their keys reserved and added in one place (addOwnCharts), and
-// the platform's charts (global.okdp.charts) they are rendered with.
+// What the compiler adds to an instance beside the dependencies of
+// Chart.yaml: the objects a section of the rule set adds (ownObjects), and
+// the chart that renders the instance's objects, its key reserved
+// (checkObjectsChart), of the platform's charts (global.okdp.charts).
 
 package okdp
 
 import (
+	"context"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 
 	"github.com/okdp/cel2yaml"
@@ -31,8 +33,8 @@ const (
 func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 	given := value.AsMap(okdp["charts"])
 	out := map[string]chart.Ref{}
-	for _, name := range slices.Sorted(maps.Keys(rules.Charts)) {
-		out[name] = rules.Charts[name]
+	for _, name := range slices.Sorted(maps.Keys(rules.Charts())) {
+		out[name] = rules.Charts()[name]
 		if given[name] != nil {
 			r, err := platformChart(given[name], "global.okdp.charts."+name)
 			if err != nil {
@@ -44,32 +46,61 @@ func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 	return out, nil
 }
 
-// ownCharts: the charts the sections of the mapping's result res add (the
-// rule set's ownCharts): each section's checked, then the values of those
-// it renders, in the compile's session; the source of each from sources.
-func ownCharts(session *cel2yaml.Session, inst *instance, res M, sources map[string]chart.Ref) ([]ownChart, error) {
-	var own []ownChart
-	for _, spec := range inst.rules.OwnCharts {
+// ownObjects: the objects the sections of the mapping's result res add (the
+// rule set's ownObjects): each section's items checked, then the objects of
+// those it renders, in the compile's session. The URLs an item names are
+// served by the project first (checkItemURLs).
+func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, res M) ([]any, error) {
+	var objects []any
+	for _, spec := range inst.rules.OwnObjects() {
 		items := []any{}
 		items = append(items, value.AsList(res[spec.Section])...)
-		listed, err := inst.rules.Values(spec.List, M{"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"]})
+		listed, err := inst.rules.Values(ctx, spec.List, M{"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"]})
 		if err != nil {
 			return nil, err
 		}
-		for _, v := range value.AsList(listed["charts"]) {
+		for _, v := range value.AsList(listed["items"]) {
 			c := value.AsMap(v)
-			o := ownChart{key: value.Str(c["key"]), of: value.Str(c["of"]), from: value.Str(c["from"]), source: sources[spec.Chart]}
-			if value.Truthy(c["render"]) {
-				scope := maps.Clone(inst.scope)
-				scope["client"], scope["names"] = c["client"], c["names"]
-				if o.values, err = evalTemplate(session, spec.Values, scope); err != nil {
-					return nil, fmt.Errorf("%s: %w", o.of, err)
-				}
+			if !value.Truthy(c["render"]) {
+				continue
 			}
-			own = append(own, o)
+			of := value.Str(c["of"])
+			if err := checkItemURLs(ctx, inst, of, value.AsList(c["urls"])); err != nil {
+				return nil, err
+			}
+			scope := maps.Clone(inst.scope)
+			scope["client"], scope["names"] = c["client"], c["names"]
+			out, err := evalTemplate(ctx, session, spec.Objects, scope)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", of, err)
+			}
+			objects = append(objects, value.AsList(out["objects"])...)
 		}
 	}
-	return own, nil
+	return objects, nil
+}
+
+// checkItemURLs: the URLs an item of a section registers with an identity
+// provider, of an instance that is not privileged: each http or https, with
+// a host and no user information (url.Parse takes the host from what a
+// browser reads), a host the project serves (hostRules): a redirect to
+// another's host hands it the authorization code. of names the item.
+func checkItemURLs(ctx context.Context, inst *instance, of string, urls []any) error {
+	if privileged(inst.okdp, inst.namespace) {
+		return nil
+	}
+	hosts := newHostRules(inst.rules, inst.okdp, inst.namespace)
+	for i, v := range urls {
+		raw, at := value.Str(v), fmt.Sprintf("%s: redirectUris[%d]", of, i)
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil {
+			return fmt.Errorf("%s: %q: an http or https URL with a host and no user information", at, raw)
+		}
+		if err := hosts.check(ctx, at, u.Hostname()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // platformChart: a chart of global.okdp.charts, a map of strings
@@ -81,53 +112,18 @@ func platformChart(v any, where string) (chart.Ref, error) {
 	return r, r.Check(where)
 }
 
-// ownChart: a chart key the compiler owns in a compile: one a section of
-// the rule set adds, and the instance's objects'. Neither
-// Chart.yaml nor the values file may list it (addOwnCharts). The compiler
-// adds it to the compile when it has values, rendered by source: no OKDP
-// defaults, no instance upstream values.
-type ownChart struct {
-	key    string
-	of     string    // what it is the chart of, for the messages
-	from   string    // what its values are compiled from, for the messages
-	source chart.Ref // the platform's chart that renders it
-	values M         // its values; nil: the key is reserved, no chart is added
-}
-
-// listed: the error of the chart c listed by Chart.yaml (deps, its
-// dependencies), then by the mapping's output (file, the values file);
-// nil when neither lists it.
-func (c ownChart) listed(deps []chart.Dependency, file string, output M) error {
+// checkObjectsChart: the key of the chart of the instance's objects is the
+// compiler's: neither Chart.yaml (deps, its dependencies) nor the mapping's
+// output (file, the values file) may list it. The writer of the umbrella
+// adds the chart.
+func checkObjectsChart(deps []chart.Dependency, file string, output M) error {
 	for i, d := range deps {
-		if d.Key() == c.key {
-			return fmt.Errorf("%s: dependencies[%d] (%s): the chart of %s is added by the compiler: remove it", chart.MetadataFile, i, c.key, c.of)
+		if d.Key() == ObjectsChart {
+			return fmt.Errorf("%s: dependencies[%d] (%s): the chart of the instance's objects is added by the compiler: remove it", chart.MetadataFile, i, ObjectsChart)
 		}
 	}
-	if _, ok := output[c.key]; ok {
-		return fmt.Errorf("%s: %s: the chart of %s is compiled from %s: remove it", file, c.key, c.of, c.from)
+	if _, ok := output[ObjectsChart]; ok {
+		return fmt.Errorf("%s: %s: the chart of the instance's objects is compiled from the objects section: remove it", file, ObjectsChart)
 	}
 	return nil
-}
-
-// addOwnCharts: the dependencies of Chart.yaml, deps, specs by key, plus
-// the charts of own that have values, each rendered by its source, their
-// values added to the mapping's output, read from the values file file:
-// what chart.FinalValues compiles. A chart of own that Chart.yaml or the
-// output lists fails (listed), the first in the order of own. specs is not
-// changed.
-func addOwnCharts(deps []chart.Dependency, specs chart.Specs, file string, output M, own []ownChart) (chart.Specs, error) {
-	for _, c := range own {
-		if err := c.listed(deps, file, output); err != nil {
-			return nil, err
-		}
-	}
-	all := chart.Specs{}
-	maps.Copy(all, specs)
-	for _, c := range own {
-		if c.values != nil {
-			all[c.key] = chart.Spec{Source: c.source}
-			output[c.key] = c.values
-		}
-	}
-	return all, nil
 }

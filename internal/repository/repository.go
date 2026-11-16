@@ -5,6 +5,7 @@ package repository
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +14,6 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"testing/fstest"
 
 	"go.yaml.in/yaml/v3"
 
@@ -73,7 +73,7 @@ type parts struct {
 	platform  *Repository            // the owner of PlatformFile, nil when none
 	services  map[string]*Repository // the owner of catalog/<service>/, by service
 	projects  map[string]*Repository // the owner of projects/<project>/, by project
-	contracts fstest.MapFS           // every contract file
+	contracts contractsFS            // every contract file
 	packages  map[[2]string]*okdp.Definition
 }
 
@@ -103,8 +103,8 @@ type parts struct {
 // Every problem at once, each naming its repository and path; a package
 // that fails once. A tree with any problem is an error and gives no
 // instance: LoadProjects loads what it can.
-func Load(repos []Repository) ([]okdp.Instance, error) {
-	l, err := LoadProjects(repos)
+func Load(ctx context.Context, repos []Repository) ([]okdp.Instance, error) {
+	l, err := LoadProjects(ctx, repos)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (e *packageError) Unwrap() error { return e.err }
 // names, a connection or a claim it declares) refuses that project as a
 // whole, listed in Loaded.Refused with its problems, and the instances of
 // the others are loaded.
-func LoadProjects(repos []Repository) (*Loaded, error) {
+func LoadProjects(ctx context.Context, repos []Repository) (*Loaded, error) {
 	t, err := index(repos)
 	if err != nil {
 		return nil, newError([]error{err})
@@ -204,7 +204,7 @@ func LoadProjects(repos []Repository) (*Loaded, error) {
 		// instance's compile checks its context's, which binds them.
 		if err == nil && len(names) == 0 && layer != nil {
 			in := okdp.Inputs{Contracts: t.contracts, Context: slices.Clip(layers), Namespace: project}
-			for _, err := range unjoin(okdp.CheckDeclarations(in)) {
+			for _, err := range unjoin(okdp.CheckDeclarations(ctx, in)) {
 				own = append(own, fmt.Errorf("%s: %w", where(repo, path.Join(dir, ProjectFile)), err))
 			}
 		}
@@ -455,7 +455,7 @@ func (t *parts) definition(service, version string) (*okdp.Definition, error) {
 // rest of it read.
 func index(repos []Repository) (*parts, error) {
 	repos = slices.SortedFunc(slices.Values(repos), func(a, b Repository) int { return strings.Compare(a.Name, b.Name) })
-	t := &parts{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: fstest.MapFS{}, packages: map[[2]string]*okdp.Definition{}}
+	t := &parts{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: contractsFS{}, packages: map[[2]string]*okdp.Definition{}}
 	var errs []error
 	owners := map[string][]string{} // a part, as messages name it: the repositories that have it
 	var parts []string
@@ -528,9 +528,9 @@ func index(repos []Repository) (*parts, error) {
 			case err != nil:
 				errs = append(errs, fmt.Errorf("%s: %w", where(*repo, file), unwrapPath(err)))
 			case !seen:
-				t.contracts[e.Name()] = &fstest.MapFile{Data: b, Mode: 0o444}
+				t.contracts[e.Name()] = b
 				from[e.Name()] = repo.Name
-			case !bytes.Equal(prev.Data, b):
+			case !bytes.Equal(prev, b):
 				errs = append(errs, fmt.Errorf("contract %s differs between the repositories %s and %s", name, from[e.Name()], repo.Name))
 			}
 		}
