@@ -1,6 +1,6 @@
-// Metadata: the Chart.yaml of a package, the umbrella chart of its
-// instances: Helm's fields, its dependencies the upstream charts that render
-// the values of their keys.
+// This file reads the Chart.yaml of a package. A package is the umbrella
+// chart of its instances, and its dependencies are the upstream charts
+// that render the values under their keys.
 package chart
 
 import (
@@ -12,16 +12,15 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// MetadataFile: the file of a package's metadata, the first segment of its
-// errors.
+// MetadataFile is the name of a package's metadata file.
 const MetadataFile = "Chart.yaml"
 
-// Metadata: a Chart.yaml, Helm's fields in Helm's order, which is also the
-// order the umbrella writes them in.
+// Metadata is a Chart.yaml. Its fields are Helm's, in Helm's order, which
+// is also the order the umbrella chart writes them in.
 type Metadata struct {
 	APIVersion   string            `yaml:"apiVersion" json:"apiVersion"` // v2
-	Name         string            `yaml:"name" json:"name"`             // the service: labels, parameter schema errors
-	Version      string            `yaml:"version" json:"version"`       // the package's version, SemVer: the umbrella's
+	Name         string            `yaml:"name" json:"name"`             // the service's name: in labels and parameter schema errors
+	Version      string            `yaml:"version" json:"version"`       // the package's version (SemVer), also the umbrella chart's
 	KubeVersion  string            `yaml:"kubeVersion,omitempty" json:"kubeVersion,omitempty"`
 	Description  string            `yaml:"description,omitempty" json:"description,omitempty"`
 	Type         string            `yaml:"type,omitempty" json:"type,omitempty"` // application, or absent
@@ -36,13 +35,13 @@ type Metadata struct {
 	Annotations  map[string]string `yaml:"annotations,omitempty" json:"annotations,omitempty"`
 }
 
-// Dependency: an upstream chart of a package, whose key (Key) names its
-// values: in the values file, okdp.yaml's defaults and upstream, the
-// final values. The fields of Helm's that decide what is rendered are
-// decoded only to be refused (Metadata.Check): the values decide it.
+// Dependency is an upstream chart of a package. Its key (Key) names its
+// values everywhere: in the values file, in okdp.yaml and in the final
+// values. Condition, Tags, Enabled and ImportValues are decoded only so
+// that Metadata.Check can refuse them.
 type Dependency struct {
 	Name         string `yaml:"name" json:"name"`                       // the chart's name in the repository
-	Alias        string `yaml:"alias,omitempty" json:"alias,omitempty"` // the key, when not the name
+	Alias        string `yaml:"alias,omitempty" json:"alias,omitempty"` // the key, when it differs from the name
 	Repository   string `yaml:"repository" json:"repository"`           // https://... or oci://...
 	Version      string `yaml:"version" json:"version"`                 // a pinned version
 	Condition    any    `yaml:"condition,omitempty" json:"-"`
@@ -51,7 +50,7 @@ type Dependency struct {
 	ImportValues any    `yaml:"import-values,omitempty" json:"-"`
 }
 
-// Key: the key of the dependency: its alias, else its name.
+// Key returns the dependency's key: its alias, else its name.
 func (d Dependency) Key() string {
 	if d.Alias != "" {
 		return d.Alias
@@ -59,21 +58,21 @@ func (d Dependency) Key() string {
 	return d.Name
 }
 
-// Ref: the upstream chart of the dependency.
+// Ref returns the upstream chart the dependency names.
 func (d Dependency) Ref() Ref {
 	return Ref{Repository: d.Repository, Chart: d.Name, Version: d.Version}
 }
 
-// Maintainer: a maintainer of the chart.
+// Maintainer is a maintainer of the chart.
 type Maintainer struct {
 	Name  string `yaml:"name,omitempty" json:"name,omitempty"`
 	Email string `yaml:"email,omitempty" json:"email,omitempty"`
 	URL   string `yaml:"url,omitempty" json:"url,omitempty"`
 }
 
-// ReadMetadata: a Chart.yaml, b, read strictly (a field Helm does not
-// define fails: a misspelt alias would otherwise rename a key), one YAML
-// document, then checked (Metadata.Check).
+// ReadMetadata decodes the Chart.yaml b, one YAML document, then checks
+// it (Metadata.Check). Decoding is strict, because a misspelt alias would
+// otherwise rename a key.
 func ReadMetadata(b []byte) (Metadata, error) {
 	var m Metadata
 	dec := yaml.NewDecoder(bytes.NewReader(b))
@@ -87,15 +86,15 @@ func ReadMetadata(b []byte) (Metadata, error) {
 	return m, m.Check()
 }
 
-// refused: the fields of a dependency that decide, for Helm, whether it is
-// rendered: refused, the values decide it.
+// refused names the first field of the dependency that tells Helm whether
+// to render it. A package may not set one: the values decide it.
 func (d Dependency) refused() (string, bool) {
 	for _, f := range []struct {
 		name string
 		v    any
 	}{{"condition", d.Condition}, {"tags", d.Tags}, {"enabled", d.Enabled}, {"import-values", d.ImportValues}} {
-		// <key>.enabled: how the chart, installed as it is, leaves out a
-		// dependency the mapping leaves out.
+		// The condition <key>.enabled is allowed. It is how the chart,
+		// installed as it is, leaves out a dependency the mapping leaves out.
 		if f.name == "condition" && f.v == d.Key()+".enabled" {
 			continue
 		}
@@ -106,14 +105,10 @@ func (d Dependency) refused() (string, bool) {
 	return "", false
 }
 
-// Check: what a Chart.yaml may not hold, refused when it is loaded and
-// before every compile: an apiVersion but v2, no name, a version that is
-// not SemVer (the umbrella's), a library chart; a dependency without a
-// name, with a field that decides what is rendered, whose key is not a DNS
-// label (it names files, which ../x would place out of their directory,
-// and the umbrella's dependency alias), is global (Helm's values of every
-// chart) or is another's, or whose chart is
-// not pinned in a chart repository (Ref.Check).
+// Check refuses what a Chart.yaml may not hold. It runs when the package is
+// loaded and before every compile. A dependency's key must be a DNS label:
+// it names files, which a key such as ../x would place outside their
+// directory, and it is the umbrella chart's dependency alias.
 func (m Metadata) Check() error {
 	switch {
 	case m.APIVersion != "v2":

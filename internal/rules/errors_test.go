@@ -20,7 +20,7 @@ func TestZeroValue(t *testing.T) {
 	if _, err := r.Values(context.Background(), "scope", M{}); !errors.Is(err, ErrNotLoaded) {
 		t.Errorf("Values: %v", err)
 	}
-	if !Empty().Loaded() {
+	if !Mandatory().Loaded() {
 		t.Error("the empty set is not loaded")
 	}
 }

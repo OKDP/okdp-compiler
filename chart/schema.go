@@ -1,5 +1,4 @@
-// Schema: values checked against a chart's values.schema.json, as Helm 4
-// checks them before it renders a chart.
+// This file checks values against a schema, as Helm 4 does before it renders.
 package chart
 
 import (
@@ -17,24 +16,23 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// schemaURL: where a schema is compiled, for its $ref to itself.
+// schemaURL is the URL schemas compile at, so that a $ref to itself resolves.
 const schemaURL = "file:///values.schema.json"
 
-// Validate: v against sch, a schema of the file name, one line per
-// violation with its path, as Helm prints them, "" when v holds:
+// Validate checks v against sch, a schema read from the file name. It
+// returns one line per violation with its path, as Helm prints them, or ""
+// when v holds:
 //
 //   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
 //
-// The violations are sorted by path: Helm's order varies between runs.
-// The value of a sensitive key (value.SensitivePath) is not printed:
-// <redacted> in its place (redactCauses).
+// The violations are sorted by path, because Helm's order varies between
+// runs. The value of a sensitive key is never printed (redactCauses).
 func Validate(name string, sch *jsonschema.Schema, v any) (string, error) {
 	msg, _, err := validate(name, sch, v)
 	return msg, err
 }
 
-// validate: Validate, and the violations of its report one by one, its
-// leaves (violations).
+// validate is Validate, and also returns the violations one by one.
 func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, error) {
 	verr := sch.Validate(v)
 	if verr == nil {
@@ -46,8 +44,7 @@ func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, 
 	}
 	sortCauses(ve)
 	redactCauses(ve)
-	// The first line names the schema: "jsonschema validation failed with
-	// '<url>#<pointer>'".
+	// Drop the first line, which only names the schema.
 	msg := ve.Error()
 	if _, lines, ok := strings.Cut(msg, "\n"); ok {
 		msg = lines
@@ -55,22 +52,17 @@ func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, 
 	return msg, violations(ve), nil
 }
 
-// Violation: a violation of a values schema, a leaf of Validate's
-// report: where it is in the values (Location, the keys and the indexes
-// from the root, the tokens of a JSON pointer, none for the whole
-// values), and its line of the report, "at '<pointer>': <message>", as
-// redacted.
+// Violation is one violation of a values schema: a leaf of Validate's
+// report.
 type Violation struct {
-	Location []string
-	Message  string
+	Location []string // the keys and indexes from the root; none for the values as a whole
+	Message  string   // its line of the report, already redacted: "at '<pointer>': <message>"
 }
 
-// printer: the printer of the validator's messages, English.
 var printer = message.NewPrinter(language.English)
 
-// violations: the leaves of e, sorted and redacted, in order: each a
-// violation, the causes of a combinator (allOf, anyOf, a $ref) its
-// leaves'.
+// violations returns the leaves of e, already sorted and redacted. A
+// combinator (allOf, anyOf, a $ref) contributes the leaves of its causes.
 func violations(e *jsonschema.ValidationError) []Violation {
 	if len(e.Causes) == 0 {
 		if _, root := e.ErrorKind.(*kind.Schema); root {
@@ -85,14 +77,14 @@ func violations(e *jsonschema.ValidationError) []Violation {
 	return out
 }
 
-// CompileSchema: the JSON schema doc (as jsonschema.UnmarshalJSON reads
-// it), at url, compiled as Helm 4 compiles a chart's values.schema.json
-// (santhosh-tekuri/jsonschema v6, the version Helm 4.3 uses): the draft of
-// its $schema, draft 2020-12 without one (Helm 4's default, checked with
-// helm 4.3), formats asserted for drafts before 2019-09 only, unknown
-// keywords ignored. Unlike Helm, nothing is fetched: a $ref to a file, a
-// URL or a urn: fails (a loader of no scheme); the draft meta-schemas are
-// built into the validator.
+// CompileSchema compiles the JSON schema doc (as jsonschema.UnmarshalJSON
+// reads it), registered at url, as Helm 4.3 compiles a chart's
+// values.schema.json: the draft is the one $schema names, or 2020-12
+// without one, formats are asserted for drafts before 2019-09 only, and
+// unknown keywords are ignored.
+//
+// Unlike Helm, it fetches nothing: a $ref to a file, a URL or a urn:
+// fails, because the loader knows no scheme.
 func CompileSchema(url string, doc any) (*jsonschema.Schema, error) {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
@@ -103,9 +95,9 @@ func CompileSchema(url string, doc any) (*jsonschema.Schema, error) {
 	return c.Compile(url)
 }
 
-// sortCauses: the causes of e sorted by instance path then message, at
-// every level, and the names of additional properties in one message
-// sorted (the validator lists them in map order), for a stable report.
+// sortCauses makes the report stable: it sorts the causes of e by instance
+// path, then by message, at every level, and the names of the additional
+// properties of one message, which the validator gives in map order.
 func sortCauses(e *jsonschema.ValidationError) {
 	if k, ok := e.ErrorKind.(*kind.AdditionalProperties); ok {
 		slices.Sort(k.Properties)
@@ -121,10 +113,10 @@ func sortCauses(e *jsonschema.ValidationError) {
 	})
 }
 
-// redactCauses: at every level of e, a violation of a sensitive value
-// (value.SensitivePath of its location) whose message prints the value (a
-// pattern, a format, a numeric bound) printing value.Redacted instead
-// (redacted).
+// redactCauses keeps sensitive values out of the report. A violation at a
+// sensitive location (value.SensitivePath) whose message would print the
+// value (a pattern, a format, a numeric bound) prints value.Redacted
+// instead.
 func redactCauses(e *jsonschema.ValidationError) {
 	if value.SensitivePath(e.InstanceLocation) {
 		switch e.ErrorKind.(type) {
@@ -137,13 +129,11 @@ func redactCauses(e *jsonschema.ValidationError) {
 	}
 }
 
-// redacted: a violation whose value is not printed, its message the
-// kind's with value.Redacted for the value it got; for a format, without
-// the format's error either, which may quote the value.
+// redacted is a violation whose value must not be printed. For a format,
+// it also drops the format's own error, which may quote the value.
 type redacted struct{ jsonschema.ErrorKind }
 
-// LocalizedString: the message of the kind, value.Redacted in place of
-// the value.
+// LocalizedString is the kind's message with value.Redacted for the value.
 func (r redacted) LocalizedString(p *message.Printer) string {
 	bound := func(keyword string, want *big.Rat) string {
 		f, _ := want.Float64()
@@ -168,7 +158,7 @@ func (r redacted) LocalizedString(p *message.Printer) string {
 	return r.ErrorKind.LocalizedString(p)
 }
 
-// quote: s as the validator quotes it in a message, '...'.
+// quote quotes s as the validator does in a message: '...'.
 func quote(s string) string {
 	s = fmt.Sprintf("%q", s)
 	s = strings.ReplaceAll(s, `\"`, `"`)
@@ -176,9 +166,9 @@ func quote(s string) string {
 	return "'" + s[1:len(s)-1] + "'"
 }
 
-// ValuesError: values that do not meet their schema (Parameters): the
-// error as Helm reports it, and each violation apart (Violations), for a
-// caller that maps them to the fields of a form.
+// ValuesError reports values that do not meet their schema (Parameters).
+// It carries the error as Helm reports it, and each violation separately
+// (Violations), for a caller that maps them to the fields of a form.
 type ValuesError struct {
 	msg        string
 	Violations []Violation
@@ -186,8 +176,10 @@ type ValuesError struct {
 
 func (e *ValuesError) Error() string { return e.msg }
 
-// SchemaError: the violations of the values of each chart, as Helm reports
-// them; what is the values checked ("values", "compiled values").
+// SchemaError builds the error Helm reports when values violate the
+// schemas of their charts, nil when none does. violations maps each chart
+// to its violations ("" when it has none). what names the values checked
+// ("values", "compiled values").
 func SchemaError(what string, violations map[string]string) error {
 	charts := make([]string, 0, len(violations))
 	for c, v := range violations {

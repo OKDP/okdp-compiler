@@ -1,6 +1,5 @@
-// Descriptor: a contract as the compile reads it (readContract), for a
-// caller that shows it: its fields in the order of the file, each what
-// the compile reads of it.
+// Descriptor: a contract as the compile reads it, for a caller that
+// shows it.
 
 package okdp
 
@@ -16,32 +15,32 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// ContractDescriptor: a contract of Inputs.Contracts, read and checked as
-// every compile reads it (ReadContract).
+// ContractDescriptor is a contract as ReadContract reads and checks it.
 type ContractDescriptor struct {
-	Name        string          // the contract's, its file's name, <name>.schema.json: what a reference and an output name
-	Label       string          // x-okdp-contract, the name the messages give it
+	Name        string          // from its file <name>.schema.json; references and outputs use it
+	Label       string          // x-okdp-contract, the name the messages give the contract
 	Title       string          // title
 	Description string          // description
-	Fields      []ContractField // its properties, in the order of the file
-	Claim       map[string]any  // x-okdp-claim, its claim schema as written, nil when it takes no request
-	Schema      map[string]any  // the document, as written: the keywords the compile does not read (x-okdp-icon, x-okdp-external...)
-	Required    []string        // the fields required after completion, the secret ones left out, sorted
+	Fields      []ContractField // the properties, in the order of the file
+	Claim       map[string]any  // x-okdp-claim as written, nil when the contract takes no request
+	// Schema is the document as written. It holds the keywords the
+	// compile does not read (x-okdp-icon, x-okdp-external...).
+	Schema   map[string]any
+	Required []string // the fields required after completion, sorted, without the secret ones
 }
 
-// ContractField: a field of a contract, a property of its schema.
+// ContractField is a field of a contract, a property of its schema.
 type ContractField struct {
 	Name      string         // its key in properties
-	Secret    bool           // x-okdp-secret: in the credentials Secret, never in a connection nor an output
-	Required  bool           // required after completion, a secret field never
+	Secret    bool           // x-okdp-secret: the field goes in the credentials Secret only
+	Required  bool           // after completion; a secret field never is
 	Default   any            // default, nil when none
 	Derived   map[string]any // x-okdp-derived, {from, map}, nil when none
-	Condition map[string]any // x-ui-condition, {field, value}: when its default applies, nil when always
-	Property  map[string]any // its schema, as written: its type, title, enum, bounds, x-ui-* hints
+	Condition map[string]any // x-ui-condition, {field, value}: when the default applies; nil: always
+	Property  map[string]any // the field's schema as written, x-ui-* hints included
 }
 
-// ReadContract: the contract name of contracts, read and checked as a
-// compile reads it, the error a compile gives when it cannot.
+// ReadContract reads and checks the contract name as a compile does.
 func ReadContract(contracts fs.FS, name string) (*ContractDescriptor, error) {
 	c, err := readContract(contracts, name)
 	if err != nil {
@@ -78,7 +77,7 @@ func ReadContract(contracts fs.FS, name string) (*ContractDescriptor, error) {
 	return d, nil
 }
 
-// Field: the field name of the contract, nil when it has none.
+// Field returns the field name of the contract, or nil when it has none.
 func (d *ContractDescriptor) Field(name string) *ContractField {
 	for i := range d.Fields {
 		if d.Fields[i].Name == name {
@@ -88,8 +87,8 @@ func (d *ContractDescriptor) Field(name string) *ContractField {
 	return nil
 }
 
-// ReadContracts: every contract of contracts, <name>.schema.json at its
-// root, by name (ReadContract); every one that cannot be read, at once.
+// ReadContracts reads the contracts at the root of contracts, in name
+// order. It returns those it can read and reports all the others.
 func ReadContracts(contracts fs.FS) ([]ContractDescriptor, error) {
 	entries, err := fs.ReadDir(contracts, ".")
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -112,8 +111,8 @@ func ReadContracts(contracts fs.FS) ([]ContractDescriptor, error) {
 	return out, errors.Join(errs...)
 }
 
-// propertyOrder: the keys of the properties of the JSON object b, in the
-// order of the file.
+// propertyOrder returns the property keys of the JSON object b, in file
+// order.
 func propertyOrder(b []byte) ([]string, error) {
 	var doc struct {
 		Properties json.RawMessage `json:"properties"`

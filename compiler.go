@@ -1,8 +1,7 @@
-// Package compiler compiles an OKDP service instance into the values of its
-// upstream charts. A package (Chart.yaml, okdp.yaml, values.cel.yaml or
-// values.yaml, its parameters and OKDP's defaults for its charts) is read
-// from any fs.FS (LoadDefinition), compiled for one instance (Compile), and
-// written as the files of okdp-compile (Write):
+// Package compiler compiles an OKDP service instance into the values of
+// its upstream charts. It reads a package from any fs.FS (LoadDefinition),
+// compiles it for one instance (Compile), and gives the files that
+// okdp-compile writes (Write).
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"))
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
@@ -15,37 +14,25 @@
 //	})
 //	files, err := compiler.Write(res) // -o <dir>
 //
-// A package is a Helm chart: each dependency of its Chart.yaml is the
-// upstream chart that renders the values of its key (repository, chart,
-// version), and Result.Charts maps every compiled chart to it: a deployer
-// renders the upstream chart from its repository, the final values over its
-// defaults. A compile reads no chart; with a chart cache (Inputs.Charts), it
-// checks the final values against each chart's defaults and schema. Write gives
-// the files of the instance: the final values of its charts, those of
-// OKDP's own objects and what it publishes (InfoFile), whose outputs the
-// other instances of the namespace reference by name (Inputs.Published);
-// the instances it depends on are for a deployer (Result.Dependencies).
+// A package is a Helm chart. Each dependency of its Chart.yaml is the
+// upstream chart that renders the values of its key, and a deployer
+// renders that chart with the final values (Result.Charts). A compile
+// reads no chart. With a chart cache (Inputs.Charts), it checks the final
+// values against each chart's defaults and schema.
+//
 // CompileAll compiles instances together, each with what the others
-// publish (a tree's, LoadRepository), and NewGraph orders their releases,
-// the dependencies checked.
+// publish. LoadRepository reads the instances of a tree, and Build
+// compiles a tree as a CLI or a control plane asks for it. Writing a tree
+// for a deployer (Helm, Flux, Argo CD) belongs to okdp-gitops, and so
+// does the standard rule set (Inputs.Rules).
 //
-// Build is the compile of a tree as a CLI or a control plane asks for it,
-// Partial the projects of the outcome that deploy and those kept as a
-// previous output holds them. What writes a tree for a deployer (the Helm,
-// Flux and Argo CD targets, the output of a tree) is okdp-gitops'; the
-// standard rule set too (Inputs.Rules).
+// Everything is read through fs.FS and in-memory values, so a caller can
+// compile from a checkout, an embedded filesystem or a git tree without
+// touching the disk.
 //
-// Everything is read through fs.FS and in-memory values, so a caller (a
-// server, a CLI) can compile from a checkout, an embedded filesystem or a
-// git tree without touching the disk.
-//
-// This package is the public API; the implementation is under internal/:
-// OKDP's rules and the order of the stages (okdp), the rule sets (rules),
-// the tree of a deployment read (repository), the deployment graph of
-// compiled instances (graph), a tree compiled and the projects of it kept
-// (tree), the merge of the final values (merge) and the mapping language
-// (compile). What the compiler reproduces of Helm (chart) and the values
-// they share (value) are public beside it.
+// This package is the public API; the implementation is under internal/.
+// Two packages are public beside it: chart, which is what the compiler
+// reproduces of Helm, and value, the values they all share.
 package compiler
 
 import (
@@ -62,233 +49,174 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// The types a caller names.
+// The types a caller names. Each is documented in full on the type it
+// aliases.
 type (
-	// Definition: a package, as LoadDefinition reads it: Chart.yaml,
-	// okdp.yaml, its values file, values.cel.yaml or values.yaml, and the
-	// package's other files; its warnings (Warnings).
+	// Definition is a package as LoadDefinition reads it.
 	Definition = okdp.Definition
-	// Inputs: what a compile reads besides the package.
+	// Inputs is what a compile reads besides the package.
 	Inputs = okdp.Inputs
-	// ContextLayer: a values layer of the context (Inputs.Context) at its
-	// level: 0, the platform's, then each level adds to those below it.
+	// ContextLayer is a values layer of the context (Inputs.Context) with
+	// its level. Level 0 is the platform's.
 	ContextLayer = okdp.ContextLayer
-	// RuleSet: Inputs.Rules, what the compiler refuses, as data (LoadRules).
+	// RuleSet holds, as data, what the compiler refuses: its mandatory
+	// rules and those a platform adds (LoadRules).
 	RuleSet = okdp.RuleSet
-	// Finalize: Inputs.Finalize, what makes the final values of a compile.
+	// Finalize makes the final values of a compile (Inputs.Finalize).
 	Finalize = okdp.Finalize
-	// FinalInput: what a Finalize makes them from.
+	// FinalInput is what a Finalize makes the final values from.
 	FinalInput = okdp.FinalInput
-	// Result: what a compile produces, its warnings among them (Warnings),
-	// which do not fail it.
+	// Result is what a compile produces, with its warnings.
 	Result = okdp.Result
-	// Info: what an instance publishes (Result.Info), as
-	// InfoFile holds it: its URL, its usage, the connections it
-	// provides.
+	// Info is what an instance publishes (Result.Info, InfoFile).
 	Info = okdp.Info
-	// Output: a connection an instance provides (Info.Provides).
+	// Output is a connection an instance provides (Info.Provides).
 	Output = okdp.Output
-	// SecretRef: the Secret of an output's credentials, by name
-	// (Output.SecretRef).
+	// SecretRef names the Secret that holds an output's credentials.
 	SecretRef = okdp.SecretRef
-	// Dependency: an instance a connection reference points to, by one of
-	// its outputs or a claim (Result.Dependencies), what a deployer orders
-	// the releases with.
+	// Dependency is an instance that a connection reference points to.
 	Dependency = okdp.Dependency
-	// Claim: a connection claimed of a provider's instance, which its
-	// package provisions (Inputs.Claims): it publishes an output of its
-	// contract named its ID.
+	// Claim is a connection claimed from a provider's instance, whose
+	// package provisions it (Inputs.Claims).
 	Claim = okdp.Claim
-	// Binding: the provider a reference's claim is bound to
-	// (Inputs.Bindings), and the output it publishes for it.
+	// Binding is the provider that a reference's claim is bound to
+	// (Inputs.Bindings), with the output it publishes for the claim.
 	Binding = okdp.Binding
-	// Connection: an external connection, connections.<name> of the
-	// context, as written (ParseConnection): its contract, a description,
-	// the contract's fields, the Secret or the key of the platform's secret
-	// store its secret fields are in; it marshals to YAML as it is written.
+	// Connection is an external connection, connections.<name> of the
+	// context, as written (ParseConnection).
 	Connection = okdp.Connection
-	// ClaimSpec: a claim, as written: a named claim, claims.<name> of a
-	// project's context (ParseClaim), or a reference's claim template; its
-	// tags the keys it is written with.
+	// ClaimSpec is a claim as written: a named claim of a project's
+	// context (ParseClaim), or the claim template of a reference.
 	ClaimSpec = okdp.ClaimSpec
-	// Instance: an instance CompileAll compiles, its package and its
-	// inputs, Name, Published, Claims and Bindings left out, and its name
-	// (Instance.Name): a claim's or a class's provider names an instance
-	// of its namespace by its name or by its release, <namespace>/<name>
-	// or <name> of the claimer's namespace; its outputs that name none
-	// and its claims' IDs are named after it (Inputs.Name). LoadRepository
-	// names each after its directory; a caller that leaves Name empty
-	// names it by its release only. A provider serves the claims of
-	// another namespace through a class of the platform's, or those of the
-	// namespaces it lists (Instance.Claimers: Inputs.Claimers, its
-	// instance.yaml's, else its package's provisions').
+	// Instance is an instance that CompileAll compiles: its package, its
+	// inputs and its name, by which a claim or a class names its provider.
 	Instance = okdp.Instance
-	// Outcome: the compile of one instance of CompileAll: its result, nil
-	// when it is refused, and why; the claims of its references, bound.
+	// Outcome is the compile of one instance by CompileAll.
 	Outcome = okdp.Outcome
-	// Bound: a claim of a reference, bound to its provider by CompileAll:
-	// the one it names, or the provider of its class, the one it names or
-	// the default one of the claimer's context (global.okdp.provisioning).
+	// Bound is a claim of a reference that CompileAll bound to a provider.
 	Bound = okdp.Bound
-	// Repository: a part of a tree LoadRepository reads: its name in
-	// messages, its files and its Role, required: RoleTree, any part of the
-	// tree, or RoleCatalog, catalog/ and contracts/ only, its platform.yaml
-	// or projects/ refused.
+	// Repository is one part of a tree that LoadRepository reads: its
+	// name in messages, its files and its Role, which is required.
 	Repository = repository.Repository
-	// Role: what a Repository contributes to the tree (RoleTree,
-	// RoleCatalog); the zero value is refused.
+	// Role is what a Repository contributes to the tree (RoleTree,
+	// RoleCatalog). The zero value is refused.
 	Role = repository.Role
-	// Catalog: the packages and the contracts of a tree's repositories
-	// together (LoadCatalog): its services (Services, Service), the files
-	// of a package (Package), the contracts (Contracts).
+	// Catalog holds the packages and contracts of a tree (LoadCatalog).
 	Catalog = repository.Catalog
-	// CatalogService: a service of a Catalog, catalog/<service>/ of one
-	// repository: its name, its repository's, its versions, highest first.
+	// CatalogService is a service of a Catalog, its versions highest first.
 	CatalogService = repository.Service
-	// Graph: the deployment graph of compiled instances (NewGraph): what
-	// each release waits for (DependsOn), its Argo CD sync wave (Wave).
+	// Graph is the deployment graph of compiled instances (NewGraph): what
+	// each release waits for, and its Argo CD sync wave.
 	Graph = graph.Graph
-	// GraphNode: a release of the graph, in its namespace.
+	// GraphNode is a release of the graph, in its namespace.
 	GraphNode = graph.Node
-	// GraphError: a problem of the graph, at the release it is found at.
+	// GraphError is a problem of the graph, at its release.
 	GraphError = graph.Error
-	// Tree: instances compiled together (CompileTree), in their order, and
-	// the deployment graph of those that compile: by instance (Instance,
-	// Release), why each that does not deploy does not (Problems).
+	// Tree holds instances compiled together (CompileTree), in their
+	// order, and the deployment graph of those that compile.
 	Tree = tree.Tree
-	// RefusedProject: a project of a Tree that does not load, why
-	// (Problems, each naming its repository and path), and no instance of
-	// it: Tree.Refused, its output kept (Partial) as a project whose
-	// instance is refused keeps it.
+	// RefusedProject is a project of a Tree that does not load
+	// (Tree.Refused), and why. It has no instance.
 	RefusedProject = tree.Refused
-	// TreeInstance: an instance of a Tree and its compile: its Outcome,
-	// the problem of the graph at its release (GraphErr), the claims bound
-	// to it as a provider (Provided), what it granted each (Granted).
+	// TreeInstance is an instance of a Tree with its compile.
 	TreeInstance = tree.Instance
-	// ProvidedClaim: a claim bound to a provider (TreeInstance.Provided),
-	// and the instance that claims it (Claimer).
+	// ProvidedClaim is a claim bound to a provider, with its claimer.
 	ProvidedClaim = tree.Provided
-	// ChartSource: a chart cache that fetches the upstream charts it lacks
-	// (Ensure), unpacked as Inputs.Charts reads them: what CompileTree
-	// checks the final values against.
+	// ChartSource is a chart cache that fetches the upstream charts it
+	// lacks and holds them unpacked, as Inputs.Charts reads them.
 	ChartSource = tree.ChartSource
-	// LoadError: the problems of a tree that does not load (LoadRepository,
-	// Build), each naming its repository and path, one problem a whole
-	// message (Problems); Error gives them one per line, Unwrap the errors
-	// they are of (errors.Is ErrNotInCatalog).
+	// LoadError holds the problems of a tree that does not load, each a
+	// whole message that names its repository and path.
 	LoadError = repository.Error
-	// KeptProject: a project of a tree whose output is not written
-	// (Partial, TreeFiles), and why: Problems, an instance each,
-	// <namespace>/<instance>: <why>, and Instances, the instances of the
-	// problems, or, Unloaded, its load problems and no instance; Rederived, the files TreeFiles writes of it of today's
-	// settings all the same (its manifests, its instances' identity).
+	// KeptProject is a project whose output is not written (Partial).
 	KeptProject = tree.Kept
-	// KeptInstance: an instance of a KeptProject that does not deploy, and
-	// why (Err): refused, a problem of the graph at its release, its
-	// release name another namespace's too (TreeFiles: an Err wrapping a
-	// *ReleaseError), or a release of a kept project it depends on
-	// (Depends).
+	// KeptInstance is an instance that does not deploy, and why (Err).
 	KeptInstance = tree.KeptInstance
-	// ChartRef: an upstream chart, pinned: what renders the values of a key.
+	// ChartRef is a pinned upstream chart, which renders a key's values.
 	ChartRef = chart.Ref
-	// ChartMetadata: a package's Chart.yaml (Definition.Chart,
-	// Result.Chart).
+	// ChartMetadata is a package's Chart.yaml.
 	ChartMetadata = chart.Metadata
 )
 
 // The files Write gives besides Chart.yaml.
 const (
-	// ObjectsChart: the key of the umbrella's values and dependencies that
-	// holds Result.Objects, when there are objects, under ObjectsValue, as
-	// one YAML stream.
+	// ObjectsChart is the key of the umbrella's values and dependencies
+	// that holds Result.Objects, when there are objects.
 	ObjectsChart = okdp.ObjectsChart
-	// ObjectsValue: the value of ObjectsChart that holds the stream.
+	// ObjectsValue is the value of ObjectsChart: the objects, a YAML stream.
 	ObjectsValue = okdp.ObjectsValue
 )
 
 // The roles of a Repository (Repository.Role).
 const (
-	// RoleTree: a repository of the deployment, the platform's or a
-	// project's: any part of the tree, PlatformFile, ProjectsDir,
-	// CatalogDir and ContractsDir.
+	// RoleTree marks a repository of the deployment, the platform's or a
+	// project's. It may hold any part of the tree.
 	RoleTree = repository.RoleTree
-	// RoleCatalog: a catalog of packages, CatalogDir and ContractsDir
-	// only: a catalog that holds PlatformFile or ProjectsDir is refused, so
-	// that its maintainers add no project nor the platform's values.
+	// RoleCatalog marks a catalog of packages. It may hold CatalogDir and
+	// ContractsDir only: a PlatformFile or a ProjectsDir is refused, so
+	// that its maintainers can add neither a project nor platform values.
 	RoleCatalog = repository.RoleCatalog
 )
 
-// The names of the tree LoadRepository reads (docs/01_usage.md, repository
-// layout), for a caller that writes or lists its parts:
-//
-//	PlatformFile                                   the platform's values
-//	ContractsDir/<contract>.schema.json            a contract
-//	CatalogDir/<service>/<version>/                a package
-//	ProjectsDir/<project>/ProjectFile              a project's values, its ProjectDescription
-//	ProjectsDir/<project>/InstancesDir/<instance>/ an instance: InstanceFile, ConnectionsFile, ConfigFile
+// The names of the tree that LoadRepository reads (docs/01_usage.md).
 const (
-	// PlatformFile: the platform's values, the context at level 0.
+	// PlatformFile holds the platform's values, the context at level 0.
 	PlatformFile = repository.PlatformFile
-	// ContractsDir: the contracts, <contract>.schema.json.
+	// ContractsDir holds the contracts, <contract>.schema.json.
 	ContractsDir = repository.ContractsDir
-	// CatalogDir: the packages, <service>/<version>/.
+	// CatalogDir holds the packages, <service>/<version>/.
 	CatalogDir = repository.CatalogDir
-	// ProjectsDir: the projects, <project>/, each a namespace.
+	// ProjectsDir holds the projects, <project>/. Each is a namespace.
 	ProjectsDir = repository.ProjectsDir
-	// ProjectFile: a project's values, the context at level 1, in its
-	// directory; its ProjectDescription and its access
-	// (ProjectAccessKey), the project's own.
+	// ProjectFile, in a project's directory, holds the project's values,
+	// the context at level 1, plus two keys that are the project's own:
+	// ProjectDescription and ProjectAccessKey.
 	ProjectFile = repository.ProjectFile
-	// ProjectDescription: the key of ProjectFile that describes the
-	// project, a string, which LoadRepository leaves out of the context:
-	// no instance receives it.
+	// ProjectDescription is the key of ProjectFile that describes the
+	// project, a string. No instance receives it.
 	ProjectDescription = repository.ProjectDescription
-	// InstancesDir: a project's instances, <instance>/, each the instance
-	// of that name (Instance.Name) and the release ReleaseName(<project>,
-	// <instance>), in its directory.
+	// InstancesDir, in a project's directory, holds its instances,
+	// <instance>/, each named after its directory.
 	InstancesDir = repository.InstancesDir
-	// InstanceFile: an instance's package, {service, version}, in its
-	// directory.
+	// InstanceFile, in an instance's directory, names its package:
+	// {service, version}.
 	InstanceFile = repository.InstanceFile
-	// ConnectionsFile: an instance's own connections, the context at level
-	// 2, in its directory; optional.
+	// ConnectionsFile, in an instance's directory, holds the instance's
+	// own connections, the context at level 2. It is optional.
 	ConnectionsFile = repository.ConnectionsFile
-	// ConfigFile: an instance's values, its parameters and upstream values,
-	// in its directory; optional.
+	// ConfigFile, in an instance's directory, holds the instance's
+	// values: its parameters and upstream values. It is optional.
 	ConfigFile = repository.ConfigFile
 )
 
-// ReleaseName: the release of an instance of the tree, <project>-<instance>
-// (LoadRepository): the project's directory name and the instance's, its
-// namespace the project. The releases of a tree are unique across its
-// projects, as the HelmReleases and Applications of a deployer, which
-// share a namespace, need them; the targets refuse two of one name, which
-// project names that hold a "-" may give (a-b/c and a/b-c), as
-// CheckReleases does.
+// ReleaseName returns the release of an instance of the tree,
+// <project>-<instance>. Its namespace is the project.
+//
+// The releases of a tree must be unique across its projects, because the
+// HelmReleases and Applications of a deployer share one namespace.
+// Project names that hold a "-" can give one release twice (a-b/c and
+// a/b-c). The targets refuse that, as CheckReleases does.
 func ReleaseName(project, instance string) string {
 	return repository.ReleaseName(project, instance)
 }
 
-// IsName: name may name a part of a tree, a project (its namespace), an
-// instance, a connection, a named claim: a DNS-1123 label, lowercase
-// letters, digits and "-", a letter or a digit at each end, 63 characters
-// at most, as the compile checks them; for a caller that writes a tree,
-// each name a directory or a key.
+// IsName reports whether name may name a project, an instance, a
+// connection or a named claim: a DNS-1123 label. The compile checks names
+// the same way.
 func IsName(name string) bool { return chart.IsDNSLabel(name) }
 
-// CheckProjectName: nil when name may name a project, its namespace, as
-// the compile checks it (Compile, which refuses every instance of the
-// project otherwise), platform the platform's values, PlatformFile's, the
-// context at level 0 (nil for none): a name (IsName); none the compiler
-// reserves, platform (the segment of the platform's keys of the secret
-// store), kube-* (Kubernetes' own) and the deployer engines' and the
-// targets' namespaces (argocd, flux-system, okdp-releases); none of the
-// platform's, global.okdp.policy.reserved, privileged or not. The errors
-// are the compile's, the name a project's: project "kube-foo": the
-// namespace is reserved: .... A namespace a target writes in by its
-// options (Flux.Source's) is refused when the target writes the tree.
-// For a program that creates projects, before it creates any of a
-// project's parts.
+// CheckProjectName returns nil when name may name a project, that is its
+// namespace. A program that creates projects calls it first. The compile
+// makes the same check, and refuses every instance of a project that
+// fails it.
+//
+// platform is the platform's values (PlatformFile), or nil for none. The
+// name must be a name (IsName), and none that the compiler reserves
+// (platform, kube-*, the namespaces of the deployer engines and of the
+// targets) or that the platform reserves (global.okdp.policy.reserved).
+//
+// A namespace that a target writes in by its options is not refused
+// here: the target refuses it when it writes the tree.
 func CheckProjectName(ctx context.Context, rules *RuleSet, name string, platform map[string]any) error {
 	v, err := value.Normalize(platform)
 	if err != nil {
@@ -297,216 +225,188 @@ func CheckProjectName(ctx context.Context, rules *RuleSet, name string, platform
 	return okdp.CheckNamespace(ctx, rules, "project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
 }
 
-// AccessRole: the role of a group within a project, its project.yaml's
-// access (ProjectAccessKey): AccessViewer, AccessEditor, AccessAdmin.
+// AccessRole is the role of a group within a project, set by the access
+// of its project.yaml (ProjectAccessKey).
 type AccessRole = okdp.Role
 
-// The roles of a project's groups, each what the one before it may do,
-// and more: what the flux and argocd targets write as the Argo CD roles of
-// the project's AppProject and the RoleBindings of its namespace to
-// Kubernetes' view, edit and admin (docs/specs/01_inputs_outputs.md,
-// access).
+// The roles of a project's groups. Each may do what the one before it
+// may, and more. The flux and argocd targets write them as Argo CD roles
+// and as RoleBindings to Kubernetes' view, edit and admin
+// (docs/specs/01_inputs_outputs.md, access).
 const (
-	// AccessViewer: sees the project's Applications (get), and its
-	// namespace's objects but its Secrets (view).
+	// AccessViewer sees the project's Applications, and the objects of
+	// its namespace except its Secrets.
 	AccessViewer = okdp.RoleViewer
-	// AccessEditor: a viewer who syncs the Applications, runs their
-	// actions and reads their logs, no exec; edits the namespace's
-	// objects (edit).
+	// AccessEditor is a viewer who also syncs the Applications, runs
+	// their actions and reads their logs, without exec, and who edits the
+	// objects of the namespace.
 	AccessEditor = okdp.RoleEditor
-	// AccessAdmin: an editor who deletes and overrides the Applications,
-	// and administers the namespace (admin).
+	// AccessAdmin is an editor who also deletes and overrides the
+	// Applications, and administers the namespace.
 	AccessAdmin = okdp.RoleAdmin
 )
 
-// ProjectAccessKey: access, the key of ProjectFile that maps the
-// project's groups to their roles, which LoadRepository leaves out of the
-// context: no instance receives it.
+// ProjectAccessKey is access, the key of ProjectFile that maps the
+// project's groups to their roles. No instance receives it.
 const ProjectAccessKey = okdp.AccessKey
 
-// DefaultProjectGroup: okdp-project-<project>, the group of a project's
-// people when its ProjectFile gives no access, an editor.
+// DefaultProjectGroup returns okdp-project-<project>, the group of a
+// project's people when its ProjectFile gives no access. That group is
+// an editor.
 func DefaultProjectGroup(project string) string { return okdp.DefaultGroup(project) }
 
-// IsGroupName: name may name a group of access or of
-// global.okdp.access.admins, as the identity provider's tokens give it:
-// a letter or a digit, then letters, digits, ".", "_", "@", ":" and "-",
-// 255 characters at most; no "/", the name of a Keycloak group, not its
-// path.
+// IsGroupName reports whether name may name a group, as the identity
+// provider's tokens give it: a letter or a digit, then letters, digits,
+// ".", "_", "@", ":" and "-", 255 characters at most. It allows no "/":
+// the name is that of a Keycloak group, not its path.
 func IsGroupName(name string) bool { return okdp.IsGroup(name) }
 
-// PlatformAdmins: the groups of the platform's administrators,
-// global.okdp.access.admins of platform, its values (PlatformFile, the
-// context at level 0), checked against the platform's schema as the
-// compile checks them; none when not set. The compiler writes nothing of
-// them: the platform's bootstrap binds them once (Argo CD's role:admin,
-// the cluster's administration); for a program that mirrors the
-// platform's authority.
+// PlatformAdmins returns the groups of the platform's administrators,
+// global.okdp.access.admins of the platform's values, checked as the
+// compile checks them. It returns none when the key is not set.
+//
+// The compiler writes nothing from them: the platform's bootstrap binds
+// them.
 func PlatformAdmins(ctx context.Context, rules *RuleSet, platform map[string]any) ([]string, error) {
 	return okdp.PlatformAdmins(ctx, rules, platform)
 }
 
-// LoadDefinition reads the package at the root of fsys: Chart.yaml, then
-// okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
-// has them, checked; each compile reads its other files. A values.yaml
-// that holds expressions is read all the same, with a warning
-// (Definition.Warnings, then Result.Warnings).
+// LoadDefinition reads and checks the package at the root of fsys:
+// Chart.yaml, then okdp.yaml and its values file (values.cel.yaml or
+// values.yaml) when the package has them. Each compile reads the other
+// files of the package. A values.yaml that holds expressions is still
+// read, with a warning.
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return okdp.LoadDefinition(fsys)
 }
 
-// Compile runs the mapping of def on one instance, cancelled with ctx
-// (between stages, and within the evaluation of an expression). It is safe
-// for concurrent use: it keeps no state between calls.
+// Compile runs the mapping of def on one instance. ctx cancels it, between
+// stages and within the evaluation of an expression. Compile keeps no
+// state between calls, so it is safe for concurrent use.
 //
-// Whatever the package says, it enforces (docs/04_threat_model.md):
-//   - names: a release, a namespace and an instance name that are labels,
-//     the namespace none the platform or the compiler reserves
-//     (global.okdp.policy.reserved, the engines' own), the release none
-//     of an object the platform writes in every namespace;
-//   - values: an instance's layers hold no connections, claims, access nor
-//     template code, and global only the keys its parameter schema
-//     declares, never okdp; the layers of a project above the platform's
-//     set nothing of global.okdp but provisioning and of global only
-//     the keys of global.okdp.policy.projectGlobals, and change no value
-//     of a lower level;
-//   - upstream values, of a project that is not privileged: the package's
-//     protect and append paths, no key of a pod's privileges, identity or
-//     containers, images from the platform's registries only;
-//   - connections: of their contract, a store key under the project's
-//     own, and the claims bound by CompileAll;
-//   - objects, of a project that is not privileged: its namespace's, none
-//     cluster-scoped nor of the engines' API groups, hosts of the form
-//     <label>.<namespace>.<ingress.suffix> or that the platform lists for
-//     it (global.okdp.policy.ingressHosts), in the objects and in the
-//     values of its charts' ingresses; of any project, no two of one kind,
-//     namespace and name, and no credential in clear unless
-//     Inputs.AllowPlainSecrets;
+// Whatever the package says, it enforces these rules
+// (docs/04_threat_model.md):
+//   - names: the release, the namespace and the instance name are labels,
+//     and none is reserved by the platform or the compiler;
+//   - values: the layers of an instance hold no connections, claims,
+//     access nor template code, and no layer sets a key of global that
+//     its level may not set, nor changes a value of a lower level;
+//   - upstream values, for a project that is not privileged: they respect
+//     the package's protect and append paths, set no key of a pod's
+//     privileges, and take images from the platform's registries only;
+//   - connections: each is of its contract, a store key is under the
+//     project's own, and the claims are those CompileAll bound;
+//   - objects, for a project that is not privileged: each is in the
+//     instance's namespace, none is cluster-scoped or of an engine's API
+//     group, and each host is one the project may serve;
+//   - objects, for any project: no two are the same, and none holds a
+//     credential in clear unless Inputs.AllowPlainSecrets;
 //   - cost: the CEL cost of the expressions (Inputs.CostLimit) and the
 //     time of the compile (Inputs.Timeout, ctx).
 func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	return okdp.Compile(ctx, def, in)
 }
 
-// CompileAll compiles instances together: each claim of a reference bound
-// to the instance that provisions its contract, the one it names or the
-// provider of its class, the one it names or the default one of the
-// claimer's context (Outcome.Claims), named by its name (Instance.Name)
-// or its release, a name of two instances refused, one of another
-// namespace through a class of the platform's or with its consent
-// (Instance.Claimers); each instance after
-// the instances of its namespace whose outputs it references and the
-// providers of its claims, with what they publish (Inputs.Name,
-// Published, Claims and Bindings, set by CompileAll). Two instances of a
-// namespace of one release, or of one name, are refused. An output two instances of a
-// namespace publish refuses both, and the instances whose references
-// resolved to it. Outcomes in the order of instances, which changes none
-// of them.
+// CompileAll compiles instances together. It returns one Outcome per
+// instance, in the order of instances; that order changes no outcome.
 //
-// Beside the rules of Compile, which it applies to each instance, it
-// enforces those that need several: a provider of another namespace only
-// through a class of the platform's or with its consent
-// (Instance.Claimers), the connections of every context checked at their
-// declaration, referenced or not, one writer per Secret of a namespace
-// (an instance's objects and the copies of its claimers' credentials), and
-// each claim's request checked against its contract's claim schema.
+// It binds each claim of a reference to the instance that provisions the
+// claim's contract: the provider the claim names, else the provider of
+// its class. It compiles each instance after the instances whose outputs
+// it references and after the providers of its claims, with what they
+// publish. To that end it sets Inputs.Name, Published, Claims and
+// Bindings itself.
+//
+// Beside the rules of Compile, it enforces those that need several
+// instances: a release, a name or an output is unique in its namespace,
+// a provider of another namespace is bound only through a class of the
+// platform's or with its consent (Instance.Claimers), each Secret of a
+// namespace has one writer, and the connections of every context are
+// checked, referenced or not.
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	return okdp.CompileAll(ctx, instances)
 }
 
-// CompileTree: instances compiled together (CompileAll), then the
-// deployment graph of those that compile (NewGraph), each of its problems
-// at the instance of its release (TreeInstance.GraphErr), and the claims
-// bound to each provider, by ID (TreeInstance.Provided): the compile of a
-// tree (LoadRepository) as a caller that reads it asks of it, each
-// instance's outcome, why it does not deploy (TreeInstance.Err), where
-// each claim is bound and what its provider granted. With charts, the
-// upstream charts the compile names (Result.Charts) are fetched, and the
-// instances compiled again with them, their final values checked against
-// them (Inputs.Charts); a chart that cannot be fetched is unchecked alone:
-// the keys of the instances that name it take no check against it, said
-// per chart (Tree.ChartFailures) and per instance
-// (TreeInstance.ChartFailures), and a project that is not privileged,
-// giving upstream values to it when the host requires rendering
-// (Inputs.RequireRender), is refused, that instance alone. instances are
-// not changed.
+// CompileTree compiles instances together (CompileAll), then builds the
+// deployment graph of those that compile (NewGraph). For each instance
+// the Tree gives its outcome, the problem of the graph at its release
+// and the claims bound to it as a provider. It does not change instances.
+//
+// With charts, it fetches the upstream charts the compile names and
+// compiles the instances again with them, so that their final values are
+// checked against the charts. A chart that cannot be fetched leaves only
+// itself unchecked, and is reported (Tree.ChartFailures). When the host
+// requires rendering (Inputs.RequireRender), an instance that gives such
+// a chart upstream values is refused, unless its project is privileged.
 func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) *Tree {
 	return tree.Compile(ctx, instances, charts)
 }
 
-// LoadRepository: every instance of the tree that repos make together
-// (docs/01_usage.md, repository layout), by project then instance, as
-// CompileAll compiles them, each named after its directory
-// (Instance.Name), the release ReleaseName of its project and its name,
-// in the namespace of its project: each part of the tree in one
-// repository (platform.yaml, catalog/<service>/, projects/<project>/), a
-// contract in several with the same bytes, so that the order of repos
-// changes nothing; platform.yaml and projects/ of a repository of
-// RoleTree only, a catalog's (RoleCatalog) refused, as a repository
-// without a role. Every problem at once, each naming its repository and
-// path: a *LoadError.
+// LoadRepository returns every instance of the tree that repos make
+// together (docs/01_usage.md, repository layout), by project then
+// instance, as CompileAll compiles them. Each instance is named after
+// its directory, and its namespace is its project.
 //
-// It enforces the layout: only the files and keys a part of the tree has
-// (an instance's directory holds instance.yaml, config.yaml and
-// connections.yaml, and connections.yaml only connections), the names of
-// its projects and instances, the declarations of a project without
-// instance checked as an instance's compile checks them, and the catalogs'
-// roles. Any problem fails the whole load; Build refuses a project that
-// does not load alone.
+// Each part of the tree is in one repository, so the order of repos
+// changes nothing. Only a repository of RoleTree may hold platform.yaml
+// and projects/. A part of the tree holds only the files and keys it may
+// have.
+//
+// It reports every problem at once in a *LoadError. Any problem fails
+// the whole load. Build is more lenient: it refuses only the project
+// that does not load.
 func LoadRepository(ctx context.Context, repos []Repository) ([]Instance, error) {
 	return repository.Load(ctx, repos)
 }
 
-// AddedProblems: the problems of after that before has not, in after's
-// order; every one of after's when before is nil: what a change of a tree
-// that does not load added to why.
+// AddedProblems returns the problems of after that before does not have,
+// in the order of after: what a change added to the reasons a tree does
+// not load. A nil before has no problem.
 func AddedProblems(before, after *LoadError) []string {
 	return repository.Added(before, after)
 }
 
-// DefaultCostLimit: the CEL cost one instance's expressions may use for a
-// caller that compiles packages it has not reviewed (okdp-compile's
-// --cost-limit, a server's BuildOptions.CostLimit), about ten times the
-// dearest case of the catalogs.
+// DefaultCostLimit is the CEL cost that the expressions of one instance
+// may use, for a caller that compiles packages it has not reviewed. It is
+// about ten times the cost of the dearest case of the catalogs.
 const DefaultCostLimit = 1_000_000
 
-// BuildOptions: what Build sets on each instance of a tree, and the chart
-// cache of its checks.
+// BuildOptions is what Build sets on each instance of a tree, plus the
+// chart cache of its checks.
 type BuildOptions struct {
-	// CostLimit: Inputs.CostLimit of each instance, 0 for none.
-	CostLimit uint64
-	// InstanceTimeout: Inputs.Timeout of each instance, 0 for none: how
-	// long one instance's compile may take, past which that instance is
-	// refused and the others compiled, beside ctx's deadline, the whole
-	// tree's.
-	InstanceTimeout time.Duration
-	// AllowPlainSecrets: Inputs.AllowPlainSecrets of each instance.
-	AllowPlainSecrets bool
-	// Charts: the chart cache CompileTree checks the final values against
-	// (StaticCharts, a cache that fetches what it lacks); nil, unchecked.
+	CostLimit uint64 // Inputs.CostLimit of each instance; 0 sets no limit
+	// InstanceTimeout is Inputs.Timeout of each instance; 0 sets no
+	// limit. Past it, that instance is refused and the others are still
+	// compiled. The deadline of ctx bounds the whole tree beside it.
+	InstanceTimeout   time.Duration
+	AllowPlainSecrets bool // Inputs.AllowPlainSecrets of each instance
+	// Charts is the chart cache that CompileTree checks the final values
+	// against: StaticCharts, or a cache that fetches what it lacks. With
+	// nil, they are not checked.
 	Charts ChartSource
-	// Rules: Inputs.Rules of each instance; nil, no rule.
-	Rules *RuleSet
-	// Finalize: Inputs.Finalize of each instance; nil, Helm's merge.
-	Finalize Finalize
-	// CheckGlobals: Inputs.CheckGlobals of each instance; nil, none.
-	CheckGlobals func(context.Context, GlobalsInput) error
+	// Rules is Inputs.Rules of each instance. Nil applies the mandatory
+	// rules alone.
+	Rules        *RuleSet
+	Finalize     Finalize                                  // Inputs.Finalize; nil is Helm's merge
+	CheckGlobals func(context.Context, GlobalsInput) error // Inputs.CheckGlobals; nil checks nothing
 }
 
-// LoadRules: the rule set of fsys, rules.yaml at its root; a table missing
-// or unknown is an error, never a rule turned off.
+// LoadRules reads the rule set of fsys, rules.yaml at its root, and adds
+// it to the compiler's mandatory one: a compile applies both. The file
+// never turns a rule off: it is an error for it to give a rule the
+// mandatory set gives, or to name a table or a check that is unknown.
 func LoadRules(fsys fs.FS) (*RuleSet, error) { return okdp.LoadRules(fsys) }
 
-// Build: the tree repos make together (LoadRepository), each instance
-// with the options' CostLimit, InstanceTimeout and AllowPlainSecrets, compiled
-// (CompileTree, with opts.Charts), cancelled with ctx: what okdp-compile
-// and okdp-gitops compile. A problem of the platform's parts (a
-// repository, platform.yaml, catalogs.yaml, a catalog) is a *LoadError,
-// every problem listed, the projects' among them; a project that does not
-// load is refused as a whole, not the tree: it has no instance and is
-// among the tree's Refused (Partial keeps its output), the others compile.
-// An instance refused is the tree's answer (TreeInstance.Err), not an
-// error.
+// Build loads the tree that repos make together (as LoadRepository reads
+// it), sets opts on each instance and compiles the tree (CompileTree).
+// ctx cancels it.
+//
+// A problem of the platform's parts (a repository, platform.yaml,
+// catalogs.yaml, a catalog) fails the build with a *LoadError that lists
+// every problem. A project that does not load is refused as a whole, but
+// the tree is not: the project is listed in the tree's Refused and the
+// other projects compile. A refused instance is not an error either: it
+// is the tree's answer (TreeInstance.Err).
 func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, error) {
 	loaded, err := repository.LoadProjects(ctx, repos)
 	if err != nil {
@@ -523,16 +423,15 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 	}
 	t := CompileTree(ctx, instances, opts.Charts)
 	for _, r := range loaded.Refused {
-		r.Inputs.Rules = opts.Rules // what CheckProject reads of a project that does not load
+		r.Inputs.Rules = opts.Rules // CheckProject reads them for a project that does not load
 		t.Refused = append(t.Refused, RefusedProject{Namespace: r.Project, Problems: r.Problems, Errs: r.Errs, Inputs: r.Inputs, Own: r.Own})
 	}
 	return t, nil
 }
 
-// LoadErrorOf: why the projects of t that do not load (Tree.Refused) do
-// not, as the *LoadError the whole tree would be with them, their
-// problems in order; nil when every project loads: for a caller that
-// reasons on a tree as a whole (treeedit.StateOf).
+// LoadErrorOf returns why the projects of t that do not load
+// (Tree.Refused) do not, as the *LoadError that the whole tree would give
+// with them. It is nil when every project loads.
 func LoadErrorOf(t *Tree) *LoadError {
 	if t == nil {
 		return nil
@@ -544,74 +443,73 @@ func LoadErrorOf(t *Tree) *LoadError {
 	return repository.JoinErrors(errs)
 }
 
-// StaticCharts: a chart cache filled already, fsys (each chart unpacked
-// with helm pull --untar, as Inputs.Charts reads it), which fetches
-// nothing: CompileTree sets it on every instance at once and compiles
-// them once, a chart it lacks failing the check of the instance that
-// names it (okdp-compile --check --charts).
+// StaticCharts returns a chart cache that is filled already and fetches
+// nothing. fsys holds each chart unpacked with helm pull --untar, as
+// Inputs.Charts reads it. A chart the cache lacks fails the check of the
+// instance that names it.
 func StaticCharts(fsys fs.FS) ChartSource { return tree.Dir{FS: fsys} }
 
-// Partial: the projects of t written and those kept. results are the
-// compiled instances of the projects written, g their graph; kept the
-// others, by namespace: the project of an instance refused, then, round
-// after round, of an instance at which the graph of the projects not kept
-// yet has a problem of its own (a cycle, a release that does not provide
-// what is referenced), or that depends on a release of a kept project
-// (Result.Dependencies), compiled with what that release publishes now,
-// which is not deployed: <namespace>/<instance>: it depends on
-// <namespace>/<release>, of the project <namespace>, whose output is
-// kept. g is nil only when the graph has a problem at no instance of t.
+// Partial splits the projects of t into those written and those kept.
+// results are the compiled instances of the projects written, and g is
+// their graph. kept holds the other projects, by namespace.
+//
+// A project is kept when one of its instances is refused. Then, round
+// after round, a project is kept when one of its instances has a problem
+// in the graph of the projects not kept yet, or depends on a release of
+// a kept project: that instance was compiled with what the release
+// publishes now, which is not deployed.
+//
+// g is nil only when the graph has a problem at no instance of t.
 func Partial(t *Tree) (results []*Result, g *Graph, kept []KeptProject) {
 	return tree.Partial(t)
 }
 
-// Regressions: the instances of after that do not deploy
-// (TreeInstance.Err) though they did in before, matched by namespace and
-// name, in after's order: what a change from before to after broke.
+// Regressions returns the instances of after that do not deploy
+// (TreeInstance.Err) though they did in before: what a change broke.
+// Instances are matched by namespace and name, in the order of after.
 func Regressions(before, after *Tree) []*TreeInstance {
 	return tree.Regressions(before, after)
 }
 
-// ParseConnection: the external connection name of connections, v, as
-// written: for a caller that lists or edits the connections of a tree,
-// each checked by the compile of the instances that reference it.
+// ParseConnection reads v, the entry name of connections, as an external
+// connection, as written. It checks nothing: the compile of the instances
+// that reference a connection checks it.
 func ParseConnection(name string, v any) Connection {
 	return okdp.ParseConnection(name, v)
 }
 
-// ParseClaim: the named claim name of claims, v, as written, and why the
-// compile refuses it, if it does: the claim holds what v does all the
-// same, for a caller that lists the claims of a tree.
+// ParseClaim reads v, the entry name of claims, as a named claim, as
+// written. The error tells why the compile refuses the claim, if it
+// does. Even then, the claim returned holds what v holds.
 func ParseClaim(name string, v any) (ClaimSpec, error) {
 	return okdp.ParseClaim(name, v)
 }
 
-// ErrNotInCatalog: a service, or a version of a service, that the catalog
-// of no repository has: what a Catalog's Service and Package wrap.
+// ErrNotInCatalog reports a service or a version that no catalog has.
+// The errors of a Catalog's Service and Package wrap it.
 var ErrNotInCatalog = repository.ErrNotInCatalog
 
-// LoadCatalog: the catalog that repos make together, as LoadRepository
-// reads it: each service in one repository, every version of it, a
-// contract in several with the same bytes; every problem at once, each
-// naming its repositories. Its services list the versions of each,
-// highest first, the SemVer ones by precedence; a package is what
-// LoadRepository reads for an instance of that service and version.
+// LoadCatalog returns the catalog that repos make together, as
+// LoadRepository reads it: each service is in one repository with every
+// version of it, and a contract may be in several with the same bytes.
+// It reports every problem at once, each naming its repositories.
 func LoadCatalog(repos []Repository) (*Catalog, error) {
 	return repository.LoadCatalog(repos)
 }
 
-// NewGraph: the deployment graph of results, the compiled instances of
-// their namespaces: a release waits for the releases its connection
-// references point to (Result.Dependencies). Every problem at once, each
-// a *GraphError: a dependency on a release no result has, or on one that
-// does not provide what is referenced; a cycle; a release given twice.
+// NewGraph builds the deployment graph of results, which are the compiled
+// instances of their namespaces. A release waits for the releases its
+// connection references point to (Result.Dependencies). NewGraph reports
+// every problem at once, each a *GraphError: a dependency on a release
+// that is missing or does not provide what is referenced, a cycle, a
+// release given twice.
 func NewGraph(results []*Result) (*Graph, error) {
 	return graph.New(results)
 }
 
-// ParseValues: a values file as Helm 3 reads it (its first document, YAML
-// 1.1, string keys, every number a float64), for Inputs.Context and
-// Inputs.Values.
+// ParseValues reads a values file as Helm 3 does: its first document, as
+// YAML 1.1, with string keys and every number a float64. The result fits
+// Inputs.Context and Inputs.Values.
 func ParseValues(b []byte) (map[string]any, error) {
 	return chart.ParseValues(b)
 }

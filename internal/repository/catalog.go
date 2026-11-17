@@ -12,19 +12,16 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 )
 
-// ErrNotInCatalog: a service, or a version of a service, that the catalog
-// of no repository has.
+// ErrNotInCatalog reports a service, or a version of a service, that no
+// repository's catalog holds.
 var ErrNotInCatalog = errors.New("not in the catalog")
 
-// notInCatalog: the error of a package the catalog lacks, its message
-// naming it, ErrNotInCatalog to errors.Is.
+// notInCatalog names the missing package. It matches ErrNotInCatalog.
 type notInCatalog struct{ msg string }
 
 func (e *notInCatalog) Error() string        { return e.msg }
 func (e *notInCatalog) Is(target error) bool { return target == ErrNotInCatalog }
 
-// repo: the repository of the service, an error wrapping ErrNotInCatalog
-// when none has it.
 func (t *parts) repo(service string) (*Repository, error) {
 	repo, ok := t.services[service]
 	if !ok {
@@ -33,12 +30,10 @@ func (t *parts) repo(service string) (*Repository, error) {
 	return repo, nil
 }
 
-// packageDir: the package of version of service,
-// catalog/<service>/<version>/, and its repository, the service's; an
-// error wrapping ErrNotInCatalog when that repository has no such
-// directory. The directory that cannot be read for another reason (a
-// symbolic link the caller's fs.FS refuses) gives its own error, naming
-// it.
+// packageDir returns the directory of a package and the service's
+// repository, which holds it. The error wraps ErrNotInCatalog when the
+// directory does not exist. A directory that cannot be read for another
+// reason (a symbolic link the caller's fs.FS refuses) gives its own error.
 func (t *parts) packageDir(service, version string) (*Repository, string, error) {
 	repo, err := t.repo(service)
 	if err != nil {
@@ -55,24 +50,21 @@ func (t *parts) packageDir(service, version string) (*Repository, string, error)
 	return repo, dir, nil
 }
 
-// Catalog: the packages and the contracts of repositories together, as
-// Load indexes them (LoadCatalog).
+// Catalog holds the packages and the contracts of several repositories,
+// indexed as Load indexes them. LoadCatalog builds it.
 type Catalog struct{ t *parts }
 
-// Service: a service of a Catalog, catalog/<service>/ of one repository:
-// its name, its repository's, and its versions, the directories of
-// catalog/<service>/, highest first (sortVersions).
+// Service is a service of a Catalog: catalog/<service>/ in the repository
+// named Repository. Versions lists its directories, highest first.
 type Service struct {
 	Name       string
 	Repository string
 	Versions   []string
 }
 
-// LoadCatalog: the catalog that repos make together, as Load reads it:
-// each service in one repository, a contract in several with the same
-// bytes, so that the order of repos changes nothing; each repository of
-// its role, as Load requires (Repository.Role). Every problem at once,
-// each naming its repositories.
+// LoadCatalog indexes the catalog that repos make together, the way Load
+// does: the order of repos changes nothing, and each repository needs a
+// role. The error lists every problem at once.
 func LoadCatalog(repos []Repository) (*Catalog, error) {
 	t, err := index(repos)
 	if err != nil {
@@ -81,7 +73,7 @@ func LoadCatalog(repos []Repository) (*Catalog, error) {
 	return &Catalog{t: t}, nil
 }
 
-// Services: every service of the catalog, by name.
+// Services returns every service of the catalog, sorted by name.
 func (c *Catalog) Services() ([]Service, error) {
 	var out []Service
 	var errs []error
@@ -96,8 +88,8 @@ func (c *Catalog) Services() ([]Service, error) {
 	return out, errors.Join(errs...)
 }
 
-// Service: the service name, an error wrapping ErrNotInCatalog when no
-// repository has it.
+// Service returns the named service. The error wraps ErrNotInCatalog when
+// no repository holds it.
 func (c *Catalog) Service(name string) (*Service, error) {
 	repo, err := c.t.repo(name)
 	if err != nil {
@@ -112,10 +104,8 @@ func (c *Catalog) Service(name string) (*Service, error) {
 	return &Service{Name: name, Repository: repo.Name, Versions: versions}, nil
 }
 
-// Package: the files of version of service, catalog/<service>/<version>/
-// of the service's repository, the package Load reads for an instance of
-// it; an error wrapping ErrNotInCatalog when that repository has no such
-// directory.
+// Package returns the files of a package, as Load reads them for an
+// instance of it. The error wraps ErrNotInCatalog when it does not exist.
 func (c *Catalog) Package(service, version string) (fs.FS, error) {
 	repo, dir, err := c.t.packageDir(service, version)
 	if err != nil {
@@ -124,13 +114,13 @@ func (c *Catalog) Package(service, version string) (fs.FS, error) {
 	return fs.Sub(repo.FS, dir)
 }
 
-// Contracts: the contracts of every repository, <contract>.schema.json,
-// as each instance's compile reads them (Inputs.Contracts).
+// Contracts returns the contracts of every repository, as
+// <contract>.schema.json files. A compile reads them as Inputs.Contracts.
 func (c *Catalog) Contracts() fs.FS { return c.t.contracts }
 
-// sortVersions: versions highest first: those that are SemVer
-// (chart.IsVersion) by precedence, then the others; those of one
-// precedence by name, the highest first.
+// sortVersions sorts versions highest first. SemVer versions
+// (chart.IsVersion) come first, by precedence; the others follow. Versions
+// of equal precedence are sorted by name, highest first.
 func sortVersions(versions []string) {
 	slices.SortStableFunc(versions, func(a, b string) int {
 		va, vb := chart.IsVersion(a), chart.IsVersion(b)

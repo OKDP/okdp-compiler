@@ -5,13 +5,15 @@ with a YAML + CEL mapping. A service is a package, a directory in git, not
 a chart: its upstream charts are rendered as published, from their own
 repositories, with the values the compiler writes.
 
-It is a Go library (`github.com/okdp/okdp-compiler`, package `compiler`):
-no binary to call, everything is read through `fs.FS` and in-memory
-values. It holds the claims and their providers, the compile of a whole
-tree they require, Helm's merge of the final values and the errors, on
-[cel2yaml](https://github.com/OKDP/cel2yaml). The `okdp-compile` command
-line, the Flux and Argo CD outputs, the chart cache that pulls charts, the
-edits of a tree and the standard rule set are
+It is a Go library (`github.com/okdp/okdp-compiler`, package `compiler`),
+everything read through `fs.FS` and in-memory values, and a thin command
+over it, `okdp-compile`, for `helm install` ([command
+line](#command-line)). It holds the claims and their providers, the
+compile of a whole tree they require, the mandatory rules every compile
+applies, Helm's merge of the final values and the errors, on
+[cel2yaml](https://github.com/OKDP/cel2yaml). The Flux
+and Argo CD outputs, the chart cache that pulls charts, the edits of a
+tree and the standard rule set are
 [okdp-gitops](https://github.com/OKDP/okdp-gitops)'s.
 
 ## Library
@@ -19,7 +21,7 @@ edits of a tree and the standard rule set are
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-rules, err := compiler.LoadRules(rulesFS) // the rule set; none, and no platform rule applies
+rules, err := compiler.LoadRules(rulesFS) // a rule set added to the mandatory one; none, and no platform rule applies
 if err != nil {
 	log.Fatal(err)
 }
@@ -131,28 +133,35 @@ chart's defaults, must meet its schema
 
 ## Rules
 
-What a platform refuses and what the compiler knows of its names are data,
-a rule set (`compiler.RuleSet`, `compiler.LoadRules`, given as
-`Inputs.Rules` or `BuildOptions.Rules`): its tables, its checks, the
-schemas of the platform's settings and of a mapping, the workload
-fragments, the OAuth clients and the charts the compiler adds. The walkers
-that apply them stay in Go. okdp-gitops holds the standard set,
-`rules/v1`, and gives it to its compiles;
-[`testdata/rules`](testdata/rules) is its copy, for this module's tests.
+What a compile knows of a platform's names and what a platform refuses
+are data, two rule sets a compile applies together. The walkers that
+apply them stay in Go.
 
-With no rule set a compile applies none: no namespace, object or host is
-refused, no schema reads the platform's values or a mapping's, there is no
-fragment, no OAuth client, no project role. The claim format stays, so
-claims bind within a namespace; a claim of another namespace is refused,
-as the objects that carry its credentials are the rule set's.
+The mandatory set, embedded in the compiler
+([`internal/rules/mandatory`](internal/rules/mandatory)), is what a
+compile needs to write values a chart installs: the workload fragments,
+the OAuth clients, the platform's schema, what a mapping sees as
+`platform`, the labels, the names, the roles and the objects of the
+secret store. Every compile applies it.
+
+A rule set given (`compiler.RuleSet`, `compiler.LoadRules`, as
+`Inputs.Rules` or `BuildOptions.Rules`) is added to it: its tables, its
+checks, the schema of a mapping and the charts the compiler adds. It
+replaces nothing the mandatory set gives, and the two together hold every
+table and check. okdp-gitops holds the standard set, `rules/v1`, and
+gives it to its compiles; [`testdata/rules`](testdata/rules) is its copy,
+for this module's tests.
+
+With no rule set a compile applies the mandatory one alone: no namespace,
+object or host is refused and no schema reads a mapping's sections.
 
 A host adds what depends on the merged values with `Inputs.Finalize` and
 `Inputs.CheckGlobals`: okdp-gitops' `deploy.Build` sets the upstream and
 ingress policy there. A compile without them applies Helm's merge alone.
 
-The settings of `global.okdp` the standard set reads are described, typed
-and defaulted by its
-[`schemas/platform.schema.json`](testdata/rules/schemas/platform.schema.json):
+The settings of `global.okdp` the compiler reads are described, typed
+and defaulted by the mandatory set's
+[`schemas/platform.schema.json`](internal/rules/mandatory/schemas/platform.schema.json):
 the classes of the claims
 ([classes](docs/specs/01_inputs_outputs.md#classes)), the platform's
 secret store (`global.okdp.secrets`), through which the credentials of
@@ -190,31 +199,44 @@ expressions), and the sections of `okdp.yaml`, after its package keys
 (`require`, `roles`, `dependsOn`, `defaults`, `upstream`): `vars`,
 `errors`, `instance` (url, usage), `provides` (the connections the
 instance publishes), `objects` (OKDP's own objects, whole manifests) and
-what the rule set adds, `oidcClients` (the service's OAuth clients) in the
-standard set. Expressions see `release`, `values`, `global.okdp`,
+what the rule sets add, `oidcClients` (the service's OAuth clients) in the
+mandatory set. Expressions see `release`, `values`, `global.okdp`,
 `platform`, `service`, `labels` and `selectorLabels`, and call host
 functions, Helm's and OKDP's (`str`, `sha256`, `toJson`, `okdpFullname`;
 `okdpGeneratedSecret`, `oidcClientSecret` and the fragments of the
-standard set...):
+mandatory set...):
 [service definition](docs/specs/02_service_definition.md),
 [control flow](docs/specs/03_control_flow.md),
 [functions](docs/specs/04_functions.md).
 
-With the standard set, the OAuth clients are provisioned by the platform
+The OAuth clients are provisioned by the platform
 (`global.okdp.oidc.clientProvisioning: existing`, the default) or
 registered by each service (`dcr`): in `dcr` mode, OIDC enabled, each
 client is registered by a Job among the instance's objects, computed by
 a template in the mapping language,
-[`charts/oidc-dcr.cel.yaml`](testdata/rules/charts/oidc-dcr.cel.yaml)
+[`charts/oidc-dcr.cel.yaml`](internal/rules/mandatory/charts/oidc-dcr.cel.yaml)
 ([oidcClients](docs/specs/02_service_definition.md#oidcclients), [their
 platform settings](docs/specs/01_inputs_outputs.md#oauth-client-settings)).
 
 ## Command line
 
-`okdp-compile` compiles a tree from directories, for CI and scripts. It
-is built from okdp-gitops, whose
-[usage](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md)
-documents it.
+`okdp-compile` (`make build`, `bin/okdp-compile`) compiles a tree from
+directories and writes the files of [Output](#output) under
+`projects/<namespace>/instances/<release>/`, with neither okdp-gitops nor
+a control plane:
+
+```bash
+okdp-compile --repository <dir>... [--catalog <dir>]... \
+  [--rules <rule set>] -o <dir>
+okdp-compile --check [--charts <dir>] --repository <dir>... \
+  [--catalog <dir>]... [--rules <rule set>]
+```
+
+It takes the flags of okdp-gitops' `okdp-compile`, whose other targets,
+`--partial` and `--report` need okdp-gitops, and `--rules`, a rule set
+added to the mandatory one (okdp-gitops' `rules/v1`, or its copy here,
+`testdata/rules`): none, and the mandatory rules alone apply
+([usage](docs/01_usage.md#command-line)).
 
 ## Layout
 
@@ -224,13 +246,15 @@ documents it.
 | `accessors.go` | the compile's rules for a caller that answers before it writes: `FieldErrors`, `ConnectionRefs`, `ReadContract`, `CheckConnection`, `MergeValues`, `CoalesceValues`, the names of the claims |
 | `write.go` | the files of a compile: `Write`, `ChartValues`, `ObjectsChartValues` |
 | `internal/okdp/` | the claims, classes and providers, the connections and contracts, the outputs, the layers, `LoadDefinition` and `Compile`, the order of the stages, `CompileAll`; the walkers the rule set drives |
-| `internal/rules/` | the rule engine: `RuleSet`, `LoadRules`, `Empty`, `rules.schema.json` |
+| `internal/rules/` | the rule engine: `RuleSet`, `LoadRules`, `Mandatory`, `rules.schema.json`; `mandatory/`, the mandatory rule set, embedded |
 | `internal/merge/` | Helm's merge of the final values, the instance's upstream values, the check against a chart cache |
 | `internal/repository/` | the tree of a deployment, in one or more repositories, read as the instances `CompileAll` compiles; the problems of one that does not load |
 | `internal/tree/` | a tree compiled (`CompileTree`), its instances read as a caller asks of them; its projects written and kept (`Partial`) |
 | `internal/graph/` | the deployment graph of compiled instances: their dependencies checked, what each release waits for, its sync wave |
 | `internal/compile/` | the top level of a mapping over github.com/okdp/cel2yaml, the YAML + CEL language: `vars`, `errors`, the sections, read from one file or several ([source map](docs/00_architecture.md#source-map)) |
 | `internal/testrules/` | the rule set of this module's tests |
+| `cmd/okdp-compile/` | the command line, over `Build` and `Write` |
+| `internal/dirfs/`, `internal/outdir/` | the directories the command reads, bounded; its output directory: copies of okdp-gitops' |
 | `chart/` | what the compiler reproduces of Helm: values, schemas, `Chart.yaml` and the charts of a package, the references to charts |
 | `value/` | the values every package shares, and their helpers |
 | `examples/<example>/` | each example: `input/catalog/` the package or its services, `input/contracts/`, `input/config/` the platform, projects and instances, `output/` what `Write` gives, checked by `go test` ([examples](docs/00_architecture.md#examples)) |
@@ -239,7 +263,7 @@ documents it.
 | `examples/02_advanced/` | `webapp`: the contracts, the platform's values, a claim of a database bound to `demo-db`, OAuth clients in `dcr` mode |
 | `examples/03_full/` | `workspace`, every part of the mapping language, commented: five charts, three OAuth clients, connections at each level, two claims |
 | `examples/04_claims/` | claims across namespaces: a provider in the project `data`, its claimers in `demo`, the classes and the consent, the platform's secret store |
-| `examples/05_fragments/` | workloads written with the fragments of the standard set |
+| `examples/05_fragments/` | workloads written with the fragments of the mandatory set |
 | `testdata/rules/` | the copy of okdp-gitops' standard rule set |
 | `docs/` | the documentation |
 

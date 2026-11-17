@@ -14,9 +14,9 @@ Three kinds of document share the directives, the
 | Document | Directives |
 |---|---|
 | the mapping: the sections of `okdp.yaml` and the values file, `values.cel.yaml` ([service definition](02_service_definition.md#sections)) | all |
-| the objects of an OAuth client, `rules/v1/charts/oidc-dcr.cel.yaml` of the standard rule set, okdp-gitops' ([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)) | all |
-| the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `rules/v1/fragments/generated-secret.cel.yaml` of the standard rule set | all |
-| the objects of the [fragments](04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload), `rules/v1/fragments/fragment-*.cel.yaml` of the standard rule set | all |
+| the objects of an OAuth client, `internal/rules/mandatory/charts/oidc-dcr.cel.yaml` of the mandatory rule set ([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)) | all |
+| the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `internal/rules/mandatory/fragments/generated-secret.cel.yaml` of the mandatory rule set | all |
+| the objects of the [fragments](04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload), `internal/rules/mandatory/fragments/fragment-*.cel.yaml` of the mandatory rule set | all |
 
 ## Directives
 

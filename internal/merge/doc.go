@@ -1,7 +1,7 @@
-// Package merge is Helm's merge of the final values of a compile: OKDP's
-// defaults, what the mapping computed and the instance's upstream values, as
-// Helm merges -f files, checked against the upstream charts when a chart
-// cache is given.
+// Package merge computes the final values of a compile. It merges OKDP's
+// defaults, what the mapping computed and the instance's upstream values,
+// as Helm merges -f files. When a chart cache is given, it checks the
+// result against the upstream charts.
 package merge
 
 import (
@@ -22,14 +22,14 @@ type (
 	UpstreamCheck = chart.UpstreamCheck
 )
 
-// Caches: the chart caches of a set of compiles, one per file system, each
-// chart read once for all of them. Safe for concurrent use.
+// Caches holds the chart caches of a set of compiles, one per file system,
+// so that each chart is read once. It is safe for concurrent use.
 type Caches struct {
 	mu     sync.Mutex
 	caches []*ChartCache
 }
 
-// Get: the cache of fsys, nil without one.
+// Get returns the cache of fsys, created on first use, nil for a nil fsys.
 func (c *Caches) Get(fsys fs.FS) *ChartCache {
 	if fsys == nil {
 		return nil
@@ -46,8 +46,8 @@ func (c *Caches) Get(fsys fs.FS) *ChartCache {
 	return x
 }
 
-// sameFS: a and b are the same file system: of one type and equal, or the
-// same map (a fstest.MapFS). Two that cannot be compared are not.
+// sameFS reports whether a and b are one file system: equal values of one
+// type, or the same map (fstest.MapFS). Uncomparable values never are.
 func sameFS(a, b fs.FS) bool {
 	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
 	switch {

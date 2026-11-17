@@ -1,54 +1,49 @@
-// Provides: what the instance publishes (Info): its instance section,
-// and the connections it provides, each checked against its contract, with
-// its credentials Secret.
+// Provides: what the instance publishes (Info): its instance section and
+// the connections it provides, each checked against its contract.
 
 package okdp
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
-	"github.com/okdp/cel2yaml"
-
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// Info: what the instance publishes, the mapping's instance and
-// provides sections, checked: what a control plane or a console reads of it
-// in the deployments repository (okdp.info.yaml, compiler.Write). An
-// empty field is not written, nor one of its outputs'.
+// Info is what the instance publishes: the instance and provides sections
+// of the mapping, checked. Empty fields are not written.
 type Info struct {
-	URL      string   `json:"url,omitempty" yaml:"url,omitempty"`           // what the console opens, trimmed; "" when none
-	Usage    string   `json:"usage,omitempty" yaml:"usage,omitempty"`       // how to use the instance, trimmed, with one final newline; "" when none
-	Provides []Output `json:"provides,omitempty" yaml:"provides,omitempty"` // the connections it provides, in the order of provides; nil when none
+	URL string `json:"url,omitempty" yaml:"url,omitempty"` // what the console opens, trimmed
+	// Usage says how to use the instance; trimmed, it ends with one newline.
+	Usage string `json:"usage,omitempty" yaml:"usage,omitempty"`
+	// Provides lists the provided connections, in the order of provides.
+	Provides []Output `json:"provides,omitempty" yaml:"provides,omitempty"`
 }
 
-// Output: a connection the instance provides, an item of provides checked
-// against its contract: what an instance that references it by name gets.
+// Output is a connection the instance provides: an item of provides,
+// checked against its contract.
 type Output struct {
-	Name      string         `json:"name,omitempty" yaml:"name,omitempty"`           // the item's name; the instance's when it names none (Inputs.Name)
-	Contract  string         `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it provides
-	Values    map[string]any `json:"values,omitempty" yaml:"values,omitempty"`       // its values, completed against the contract
-	SecretRef *SecretRef     `json:"secretRef,omitempty" yaml:"secretRef,omitempty"` // the Secret of its credentials; nil when none
+	// Name is the item's name, or the instance's name when it gives none.
+	Name     string `json:"name,omitempty" yaml:"name,omitempty"`
+	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"`
+	// Values are its values, completed against the contract.
+	Values map[string]any `json:"values,omitempty" yaml:"values,omitempty"`
+	// SecretRef names the Secret of its credentials; nil when it has none.
+	SecretRef *SecretRef `json:"secretRef,omitempty" yaml:"secretRef,omitempty"`
 }
 
-// SecretRef: a Secret, by name.
+// SecretRef names a Secret.
 type SecretRef struct {
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 }
 
-// secretName: a DNS-1123 subdomain, DNS-1123 labels joined by dots.
+// secretName matches a DNS-1123 subdomain: DNS-1123 labels joined by dots.
 var secretName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
 
-// isSecretName: s names a Secret, as Kubernetes does: a DNS-1123
-// subdomain, 253 characters at most (secretName).
 func isSecretName(s string) bool { return len(s) <= 253 && secretName.MatchString(s) }
 
-// published: what the instance publishes, its instance section info, of
-// the form the mapping schema checks (runMapping), and outputs (provided).
 func published(info M, outputs []Output) Info {
 	usage := strings.TrimSpace(value.Str(info["usage"]))
 	if usage != "" {
@@ -57,78 +52,65 @@ func published(info M, outputs []Output) Info {
 	return Info{URL: strings.TrimSpace(value.Str(info["url"])), Usage: usage, Provides: outputs}
 }
 
-// provided: the outputs of the instance inst, its provides section, of the
-// form the mapping schema checks (runMapping), and their credentials
-// Secrets. Every output is named after the instance (Inputs.Name, the
-// release when it is empty) unless the mapping names it, and checked against its contract, from contracts (Inputs.Contracts),
-// in the order of provides: its fields in key order (contract.fields): the
-// first error is reported, every required field not
-// set at once (contract.complete), every violation of the contract's types
-// at once (contract.check). An output given a `secret` ({generate,
-// stringData}, or {stringData} when plain, Inputs.AllowPlainSecrets, is
-// true) gets its credentials Secret, named after its secretRef (default
-// <name>-<contract>-credentials), a DNS-1123 subdomain (isSecretName).
-// Then two outputs of one contract and name fail (twice).
-func provided(ctx context.Context, session *cel2yaml.Session, inst *instance, contracts *contractCache, provides []any, plain bool) ([]Output, []M, error) {
-	var outputs []Output
-	var credentials []M
-	for _, x := range provides {
+// provided reads the provides section of the mapping's result into the
+// outputs of the instance and their credentials Secrets. An unnamed output
+// takes the instance's name. An item with a `secret` gets a credentials
+// Secret, named by its secretRef or <name>-<contract>-credentials.
+func (c *run) provided() error {
+	contracts := c.in.memo.contracts
+	for _, x := range value.AsList(c.res["provides"]) {
 		p := value.AsMap(x)
-		contract := value.Str(p["contract"])
-		out := value.Str(p["name"])
-		if out == "" {
-			out = inst.name
+		o := Output{Name: value.Str(p["name"]), Contract: value.Str(p["contract"])}
+		if o.Name == "" {
+			o.Name = c.inst.name
 		}
-		where := fmt.Sprintf("provides %q (%s)", out, contract)
-		c, err := contracts.get(contract)
+		where := fmt.Sprintf("provides %q (%s)", o.Name, o.Contract)
+		contract, err := contracts.get(o.Contract)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%s: %w", where, err)
+			return fmt.Errorf("%s: %w", where, err)
 		}
-		// Only contract fields, and no secret: those go to the credentials
-		// Secret. In key order, as every check of an output: the first error
-		// is the same from one compile to the next.
-		values := value.AsMap(value.Copy(p["values"]))
-		if err := c.fields(values, where); err != nil {
-			return nil, nil, err
+		// The values hold contract fields only, and no secret one: those go
+		// to the credentials Secret.
+		o.Values = value.AsMap(value.Copy(p["values"]))
+		if err := contract.fields(o.Values, where); err != nil {
+			return err
 		}
-		if err := c.complete(values, where); err != nil {
-			return nil, nil, err
+		if err := contract.complete(o.Values, where); err != nil {
+			return err
 		}
-		if err := c.check(values, where); err != nil {
-			return nil, nil, err
+		if err := contract.check(o.Values, where); err != nil {
+			return err
 		}
-		o := Output{Name: out, Contract: contract, Values: values}
 		secret := value.AsMap(p["secret"])
 		if ref := value.AsMap(p["secretRef"]); len(ref) > 0 {
 			o.SecretRef = &SecretRef{Name: value.Str(ref["name"])}
 		} else if value.Truthy(secret) {
-			o.SecretRef = &SecretRef{Name: inst.rules.Name("credentialsSecret", "output", out, "contract", contract)}
+			o.SecretRef = &SecretRef{Name: c.inst.rules.Name("credentialsSecret", "output", o.Name, "contract", o.Contract)}
 		}
 		if o.SecretRef != nil && !isSecretName(o.SecretRef.Name) {
-			return nil, nil, fmt.Errorf("%s: secretRef.name %q: not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most", where, o.SecretRef.Name)
+			return fmt.Errorf("%s: secretRef.name %q: not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most", where, o.SecretRef.Name)
 		}
-		outputs = append(outputs, o)
-		// The credentials Secret, when the mapping describes it.
+		c.outputs = append(c.outputs, o)
 		if value.Truthy(secret) {
-			objs, err := credentialsSecret(ctx, session, inst, contract, out, o.SecretRef.Name, secret, plain)
+			objs, err := c.credentialsSecret(o, secret)
 			if err != nil {
-				return nil, nil, err
+				return err
 			}
-			for _, o := range objs {
-				credentials = append(credentials, value.AsMap(o))
+			for _, obj := range objs {
+				c.credentials = append(c.credentials, value.AsMap(obj))
 			}
 		}
 	}
-	return outputs, credentials, twice(outputs)
+	return twice(c.outputs)
 }
 
-// twice: the error of the outputs of one contract and name, one line per
-// name, in the order of their first output; nil when there is none.
+// twice reports the outputs that share a contract and a name.
 func twice(outputs []Output) error {
-	count := map[[2]string]int{}
-	var names [][2]string // contract and name, in the order of their first output
+	type key struct{ contract, name string }
+	count := map[key]int{}
+	var names []key // in the order of their first output
 	for _, o := range outputs {
-		k := [2]string{o.Contract, o.Name}
+		k := key{o.Contract, o.Name}
 		if count[k] == 0 {
 			names = append(names, k)
 		}
@@ -137,41 +119,40 @@ func twice(outputs []Output) error {
 	var errs []error
 	for _, k := range names {
 		if count[k] > 1 {
-			errs = append(errs, fmt.Errorf("two %s outputs are named %q", k[0], k[1]))
+			errs = append(errs, fmt.Errorf("two %s outputs are named %q", k.contract, k.name))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// credentialsSecret: the credentials Secret of an output published with a
-// `secret`: {generate: [keys], stringData} as a generated Secret
-// (generatedSecret, in the compile's session), {stringData} as a plain
-// Secret when plain (Inputs.AllowPlainSecrets), refused otherwise: its
-// values would be written in clear to the deployments repository; both
-// labelled okdp.io/credentials-<contract>, in the namespace of the
-// instance inst.
-func credentialsSecret(ctx context.Context, session *cel2yaml.Session, inst *instance, contract, output, name string, secret M, plain bool) ([]any, error) {
-	label := inst.rules.Name("credentialsLabel", "contract", contract)
+// credentialsSecret builds the credentials Secret of the output o, in the
+// instance's namespace, labelled okdp.io/credentials-<contract>. With
+// generate it is generated in the cluster. A plain stringData is refused
+// unless Inputs.AllowPlainSecrets is set, because its values would be
+// written in clear to the deployments repository.
+func (c *run) credentialsSecret(o Output, secret M) ([]any, error) {
+	inst := c.inst
+	label := inst.rules.Name("credentialsLabel", "contract", o.Contract)
 	if value.Truthy(secret["generate"]) {
-		return generatedSecret(ctx, session, inst, M{
-			"name":       name,
+		return generatedSecret(c.ctx, c.session, inst, M{
+			"name":       o.SecretRef.Name,
 			"keys":       secret["generate"],
 			"stringData": value.AsMap(secret["stringData"]),
 			"labels":     M{label: "true"},
 		})
 	}
 	if !value.Truthy(secret["stringData"]) {
-		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", inst.svc.Name, output)
+		return nil, fmt.Errorf("%s: output %q: secret needs stringData or generate", inst.svc.Name, o.Name)
 	}
-	if !plain {
-		return nil, fmt.Errorf("%s: output %q: secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it", inst.svc.Name, output)
+	if !c.in.AllowPlainSecrets {
+		return nil, fmt.Errorf("%s: output %q: secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it", inst.svc.Name, o.Name)
 	}
 	l := inst.rules.Labels(inst.svc.Name, inst.release, "", false)
 	l[label] = "true"
 	return []any{M{
 		"apiVersion": "v1",
 		"kind":       "Secret",
-		"metadata":   M{"name": name, "namespace": inst.namespace, "labels": l},
+		"metadata":   M{"name": o.SecretRef.Name, "namespace": inst.namespace, "labels": l},
 		"type":       "Opaque",
 		"stringData": value.Copy(secret["stringData"]),
 	}}, nil

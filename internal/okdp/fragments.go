@@ -1,12 +1,8 @@
 // Fragments: the workloads OKDP provides to packages as CEL functions
-// returning the objects, a pod spec, a Job, a sign-in proxy, a web
-// workload, instead of each package writing its own: one hardening, one
-// proxy, reviewed once, in git with the compiler, never a chart to publish.
-// Each is a template of the compiler (fragment-*.cel.yaml, the mapping
-// language) evaluated at each call on the arguments, which
-// mapping.schema.json checks (okdpPodSpec, okdpJob, okdpSignInProxy,
-// okdpWebWorkload); the objects are a package's own, the compile's policy
-// over its objects applies to them: namespace, hosts, plain Secrets.
+// that return objects: a pod spec, a Job, a sign-in proxy, a web
+// workload. A package calls them instead of writing its own, so there is
+// one hardening and one proxy, reviewed once. The objects they return
+// belong to the package, so the compile's policy over objects applies.
 
 package okdp
 
@@ -21,9 +17,9 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// call: the value of the fragment f for the arguments args (okdpPodSpec(args)...), in
-// the compile's session: args checked, the template evaluated with args, the
-// instance's release, labels, platform and global.
+// callFragment evaluates the fragment f, a template of the rule set, on
+// args in the compile's session. It checks args against
+// mapping.schema.json.
 func callFragment(ctx context.Context, f ruleset.Fragment, session *cel2yaml.Session, inst *instance, args any) (any, error) {
 	checked, err := schemaValues(inst.rules.MappingSchema(), f.Name+": the arguments don't meet the specifications of mapping.schema.json", M{f.Name: args})
 	if err != nil {
@@ -46,8 +42,8 @@ func callFragment(ctx context.Context, f ruleset.Fragment, session *cel2yaml.Ses
 	return v[f.Result], nil
 }
 
-// fragmentFunctions: okdpPodSpec(args), okdpJob(args), okdpSignInProxy(args)
-// and okdpWebWorkload(args) for the instance inst, in the session *session.
+// fragmentFunctions returns the fragment functions of the rule set for
+// inst. They run in *session, which is read at each call.
 func fragmentFunctions(ctx context.Context, inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	var opts []cel.EnvOption
 	for _, f := range inst.rules.Fragments() {

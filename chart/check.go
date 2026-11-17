@@ -1,5 +1,5 @@
-// Checks of values the compile applies itself: no template code, and no
-// level that changes a lower one's.
+// Checks the compile applies to values itself: no template code, and no
+// layer that changes a value a lower layer sets.
 
 package chart
 
@@ -12,25 +12,23 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// UpstreamCheck: what a caller refuses of the instance's upstream values
-// of a chart, user, whatever the package's protect paths: the platform's
-// policy. values: the computed values they are applied over (OKDP's
-// defaults and the mapping's), which it does not change; at names a path of
-// user in the messages (upstream.<key>.<path>, Key and Index paths). Its
-// error fails the compile.
+// UpstreamCheck is the platform's policy on instance upstream values: it
+// refuses values of a chart beyond what the package's protect paths
+// refuse. user holds the instance's upstream values for the chart, and
+// values the computed values they are applied over, which the check does
+// not change. at turns a path of user (value.Key, value.Index) into the
+// name a message shows: upstream.<key>.<path>.
 type UpstreamCheck func(user, values M, at func(p string) string) error
 
-// NoTemplate: no key or string of v, at any depth, contains "{{". Values
-// reach a chart as data, and some charts pass them to tpl, where template
-// code could call lookup and read the cluster's Secrets. The first one
-// found, in path order (keys sorted, items in order), fails, at(p) naming
-// where: p, its path in v (value.Key, value.Index). A value of a type
-// values do not hold (package value) fails too: it could not be checked.
+// NoTemplate fails when a key or a string of v contains "{{", at any
+// depth. Values reach a chart as data, but some charts pass them to tpl,
+// where template code could call lookup and read the cluster's Secrets.
+// It names the first occurrence, in path order, with at(p). A value of a
+// type that values cannot hold fails too, because it cannot be checked.
 func NoTemplate(v any, at func(p string) string) error {
 	return noTemplate(v, "", at)
 }
 
-// noTemplate: NoTemplate on v, found at the path p.
 func noTemplate(v any, p string, at func(string) string) error {
 	switch t := v.(type) {
 	case nil, bool, float64:
@@ -60,16 +58,14 @@ func noTemplate(v any, p string, at func(string) string) error {
 	return nil
 }
 
-// Overlap: the first path, in path order (keys sorted), at which layer sets
-// a value base sets, "" when there is none: a key of both whose values are
-// not both maps (a null, a list, a map over a scalar), or whose path whole
-// names, a map then taken as one value. The path is written as NoTemplate
-// writes it (FormatPath).
+// Overlap returns the first path, in path order, where layer sets a value
+// that base already sets, or "" when there is none. A key overlaps when
+// its two values are not both maps, or when whole reports that the map at
+// this path counts as one value. The path is formatted with FormatPath.
 func Overlap(base, layer M, whole func(keys []string) bool) string {
 	return overlap(base, layer, nil, whole)
 }
 
-// overlap: Overlap below the keys at.
 func overlap(base, layer M, at []string, whole func([]string) bool) string {
 	for _, k := range slices.Sorted(maps.Keys(layer)) {
 		b, ok := base[k]

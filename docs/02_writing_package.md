@@ -2,8 +2,9 @@
 
 How to package an upstream application for OKDP: a directory of
 parameters, OKDP's defaults and a service definition, compiled by
-okdp-compiler (the `okdp-compile` command is okdp-gitops'). The steps
-follow a `webapp` service, of which the example of this repository is a
+okdp-compiler (the `okdp-compile` of its
+[command line](01_usage.md#command-line), okdp-gitops' with the deployer
+targets). The steps follow a `webapp` service, of which the example of this repository is a
 smaller version (`examples/02_advanced/input/catalog/webapp/`;
 `examples/00_passthrough/input/catalog/` is the smallest package, a chart
 and its values, `examples/01_minimal/input/catalog/` the smallest with a

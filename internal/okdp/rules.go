@@ -8,31 +8,30 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// RuleSet: what the compiler refuses and what it knows of a platform's
-// names, as data (internal/rules).
+// RuleSet holds, as data, what the compiler refuses and what it knows of
+// a platform's names (internal/rules).
 type RuleSet = ruleset.RuleSet
 
-// LoadRules: the rule set of a file system.
+// LoadRules loads the rule set of a file system and adds it to the
+// mandatory one.
 func LoadRules(fsys fs.FS) (*RuleSet, error) { return ruleset.LoadRules(fsys) }
 
-// schemaValues: ruleset.SchemaValues.
 func schemaValues(schema *chart.Schema, heading string, user M) (M, error) {
 	return ruleset.SchemaValues(schema, heading, user)
 }
 
-// rules: the rule set of the compile.
 func (in Inputs) rules() *RuleSet { return rulesOr(in.Rules) }
 
-// rulesOr: r, or the rule set of a compile that gives none.
+// rulesOr returns r, or the mandatory rule set alone when r is nil.
 func rulesOr(r *RuleSet) *RuleSet {
 	if r != nil {
 		return r
 	}
-	return ruleset.Empty()
+	return ruleset.Mandatory()
 }
 
-// objectInput: an object as the checks read it: what its fields are as
-// text, whatever a mapping wrote, and the object as it is (raw).
+// objectInput returns an object as the checks read it: its fields as
+// text, whatever a mapping wrote in them, and the object itself (raw).
 func objectInput(o M) M {
 	meta := value.AsMap(o["metadata"])
 	kind, name, version := value.Str(o["kind"]), value.Str(meta["name"]), value.Str(o["apiVersion"])

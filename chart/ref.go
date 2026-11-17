@@ -1,5 +1,3 @@
-// Ref: the upstream chart that renders a chart key's values, pinned, as its
-// repository publishes it.
 package chart
 
 import (
@@ -11,29 +9,26 @@ import (
 	"strings"
 )
 
-// Ref: an upstream chart as its repository publishes it: what renders
-// the values of a chart key (a Flux HelmRelease, an Argo CD source), and
-// what the chart cache holds its defaults and schema under
-// (<repository>/<chart>-<version>/<chart>, Dir).
+// Ref is an upstream chart as its repository publishes it. It renders the
+// values of a chart key, and it is where the chart cache keeps the chart's
+// defaults and schema (Dir).
 type Ref struct {
 	Repository string `yaml:"repository" json:"repository"` // https://... or oci://...
 	Chart      string `yaml:"chart" json:"chart"`           // the chart's name in the repository
 	Version    string `yaml:"version" json:"version"`       // a pinned version
 }
 
-// chartVersion: a pinned chart version, SemVer as Helm requires it.
+// chartVersion matches a pinned chart version: SemVer, as Helm requires.
 var chartVersion = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
-// IsVersion: v is a pinned chart version, SemVer as Helm requires it.
+// IsVersion reports whether v is a pinned chart version (SemVer).
 func IsVersion(v string) bool {
 	return chartVersion.MatchString(v)
 }
 
-// CompareVersions: -1, 0 or +1 as a precedes, equals or follows b in
-// SemVer precedence (semver.org, 11), each a version IsVersion accepts:
-// the build metadata ignored, a pre-release before its release, its
-// identifiers compared one by one, numbers by value, below the others,
-// compared in ASCII order.
+// CompareVersions returns -1, 0 or +1 when a precedes, equals or follows b
+// in SemVer precedence (semver.org, section 11). Both must be versions
+// IsVersion accepts. Build metadata is ignored.
 func CompareVersions(a, b string) int {
 	pa, pb := splitVersion(a), splitVersion(b)
 	for i := range 3 {
@@ -70,14 +65,11 @@ func CompareVersions(a, b string) int {
 	return cmp.Compare(len(pa.pre), len(pb.pre))
 }
 
-// version: a version IsVersion accepts: its major, minor and patch, its
-// pre-release identifiers, nil when none.
 type version struct {
-	core [3]string
-	pre  []string
+	core [3]string // major, minor, patch
+	pre  []string  // the pre-release identifiers, nil when none
 }
 
-// splitVersion: v, a version IsVersion accepts, in its parts.
 func splitVersion(v string) version {
 	v, _, _ = strings.Cut(strings.TrimPrefix(v, "v"), "+")
 	core, pre, hasPre := strings.Cut(v, "-")
@@ -89,12 +81,11 @@ func splitVersion(v string) version {
 	return out
 }
 
-// isNumber: s is a numeric identifier, digits only.
 func isNumber(s string) bool {
 	return s != "" && strings.Trim(s, "0123456789") == ""
 }
 
-// compareNumbers: two numeric identifiers by value, of any length.
+// compareNumbers compares by value two digit strings of any length.
 func compareNumbers(a, b string) int {
 	a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
 	if c := cmp.Compare(len(a), len(b)); c != 0 {
@@ -103,10 +94,10 @@ func compareNumbers(a, b string) int {
 	return strings.Compare(a, b)
 }
 
-// Check: a repository URL, https:// or oci://, never http://, the chart
-// fetched in clear, that names a directory of the chart cache (CacheDir),
-// the name of a chart, a pinned version. where names the reference in the
-// errors.
+// Check verifies the reference: a repository URL that names a directory of
+// the chart cache (CacheDir), a chart name and a pinned version. http://
+// is refused because the chart would be fetched in clear. where names the
+// reference in the errors.
 func (r Ref) Check(where string) error {
 	switch {
 	case r == Ref{}:
@@ -123,32 +114,29 @@ func (r Ref) Check(where string) error {
 	return nil
 }
 
-// isChartName: name may name a chart of a repository, and its directory
-// in the chart cache: not empty, one path element, not . or .., without
-// spaces at either end.
+// isChartName reports whether name can name a chart and its directory in
+// the chart cache: one path element, without a space at either end.
 func isChartName(name string) bool {
 	return name != "" && name == path.Base(name) && name != "." && name != ".." && strings.TrimSpace(name) == name
 }
 
-// IsFileName: s is one element of a path, a file or directory name: not
-// empty, not . or .., without a / or a \ (fs.ValidPath).
+// IsFileName reports whether s is one element of a path: a file or
+// directory name, not . or .., without a / or a \.
 func IsFileName(s string) bool {
 	return fs.ValidPath(s) && s != "." && !strings.ContainsAny(s, `/\`)
 }
 
-// id: <chart>-<version>, the chart's name in the chart cache and in the
-// errors.
+// ID returns <chart>-<version>, as the chart cache and the errors name it.
 func (r Ref) ID() string {
 	return r.Chart + "-" + r.Version
 }
 
-// repoDir: the directory of the chart cache that holds the charts of the
-// repository: its URL without the scheme and a trailing /, host, port and
-// path kept (quay.io/adaltas for oci://quay.io/adaltas). "" for a
-// repository that is not https:// or oci:// (http:// only when http: a
-// chart is not fetched in clear), or whose rest is not a path inside the
-// chart cache: an empty host, an empty, . or .. segment, a \, ? or # (a
-// URL's query or fragment).
+// repoDir returns the directory of the chart cache that holds the charts
+// of the repository: the URL without its scheme and trailing /
+// (quay.io/adaltas for oci://quay.io/adaltas). It returns "" when the
+// scheme is not https:// or oci://, or when the rest is not a path inside
+// the chart cache (a segment that is empty, . or .., or holds \, ? or #).
+// http:// is accepted only when http is true.
 func (r Ref) repoDir(http bool) string {
 	schemes := []string{"oci://", "https://"}
 	if http {
@@ -168,19 +156,19 @@ func (r Ref) repoDir(http bool) string {
 	return ""
 }
 
-// CacheDir: the directory of the chart cache that holds the charts of the
-// repository (repoDir) of a chart that is fetched: "" for http:// among
-// others. Check refuses such a repository.
+// CacheDir returns the chart cache directory of the repository, for a
+// chart that is fetched, or "" when it has none. http:// has none: a
+// chart is not fetched in clear.
 func (r Ref) CacheDir() string { return r.repoDir(false) }
 
-// Dir: the directory of the chart in the chart cache, slash-separated:
-// <repository without scheme>/<chart>-<version>/<chart>, the layout of the
-// chart cache whoever fills it (helm pull --untar, chartcache.Cache) and
-// whoever reads it (a compile's checks, the console). http:// is a
-// directory too, for a cache that pulls from a host the platform trusts
-// (RepositoryPuller.InsecureHosts): Check refuses it in a package. A
-// repository, a chart or a version that is no directory of the cache (a
-// ?, a # or a \ in it, an empty, . or .. segment) has none.
+// Dir returns the directory of the chart in the chart cache, with slashes:
+//
+//	<repository without scheme>/<chart>-<version>/<chart>
+//
+// Unlike CacheDir, Dir gives http:// a directory, for a cache that pulls
+// from a host the platform trusts (RepositoryPuller.InsecureHosts). Check
+// still refuses http:// in a package. Dir fails when the repository, the
+// chart or the version cannot be a directory of the cache.
 func (r Ref) Dir() (string, error) {
 	repo := r.repoDir(true)
 	if repo == "" {
@@ -194,9 +182,9 @@ func (r Ref) Dir() (string, error) {
 	return path.Join(repo, r.ID(), r.Chart), nil
 }
 
-// pull: the command that downloads the chart and unpacks it into its entry
-// of the chart cache, <repository>/<chart>-<version>/<chart> (helm pull
-// --untar creates the directory).
+// Pull returns the command that downloads the chart and unpacks it into
+// its entry of the chart cache. helm pull --untar creates the <chart>
+// directory itself.
 func (r Ref) Pull() string {
 	to := path.Join("<chart cache>", r.CacheDir(), r.ID())
 	if strings.HasPrefix(r.Repository, "oci://") {
@@ -205,20 +193,19 @@ func (r Ref) Pull() string {
 	return fmt.Sprintf("helm pull %s --repo %s --version %s --untar -d %s", r.Chart, r.Repository, r.Version, to)
 }
 
-// dnsLabel: the characters of a DNS-1123 label: lowercase letters, digits
-// and "-", a letter or digit at each end.
+// dnsLabel matches the characters of a DNS-1123 label.
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
-// IsDNSLabel: s is a DNS-1123 label, as Kubernetes names a namespace:
-// lowercase letters, digits and "-", a letter or digit at each end, 63
-// characters at most.
+// IsDNSLabel reports whether s is a DNS-1123 label, the form Kubernetes
+// requires of a namespace name: lowercase letters, digits and "-", a
+// letter or digit at each end, 63 characters at most.
 func IsDNSLabel(s string) bool {
 	return len(s) <= 63 && dnsLabel.MatchString(s)
 }
 
-// IsClaimID: s is a claim's ID, DNS-1123 labels joined by dots, 63
-// characters at most: a Kubernetes name, a DNS subdomain, which the dots of
-// its parts separate.
+// IsClaimID reports whether s is a claim ID: DNS-1123 labels joined by
+// dots, 63 characters at most. Such an ID is a Kubernetes name (a DNS
+// subdomain), and the dots separate its parts.
 func IsClaimID(s string) bool {
 	if len(s) > 63 {
 		return false
@@ -231,12 +218,11 @@ func IsClaimID(s string) bool {
 	return true
 }
 
-// ReleaseMax: the longest release name Helm accepts, leaving room for the
-// suffixes of the names derived from it.
+// ReleaseMax is the longest release name Helm accepts. It leaves room for
+// the suffixes of the names derived from the release.
 const ReleaseMax = 53
 
-// IsRelease: name is a release name, as Helm accepts it and OKDP derives
-// object names from it (<release>-<suffix>, Secrets): a DNS-1123 label of
+// IsRelease reports whether name is a release name: a DNS-1123 label of
 // ReleaseMax characters at most.
 func IsRelease(name string) bool {
 	return len(name) <= ReleaseMax && dnsLabel.MatchString(name)

@@ -1,4 +1,7 @@
-.PHONY: test race cover lint fmt tidy fuzz check help
+.PHONY: build test race cover lint fmt tidy fuzz check help
+
+# The version --version prints, without the leading "v" of the tag.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 
 # golangci-lint at the version tools/go.mod pins: a module of its own, its
 # dependencies stay out of the library's go.mod.
@@ -6,6 +9,9 @@ GOLANGCI_LINT := go tool -modfile=tools/go.mod golangci-lint
 
 # The Go files, but those of dot directories (.claude/worktrees...).
 GOFILES = $(shell find . -name '*.go' -not -path './.*')
+
+build: ## Compile the okdp-compile CLI to bin/okdp-compile
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/okdp-compile ./cmd/okdp-compile
 
 test: ## Run all tests
 	go test ./...

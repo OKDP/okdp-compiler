@@ -2,7 +2,7 @@
 
 | Document | For | Content |
 |---|---|---|
-| [Usage](01_usage.md) | platform engineers, integrators | the Go library, the tree a compile reads, how to give it a rule set, troubleshooting; the `okdp-compile` command line is okdp-gitops' |
+| [Usage](01_usage.md) | platform engineers, integrators | the Go library, the tree a compile reads, how to give it a rule set, the `okdp-compile` command line, troubleshooting |
 | [Writing a package](02_writing_package.md) | package authors | a package, its upstream charts and its service definition, step by step; recipes and pitfalls from OKDP's packages; a checklist |
 | [Service definition](specs/02_service_definition.md) | package authors (reference) | the package files: `Chart.yaml` (the package metadata, its upstream charts), `okdp.yaml` (requirements, OKDP's defaults, upstream values, the mapping's sections) and `values.cel.yaml` or `values.yaml` (the values of each chart); sections, expressions, the CEL context, errors |
 | [Control flow](specs/03_control_flow.md) | package authors (reference) | the directives `$if`, `$value`, `$else`, `$for`, `$vars`, `$merge`, `$spread`: places, scope, evaluation, Helm equivalents, errors |

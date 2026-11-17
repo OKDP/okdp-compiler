@@ -7,10 +7,11 @@ files; it is installed as it is, with the values of a compile.
 
 The `oidcClients` section, the functions `okdpPodSpec`, `okdpJob`,
 `okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret` and
-`okdpGeneratedSecret`, the shape of the mapping's sections and what the
-mapping sees as `platform` come from the standard rule set, okdp-gitops'
+`okdpGeneratedSecret` and what the mapping sees as `platform` come from
+the compiler's mandatory rule set, which every compile applies, the
+shape of the mapping's sections from the standard rule set, okdp-gitops'
 ([rule set](01_inputs_outputs.md#rule-set)): a compile without a rule set
-has none of them.
+does not check it.
 
 | File | Required | Content |
 |---|---|---|
@@ -627,8 +628,8 @@ of `instance`. A value used by several sections is a `vars` binding.
 
 Each section has a shape: the values file and `instance` are maps,
 `provides`, `objects` and `oidcClients` lists. So have the items and keys
-the compiler reads in them, described by the mapping schema the compiler
-embeds,
+the compiler reads in them, described by the mapping schema of the
+standard rule set, here its copy,
 [`testdata/rules/schemas/mapping.schema.json`](../../testdata/rules/schemas/mapping.schema.json),
 where the values file is the section `output`:
 their types, the keys required, the keys allowed where another is

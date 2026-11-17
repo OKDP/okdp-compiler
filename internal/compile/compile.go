@@ -1,11 +1,8 @@
 // Package compile reads a document from one file or several (Source) and
-// evaluates it in a cel2yaml session: the language of a mapping (YAML where
-// ${{ <CEL> }} computes a value, github.com/okdp/cel2yaml) with its top
-// level. It knows neither Helm charts nor OKDP: the caller opens a session
-// with its own host functions (cel2yaml.NewSession), then evaluates each
-// document on its context with the names of its sections (Eval: the
-// document checked and its expressions compiled, in every branch, then its
-// sections evaluated).
+// evaluates it in a cel2yaml session. A document is written in the
+// language of a mapping: YAML where ${{ <CEL> }} computes a value
+// (github.com/okdp/cel2yaml). This package adds the top level of the
+// document, and knows neither Helm charts nor OKDP.
 //
 // Top level, before any section:
 //
@@ -13,9 +10,8 @@
 //	errors (a list of messages, {$if: <condition>, $value: <text>}: any
 //	message fails the compile)
 //
-// Any other top-level key is a section the caller names (Eval), or a key
-// another reader reads (Source.Skip). A file may also be one section whole
-// (Source.Section).
+// Any other top-level key is a section the caller names, or a key another
+// reader reads (Source.Skip). A file may also be one section whole.
 package compile
 
 import (
@@ -32,27 +28,28 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// M: a values map (value.M).
+// M is a values map (value.M).
 type M = value.M
 
-// Source: a file of a document (Eval).
+// Source is one file of a document (Eval).
 type Source struct {
-	Name    string   // the file: the first segment of its errors
+	Name    string   // the file name: the first segment of its errors
 	Data    []byte   // its YAML
-	Section string   // "": its top-level keys are vars, errors and sections; else the whole file is this section
-	Skip    []string // top-level keys another reader reads, neither sections nor refused (Section "")
+	Section string   // when set, the whole file is this section
+	Skip    []string // top-level keys left to another reader, when Section is ""
 }
 
-// Doc: a document evaluated (Eval).
+// Doc is an evaluated document (Eval).
 type Doc struct {
-	Sections M                   // the values of its sections, by name, those its sources give
-	Written  map[string][]string // the keys each of its sections writes at its top level, by name, whether the section is kept or not ($if): those of its map as written, $$key as $key, not those its $merge or a $for gives
+	Sections M // the values of the sections the sources give, by name
+	// Written lists, by section name, the keys the section writes at its
+	// top level, with $$key read as $key. It leaves out the keys a $merge
+	// or a $for gives. A section is listed whether its $if keeps it or not.
+	Written map[string][]string
 }
 
-// document: a document built: its vars bindings, its errors section, and its
-// sections by name, those it has, with the keys each writes (literals);
-// and the source of each of them, by key (vars, errors, a section), whose
-// errors start with its name (at).
+// document is a built document. srcs maps vars, errors and each section
+// to the source that gives it, whose name starts their errors.
 type document struct {
 	vars     []binding
 	errors   *cel2yaml.Template
@@ -61,27 +58,19 @@ type document struct {
 	srcs     map[string]Source
 }
 
-// binding: a name of vars, as written, and its template; at, its path in
-// errors ("vars <name>").
+// binding is one name of vars. at is its path in errors: "vars <name>".
 type binding struct {
 	name, at string
 	t        *cel2yaml.Template
 }
 
-// Eval: the document of the sources srcs (a mapping, a template) on the
-// context scope, in the session s, its sections those named: each source
-// read as YAML 1.2, its maps in order, then the whole built (build: the top
-// level of each source, or the section it is; its directives in every
-// branch, each expression compiled once in its scope), a top-level key
-// other than vars, errors, a section and those its source skips failing, as
-// vars, errors or a section two sources give; then its vars bindings
-// evaluated in order, then its errors section, every message collected
-// before failing; then its sections, in order, by name, those it has, with
-// the keys each writes (Doc.Written). The bindings of vars are seen by every
-// source. An error starts with the name of its source, then its path, under
-// the section (okdp.yaml: objects[1]: ...) but in a source that is the
-// section (values.cel.yaml: app: env[2]: ...). The evaluations are one
-// document of the session (cel2yaml.Session.Document).
+// Eval evaluates the document that the sources srcs make together on the
+// context scope, in the session s. sections names the sections of the
+// document; Eval returns those it has. It first builds the whole document, so a wrong directive or expression
+// fails in every branch, even one that is not taken. It then evaluates
+// vars, the errors section, whose messages it collects before it fails,
+// and the sections. An error starts with the name of its source, then
+// its path (okdp.yaml: objects[1]: ...).
 func Eval(ctx context.Context, s *cel2yaml.Session, scope M, sections []string, srcs ...Source) (*Doc, error) {
 	var d *Doc
 	err := s.Document(func() error {
@@ -110,20 +99,20 @@ func Eval(ctx context.Context, s *cel2yaml.Session, scope M, sections []string, 
 	return d, nil
 }
 
-// Prepared: a document of vars and errors built once (Prepare), evaluated on
-// many inputs, in its session: not safe for concurrent use.
+// Prepared is a document built once (Prepare) and evaluated on many
+// inputs, in its session. It is not safe for concurrent use.
 type Prepared struct {
 	s        *cel2yaml.Session
 	t        *document
 	sections []string
 }
 
-// Problem: an item of the errors of a document (Prepared.Problems): a
-// message, and the path of the field it is about, when the item names one.
+// Problem is one item of the errors section of a document: a message,
+// and the path of the field it is about when the item names one.
 type Problem struct{ Path, Message string }
 
-// Prepare: the document of srcs, its vars, its errors and the sections
-// named, its expressions compiled once with the names in scope.
+// Prepare builds the document of srcs: its vars, its errors and the named
+// sections. It compiles the expressions once, with names in scope.
 func Prepare(s *cel2yaml.Session, names, sections []string, srcs ...Source) (*Prepared, error) {
 	t, err := build(s, srcs, slices.Sorted(slices.Values(names)), sections)
 	if err != nil {
@@ -132,11 +121,11 @@ func Prepare(s *cel2yaml.Session, names, sections []string, srcs ...Source) (*Pr
 	return &Prepared{s, t, sections}, nil
 }
 
-// Eval: the document on scope: the items of its errors, in order, those
-// that are not empty, a text or a map of path and message; without any, the
-// values of its sections, by name. A failure to evaluate it is an error,
-// not a problem. It may be called while another document of the session is
-// being evaluated, by a host function. Cancelled with ctx.
+// Eval evaluates the document on scope and returns the items of its
+// errors section, in order. When there is none, it also returns the
+// values of the sections, by name. A failure to evaluate the document is
+// an error, not a problem. A host function may call Eval while another
+// document of the session is being evaluated.
 func (p *Prepared) Eval(ctx context.Context, scope M) (M, []Problem, error) {
 	var out []Problem
 	sections := M{}
@@ -173,11 +162,9 @@ func (p *Prepared) Eval(ctx context.Context, scope M) (M, []Problem, error) {
 	return sections, out, err
 }
 
-// bind: the scope of the sections of t: the context (outer), then the vars
-// bindings, in order (each sees the previous ones); then the errors
-// section, a list, every message collected before failing: each item it
-// gives that is not empty, as text (value.Str), a message, without the
-// name of its file (a Refusal each, joined).
+// bind returns the scope of the sections of t: the context outer plus
+// the vars bindings. It then evaluates the errors section, and returns
+// its messages joined, a Refusal each.
 func (t *document) bind(ctx context.Context, outer M) (M, error) {
 	scope, err := t.vars2scope(ctx, outer)
 	if err != nil {
@@ -199,15 +186,14 @@ func (t *document) bind(ctx context.Context, outer M) (M, error) {
 	return scope, nil
 }
 
-// Refusal: a message of the errors section of a document (Eval, joined with
-// errors.Join when it gives several, one a line).
+// Refusal is a message of the errors section of a document.
 type Refusal struct{ Message string }
 
-// Error: the message.
+// Error returns the message.
 func (r Refusal) Error() string { return r.Message }
 
-// vars2scope: the context outer, then the vars bindings, in order, each
-// seeing the previous ones.
+// vars2scope returns a copy of the context outer with the vars bindings
+// added in order. Each binding sees the previous ones.
 func (t *document) vars2scope(ctx context.Context, outer M) (M, error) {
 	scope := make(M, len(outer)+len(t.vars))
 	maps.Copy(scope, outer)
@@ -221,9 +207,8 @@ func (t *document) vars2scope(ctx context.Context, outer M) (M, error) {
 	return scope, nil
 }
 
-// at: err, an error of k (vars, errors, a section): under k, but for vars,
-// whose errors name their binding, and for a source that is the section k;
-// then under the name of its source.
+// at places err under k, then under the name of the source of k. It
+// leaves k out for vars and for a source that is the section k.
 func (t *document) at(k string, err error) error {
 	src := t.srcs[k]
 	if k != "vars" && src.Section == "" {
@@ -232,19 +217,16 @@ func (t *document) at(k string, err error) error {
 	return fmt.Errorf("%s: %w", src.Name, err)
 }
 
-// build: the document of the sources srcs, where the names of its context
-// (sorted) are in scope, its sections those named. A source that is a
-// section gives it whole; the top level of another is a map, each key vars,
-// errors, one of the sections or a key it skips, the later of a key written
-// twice winning. vars, errors and each section are given by one source at
-// most. vars, a map of bindings, is built first, its names then in scope of
-// errors and of the sections, in order, each with the keys it writes
-// (literals).
+// build builds the document of the sources srcs. names are the names of
+// its context, sorted. A source that is a section gives it whole. The
+// top level of any other source is a map of vars, errors, sections and
+// skipped keys. At most one source gives vars, errors and each section.
+// vars is compiled first: its names are in scope of the rest.
 func build(s *cel2yaml.Session, srcs []Source, names, sections []string) (*document, error) {
 	allowed := append([]string{"vars", "errors"}, sections...)
 	t := &document{sections: map[string]*cel2yaml.Template{}, written: map[string][]string{}, srcs: map[string]Source{}}
-	read := map[string]*yaml.Node{} // vars, errors, a section: as read
-	from := map[string]int{}        // its source, by position
+	read := map[string]*yaml.Node{} // vars, errors and each section, as read
+	from := map[string]int{}        // the position of the source of each
 	for i, src := range srcs {
 		root, err := cel2yaml.Parse(src.Data)
 		if err != nil {
@@ -292,10 +274,9 @@ func build(s *cel2yaml.Session, srcs []Source, names, sections []string) (*docum
 	return t, nil
 }
 
-// bindings: the vars map v, built: its names as written (a name bound
-// twice, y and "y", the later wins), each value compiled with the names
-// before it in scope. Null has none. The names in scope after them are
-// returned too.
+// bindings compiles the vars map v, each value with the names before it
+// in scope. A name bound twice (y and "y") takes the later binding. It
+// also returns the names in scope after vars.
 func bindings(s *cel2yaml.Session, v *yaml.Node, names []string) ([]binding, []string, error) {
 	if isNull(v) {
 		return nil, names, nil
@@ -321,14 +302,14 @@ func bindings(s *cel2yaml.Session, v *yaml.Node, names []string) ([]binding, []s
 	return out, names, nil
 }
 
-// isNull: n is null as YAML reads it: absent, empty, ~ or null.
+// isNull reports whether n is null as YAML reads it, or absent.
 func isNull(n *yaml.Node) bool {
 	return n == nil || n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null"
 }
 
-// literals: the keys a map of the document writes as written, in order,
-// each once, $$key as $key: those of a plain map, with or without $if;
-// none for a map with $for or $value, or another value.
+// literals returns the keys that the map n of a document writes as
+// written, each once, with $$key read as $key. A map with $for or
+// $value, and any value that is not a map, gives none.
 func literals(n *yaml.Node) []string {
 	if n == nil || n.Kind != yaml.MappingNode {
 		return nil

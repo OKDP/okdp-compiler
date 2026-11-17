@@ -1,6 +1,5 @@
-// Service: the package as a compile reads it: Chart.yaml, okdp.yaml and
-// its values file, and its other files (Definition), and what a compile
-// builds of them (Service).
+// Service: the package as a compile reads it. Definition holds its
+// files; Service holds what a compile builds from them.
 
 package okdp
 
@@ -13,34 +12,38 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 )
 
-// Definition: a package, as LoadDefinition reads it: Chart.yaml, okdp.yaml
-// (its package keys, and its mapping), its values file, values.cel.yaml or
-// values.yaml, and the package's other files.
+// Definition is a package as LoadDefinition reads it.
 type Definition struct {
-	Chart      chart.Metadata // Chart.yaml: the service's name, version and upstream charts, the umbrella's metadata (Result.Chart)
-	Package    Package        // okdp.yaml's package keys
-	Okdp       []byte         // okdp.yaml, read by the mapping: vars, errors and the OKDP sections, its package keys skipped; nil: none
-	Values     []byte         // the values file, read by the mapping as its output section: the charts' values, by dependency key; nil: none
-	ValuesFile string         // the values file's name, values.cel.yaml or values.yaml, which its errors start with; "": values.cel.yaml
+	Chart      chart.Metadata // Chart.yaml, also the umbrella's metadata (Result.Chart)
+	Package    Package        // the package keys of okdp.yaml
+	Okdp       []byte         // okdp.yaml, or nil without one
+	Values     []byte         // the values file (the mapping's output section), or nil without one
+	ValuesFile string         // values.cel.yaml or values.yaml; "" means values.cel.yaml
 	Files      fs.FS          // the package: config.schema.json, the defaults files
-	Warnings   []string       // what LoadDefinition warns of, the package read all the same: a values.yaml that holds expressions; given with each compile (Result.Warnings)
+	// Warnings holds what LoadDefinition warns of. Each compile returns
+	// them (Result.Warnings).
+	Warnings []string
 }
 
-// Package: okdp.yaml's package keys, what the compiler reads of the
-// package besides Chart.yaml and the mapping.
+// Package holds the package keys of okdp.yaml.
 type Package struct {
-	Require   []string          `yaml:"require"`   // the global.okdp keys the service needs, dotted (ingress.suffix), each set and not empty
-	Roles     []string          `yaml:"roles"`     // catalog: what the service provides (not read by the compiler)
-	DependsOn []string          `yaml:"dependsOn"` // catalog: the platform services it needs (not read by the compiler)
-	Defaults  map[string]string `yaml:"defaults"`  // dependency key -> a values file of the package, <key>.defaults.yaml by convention: OKDP's defaults for the chart
-	Upstream  chart.Upstream    `yaml:"upstream"`  // the dependencies that accept instance upstream values, with their protect and append paths
-	// Provisions: the contracts the package provisions connections of, one
-	// per claim bound to an instance (Inputs.Claims), each with the
-	// namespaces that may claim of an instance of it by default.
+	// Require lists the global.okdp keys the service needs, dotted
+	// (ingress.suffix). Each must be set and not empty.
+	Require   []string `yaml:"require"`
+	Roles     []string `yaml:"roles"`     // catalog data, not read by the compiler
+	DependsOn []string `yaml:"dependsOn"` // catalog data, not read by the compiler
+	// Defaults maps a dependency key to a values file of the package:
+	// OKDP's defaults for the chart.
+	Defaults map[string]string `yaml:"defaults"`
+	// Upstream lists the dependencies that accept upstream values from
+	// an instance, with their protect and append paths.
+	Upstream chart.Upstream `yaml:"upstream"`
+	// Provisions lists the contracts the package provisions connections
+	// of, one connection per claim bound to an instance.
 	Provisions []Provision `yaml:"provisions"`
 
-	// The mapping's keys, read by the mapping (Definition.Okdp), declared
-	// so that okdp.yaml is read strictly: any other key fails.
+	// The mapping reads the keys below. They are declared here so that
+	// okdp.yaml is read strictly: any other key fails.
 	Vars        yaml.Node `yaml:"vars"`
 	Errors      yaml.Node `yaml:"errors"`
 	Instance    yaml.Node `yaml:"instance"`
@@ -49,18 +52,17 @@ type Package struct {
 	OIDCClients yaml.Node `yaml:"oidcClients"`
 }
 
-// Provision: an entry of okdp.yaml's provisions: a contract the package
-// provisions connections of, written as its name, or as {contract,
-// claimers}: Claimers, the namespaces whose instances may claim of an
-// instance of the package across namespaces, unless the instance lists
-// its own (Inputs.Claimers), "*" for any; none by default (compilation.consent).
+// Provision is an entry of the provisions of okdp.yaml, written as the
+// contract's name or as {contract, claimers}. Claimers lists the
+// namespaces whose instances may claim from an instance of the package
+// across namespaces, "*" for any. An instance that lists its own
+// (Inputs.Claimers) replaces them. The default is none (consent).
 type Provision struct {
 	Contract string   `yaml:"contract"`
 	Claimers []string `yaml:"claimers"`
 }
 
-// UnmarshalYAML: a provisions entry, a contract name or {contract,
-// claimers}, strictly: another key, or another form, fails.
+// UnmarshalYAML decodes an entry strictly: another key or form fails.
 func (p *Provision) UnmarshalYAML(n *yaml.Node) error {
 	switch n.Kind {
 	case yaml.ScalarNode:
@@ -78,9 +80,7 @@ func (p *Provision) UnmarshalYAML(n *yaml.Node) error {
 	return fmt.Errorf("provisions (line %d): an entry is a contract name, or {contract, claimers}", n.Line)
 }
 
-// claimers: the namespaces that may claim connections of contract of an
-// instance of the package, across namespaces, its provisions entry's;
-// nil when it lists none.
+// claimers returns the claimers of the provisions entry of contract.
 func (p Package) claimers(contract string) []string {
 	for _, e := range p.Provisions {
 		if e.Contract == contract {
@@ -90,33 +90,28 @@ func (p Package) claimers(contract string) []string {
 	return nil
 }
 
-// packageKeys: the keys of okdp.yaml its package reader reads (Package),
-// skipped by the mapping.
+// packageKeys lists the okdp.yaml keys of Package, which the mapping skips.
 var packageKeys = []string{"require", "roles", "dependsOn", "defaults", "upstream", "provisions"}
 
-// Service: the engine-neutral part of a package, as a compile reads it
+// Service is the engine-neutral part of a package, as a compile reads it
 // (Definition.service).
 type Service struct {
-	Name      string      // Chart.yaml's name, the service: labels, parameter schema errors
-	Version   string      // Chart.yaml's version, the package's: the umbrella's
-	Roles     []string    // okdp.yaml: catalog, not read by the compiler
-	DependsOn []string    // okdp.yaml: catalog, not read by the compiler
-	Require   []string    // okdp.yaml: the global.okdp keys the service needs
-	Charts    chart.Specs // Chart.yaml's dependencies, with okdp.yaml's defaults and upstream
-	// Provisions: okdp.yaml: the contracts it provisions connections of.
-	Provisions []string
+	Name       string      // the name of Chart.yaml; the labels and the schema errors use it
+	Version    string      // from Chart.yaml, also the umbrella's
+	Roles      []string    // okdp.yaml: catalog, not read by the compiler
+	DependsOn  []string    // okdp.yaml: catalog, not read by the compiler
+	Require    []string    // okdp.yaml: the global.okdp keys the service needs
+	Charts     chart.Specs // Chart.yaml's dependencies, with the defaults and upstream of okdp.yaml
+	Provisions []string    // okdp.yaml: the contracts the package provisions connections of
 }
 
-// platformValue: the end of the error of a missing platform value: the
-// input that sets it, the context's values layers, by the binary's flag
-// and the library's field.
+// platformValue ends the error of a missing platform value. It names
+// the input that sets it: the context's values layers (Inputs.Context).
 const platformValue = "It is a context value: the platform's or a project's (Inputs.Context)"
 
-// service: the Service of d, checked when it is loaded (LoadDefinition)
-// and before every compile (a Definition may be built in memory): what
-// Chart.yaml may not hold (chart.Metadata.Check), then what okdp.yaml's
-// defaults and upstream may not hold (chart.NewSpecs), then its
-// provisions (checkProvisions).
+// service builds the Service of d and checks it. It runs when the
+// package is loaded and before every compile, because a Definition may
+// be built in memory.
 func (d *Definition) service() (*Service, error) {
 	if err := d.Chart.Check(); err != nil {
 		return nil, err
@@ -132,8 +127,6 @@ func (d *Definition) service() (*Service, error) {
 	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Roles: p.Roles, DependsOn: p.DependsOn, Require: p.Require, Charts: specs, Provisions: p.contracts()}, nil
 }
 
-// contracts: the contracts the package provisions, in the order of its
-// provisions; nil when none.
 func (p Package) contracts() []string {
 	var out []string
 	for _, e := range p.Provisions {

@@ -1,20 +1,21 @@
-// Layers: the values layers of a compile, the context's (Inputs.Context), by
-// level, then the instance's (Inputs.Values), Go values of any type read as
-// Helm values (value.Normalize). global is the context's: global.okdp (the
-// instance's host, where its OAuth clients register, the chart its objects
-// are rendered with, the platform's policy) and what every chart receives
-// as global (chart.FinalValues). Level 0 is the platform's; each level
-// above adds to those below it, it changes none of their values: no value
-// they set, no connection they give, no claim they declare, no class they
-// define, nor the default class they set; and of global.okdp, the
-// platform's settings, it sets provisioning only, its classes: every other
-// key of global.okdp, known to the compiler or not, is level 0's. An
-// instance sets only the keys of global its package's parameter schema
-// declares, never okdp, no connections, its own being a context layer of
-// its level, and no claims, its project's (level 1 or above, never the
-// platform's). None but level 0 gives template code: the platform's layers
-// and the package's schema defaults are reviewed, the higher levels' and
-// the instance's are input.
+// Layers: the values layers of a compile. The context's layers
+// (Inputs.Context) come first, by level, then the instance's
+// (Inputs.Values).
+//
+// Level 0 is the platform's. Each level above adds to the levels below
+// and changes nothing they set: no value, no connection, no claim, no
+// class, no default class. Of global.okdp, the platform's settings, a
+// level above 0 sets provisioning only (its classes). Every other key
+// belongs to level 0, whether the compiler knows it or not.
+//
+// An instance sets only the keys of global that its package's parameter
+// schema declares, and never okdp. It sets no connections (its own are a
+// context layer of its level), no claims (they are its project's) and no
+// access.
+//
+// Only level 0 may give template code: the platform's layers and the
+// package's schema defaults are reviewed, the higher levels and the
+// instance are input.
 
 package okdp
 
@@ -29,14 +30,10 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// valuesLayers: the layers of in, the context's (contextLayers), then the
-// instance's, as values (normalized), for chart.Parameters, and the
-// context's global.okdp (contextLayers). Each instance
-// layer in turn: one that sets global fails, but for the keys the parameter
-// schema (chart.Schema.Doc) declares under it (properties.global.properties),
-// okdp excepted; then one that sets connections, then claims, then
-// access, to any value; then one with "{{" in a key or a string, anywhere
-// (chart.NoTemplate).
+// valuesLayers returns the normalized layers of in for chart.Parameters:
+// the context's, then the instance's, and the context's global.okdp.
+// schema is the document of the parameter schema. It refuses an instance
+// layer that breaks the rules above.
 func valuesLayers(ctx context.Context, schema M, in Inputs) ([]map[string]any, M, error) {
 	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
@@ -53,8 +50,8 @@ func valuesLayers(ctx context.Context, schema M, in Inputs) ([]map[string]any, M
 		if err := in.rules().Refuse(ctx, ruleset.CheckValuesLayer, M{"name": name, "layer": layer, "declared": declared}); err != nil {
 			return nil, nil, err
 		}
-		// No template code in what the instance gives, whatever key it is
-		// under: parameters, upstream values (chart.NoTemplate).
+		// The instance gives no template code, under any key: parameters or
+		// upstream values.
 		if err := chart.NoTemplate(layer, func(p string) string { return name + ": " + p }); err != nil {
 			return nil, nil, err
 		}
@@ -63,33 +60,24 @@ func valuesLayers(ctx context.Context, schema M, in Inputs) ([]map[string]any, M
 	return layers, platform, nil
 }
 
-// contextLayers: the context's layers as values (normalized), in a copy,
-// by level, lowest first, a level's in their order: named context layer
-// <n> (level <l>), n their position in layers, from 1. A layer may change
-// what a layer of its level sets; it adds to the lower levels' values and
-// changes none of them: it fails at the first lower level, then the first
-// path (in path order), at which it sets a value that level sets, to any
-// value, the same one included: a key whose value is not a map, a
-// connection, a named claim, a class or the default class of a contract
-// (connections.<name>, claims.<name>,
-// global.okdp.provisioning.<contract>.classes.<name>,
-// global.okdp.provisioning.<contract>.default, taken whole), or a parent of
-// either set to anything but a map (chart.Overlap). Above level 0, a layer
-// sets nothing of global.okdp but provisioning (platformOnly): the other
-// keys, those the compiler reads (charts, oidc, policy...) and the others,
-// are the platform's, level 0's, whether level 0 sets them or not.
-// Level 0 declares no claims: they are a project's. access, the roles of
-// a project's groups, is level 1's only, and left out of the layers: it
-// is read apart (projectAccess), no instance receives it. Above level 0,
-// no template code (chart.NoTemplate): only the platform's level is
-// reviewed.
+// contextLayers returns the context's layers as normalized copies,
+// lowest level first, and within a level in their given order. It
+// applies the rules above. A layer may change what another layer of its
+// level sets, but fails when it sets something a lower level sets, even
+// to the same value. A connection, a named claim, a class and the
+// default class of a contract are each taken whole (the rule set's
+// Whole); otherwise what counts as set is a key whose value is not a
+// map.
 //
-// And the context's global.okdp, {global: {okdp: ...}} ({} when no layer
-// sets it), built from these layers alone, never from the parameters (a
-// package schema's defaults do not reach it): level 0's global.okdp, its
-// layers merged in order, then global.okdp.provisioning of each layer
-// above, merged in the same order; no other key of a higher level is read,
-// whatever the checks above let through.
+// access is left out of the returned layers. projectAccess reads it
+// apart, and no instance receives it. A layer sets it at level 1 only,
+// and a layer of level 0 declares no claims.
+//
+// contextLayers also returns the context's global.okdp, as {global:
+// {okdp: ...}}, or {} when no layer sets it. It builds it from these
+// layers alone, never from the parameters, so the defaults of a package
+// schema do not reach it. Of a layer above level 0 it reads
+// global.okdp.provisioning only, whatever the checks let through.
 func contextLayers(ctx context.Context, rules *RuleSet, layers []ContextLayer) ([]map[string]any, M, error) {
 	order := levelOrder(layers)
 	var out []map[string]any
@@ -137,8 +125,8 @@ func contextLayers(ctx context.Context, rules *RuleSet, layers []ContextLayer) (
 	return out, platform, nil
 }
 
-// levelOrder: the positions of layers by level, lowest first, a level's in
-// their order: the order contextLayers merges them in.
+// levelOrder returns the positions of layers sorted by level, lowest
+// first, and in their given order within a level.
 func levelOrder(layers []ContextLayer) []int {
 	order := make([]int, len(layers))
 	for i := range order {
@@ -148,10 +136,10 @@ func levelOrder(layers []ContextLayer) []int {
 	return order
 }
 
-// upstreamGlobals: the global of every layer above level 0 (layers,
-// valuesLayers' result for in) given to the host's policy
-// (Inputs.CheckGlobals): the keys of global a project sets, the instance's
-// own, which every chart receives. None without one.
+// upstreamGlobals gives the host's policy (Inputs.CheckGlobals) the
+// global of every layer above level 0: the keys of global that a project
+// or the instance sets, which every chart receives. layers is the result
+// of valuesLayers for in.
 func upstreamGlobals(ctx context.Context, in Inputs, layers []map[string]any, okdp M) error {
 	if in.CheckGlobals == nil {
 		return nil

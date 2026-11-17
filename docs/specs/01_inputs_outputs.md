@@ -22,7 +22,7 @@ the `TestHelm*` tests named below are okdp-gitops', but `testdata/rules`.
 | The claims bound to the instance, a provider | `Inputs.Claims` (`[]Claim`) | no; `CompileAll` sets them | [Claims](#claims) |
 | The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; a tree's instance's, its `instance.yaml`'s `claimers` | [Providers](#providers) |
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
-| The rule set | `Inputs.Rules` (`*RuleSet`) | no: the empty set | [Rule set](#rule-set) |
+| The rule set | `Inputs.Rules` (`*RuleSet`) | no: the mandatory set alone | [Rule set](#rule-set) |
 | The final values, and what a project sets of `global` | `Inputs.Finalize`, `Inputs.CheckGlobals` | no: Helm's merge, no policy | [Rule set](#rule-set) |
 | The charts that could not be fetched, and whether the host renders the charts | `Inputs.ChartFailures` (`map[chart.Ref]error`), `Inputs.RequireRender` | no: every chart in the cache, no rendering; `CompileTree` sets `ChartFailures` | [Hosts](#hosts) |
 | Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret, of a `provides` `secret` or of the objects, fails | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
@@ -52,31 +52,39 @@ Paths in an `fs.FS` are relative to its root.
 
 ## Rule set
 
-`Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules`), is what a
-compile refuses of a platform and what it knows of its names, as data:
-the tables and the CEL checks; the schemas of `global.okdp`
-(`platform.schema.json`) and of the mapping's sections
-(`mapping.schema.json`), with their defaults; the values the mapping sees
+A compile applies two rule sets, as data, each rule in one of them. The
+mandatory set, embedded (`internal/rules/mandatory`), is what a compile
+needs to write values a chart installs: the schema of `global.okdp`
+(`platform.schema.json`), with its defaults; the values the mapping sees
 as `platform`; the functions and fragments; the `oidcClients` section;
-the platform's charts; the labels of OKDP's objects; the documents of the
-secret store's objects. The standard set is okdp-gitops', `rules/v1`;
+the labels of OKDP's objects; the names of the Secrets that carry
+credentials; the documents of the secret store's objects; the roles of a
+project's groups; what a level may not change of a lower one.
+
+`Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules`), adds what a
+compile refuses of a platform: the other tables and the CEL checks, the
+schema of the mapping's sections (`mapping.schema.json`) and the
+platform's charts. `LoadRules` refuses a set that gives a rule of the
+mandatory one (`a rule set adds rules, it replaces none`), and one that
+leaves out, with the mandatory one, a table, a check, the mapping schema
+or the `objects` chart. The standard set is okdp-gitops', `rules/v1`;
 `testdata/rules` here is a copy for this module's tests. Every rule this
-document gives as OKDP's is the standard set's: another set says otherwise.
+document gives as OKDP's is the standard set's or the mandatory one's:
+another set says otherwise of the standard set's alone.
 
-`Inputs.Rules` nil compiles with the empty set:
+`Inputs.Rules` nil compiles with the mandatory set alone:
 
-| | Without a rule set |
+| | The mandatory set alone |
 |---|---|
 | namespaces, releases, objects, hosts, plain Secrets, layers | no check refuses; the checks written in Go stay (a name is a DNS-1123 label, a level adds values, no `{{` above level 0, two writers of one Secret) |
-| `global.okdp`, the mapping's sections | no schema, no default: read as written |
-| `platform.*` of the mapping, `labels`, `selectorLabels` | empty |
-| `okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret` | not declared: a package that calls one does not load |
-| `okdpGeneratedSecret` | fails when called |
-| `oidcClients` | an unknown section: the package is refused |
-| `access` of a project | no role: nobody has one, and `Result.Groups` is nil |
+| `global.okdp` | read against the platform schema, its defaults applied |
+| the mapping's sections, the arguments of the functions | no schema: read as written |
+| `platform.*` of the mapping, `labels`, `selectorLabels` | computed |
+| the functions and fragments, `oidcClients` | declared |
+| `access` of a project | its roles, the default group an editor |
 | `global.okdp.charts` | no default, `Result.ObjectsSource` empty |
 | the claim format | kept: `global.okdp.provisioning` of a project, the classes and connections a level may not change, the names of the Secrets that carry credentials |
-| a claim of another namespace | refused: the objects that carry its credentials are the rule set's |
+| a claim of another namespace | bound, its credentials through the platform's secret store |
 
 The policy over the upstream values and the hosts of an upstream chart's
 values is no rule of the compile: it is the host's, through two hooks.
@@ -1250,7 +1258,7 @@ global.okdp.ingress.className is required. It is a context value: the platform's
 
 The settings of `global.okdp` the compiler reads are described by the
 platform schema the compiler embeds,
-[`testdata/rules/schemas/platform.schema.json`](../../testdata/rules/schemas/platform.schema.json):
+[`internal/rules/mandatory/schemas/platform.schema.json`](../../internal/rules/mandatory/schemas/platform.schema.json):
 their types, their defaults and, in its `description`s, what each means.
 It is the platform authors' reference; an editor can check a platform
 values file against it. Every key of `global.okdp`, described there or
@@ -1939,8 +1947,9 @@ for it in `global.okdp.policy.ingressHosts`, in `dcr` mode. A client's
 `jwks_uri`, `initiate_login_uri`, `backchannel_logout_uri` and
 `frontchannel_logout_uri` are refused, in every mode.
 
-The objects are not Go code: `rules/v1/charts/oidc-dcr.cel.yaml` of
-okdp-gitops, a template in the mapping language of the rule set, computes
+The objects are not Go code:
+`internal/rules/mandatory/charts/oidc-dcr.cel.yaml`, a template in the
+mapping language of the mandatory rule set, computes
 them for each client from the client (its keys, checked), its names (the
 objects' name, the Secret) and the mapping's context
 ([why](../00_architecture.md#the-oidc-dcr-template)). The registration
@@ -2656,10 +2665,9 @@ groups hold the people, and okdp-gitops' targets write their roles into
 each project's manifests, which Argo CD and the API server enforce. A
 control plane, optional, mirrors the same authority (it reads it with
 `compiler.ParseAccess` and `compiler.PlatformAdmins`), never adds a
-boundary only it enforces. The roles are the standard rule set's
-(`projectRoles`): without a rule set, `access` gives none. A rule set
-lists some of `viewer`, `editor` and `admin`, and no other: what each
-may do is code. One without `editor` gives the default group no role.
+boundary only it enforces. The roles are the mandatory rule set's
+(`projectRoles`), `viewer`, `editor` and `admin`: what each may do is
+code, and no other set changes them.
 
 ```yaml
 # platform.yaml, level 0

@@ -1,7 +1,5 @@
-// Spec: each dependency of a package's Chart.yaml by key, the upstream
-// chart that renders its values, with okdp.yaml's defaults and upstream:
-// OKDP's defaults for it, and the instance upstream values it accepts, with
-// their protect and append paths.
+// This file joins each dependency of Chart.yaml with what okdp.yaml says
+// of it.
 package chart
 
 import (
@@ -13,40 +11,39 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Specs: the dependencies of a package, by key (NewSpecs).
+// Specs holds the dependencies of a package, by key (NewSpecs).
 type Specs map[string]Spec
 
-// Spec: one upstream chart of a service, by key: the key names its
-// values (the values file, the final values), the upstream chart renders
-// them.
+// Spec is one upstream chart of a service. Its key names its values, and
+// the upstream chart renders them.
 type Spec struct {
-	Source   Ref      // the upstream chart: what renders the values, and its defaults and schema for a check (the chart cache)
-	Defaults string   // a values file of the package, <key>.defaults.yaml by convention: OKDP's defaults for the chart
-	Protect  []string // instance upstream values: protected paths (paths.go: dotted keys, ["literal.key"], ["prefix*"])
-	Append   []string // instance upstream values: appended lists (same paths)
-	Upstream bool     // instance upstream values accepted: upstream.<key> of the instance's values
+	Source   Ref      // the upstream chart, which renders the values
+	Defaults string   // a values file of the package with OKDP's defaults for the chart
+	Protect  []string // the paths instance upstream values may not set (paths.go)
+	Append   []string // the paths of the lists instance upstream values append to
+	Upstream bool     // whether the chart accepts instance upstream values (upstream.<key>)
 }
 
-// Upstream: okdp.yaml's upstream, the dependencies that accept instance
-// upstream values: All (true: every dependency, nothing protected or
-// appended), or by dependency key (Keys). Absent or false: none.
+// Upstream is the upstream section of okdp.yaml: the dependencies that
+// accept instance upstream values. All accepts them for every dependency,
+// with nothing protected or appended. An absent section, or false, accepts
+// none.
 type Upstream struct {
 	All  bool
 	Keys map[string]UpstreamKey
 }
 
-// UpstreamKey: a dependency's entry of upstream: true or {} accepts its
-// upstream values, false does not; {protect, append} accepts them, with
-// these paths.
+// UpstreamKey is one dependency's entry of upstream: true or {} accepts
+// its upstream values, false does not, and {protect, append} accepts them
+// with these paths.
 type UpstreamKey struct {
 	Accept  bool
 	Protect []string
 	Append  []string
 }
 
-// UnmarshalYAML: upstream, a boolean (a YAML 1.1 one, off or yes, read as
-// the one it spells) or a map by dependency key of booleans and
-// {protect, append}, those two keys only: a misspelt protect would
+// UnmarshalYAML decodes upstream: a boolean, or a map by dependency key.
+// An entry may hold protect and append only: a misspelt protect would
 // otherwise leave its paths unprotected.
 func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode && n.Decode(&u.All) == nil {
@@ -74,8 +71,7 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// upstreamKey: the entry n of upstream; ok false when it has none of the
-// forms of UpstreamKey.
+// upstreamKey decodes an entry; ok is false when n is no form of UpstreamKey.
 func upstreamKey(n *yaml.Node) (k UpstreamKey, ok bool, err error) {
 	switch n.Kind {
 	case yaml.ScalarNode:
@@ -97,9 +93,10 @@ func upstreamKey(n *yaml.Node) (k UpstreamKey, ok bool, err error) {
 	return k, ok, err
 }
 
-// NewSpecs: the dependencies of meta, a checked Chart.yaml, by key, their
-// source the chart each names, with okdp.yaml's defaults and upstream
-// (keys of dependencies only), then checked (Specs.Check).
+// NewSpecs builds the Specs of meta, a checked Chart.yaml: one per
+// dependency, by key. It adds the defaults and upstream sections of
+// okdp.yaml, which may name keys of dependencies only, then checks the
+// result (Specs.Check).
 func NewSpecs(meta Metadata, defaults map[string]string, upstream Upstream) (Specs, error) {
 	s := Specs{}
 	for _, d := range meta.Dependencies {
@@ -122,10 +119,10 @@ func NewSpecs(meta Metadata, defaults map[string]string, upstream Upstream) (Spe
 	return s, s.Check()
 }
 
-// Check: a protect or append path that does not follow the grammar of
-// paths.go, refused when the package is loaded and before every compile: a
-// malformed path would otherwise surface only when an instance sets a
-// value under it, or never, leaving a value unprotected.
+// Check refuses a malformed protect or append path (paths.go). It runs
+// when the package is loaded and before every compile: the path would
+// otherwise fail only when an instance sets a value under it, or never,
+// which would leave a value unprotected.
 func (s Specs) Check() error {
 	for _, key := range slices.Sorted(maps.Keys(s)) {
 		spec := s[key]
