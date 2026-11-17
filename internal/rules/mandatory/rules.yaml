@@ -1,10 +1,28 @@
-# The standard rule set of an OKDP platform: what the compiler refuses and
-# what it knows of the platform's names, as data. A table with addFrom also
-# reads the list global.okdp.<addFrom>: the platform adds to the table, it
-# never removes from it.
+# The compiler's mandatory rule set, applied to every compile: what a
+# compile needs to write values a chart installs (the functions, the
+# templates and the names of a mapping), and what it refuses (the checks,
+# and the tables they read), as data. Another rule set given to the compile
+# (LoadRules, --rules) adds to this one without replacing any of it. A table
+# with addFrom also reads the list global.okdp.<addFrom>: the platform adds
+# to the table, it never removes from it.
 apiVersion: okdp-compiler/rules.v1
 version: 1.0.0
 tables:
+  # The paths of the context a level gives whole, or not at all: * stands for
+  # one key. A level may not change them piecemeal.
+  wholePaths:
+    values:
+      - connections.*
+      - claims.*
+      - global.okdp.provisioning.*.classes.*
+      - global.okdp.provisioning.*.default
+  # The keys of global.okdp a level above 0 may set, read as the platform's
+  # settings: the classes a project adds.
+  projectPlatformKeys:
+    values: [provisioning]
+  # The roles of a project's groups, least first.
+  projectRoles:
+    values: [viewer, editor, admin]
   # The namespaces of the deployer engines and of the objects the targets
   # write in them, which no project may have: a project's releases are
   # installed with every verb of its namespace, and there they would rewrite
@@ -151,21 +169,6 @@ tables:
   # (global.okdp.policy.projectGlobals).
   defaultProjectGlobals:
     values: [project, storageClass]
-  # The paths of the context a level gives whole, or not at all: * stands for
-  # one key. A level may not change them piecemeal.
-  wholePaths:
-    values:
-      - connections.*
-      - claims.*
-      - global.okdp.provisioning.*.classes.*
-      - global.okdp.provisioning.*.default
-  # The keys of global.okdp a level above 0 may set, read as the platform's
-  # settings: the classes a project adds.
-  projectPlatformKeys:
-    values: [provisioning]
-  # The roles of a project's groups, least first.
-  projectRoles:
-    values: [viewer, editor, admin]
 # The checks: each a document of vars and errors (the mapping language),
 # applied by a walker of the compiler, the first message refusing. They see
 # their input and sets, each table as a set, and tables, as a list.
@@ -179,10 +182,15 @@ checks:
   host: checks/host.cel.yaml
   contextLayer: checks/context-layer.cel.yaml
   valuesLayer: checks/values-layer.cel.yaml
-# The JSON schemas of the platform's settings and of what a mapping writes.
+# The JSON schemas of the platform's settings, and their defaults, and of
+# what a mapping writes.
 schemas:
   platform: schemas/platform.schema.json
   mapping: schemas/mapping.schema.json
+# The charts the compiler adds: objects, overridden by
+# global.okdp.charts.objects.
+charts:
+  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 0.1.0}
 # The functions mappings call: each a fragment, a template evaluated on its
 # arguments, checked against the mapping schema under the function's name,
 # and the instance's context; result names the value it returns, all of them
@@ -201,20 +209,17 @@ templates:
 # The sections of a mapping besides the compiler's own (output, instance,
 # provides, objects).
 sections: [oidcClients]
-# The charts the compiler adds: objects, overridden by
-# global.okdp.charts.objects.
-charts:
-  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 0.1.0}
 # Documents the others call: rule(<name>, input) in a document, a function of
-# functions, scope (what a mapping sees as platform).
+# functions, scope (what a mapping sees as platform); deployerRole, which the
+# targets call, the Role of a project's releases.
 documents:
   oidcSecret: functions/oidc-secret.cel.yaml
   oidcClients: charts/oidc-clients.cel.yaml
   scope: scope.cel.yaml
   secretStore: objects/secret-store.cel.yaml
-  deployerRole: objects/deployer-role.cel.yaml
   pushSecret: objects/push-secret.cel.yaml
   pullSecret: objects/pull-secret.cel.yaml
+  deployerRole: objects/deployer-role.cel.yaml
 # A section whose items add objects: list gives them, objects the template
 # of the objects of each it says to render.
 ownObjects:

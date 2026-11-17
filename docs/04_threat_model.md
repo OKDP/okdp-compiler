@@ -8,12 +8,17 @@ code that enforces it, `<file>: <function>`, and the fixture that proves
 it, a case that must fail, or a unit test where no fixture is. [What
 cannot be enforced](#what-cannot-be-enforced) closes it.
 
-The compiler applies these rules only as far as its rule set says so. The
-walkers of `internal/okdp` (`policy.go`, `hosts.go`, `release.go`) run the
-checks of the rule set a compile is given (`Inputs.Rules`); this document
-is the standard set's, okdp-gitops' `rules/v1`, which
-`deploy.Build` gives its compiles. A compile with no rule set refuses
-none of what these walkers look for.
+These rules are data. The walkers of `internal/okdp` (`policy.go`,
+`hosts.go`, `release.go`) run the checks of the compiler's mandatory rule
+set, which every compile applies; a rule set a compile is given
+(`Inputs.Rules`) adds to it and replaces none of its rules.
+
+This module's own `cmd/okdp-compile` holds the lines of okdp-gitops'
+command about what it reads and writes, with copies of `dirfs` and
+`outdir`. It compiles with the mandatory rules and the set of `--rules`,
+the mandatory rules alone without it, their checks among them, and
+without okdp-gitops' `policy` package: a compile to deploy from goes
+through okdp-gitops.
 
 okdp-gitops holds part of what is named here: `target`, `flux`,
 `argocd`, `output`, `outdir`, `dirfs`, `chartcache`, `treeedit`,
@@ -21,7 +26,7 @@ okdp-gitops holds part of what is named here: `target`, `flux`,
 `policy.CheckIngressValues`, `policy.PlainUpstream`, set by `deploy.Build`
 through `Inputs.Finalize` and `Inputs.CheckGlobals`), and the fixtures
 `testdata/<case>.yaml`, `testdata/context/<level>/<case>.yaml` and
-`testdata/cli/*.txtar`, which compile whole trees with the standard set.
+`testdata/cli/*.txtar`, which compile whole trees.
 
 ## What is at stake
 
@@ -88,7 +93,7 @@ route every namespace to their providers, consenting for them.
 | may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | `target.NetworkPolicy` | `testdata/cli/network.txtar`, `TestNetworkPolicy` |
 | may | give a connection of any key of the store, `platform/<key>` of a ClusterSecretStore; with `secrets.provider`, a key a namespace reads, `<namespace>/<key>`, read through the project's connection | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`platform/datalake`) |
 | may not | give a connection a key under `platform/` when the platform gives `secrets.provider`: no namespace reads it, the platform's credentials are copied under the keys of the namespaces that use them | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`provider`) |
-| may | route any namespace to a provider of any namespace (a class) | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
+| may | route any namespace to a provider of any namespace (a class) | `namespace.go: consent` | `testdata/cli/claims.txtar` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | `testdata/context/0/http-chart-repository.yaml` |
 | may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (the menu is `catalogs.yaml`'s), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
 | may not | a `catalogs.yaml` the compile does not read: an unknown key, at any level, a value of another type, a catalog or a category named twice, a service listed twice, of no catalog, or of a default version its catalog lacks | `repository/catalogs.go: ParseCatalogs`, `checkCatalogs`; `treeedit.ReadCatalogRepositories`, `UpdateCatalog`, `CheckCatalogs` | `TestParseCatalogs`, `TestLoadCatalogsFile`, `TestCheckCatalogs` |
@@ -105,7 +110,7 @@ values for its instances, and its instances' directories are its own.
 | may | settings under `global` beside `okdp`: the keys the platform lists (`global.okdp.policy.projectGlobals`, `project` and `storageClass` by default), checked as upstream values; parameters and upstream values for its instances, under an instance's rules | `layers.go: contextLayers` | `examples/03_full` (`project.yaml`) |
 | may | classes of its own, and the default class of a contract the platform leaves without one (`global.okdp.provisioning`) | `layers.go: platformOnly` | `examples/04_claims` (`project.yaml`) |
 | may | connections and named claims of its own | `layers.go: contextLayers` | `examples/03_full`, `examples/04_claims` |
-| may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
+| may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: consent` | `testdata/cli/claims.txtar` |
 | may | give the identity provider's groups a role within the project, `access` (`viewer`, `editor`, `admin`; `okdp-project-<namespace>` an editor by default): a project team gets exactly its roles, those of its AppProject and of its namespace, nothing of another project's | `access.go: ParseAccess`, `target.Access`, `argocd.Policies` | `TestAccessCompile`, `TestAccess`, `testdata/targets/<target>/projects/demo/project/` |
 | may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three; nor set it from another level than its file's (the platform's, an instance's `connections.yaml` or `config.yaml`) | `access.go: ParseAccess`, `layers.go: contextLayers`, `valuesLayers` | `TestParseAccess`, `TestAccessCompile` |
 | may not | the platform's administrators or the API server's group prefix (`global.okdp.access`) | `layers.go: platformOnly` | `TestAccessCompile` |
@@ -114,7 +119,7 @@ values for its instances, and its instances' directories are its own.
 | may not | change a value, a connection, a class or a default class of a lower level | `layers.go: contextLayers` (`chart.Overlap`) | `testdata/context/1/redefines-platform-connection.yaml`, `redefines-platform-class.yaml` |
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `testdata/context/1/template-code.yaml` |
 | may not | a connection of a store key outside `<project>/`: the platform's, another namespace's | `connections.go: storeSecret` | `testdata/context/1/remote-key-of-the-platform.yaml` |
-| may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: compilation.consent` | `testdata/cli/claims.txtar` |
+| may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: consent` | `testdata/cli/claims.txtar` |
 | may not | keep a declaration unchecked by having no instance: its named claims (class, request, name) and its connections checked as an instance's compile checks them, the tree refused | `repository.Load`, `okdp.CheckDeclarations` | `testdata/cli/layout.txtar`, `TestValidateClaim` |
 | may not | the name `platform`, the segment of the platform's keys | `policy.go: checkNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `testdata/cli/secrets.txtar`, `TestCheckProjectName` |
 | may not | a reserved namespace: `kube-*`, Kubernetes' own; `flux-system`, `argocd`, `okdp-releases`, the engines' and the targets' (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); another namespace a target writes in (the flux target's `Source`); those of `policy.reserved`, privileged or not | `policy.go: checkNamespace`, `checkPlatformNamespace`, `target.OwnNamespaces`; before a project is created, `compiler.CheckProjectName`, the compile's two | `testdata/cli/policy.txtar` (`reserved`), `TestCompileErrors`, `TestCheckProjectName`, `TestOwnNamespaces` |
@@ -133,7 +138,7 @@ and, a provider, its `claimers`.
 | may | parameters the package's schema accepts, the keys of `global` it declares | `layers.go: valuesLayers`, `chart.Parameters` | `examples/02_advanced` |
 | may | upstream values of the keys its package opens (`upstream`) | `merge.go: applyUpstream` | `examples/02_advanced` |
 | may | connections of its own, their credentials under `<project>/` of the store | `connections.go: storeSecret` | `testdata/cli/secrets.txtar` (`demo/own`) |
-| may | claims of a class, or of a provider of its namespace or with its consent; a request the contract's claim schema accepts | `namespace.go: compilation.provider`, `compilation.consent`, `compilation.request` | `testdata/cli/claims.txtar` |
+| may | claims of a class, or of a provider of its namespace or with its consent; a request the contract's claim schema accepts | `namespace.go: compilation.provider`, `consent`, `claimRequest` | `testdata/cli/claims.txtar` |
 | may not | `global` but the keys the parameter schema declares, never `okdp` | `layers.go: valuesLayers` | `testdata/instance-sets-global.yaml` |
 | may not | `connections` or `claims` in `config.yaml` | `layers.go: valuesLayers` | `testdata/instance-sets-connections.yaml`, `instance-sets-claims.yaml` |
 | may not | anything but `connections` in `connections.yaml` | `repository.go: parts.instance` | `TestLoadErrors` |
@@ -316,12 +321,11 @@ these lines.
 
 ## What cannot be enforced
 
-- **A compile with no rule set.** A caller that gives none
-  (`Inputs.Rules` nil) gets no namespace, object, host or plain-secret
-  refusal, and no schema check of the platform's values: only the claim
-  format holds. It is the caller's to give a rule set, as okdp-gitops
-  does. A compile without its `Inputs.Finalize` applies no upstream or
-  ingress policy either.
+- **A compile without the host's hooks.** Every compile applies the
+  mandatory rule set, its checks among them, but a caller that gives no
+  `Inputs.Finalize` and no `Inputs.CheckGlobals` applies no upstream or
+  ingress policy, and no check of the keys of `global` a project sets.
+  It is the caller's to give them, as okdp-gitops does.
 - **Who writes a file.** The compiler trusts a file for its place in the
   tree and its repository's role, which the caller gives: a catalog given
   as a repository of the tree (`--repository`, `RoleTree`) adds projects

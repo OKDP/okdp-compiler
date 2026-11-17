@@ -1,9 +1,8 @@
-// Names: okdpSqlName and okdpObjectName, the names a provider derives from
-// a claim's ID, one name per ID, so that two claimers' claims never share
-// one: the database, the role or the keyspace of a claim, the object of a
-// topic. A claim's ID is DNS-1123 labels joined by dots, and the
-// replacement of its dots and dashes by one character loses it: a-b.c and
-// a.b-c are both a_b_c.
+// Names: okdpSqlName and okdpObjectName, the names a provider derives
+// from a claim's ID: a database, a role, a keyspace, the object of a
+// topic. No two IDs give the same name, so the claims of two claimers
+// never share one. Replacing the dots and dashes of an ID by a single
+// character would lose that: a-b.c and a.b-c both become a_b_c.
 
 package okdp
 
@@ -22,23 +21,16 @@ import (
 )
 
 const (
-	// nameMax: the length okdpSqlName and okdpObjectName give a name by
-	// default: PostgreSQL's identifiers and a DNS-1123 label.
-	nameMax = 63
-	// nameMaxMin, nameMaxMax: the bounds of the length a caller asks for.
-	nameMaxMin, nameMaxMax = 24, 253
-	// nameHash: the hexadecimal digits of the ID's SHA-256 a long name ends
-	// with: 64 bits.
-	nameHash = 16
-	// systemEscape: what okdpSqlName puts before a name that starts with
-	// system.
-	systemEscape = "c___"
+	nameMax                = 63      // the default limit: a PostgreSQL identifier, a DNS-1123 label
+	nameMaxMin, nameMaxMax = 24, 253 // bound the limit a caller may ask for
+	nameHash               = 16      // hex digits of the ID's SHA-256 that end a long name: 64 bits
+	systemEscape           = "c___"  // what okdpSqlName puts before a name that starts with system
 )
 
-// checkDotted: nil when id is a claim's ID (chart.IsClaimID), DNS-1123
-// labels joined by dots, 63 characters at most: the form the names below
-// are injective over. A label starts and ends with a letter or a digit, so
-// that a dot is never next to a dash.
+// checkDotted returns nil when id is a claim's ID. The names below are
+// injective over that form: a label starts and ends with a letter or a
+// digit, so a dot is never next to a dash. fn names the caller in the
+// error.
 func checkDotted(fn, id string) error {
 	if !chart.IsClaimID(id) {
 		return fmt.Errorf("%s: %q is not a claim's ID: DNS-1123 labels joined by dots, 63 characters at most", fn, id)
@@ -46,7 +38,6 @@ func checkDotted(fn, id string) error {
 	return nil
 }
 
-// checkNameMax: nil when limit is a length a name may be asked to have.
 func checkNameMax(fn string, limit int64) error {
 	if limit < nameMaxMin || limit > nameMaxMax {
 		return fmt.Errorf("%s: the length %d is out of %d to %d", fn, limit, nameMaxMin, nameMaxMax)
@@ -54,11 +45,11 @@ func checkNameMax(fn string, limit int64) error {
 	return nil
 }
 
-// boundName: name, the name of the ID id, as it is when it is shorter than
-// limit; else its first limit-17 characters, "sep" and the first 16 digits of
-// the SHA-256 of id: limit characters. A name that fits is shorter than limit,
-// one cut is limit long, so that a cut name is no other ID's whole name, and
-// the digits tell two IDs that share their start apart.
+// boundName returns name, derived from id, when it is shorter than
+// limit. Otherwise it returns exactly limit characters: the start of
+// name, then sep, then the first 16 hexadecimal digits of the SHA-256 of
+// id. A cut name is limit long and a name that fits is shorter, so a cut
+// name is never the whole name of another ID.
 func boundName(id, name, sep string, limit int) string {
 	if len(name) < limit {
 		return name
@@ -67,14 +58,15 @@ func boundName(id, name, sep string, limit int) string {
 	return name[:limit-1-nameHash] + sep + hex.EncodeToString(sum[:])[:nameHash]
 }
 
-// sqlName: okdpSqlName, an identifier of [a-z0-9_], limit characters at
-// most, one per claim ID (checkDotted): each dash two underscores, each dot
-// one. The labels of an ID neither start nor end with a dash, so a dot is
-// never next to one: a run of underscores is one dot (1) or dashes (2
-// each), and two IDs never give one name. A name that starts with system
-// (Cassandra's system, system_schema... keyspaces, PostgreSQL's system
-// catalogs' prefix) gets systemEscape first: three underscores in a row
-// are no ID's, so no other name is that one; then boundName.
+// sqlName implements okdpSqlName. It returns an identifier of [a-z0-9_]:
+// each dash becomes two underscores and each dot one. A dot is never
+// next to a dash, so a run of underscores reads back as one dot (1) or
+// dashes (2 each), and two IDs never give one name.
+//
+// A name that starts with system gets systemEscape first. It would
+// otherwise collide with Cassandra's system keyspaces or with the prefix
+// of PostgreSQL's system catalogs. No ID gives three underscores in a
+// row, so the escaped name is no other ID's.
 func sqlName(id string, limit int64) (string, error) {
 	if err := checkDotted("okdpSqlName", id); err != nil {
 		return "", err
@@ -89,10 +81,9 @@ func sqlName(id string, limit int64) (string, error) {
 	return boundName(id, name, "_", int(limit)), nil
 }
 
-// objectName: okdpObjectName, a DNS-1123 label, limit characters at most,
-// one per claim ID (checkDotted): each dash two dashes, each dot one. A dot
-// is never next to a dash, so a run of dashes is one dot (1) or dashes (2
-// each); then boundName.
+// objectName implements okdpObjectName. It returns a DNS-1123 label:
+// each dash becomes two dashes and each dot one, which reads back the
+// same way.
 func objectName(id string, limit int64) (string, error) {
 	if err := checkDotted("okdpObjectName", id); err != nil {
 		return "", err
@@ -103,10 +94,9 @@ func objectName(id string, limit int64) (string, error) {
 	return boundName(id, strings.NewReplacer("-", "--", ".", "-").Replace(id), "-", int(limit)), nil
 }
 
-// nameFunctions: okdpSqlName(id), okdpSqlName(id, limit), okdpObjectName(id),
-// okdpObjectName(id, limit), their calls counted in the session's cost. An
-// argument of another type than a string and an int, which an expression
-// of an unchecked type reaches, fails the call.
+// nameFunctions returns okdpSqlName and okdpObjectName, each taking an
+// ID and an optional limit. An expression of an unchecked type can pass
+// an argument that is not a string or an int: the call then fails.
 func nameFunctions() []cel.EnvOption {
 	call := func(name string, f func(string, int64) (string, error), id, limit ref.Val) ref.Val {
 		s, ok := id.(types.String)

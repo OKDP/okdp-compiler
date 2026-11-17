@@ -1,8 +1,7 @@
-// Parameters: the values of an instance, read as Helm reads the values of a
-// chart: the layers merged as -f files, coalesced over the defaults of the
-// package's config.schema.json, checked against it. The same machinery
-// serves any values schema (Schema): package okdp reads the platform
-// values with its own.
+// This file reads the parameters: the values of an instance, merged like
+// -f files, coalesced over the defaults of the package's
+// config.schema.json and checked against it. Package okdp reads the
+// platform values with the same machinery (Schema).
 package chart
 
 import (
@@ -17,37 +16,29 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// parameterSchema: the parameter schema of a package, the parameters'
-// defaults included.
+// parameterSchema is the file of a package's parameter schema and defaults.
 const parameterSchema = "config.schema.json"
 
-// Schema: a values schema, read, decoded and compiled once (ParseSchema)
-// for every stage that reads it: its values' defaults and check (Values),
-// and its keywords (Doc). A package's parameter schema
-// (ReadParameterSchema, once per compile): the parameters (Parameters), and
-// in package okdp the keys of global an instance may set and the connection
-// references; the schema of the platform values (package okdp): the
-// settings of global.okdp the compiler reads.
+// Schema is a values schema, read and compiled once (ParseSchema). Values
+// applies its defaults and checks values against it. A package's parameter
+// schema and the schema of the platform values (package okdp) are read
+// this way.
 type Schema struct {
-	// Doc: the document as values (value.Normalize: every number a
-	// float64, as a values file reads it); empty for a boolean schema.
+	// Doc is the schema document as values (every number a float64). It is
+	// empty for a boolean schema.
 	Doc      M
-	name     string             // the file it is read from, for the errors
-	root     *jsonschema.Schema // the values' validator, compiled as a chart's values.schema.json (CompileSchema)
-	defaults M                  // the values' defaults, as a values file holds them
+	name     string             // the file the schema is read from, for the errors
+	root     *jsonschema.Schema // validates the values (CompileSchema)
+	defaults M                  // the values' defaults, laid out as in a values file
 }
 
-// ReadParameterSchema: the parameter schema of pkg (config.schema.json),
-// read as ParseSchema reads a schema; a missing one is the empty schema
-// ({}): no defaults, any values, no key of global declared. Any other read
-// error fails with the error of the file system. A schema that declares
-// properties.global.properties.okdp is refused, and one whose defaults
-// give global.okdp (properties.global.default, a map with the key okdp):
-// global.okdp is the platform's settings, given by the context
-// (Inputs.Context), and a package declares nothing under it nor gives it
-// a default. The platform's settings are read from the context alone,
-// whatever the parameters hold: the refusal tells the package's author
-// rather than leave a default unread.
+// ReadParameterSchema reads the parameter schema of pkg. A package
+// without the file gets the empty schema ({}): no defaults, any values
+// accepted.
+//
+// global.okdp holds the platform's settings, which come from the context
+// alone (Inputs.Context). A schema that declares it, or gives it a
+// default, is refused: nothing would read that default.
 func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	b, err := fs.ReadFile(pkg, parameterSchema)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -69,14 +60,14 @@ func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	return s, nil
 }
 
-// ParseSchema: the values schema b, read from the file name, decoded once
-// (jsonschema.UnmarshalJSON: the validator keeps the numbers as written,
-// Doc reads them as float64) and compiled once (CompileSchema). The
-// defaults are as a values file holds them: the default of each property
-// reached from the root through properties alone, at its path (that of
-// properties.a.properties.b at a.b), the outermost on a path. A default
-// anywhere else is not read; one that does not meet its schema fails the
-// check of the values that keep it (Values).
+// ParseSchema decodes and compiles the values schema b. name is the file b
+// is read from, for the errors.
+//
+// The defaults are laid out as in a values file. A property's default is
+// read only when the property is reached from the root through properties
+// alone: the default of properties.a.properties.b lands at a.b. When
+// several defaults lie on one path, the outermost is read. A default that
+// does not meet its schema fails the check of the values that keep it.
 func ParseSchema(name string, b []byte) (*Schema, error) {
 	sdoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
 	if err != nil {
@@ -93,16 +84,16 @@ func ParseSchema(name string, b []byte) (*Schema, error) {
 	return &Schema{Doc: value.AsMap(doc), name: name, root: root, defaults: schemaDefaults(doc)}, nil
 }
 
-// Values: user coalesced over the defaults of s, as Helm coalesces values
-// over a chart's values.yaml, then checked against s, as Helm checks a
-// chart's values.schema.json: the values, and their violations, one line
-// each with its path (Validate), "" when they hold. user is not changed.
+// Values coalesces user over the defaults of s, then checks the result
+// against s, as Helm does with a chart's values.yaml and schema. It
+// returns the coalesced values and their violations, one line each, ""
+// when the values hold. user is not changed.
 func (s *Schema) Values(user M) (M, string, error) {
 	values, v, _, err := s.check(user)
 	return values, v, err
 }
 
-// check: Values, and the violations one by one (validate).
+// check is Values, and also returns the violations one by one (validate).
 func (s *Schema) check(user M) (M, string, []Violation, error) {
 	values := coalesceValues(s.defaults, user)
 	v, leaves, err := validate(s.name, s.root, values)
@@ -112,13 +103,13 @@ func (s *Schema) check(user M) (M, string, []Violation, error) {
 	return values, v, leaves, nil
 }
 
-// Parameters: the values layers, normalized (value.Normalize), merged in
-// order (helm -f), coalesced over the defaults of the parameter schema and
-// checked against it (Schema.Values). Every violation is reported at once,
-// under name, as Helm reports those of a chart's values: a *ValuesError,
-// each violation apart too. connections and claims are not parameters:
-// kept as merged, out of the defaults and the check, whatever the schema
-// declares of them.
+// Parameters computes the parameters of an instance: its values layers,
+// already normalized (value.Normalize), merged in order like helm -f,
+// then coalesced and checked as Schema.Values does. All the violations
+// are reported at once, under name, in a *ValuesError.
+//
+// connections and claims are not parameters. They are returned as merged:
+// they get no default and no check, whatever the schema declares for them.
 func Parameters(schema *Schema, name string, layers []map[string]any) (M, error) {
 	user := M{}
 	for _, v := range layers {
@@ -144,8 +135,7 @@ func Parameters(schema *Schema, name string, layers []map[string]any) (M, error)
 	return values, nil
 }
 
-// schemaDefaults: the defaults of the properties of the schema s, at
-// their path (ParseSchema).
+// schemaDefaults returns the defaults of s, each at its path (ParseSchema).
 func schemaDefaults(s any) M {
 	out := M{}
 	for k, p := range value.AsMap(value.AsMap(s)["properties"]) {
@@ -158,5 +148,5 @@ func schemaDefaults(s any) M {
 	return out
 }
 
-// Validate: the violations of v against the schema, under name (Validate).
+// Validate checks v against the schema, as the function Validate does.
 func (s *Schema) Validate(name string, v any) (string, error) { return Validate(name, s.root, v) }

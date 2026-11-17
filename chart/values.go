@@ -1,27 +1,20 @@
 // Package chart is what the compiler reproduces of Helm and needs of the
-// upstream charts: values read, merged and coalesced as Helm does
-// (values.go), checked against a values.schema.json (schema.go), the chart
-// references and the chart cache of the checks (ref.go, cache.go), a
-// package's Chart.yaml (metadata.go) and its dependencies, with okdp.yaml's
-// defaults and upstream (spec.go, paths.go), a values schema, its defaults
-// and the parameters of an instance (parameters.go), the final values of
-// each chart key and their check (merge.go). It knows neither the mapping
-// language nor OKDP.
+// upstream charts: values read and coalesced as Helm does (values.go) and
+// checked against a schema (schema.go, parameters.go), the compiler's own
+// checks of values (check.go), a package's Chart.yaml (metadata.go), its
+// dependencies with what okdp.yaml says of them (spec.go, paths.go), and
+// the chart references (ref.go). It knows neither the mapping language nor
+// OKDP.
 //
-// Values: reading YAML as Helm values, and Helm's merge rules.
+// Values files are read as Helm 3 reads them: only the first YAML document
+// is decoded (Helm 4 merges the later ones), as YAML 1.1 (y, yes, on are
+// booleans) and through JSON (string keys, every number a float64).
 //
-// Values files are read as Helm 3 reads them: the first YAML document of the
-// file decoded by sigs.k8s.io/yaml (YAML 1.1: y, yes, on... are booleans;
-// through JSON: string keys, every number a float64); Helm 4 merges the
-// later documents, which are ignored. The layers are merged as Helm merges
-// its -f files (MergeMaps); the parameters, and the final values a check
-// reads, are coalesced over their defaults as Helm does (CoalesceValues): a
-// null deletes a default, and is kept where there is no default. Helm's own
-// functions are not imported: helm.sh/helm/v4
-// pulls in client-go and a newer Go and Kubernetes than the programs that
-// embed this package, for about a hundred lines. They are reproduced from
-// helm v4.3.0 (pkg/chart/common/util/coalesce.go), and testdata/helm holds
-// what `helm template` computes on each case.
+// Helm's own functions are not imported: helm.sh/helm/v4 pulls in
+// client-go, and a newer Go and Kubernetes than the programs that embed
+// this package have. They are reproduced from helm v4.3.0
+// (pkg/chart/common/util/coalesce.go), and testdata/helm holds what
+// `helm template` computes on each case.
 package chart
 
 import (
@@ -33,10 +26,10 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// M: a values map (value.M).
+// M is a values map (value.M).
 type M = value.M
 
-// ReadValues: a values file of fsys, read as Helm reads values files.
+// ReadValues reads and parses the values file name of fsys.
 func ReadValues(fsys fs.FS, name string) (M, error) {
 	b, err := fs.ReadFile(fsys, name)
 	if err != nil {
@@ -49,9 +42,8 @@ func ReadValues(fsys fs.FS, name string) (M, error) {
 	return v, nil
 }
 
-// ParseValues: a values file as Helm 3 reads it: its first YAML document,
-// decoded by sigs.k8s.io/yaml (YAML 1.1, string keys, every number a
-// float64), for Inputs.Values.
+// ParseValues decodes a values file as Helm 3 reads it (see the package
+// doc). Callers use it to build Inputs.Values.
 func ParseValues(b []byte) (M, error) {
 	v := M{}
 	if err := sigsyaml.Unmarshal(b, &v); err != nil {
@@ -60,23 +52,22 @@ func ParseValues(b []byte) (M, error) {
 	return v, nil
 }
 
-// coalesceValues: Helm's CoalesceValues for a chart without dependencies,
-// the values its templates see: user values (the merged -f files) over the
-// chart defaults. A user null deletes the default (the key is gone); a null
-// where the chart has no default stays; null defaults are dropped (Helm 4).
-// When a value and its default are not both maps, the value wins. Neither
+// coalesceValues is Helm's CoalesceValues for a chart without
+// dependencies: the values the chart's templates see, user (the merged -f
+// files) over the chart's defaults. A user null deletes the default, and
+// stays where there is none. A null default is dropped (Helm 4). When a
+// value and its default are not both maps, the value wins. Neither
 // argument is changed.
 func coalesceValues(defaults, user M) M {
 	return coalesce(defaults, user, true)
 }
 
-// Coalesce: coalesceValues, for a caller that shows the values a chart's
-// templates see.
+// Coalesce is coalesceValues, exported for a caller that shows the values
+// a chart's templates see.
 func Coalesce(defaults, user M) M { return coalesceValues(defaults, user) }
 
-// coalesce: coalesceValues at any depth, Helm's coalesceTablesFullKey and
-// cleanNilValues below the top level (top false), where a user null over a
-// null default stays.
+// coalesce is coalesceValues at any depth. Below the top level (top is
+// false), a user null over a null default stays, as in Helm.
 func coalesce(defaults, user M, top bool) M {
 	out := value.AsMap(value.Copy(user))
 	for k, d := range defaults {

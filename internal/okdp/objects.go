@@ -1,7 +1,6 @@
-// What the compiler adds to an instance beside the dependencies of
-// Chart.yaml: the objects a section of the rule set adds (ownObjects), and
-// the chart that renders the instance's objects, its key reserved
-// (checkObjectsChart), of the platform's charts (global.okdp.charts).
+// What the compiler adds to an instance besides the dependencies of
+// Chart.yaml: the objects of the rule set's sections, and the chart that
+// renders the instance's objects, whose key is reserved.
 
 package okdp
 
@@ -18,18 +17,17 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// ObjectsChart: the chart key of the instance's objects, in the umbrella,
-// reserved in every compile; ObjectsValue: its value that holds them, one
-// YAML stream.
+// ObjectsChart is the key of the chart of the instance's objects in the
+// umbrella. Every compile reserves it. ObjectsValue is the value of that
+// chart that holds the objects, as one YAML stream.
 const (
 	ObjectsChart = "okdp-objects"
 	ObjectsValue = "manifests"
 )
 
-// platformCharts: the charts the platform renders the compiler's own charts
-// with: each of the rule set's, unless global.okdp.charts of okdp, of the
-// form the platform schema gives it, sets it. A misspelled key is refused
-// there: it would otherwise leave the default in place.
+// platformCharts returns the charts the platform renders the compiler's
+// own charts with: each chart of the rule set, or the one that
+// global.okdp.charts of okdp sets under the same name.
 func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 	given := value.AsMap(okdp["charts"])
 	out := map[string]chart.Ref{}
@@ -46,10 +44,9 @@ func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 	return out, nil
 }
 
-// ownObjects: the objects the sections of the mapping's result res add (the
-// rule set's ownObjects): each section's items checked, then the objects of
-// those it renders, in the compile's session. The URLs an item names are
-// served by the project first (checkItemURLs).
+// ownObjects returns the objects that the sections of the mapping's
+// result res add (the rule set's ownObjects). Before it renders an item,
+// it checks that the project serves the URLs the item names.
 func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, res M) ([]any, error) {
 	var objects []any
 	for _, spec := range inst.rules.OwnObjects() {
@@ -80,11 +77,12 @@ func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, 
 	return objects, nil
 }
 
-// checkItemURLs: the URLs an item of a section registers with an identity
-// provider, of an instance that is not privileged: each http or https, with
-// a host and no user information (url.Parse takes the host from what a
-// browser reads), a host the project serves (hostRules): a redirect to
-// another's host hands it the authorization code. of names the item.
+// checkItemURLs checks the URLs that an item registers with an identity
+// provider, for an instance that is not privileged. Each must be http or
+// https, with a host the project serves and no user information. A
+// redirect to the host of another project would hand it the
+// authorization code. url.Parse takes the host from what a browser
+// reads.
 func checkItemURLs(ctx context.Context, inst *instance, of string, urls []any) error {
 	if privileged(inst.okdp, inst.namespace) {
 		return nil
@@ -103,19 +101,17 @@ func checkItemURLs(ctx context.Context, inst *instance, of string, urls []any) e
 	return nil
 }
 
-// platformChart: a chart of global.okdp.charts, a map of strings
-// (platform.schema.json), checked as a source is (chart.Ref.Check); where
-// names it in the errors.
+// platformChart reads and checks a chart of global.okdp.charts, found at
+// where.
 func platformChart(v any, where string) (chart.Ref, error) {
 	m := value.AsMap(v)
 	r := chart.Ref{Repository: value.Str(m["repository"]), Chart: value.Str(m["chart"]), Version: value.Str(m["version"])}
 	return r, r.Check(where)
 }
 
-// checkObjectsChart: the key of the chart of the instance's objects is the
-// compiler's: neither Chart.yaml (deps, its dependencies) nor the mapping's
-// output (file, the values file) may list it. The writer of the umbrella
-// adds the chart.
+// checkObjectsChart reserves the key of the chart of the instance's
+// objects: neither the dependencies of Chart.yaml nor the output of the
+// mapping may list it. The writer of the umbrella adds the chart.
 func checkObjectsChart(deps []chart.Dependency, file string, output M) error {
 	for i, d := range deps {
 		if d.Key() == ObjectsChart {

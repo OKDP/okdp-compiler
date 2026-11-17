@@ -21,7 +21,7 @@ global:
     # The chart of the instances' objects, here from a
     # mirror of oci://quay.io/okdp/charts (the default).
     charts:
-      objects: {repository: oci://registry.example.org/mirror, chart: okdp-objects, version: 2.0.0}
+      objects: {repository: oci://registry.example.org/mirror, chart: okdp-objects, version: 0.1.0}
     oidc:
       issuerUri: https://sso.okdp.example.org/realms/okdp/
       # Each service registers its OAuth clients: one Job per client of its

@@ -11,62 +11,54 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-// Kept: a project of a tree whose output is not written (Partial), and
-// why: its instances that do not deploy, each with its problem, or that
-// it does not load (Unloaded).
+// Kept is a project of a tree whose output is not written (Partial): some
+// of its instances do not deploy, or the project does not load (Unloaded).
 type Kept struct {
-	// Namespace is the project.
-	Namespace string
-	// Problems are why, an instance each, <namespace>/<instance>: <why>,
-	// in the order of Instances.
-	Problems []string
-	// Instances are the instances of Problems.
-	Instances []KeptInstance
-	// Unloaded: the project does not load (Tree.Refused): Problems are
-	// its load problems, as they are, and it has no Instances.
+	Namespace string // the project
+	// Problems says why, one per instance, as "<namespace>/<instance>:
+	// <why>", in the order of Instances.
+	Problems  []string
+	Instances []KeptInstance // the instances that Problems is about
+	// Unloaded reports that the project does not load (Tree.Refused).
+	// Problems then holds its load problems, and Instances is empty.
 	Unloaded bool
-	// Dropped is why the project's output is dropped, nothing of it kept
-	// nor written (output.Files): its namespace is none a project may
-	// have today (okdp.NamespaceError); "" when it is kept.
+	// Dropped says why the project's output is neither kept nor written:
+	// its namespace is one no project may have today (okdp.NamespaceError).
+	// It is "" when the output is kept (output.Files).
 	Dropped string
-	// Rederived are the files of the project the output writes of today's
-	// settings though it is kept (output.Files): its manifests, its
-	// instances' identity, in path order; none when its output is kept
-	// whole.
+	// Rederived lists the files that the output writes from today's
+	// settings although the project is kept: its manifests and its
+	// instances' identity, in path order (output.Files).
 	Rederived []string
 }
 
-// KeptInstance: an instance of a kept project that does not deploy, and
-// why (Err): its refusal, the problems of the graph at its release,
-// joined, or, Depends, the release of a kept project it depends on.
+// KeptInstance is an instance of a kept project that does not deploy. Err
+// says why.
 type KeptInstance struct {
 	*Instance
 	Err error
-	// Depends: the instance compiled, the graph has no problem of its own
-	// at its release, and it depends on a release of a kept project, whose
-	// output is not written.
+	// Depends reports that the instance has no problem of its own: it
+	// depends on a release of a kept project, whose output is not written.
 	Depends bool
 }
 
-// Partial: the projects of t written and those kept. results are the
-// compiled instances of the projects written, g their graph; kept the
-// others, in namespace order: the project of an instance refused, then,
-// round after round, of an instance at which the graph of the results of
-// the projects not kept yet has a problem of its own (a cycle, a release
-// that does not provide what is referenced: its dependencies on the kept
-// projects left out), or that depends on a release of a kept project
-// (Result.Dependencies: a connection reference, a claim), compiled with
-// what that release publishes now, which is not deployed. g is nil only
-// when the graph has a problem at no instance of t. The projects that do
-// not load (Tree.Refused) are kept first.
+// Partial splits the projects of t into those written (results, with their
+// graph g) and those kept, in namespace order. A project is kept when it
+// does not load or one of its instances is refused. Then, round after round
+// until no project is added, a project is kept when one of its instances
+// has a graph problem of its own, or depends on a release of a kept
+// project: it compiled with what that release publishes now, which is not
+// deployed. A graph problem is an instance's own when it remains with the
+// dependencies on kept projects left out.
+//
+// g is nil only when the graph has a problem that is at no instance of t.
 func Partial(t *Tree) (results []*okdp.Result, g *graph.Graph, kept []Kept) {
 	return PartialWith(t, nil)
 }
 
-// PartialWith: Partial, each instance of also that compiled kept too, as
-// one refused, also[ti] its problem: what a target that cannot write it
-// keeps (output.Files, a release name in two namespaces); its project,
-// then those that depend on a release of it, kept.
+// PartialWith is Partial with more instances kept. Each instance of also
+// that compiled is kept like a refused one, with also[ti] as its problem. A
+// target uses it for an instance it cannot write.
 func PartialWith(t *Tree, also map[*Instance]error) (results []*okdp.Result, g *graph.Graph, kept []Kept) {
 	byNamespace := map[string]*Kept{}
 	keep := func(ti *Instance, err error, depends bool) {
@@ -135,8 +127,7 @@ func PartialWith(t *Tree, also map[*Instance]error) (results []*okdp.Result, g *
 	}
 }
 
-// dependsOnKept: the first dependency of res on a release of a kept
-// project, as a problem.
+// dependsOnKept names the first dependency of res on a kept project.
 func dependsOnKept(res *okdp.Result, kept map[string]*Kept) error {
 	for _, d := range res.Dependencies {
 		if to := cmp.Or(d.Namespace, res.Namespace); kept[to] != nil {
@@ -146,7 +137,6 @@ func dependsOnKept(res *okdp.Result, kept map[string]*Kept) error {
 	return nil
 }
 
-// sorted: the kept projects, in namespace order.
 func sorted(byNamespace map[string]*Kept) []Kept {
 	var out []Kept
 	for _, ns := range slices.Sorted(maps.Keys(byNamespace)) {
@@ -155,9 +145,9 @@ func sorted(byNamespace map[string]*Kept) []Kept {
 	return out
 }
 
-// Regressions: the instances of after that do not deploy (Instance.Err)
-// though they did in before, matched by namespace and name, in after's
-// order: what a change from before to after broke.
+// Regressions returns the instances of after that do not deploy although
+// they did in before, in after's order. Instances are matched by namespace
+// and name.
 func Regressions(before, after *Tree) []*Instance {
 	if before == nil || after == nil {
 		return nil

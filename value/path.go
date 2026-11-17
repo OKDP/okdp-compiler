@@ -1,9 +1,11 @@
-// Paths: where a value is in values, as messages name it: plain keys joined
-// by dots, a list item [i], a key a dot would split in brackets. The same
-// form as the protect and append paths of okdp.yaml, which chart's
-// parsePath reads back as these literal keys (but a key with a quote, a
-// backslash or a star): env[1].name,
-// annotations["nginx.ingress.kubernetes.io/auth-type"], ["a.b"].
+// This file writes and reads paths, as messages name them. Keys are joined
+// by dots, a list item is [i], and a key with a dot is in brackets:
+//
+//	env[1].name
+//	annotations["nginx.ingress.kubernetes.io/auth-type"]
+//	["a.b"]
+//
+// The protect and append paths of okdp.yaml have the same form.
 package value
 
 import (
@@ -11,15 +13,11 @@ import (
 	"strings"
 )
 
-// specialKey: the characters a plain key of a path cannot contain: a key
-// holding one is written in brackets.
+// specialKey lists the characters that put a key in brackets.
 const specialKey = `.[]"\*`
 
-// Key: the path p followed by the key k: p.k, k alone when p is empty. A
-// key that is empty or holds a special character (specialKey) is written
-// in brackets, ["..."], as it is, joined without a dot:
-// config["spark.ui.filters"]; an empty key, which no protect path names, is
-// still shown.
+// Key appends the key k to the path p: p.k, or p["k"] when k is empty or
+// holds a character of specialKey.
 func Key(p, k string) string {
 	switch {
 	case k == "" || strings.ContainsAny(k, specialKey):
@@ -30,15 +28,13 @@ func Key(p, k string) string {
 	return p + "." + k
 }
 
-// Index: the path p followed by the item i of a list: env[2].
+// Index appends the list index i to the path p: env[2].
 func Index(p string, i int) string {
 	return p + "[" + strconv.Itoa(i) + "]"
 }
 
-// Split: the path p as Key and Index write it, its keys and indexes in
-// order, an index as its digits (a JSON pointer's tokens): env[2].name is
-// env, 2, name; config["spark.ui.filters"] is config, spark.ui.filters.
-// "" is none.
+// Split returns the keys and indexes of a path written by Key and Index,
+// as the tokens of a JSON pointer: an index is its digits.
 func Split(p string) []string {
 	var out []string
 	for p != "" {
@@ -67,8 +63,7 @@ func Split(p string) []string {
 	return out
 }
 
-// Join: the path of tokens, a JSON pointer's (Split), as Key and Index
-// write it, a token of digits an index.
+// Join is the reverse of Split. A token made of digits is an index.
 func Join(tokens []string) string {
 	p := ""
 	for _, t := range tokens {
@@ -81,8 +76,8 @@ func Join(tokens []string) string {
 	return p
 }
 
-// Pointer: the JSON pointer (RFC 6901) of tokens, each "/" and its "~"
-// and "/" escaped: /env/2/name; "" for none, the whole document.
+// Pointer writes tokens as a JSON pointer (RFC 6901): /env/2/name. No
+// token gives "", the pointer to the whole document.
 func Pointer(tokens []string) string {
 	var b strings.Builder
 	for _, t := range tokens {

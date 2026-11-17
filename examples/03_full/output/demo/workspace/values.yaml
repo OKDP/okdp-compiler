@@ -134,7 +134,7 @@ api:
         objects:
           chart: okdp-objects
           repository: oci://registry.example.org/mirror
-          version: 2.0.0
+          version: 0.1.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -240,7 +240,7 @@ gateway:
         objects:
           chart: okdp-objects
           repository: oci://registry.example.org/mirror
-          version: 2.0.0
+          version: 0.1.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -303,7 +303,7 @@ metrics:
         objects:
           chart: okdp-objects
           repository: oci://registry.example.org/mirror
-          version: 2.0.0
+          version: 0.1.0
       ingress:
         className: nginx
         suffix: okdp.example.org
@@ -463,7 +463,7 @@ scheduler:
         objects:
           chart: okdp-objects
           repository: oci://registry.example.org/mirror
-          version: 2.0.0
+          version: 0.1.0
       ingress:
         className: nginx
         suffix: okdp.example.org

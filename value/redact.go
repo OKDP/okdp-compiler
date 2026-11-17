@@ -5,24 +5,20 @@ import (
 	"strings"
 )
 
-// Redacted: what a message prints in place of a sensitive value
-// (Sensitive): an error is shown to whoever runs the compile, logged by
-// CI and by a server, and copied into issues.
+// Redacted is what a message prints in place of a sensitive value. An
+// error is logged and copied into issues, so it must hold no credential.
 const Redacted = "<redacted>"
 
-// sensitiveKeys: the keys whose values are credentials, lowercase.
+// sensitiveKeys lists the keys whose values are credentials, in lowercase.
 var sensitiveKeys = []string{"password", "passwd", "secret", "token", "apikey", "api_key", "accesskey", "secretkey", "credential", "privatekey", "clientsecret"}
 
-// sensitiveSuffixes: the endings of the keys whose values are
-// credentials, lowercase: dbPassword, db_password, clientSecret, apiToken.
+// sensitiveSuffixes lists the endings of such keys: dbPassword, apiToken.
 var sensitiveSuffixes = []string{"password", "passwd", "secret", "token"}
 
-// Sensitive: the value of key may be a credential, and a message prints
-// Redacted for it: key, a plural's s left out, is one of sensitiveKeys,
-// case-insensitive, or ends with one of sensitiveSuffixes,
-// case-insensitive, or with Key, _key or -key (accessKey, private_key,
-// apiKeys; not monkey). A list item's key is its list's: SensitivePath
-// reads it.
+// Sensitive reports whether the value of key may be a credential, for
+// which a message prints Redacted. Ignoring case and a plural's final s,
+// the key is one of sensitiveKeys, ends with one of sensitiveSuffixes, or
+// ends with Key, _key or -key (accessKey, but not monkey).
 func Sensitive(key string) bool {
 	key = strings.TrimSuffix(key, "s")
 	lower := strings.ToLower(key)
@@ -37,9 +33,9 @@ func Sensitive(key string) bool {
 	return strings.HasSuffix(key, "Key") || strings.HasSuffix(lower, "_key") || strings.HasSuffix(lower, "-key")
 }
 
-// SensitivePath: the value at path, its elements from the root, is
-// Sensitive: its last element that is not a list index (digits), the key
-// of the map that holds it or of the list it is in.
+// SensitivePath reports whether the value at path is sensitive. The key
+// checked is the last element that is not a list index: a list item has
+// no key of its own, so it takes its list's.
 func SensitivePath(path []string) bool {
 	for _, elem := range slices.Backward(path) {
 		if elem != "" && strings.Trim(elem, "0123456789") == "" {
@@ -50,9 +46,8 @@ func SensitivePath(path []string) bool {
 	return false
 }
 
-// Redact: v for a message, in a copy: at any depth, the value of a
-// Sensitive key of a map, whatever it is, Redacted; v itself when it is
-// neither a map nor a list.
+// Redact returns a copy of v for a message. At any depth, the value of a
+// Sensitive key of a map becomes Redacted, whatever it is.
 func Redact(v any) any {
 	switch v := v.(type) {
 	case M:
@@ -75,8 +70,8 @@ func Redact(v any) any {
 	return v
 }
 
-// ShortAt: the value v of key for a message (Short), Redacted when key is
-// Sensitive, else v with its own sensitive keys redacted.
+// ShortAt formats the value v of key for a message: Redacted when key is
+// Sensitive, else Short(v).
 func ShortAt(key string, v any) string {
 	if Sensitive(key) {
 		return Redacted

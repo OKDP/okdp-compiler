@@ -28,8 +28,8 @@ func compileExample(t *testing.T, name string, rules *compiler.RuleSet) map[stri
 	return out
 }
 
-// A compile that gives no rule set: nothing of a platform is applied, and
-// claims still bind in their namespace.
+// A compile that gives no rule set: the compiler's mandatory rules alone,
+// its functions, templates and checks applied.
 func TestCompileWithoutRules(t *testing.T) {
 	t.Run("values", func(t *testing.T) {
 		o := compileExample(t, "00_passthrough", nil)["demo-echo"]
@@ -57,32 +57,21 @@ func TestCompileWithoutRules(t *testing.T) {
 			t.Error("no claim was bound to the provider")
 		}
 	})
-	for _, tc := range []struct{ name, release, want string }{
-		{"no section of a rule set", "demo-workspace", "oidcClients: unknown section"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			o := compileExample(t, "03_full", nil)[tc.release]
-			if o.Err == nil || !strings.Contains(o.Err.Error(), tc.want) {
-				t.Errorf("got %v, want %q", o.Err, tc.want)
-			}
-		})
-	}
-	t.Run("no secret store objects", func(t *testing.T) {
-		o := compileExample(t, "04_claims", nil)["data-postgresql"]
-		if o.Err == nil || !strings.Contains(o.Err.Error(), "the rule set of the compile has no") {
-			t.Errorf("a claim of another namespace: %v", o.Err)
+	t.Run("the sections and functions of the mandatory set", func(t *testing.T) {
+		if o := compileExample(t, "03_full", nil)["demo-workspace"]; o.Err != nil {
+			t.Error(o.Err)
 		}
 	})
-	t.Run("no policy", func(t *testing.T) {
+	t.Run("the secret store objects of a claim of another namespace", func(t *testing.T) {
+		if o := compileExample(t, "04_claims", nil)["data-postgresql"]; o.Err != nil {
+			t.Error(o.Err)
+		}
+	})
+	t.Run("the checks of the mandatory set", func(t *testing.T) {
 		def, in := example()
 		in.Rules, in.Namespace, in.Release = nil, "kube-system", "kube-system-webapp"
-		_, err := compiler.Compile(context.Background(), def, in)
-		if err != nil && strings.Contains(err.Error(), "reserved") {
-			t.Errorf("no rule set, a namespace refused: %v", err)
-		}
-		in.Rules = testrules.Standard()
 		if _, err := compiler.Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "reserved") {
-			t.Errorf("the standard set, kube-system: %v", err)
+			t.Errorf("no rule set, kube-system: %v", err)
 		}
 	})
 }

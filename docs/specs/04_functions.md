@@ -88,10 +88,9 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 ## Host functions
 
 `okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload` and
-`oidcClientSecret` are declared by the rule set, `okdpGeneratedSecret`'s
-template is its too: the standard set, okdp-gitops'
-([rule set](01_inputs_outputs.md#rule-set)). Without a rule set the first
-five are not declared, and `okdpGeneratedSecret` fails when called.
+`oidcClientSecret` are declared by the compiler's mandatory rule set,
+`okdpGeneratedSecret`'s template is its too
+([rule set](01_inputs_outputs.md#rule-set)): every compile has them.
 
 | Function | Returns | Helm equivalent |
 |---|---|---|

@@ -8,10 +8,9 @@ trade-offs; it changes nothing. The formats are specified in
 [the objects chart](specs/01_inputs_outputs.md#the-objects-chart) and
 [credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets).
 
-Rules quoted here are those of the standard rule set, which okdp-gitops
-holds (`rules/v1`; [`testdata/rules`](../testdata/rules) is its copy). A
-compile with no rule set refuses none of these objects, and has no
-default for the chart.
+Rules quoted here are those of the compiler's mandatory rule set
+([`internal/rules/mandatory`](../internal/rules/mandatory)), which every
+compile applies.
 
 What the instance publishes, its URL, its usage and the connections it
 provides, is no object: it stays in git, `okdp.info.yaml`, which a
@@ -83,13 +82,15 @@ OKDP does not modify an upstream chart ([values for unmodified upstream
 charts](00_architecture.md#values-for-unmodified-upstream-charts)): what
 an upstream chart cannot produce needs a vehicle. The vehicle is the
 `okdp-objects` chart, its source `Result.ObjectsSource`, pinned in the
-rule set and overridden by `global.okdp.charts.objects`. Its one template
-writes its value as it is, `{{- .Values.manifests }}`. The compiler writes
-its values and no chart: `helm install` takes the chart and those values,
-before the catalog's chart, whose pods read the Secrets it creates.
+rule set and overridden by `global.okdp.charts.objects`: the chart
+OKDP/okdp-objects-chart 0.1.0, installed from a checkout, as it is not
+published to a registry yet. Its one template writes its value as it is,
+`{{- .Values.manifests }}`. The compiler writes its values and no chart:
+`helm install` takes the chart and those values, before the catalog's
+chart, whose pods read the Secrets it creates.
 
 ```bash
-helm install <release>-okdp <okdp-objects chart> -n <namespace> -f okdp-objects.values.yaml
+helm install <release>-okdp ../okdp-objects-chart -n <namespace> -f okdp-objects.values.yaml
 helm install <release> <package> -n <namespace> -f values.yaml
 ```
 

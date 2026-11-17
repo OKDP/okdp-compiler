@@ -13,7 +13,7 @@ import (
 // M: a values map.
 type M = map[string]any
 
-// keepRules: the standard set's.
+// keepRules: the mandatory set's.
 var keepRules = KeepSync{Annotation: "helm.sh/resource-policy", Value: "keep", SyncOptions: "argocd.argoproj.io/sync-options", Options: []string{"Prune=false", "Delete=false"}}
 
 func TestKeepSynced(t *testing.T) {

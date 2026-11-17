@@ -11,30 +11,29 @@ import (
 	"github.com/okdp/okdp-compiler/internal/tree"
 )
 
-// What the programs that write a tree's output and edit its files need of
-// its compile and its layout.
+// The types that a program that writes or edits a tree needs.
 type (
-	// GlobalLayer: the global a layer of a project sets.
+	// GlobalLayer is the global that a layer of a project sets.
 	GlobalLayer = okdp.GlobalLayer
-	// GlobalsInput: what Inputs.CheckGlobals checks.
+	// GlobalsInput is what Inputs.CheckGlobals checks.
 	GlobalsInput = okdp.GlobalsInput
-	// ChartCaches: the chart caches of a set of compiles, for a Finalize.
+	// ChartCaches holds the chart caches of a set of compiles.
 	ChartCaches = merge.Caches
-	// KeepSync: what a writer tells Argo CD of the objects Helm keeps.
+	// KeepSync tells Argo CD's sync options for the objects Helm keeps.
 	KeepSync = ruleset.KeepSync
-	// InstanceSpec: an instance.yaml, as ParseInstance reads it.
+	// InstanceSpec is an instance.yaml, as ParseInstance reads it.
 	InstanceSpec = repository.InstanceSpec
-	// CatalogRepository: a repository of catalogs.yaml.
+	// CatalogRepository is a repository of catalogs.yaml.
 	CatalogRepository = repository.CatalogRepository
-	// Catalogs: catalogs.yaml, as ParseCatalogs reads it.
+	// Catalogs is catalogs.yaml, as ParseCatalogs reads it.
 	Catalogs = repository.Catalogs
-	// MenuCategory: a category of the console's menu.
+	// MenuCategory is a category of the console's menu.
 	MenuCategory = repository.MenuCategory
-	// MenuService: a service of the console's menu.
+	// MenuService is a service of the console's menu.
 	MenuService = repository.MenuService
-	// SecretStore: the platform's secret store in a namespace.
+	// SecretStore is the platform's secret store in a namespace.
 	SecretStore = okdp.SecretStore
-	// NamespaceError: a namespace no project may have.
+	// NamespaceError reports a namespace that no project may have.
 	NamespaceError = okdp.NamespaceError
 )
 
@@ -44,7 +43,7 @@ const (
 	DefaultCatalogRef = repository.DefaultCatalogRef
 )
 
-// What the host's policy reads of the rule set.
+// The tables and checks of the rule set that a host's policy reads.
 const (
 	TableDeniedUpstreamKeys  = ruleset.TableDeniedUpstreamKeys
 	TableImageKeySuffixes    = ruleset.TableImageKeySuffixes
@@ -56,85 +55,75 @@ const (
 	CheckHost                = ruleset.CheckHost
 )
 
-// FinalValues: Helm's merge of the final values of the input, check what is
-// refused of the upstream values of every key (nil, nothing): what a compile
-// does without a Finalize, for one that adds a policy to it.
+// FinalValues returns Helm's merge of the final values of in, as a
+// compile does without a Finalize; a Finalize calls it to add a policy.
+// check tells what to refuse of the upstream values; nil refuses nothing.
 func FinalValues(caches *ChartCaches, in FinalInput, check chart.UpstreamCheck) (map[string]map[string]any, map[string]ChartRef, []string, error) {
 	return merge.FinalValues(caches.Get(in.Charts), in.ChartFailures, in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, check)
 }
 
-// CheckObjects: the objects of an instance of svc in namespace, that of a
-// project that is not privileged, rendered from a chart, for example: each
-// in the instance's namespace, where its metadata.namespace is set (unset,
-// "" or null, the release's), none of a cluster-scoped kind nor an API
-// group of the deployer engines (the rule set's check object), the items of
-// a list checked alike. nil when they all hold; the first refused, in
-// order, fails, named <kind>/<name>. What a compile does with its own
-// objects (Result.Objects), for a host that adds a chart's: a privileged
-// project takes no such check.
+// CheckObjects returns nil when the objects of an instance of svc in
+// namespace are allowed to a project that is not privileged: each is in
+// that namespace or names none, and none is cluster-scoped or of an
+// engine's API group. A host calls it for the objects it adds itself.
 func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, objects []map[string]any) error {
 	return okdp.CheckObjects(ctx, rules, svc, namespace, objects)
 }
 
-// CheckIngressHosts: the objects of an instance of svc in namespace, that
-// of a project that is not privileged, rendered from a chart, for example,
-// serve only the hosts the project may serve, settings the platform's
-// (Result.Settings, global.okdp): an Ingress's rules (no spec.defaultBackend,
-// no rule without host) and tls hosts, a cert-manager Certificate's
-// dnsNames and commonName, a Gateway API route's hostnames, a Gateway's
-// listeners' hostname, the annotations that name hosts (the rule set's
-// hostAnnotations) of any object, the items of a list alike. The same
-// check as a compile's on its own objects.
+// CheckIngressHosts returns nil when the objects of an instance of svc in
+// namespace serve only the hosts that a project that is not privileged
+// may serve. settings are the platform's (Result.Settings). It reads the
+// hosts of Ingresses, Certificates, Gateway API routes and listeners, and
+// of host annotations. It refuses an Ingress that serves every host.
 func CheckIngressHosts(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, objects []map[string]any) error {
 	return okdp.CheckIngressHosts(ctx, rules, svc, namespace, settings, objects)
 }
 
-// ParseInstance: an instance.yaml.
+// ParseInstance reads an instance.yaml.
 func ParseInstance(raw []byte) (InstanceSpec, error) { return repository.ParseInstance(raw) }
 
-// ParseCatalogs: catalogs.yaml, as read.
+// ParseCatalogs reads catalogs.yaml from its decoded document.
 func ParseCatalogs(doc map[string]any) (*Catalogs, error) { return repository.ParseCatalogs(doc) }
 
-// Roles: the roles of a project's groups, least first.
+// Roles returns the roles of a project's groups, least first.
 func Roles(rules *RuleSet) []AccessRole { return okdp.Roles(rules) }
 
-// EngineNamespaces: the namespaces of the deployer engines, which no
-// project may have.
+// EngineNamespaces returns the engines' namespaces, reserved to them.
 func EngineNamespaces(rules *RuleSet) []string { return okdp.EngineNamespaces(rules) }
 
-// PlatformObjectNames: the names of the objects the platform writes in the
-// namespace of every project.
+// PlatformObjectNames returns the names of the objects that the platform
+// writes in the namespace of every project.
 func PlatformObjectNames(rules *RuleSet) []string { return okdp.PlatformObjectNames(rules) }
 
-// CheckProject: nil when the instance's namespace may be a project's.
+// CheckProject returns nil when the namespace of in may be a project's.
 func CheckProject(ctx context.Context, in Inputs) error { return okdp.CheckProject(ctx, in) }
 
-// PlatformOf: the platform's settings of the context of in, as a compile
-// checks them; an error when the namespace may be no project's.
+// PlatformOf returns the platform's settings of the context of in, as a
+// compile checks them. It fails when the namespace of in is no project's.
 func PlatformOf(ctx context.Context, in Inputs) (map[string]any, error) {
 	return okdp.PlatformOf(ctx, in)
 }
 
-// ProjectGroups: the roles of the groups of the project of in.
+// ProjectGroups returns the roles of the groups of the project of in.
 func ProjectGroups(in Inputs) (map[string]AccessRole, error) { return okdp.ProjectGroups(in) }
 
-// SecretStoreOf: the platform's secret store in settings, nil without one.
+// SecretStoreOf returns the secret store that settings declare, or nil.
 func SecretStoreOf(ctx context.Context, in Inputs, settings map[string]any) (*SecretStore, error) {
 	return okdp.SecretStoreOf(ctx, in, settings)
 }
 
-// Privileged: whether namespace is one of the platform's own projects.
+// Privileged reports whether namespace is a project of the platform's own.
 func Privileged(settings map[string]any, namespace string) bool {
 	return okdp.Privileged(settings, namespace)
 }
 
-// ParseAccess: the roles of the groups of a project, its file's access.
+// ParseAccess reads v, a project's access, as the roles of its groups.
 func ParseAccess(rules *RuleSet, v any, namespace string) (map[string]AccessRole, error) {
 	return okdp.ParseAccess(rules, v, namespace)
 }
 
-// PartialWith: Partial, the instances of also refused too, each for its
-// error.
+// PartialWith works as Partial, and also treats each instance of also as
+// refused, for the error it maps to.
 func PartialWith(t *Tree, also map[*TreeInstance]error) (results []*Result, g *Graph, kept []KeptProject) {
 	return tree.PartialWith(t, also)
 }

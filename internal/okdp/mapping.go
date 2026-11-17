@@ -1,20 +1,10 @@
-// Mapping: what an OKDP mapping holds besides vars and errors (package
-// compile), and the host functions OKDP adds to the language:
-//
-//	output (chart -> values), the values file,
-//	instance (url, usage) and provides (the connections the instance publishes),
-//	objects (OKDP's own objects, whole manifests),
-//	oidcClients (the OAuth clients of the service, oidc.go),
-//
-// their shapes described by the embedded mapping.schema.json. A package's
-// mapping is read from okdp.yaml (vars, errors and every section but
-// output, its package keys skipped) and its values file (output),
-// values.cel.yaml or values.yaml.
-//
-// The rule set's own templates (oidc-dcr.cel.yaml,
-// generated-secret.cel.yaml) are written in the same
-// language, with the same functions: vars, errors, then the values they
-// compute (compile.Eval), their errors under their file's name.
+// Mapping: the sections an OKDP mapping holds besides vars and errors
+// (package compile), and the host functions OKDP adds to the language.
+// The embedded mapping.schema.json describes the sections. A package's
+// mapping is read from two files: okdp.yaml gives vars, errors and
+// every section but output; the values file gives output. The rule
+// set's own templates are written in the same language, with the same
+// functions.
 
 package okdp
 
@@ -36,25 +26,27 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// sections: the sections of a mapping the compiler reads itself, besides
-// vars and errors, those of the rule set after them: any other top-level
-// key fails the compile.
+// sections lists the sections of a mapping the compiler reads itself,
+// besides vars and errors. The sections of the rule set come after them.
+// Any other top-level key fails the compile.
 var sections = []string{"output", "instance", "provides", "objects"}
 
-// The values file of a package, the mapping's output section: one of
-// these, read alike.
+// The values file of a package holds the output section of the mapping.
+// It is read the same way under either name.
 const (
-	valuesFile      = "values.cel.yaml" // with expressions; the name of a Definition's values file when it gives none
-	plainValuesFile = "values.yaml"     // without, conventionally: one that holds any gives a warning (LoadDefinition)
+	// valuesFile may hold expressions. A Definition that names no values
+	// file gets this name.
+	valuesFile = "values.cel.yaml"
+	// plainValuesFile holds no expression, by convention. One that holds
+	// any gives a warning.
+	plainValuesFile = "values.yaml"
 )
 
-// valuesName: the name of d's values file, the first segment of its
-// errors: Definition.ValuesFile, values.cel.yaml when empty (a
-// Definition built in memory).
+// valuesName returns the name of d's values file, which starts its errors.
 func (d *Definition) valuesName() string { return cmp.Or(d.ValuesFile, valuesFile) }
 
-// sources: the mapping of d: okdp.yaml, its package keys skipped, then
-// the values file, the output section; each when the package has it.
+// sources returns the mapping of d: okdp.yaml with its package keys
+// skipped, then the values file as the output section.
 func (d *Definition) sources() []compile.Source {
 	var srcs []compile.Source
 	if d.Okdp != nil {
@@ -66,15 +58,20 @@ func (d *Definition) sources() []compile.Source {
 	return srcs
 }
 
-// runMapping: runs a mapping, read from srcs (Definition.sources: the
-// name of each the first segment of its errors), on scope, what it sees
-// (instance.scope), in the compile's session, its sections in order, then
-// checks them against mappingSchema (schemaValues): the sections, by name,
-// a null one (absent, $if) not set. output (chart -> computed values, or
-// null), instance (url, usage), provides ([{contract, name?, values,
-// secretRef?, secret?}]), objects (OKDP's own objects, whole manifests),
-// oidcClients (checked further by oidc.go). written: the keys output
-// writes at its top level (compile.Doc.Written), kept or not.
+// runMapping runs the mapping read from srcs on scope, in the compile's
+// session, and checks its sections against the mapping schema.
+//
+// res holds the sections by name. A null section (absent, or removed by
+// $if) is not set:
+//
+//	output       chart -> computed values, or null
+//	instance     url, usage
+//	provides     [{contract, name?, values, secretRef?, secret?}]
+//	objects      OKDP's own objects, whole manifests
+//	oidcClients  checked further by oidc.go
+//
+// written lists the keys that output writes at its top level, whether
+// they are kept or not.
 func runMapping(ctx context.Context, rules *RuleSet, session *cel2yaml.Session, scope M, srcs ...compile.Source) (res M, written []string, err error) {
 	doc, err := compile.Eval(ctx, session, scope, slices.Concat(sections, rules.Sections()), srcs...)
 	if err != nil {
@@ -85,14 +82,12 @@ func runMapping(ctx context.Context, rules *RuleSet, session *cel2yaml.Session, 
 	return res, doc.Written["output"], err
 }
 
-// functions: the host functions OKDP adds for the instance inst, those of
-// the compile's session (Compile), *session once it is open: okdpFullname,
-// okdpGeneratedSecret (generatedSecret, evaluated in the session),
-// okdpLabels and okdpSelectorLabels (labels.go), oidcClientSecret
-// (oidc.go). They read only what the documents of a compile see alike (the
-// release, its namespace, the service, the OAuth client mode): the mapping
-// and the compiler's templates share them. Each call counts in the
-// session's cost as the compiler's own host functions (cel2yaml.Costed).
+// functions returns the host functions OKDP adds for the instance inst.
+// They run in the compile's session, read through *session once it is
+// open. They read only what every document of a compile sees alike (the
+// release, its namespace, the service, the OAuth client mode), so the
+// mapping and the compiler's templates share them. Each call counts in
+// the session's cost (cel2yaml.Costed).
 func functions(ctx context.Context, inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	release := inst.release
 	opts := []cel.EnvOption{
@@ -120,18 +115,17 @@ func functions(ctx context.Context, inst *instance, session **cel2yaml.Session) 
 	return append(opts, documentFunctions(ctx, inst)...)
 }
 
-// generatedSecret: okdpGeneratedSecret, the objects of a generated Secret
-// for the instance inst (the rule set's template), args checked against
-// mapping.schema.json (okdpGeneratedSecret), in the compile's session.
+// generatedSecret implements okdpGeneratedSecret, from the rule set's
+// template. args is already checked against mapping.schema.json.
 func generatedSecret(ctx context.Context, session *cel2yaml.Session, inst *instance, args M) ([]any, error) {
 	scope := M{"args": args, "release": M{"name": inst.release, "namespace": inst.namespace}, "labels": inst.rules.Labels(inst.svc.Name, inst.release, "", false)}
 	v, err := evalTemplate(ctx, session, inst.rules.GeneratedSecret(), scope)
 	return value.AsList(v["objects"]), err
 }
 
-// documentFunctions: the functions of the rule set a document computes, on
-// their argument, the release and what the mapping sees as platform; each
-// call counts in the session's cost as the compiler's own host functions.
+// documentFunctions returns the functions that the rule set computes
+// with a document. A document sees the argument of the call, the release
+// and what the mapping sees as platform.
 func documentFunctions(ctx context.Context, inst *instance) []cel.EnvOption {
 	var opts []cel.EnvOption
 	for _, f := range inst.rules.DocumentFuncs() {
@@ -148,10 +142,8 @@ func documentFunctions(ctx context.Context, inst *instance) []cel.EnvOption {
 	return opts
 }
 
-// evalTemplate: t, a template of the rule set (the
-// mapping language: vars, errors, then its one section, values), evaluated
-// on scope in the compile's session: its values; its errors start with
-// name.
+// evalTemplate evaluates t, a template of the rule set, on scope and
+// returns its values section. Its errors start with the template's name.
 func evalTemplate(ctx context.Context, session *cel2yaml.Session, t ruleset.Template, scope M) (M, error) {
 	doc, err := compile.Eval(ctx, session, scope, []string{"values"}, compile.Source{Name: t.Name, Data: t.Data})
 	if err != nil {
@@ -160,8 +152,8 @@ func evalTemplate(ctx context.Context, session *cel2yaml.Session, t ruleset.Temp
 	return value.AsMap(doc.Sections["values"]), nil
 }
 
-// fullname: okdpFullname, "<release>-<suffix>" (the release alone without
-// a suffix) cut to 63 characters, without a trailing "-".
+// fullname implements okdpFullname: "<release>-<suffix>", or the release
+// alone without a suffix, cut to 63 characters, without a trailing "-".
 func fullname(release, suffix string) string {
 	s := release
 	if suffix != "" {
@@ -170,8 +162,7 @@ func fullname(release, suffix string) string {
 	return truncName(s, 63)
 }
 
-// truncName: s cut as a chart cuts a name, `trunc n | trimSuffix "-"`: to
-// n bytes, without a trailing "-".
+// truncName cuts s as a chart cuts a name: `trunc n | trimSuffix "-"`.
 func truncName(s string, n int) string {
 	return strings.TrimSuffix(s[:min(n, len(s))], "-")
 }

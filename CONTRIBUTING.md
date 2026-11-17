@@ -33,11 +33,10 @@ same checks on every pull request.
 - Test data lives at the repository root, in `testdata/`, never under
   `internal/`. Keep a fixture small, the least input that shows the
   behaviour, and add a case only for what no other case covers.
-- `testdata/rules` is a copy of okdp-gitops' standard rule set
-  (`rules/v1`), which this module cannot import: its tests compile with it
-  (`internal/testrules`). A rule changes in both, and okdp-gitops'
-  `TestCompilerCopy` fails while they differ. A compile with no rule set
-  is tested too (`TestCompileWithoutRules`).
+- The rules every compile applies, the checks and their tables among
+  them, have one home, `internal/rules/mandatory`: the tests compile with
+  that set (`internal/testrules`). A compile given no rule set, the
+  mandatory one alone, is tested too (`TestCompileWithoutRules`).
 - A boundary of the [threat model](docs/04_threat_model.md), what an
   author may not do, has one case that must fail: a unit test here, or a
   fixture of okdp-gitops, where a whole tree compiles. A new check gets

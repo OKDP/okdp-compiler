@@ -1,13 +1,10 @@
-// Paths: the protect and append paths of okdp.yaml's upstream, which name
-// keys of a chart's values.
+// This file parses the protect and append paths of the upstream section of
+// okdp.yaml. A path names keys of a chart's values.
 //
-// A path was a list of keys separated by dots, so it could not name a key
-// that contains a dot, and many keys the platform sets do: annotations
-// (nginx.ingress.kubernetes.io/auth-url), Spark properties
-// (spark.ui.filters), environment maps. A service had to refuse those in
-// its mapping's errors section instead. A key may now be written in
-// brackets, as one literal key, and end with a glob, for a family of keys
-// (every auth-* annotation):
+// Keys joined by dots cannot name a key that itself contains a dot, and
+// many keys the platform sets do: annotations, Spark properties,
+// environment maps. So a key may be written in brackets, as one literal
+// key, and may end with a glob to name a family of keys:
 //
 //	path    = segment *( "." key / bracket )
 //	segment = key / bracket                  the first key: plain or bracketed
@@ -16,12 +13,10 @@
 //	        / "[" DQUOTE "*" DQUOTE "]"
 //	char    = any character but " \ *
 //
-// A plain key is literal and contains no glob. A bracketed key is literal,
-// dots included; no key holds a quote, a backslash or a star but a glob's.
-// A bracketed key ending with * is a Glob: it names every key that starts
-// with the text before the star (the text itself included; ["*"] names
-// every key). Any bracketed key of a path may be a glob, the last or one on
-// the way. Examples:
+// No key may hold a quote, a backslash or a star, except the star of a
+// glob. A glob names every key that starts with the text before the star,
+// that text itself included, and ["*"] names every key. Any bracketed key
+// of a path may be a glob, not only the last. Examples:
 //
 //	ingress.hosts
 //	filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]
@@ -36,23 +31,20 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// PathSeg: one key of a path.
+// PathSeg is one key of a path.
 type PathSeg struct {
 	Key  string // the key, or the prefix of a glob
 	Glob bool   // every key that starts with Key
 }
 
-// pathKey: the key at the start of a path: bracketed (its text, its glob)
-// or plain.
+// pathKey matches the key at the start of a path. A bracketed key captures
+// its text and its glob star; a plain key captures itself.
 var pathKey = regexp.MustCompile(`^(?:\["([^"\\*]*)(\*?)"\]|([^.\[\]"\\*]+))`)
 
-// errPath: the error of any malformed path.
 var errPath = errors.New(`not a path: keys joined by dots, a key with a dot in brackets (a["b.c"]), a family of keys with a final * (a["prefix*"])`)
 
-// ParsePath: the keys of a protect or append path (see the grammar above).
-// okdp.yaml is checked with it when it is loaded (Specs.Check), so a
-// malformed path fails before any compile, not when an instance first sets
-// a value under it.
+// ParsePath returns the keys of a protect or append path (see the grammar
+// above).
 func ParsePath(p string) ([]PathSeg, error) {
 	var segs []PathSeg
 	for rest := p; ; {
@@ -72,12 +64,10 @@ func ParsePath(p string) ([]PathSeg, error) {
 	}
 }
 
-// FormatPath: the path of these keys, as an error message shows the key a
-// value was refused at (value.Key): plain keys joined by dots, a key with a
-// special character in brackets
-// (annotations["nginx.ingress.kubernetes.io/auth-type"]). ParsePath reads
-// it back as these literal keys, unless one holds a quote, a backslash or a
-// star.
+// FormatPath joins keys into a path, as an error message shows it: plain
+// keys joined by dots, a key with a special character in brackets.
+// ParsePath reads the path back as the same literal keys, unless a key
+// holds a quote, a backslash or a star.
 func FormatPath(keys []string) string {
 	p := ""
 	for _, k := range keys {

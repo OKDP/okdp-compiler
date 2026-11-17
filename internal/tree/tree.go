@@ -1,8 +1,7 @@
-// Package tree: the instances of a tree compiled together
-// (okdp.CompileAll), the deployment graph of those that compile
-// (graph.New), each problem of the graph at the instance of its release,
-// and the claims bound to each provider: what a caller that reads a
-// compiled tree (a control plane, its console) asks of it.
+// Package tree compiles the instances of a tree together (okdp.CompileAll)
+// and builds the deployment graph of those that compile (graph.New). It
+// puts each problem of the graph at the instance of its release, and lists
+// the claims bound to each provider.
 package tree
 
 import (
@@ -19,109 +18,94 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
-// Tree: instances compiled together, in their order, and the deployment
-// graph of those that compile.
+// Tree is a set of instances compiled together, in their order.
 type Tree struct {
 	Instances []*Instance
-	// Graph orders the releases of the instances that compile; nil when it
-	// has a problem (Instance.GraphErr).
+	// Graph orders the releases of the instances that compile. It is nil
+	// when the graph has a problem (Instance.GraphErr).
 	Graph *graph.Graph
-	// ChartFailures: the charts the ChartSource could not fetch, why, by
-	// chart; nil without a ChartSource or when every chart was fetched.
-	// The final values of the instances that name others are checked; the
-	// keys of each instance that names one are its ChartFailures.
+	// ChartFailures says why the ChartSource could not fetch a chart, by
+	// chart. It is nil when every chart was fetched. An instance that names
+	// a failed chart lists its key in its own ChartFailures.
 	ChartFailures map[chart.Ref]error
-	// Refused are the projects that do not load (repository.Load), no
-	// instance of them in Instances, in name order: their output is kept
-	// (Partial), not written.
+	// Refused lists the projects that do not load, in name order. Instances
+	// holds no instance of them. Partial keeps their output.
 	Refused []Refused
 }
 
-// Refused: a project of a Tree that does not load, why, and its own
-// context for what the platform decides of it all the same.
+// Refused is a project of a Tree that does not load.
 type Refused struct {
-	// Namespace is the project.
-	Namespace string
-	// Problems are why, each naming its repository and path, with their
-	// errors in Errs.
-	Problems []string
-	Errs     []error
-	// Inputs are the project's context (Namespace, Context, Contracts).
-	Inputs okdp.Inputs
-	// Own: Inputs holds the project's own layer; not when its
-	// project.yaml does not read, the platform's alone.
+	Namespace string      // the project
+	Problems  []string    // why, each naming its repository and path
+	Errs      []error     // the errors behind Problems
+	Inputs    okdp.Inputs // the project's context (Namespace, Context, Contracts)
+	// Own reports whether Inputs holds the project's own layer. It is false
+	// when its project.yaml cannot be read: Inputs then holds the
+	// platform's layers alone.
 	Own bool
 }
 
-// ChartSource: a chart cache that fetches the upstream charts it lacks,
-// unpacked as a compile reads them (okdp.Inputs.Charts), for the checks of
-// the final values against them. A chart is fetched or not on its own: a
-// tree does not depend on each of its charts' availability.
+// ChartSource is a chart cache that fetches the upstream charts it lacks
+// and gives them unpacked (okdp.Inputs.Charts). Each chart is fetched on
+// its own: a tree does not depend on every chart being available.
 type ChartSource interface {
-	// Ensure: the chart cache, holding every chart of refs it could
-	// fetch, and why each of the others could not be, by chart: an entry
-	// of that map (non nil) is what leaves a chart unchecked and reported
-	// per instance (Tree.ChartFailures, Instance.ChartFailures); a chart
-	// of refs that is neither in the cache nor in the map is treated as
-	// any chart missing from a filled cache, the instance naming it
-	// refused (Dir).
+	// Ensure returns the chart cache, which holds every chart of refs it
+	// could fetch, and a map that says why each of the others could not be
+	// fetched. A non-nil entry of the map leaves its chart unchecked. A
+	// chart of refs that is in neither the cache nor the map counts as
+	// missing from a filled cache: the instance that names it is refused.
 	Ensure(ctx context.Context, refs []chart.Ref) (fs.FS, map[chart.Ref]error)
 }
 
-// Instance: an instance of a Tree and its compile.
+// Instance is an instance of a Tree, with its compile.
 type Instance struct {
 	okdp.Instance
-	// Outcome is its compile with the other instances: its result, nil
-	// when refused, and why; the claims of its references, bound.
+	// Outcome is its compile with the other instances: its result (nil when
+	// refused), the reason, and the bound claims of its references.
 	Outcome okdp.Outcome
 	// GraphErr is the problem of the deployment graph at its release, nil
-	// when none: a dependency on a release that does not provide what is
-	// referenced, a cycle; several joined once (errors.Join), each its own.
+	// when there is none. Several problems are joined (errors.Join).
 	GraphErr error
-	// ChartFailures are why charts of its result could not be fetched, by
-	// chart key (Result.Charts), nil when none: the values of these keys
-	// were not checked, an instance compiled without them; those of the
-	// others were (Tree.ChartFailures).
+	// ChartFailures says why charts of its result could not be fetched, by
+	// chart key (Result.Charts), nil when there is none. The values of
+	// these keys were not checked: the instance compiled without the charts.
 	ChartFailures map[string]error
-	// Provided are the claims bound to it, its package provisioning their
-	// contract, by ID, each with the instance that claims it.
+	// Provided lists the claims bound to it as a provider, sorted by ID.
 	Provided []Provided
 }
 
-// Provided: a claim bound to a provider (Instance.Provided), and the
-// instance whose reference claims it.
+// Provided is a claim bound to a provider, with the instance claiming it.
 type Provided struct {
 	okdp.Bound
 	Claimer *Instance
 }
 
-// Dir: a chart cache filled already, a directory of unpacked charts
-// (helm pull --untar), which fetches nothing: Compile sets it on every
-// instance at once, and compiles them once.
+// Dir is a chart cache that is filled already: a directory of unpacked
+// charts (helm pull --untar). It fetches nothing, so Compile sets it on
+// every instance up front and compiles them once.
 type Dir struct{ FS fs.FS }
 
-// Ensure: the directory as it is, fetching nothing and reporting no
-// failure: a chart it lacks fails the check of the instance that names it.
+// Ensure returns the directory as it is and reports no failure, so a chart
+// it lacks fails the check of the instance that names it.
 func (d Dir) Ensure(context.Context, []chart.Ref) (fs.FS, map[chart.Ref]error) { return d.FS, nil }
 
-// Compile: instances compiled together (okdp.CompileAll), then the graph
-// of those that compile, its problems at their releases, and the claims
-// bound to each provider. With charts, the upstream charts the compile
-// names (Result.Charts: those of the packages and of the platform, the
-// OAuth clients' among them) are fetched, then the instances compiled
-// again with them (Inputs.Charts), their final values checked against
-// the charts' defaults and schemas. Fetching fails per chart: a chart
-// that cannot be fetched leaves the keys of the instances that name it
-// unchecked, reported per instance (Instance.ChartFailures) and per chart
-// (Tree.ChartFailures), the rest of the checks and the others' charts
-// as they are. A Dir is set at once, the instances compiled once. instances
-// are not changed.
+// Compile compiles instances together (okdp.CompileAll). It then builds the
+// graph of those that compile, puts its problems at their releases, and
+// lists the claims bound to each provider. It does not change instances.
+//
+// With charts, Compile fetches the upstream charts the first compile names
+// (Result.Charts). It then compiles the instances again with them, which
+// checks their final values against the charts' defaults and schemas. A
+// chart that cannot be fetched leaves the keys of the instances that name
+// it unchecked, and nothing else. A Dir needs no fetch: the instances are
+// compiled once.
 func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource) *Tree {
 	if d, ok := charts.(Dir); ok {
 		checked := withCharts(instances, d.FS, nil)
 		return build(checked, okdp.CompileAll(ctx, checked), nil)
 	}
-	// The second run reads the parameters and the contracts the first read.
+	// The memo lets the second run reuse the parameters and the contracts
+	// the first run read.
 	memo := okdp.NewMemo()
 	outcomes := okdp.CompileAllWith(ctx, instances, memo)
 	if charts == nil {
@@ -132,8 +116,6 @@ func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource)
 	return build(checked, okdp.CompileAllWith(ctx, checked, memo), failed)
 }
 
-// withCharts: a copy of instances, each with the chart cache charts and
-// the charts failed that could not be fetched.
 func withCharts(instances []okdp.Instance, charts fs.FS, failed map[chart.Ref]error) []okdp.Instance {
 	checked := slices.Clone(instances)
 	for i := range checked {
@@ -142,8 +124,7 @@ func withCharts(instances []okdp.Instance, charts fs.FS, failed map[chart.Ref]er
 	return checked
 }
 
-// refs: the upstream charts of the instances compiled, once each, in the
-// order of the outcomes, then of their chart keys.
+// refs returns the upstream charts of the compiled instances, once each.
 func refs(outcomes []okdp.Outcome) []chart.Ref {
 	var out []chart.Ref
 	for _, o := range outcomes {
@@ -159,8 +140,7 @@ func refs(outcomes []okdp.Outcome) []chart.Ref {
 	return out
 }
 
-// build: the tree of instances and their outcomes, in their order, each
-// with the charts of failed its result names (Tree.ChartFailures).
+// build makes the tree of instances and their outcomes, in their order.
 func build(instances []okdp.Instance, outcomes []okdp.Outcome, failed map[chart.Ref]error) *Tree {
 	t := &Tree{}
 	if len(failed) > 0 {
@@ -205,9 +185,8 @@ func build(instances []okdp.Instance, outcomes []okdp.Outcome, failed map[chart.
 	return t
 }
 
-// atInstances: the problems of the graph, err of graph.New, at the
-// instances of their releases, each instance's in their order; those at
-// no instance of t left out.
+// atInstances puts the problems of the graph at the instances of their
+// releases. It leaves out the problems at no instance of t.
 func atInstances(t *Tree, err error) map[*Instance][]error {
 	out := map[*Instance][]error{}
 	for _, e := range unjoin(err) {
@@ -220,7 +199,7 @@ func atInstances(t *Tree, err error) map[*Instance][]error {
 	return out
 }
 
-// unjoin: the errors errors.Join joined, err alone otherwise.
+// unjoin returns the errors that errors.Join joined, err alone otherwise.
 func unjoin(err error) []error {
 	if j, ok := err.(interface{ Unwrap() []error }); ok {
 		return j.Unwrap()
@@ -228,14 +207,14 @@ func unjoin(err error) []error {
 	return []error{err}
 }
 
-// Namespace: the instance's namespace.
+// Namespace returns the instance's namespace.
 func (ti *Instance) Namespace() string { return ti.Inputs.Namespace }
 
-// Release: the instance's release.
+// Release returns the instance's release.
 func (ti *Instance) Release() string { return ti.Inputs.Release }
 
-// Err: why the instance does not deploy, its refusal, else the problem of
-// the graph at its release; nil when it does.
+// Err says why the instance does not deploy: its refusal, else the problem
+// of the graph at its release. It returns nil when the instance deploys.
 func (ti *Instance) Err() error {
 	if ti.Outcome.Err != nil {
 		return ti.Outcome.Err
@@ -243,8 +222,8 @@ func (ti *Instance) Err() error {
 	return ti.GraphErr
 }
 
-// Granted: what a provider granted a claim, the output it publishes for
-// it, named the claim's ID; nil when it publishes none (refused).
+// Granted returns the output the provider publishes for the claim id, nil
+// when it publishes none (refused).
 func (ti *Instance) Granted(id string) *okdp.Output {
 	if ti.Outcome.Result == nil {
 		return nil
@@ -257,8 +236,7 @@ func (ti *Instance) Granted(id string) *okdp.Output {
 	return nil
 }
 
-// Provisions: the contracts the instance's package provisions (okdp.yaml
-// provisions), nil when none.
+// Provisions returns the contracts the instance's package provisions.
 func (ti *Instance) Provisions() []string {
 	if ti.Definition == nil {
 		return nil
@@ -270,7 +248,7 @@ func (ti *Instance) Provisions() []string {
 	return out
 }
 
-// Instance: the instance name of namespace, nil when the tree has none.
+// Instance returns the instance name of namespace, nil when there is none.
 func (t *Tree) Instance(namespace, name string) *Instance {
 	for _, ti := range t.Instances {
 		if ti.Namespace() == namespace && ti.Name == name {
@@ -280,8 +258,7 @@ func (t *Tree) Instance(namespace, name string) *Instance {
 	return nil
 }
 
-// Release: the instance of release of namespace, nil when the tree has
-// none.
+// Release returns the instance of release in namespace, nil when none.
 func (t *Tree) Release(namespace, release string) *Instance {
 	for _, ti := range t.Instances {
 		if ti.Namespace() == namespace && ti.Release() == release {
@@ -291,8 +268,8 @@ func (t *Tree) Release(namespace, release string) *Instance {
 	return nil
 }
 
-// Problems: why each instance that does not deploy does not,
-// <namespace>/<name>: <why>, in the order of the instances.
+// Problems says why each instance that does not deploy fails, as
+// "<namespace>/<name>: <why>", in the order of the instances.
 func (t *Tree) Problems() []string {
 	var out []string
 	for _, ti := range t.Instances {

@@ -1,6 +1,6 @@
-// Transfer: the credentials of a claim across namespaces, through the
-// platform's secret store, and those of a connection that are in it
-// (secretRef.remoteKey).
+// Transfer: credentials that go through the platform's secret store.
+// Those of a claim cross namespaces through it, and those of a connection
+// may already be in it (secretRef.remoteKey).
 
 package okdp
 
@@ -12,39 +12,33 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// transfer: credentials read from the platform's secret store, a claim's
-// across namespaces or a connection's (secretRef.remoteKey): the Secret of
-// the instance's namespace they are read into, the key they are under in
-// the store, the contract of the claim or the connection and its secret
-// fields.
+// transfer describes credentials read from the platform's secret store
+// into a Secret of the instance's namespace.
 type transfer struct {
-	secret, key, contract string
-	fields                []string
+	secret, key, contract string   // the Secret read into, the key in the store, the contract
+	fields                []string // the contract's secret fields
 }
 
-// storeName: global.okdp.secrets.store, the store claims' credentials
-// cross namespaces through, and the connections' of a secretRef.remoteKey
-// are in: a SecretStore of each namespace, or a ClusterSecretStore
-// (storeRef); "" when not set.
+// storeName returns global.okdp.secrets.store, or "" when it is not set.
+// The store is a SecretStore of each namespace, or a ClusterSecretStore.
 func storeName(okdp M) string { return value.Str(value.Dig(okdp, "secrets.store")) }
 
-// SecretStore: the platform's secret store as the targets write it in
-// each project's namespace (Result.SecretStore): a SecretStore Name, its
-// Provider (External Secrets' SecretStore spec.provider, verbatim), the
-// ServiceAccount of the namespace it authenticates with.
+// SecretStore is the platform's secret store as the targets write it in
+// the namespace of each project (Result.SecretStore). Provider is its
+// spec.provider, an External Secrets SecretStore provider, verbatim.
+// ServiceAccount is the one of the namespace that it authenticates with.
 type SecretStore struct {
 	Name, ServiceAccount string
 	Provider             map[string]any
 }
 
-// storeOf: the rule set's account of the secret store of global.okdp.secrets
-// in okdp: store, ref and refreshInterval (objects/secret-store.cel.yaml).
+// storeOf returns the rule set's account of the secret store that
+// global.okdp.secrets describes: store, ref and refreshInterval.
 func storeOf(ctx context.Context, rules *RuleSet, okdp M) (M, error) {
 	return rules.Values(ctx, "secretStore", M{"settings": okdp})
 }
 
-// secretStore: Result.SecretStore of global.okdp.secrets: nil without
-// store or provider.
+// secretStore returns nil without a store or a provider.
 func secretStore(ctx context.Context, rules *RuleSet, okdp M) (*SecretStore, error) {
 	v, err := storeOf(ctx, rules, okdp)
 	if err != nil {
@@ -57,31 +51,33 @@ func secretStore(ctx context.Context, rules *RuleSet, okdp M) (*SecretStore, err
 	return &SecretStore{Name: value.Str(s["name"]), ServiceAccount: value.Str(s["serviceAccount"]), Provider: value.AsMap(s["provider"])}, nil
 }
 
-// platformKeys: the first segment of the platform's keys of the secret
-// store, platform/<key>, the credentials of its connections, which every
-// namespace of a ClusterSecretStore reads and none writes; with
-// secrets.provider no namespace reads them, the platform's credentials
-// being copied under the namespaces' own keys, and a connection naming
-// one is refused (storeSecret). No project is named so (Compile).
+// platformKeys is the first segment of the platform's keys in the secret
+// store, platform/<key>. They hold the credentials of the platform's
+// connections. With a ClusterSecretStore, every namespace reads them and
+// none writes them. With secrets.provider, no namespace reads them: the
+// platform's credentials are copied under the namespaces' own keys, and
+// a connection that names a platform key is refused. No project is named
+// platform.
 const platformKeys = "platform"
 
-// storeKey: the key of a claim's credentials in the platform's secret
-// store: <provider namespace>/<id>, the namespace of the provider that
-// pushes them, then the claim's ID, which starts with the namespace of
-// its claimers: a path-based store scopes a writer by the first segment,
-// its own namespace, and a reader by the first label of the second, its
-// own claims, whichever namespace provides them (docs/specs: what the
-// store must enforce). The platform's keys are under platform/, a
-// namespace no project may have (Compile).
+// storeKey returns the key of a claim's credentials in the platform's
+// secret store:
+//
+//	<provider namespace>/<id>
+//
+// The first segment is the namespace of the provider that pushes them.
+// The second is the claim's ID, which starts with the namespace of its
+// claimers. A path-based store can thus scope a writer by the first
+// segment and a reader by the first label of the second, whichever
+// namespace provides them.
 func storeKey(namespace, id string) string { return namespace + "/" + id }
 
-// pushSecrets: the PushSecrets of the credentials of the claims of another
-// namespace than the instance's, each the Secret of its output (outputs)
-// pushed to the platform's secret store, under storeKey, each secret
-// field of its contract (contracts) a property of its key, deleted from
-// the store with the PushSecret, when the claim is gone. A claim whose
-// output has no secretRef, or whose contract no secret field, has none.
-// The store is then required.
+// pushSecrets returns the PushSecrets for the claims of a namespace
+// other than the instance's. Each pushes the Secret of the claim's
+// output to the platform's secret store, under storeKey. The key is
+// deleted from the store with the PushSecret, when the claim is gone.
+// A claim has none when its output has no secretRef or its contract no
+// secret field. Otherwise the compile fails when the store is not set.
 func pushSecrets(ctx context.Context, inst *instance, contracts *contractCache, claims []Claim, outputs []Output) ([]M, error) {
 	var out []M
 	for _, c := range claims {
@@ -113,13 +109,10 @@ func pushSecrets(ctx context.Context, inst *instance, contracts *contractCache, 
 	return out, nil
 }
 
-// pullSecret: the ExternalSecret, named after the Secret x names, that
-// reads the credentials of a claim of another namespace, or of a
-// connection (secretRef.remoteKey), from the platform's secret store into
-// that Secret, in the instance's namespace, each secret field a property
-// of x's key; it carries the labels of a provider's credentials Secret,
-// okdp.io/credentials-<contract>, on the ExternalSecret and on the Secret
-// it writes.
+// pullSecret returns the ExternalSecret that reads the credentials x
+// from the platform's secret store into the Secret x names, under that
+// Secret's name. Both carry the label of a provider's credentials
+// Secret, okdp.io/credentials-<contract>.
 func pullSecret(ctx context.Context, inst *instance, x transfer) (M, error) {
 	l := inst.rules.Labels(inst.svc.Name, inst.release, "", false)
 	l[inst.rules.Name("credentialsLabel", "contract", x.contract)] = "true"
@@ -130,8 +123,8 @@ func pullSecret(ctx context.Context, inst *instance, x transfer) (M, error) {
 	return storeObject(ctx, inst, "pullSecret", M{"secret": x.secret, "key": x.key, "fields": fields, "labels": l, "namespace": inst.namespace})
 }
 
-// storeObject: the object of the document, of the rule set, for arg and the
-// platform's secret store.
+// storeObject returns the object that the document of the rule set
+// builds from arg and the platform's secret store.
 func storeObject(ctx context.Context, inst *instance, document string, arg M) (M, error) {
 	store, err := storeOf(ctx, inst.rules, inst.okdp)
 	if err != nil {

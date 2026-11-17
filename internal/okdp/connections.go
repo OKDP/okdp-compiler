@@ -1,11 +1,7 @@
-// Connections: the references declared in the parameter schema
-// (x-okdp-connection-ref), resolved to an external connection, to a named
-// claim of the namespace, to an output another instance of the namespace
-// publishes, or to the output of a claim's provider, completed against
-// their contract, then checked against what the package requires of them
-// (require); the contracts, read once for a set of compiles
-// (readContract), and their checks, which the outputs the instance
-// provides go through too.
+// Connections: the connection references of the parameter schema
+// (x-okdp-connection-ref) and the contracts they are checked against. A
+// reference resolves to an external connection, a claim, or an output
+// that another instance of the namespace publishes.
 
 package okdp
 
@@ -28,39 +24,40 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// resolver: resolves connection references against the contracts, the
-// external connections of the instance, what the other instances of the
-// namespace publish and the claims' bindings, recording those that point
-// to an instance.
+// resolver resolves the connection references of an instance, and records
+// those that point to an instance (deps).
 type resolver struct {
-	rules     *RuleSet             // the rule set: the names it gives credentials
+	rules     *RuleSet             // names the credentials Secrets
 	contracts *contractCache       // Inputs.Contracts
 	conns     M                    // the external connections
-	levels    map[string]uint      // the level of the context each is given at, by name (connectionLevels)
+	levels    map[string]uint      // the context level each connection is given at, by name
 	claims    map[string]ClaimSpec // the named claims of the context (namedClaims)
-	classes   M                    // global.okdp.provisioning, by contract: the default class of a claim that names none
+	classes   M                    // global.okdp.provisioning, by contract, for the default classes
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
-	store     string               // global.okdp.secrets.store: the store the credentials of a claim of another namespace go through, and those of a connection's secretRef.remoteKey are in
-	provider  bool                 // global.okdp.secrets.provider is set: a SecretStore of each namespace, which reads no platform/ key
-	transfers []transfer           // those credentials, in order, each Secret once (addTransfer)
-	release   string               // Inputs.Release: never its own provider
+	// store is global.okdp.secrets.store: the credentials of a claim of
+	// another namespace and those of a secretRef.remoteKey go through it.
+	store string
+	// provider reports whether global.okdp.secrets.provider is set. Each
+	// namespace then has its own SecretStore, which reads no platform/ key.
+	provider  bool
+	transfers []transfer // the credentials to read from the store, one per Secret
+	release   string     // Inputs.Release; the instance is never its own provider
 	namespace string
-	draft     any          // the parameter schema's $schema: the draft of the requirements that name none
-	deps      []Dependency // every reference to an instance resolved, in order
-	errs      []error      // every reference that does not resolve, in order (walk)
-	missing   []outputKey  // the outputs references name that no instance of published publishes, in order (output)
+	draft     any          // $schema of the parameter schema, for the requirements that name no draft
+	deps      []Dependency // the references to an instance that resolve, in order
+	errs      []error      // the references that do not resolve, in order (walk)
+	missing   []outputKey  // the outputs references name that nobody publishes, in order
 }
 
-// outputKey: an output, by namespace, "" the instance's own, contract and
-// name; release, the instance of that namespace that publishes it when a
-// claim's provider is known, "" for a name any instance of it may publish.
+// outputKey identifies an output by namespace, contract and name. An
+// empty namespace is the instance's own. release is the instance that
+// publishes it, when it is a claim's provider; "" means any instance.
 type outputKey struct{ namespace, contract, name, release string }
 
-// missingOutputs: the error of a compile whose references name outputs no
-// instance of Inputs.Published publishes (outputs, in order), err the
-// compile's error as it is, which may say more: what CompileAll waits for
-// before compiling the instance again.
+// missingOutputs is the error of a compile whose references name outputs
+// that nobody publishes yet. CompileAll waits for them before it compiles
+// the instance again. err is the compile's error unchanged.
 type missingOutputs struct {
 	outputs []outputKey
 	err     error
@@ -69,30 +66,27 @@ type missingOutputs struct {
 func (e *missingOutputs) Error() string { return e.err.Error() }
 func (e *missingOutputs) Unwrap() error { return e.err }
 
-// Dependency: an instance that a connection reference of the parameters
-// points to, not an external connection: the instance of the namespace
-// that publishes the output the reference names (Inputs.Published), or the
-// provider a claim is bound to, maybe of another namespace
-// (Inputs.Bindings). The instance must
-// exist and publish an output of the contract by that name. Its fields are
-// all set, but Namespace, which is set for a provider of another namespace
-// only. What a deployer orders the releases with, read from
-// Result.Dependencies: the deployment graph checks them, and makes the
-// release wait for the instance (graph.New: Flux dependsOn, Argo CD sync
-// waves).
+// Dependency is an instance that a connection reference of the parameters
+// points to: the instance of the namespace that publishes the output the
+// reference names, or the provider a claim is bound to, which may be of
+// another namespace. A deployer reads them to order the releases.
 type Dependency struct {
-	Instance  string `json:"instance,omitempty" yaml:"instance,omitempty"`   // the referenced instance, or the one that publishes the referenced output (its release name)
-	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"` // the namespace of Instance when it is not the instance's: a claim bound to a provider of another namespace
-	Contract  string `json:"contract,omitempty" yaml:"contract,omitempty"`   // the contract it must provide
-	Field     string `json:"field,omitempty" yaml:"field,omitempty"`         // the parameter that references it, e.g. backends[0].database
-	Output    string `json:"output,omitempty" yaml:"output,omitempty"`       // the output the reference resolved to, by name, a claim's ID
+	// Instance is the release name of the instance that publishes the output.
+	Instance string `json:"instance,omitempty" yaml:"instance,omitempty"`
+	// Namespace is the namespace of Instance when it is not the instance's
+	// own: a claim bound to a provider of another namespace.
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Contract  string `json:"contract,omitempty" yaml:"contract,omitempty"`
+	// Field is the parameter that references it, e.g. backends[0].database.
+	Field string `json:"field,omitempty" yaml:"field,omitempty"`
+	// Output is the name of the output it resolved to; for a claim, its ID.
+	Output string `json:"output,omitempty" yaml:"output,omitempty"`
 }
 
-// refs: v, at path, of the schema s, each value carrying an
-// x-okdp-connection-ref (ref) replaced by what visit gives for it, in path
-// order (keys sorted, items in order), at its parameter path (value.Key,
-// value.Index: a key with a dot in brackets) and under its key, an item's
-// its list's, the key of a message's value.ShortAt. The keys the schema
+// refs walks the value v along the schema s and replaces every value
+// whose schema carries an x-okdp-connection-ref by what visit returns for
+// it, in path order. visit gets the reference, the value, its parameter
+// path and its key, which messages print the value with. Keys the schema
 // does not declare are left as they are.
 func refs(s M, v any, path, key string, visit func(ref M, v any, path, key string) any) any {
 	if ref, ok := s["x-okdp-connection-ref"].(M); ok {
@@ -107,7 +101,6 @@ func refs(s M, v any, path, key string, visit func(ref M, v any, path, key strin
 			}
 		}
 	case []any:
-		// A list: the same, with the item schema.
 		for i, x := range t {
 			t[i] = refs(value.AsMap(s["items"]), x, value.Index(path, i), key, visit)
 		}
@@ -115,42 +108,39 @@ func refs(s M, v any, path, key string, visit func(ref M, v any, path, key strin
 	return v
 }
 
-// walk: v, the parameters, of the schema s, with every reference replaced
-// by the resolved connection (refs, reference). The error of a reference
-// that does not resolve is recorded (errs).
+// walk replaces every reference of the parameters v, of schema s, by the
+// connection it resolves to, and records the errors (errs).
 func (r *resolver) walk(s M, v any) any { return refs(s, v, "", "", r.reference) }
 
-// reference: v, the value of a reference ref at path, under key, resolved.
-// Null or empty means not set; a string is a connection's name, or a named
-// claim's; an object a claim template (parseClaim), when the reference
-// takes them (provision). Another value would reach the mapping
-// unresolved, past the contract: refused, its value printed as a
-// sensitive key's is (value.ShortAt). What it resolves to meets its
-// requirement, require (readRequirement). An error is the field's
-// (FieldError).
+// reference resolves v, the value of a reference (ref) at path. Null or
+// "" means not set, a string names a connection, a named claim or an
+// output, and an object is a claim template. Any other value is refused,
+// because it would reach the mapping unresolved and unchecked by the
+// contract. On error the value is left as it is.
 func (r *resolver) reference(ref M, v any, path, key string) any {
 	if v == nil || v == "" {
 		return v
 	}
 	contract, provision := value.Str(ref["contract"]), value.Truthy(ref["provision"])
-	// Checked with the parameter schema (requirements): it compiles.
+	// It compiles: requirements checked it with the parameter schema.
 	req, err := readRequirement(ref, r.draft)
 	if err != nil {
 		r.errs = append(r.errs, atField(path, fmt.Errorf("%s: x-okdp-connection-ref: %w", path, err)))
 		return v
 	}
 	var c M
+	l := lookup{field: path, contract: contract, req: req, provision: provision}
 	switch t := v.(type) {
 	case string:
-		c, err = r.resolve(t, contract, path, nil, req, provision)
+		l.name = t
+		c, err = r.resolve(l)
 	case M:
 		if !provision {
 			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 			break
 		}
-		var claim *ClaimSpec
-		if claim, err = parseClaim(t, path, false); err == nil {
-			c, err = r.resolve("", contract, path, claim, req, true)
+		if l.claim, err = parseClaim(t, path, false); err == nil {
+			c, err = r.resolve(l)
 		}
 	default:
 		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
@@ -162,11 +152,10 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 	return c
 }
 
-// declaredConnections: every connection of the context of in, of every
-// level, referenced or not, checked at its declaration (declared), with
-// its contracts, the store of its platform's settings: what CompileAll
-// checks of each instance before it binds the claims. nil when the
-// context's layers fail: the compile reports them (contextLayers).
+// declaredConnections checks every connection of the context of in at its
+// declaration, whatever its level and whether a reference names it or not.
+// It returns nil when the context's layers fail: the instance's compile
+// reports them.
 func declaredConnections(ctx context.Context, in Inputs) error {
 	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
@@ -178,32 +167,41 @@ func declaredConnections(ctx context.Context, in Inputs) error {
 			conns = value.Merge(conns, c)
 		}
 	}
-	r := resolver{rules: in.rules(), contracts: contractCacheOf(in), conns: conns, levels: connectionLevels(in.Context), store: value.Str(value.Dig(platform, "global.okdp.secrets.store")), provider: len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace}
+	r := resolver{
+		rules:     in.rules(),
+		contracts: contractCacheOf(in),
+		conns:     conns,
+		levels:    connectionLevels(in.Context),
+		store:     value.Str(value.Dig(platform, "global.okdp.secrets.store")),
+		provider:  len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0,
+		release:   in.Release,
+		namespace: in.Namespace,
+	}
 	return r.declared()
 }
 
-// CheckConnection: the connection name, conn as written in connections,
-// declared at level of the context (0 the platform's, 1 a project's, 2
-// an instance's) of namespace, checked as CompileAll checks it at its
-// declaration (declared), store the platform's secret store
-// (global.okdp.secrets.store), contracts the contracts: the error at
-// connections.<name>, nil when it holds.
+// CheckConnection checks one connection as CompileAll checks it at its
+// declaration. conn is its entry as written in connections, level the
+// level of the context it is declared at (0 the platform, 1 a project, 2
+// an instance) and store global.okdp.secrets.store.
 func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, level uint, namespace, store string) error {
 	v, err := value.Normalize(conn)
 	if err != nil {
 		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
 	}
-	r := resolver{rules: rulesOr(rules), contracts: newContractCache(contracts), conns: M{name: v}, levels: map[string]uint{name: level}, store: store, namespace: namespace}
+	r := resolver{
+		rules:     rulesOr(rules),
+		contracts: newContractCache(contracts),
+		conns:     M{name: v},
+		levels:    map[string]uint{name: level},
+		store:     store,
+		namespace: namespace,
+	}
 	return r.declared()
 }
 
-// declared: every connection of the context (conns), referenced or not,
-// checked at its declaration as a reference to it would check it, in
-// name order: its name a DNS-1123 label, an object of a contract,
-// readable; then as resolveExternal, complete, check and resolve check
-// it, its fields, its secretRef, its required fields, its types, "{{".
-// Every one that fails, at once, each the connection's (FieldError at
-// connections.<name>); nil when they all hold.
+// declared checks every connection of the context, in name order, and
+// reports every one that fails, each at connections.<name>.
 func (r *resolver) declared() error {
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(r.conns)) {
@@ -213,8 +211,8 @@ func (r *resolver) declared() error {
 	return errors.Join(errs...)
 }
 
-// declaration: the connection name of the context, at field, checked
-// (declared), the transfers it would need not recorded.
+// declaration checks the connection name, declared at field, as a
+// reference to it would. The transfers it would need are not recorded.
 func (r *resolver) declaration(name, field string) error {
 	conn, ok := r.conns[name].(M)
 	switch {
@@ -244,39 +242,46 @@ func (r *resolver) declaration(name, field string) error {
 	return chart.NoTemplate(x.values, func(p string) string { return fmt.Sprintf("%s: field %q", x.where, p) })
 }
 
-// resolved: what a reference resolves to before the checks every source
-// shares: the values, the secretRef of its connection, where it is for the
-// messages, and what the mapping is told of its source (okdp).
-type resolved struct {
-	values    M
-	secretRef any    // {name}, nil when none
-	where     string // the reference in the messages: <field> (connection "<name>"), <field> (claim ... of <provider>), <field> (output ... of <instance>)
-	ref       string // the connection's, the claim's ID or the output's name
-	source    string // external, claim or output
-	instance  string // the instance it comes from, "" when external
-	namespace string // its namespace when it is not the compiling instance's
-	advice    string // what a requirement it does not meet may add
+// lookup is one connection reference to resolve.
+type lookup struct {
+	field     string       // its parameter path
+	contract  string       // the contract it takes
+	name      string       // the connection, named claim or output it names; "" for a claim template
+	claim     *ClaimSpec   // its claim template; nil when it names something
+	req       *requirement // what it requires beyond the contract; nil for nothing
+	provision bool         // it accepts a claim
 }
 
-// resolve: a reference to its contract fields. An entry of connections is
-// external. An entry of claims, a named claim, is a claim, of the
-// contract, when the reference takes claims (provision). Any other name is
-// an output named ref of the contract that another instance of the
-// namespace publishes (Published, the compiling release left out:
-// output). A claim (claim, ref empty, or a named claim) resolves to the
-// output its binding gives (Inputs.Bindings), as an output does. The first
-// error is reported: the contract, then the fields the requirement req
-// names (contract.requires), then the named claim (its contract, the
-// reference's provision), then the binding (its contract), then the output (several instances, none),
-// the fields of an external connection or an output in alphabetical order
-// (contract.fields), then an external connection's secretRef.remoteKey
-// (storeSecret), then the required fields, then the violations of the
-// contract, all of them (contract.check), then those of the requirement,
-// all of them (requirement.check), then "{{" in what it resolves to
-// (chart.NoTemplate). A reference to an instance that resolves is
-// recorded (deps), field naming it, ref the output.
-func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *requirement, provision bool) (M, error) {
-	c, err := r.contracts.get(contract)
+// resolved is what a reference resolves to, before the checks every
+// source shares. ref, source, instance and namespace go to the mapping.
+type resolved struct {
+	values    M
+	secretRef any // {name}, nil when none
+	// where names the reference in messages:
+	//
+	//	<field> (connection "<name>")
+	//	<field> (claim "<id>" of <provider>)
+	//	<field> (output "<name>" of <instance>)
+	where     string
+	ref       string // the connection's name, the claim's ID or the output's name
+	source    string // external, claim or output
+	instance  string // the instance it comes from; "" when external
+	namespace string // its namespace, when it is not the compiling instance's
+	advice    string // what the error of a requirement it does not meet adds
+}
+
+// resolve resolves the reference l to the fields of its contract. The
+// source is the first that applies: a named claim, when no connection has
+// that name; a claim template; an external connection; an output that
+// another instance of the namespace publishes under that name. A claim
+// resolves to the output its binding gives.
+//
+// Whatever the source, the result is completed and checked against the
+// contract, then against the requirement of the reference. It carries an
+// okdp key that tells the mapping where it comes from.
+func (r *resolver) resolve(l lookup) (M, error) {
+	ref, field, claim, req := l.name, l.field, l.claim, l.req
+	c, err := r.contracts.get(l.contract)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", field, err)
 	}
@@ -287,7 +292,7 @@ func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *r
 	named, isNamed := r.claims[ref]
 	switch conn, external := r.conns[ref].(M); {
 	case isNamed && claim == nil && r.conns[ref] == nil:
-		x, err = r.resolveNamed(c, ref, field, named, provision)
+		x, err = r.resolveNamed(c, ref, field, named, l.provision)
 	case claim != nil:
 		x, err = r.resolveClaim(c, ref, field, claim)
 	case external:
@@ -311,8 +316,6 @@ func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *r
 	if err := req.check(out, x.where, x.advice); err != nil {
 		return nil, err
 	}
-	// Where it comes from, for the mapping (e.g. error messages): the
-	// instance too, unless external.
 	from := M{"ref": x.ref, "contract": c.name, "source": x.source}
 	if x.instance != "" {
 		from["instance"] = x.instance
@@ -321,7 +324,7 @@ func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *r
 		from["namespace"] = x.namespace
 	}
 	out["okdp"] = from
-	// No template code in what the mapping receives, whatever layer,
+	// What the mapping receives holds no template code, whatever layer,
 	// output or default it comes from.
 	if err := chart.NoTemplate(out, func(p string) string { return fmt.Sprintf("%s: field %q", x.where, p) }); err != nil {
 		return nil, err
@@ -332,8 +335,6 @@ func (r *resolver) resolve(ref, contract, field string, claim *ClaimSpec, req *r
 	return out, nil
 }
 
-// resolveNamed: the named claim ref, declared as spec, a claim of the
-// contract c, when the reference takes claims (provision).
 func (r *resolver) resolveNamed(c *contract, ref, field string, spec ClaimSpec, provision bool) (*resolved, error) {
 	switch {
 	case !provision:
@@ -344,9 +345,10 @@ func (r *resolver) resolveNamed(c *contract, ref, field string, spec ClaimSpec, 
 	return r.resolveClaim(c, ref, field, &spec)
 }
 
-// resolveClaim: the claim at field, as written (claim), to the output its
-// binding gives, its credentials a copy of the instance's own when the
-// provider is of another namespace.
+// resolveClaim resolves the claim at field to the output its binding
+// gives. When the provider is of another namespace, the credentials are
+// read through the platform's secret store into a Secret of the
+// instance's own.
 func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec) (*resolved, error) {
 	contract := c.name
 	b, ok := r.bindings[field]
@@ -358,7 +360,7 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 	}
 	provider := path.Join(b.Namespace, b.Release)
 	if b.Output == nil {
-		r.missing = append(r.missing, outputKey{b.Namespace, contract, b.ID, b.Release})
+		r.missing = append(r.missing, outputKey{namespace: b.Namespace, contract: contract, name: b.ID, release: b.Release})
 		return nil, fmt.Errorf("%s: claim %q (%s): %s publishes no output for it", field, b.ID, contract, provider)
 	}
 	x := &resolved{ref: b.ID, source: "claim", instance: b.Release}
@@ -367,8 +369,8 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 	}
 	from := fmt.Sprintf("claim %q of %s", b.ID, provider)
 	x.where = fmt.Sprintf("%s (%s)", field, from)
-	// The default class: another one's provider may meet the
-	// requirement.
+	// The claim took the default class: the provider of another class may
+	// meet the requirement, and the advice says so.
 	if claim.Provider == "" && claim.Class == "" {
 		key := provisioningKey(contract)
 		class := value.Str(value.AsMap(r.classes[contract])["default"])
@@ -378,7 +380,6 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 	if x.values, x.secretRef, err = c.published(*b.Output, field, from); err != nil {
 		return nil, err
 	}
-	// Credentials of another namespace: a copy of the instance's own.
 	if fields := c.secretFields(); x.namespace != "" && x.secretRef != nil && fields != nil {
 		if r.store == "" {
 			return nil, fmt.Errorf("%s: claim %q (%s): of %s, another namespace: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", field, b.ID, contract, provider)
@@ -390,10 +391,9 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 	return x, nil
 }
 
-// resolveExternal: the external connection ref, conn, of the contract c,
-// its fields checked (contract.fields), then its secretRef: {name}, or
-// {remoteKey}, its credentials in the platform's secret store
-// (storeSecret).
+// resolveExternal resolves a reference to the external connection ref,
+// whose entry is conn. Its secretRef is either {name}, a Secret of the
+// namespace, or {remoteKey}, credentials in the platform's secret store.
 func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*resolved, error) {
 	x := &resolved{values: M{}, ref: ref, source: "external", where: fmt.Sprintf("%s (connection %q)", field, ref)}
 	if value.Str(conn["contract"]) != c.name {
@@ -417,10 +417,8 @@ func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*res
 	return x, nil
 }
 
-// connectionFields: the fields of the contract that the external
-// connection conn holds, its keys but contract, description and
-// secretRef, and its secretRef, nil when it has none: credentials are
-// only referenced, never inlined.
+// connectionFields splits the entry of an external connection into its
+// contract fields and its secretRef, nil when it has none.
 func connectionFields(conn M) (fields, secretRef M) {
 	fields = M{}
 	for k, v := range conn {
@@ -435,12 +433,10 @@ func connectionFields(conn M) (fields, secretRef M) {
 	return fields, secretRef
 }
 
-// Connection: an external connection, connections.<name> of the context
-// (the platform's, a project's, an instance's), as written: the contract
-// it is of, a description, the contract's fields, and where its secret
-// fields are (secretRef): the Secret of the namespace of each instance
-// that references it (SecretRef, its name), or a key of the platform's
-// secret store, global.okdp.secrets.store (RemoteKey).
+// Connection is an external connection as written at connections.<name>
+// in the context. Its secret fields are not in it: secretRef names a
+// Secret in the namespace of each instance that references the connection
+// (SecretRef) or a key of the platform's secret store (RemoteKey).
 type Connection struct {
 	Name        string         // its key in connections
 	Contract    string         // contract
@@ -450,9 +446,8 @@ type Connection struct {
 	RemoteKey   string         // secretRef.remoteKey, "" when none
 }
 
-// ParseConnection: the connection name, v, as written in connections; what
-// it holds is checked by the compile of each instance that references it
-// (resolveExternal).
+// ParseConnection reads the connection name from v, its entry as written
+// in connections. It checks nothing: the compiles that reference it do.
 func ParseConnection(name string, v any) Connection {
 	conn := value.AsMap(v)
 	fields, secretRef := connectionFields(conn)
@@ -466,9 +461,8 @@ func ParseConnection(name string, v any) Connection {
 	}
 }
 
-// Entry: the connection as written in connections.<name>, values: its
-// contract, its description and its secretRef when set, then the
-// contract's fields of Values, but those keys.
+// Entry returns the connection as written at connections.<name>. A key of
+// Values named contract, description or secretRef is left out.
 func (c Connection) Entry() map[string]any {
 	out := M{}
 	for k, v := range c.Values {
@@ -493,9 +487,8 @@ func (c Connection) Entry() map[string]any {
 	return out
 }
 
-// MarshalYAML: the connection as written in connections.<name>, its own
-// keys first, contract, description and secretRef, then the contract's
-// fields, sorted, for a YAML encoder of the yaml.v3 family.
+// MarshalYAML encodes the connection as written (yaml.v3): its own keys
+// first, then the contract's fields, sorted.
 func (c Connection) MarshalYAML() (any, error) {
 	type ref struct {
 		Name      string `yaml:"name,omitempty"`
@@ -519,27 +512,23 @@ func (c Connection) MarshalYAML() (any, error) {
 	return entry, nil
 }
 
-// storeSecret: the Secret of the instance's namespace the credentials of
-// the external connection ref, of the contract c, are read into from the
-// platform's secret store, under the key of its secretRef, {remoteKey}:
-// <release>.<ref>-credentials, the release and the connection's name,
-// DNS-1123 labels, joined by a dot, which neither holds, so that no other
-// connection's Secret takes the name, nor a claim's: <release>-<secret>
-// across namespaces; within one, the provider's
-// <id>-<contract>-credentials, its ID <namespace>.<...>, and a tree's
-// release is <namespace>-<instance>. Recorded once (addTransfer), each
-// secret field of the contract a property of the key. The key is a path
-// of the store (isStorePath); a connection above level 0, a project's or
-// an instance's, names one under its namespace, <namespace>/<rest>,
-// where its own PushSecrets or an administrator put it (storeKey): the
-// platform's keys are read through the platform's connections, and
-// another namespace's never. The first that fails, in order: remoteKey
-// with a name; remoteKey not a string, or empty; "{{" in it; no store;
-// the connection's name not a DNS-1123 label; a contract without secret
-// field; a key that is no path; a key outside the namespace; a key under
-// platform/ when the platform gives the store's provider (a SecretStore of
-// each namespace, which no policy lets read platform/: the platform's
-// credentials are copied under the keys of the namespaces that use them).
+// storeSecret handles the secretRef {remoteKey} of the external connection
+// ref: its credentials are in the platform's secret store under that key,
+// one property per secret field of c. It returns the name of the Secret
+// of the instance's namespace they are read into, and records the transfer.
+//
+// The Secret is named <release>.<ref>-credentials. Neither part holds a
+// dot, so no other Secret takes that name: the copy of a claim's
+// credentials is named <release>-<secret>, and the Secret a provider
+// publishes for a claim starts with <namespace>.<...>, while the release
+// of a tree is <namespace>-<instance>.
+//
+// A connection above level 0 names a key under its own namespace,
+// <namespace>/<rest>: a project never reads the key of another namespace,
+// and the platform's keys are read through the platform's connections
+// only. With a store provider (global.okdp.secrets.provider) each
+// namespace has its own SecretStore, which no policy lets read platform/:
+// no connection may then name a key under it.
 func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
 	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
 	key, ok := secretRef["remoteKey"].(string)
@@ -548,9 +537,9 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	case secretRef["name"] != nil:
 		return "", fmt.Errorf("%s: name or remoteKey, not both", where)
 	case !ok || key == "":
-		// A key of the store names credentials, it holds none: printed as
-		// the messages below print it (value.Short, not ShortAt, which
-		// reads remoteKey as an API key).
+		// A key of the store names credentials and holds none, so it is
+		// printed as the messages below print it. value.Short is used, not
+		// ShortAt, which reads remoteKey as an API key.
 		return "", fmt.Errorf("%s.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got %s", where, value.Short(secretRef["remoteKey"]))
 	}
 	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
@@ -576,10 +565,9 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	return name, nil
 }
 
-// isStorePath: key is a path of the platform's secret store, as the
-// compiler writes them (storeKey): segments separated by "/", none empty,
-// "." or "..", so that no key reaches past its first segment, the one a
-// store's policy scopes.
+// isStorePath reports whether key is segments separated by "/", none of
+// them empty, "." or "..". A key thus never reaches past its first
+// segment, the one a store's policy scopes.
 func isStorePath(key string) bool {
 	for s := range strings.SplitSeq(key, "/") {
 		if s == "" || s == "." || s == ".." {
@@ -589,11 +577,10 @@ func isStorePath(key string) bool {
 	return true
 }
 
-// connectionLevels: the level of the context each connection is given at
-// (Inputs.Context), by name: the lowest level that gives it, a lower
-// level's connection being taken whole (contextLayers), which the
-// resolver scopes a secretRef.remoteKey by (storeSecret). A layer that
-// values cannot hold gives none: the layers failed before (valuesLayers).
+// connectionLevels returns, by name, the lowest level of the context that
+// gives each connection, because a lower level's connection is taken
+// whole. storeSecret scopes a secretRef.remoteKey by it. A layer that
+// does not normalize is skipped: valuesLayers has already reported it.
 func connectionLevels(layers []ContextLayer) map[string]uint {
 	levels := map[string]uint{}
 	for _, l := range layers {
@@ -610,18 +597,16 @@ func connectionLevels(layers []ContextLayer) map[string]uint {
 	return levels
 }
 
-// addTransfer: x recorded, unless a transfer of its Secret is already: two
-// references to one connection, or to one named claim, read its
-// credentials into one Secret, by one ExternalSecret.
+// addTransfer records x once per Secret: two references to one connection,
+// or to one named claim, read its credentials through one ExternalSecret.
 func (r *resolver) addTransfer(x transfer) {
 	if !slices.ContainsFunc(r.transfers, func(t transfer) bool { return t.secret == x.secret }) {
 		r.transfers = append(r.transfers, x)
 	}
 }
 
-// resolveOutput: the output ref of the contract c that another instance
-// of the namespace publishes, its values as the context's layers give a
-// connection, in a copy, every number a float64 whatever decoded them.
+// resolveOutput resolves a reference to the output ref of the contract c
+// that another instance of the namespace publishes.
 func (r *resolver) resolveOutput(c *contract, ref, field string) (*resolved, error) {
 	o, provider, err := r.output(ref, c.name, field)
 	if err != nil {
@@ -636,10 +621,9 @@ func (r *resolver) resolveOutput(c *contract, ref, field string) (*resolved, err
 	return x, nil
 }
 
-// published: the values of an output o, as a reference gets them: a copy,
-// read as values are (every number a float64), each field of the contract
-// and not a secret one, from naming it in messages; and its secretRef,
-// {name}, nil when it has none.
+// published returns the values of the output o as a reference gets them,
+// a copy, and its secretRef ({name}, nil when it has none). Each value
+// must be a field of the contract and not a secret one.
 func (c *contract) published(o Output, field, from string) (M, any, error) {
 	v, err := value.Normalize(o.Values)
 	if err != nil {
@@ -655,11 +639,9 @@ func (c *contract) published(o Output, field, from string) (M, any, error) {
 	return out, nil, nil
 }
 
-// output: the output named ref of the contract that an instance of
-// Published publishes, the compiling release left out, and that instance. Several instances fail, named in
-// release order; none fails, saying, with Published, which instances
-// publish an output of that name of another contract, in release order,
-// and records the output (missing).
+// output finds the output named ref of the contract among what the other
+// instances of the namespace publish, with the release that publishes it.
+// When none does, it records the output (missing).
 func (r *resolver) output(ref, contract, field string) (Output, string, error) {
 	var found Output
 	var providers, others []string
@@ -679,14 +661,15 @@ func (r *resolver) output(ref, contract, field string) (Output, string, error) {
 			}
 		}
 	}
-	// One release, one output of a contract and name (twice).
+	// A release counts once: it publishes one output of a contract and name
+	// (twice).
 	switch providers = slices.Compact(providers); {
 	case len(providers) == 1:
 		return found, providers[0], nil
 	case len(providers) > 1:
 		return Output{}, "", fmt.Errorf("%s: %q names %s outputs of several instances of the namespace: %s", field, ref, contract, strings.Join(providers, ", "))
 	}
-	r.missing = append(r.missing, outputKey{"", contract, ref, ""})
+	r.missing = append(r.missing, outputKey{contract: contract, name: ref})
 	msg := fmt.Sprintf("%s: %q is not a connection", field, ref)
 	if r.published != nil {
 		msg += ", nor an output of an instance of the namespace"
@@ -697,32 +680,29 @@ func (r *resolver) output(ref, contract, field string) (Output, string, error) {
 	return Output{}, "", errors.New(msg)
 }
 
-// contract: a contract, the JSON Schema of a kind of connection, as each
-// use reads it (readContract): the keywords its checks read (fields,
-// complete) and resolve reads, and its validator (check); its claim
-// schema, what a claim may request of a provider (request).
+// contract is a contract: the JSON Schema of a kind of connection, read
+// from <name>.schema.json.
 type contract struct {
-	name     string             // the name references and outputs give, that of its file <name>.schema.json
-	label    string             // x-okdp-contract: its name in the error of a required field
-	props    M                  // properties: the schema of each field
-	secret   map[string]bool    // the fields marked x-okdp-secret: credentials, in the Secret, never in the values
-	required []string           // the required fields, secret ones left out, sorted
-	schema   *jsonschema.Schema // the validator of the values of its connections and outputs
-	claim    *chart.Schema      // x-okdp-claim: the schema of a claim's request, its defaults; nil when it declares none
+	name  string // what references and outputs call it
+	label string // x-okdp-contract: its name in the error of a required field
+	props M      // properties: the schema of each field
+	// secret holds the fields marked x-okdp-secret. They are credentials:
+	// in the Secret, never in the values.
+	secret   map[string]bool
+	required []string           // the required fields, without the secret ones, sorted
+	schema   *jsonschema.Schema // validates the values of its connections and outputs
+	// claim is x-okdp-claim: the schema of what a claim may request of a
+	// provider, with its defaults. Nil when the contract declares none.
+	claim *chart.Schema
 }
 
-// readContract: the contract name, the file <name>.schema.json of fsys
-// (Inputs.Contracts), read by each reference and each output that names it,
-// decoded once (jsonschema.UnmarshalJSON): the validator keeps the numbers
-// as written, the keywords are read from its map view (value.Normalize:
-// every number a float64). The validator is the schema compiled as a
-// chart's (chart.CompileSchema, x-* keywords ignored), its secret fields
-// left out of required, as they are in the credentials Secret, never in the
-// values. Its claim schema, x-okdp-claim, is read as a values schema
-// (chart.ParseSchema), in the contract's draft unless it names its own. An
-// error naming the file and the cause when it is missing, cannot be read,
-// is not a JSON object or not a valid JSON Schema, or its claim schema is
-// not.
+// readContract reads the contract name from <name>.schema.json in fsys.
+//
+// The validator keeps the numbers as written; the keywords are read from
+// a map view where every number is a float64. The secret fields are
+// removed from the validator's required list, because they are in the
+// credentials Secret and never in the values. The claim schema is read in
+// the contract's draft unless it names its own.
 func readContract(fsys fs.FS, name string) (*contract, error) {
 	file := name + ".schema.json"
 	b, err := fs.ReadFile(fsys, file)
@@ -730,7 +710,7 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 		return fmt.Errorf("the %s contract cannot be read: %s: %v", name, file, cause)
 	}
 	if err != nil {
-		// The file is named once.
+		// The PathError is unwrapped: fail already names the file.
 		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
 			err = pe.Err
 		}
@@ -749,7 +729,8 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 		return nil, fail("not a JSON object")
 	}
 	c := &contract{name: name, label: value.Str(m["x-okdp-contract"]), props: value.AsMap(m["properties"]), secret: map[string]bool{}}
-	// Removed: a reference names an output its provider publishes.
+	// x-okdp-internal is no longer supported: a reference names an output
+	// its provider publishes.
 	if _, ok := m["x-okdp-internal"]; ok {
 		return nil, fail("x-okdp-internal: naming conventions are gone, a provider publishes its connections (provides)")
 	}
@@ -796,11 +777,9 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 	return c, nil
 }
 
-// request: req, what a claim at field requests of a provider of the
-// contract, its claim schema's defaults applied (chart.Schema.Values: as
-// the parameters' are), checked against it: every violation, one line
-// each with its path. A contract without claim schema takes no request:
-// nothing, or an empty one.
+// request returns what a claim at field requests of a provider of the
+// contract: req with the defaults of the claim schema applied, checked
+// against that schema. A contract without claim schema accepts no request.
 //
 //	<field>: claim (<contract>): the request does not meet the contract's claim schema (x-okdp-claim):
 //	- at '/size': '5G' does not match pattern '^[0-9]+(Mi|Gi)$'
@@ -822,19 +801,15 @@ func (c *contract) request(req M, field string) (M, error) {
 	return values, nil
 }
 
-// requirement: what a connection reference requires of the connection it
-// resolves to, beyond its contract (x-okdp-connection-ref's require): a
-// JSON Schema of its fields and secretRef, as written (doc) and compiled
-// (schema).
+// requirement is what a connection reference requires of its connection
+// beyond the contract: a JSON Schema of its fields and secretRef.
 type requirement struct {
 	doc    M
 	schema *jsonschema.Schema
 }
 
-// readRequirement: the requirement of the reference ref, compiled as a
-// contract is (chart.CompileSchema), in the draft of the parameter schema
-// (draft, its $schema) unless it names its own; nil when it has none, or
-// null. One that is not an object or not a valid JSON Schema fails.
+// readRequirement compiles the requirement of ref, in the draft of the
+// parameter schema unless it names its own; nil when ref has none.
 func readRequirement(ref M, draft any) (*requirement, error) {
 	v := ref["require"]
 	if v == nil {
@@ -855,15 +830,12 @@ func readRequirement(ref M, draft any) (*requirement, error) {
 	return &requirement{doc, s}, nil
 }
 
-// requirements: stage 1, the requirement of each connection reference of
-// the parameter schema s (readRequirement) and the request it fixes of its
-// claims, an object (x-okdp-connection-ref's request), whether the
-// parameters set it or not, found as refs finds the references, through
-// properties and items (schemaRefs): every one that fails, one line each,
-// in key order, named by its place in the schema
-// (properties.catalogs.items.properties.database); then each reference
-// the walk does not reach, under a combinator, a definition or
-// additionalProperties, which no compile would read.
+// requirements is part of stage 1. It checks the connection references of
+// the parameter schema s, whether the parameters set them or not: the
+// requirement of each must compile, the request each fixes of its claims
+// must be an object, and none may sit where no compile would read it
+// (under a combinator, a definition or additionalProperties). Every
+// failure is reported, named by its place in the schema.
 func requirements(s M) error {
 	var errs []error
 	out := schemaRefs(s, func(r ConnectionRef) {
@@ -882,24 +854,25 @@ func requirements(s M) error {
 	return errors.Join(errs...)
 }
 
-// ConnectionRef: a connection reference of a parameter schema
+// ConnectionRef is a connection reference of a parameter schema
 // (x-okdp-connection-ref), where the compile finds it (ConnectionRefs).
 type ConnectionRef struct {
-	Path      string // its parameter path, value.Key's, [] for every item of a list: catalogs[].storage
-	Schema    string // its place in the schema: properties.catalogs.items.properties.storage
+	// Path is its parameter path, with [] for every item: catalogs[].storage.
+	Path string
+	// Schema is its place in the schema:
+	// properties.catalogs.items.properties.storage.
+	Schema    string
 	Contract  string // the contract of the connection it takes
-	Provision bool   // a claim may take its place, a claim template or a named claim
-	Request   M      // what it fixes of its claims, nil for nothing
-	Require   M      // what it requires of the connection, a JSON Schema, nil for nothing
+	Provision bool   // a claim may take its place
+	Request   M      // what it fixes of its claims; nil for nothing
+	Require   M      // what it requires of the connection, a JSON Schema; nil for nothing
 	Required  bool   // its property is in its parent's required
-	Property  M      // the schema of its property, whole: its description, its default
+	Property  M      // the whole schema of its property
 	ref       M
 }
 
-// ConnectionRefs: the connection references of the parameter schema s,
-// as the compile reads them (schemaRefs), in key order; the error of
-// requirements when one fails, or when s holds one the compile does not
-// reach.
+// ConnectionRefs returns the connection references of the parameter schema
+// s the compile reads, in key order, or the error of an invalid one.
 func ConnectionRefs(s M) ([]ConnectionRef, error) {
 	if err := requirements(s); err != nil {
 		return nil, err
@@ -909,17 +882,26 @@ func ConnectionRefs(s M) ([]ConnectionRef, error) {
 	return out, nil
 }
 
-// schemaRefs: visit each connection reference of the parameter schema s
-// the compile reads (refs), reached from the root through properties and
-// items (an object), in key order: at its parameter path, its place in
-// the schema. The places of those it does not reach, anywhere else in s,
-// sorted.
+// schemaRefs calls visit on each connection reference of the parameter
+// schema s that the compile reads: those reached from the root through
+// properties and items, in key order. It returns the places of the
+// references found anywhere else in s, sorted.
 func schemaRefs(s M, visit func(ConnectionRef)) []string {
 	var out []string
 	var walk func(sub M, at, path string, required, reach bool)
 	walk = func(sub M, at, path string, required, reach bool) {
 		if ref, ok := sub["x-okdp-connection-ref"].(M); ok && reach {
-			visit(ConnectionRef{Path: path, Schema: at, Contract: value.Str(ref["contract"]), Provision: value.Truthy(ref["provision"]), Request: value.AsMap(ref["request"]), Require: value.AsMap(ref["require"]), Required: required, Property: sub, ref: ref})
+			visit(ConnectionRef{
+				Path:      path,
+				Schema:    at,
+				Contract:  value.Str(ref["contract"]),
+				Provision: value.Truthy(ref["provision"]),
+				Request:   value.AsMap(ref["request"]),
+				Require:   value.AsMap(ref["require"]),
+				Required:  required,
+				Property:  sub,
+				ref:       ref,
+			})
 			reach = false
 		} else if _, ok := sub["x-okdp-connection-ref"]; ok {
 			out = append(out, cmp.Or(at, "(the root)"))
@@ -954,8 +936,7 @@ func schemaRefs(s M, visit func(ConnectionRef)) []string {
 	return out
 }
 
-// walkAny: f on each object of v, a schema's value, at its place: v
-// itself, or each item of a list.
+// walkAny calls f on each object of v, itself or the items of a list.
 func walkAny(v any, at string, f func(M, string)) {
 	switch t := v.(type) {
 	case M:
@@ -967,11 +948,10 @@ func walkAny(v any, at string, f func(M, string)) {
 	}
 }
 
-// requires: nil when req, the requirement of a reference of c at field,
-// names the fields the connection has, those of its properties and
-// required: each a field of the contract, not a secret one, which is in
-// the credentials Secret, never in the connection; or secretRef. The
-// first that is not, in alphabetical order, fails. nil when req is nil.
+// requires checks the fields that req, the requirement of a reference to
+// c at field, names in its properties and required. Each must be
+// secretRef, or a field of the contract that is not secret: a secret
+// field is in the credentials Secret, never in the connection.
 func (c *contract) requires(req *requirement, field string) error {
 	if req == nil {
 		return nil
@@ -995,10 +975,8 @@ func (c *contract) requires(req *requirement, field string) error {
 	return nil
 }
 
-// check: values, the connection a reference resolves to, completed, its
-// secretRef included, against the requirement req: every violation, one
-// line each with its path, as contract.check reports them, advice after
-// the heading; nil req, none.
+// check validates values, the connection a reference resolves to with its
+// secretRef, against the requirement. advice follows the heading.
 //
 //	<where>: the connection does not meet the package's requirement (x-okdp-connection-ref.require):
 //	- at '/engine': value must be 'postgresql'
@@ -1016,7 +994,6 @@ func (req *requirement) check(values M, where, advice string) error {
 	return nil
 }
 
-// secretFields: the secret fields of the contract, sorted; nil when none.
 func (c *contract) secretFields() []string {
 	if len(c.secret) == 0 {
 		return nil
@@ -1024,10 +1001,9 @@ func (c *contract) secretFields() []string {
 	return slices.Sorted(maps.Keys(c.secret))
 }
 
-// fields: values, the fields of an external connection or of an output,
-// in key order, each a field of the contract and not a secret one: the
-// credentials are in the credentials Secret, never in the values. The
-// first that is not is reported, under where.
+// fields checks that each key of values is a field of the contract and
+// not a secret one: credentials are in the credentials Secret, never in
+// the values.
 func (c *contract) fields(values M, where string) error {
 	for _, k := range slices.Sorted(maps.Keys(values)) {
 		if _, ok := c.props[k]; !ok {
@@ -1040,17 +1016,15 @@ func (c *contract) fields(values M, where string) error {
 	return nil
 }
 
-// complete: the contract's defaults set in out (copies: a contract is
-// read once for every compile that names it, Memo), then its derived
-// fields, again until nothing changes, then the required check: every
-// required field not set, one line each, in alphabetical order, as the
-// violations of check.
+// complete sets the contract's defaults in out, then its derived fields
+// (x-okdp-derived), and repeats until nothing changes. The values it sets
+// are copies, because a contract is read once for every compile that
+// names it. It then reports every required field that is not set.
 func (c *contract) complete(out M, where string) error {
 	names := slices.Sorted(maps.Keys(c.props))
-	// Defaults first: a derived field may come from a defaulted one. Until
-	// nothing changes: a conditional default may depend on a field set
-	// after it, one that sorts after it or a derived one. A field is set
-	// once: the loop ends.
+	// Defaults come first, because a derived field may come from a defaulted
+	// one. The passes repeat because a conditional default may depend on a
+	// field set after it. The loop ends because a field is set only once.
 	for changed := true; changed; {
 		changed = false
 		for _, pass := range []string{"default", "derived"} {
@@ -1079,8 +1053,8 @@ func (c *contract) complete(out M, where string) error {
 			}
 		}
 	}
-	// false is a value: only missing or empty fails. A secret field is never
-	// set: it is not in required.
+	// false is a value: only a missing or empty field fails. A secret field
+	// is never set, and it is not in required.
 	var errs []error
 	for _, f := range c.required {
 		if !value.Truthy(out[f]) && out[f] != false {
@@ -1090,9 +1064,8 @@ func (c *contract) complete(out M, where string) error {
 	return errors.Join(errs...)
 }
 
-// check: values, the fields of a connection or an output once completed,
-// against the contract's validator: every violation, one line each with its
-// path, as Helm prints those of a chart's values (chart.Validate):
+// check validates values, the completed fields of a connection or an
+// output, against the contract, as Helm reports a chart's values:
 //
 //	<where>: the fields violate the database contract:
 //	- at '/port': got string, want integer

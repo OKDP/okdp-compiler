@@ -1,7 +1,6 @@
-// The checks of a rule set: documents of the mapping language that say what
-// a walker of the compiler refuses. Each is prepared once, in a session of
-// the rule set's own: a compile pays neither for building them nor in its
-// cost, which bounds what a package's expressions compute.
+// The checks of a rule set are documents of the mapping language. Each is
+// prepared once, in a session that belongs to the rule set. A compile
+// therefore does not pay for building them, nor count them in its cost.
 
 package rules
 
@@ -12,7 +11,6 @@ import (
 	"io/fs"
 	"maps"
 	"path"
-	"runtime"
 	"slices"
 
 	"cel.dev/cel-go/cel"
@@ -24,7 +22,7 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// The checks a rule set holds, every one of them.
+// The names of the checks a rule set holds, every one of them.
 const (
 	CheckNamespaceRule  = "namespace"
 	CheckPlatformNSRule = "platformNamespace"
@@ -37,22 +35,21 @@ const (
 	CheckValuesLayer    = "valuesLayer"
 )
 
-// ruleChecks: the names of the checks of a rule set, sorted.
+// ruleChecks lists the names of the checks of a rule set, sorted.
 var ruleChecks = []string{CheckContextLayer, CheckHost, CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule, CheckUpstreamKey, CheckValuesLayer}
 
-// ruleInputs: what the checks may read, besides their sets and tables.
+// ruleInputs lists what the checks may read, besides their sets and tables.
 var ruleInputs = []string{"added", "arg", "at", "declared", "field", "host", "items", "key", "layer", "level", "listed", "name", "ns", "object", "platform", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}
 
-// checker: the checks prepared in one session, which is not safe for
-// concurrent use: a rule set keeps those that are free. ctx: the context of
-// the evaluation that holds the checker (RuleSet.eval), for the rule
-// function, a CEL binding, which takes none; nil while it is free.
+// checker holds the checks prepared in one session. A session is not safe
+// for concurrent use, so a rule set keeps the checkers that are free. ctx
+// is the context of the evaluation that holds the checker, nil while it is
+// free: the rule function needs it, because a CEL binding takes no context.
 type checker struct {
 	docs map[string]*compile.Prepared
 	ctx  context.Context
 }
 
-// prepare: the documents of sources, by name, built in a new session.
 func prepare(sources map[string]compile.Source) (*checker, error) {
 	c := &checker{docs: map[string]*compile.Prepared{}}
 	s := cel2yaml.NewSession(0, ruleFunctions(c)...)
@@ -66,44 +63,37 @@ func prepare(sources map[string]compile.Source) (*checker, error) {
 	return c, nil
 }
 
-// loadChecks: the checks of a rule set, their files read from fsys,
-// prepared once to fail on one that does not compile, the session kept for
-// the first compile.
+// loadChecks reads the checks and documents of a set. ready prepares them.
 func (r *RuleSet) loadChecks(fsys fs.FS, files, documents M) error {
-	sources := map[string]compile.Source{}
 	read := func(what, name string, file any) error {
+		if _, ok := r.sources[name]; ok {
+			return taken(what, name)
+		}
 		b, err := fs.ReadFile(fsys, path.Clean(value.Str(file)))
 		if err != nil {
 			return fmt.Errorf("%s: %s: %s: %w", RulesFile, what, name, err)
 		}
-		sources[name] = compile.Source{Name: path.Clean(value.Str(file)), Data: b}
+		r.sources[name] = compile.Source{Name: path.Clean(value.Str(file)), Data: b}
 		return nil
 	}
-	for _, name := range ruleChecks {
+	for _, name := range slices.Sorted(maps.Keys(files)) {
 		if err := read("checks", name, files[name]); err != nil {
 			return err
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(documents)) {
-		if _, taken := sources[name]; taken {
+		if slices.Contains(ruleChecks, name) {
 			return fmt.Errorf("%s: documents: %s: the name of a check", RulesFile, name)
 		}
 		if err := read("documents", name, documents[name]); err != nil {
 			return err
 		}
 	}
-	first, err := prepare(sources)
-	if err != nil {
-		return fmt.Errorf("%s: checks: %w", RulesFile, err)
-	}
-	r.sources = sources
-	r.free = make(chan *checker, runtime.GOMAXPROCS(0))
-	r.free <- first
 	return nil
 }
 
-// get: a checker of the rule set, one that is free, else a new one: a pool
-// the collector would empty rebuilds them at every compile.
+// get returns a free checker, else a new one. A channel keeps them rather
+// than a sync.Pool, which the garbage collector would empty.
 func (r *RuleSet) get() (*checker, error) {
 	select {
 	case c := <-r.free:
@@ -113,7 +103,7 @@ func (r *RuleSet) get() (*checker, error) {
 	return prepare(r.sources)
 }
 
-// put: c free again, when the rule set keeps fewer than it can use at once.
+// put frees c, or drops it when the rule set keeps as many as it can use.
 func (r *RuleSet) put(c *checker) {
 	select {
 	case r.free <- c:
@@ -121,15 +111,15 @@ func (r *RuleSet) put(c *checker) {
 	}
 }
 
-// eval: the document on input, with the sets and tables of the rule set,
-// cancelled with ctx: the first of its messages, "" when it has none, and
-// its values. A rule set no LoadRules made (the zero value) fails.
+// eval evaluates the document on input, with the sets and tables of the
+// rule set. It returns its first message (empty when none) and its values.
+// A document r does not hold fails.
 func (r *RuleSet) eval(ctx context.Context, document string, input M) (compile.Problem, M, error) {
 	if !r.Loaded() {
 		return compile.Problem{}, nil, fmt.Errorf("the rule set: %w", ErrNotLoaded)
 	}
-	if len(r.sources) == 0 { // Empty: nothing to refuse, nothing computed
-		return compile.Problem{}, M{}, nil
+	if _, ok := r.sources[document]; !ok {
+		return compile.Problem{}, nil, fmt.Errorf("the rule set: no document %s", document)
 	}
 	c, err := r.get()
 	if err != nil {
@@ -150,8 +140,8 @@ func (r *RuleSet) eval(ctx context.Context, document string, input M) (compile.P
 	return compile.Problem{}, value.AsMap(sections["values"]), nil
 }
 
-// Values: the values of the document on input, cancelled with ctx; its
-// first message is an error (a *Failure).
+// Values evaluates the document on input and returns its values. The first
+// message of the document is an error (a *Failure).
 func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, error) {
 	p, v, err := r.eval(ctx, document, input)
 	if err == nil {
@@ -163,9 +153,9 @@ func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, erro
 	return v, nil
 }
 
-// Refuse: the check on input, cancelled with ctx: nil when it passes; its
-// first message as a *Failure, at its field when it names one; any other
-// error, a check that fails to evaluate, never a rule passed.
+// Refuse runs the check on input. It returns nil when the check passes, and
+// its first message as a *Failure. A check that fails to evaluate gives
+// another error: it never counts as a rule passed.
 func (r *RuleSet) Refuse(ctx context.Context, check string, input M) error {
 	p, _, err := r.eval(ctx, check, input)
 	if err != nil {
@@ -174,29 +164,26 @@ func (r *RuleSet) Refuse(ctx context.Context, check string, input M) error {
 	return failure(check, p)
 }
 
-// ErrRefused: what a *Failure is (errors.Is): a rule of the rule set
+// ErrRefused is what a *Failure matches (errors.Is): a rule of the rule set
 // refused, as opposed to a check that could not run.
 var ErrRefused = errors.New("refused by the rule set")
 
-// ErrNotLoaded: what a check of the zero value of RuleSet fails with: none
-// was read (LoadRules, Empty).
+// ErrNotLoaded is the error of a check on the zero value of RuleSet.
 var ErrNotLoaded = errors.New("no rule set was loaded (LoadRules)")
 
-// Failure: a rule that refused, the message of a check or a document of
-// the rule set, whole (its Error), and the document's name; Path, the field
-// it is about (value.FieldError wraps it), when it names one.
+// Failure is a rule that refused. Path is the field the message is about,
+// when it names one: value.FieldError then wraps the Failure.
 type Failure struct {
 	Check, Path, Message string
 }
 
-// Error: the message.
+// Error returns the message.
 func (f *Failure) Error() string { return f.Message }
 
-// Is: a *Failure is ErrRefused.
+// Is makes a *Failure match ErrRefused.
 func (f *Failure) Is(target error) bool { return target == ErrRefused }
 
-// failure: the error of the message p of the document name, nil without a
-// message, at its field when it names one.
+// failure turns the message p into an error, nil without a message.
 func failure(name string, p compile.Problem) error {
 	if p.Message == "" {
 		return nil
@@ -208,9 +195,8 @@ func failure(name string, p compile.Problem) error {
 	return f
 }
 
-// ruleFunctions: what the documents call besides the language: reading the
-// walkers' values as they are, what a message or a heuristic needs, and
-// rule, the values of another document of c, those of the session.
+// ruleFunctions returns the functions the documents call besides the
+// language. rule evaluates another document of c, in the same session.
 func ruleFunctions(c *checker) []cel.EnvOption {
 	native := func(name string, f func(any) any) cel.EnvOption {
 		return cel.Function(name, cel.Overload(name+"_dyn", []*cel.Type{cel.DynType}, cel.DynType,

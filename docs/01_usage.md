@@ -9,11 +9,12 @@ formats it reads and what it gives are specified in
 in [architecture](00_architecture.md); how to write a package is in
 [writing a package](02_writing_package.md).
 
-The library holds no command, no writer for a deployer and no chart
-fetching. The `okdp-compile` and `okdp-gitops` commands, the chart cache,
-the single-release umbrella, the Flux and Argo CD targets, the tree edits
-(`treeedit`), the upstream and ingress policy and the standard rule set
-are okdp-gitops': see its
+The module holds a thin command over the library, `okdp-compile` ([command
+line](#command-line)), no writer for a deployer and no chart fetching. The
+`okdp-gitops` command and the `okdp-compile` with deployer targets, the
+chart cache, the single-release umbrella, the Flux and Argo CD targets,
+the tree edits (`treeedit`), the upstream and ingress policy and the
+standard rule set are okdp-gitops': see its
 [usage](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md).
 Helm is not needed to compile, only to install the result.
 
@@ -87,7 +88,7 @@ db/
 - `project.yaml` may give its people their roles, `access: {<group>:
   viewer|editor|admin}`, the identity provider's groups
   (`compiler.ProjectAccessKey`): absent, `okdp-project-<project>` is an
-  editor; `{}`, no group. Without roles in the rule set, it is ignored.
+  editor; `{}`, no group.
   No instance receives it; okdp-gitops' Flux and Argo CD targets write it
   as the Argo CD roles of the project's AppProject and the RoleBindings
   of its namespace to Kubernetes' `view`, `edit` and `admin`,
@@ -190,6 +191,45 @@ package's `Chart.yaml`, without which `Write` fails. To deploy each
 instance as one release, an umbrella chart over both, use okdp-gitops:
 it is what its Flux and Argo CD targets write.
 
+## Command line
+
+`make build` gives `bin/okdp-compile`, which compiles a tree from local
+directories, `compiler.Build` then `compiler.Write`, and writes the files
+above under `<output>/projects/<namespace>/instances/<release>/`:
+
+```bash
+okdp-compile --repository tree --catalog charts \
+  --rules testdata/rules -o out
+okdp-compile --check --charts ~/.cache/okdp/charts \
+  --repository tree --catalog charts --rules testdata/rules
+i=out/projects/demo/instances/demo-webapp
+helm install demo-webapp-okdp <okdp-objects chart> -n demo \
+  -f $i/okdp-objects.values.yaml
+helm dependency build charts/catalog/webapp/1.0.0
+helm install demo-webapp charts/catalog/webapp/1.0.0 -n demo \
+  -f $i/values.yaml
+```
+
+| Flag | What |
+|---|---|
+| `--repository <dir>` | a part of the tree, repeatable, one required |
+| `--catalog <dir>` | a catalog, `catalog/` and `contracts/` only, repeatable |
+| `--rules <dir>` | a rule set, `rules.yaml` at its root, added to the mandatory one; none, and the mandatory rules alone apply |
+| `--output`, `-o <dir>` | where to write; the command owns its `projects/` |
+| `--check` | compile, write nothing, no `-o` |
+| `--charts <dir>` | with `--check`, the chart cache the final values are checked against (default `$OKDP_CHARTS`) |
+| `--cost-limit`, `--instance-timeout`, `--timeout` | the bounds of a compile, those of okdp-gitops' command by default |
+| `--force` | write into a `projects/` the command did not write, removing what it does not write |
+| `--allow-plain-secrets` | `Inputs.AllowPlainSecrets` of every instance |
+| `--version` | the version |
+
+It reads its directories as okdp-gitops' `okdp-compile` does, no symbolic
+link followed and the files bounded, and the bindings of the claims, the
+refusals, the warnings and the dependencies are on stderr in the same
+lines. It compiles with Helm's merge alone: okdp-gitops' upstream and
+ingress policy, `Inputs.Finalize` and `Inputs.CheckGlobals`, does not run.
+Other targets, `--partial` and `--report` are okdp-gitops'.
+
 ## Go library
 
 `go get github.com/okdp/okdp-compiler@vX.Y.Z`, a version of
@@ -203,9 +243,8 @@ go mod tidy
 ```
 
 From a checkout, with `os.DirFS` (run from the repository root). The
-example's package has OAuth clients, so it needs the rule set:
-`testdata/rules` is a copy of the standard set, whose home is okdp-gitops
-([rule sets](#rule-sets)):
+example gives a rule set: `testdata/rules` is a copy of the standard set,
+whose home is okdp-gitops ([rule sets](#rule-sets)):
 
 ```go
 package main
@@ -388,37 +427,37 @@ template, nor a null, nor a large integer. `compiler.Info` is what
 
 ### Rule sets
 
-What a compile refuses of a platform, and what it knows of its names, is
-data, a `*compiler.RuleSet`: tables, CEL checks, the schemas of the
-platform's settings and of the mapping, the functions, the `oidcClients`
-section, the platform's charts. `compiler.LoadRules(fsys)` reads one,
-`rules.yaml` at the root of `fsys`, and fails on a table or a check missing
-or unknown: never a rule turned off by omission. The compiler holds none:
-the standard set is okdp-gitops' (`rules/v1`, `rules.Standard()`), which
-`deploy.Build` gives its compiles; `testdata/rules` here is a copy for
-the tests, kept equal by a test of okdp-gitops.
+What a compile applies of a platform is data, in two rule sets. The
+compiler embeds the mandatory one, which every compile applies: the
+functions, the `oidcClients` section, the schema of the platform's
+settings, what a mapping sees as `platform`, the labels, the names, the
+roles and the documents of the secret store.
 
-`Inputs.Rules` and `BuildOptions.Rules` nil compile with the empty set:
+`compiler.LoadRules(fsys)` reads another, `rules.yaml` at the root of
+`fsys`, and adds it to the mandatory one, in a `*compiler.RuleSet`: its
+tables, CEL checks, the schema of the mapping, the platform's charts. Both
+apply. It fails on a rule the mandatory set gives, on a table or a check
+that neither gives or that is unknown, and without the mapping schema or
+the `objects` chart: never a rule turned off by omission. The standard
+set is okdp-gitops' (`rules/v1`, `rules.Standard()`), which `deploy.Build`
+gives its compiles; `testdata/rules` here is a copy for the tests, kept
+equal by a test of okdp-gitops.
+
+`Inputs.Rules` and `BuildOptions.Rules` nil compile with the mandatory set
+alone:
 
 - no check refuses: no reserved namespace, no policy on objects, hosts or
   plain Secrets beyond what the compile does in Go;
-- no schema reads the platform's settings or the mapping's sections, and
-  no default applies; `platform.*` of the mapping is empty, and so are
-  `labels`, `selectorLabels` and what a label function gives;
-- no fragment or function of the rule set exists (`okdpPodSpec`,
-  `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret`),
-  `okdpGeneratedSecret` fails when called, and a package with
-  `oidcClients` is refused, an unknown section;
-- `access` of `project.yaml` gives nobody a role, and no platform chart
-  has a default;
-- the claim format stays: a project's classes, what a level may not change
-  of a lower one, the names of the Secrets that carry credentials. Claims
-  bind within a namespace; a claim across namespaces is refused, the
-  objects that carry its credentials being the rule set's.
+- no schema reads the mapping's sections or the arguments of the
+  functions, and no platform chart has a default;
+- all the rest applies: the fragments and functions, `oidcClients`, the
+  schema of the platform's settings, `platform.*`, the labels, the roles
+  of `access`, the claim format, and claims across namespaces, whose
+  credentials go through the platform's secret store.
 
 Mind that a program compiling through this library with no rule set
 applies no platform policy at all. The helpers that read rules take the
-set first, nil being the empty one: `compiler.Roles(rules)`,
+set first, nil being the mandatory one: `compiler.Roles(rules)`,
 `EngineNamespaces(rules)`, `PlatformObjectNames(rules)`,
 `ParseAccess(rules, v, namespace)`,
 `CheckProjectName(ctx, rules, name, platform)`,
@@ -722,10 +761,10 @@ that holds a dot in brackets: `databases["eu.main"]`),
 chart), `<chart>-<version>` the upstream chart that renders it,
 `<service>` the `name` of `Chart.yaml`. `error: <namespace>/<release>: `
 starts a message as okdp-gitops' commands print it; the library's is what
-follows. The messages about reserved namespaces, the platform's schema,
-objects, plain Secrets and OAuth clients are the standard rule set's, and
-those about upstream values okdp-gitops' policy's: a compile without them
-gives none of them.
+follows. The messages about reserved namespaces, objects and plain Secrets
+are the standard rule set's, those about upstream values okdp-gitops'
+policy's: a compile without them gives none of them. Those about the
+platform's schema and OAuth clients are the mandatory set's.
 
 ### Inputs and instance values
 

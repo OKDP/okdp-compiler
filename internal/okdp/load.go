@@ -1,5 +1,4 @@
-// Load: the package read from a filesystem (LoadDefinition); each stage
-// reads the other inputs through the fs.FS the caller gives it (Inputs).
+// Load: reading a package from a filesystem.
 
 package okdp
 
@@ -16,11 +15,10 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 )
 
-// LoadDefinition reads the package at the root of fsys: Chart.yaml, then
-// okdp.yaml and its values file, values.cel.yaml or values.yaml, when it
-// has them, checked; each compile reads its other files. A values.yaml
-// that holds expressions is read all the same, with a warning
-// (Definition.Warnings).
+// LoadDefinition reads and checks the package at the root of fsys:
+// Chart.yaml, then okdp.yaml and the values file when the package has
+// them. A values.yaml that holds expressions is still read, with a
+// warning (Definition.Warnings).
 func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	b, err := fs.ReadFile(fsys, chart.MetadataFile)
 	if err != nil {
@@ -61,17 +59,15 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return def, nil
 }
 
-// holdsExpressions: whether the values file b, its first YAML document,
-// holds what Helm would not read as the same values: a string holding ${{
-// (an expression, a $${{), a key starting with $ (a directive, a $$key),
-// at any depth; false when it is not YAML, which the compile reports.
+// holdsExpressions reports whether the values file b holds something
+// Helm would not read as the same values: a string that holds "${{" or
+// a key that starts with "$". It returns false when b is not YAML: the
+// compile reports that.
 func holdsExpressions(b []byte) bool {
 	var doc yaml.Node
 	return yaml.Unmarshal(b, &doc) == nil && expressionIn(&doc)
 }
 
-// expressionIn: whether the node n, or one under it, holds an expression
-// or a $-key (holdsExpressions).
 func expressionIn(n *yaml.Node) bool {
 	if n.Kind == yaml.ScalarNode {
 		return strings.Contains(n.Value, "${{")
@@ -88,7 +84,7 @@ func expressionIn(n *yaml.Node) bool {
 	return false
 }
 
-// readOptional: the file name of fsys, nil when there is none.
+// readOptional returns nil when fsys has no file name.
 func readOptional(fsys fs.FS, name string) ([]byte, error) {
 	b, err := fs.ReadFile(fsys, name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -97,11 +93,10 @@ func readOptional(fsys fs.FS, name string) ([]byte, error) {
 	return b, err
 }
 
-// decodePackage: the package keys of okdp.yaml, b, its first YAML
-// document, strictly: a key that is neither a package key nor a mapping key
-// fails (a misspelt require would otherwise leave the platform values
-// unchecked); the charts' values (output) and Chart.yaml's keys with their
-// own message. An empty file, or none, holds none.
+// decodePackage decodes the package keys of okdp.yaml strictly: an
+// unknown key fails. Otherwise a misspelt require would leave the
+// platform values unchecked. The charts' values (output) and the keys of
+// Chart.yaml fail with their own message.
 func decodePackage(b []byte) (Package, error) {
 	var p Package
 	var doc yaml.Node

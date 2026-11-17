@@ -9,13 +9,12 @@ import (
 	"time"
 )
 
-// contractsFS: the contracts of a tree in memory, by file name
-// (<contract>.schema.json), a flat fs.FS: what a compile reads
-// (Inputs.Contracts), written once the repositories are read, then only
-// read: safe for concurrent use.
+// contractsFS holds the contracts of a tree in memory, by file name, as a
+// flat fs.FS. It is written while the repositories are read and only read
+// afterwards, so it is safe for concurrent use.
 type contractsFS map[string][]byte
 
-// Open: the file name, or the root directory (".").
+// Open opens the named file, or the root directory (".").
 func (c contractsFS) Open(name string) (fs.File, error) {
 	if !fs.ValidPath(name) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
@@ -30,7 +29,6 @@ func (c contractsFS) Open(name string) (fs.File, error) {
 	return &contractFile{Reader: bytes.NewReader(data), info: fileInfo{name: name, size: int64(len(data))}}, nil
 }
 
-// entries: the files, by name.
 func (c contractsFS) entries() []fs.DirEntry {
 	out := make([]fs.DirEntry, 0, len(c))
 	for name, data := range c {
@@ -40,36 +38,31 @@ func (c contractsFS) entries() []fs.DirEntry {
 	return out
 }
 
-// contractFile: an open contract.
 type contractFile struct {
 	*bytes.Reader
 	info fileInfo
 }
 
-// Stat: its description.
 func (f *contractFile) Stat() (fs.FileInfo, error) { return f.info, nil }
 
-// Close: nothing to release.
 func (f *contractFile) Close() error { return nil }
 
-// contractsDir: the open root directory.
+// contractsDir is the open root directory.
 type contractsDir struct {
 	entries []fs.DirEntry
 	next    int
 }
 
-// Stat: the root's description.
 func (d *contractsDir) Stat() (fs.FileInfo, error) { return fileInfo{name: ".", dir: true}, nil }
 
-// Read: a directory holds no bytes.
+// Read fails: a directory holds no bytes.
 func (d *contractsDir) Read([]byte) (int, error) {
 	return 0, &fs.PathError{Op: "read", Path: ".", Err: fs.ErrInvalid}
 }
 
-// Close: nothing to release.
 func (d *contractsDir) Close() error { return nil }
 
-// ReadDir: the next n entries, every one left when n <= 0 (fs.ReadDirFile).
+// ReadDir returns the next n entries, or all those left when n <= 0.
 func (d *contractsDir) ReadDir(n int) ([]fs.DirEntry, error) {
 	left := d.entries[d.next:]
 	if n <= 0 {
@@ -86,7 +79,6 @@ func (d *contractsDir) ReadDir(n int) ([]fs.DirEntry, error) {
 	return slices.Clone(left[:n]), nil
 }
 
-// fileInfo: what fs.FileInfo says of a contract or of the root.
 type fileInfo struct {
 	name string
 	size int64

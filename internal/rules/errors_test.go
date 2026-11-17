@@ -3,7 +3,6 @@ package rules
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 )
 
@@ -20,19 +19,16 @@ func TestZeroValue(t *testing.T) {
 	if _, err := r.Values(context.Background(), "scope", M{}); !errors.Is(err, ErrNotLoaded) {
 		t.Errorf("Values: %v", err)
 	}
-	if !Empty().Loaded() {
-		t.Error("the empty set is not loaded")
+	if !Mandatory().Loaded() {
+		t.Error("the mandatory set is not loaded")
 	}
 }
 
 // TestFailure: a rule that refuses is a *Failure, ErrRefused, whose message
 // is the rule's; a check cancelled is not.
 func TestFailure(t *testing.T) {
-	r, err := LoadRules(os.DirFS(standardDir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = r.Refuse(context.Background(), CheckNamespaceRule, M{"ns": "kube-system"})
+	r := Mandatory()
+	err := r.Refuse(context.Background(), CheckNamespaceRule, M{"ns": "kube-system"})
 	var f *Failure
 	if !errors.As(err, &f) || !errors.Is(err, ErrRefused) || f.Check != CheckNamespaceRule || f.Message != err.Error() {
 		t.Fatalf("a refusal: %v (%+v)", err, f)
@@ -48,11 +44,8 @@ func TestFailure(t *testing.T) {
 // TestSchemaError: the values a schema refuses, a *SchemaError, whose
 // message is the heading, then the violations.
 func TestSchemaError(t *testing.T) {
-	r, err := LoadRules(os.DirFS(standardDir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = SchemaValues(r.PlatformSchema(), "heading", M{"global": M{"okdp": M{"policy": "x"}}})
+	r := Mandatory()
+	_, err := SchemaValues(r.PlatformSchema(), "heading", M{"global": M{"okdp": M{"policy": "x"}}})
 	var se *SchemaError
 	if !errors.As(err, &se) || err.Error() != "heading:\n"+se.Violations || se.Violations == "" {
 		t.Errorf("got %v", err)

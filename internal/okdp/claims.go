@@ -1,6 +1,5 @@
 // Claims: the connections a provider's instance provisions, one per claim
-// bound to it (Inputs.Claims): the mapping reads them, and publishes an
-// output for each.
+// bound to it. The mapping reads them and publishes an output for each.
 
 package okdp
 
@@ -18,47 +17,54 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// Claim: a connection claimed of a provider, which its package provisions
-// (provisions): the instance provisions it and publishes it, an output of
-// Contract named ID.
+// Claim is a connection claimed of a provider. The provider's instance
+// provisions it and publishes it as an output of Contract named ID.
 type Claim struct {
-	ID        string         `json:"id"`                // the connection's name, DNS-1123 labels joined by dots: <namespace>.<name>, or <namespace>.<instance>.<field>
-	Contract  string         `json:"contract"`          // a contract the package provisions
-	Namespace string         `json:"namespace"`         // the namespace of the instances that claim it
-	Name      string         `json:"name,omitempty"`    // a named claim's name, claims.<name> of the context, the connection of every reference to it in Namespace; "" for a claim template's
-	Request   map[string]any `json:"request,omitempty"` // what the claim requests, as the contract's claim schema (x-okdp-claim) allows, its defaults applied
+	// ID is the connection's name: <namespace>.<name> for a named claim,
+	// <namespace>.<instance>.<field> for a claim template.
+	ID        string `json:"id"`
+	Contract  string `json:"contract"`  // a contract the package provisions
+	Namespace string `json:"namespace"` // the namespace of the instances that claim it
+	// Name is the name of a named claim (claims.<name> of the context), whose
+	// references in Namespace all get this one connection; "" for a template.
+	Name string `json:"name,omitempty"`
+	// Request is what the claim requests, with the claim schema's defaults.
+	Request map[string]any `json:"request,omitempty"`
 }
 
-// Binding: the provider a reference's claim is bound to (CompileAll), and
-// what it publishes for the claim.
+// Binding is the provider that the claim of a reference is bound to
+// (CompileAll), and what it publishes for the claim.
 type Binding struct {
-	Namespace, Release string  // the provider's instance
-	Contract           string  // the claim's contract: the one the output is of
-	ID                 string  // the claim's ID: the name of the output it publishes for it
-	Output             *Output // that output, nil when it is not known yet (the provider not compiled)
+	Namespace, Release string // the provider's instance
+	Contract           string // the claim's contract, which is the output's
+	ID                 string // the claim's ID, which names the output
+	// Output is what the provider publishes for the claim; nil until it compiles.
+	Output *Output
 }
 
-// ClaimSpec: a claim, as written (parseClaim): an object of the
-// parameters in place of a connection's name, a claim template, or a
-// named claim of the context (claims.<name>, ParseClaim). Its tags are
-// the keys it is written with.
+// ClaimSpec is a claim as written: a claim template, an object of the
+// parameters in place of a connection's name, or a named claim of the
+// context (claims.<name>).
 type ClaimSpec struct {
-	Name     string `json:"-" yaml:"-"`                                   // a named claim's name, its key in claims; "" for a claim template
-	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"` // a named claim's contract; "" for a claim template, of its reference's
-	Class    string `json:"class,omitempty" yaml:"class,omitempty"`       // the class named, of global.okdp.provisioning.<contract>.classes; "" for the default one, or a provider named
-	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"` // the provider named, <name> of the namespace or <namespace>/<name>, an instance's name or its release; "" when none
-	Request  M      `json:"request,omitempty" yaml:"request,omitempty"`   // what it requests (request), nil when nothing
+	// Name is the key of a named claim in claims; "" for a claim template.
+	Name string `json:"-" yaml:"-"`
+	// Contract is set for a named claim only: a template has its reference's.
+	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"`
+	// Class names a class of global.okdp.provisioning.<contract>.classes;
+	// "" means the default class, or that the claim names a provider.
+	Class string `json:"class,omitempty" yaml:"class,omitempty"`
+	// Provider names the instance that provisions the claim, by its name or
+	// its release: <name> in the namespace, or <namespace>/<name>; "" for none.
+	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	// Request is what the claim requests; nil for nothing.
+	Request M `json:"request,omitempty" yaml:"request,omitempty"`
 }
 
-// parseClaim: the claim m at path. A claim template, a reference's: {} a
-// connection of its own, of the default class of its contract; class, the
-// class it names; provider, the instance that provisions it, <name> of
-// the namespace or <namespace>/<name>, the instance's name or its
-// release, not with a class; request, what it requests of it, an object
-// the contract's claim schema checks at binding. A named claim (named),
-// claims.<name> of the context: contract, required, a contract name,
-// class, provider and request. Any other key fails, and so does a value
-// that is not a string of that form, or a request that is not an object.
+// parseClaim reads the claim m, written at path. A named claim requires a
+// contract; a claim template may not set one, because it has the contract
+// of its reference. class and provider exclude each other, and a claim
+// that names neither takes the default class of its contract: {} thus
+// claims a connection of its own, of the default class.
 func parseClaim(m M, path string, named bool) (*ClaimSpec, error) {
 	keys, allowed := []string{"class", "provider", "request"}, "class, provider and request only"
 	if named {
@@ -94,11 +100,9 @@ func parseClaim(m M, path string, named bool) (*ClaimSpec, error) {
 	return c, nil
 }
 
-// namedClaims: the named claims of the merged values of an instance,
-// claims of its context (valuesLayers: never the instance's own values),
-// by name: each name a DNS-1123 label and no connection's, each claim of
-// the form parseClaim reads. Every problem, one line each, in name order,
-// each the claim's (FieldError).
+// namedClaims returns the named claims of the merged values of an
+// instance, by name. They are its context's: its own values set none.
+// Every problem is reported, in name order.
 func namedClaims(values M) (map[string]ClaimSpec, error) {
 	v, set := values["claims"]
 	if !set {
@@ -130,10 +134,9 @@ func namedClaims(values M) (map[string]ClaimSpec, error) {
 	return out, nil
 }
 
-// ParseClaim: the named claim name, v, as written in claims: a name that
-// is a DNS-1123 label, an object of the form parseClaim reads. The claim
-// holds what v does, each key that is a string of its type, even when it
-// fails: a caller lists a claim that does not compile.
+// ParseClaim reads the named claim name from v, its entry as written in
+// claims. Even when it fails, the claim returned holds the keys of v that
+// are of their type, so that a caller can list it.
 func ParseClaim(name string, v any) (ClaimSpec, error) {
 	where := value.Key("claims", name)
 	decl, ok := v.(M)
@@ -155,14 +158,10 @@ func ParseClaim(name string, v any) (ClaimSpec, error) {
 	return *parsed, nil
 }
 
-// providerForms: what a provider may be, in the messages of one that is
-// not of the form (providerName).
 const providerForms = "<instance>, <release>, <namespace>/<instance> or <namespace>/<release>"
 
-// providerName: the namespace and the name of the instance a provider
-// names, a claim's or a class's: <namespace>/<name>, or <name> of
-// namespace, the name an instance's name or its release (compilation.provider);
-// false when s is not of that form.
+// providerName splits s, the provider a claim or a class names, into the
+// namespace and the name of an instance. A bare <name> is of namespace.
 func providerName(s, namespace string) (string, string, bool) {
 	ns, name, qualified := strings.Cut(s, "/")
 	if !qualified {
@@ -171,9 +170,8 @@ func providerName(s, namespace string) (string, string, bool) {
 	return ns, name, (!qualified || chart.IsDNSLabel(ns)) && chart.IsRelease(name)
 }
 
-// checkProvisions: the contracts a package provisions (okdp.yaml's
-// provisions), each a contract name, once, its claimers of the form
-// CheckClaimers reads.
+// checkProvisions checks the contracts a package provisions (okdp.yaml):
+// each is a contract name, listed once, with valid claimers.
 func checkProvisions(provisions []Provision) error {
 	for i, p := range provisions {
 		switch {
@@ -189,10 +187,9 @@ func checkProvisions(provisions []Provision) error {
 	return nil
 }
 
-// CheckClaimers: claimers, the namespaces whose instances may claim of a
-// provider across namespaces (Inputs.Claimers, a provisions entry's), at
-// name in the message: each a namespace name, a DNS-1123 label, or "*",
-// any namespace, once; the first that is not.
+// CheckClaimers checks claimers, the namespaces that may claim of a
+// provider from another namespace: each is a namespace name or "*", listed
+// once. name is what the error calls the list.
 func CheckClaimers(name string, claimers []string) error {
 	for i, c := range claimers {
 		switch {
@@ -205,16 +202,13 @@ func CheckClaimers(name string, claimers []string) error {
 	return nil
 }
 
-// consents: whether claimers, those of a provider, let the instances of
-// namespace claim of it: it is listed, or "*" is.
 func consents(claimers []string, namespace string) bool {
 	return slices.Contains(claimers, "*") || slices.Contains(claimers, namespace)
 }
 
-// checkClaims: the claims bound to an instance of svc: each a claim ID
-// (chart.IsClaimID) starting with the namespace of its claimers, a
-// DNS-1123 label, of a contract the package provisions, once, its request
-// what values hold (value.Normalize).
+// checkClaims checks the claims bound to an instance of svc: each has a
+// claim ID that starts with its claimers' namespace, is of a contract the
+// package provisions and appears once. Every claim that fails is reported.
 func checkClaims(svc *Service, claims []Claim) error {
 	var errs []error
 	for i, c := range claims {
@@ -237,8 +231,8 @@ func checkClaims(svc *Service, claims []Claim) error {
 	return errors.Join(errs...)
 }
 
-// claimed: nil when outputs hold, for each claim, an output of its
-// contract named its ID; else an error per claim without one, in order.
+// claimed checks that outputs hold, for each claim, an output of its
+// contract named after its ID.
 func claimed(claims []Claim, outputs []Output) error {
 	var errs []error
 	for _, c := range claims {
@@ -249,9 +243,8 @@ func claimed(claims []Claim, outputs []Output) error {
 	return errors.Join(errs...)
 }
 
-// claimsScope: the claims as the mapping sees them (claims): {id,
-// contract, namespace, name, request}, name "" for a claim template's,
-// request {} when it has none; checked (checkClaims).
+// claimsScope returns the claims as the mapping sees them. name is "" for
+// a claim template, and request is {} when the claim has none.
 func claimsScope(claims []Claim) []any {
 	out := []any{}
 	for _, c := range claims {
@@ -264,30 +257,29 @@ func claimsScope(claims []Claim) []any {
 	return out
 }
 
-// claimRef: a claim of a reference of an instance, as written: its
-// parameter path and its contract; the claim template (spec, its request
-// the instance's merged over the package's), or the named claim of the
-// context it names (name, spec its declaration).
+// claimRef is a claim of a reference of an instance, at the parameter
+// path field. name is "" for a claim template, whose spec holds the
+// instance's request merged over the one the package fixes.
 type claimRef struct {
 	field, contract, name string
 	spec                  ClaimSpec
 }
 
-// instanceClaims: what CompileAll binds of an instance (claimsOf): the
-// claims of its references, the named claims of its context, the classes
-// its context defines, global.okdp.provisioning, and those of them the
-// platform defines, at level 0.
+// instanceClaims is what CompileAll binds of an instance (claimsOf).
 type instanceClaims struct {
-	refs     []claimRef
-	named    map[string]ClaimSpec
-	classes  M // by contract: {default, classes: {<name>: {provider, request}}}, of the form the platform schema checks
-	platform M // the same, of the layers of level 0 alone (platformClasses)
+	refs  []claimRef           // the claims of its references
+	named map[string]ClaimSpec // the named claims of its context
+	// classes are the classes its context defines, by contract:
+	//
+	//	{default, classes: {<name>: {provider, request}}}
+	classes  M
+	platform M // those of them the platform defines (level 0)
 }
 
-// platformClasses: global.okdp.provisioning of the layers of level 0 of
-// layers, merged: the platform's classes, which route every namespace to
-// their provider, with its consent given (compilation.consent). A layer that
-// values cannot hold gives none: the layers failed before (valuesLayers).
+// platformClasses returns global.okdp.provisioning merged from the layers
+// of level 0 alone. A class of the platform routes every namespace to its
+// provider, and needs no consent from it. A layer that does not normalize
+// is skipped: valuesLayers has already reported it.
 func platformClasses(layers []ContextLayer) M {
 	out := M{}
 	for _, l := range layers {
@@ -300,16 +292,12 @@ func platformClasses(layers []ContextLayer) M {
 	return out
 }
 
-// claimsOf: the claims of the references of an instance of def, in
-// parameter path order: its parameters (stage 1), each map of a reference
-// that takes claims, its request the instance's merged over what the
-// package fixes (x-okdp-connection-ref's request), and each name of a
-// named claim of its contract that is no connection; the named claims of
-// its context (namedClaims); and its classes, global.okdp.provisioning of
-// the platform's settings, the context's layers (contextLayers: never the
-// instance's, nor the package schema's defaults).
-// None when the parameters, the platform values (platformSchema) or a
-// claim fail: the compile says why.
+// claimsOf returns what CompileAll binds of an instance of def: the
+// claims of its references, in parameter path order, the named claims of
+// its context, and its classes, which come from the context's layers
+// alone. A claim template carries the instance's request merged over what
+// the package fixes. It returns nothing when the parameters, the platform
+// values or a claim fail: the compile says why.
 func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
 	svc, err := def.service()
 	if err != nil {
@@ -347,18 +335,24 @@ func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
 	return instanceClaims{out, named, value.AsMap(settings["provisioning"]), platformClasses(in.Context)}
 }
 
-// claimID: the ID of a claim of the reference at field of the instance
-// in namespace (Instance.Name, its release when it has none), or of the
-// named claim name: <namespace>.<name>, or
-// <namespace>.<instance>.<field>, each part a DNS-1123 label (lowercased,
-// every run of other characters than letters and digits one "-", trimmed),
-// the parts joined by dots, which no part holds: two sources give two IDs,
-// and the dots tell the kind. Longer than 63 characters (chart.IsClaimID):
-// what follows <namespace>. cut, the namespace kept whole, and ended with
-// 8 hexadecimal digits of its SHA-256: <namespace>.<cut>-<digits> to 54
-// characters before the digits, <namespace>.<digits> when no cut fits (a
-// namespace of 53 or 54 characters). A longer namespace cannot keep its
-// prefix within 63: the ID is cut whole, which checkClaims refuses.
+func namedClaimID(namespace, name string) string { return claimID(namespace, "", "", name) }
+
+func templateClaimID(namespace, instance, field string) string {
+	return claimID(namespace, instance, field, "")
+}
+
+// claimID builds the ID of a claim:
+//
+//	<namespace>.<name>              a named claim (name is set)
+//	<namespace>.<instance>.<field>  the claim template at field
+//
+// Each part is made a DNS-1123 label, so no part holds a dot: two sources
+// give two IDs, and the dots tell the kind.
+//
+// An ID longer than 63 characters is shortened: the namespace is kept
+// whole, the rest is cut, and 8 hexadecimal digits of the SHA-256 of the
+// whole ID end it. A namespace too long to keep its prefix gives an ID cut
+// whole, which checkClaims refuses.
 func claimID(namespace, instance, field, name string) string {
 	parts := []string{namespace, name}
 	if name == "" {
@@ -394,21 +388,12 @@ func claimID(namespace, instance, field, name string) string {
 	return id
 }
 
-// CheckDeclarations: the declarations of the context of in, a project's
-// that has no instance (in.Namespace, in.Contracts, in.Context; no
-// release), checked as CompileAll checks those of an instance's context,
-// which binds them: every connection at its declaration
-// (declaredConnections), then every named claim, in name order: its name
-// and its form, no connection's name (namedClaims); its class, the one it
-// names or the default one of the context, a class of
-// global.okdp.provisioning whose provider is of the form (claimClass);
-// its request, which sets no key the class fixes, against the contract's
-// claim schema (compilation.request). Its provider is not looked for: a claim of
-// a project without instance is bound to none, nor provisioned, until an
-// instance's context declares it. The context's layers checked as a
-// compile checks them, and the platform's settings; every claim's error
-// joined, each at claims.<name> (FieldError); the global it sets checked by
-// the upstream policy (upstreamGlobals), as an instance's compile checks it.
+// CheckDeclarations checks the declarations of a context that has no
+// instance, a project's (in.Namespace, in.Contracts, in.Context), as
+// CompileAll checks those of an instance's context: the layers, the
+// platform's settings, every connection and every named claim. The
+// provider of a claim is not looked up: a claim of a project without
+// instance is bound to no provider until an instance's context declares it.
 func CheckDeclarations(ctx context.Context, in Inputs) error {
 	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
@@ -436,16 +421,17 @@ func CheckDeclarations(ctx context.Context, in Inputs) error {
 	classes := value.AsMap(settings["provisioning"])
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(claims)) {
-		// Each claim alone, its errors in name order.
+		// Each claim is checked alone, so that the errors come in name order.
 		named, err := namedClaims(M{"claims": M{name: claims[name]}, "connections": merged["connections"]})
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
 		spec, where := named[name], value.Key("claims", name)
-		ch, _, _, err := claimClass(classes, in.Namespace, where, spec.Contract, spec)
+		site := claimSite{in.Namespace, where, spec.Contract, spec}
+		ch, _, _, err := claimClass(classes, site)
 		if err == nil {
-			_, err = (&compilation{}).request(in, where, spec.Contract, spec.Request, ch)
+			_, err = claimRequest(in, site, ch)
 		}
 		if err != nil {
 			errs = append(errs, atField(where, err))

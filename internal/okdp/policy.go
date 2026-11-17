@@ -1,11 +1,11 @@
-// Policy: the platform's policy, global.okdp.policy: which namespaces no
-// project may have (reserved), which projects are the platform's own
-// (privileged), and what the others' instances may not
-// do: their objects stay in their namespace, no cluster-scoped kind
-// (CheckObjects). What they give upstream charts is a host's to check
-// (Inputs.Finalize, Inputs.CheckGlobals: okdp-gitops' policy). And for
-// every project, no Secret of credentials in clear unless the caller
-// allows it (checkPlainSecrets).
+// Policy: the platform's policy, global.okdp.policy. It says which
+// namespaces no project may have (reserved) and which projects are the
+// platform's own (privileged). The instances of the other projects keep
+// their objects in their namespace and install no cluster-scoped kind
+// (CheckObjects). What they give upstream charts is for a host to check
+// (Inputs.Finalize, Inputs.CheckGlobals). And no project, privileged or
+// not, writes a Secret of credentials in clear unless the caller allows
+// it (checkPlainSecrets).
 
 package okdp
 
@@ -20,42 +20,36 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// privileged: whether namespace is one of global.okdp.policy.privileged,
-// the platform's own projects.
+// privileged reports whether namespace is one of the platform's own
+// projects, global.okdp.policy.privileged.
 func privileged(okdp M, namespace string) bool {
 	return slices.ContainsFunc(value.AsList(value.Dig(okdp, "policy.privileged")), func(v any) bool { return value.Str(v) == namespace })
 }
 
-// EngineNamespaces: the namespaces of the deployer engines and of the
-// objects the targets write in them, which no project may have: a
-// project's releases are installed with every verb of its namespace, and
-// there they would rewrite the engine's sources, its Applications or
-// HelmReleases, the other projects' identities: flux-system, Flux's and
-// its default source's (flux.DefaultSource), okdp-releases, the flux
-// target's HelmReleases and ServiceAccounts (flux.ReleasesNamespace),
-// argocd, Argo CD's and the argocd target's Applications and AppProjects
-// (argocd.Namespace). A target that writes in another (Flux.Source's)
-// refuses its projects too.
+// EngineNamespaces lists the namespaces no project may have, because the
+// deployer engines and the objects the targets write for them live
+// there: flux-system, okdp-releases and argocd.
+//
+// A project's releases are installed with every verb of its namespace.
+// In one of these namespaces they would rewrite the engine's sources,
+// its Applications or HelmReleases, and the identities of the other
+// projects.
 func EngineNamespaces(rules *RuleSet) []string {
 	return rulesOr(rules).List(ruleset.TableEngineNamespaces)
 }
 
-// reservedNamespace: why namespace is no project's, those the compiler
-// reserves whatever the platform (the rule set's namespace check); those of
-// global.okdp.policy.reserved are the platform's (Compile). nil when it may
-// be one. A check that cannot be evaluated reserves it: its error says so.
+// reservedNamespace returns why namespace cannot be a project's on any
+// platform, or nil when it can. A check that cannot be evaluated
+// reserves the namespace, and its error says so.
 func reservedNamespace(ctx context.Context, rules *RuleSet, namespace string) error {
 	return rules.Refuse(ctx, ruleset.CheckNamespaceRule, M{"ns": namespace})
 }
 
-// The rule of a project's name, its namespace, in two parts, as the
-// compile applies them (Compile): the compiler's own, then the
-// platform's; CheckNamespace both, for a program that creates projects.
-// field names the name in the errors: Inputs.Namespace for Compile.
+// The rule on a project's namespace has two parts: the compiler's own,
+// then the platform's. field names the namespace in the errors.
 
-// checkNamespace: nil when namespace may be a project's whatever the
-// platform: a DNS label (chart.IsDNSLabel), none the compiler reserves
-// (reservedNamespace).
+// checkNamespace returns nil when namespace may be a project's on any
+// platform: it is a DNS label that the compiler does not reserve.
 func checkNamespace(ctx context.Context, rules *RuleSet, field, namespace string) error {
 	if !chart.IsDNSLabel(namespace) {
 		return fmt.Errorf("%s %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", field, namespace)
@@ -66,18 +60,17 @@ func checkNamespace(ctx context.Context, rules *RuleSet, field, namespace string
 	return nil
 }
 
-// checkPlatformNamespace: nil when namespace is none of the platform's
-// reserved namespaces, global.okdp.policy.reserved of okdp, the
-// platform's settings: a reservation wins over a privilege.
+// checkPlatformNamespace returns nil when the platform does not reserve
+// namespace (global.okdp.policy.reserved). A reservation wins over a
+// privilege.
 func checkPlatformNamespace(ctx context.Context, rules *RuleSet, field, namespace string, okdp M) error {
 	return rules.Refuse(ctx, ruleset.CheckPlatformNSRule, M{"field": field, "ns": namespace, "settings": okdp})
 }
 
-// CheckNamespace: nil when namespace may be a project's, okdp the
-// platform's settings (global.okdp): checkNamespace, then
-// checkPlatformNamespace. A namespace a target writes in by its options
-// (the flux target's Source) is the target's to refuse
-// (target.OwnNamespaces).
+// CheckNamespace applies both parts, for a program that creates
+// projects. okdp is the platform's settings (global.okdp). A namespace
+// that a target writes in because of its options is for the target to
+// refuse (target.OwnNamespaces).
 func CheckNamespace(ctx context.Context, rules *RuleSet, field, namespace string, okdp M) error {
 	rules = rulesOr(rules)
 	if err := checkNamespace(ctx, rules, field, namespace); err != nil {
@@ -86,7 +79,7 @@ func CheckNamespace(ctx context.Context, rules *RuleSet, field, namespace string
 	return checkPlatformNamespace(ctx, rules, field, namespace, okdp)
 }
 
-// apiGroup: the group of an apiVersion, "" for the core group (v1).
+// apiGroup returns the group of an apiVersion, "" for the core group.
 func apiGroup(apiVersion string) string {
 	group, _, ok := strings.Cut(apiVersion, "/")
 	if !ok {
@@ -95,33 +88,27 @@ func apiGroup(apiVersion string) string {
 	return group
 }
 
-// CheckObjects: the objects of an instance of svc in namespace, one that
-// is not privileged (Result.Objects, every source: the credentials
-// Secrets, the objects section, the generated Secrets, the PushSecrets and
-// ExternalSecrets): each in the instance's namespace, where its
-// metadata.namespace is set (unset, "" or null, the release's), and none
-// of a cluster-scoped kind (the rule set's clusterScopedKinds); the items of one that holds a
-// list of them (items: a List, which Helm installs item by item) checked
-// alike. The first refused, in order, fails, named <kind>/<name>: the
-// platform's projects alone (global.okdp.policy.privileged) install
-// cluster-scoped objects and write other namespaces.
+// CheckObjects checks the objects of an instance of svc that is not
+// privileged. objects is Result.Objects, from every source. Each must
+// be in the instance's namespace when it sets metadata.namespace, and of
+// no cluster-scoped kind: only the platform's projects install
+// cluster-scoped objects and write in other namespaces. The items of a
+// List are checked too, because Helm installs them one by one.
 func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, objects []M) error {
 	return eachObject(objects, func(o M) error {
 		return rules.Refuse(ctx, ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": objectInput(o)})
 	})
 }
 
-// checkDuplicateObjects: the objects of an instance of svc in namespace
-// (Result.Objects, every source, the items of a list alike) hold no two of
-// one apiVersion group, kind, namespace (unset, "" or null, the
-// instance's) and name: the second would replace the first in the cluster,
-// whichever comes last in the file, as two claims' objects whose names a
-// provider derived the same way do. Of every project, privileged or not;
-// the versions of a group are one object. A Secret is left to
-// refuseSecretTargets, which compares those of the namespace's instances
-// all together. An object without a name (generateName) is none to
-// compare. The second is named, <kind>/<name>,
-// with the first's position.
+// checkDuplicateObjects checks that no two objects of an instance have
+// the same API group, kind, namespace and name, in any project. The
+// second would replace the first in the cluster. That happens when a
+// provider derives the same name for the objects of two claims.
+//
+// The versions of a group count as one object. An object without a name
+// (generateName) is not compared. A Secret is left to
+// refuseSecretTargets, which compares the Secrets of all the instances
+// of the namespace together.
 func checkDuplicateObjects(svc, namespace string, objects []M) error {
 	seen := map[string]int{}
 	n := 0
@@ -149,8 +136,7 @@ func checkDuplicateObjects(svc, namespace string, objects []M) error {
 	})
 }
 
-// apiGroupName: the group of an apiVersion as the messages name it, "core"
-// for the core group (v1).
+// apiGroupName is apiGroup for messages: "core" for the core group.
 func apiGroupName(apiVersion string) string {
 	if g := apiGroup(apiVersion); g != "" {
 		return g
@@ -158,12 +144,10 @@ func apiGroupName(apiVersion string) string {
 	return "core"
 }
 
-// eachObject: f on each object of objects, in order, each followed by the
-// items of the list it holds, at any depth (items: a List, which Helm and
-// Argo CD install item by item, an item that is not a map skipped): the
-// one walk of the rules on an instance's objects (CheckObjects,
-// checkPlainSecrets, refuseSecretTargets, keepSynced), so that an object
-// wrapped in a List escapes none. The first error of f stops it.
+// eachObject calls f on each object, then on the items of the list the
+// object holds, at any depth, and stops at the first error. Every rule
+// on an instance's objects walks them with it, so that an object wrapped
+// in a List escapes none of them.
 func eachObject(objects []M, f func(o M) error) error {
 	for _, o := range objects {
 		if err := f(o); err != nil {
@@ -182,26 +166,17 @@ func eachObject(objects []M, f func(o M) error) error {
 	return nil
 }
 
-// checkPlainSecrets: the objects of an instance of svc (Result.Objects),
-// unless Inputs.AllowPlainSecrets, hold no credential in clear, the items
-// of one that holds a list of them (items) alike:
+// checkPlainSecrets checks that the objects of an instance hold no
+// credential in clear, unless Inputs.AllowPlainSecrets is set. It
+// refuses a Secret that holds values, an ExternalSecret whose template
+// holds a literal at a sensitive key, and a Fake generator that holds
+// values. A template ({{ }}) and a literal at another key (a region, a
+// URL) pass, and so does a Secret with only metadata and type.
 //
-//   - no Secret (v1) holds values, a non-empty data or stringData;
-//   - no ExternalSecret (external-secrets.io), nor ClusterExternalSecret
-//     (spec.externalSecretSpec), has its target.template.data hold a
-//     literal (credentialLiteral) at a sensitive key (value.Sensitive):
-//     a template ({{ }}) reads what the store or a generator gives, a
-//     literal at another key (a region, a URL) passes;
-//   - no Fake generator (generators.external-secrets.io), nor
-//     ClusterGenerator of kind Fake, holds values (its data).
-//
-// The objects file is written to the deployments repository: credentials
-// are generated in the cluster (okdpGeneratedSecret, a provides secret's
-// generate) or read from the platform's secret store (an
-// ExternalSecret), never written in clear. A Secret with only metadata
-// and type passes. The first refused, in order, fails, named
-// <kind>/<name>, its field named, data before stringData, the keys of a
-// template in order; the value is never printed.
+// The reason is that the objects file is written to the deployments
+// repository. Credentials are generated in the cluster or read from the
+// platform's secret store, never written in clear. The error never
+// prints the value.
 func checkPlainSecrets(ctx context.Context, rules *RuleSet, svc string, objects []M) error {
 	return eachObject(objects, func(o M) error {
 		return rules.Refuse(ctx, ruleset.CheckPlainSecret, M{"svc": svc, "object": objectInput(o)})

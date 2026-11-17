@@ -1,8 +1,6 @@
-// Context: the instance of a compile, built by the first stages
-// (newInstance): its parameters, its platform context (global.okdp checked
-// against the embedded platform.schema.json, the OIDC settings derived from
-// it) and its connections (the references resolved, connections.go), which
-// give what the mapping sees.
+// Context: the instance of a compile (newInstance): its parameters, the
+// platform context (global.okdp) and its connections, which together give
+// what the mapping sees.
 
 package okdp
 
@@ -17,76 +15,77 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// instance: what a compile knows of its instance, built once by the first
-// stages (newInstance) and read by the others: the typed facts they need,
-// and what the mapping sees (scope).
+// instance is what a compile knows of its instance. The first stages
+// build it once (newInstance) and the others read it.
 type instance struct {
-	rules              *RuleSet     // Inputs.Rules
-	release, namespace string       // Inputs.Release, Inputs.Namespace
-	name               string       // Inputs.Name, the release when it is empty
-	svc                *Service     // the package: Chart.yaml's name and version
-	values             M            // the merged parameters, as the user wrote them: global, connections and upstream values included (chart.FinalValues)
-	okdp               M            // the platform's settings: the context's global.okdp (contextLayers), checked against platform.schema.json, its defaults applied
-	deps               []Dependency // the instances the connection references point to, of the namespace or, for a claim, of its provider's, by parameter path
-	scope              M            // what the mapping sees
-	transfers          []transfer   // the credentials of its claims of another namespace, and of its connections in the platform's secret store, read into Secrets of its own (pullSecret)
+	rules              *RuleSet // Inputs.Rules
+	release, namespace string   // Inputs.Release, Inputs.Namespace
+	name               string   // Inputs.Name, or the release when it is empty
+	svc                *Service // the package: Chart.yaml's name and version
+	// values are the merged parameters as the user wrote them, with global,
+	// connections and the upstream values.
+	values M
+	// okdp holds the platform's settings: global.okdp of the context, checked
+	// against platform.schema.json, with its defaults applied.
+	okdp  M
+	deps  []Dependency // the instances the references point to, in parameter path order
+	scope M            // what the mapping sees
+	// transfers are the credentials read into Secrets of the instance's own
+	// namespace (pullSecret): those of its claims of another namespace, and
+	// those of its connections in the platform's secret store.
+	transfers []transfer
 }
 
-// newInstance: stages 1 to 3, the instance of a compile of the package
-// files.
+// newInstance runs stages 1 to 3 and returns the instance of a compile of
+// the package files.
 //
-// 1. Parameters: the package's parameter schema, read once for the stages
-// that read it (chart.ReadParameterSchema): the keys of global an instance
-// sets, the parameters, the connection references, their requirements
-// compiled (requirements). Then the values layers, as Helm: the context's
-// then the instance's (global and connections are the context's:
-// valuesLayers), merged in order as -f files, coalesced over the schema's
-// defaults, checked against it, connections apart (chart.Parameters).
+//  1. Parameters. The values layers are merged in order, as Helm merges -f
+//     files, the context's then the instance's, over the defaults of the
+//     package's parameter schema, and checked against it (parameters).
+//  2. Platform context. The platform's settings are global.okdp of the
+//     context's layers alone, never of the parameters, which the defaults
+//     of a package schema reach.
+//  3. Connections. The connection references of the parameters are
+//     resolved in a copy; the merged values stay as the user wrote them.
+//     The references that do not resolve are reported together.
 //
-// 2. Platform context: global.okdp of the context's layers alone
-// (contextLayers: level 0's, the provisioning classes of the levels
-// above), never of the parameters, which a package schema's defaults
-// reach; checked against platformSchema, its defaults applied
-// (platformSettings): a value of another type is refused rather than read
-// as not set, oidc: false would leave OIDC enabled. The
-// OIDC settings are derived from them: the client provisioning mode in
-// effect (existing or dcr), and the CA bundle of the registration Jobs,
-// tls.caBundleSecret unless oidc.dcr.caSecret is set.
-//
-// 3. Connections: the connection references of the parameters
-// (x-okdp-connection-ref) resolved in a copy against the contracts
-// (Inputs.Contracts), the context's connections and what the other
-// instances of the namespace publish (Inputs.Published), then checked
-// against their requirements (require); the references
-// that do not resolve are reported together, one error each, one per line,
-// in the order of the walk (resolver.walk), as the violations of the
-// parameter schema are; when some name an output no instance publishes,
-// the error says which (missingOutputs). The references to an instance,
-// an output or a claim, are recorded (deps), by parameter path, in string
-// order.
-//
-// The merged values stay as the user wrote them. The mapping sees release
-// (name, namespace), values (the resolved parameters), global (as written:
-// global.okdp, the platform's settings, and the other keys of global, a
-// project's own settings among them), platform (what the compiler derives
-// from global.okdp: oidc, the Secret of the main OAuth client, the ingress
-// annotations, the proxy environment), and the package: service (name,
-// version), labels and selectorLabels (without component).
+// The mapping sees release (name, namespace), values (the resolved
+// parameters), global as written, platform (what the compiler derives from
+// global.okdp), service, labels, selectorLabels and claims.
 func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*instance, error) {
 	schema, values, settings, err := in.memo.paramsOf().get(ctx, files, in, svc)
 	if err != nil {
 		return nil, err
 	}
-	// The platform's settings come from the context's layers alone
-	// (contextLayers), never from the parameters: a package schema's
-	// defaults do not reach them.
-	inst := &instance{rules: in.rules(), release: in.Release, namespace: in.Namespace, name: cmp.Or(in.Name, in.Release), svc: svc, values: values, okdp: settings}
+	inst := &instance{
+		rules:     in.rules(),
+		release:   in.Release,
+		namespace: in.Namespace,
+		name:      cmp.Or(in.Name, in.Release),
+		svc:       svc,
+		values:    values,
+		okdp:      settings,
+	}
 	named, err := namedClaims(values)
 	if err != nil {
 		return nil, err
 	}
 	params := value.AsMap(value.Copy(values))
-	r := resolver{rules: in.rules(), contracts: contractCacheOf(in), conns: value.AsMap(values["connections"]), levels: connectionLevels(in.Context), claims: named, classes: value.AsMap(inst.okdp["provisioning"]), published: in.Published, bindings: in.Bindings, store: storeName(inst.okdp), provider: len(value.AsMap(value.Dig(inst.okdp, "secrets.provider"))) > 0, release: in.Release, namespace: in.Namespace, draft: schema.Doc["$schema"]}
+	r := resolver{
+		rules:     in.rules(),
+		contracts: contractCacheOf(in),
+		conns:     value.AsMap(values["connections"]),
+		levels:    connectionLevels(in.Context),
+		claims:    named,
+		classes:   value.AsMap(inst.okdp["provisioning"]),
+		published: in.Published,
+		bindings:  in.Bindings,
+		store:     storeName(inst.okdp),
+		provider:  len(value.AsMap(value.Dig(inst.okdp, "secrets.provider"))) > 0,
+		release:   in.Release,
+		namespace: in.Namespace,
+		draft:     schema.Doc["$schema"],
+	}
 	if r.walk(schema.Doc, params); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
@@ -94,14 +93,14 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 		}
 		return nil, err
 	}
-	// Not parameters: global is exposed apart, connections and claims are
-	// resolved.
+	// global, connections and claims are not parameters: global is exposed
+	// apart, connections and claims are resolved.
 	delete(params, "global")
 	delete(params, "connections")
 	delete(params, "claims")
 	sort.Slice(r.deps, func(i, j int) bool { return r.deps[i].Field < r.deps[j].Field })
 	inst.deps, inst.transfers = r.deps, r.transfers
-	// What the mapping sees as platform, of the platform's settings.
+	// platform, as the mapping sees it, derives from the platform's settings.
 	release := M{"name": in.Release, "namespace": in.Namespace}
 	groups, _ := projectAccess(in.rules(), in.Context, in.Namespace) // a project file refused is Compile's to report: no group
 	roles := M{}
@@ -126,14 +125,13 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 	return inst, nil
 }
 
-// parameters: stage 1, the parameter schema of the package's files, the
-// requirements of its connection references compiled (requirements), and
-// the parameters: the values layers merged over its defaults, checked;
-// and the platform's settings, the context's global.okdp
-// (contextLayers), {global: {okdp: ...}}, checked against platformSchema,
-// its defaults applied (platformSettings). global.okdp of the parameters
-// is the context's, as written, whatever the package's schema gives: the
-// mapping and the charts read the platform's settings, never a package's.
+// parameters runs stage 1. It returns the parameter schema of the
+// package, the parameters (the values layers merged over the schema's
+// defaults, and checked) and the platform's settings (platformSettings).
+//
+// global.okdp of the parameters is the context's, as written, whatever
+// the package's schema gives: the mapping and the charts read the
+// platform's settings, never a package's.
 func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	schema, err := chart.ReadParameterSchema(files)
 	if err != nil {
@@ -169,10 +167,10 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 	return schema, values, settings, nil
 }
 
-// platformSettings: the platform's settings, global.okdp of platform, the
-// context's (contextLayers), checked against platformSchema, its defaults
-// applied: a value of another type is refused rather than read as not set
-// (oidc: false would leave OIDC enabled).
+// platformSettings returns global.okdp of platform, the context's values,
+// checked against the platform schema with its defaults applied. A value
+// of another type is refused rather than read as not set: oidc: false
+// would leave OIDC enabled.
 func platformSettings(rules *RuleSet, platform M) (M, error) {
 	settings, err := schemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {

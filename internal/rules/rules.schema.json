@@ -1,16 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A rule set: rules.yaml, at the root of its file system (LoadRules).",
+  "description": "A rule set: rules.yaml, at the root of its file system: the compiler's mandatory set, or one added to it (LoadRules). Each section is optional here: what the sets give together is checked when they are combined.",
   "additionalProperties": false,
-  "required": ["apiVersion", "version", "tables", "checks", "schemas", "functions", "templates", "sections", "charts", "documents", "ownObjects", "labels", "names", "keepSync"],
+  "required": ["apiVersion", "version"],
   "properties": {
     "apiVersion": {"const": "okdp-compiler/rules.v1"},
     "version": {"type": "string", "minLength": 1},
     "schemas": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["platform", "mapping"],
       "properties": {"platform": {"type": "string", "minLength": 1}, "mapping": {"type": "string", "minLength": 1}}
     },
     "functions": {
@@ -23,7 +22,6 @@
     },
     "templates": {
       "type": "object",
-      "required": ["generatedSecret"],
       "additionalProperties": {"type": "string", "minLength": 1}
     },
     "sections": {"type": "array", "items": {"type": "string", "minLength": 1}},

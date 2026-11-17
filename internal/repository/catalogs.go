@@ -12,44 +12,38 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// CatalogsFile: the catalogs of a tree, beside PlatformFile, which the
-// program that fetches them reads (okdp-gitops): their repositories
-// (CatalogRepository), and the console's menu of their services
-// (MenuCategory). Load checks it when a repository of the tree holds it
-// (checkCatalogs).
+// CatalogsFile is the file that lists the catalogs of a tree, beside
+// PlatformFile: the catalog repositories and the console's menu of their
+// services. Load checks it when a repository of the tree holds it.
 const CatalogsFile = "catalogs.yaml"
 
-// DefaultCatalogRef: the ref of a catalog that names none.
+// DefaultCatalogRef is the ref of a catalog that names none.
 const DefaultCatalogRef = "main"
 
-// Catalogs: CatalogsFile, read (ParseCatalogs).
+// Catalogs is the content of CatalogsFile.
 type Catalogs struct {
 	Repositories []CatalogRepository `json:"repositories,omitempty" yaml:"repositories,omitempty"`
 	Categories   []MenuCategory      `json:"categories,omitempty" yaml:"categories,omitempty"`
 }
 
-// CatalogRepository: a catalog of CatalogsFile, a repository of
-// packages (catalog/<service>/<version>/, contracts/), a compile's
-// RoleCatalog, at a ref (a branch, a tag or a commit), DefaultCatalogRef
-// when it names none.
+// CatalogRepository is a catalog listed in CatalogsFile. Ref is a branch, a
+// tag or a commit: DefaultCatalogRef when the file names none.
 type CatalogRepository struct {
 	Name string `json:"name" yaml:"name"`
 	URL  string `json:"url" yaml:"url"`
 	Ref  string `json:"ref,omitempty" yaml:"ref,omitempty"`
 }
 
-// MenuCategory: a section of the console's menu, in the order of the
-// file: its title, its icon, its services, each listed once in the menu.
+// MenuCategory is a section of the console's menu. The categories keep the
+// order of the file. A service is listed once in the whole menu.
 type MenuCategory struct {
 	Title    string        `json:"title" yaml:"title"`
 	Icon     string        `json:"icon,omitempty" yaml:"icon,omitempty"`
 	Services []MenuService `json:"services" yaml:"services"`
 }
 
-// MenuService: a service of the menu, a service of the catalogs: its
-// description, the version the console offers (Default, the highest of
-// its catalog when empty), its label, whether it exposes a UI. Its
-// versions are the directories of its catalog.
+// MenuService is a menu entry for a service of the catalogs. When Default
+// is empty, the console offers the highest version of the catalog.
 type MenuService struct {
 	Name        string `json:"name" yaml:"name"`
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
@@ -58,14 +52,16 @@ type MenuService struct {
 	ExposesUI   *bool  `json:"exposesUI,omitempty" yaml:"exposesUI,omitempty"`
 }
 
-// ParseCatalogs: CatalogsFile, doc as decoded (chart.ParseValues),
-// strictly: repositories, a list of {name, url, ref}, each a name and a
-// url, the names unique, the ref DefaultCatalogRef when it names none;
-// categories, a list of {title, icon, services}, each a title, the titles
-// unique, its services a list of {name, description, default, label,
-// exposesUI}, each a name, listed once in the menu; any other key, at any
-// level, refused, and a value of another type. Every problem at once, one
-// line each, in the order of the file.
+// ParseCatalogs reads CatalogsFile strictly. doc is the file as decoded
+// (chart.ParseValues):
+//
+//	repositories: {name, url, ref}
+//	categories:   {title, icon, services}
+//	  services:   {name, description, default, label, exposesUI}
+//
+// Any other key, at any level, is refused, and so is a value of the wrong
+// type. A service is listed once in the menu. The error lists every problem
+// at once, one line each, in the order of the file.
 func ParseCatalogs(doc map[string]any) (*Catalogs, error) {
 	p := &parser{}
 	out := &Catalogs{}
@@ -132,14 +128,13 @@ func ParseCatalogs(doc map[string]any) (*Catalogs, error) {
 	return out, nil
 }
 
-// parser: the problems of a document read strictly, in order.
+// parser collects the problems of a document read strictly, in order.
 type parser struct{ errs []error }
 
 func (p *parser) fail(format string, args ...any) {
 	p.errs = append(p.errs, fmt.Errorf(format, args...))
 }
 
-// keys: the keys of m at at, each one of allowed, in key order.
 func (p *parser) keys(at string, m map[string]any, allowed ...string) {
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		if !slices.Contains(allowed, k) {
@@ -148,7 +143,7 @@ func (p *parser) keys(at string, m map[string]any, allowed ...string) {
 	}
 }
 
-// list: v at at, a list, nil when absent or null.
+// list returns v as a list, nil when it is absent or null.
 func (p *parser) list(at string, v any) []any {
 	if v == nil {
 		return nil
@@ -160,7 +155,7 @@ func (p *parser) list(at string, v any) []any {
 	return l
 }
 
-// object: v at at, an object of the keys allowed, nil when it is none.
+// object returns v as an object, nil with a problem when it is not one.
 func (p *parser) object(at string, v any, allowed ...string) map[string]any {
 	m, ok := v.(map[string]any)
 	if !ok {
@@ -171,8 +166,7 @@ func (p *parser) object(at string, v any, allowed ...string) map[string]any {
 	return m
 }
 
-// str: the key k of m at at, a string, trimmed, "" when absent or null;
-// required, a problem when empty.
+// str returns the string at key k of m, trimmed, "" when absent or null.
 func (p *parser) str(at string, m map[string]any, k string, required bool) string {
 	v, set := m[k]
 	s, ok := v.(string)
@@ -185,10 +179,7 @@ func (p *parser) str(at string, m map[string]any, k string, required bool) strin
 	return strings.TrimSpace(s)
 }
 
-// checkCatalogs: CatalogsFile of repo, when it holds one: read strictly
-// (ParseCatalogs), each service of its menu one of the catalogs of the
-// tree, its default version one of the service's; every problem, the
-// file named.
+// checkCatalogs checks the CatalogsFile of repo, when it holds one.
 func (t *parts) checkCatalogs(repo Repository) []error {
 	b, err := fs.ReadFile(repo.FS, CatalogsFile)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -209,8 +200,8 @@ func (t *parts) checkCatalogs(repo Repository) []error {
 	return t.menu(c, at)
 }
 
-// menu: the problems of the menu of c, of the file at: each service one
-// of the catalogs of t, its default version one of the service's.
+// menu checks the menu of c: each service must be in a catalog, and its
+// default version must be a version of it. at names the file in messages.
 func (t *parts) menu(c *Catalogs, at string) []error {
 	var errs []error
 	for i, cat := range c.Categories {
@@ -231,9 +222,8 @@ func (t *parts) menu(c *Catalogs, at string) []error {
 	return errs
 }
 
-// CheckMenu: nil when every service of the menu of c is one of the
-// catalog's, its default version one of the service's (as Load checks
-// CatalogsFile); else every problem, each naming CatalogsFile.
+// CheckMenu checks the menu of m against the catalog, as Load checks
+// CatalogsFile. Each problem names CatalogsFile.
 func (c *Catalog) CheckMenu(m *Catalogs) error {
 	return errors.Join(c.t.menu(m, CatalogsFile)...)
 }

@@ -12,7 +12,7 @@
 #
 #   global: {okdp: {ingress: {suffix: demo.example.org}}}
 #   connections: {platform-db: {port: 5433}}
-#   global: {okdp: {charts: {objects: {repository: oci://x, chart: okdp-objects, version: 2.0.0}}}}
+#   global: {okdp: {charts: {objects: {repository: oci://x, chart: okdp-objects, version: 0.1.0}}}}
 #
 #   context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 #   context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's

@@ -6,7 +6,7 @@ Normative reference of what a compile reads besides the service definition
 and of what it produces. The library's calls are in
 [01_usage.md](../01_usage.md); how the compiler works inside, in
 [00_architecture.md](../00_architecture.md). The `testdata/` fixtures and
-the `TestHelm*` tests named below are okdp-gitops', but `testdata/rules`.
+the `TestHelm*` tests named below are okdp-gitops'.
 
 | Input | Field | Required | Section |
 |---|---|---|---|
@@ -22,7 +22,7 @@ the `TestHelm*` tests named below are okdp-gitops', but `testdata/rules`.
 | The claims bound to the instance, a provider | `Inputs.Claims` (`[]Claim`) | no; `CompileAll` sets them | [Claims](#claims) |
 | The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; a tree's instance's, its `instance.yaml`'s `claimers` | [Providers](#providers) |
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
-| The rule set | `Inputs.Rules` (`*RuleSet`) | no: the empty set | [Rule set](#rule-set) |
+| The rule set | `Inputs.Rules` (`*RuleSet`) | no: the mandatory set alone | [Rule set](#rule-set) |
 | The final values, and what a project sets of `global` | `Inputs.Finalize`, `Inputs.CheckGlobals` | no: Helm's merge, no policy | [Rule set](#rule-set) |
 | The charts that could not be fetched, and whether the host renders the charts | `Inputs.ChartFailures` (`map[chart.Ref]error`), `Inputs.RequireRender` | no: every chart in the cache, no rendering; `CompileTree` sets `ChartFailures` | [Hosts](#hosts) |
 | Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret, of a `provides` `secret` or of the objects, fails | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
@@ -45,38 +45,29 @@ empty one fails as another:
 | a namespace the platform reserves, `global.okdp.policy.reserved` ([fields the compiler reads](#fields-the-compiler-reads)), checked once the platform's settings are read; one `policy.privileged` lists too is reserved all the same (`testdata/context/0/reserved-namespace.yaml`, `reserved-and-privileged.yaml`) | `Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`, then `, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins` |
 | an instance name that is set and not a DNS-1123 label | `Inputs.Name "<name>": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 
-Those of the namespaces and the platform's object names are the standard
+Those of the namespaces and the platform's object names are the mandatory
 rule set's ([rule set](#rule-set)).
 
 Paths in an `fs.FS` are relative to its root.
 
 ## Rule set
 
-`Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules`), is what a
-compile refuses of a platform and what it knows of its names, as data:
-the tables and the CEL checks; the schemas of `global.okdp`
-(`platform.schema.json`) and of the mapping's sections
-(`mapping.schema.json`), with their defaults; the values the mapping sees
-as `platform`; the functions and fragments; the `oidcClients` section;
-the platform's charts; the labels of OKDP's objects; the documents of the
-secret store's objects. The standard set is okdp-gitops', `rules/v1`;
-`testdata/rules` here is a copy for this module's tests. Every rule this
-document gives as OKDP's is the standard set's: another set says otherwise.
+A compile applies its rules as data. The mandatory set, embedded
+(`internal/rules/mandatory`), applied to every compile, is what a compile
+needs to write values a chart installs and what it refuses of a
+platform: the schema of `global.okdp` (`platform.schema.json`), with its
+defaults; the values the mapping sees as `platform`; the functions and
+fragments; the `oidcClients` section; the labels of OKDP's objects; the
+names of the Secrets that carry credentials; the documents of the secret
+store's objects; the roles of a project's groups; what a level may not
+change of a lower one; the tables and the CEL checks; the schema of the
+mapping's sections (`mapping.schema.json`); the platform's charts.
 
-`Inputs.Rules` nil compiles with the empty set:
-
-| | Without a rule set |
-|---|---|
-| namespaces, releases, objects, hosts, plain Secrets, layers | no check refuses; the checks written in Go stay (a name is a DNS-1123 label, a level adds values, no `{{` above level 0, two writers of one Secret) |
-| `global.okdp`, the mapping's sections | no schema, no default: read as written |
-| `platform.*` of the mapping, `labels`, `selectorLabels` | empty |
-| `okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret` | not declared: a package that calls one does not load |
-| `okdpGeneratedSecret` | fails when called |
-| `oidcClients` | an unknown section: the package is refused |
-| `access` of a project | no role: nobody has one, and `Result.Groups` is nil |
-| `global.okdp.charts` | no default, `Result.ObjectsSource` empty |
-| the claim format | kept: `global.okdp.provisioning` of a project, the classes and connections a level may not change, the names of the Secrets that carry credentials |
-| a claim of another namespace | refused: the objects that carry its credentials are the rule set's |
+`Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules`), adds a
+platform's own rules to it; nil, the mandatory set alone applies.
+`LoadRules` refuses a set that gives a rule of the mandatory one (`a rule
+set adds rules, it replaces none`). Every rule this document gives as
+OKDP's is the mandatory set's ([the rule set](05_rules.md)).
 
 The policy over the upstream values and the hosts of an upstream chart's
 values is no rule of the compile: it is the host's, through two hooks.
@@ -1250,7 +1241,7 @@ global.okdp.ingress.className is required. It is a context value: the platform's
 
 The settings of `global.okdp` the compiler reads are described by the
 platform schema the compiler embeds,
-[`testdata/rules/schemas/platform.schema.json`](../../testdata/rules/schemas/platform.schema.json):
+[`internal/rules/mandatory/schemas/platform.schema.json`](../../internal/rules/mandatory/schemas/platform.schema.json):
 their types, their defaults and, in its `description`s, what each means.
 It is the platform authors' reference; an editor can check a platform
 values file against it. Every key of `global.okdp`, described there or
@@ -1798,7 +1789,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml` |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written |
-| `ObjectsSource` | `compiler.ChartRef` | the chart of the objects and clients, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)); empty without a rule set |
+| `ObjectsSource` | `compiler.ChartRef` | the chart of the objects and clients, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)) |
 | `Computed` | `map[string]any` | chart key -> what the mapping computed for it, before `Finalize` made `Values` of it |
 | `Groups`, `Privileged`, `SecretStore`, `Settings`, `KeepSync`, `Claims` | | what okdp-gitops' writers read: the project's groups, whether it is one of the platform's own, the platform's store and settings, what Argo CD is told of the objects Helm keeps, the claims bound to the instance |
 | `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); a list appended to that drops a chart's defaults ([append](#append)); a literal of the upstream values at a sensitive key ([objects section](#objects-section)); nil when none. The binary prints each on stderr, `warning: <message>` |
@@ -1939,8 +1930,9 @@ for it in `global.okdp.policy.ingressHosts`, in `dcr` mode. A client's
 `jwks_uri`, `initiate_login_uri`, `backchannel_logout_uri` and
 `frontchannel_logout_uri` are refused, in every mode.
 
-The objects are not Go code: `rules/v1/charts/oidc-dcr.cel.yaml` of
-okdp-gitops, a template in the mapping language of the rule set, computes
+The objects are not Go code:
+`internal/rules/mandatory/charts/oidc-dcr.cel.yaml`, a template in the
+mapping language of the mandatory rule set, computes
 them for each client from the client (its keys, checked), its names (the
 objects' name, the Secret) and the mapping's context
 ([why](../00_architecture.md#the-oidc-dcr-template)). The registration
@@ -2260,7 +2252,7 @@ upstream.app.auth.password: a literal at a sensitive key, a credential in clear 
 
 `Objects` are the values of one chart beside the package's, `okdp-objects`,
 reserved as a chart key (`compiler.ObjectsChart`):
-`global.okdp.charts.objects`, by default, in the standard rule set,
+`global.okdp.charts.objects`, by default, in the mandatory rule set,
 `oci://quay.io/okdp/charts`, `okdp-objects`, `0.1.0`.
 `compiler.ObjectsChartValues` (`okdp-objects.values.yaml` of `Write`) gives,
 when there are objects, `manifests` (`compiler.ObjectsValue`): a string, a
@@ -2361,7 +2353,7 @@ catalog is installed as it is, a release of its own. By name:
   file](#the-info-file)), when the instance publishes something.
 
 ```bash
-helm install <release>-okdp <okdp-objects chart> -n <namespace> -f okdp-objects.values.yaml
+helm install <release>-okdp ../okdp-objects-chart -n <namespace> -f okdp-objects.values.yaml
 helm install <release> <package> -n <namespace> -f values.yaml
 ```
 
@@ -2656,10 +2648,9 @@ groups hold the people, and okdp-gitops' targets write their roles into
 each project's manifests, which Argo CD and the API server enforce. A
 control plane, optional, mirrors the same authority (it reads it with
 `compiler.ParseAccess` and `compiler.PlatformAdmins`), never adds a
-boundary only it enforces. The roles are the standard rule set's
-(`projectRoles`): without a rule set, `access` gives none. A rule set
-lists some of `viewer`, `editor` and `admin`, and no other: what each
-may do is code. One without `editor` gives the default group no role.
+boundary only it enforces. The roles are the mandatory rule set's
+(`projectRoles`), `viewer`, `editor` and `admin`: what each may do is
+code, and no other set changes them.
 
 ```yaml
 # platform.yaml, level 0

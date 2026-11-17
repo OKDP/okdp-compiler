@@ -5,10 +5,10 @@ import (
 	"strings"
 )
 
-// Error: the problems of a tree that does not load (Load), each naming its
-// repository and path, in their order; one problem a whole message, which
-// may span lines (a report). Error gives them one per line, Unwrap the
-// errors they are of (errors.Is ErrNotInCatalog).
+// Error lists the problems of a tree that does not load, in order. A
+// problem is a whole message, which may span several lines, and names its
+// repository and path. Unwrap returns the errors behind the problems, so
+// that errors.Is finds ErrNotInCatalog.
 type Error struct {
 	Problems []string
 	errs     []error
@@ -16,12 +16,11 @@ type Error struct {
 
 func (e *Error) Error() string { return strings.Join(e.Problems, "\n") }
 
-// Unwrap: the errors of the problems, none for an Error built of Problems
-// only.
+// Unwrap returns no error for an Error built from Problems only.
 func (e *Error) Unwrap() []error { return e.errs }
 
-// newError: the *Error of errs, the nil ones left out and those
-// errors.Join joined listed one by one; nil when there is none.
+// newError builds an *Error from errs. It drops the nil errors and lists
+// one by one those errors.Join joined. It returns nil when none is left.
 func newError(errs []error) error {
 	var flat []error
 	var add func(err error)
@@ -47,16 +46,14 @@ func newError(errs []error) error {
 	return e
 }
 
-// JoinErrors: the *Error of errs as newError makes it; nil when there is
-// none.
+// JoinErrors is newError as an *Error: nil when errs holds no error.
 func JoinErrors(errs []error) *Error {
 	e, _ := newError(errs).(*Error)
 	return e
 }
 
-// Added: the problems of after that before has not, in after's order;
-// every one of after's when before is nil: what a change of the tree
-// added to why it does not load.
+// Added returns the problems of after that before does not have, in after's
+// order. A nil before gives every problem of after.
 func Added(before, after *Error) []string {
 	if after == nil {
 		return nil
@@ -73,10 +70,9 @@ func Added(before, after *Error) []string {
 	return out
 }
 
-// Select: the Error of the problems of e that problems lists, in e's
-// order, each with its error when e has them (Unwrap): a change's added
-// problems (Added), their fields kept for a caller that maps them
-// (compiler.FieldErrors).
+// Select returns an Error with the problems of e that problems lists, in
+// e's order. Each keeps its error when e has them, so that a caller can
+// still map the problems to their fields (compiler.FieldErrors).
 func (e *Error) Select(problems []string) *Error {
 	out := &Error{}
 	for i, p := range e.Problems {
@@ -91,8 +87,7 @@ func (e *Error) Select(problems []string) *Error {
 	return out
 }
 
-// unjoin: the errors errors.Join joined, err alone otherwise, none for
-// nil.
+// unjoin returns the errors that errors.Join joined, else err alone.
 func unjoin(err error) []error {
 	if err == nil {
 		return nil

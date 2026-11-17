@@ -2,12 +2,10 @@ package value
 
 import "strings"
 
-// FieldError: an error of a compile about one field of the instance's
-// values, its parameter path as the messages name it (value.Key,
-// value.Index: catalogs[1].storage, claims.analytics): a connection
-// reference that does not resolve, a claim that does not bind, a named
-// claim of the context. Its message is the error's, the path at its
-// head: the tag changes no message.
+// FieldError tags an error of a compile with the field of the instance's
+// values it is about, as messages name it (Key, Index):
+// catalogs[1].storage. The tag changes no message: the wrapped error's
+// text already starts with the path.
 type FieldError struct {
 	Field string
 	Err   error
@@ -16,7 +14,7 @@ type FieldError struct {
 func (e *FieldError) Error() string { return e.Err.Error() }
 func (e *FieldError) Unwrap() error { return e.Err }
 
-// AtField: err tagged with field, nil for nil.
+// AtField tags err with field. It returns nil for a nil err.
 func AtField(field string, err error) error {
 	if err == nil {
 		return nil
@@ -24,10 +22,9 @@ func AtField(field string, err error) error {
 	return &FieldError{Field: field, Err: err}
 }
 
-// CredentialLiteral: v is written as it is, a credential when its key is
-// sensitive: a string that is not empty and holds no template ({{ }},
-// Helm's or External Secrets', nor ${ }, a reference of an environment
-// variable), or a number. A boolean, null, a map or a list is not one.
+// CredentialLiteral reports whether v is written in clear: a number, or
+// a non-empty string that holds no template, neither {{ }} nor ${ }. Such
+// a value is a credential when its key is sensitive.
 func CredentialLiteral(v any) bool {
 	switch v := v.(type) {
 	case string:
@@ -38,11 +35,10 @@ func CredentialLiteral(v any) bool {
 	return false
 }
 
-// CredentialReference: key is sensitive (value.Sensitive) by its name
-// only, and names a credential rather than holds one: an existing
-// Secret (existingSecret, existingSecretPasswordKey), a reference
-// (passwordSecretRef, tokenRef), or the key of a Secret that holds one
-// (adminPasswordKey, tokenKey; not secretKey, accessKey, which hold one).
+// CredentialReference reports whether key, which is sensitive by its name
+// only (Sensitive), names a credential rather than holds one:
+// existingSecret, passwordSecretRef, tokenKey. secretKey and accessKey
+// hold a credential, so they are not references.
 func CredentialReference(key string) bool {
 	lower := strings.ToLower(strings.TrimSuffix(key, "s"))
 	if strings.HasPrefix(lower, "existing") || strings.HasSuffix(lower, "ref") {

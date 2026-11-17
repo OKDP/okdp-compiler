@@ -1,13 +1,13 @@
-// Hosts: the host names a project that is not privileged serves, the
-// platform's rule (the rule set's check host): one DNS label, then the
-// namespace, then the suffix, <label>.<namespace>.<global.okdp.ingress.suffix>,
-// or a host the platform lists for the project
-// (global.okdp.policy.ingressHosts). A host is a name in a namespace shared
-// by every project (ingress-nginx merges the rules of one host across
-// namespaces, cert-manager signs the certificate of any name from the
-// platform's issuer): the sandbox's keycloak.okdp.sandbox, asked by a
-// project's Ingress or Certificate, would take the identity provider's
-// traffic or a certificate for it.
+// Hosts: the host names a project that is not privileged may serve:
+// <label>.<namespace>.<global.okdp.ingress.suffix>, or a host the
+// platform lists for it (global.okdp.policy.ingressHosts).
+//
+// The rule exists because every project shares one namespace of host
+// names. ingress-nginx merges the rules of one host across namespaces,
+// and cert-manager signs a certificate for any name from the platform's
+// issuer. Without it, a project's Ingress or Certificate that asks for
+// keycloak.okdp.sandbox would take the identity provider's traffic, or
+// get a certificate for it.
 
 package okdp
 
@@ -22,16 +22,14 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// hostRules: the hosts a project may serve (CheckIngressHosts).
+// hostRules holds the hosts a project may serve.
 type hostRules struct {
 	rules     *RuleSet
 	namespace string
 	suffix    string // global.okdp.ingress.suffix, "" when unset
-	listed    M      // global.okdp.policy.ingressHosts of namespace, lower case, as a set
+	listed    M      // the hosts global.okdp.policy.ingressHosts gives namespace, in lower case
 }
 
-// newHostRules: the rules of the project of namespace, of okdp, the
-// platform's settings.
 func newHostRules(rules *RuleSet, okdp M, namespace string) *hostRules {
 	r := &hostRules{rules: rules, namespace: namespace, suffix: strings.ToLower(strings.Trim(value.Str(value.Dig(okdp, "ingress.suffix")), ".")), listed: M{}}
 	for _, h := range value.AsList(value.AsMap(value.Dig(okdp, "policy.ingressHosts"))[namespace]) {
@@ -40,16 +38,15 @@ func newHostRules(rules *RuleSet, okdp M, namespace string) *hostRules {
 	return r
 }
 
-// check: the error of the host, found at where, when the project may not
-// serve it (the rule set's host check). The case and a final dot do not
-// count.
+// check returns an error when the project may not serve host, found at
+// where. The case and a final dot do not count.
 func (r *hostRules) check(ctx context.Context, where, host string) error {
 	return r.rules.Refuse(ctx, ruleset.CheckHost, M{"at": where, "raw": host, "host": strings.ToLower(strings.TrimSuffix(host, ".")), "ns": r.namespace, "suffix": r.suffix, "listed": r.listed})
 }
 
-// annotationHosts: the first host of the annotations a (a map of
-// annotations) that the rules refuse, by annotation key order; nil when
-// they all hold.
+// annotationHosts checks the hosts that the annotations a name. Only
+// the annotations of the rule set's hostAnnotations name hosts. p is the
+// path of a in the errors.
 func (r *hostRules) annotationHosts(ctx context.Context, p string, a M) error {
 	for _, k := range slices.Sorted(maps.Keys(a)) {
 		if !r.rules.Has(ruleset.TableHostAnnotations, k) {
@@ -64,16 +61,13 @@ func (r *hostRules) annotationHosts(ctx context.Context, p string, a M) error {
 	return nil
 }
 
-// CheckIngressHosts: the objects of an instance of svc in namespace, one
-// that is not privileged (Result.Objects, the items of a list alike),
-// serve the hosts the platform lets the project serve (hostRules): an
-// Ingress's rules (a rule without host, like its spec.defaultBackend,
-// answers every host, refused) and tls hosts, a cert-manager Certificate's
-// dnsNames and commonName, a Gateway API route's hostnames, a Gateway's
-// listeners' (a listener that matches hosts without a hostname answers
-// every host), and the annotations that name hosts (the rule set's
-// hostAnnotations) of any object. The first refused, in order, fails, named
-// <kind>/<name>, its field named.
+// CheckIngressHosts checks that the objects of an instance that is not
+// privileged serve only hosts the project may serve. objects is
+// Result.Objects; the items of a List are checked too. It checks the
+// hosts of an Ingress, a cert-manager Certificate, a Gateway API route
+// or Gateway, and the annotations that name hosts. An Ingress rule
+// without a host and spec.defaultBackend answer every host, so both are
+// refused.
 func CheckIngressHosts(ctx context.Context, rules *RuleSet, svc, namespace string, okdp M, objects []M) error {
 	r := newHostRules(rules, okdp, namespace)
 	return eachObject(objects, func(o M) error {
@@ -131,10 +125,9 @@ func CheckIngressHosts(ctx context.Context, rules *RuleSet, svc, namespace strin
 	})
 }
 
-// listeners: the listeners of the Gateway o serve only hosts the project
-// may serve: those of a protocol that matches hosts (HTTP, HTTPS, TLS) name
-// a hostname, one that holds (a listener without one answers every host,
-// every); a listener of another protocol matches no host.
+// listeners checks the listeners of the Gateway o. A listener without a
+// hostname whose protocol matches hosts (HTTP, HTTPS, TLS) answers every
+// host, so it is refused. A listener of another protocol matches none.
 func listeners(ctx context.Context, r *hostRules, at func(string) string, o M, every func(p, what string) error) error {
 	for i, l := range value.AsList(value.Dig(o, "spec.listeners")) {
 		m := value.AsMap(l)
