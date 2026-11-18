@@ -135,14 +135,6 @@ func MergeValues(layers ...map[string]any) map[string]any {
 	return out
 }
 
-// CoalesceValues lays values over a chart's defaults, as Helm does before
-// it renders the chart. Maps merge key by key. A null in values deletes
-// the default, and a null default is dropped. It changes neither
-// argument.
-func CoalesceValues(values, defaults map[string]any) map[string]any {
-	return chart.Coalesce(defaults, values)
-}
-
 // NamedClaimID returns <project>.<name>, the ID of a named claim and the
 // name of the output that its provider publishes for it.
 func NamedClaimID(project, name string) string { return okdp.NamedClaimID(project, name) }

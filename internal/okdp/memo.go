@@ -9,22 +9,19 @@ import (
 	"sync"
 
 	"github.com/okdp/okdp-compiler/chart"
-	"github.com/okdp/okdp-compiler/internal/merge"
 	"github.com/okdp/okdp-compiler/value"
 )
 
 // Memo holds what the compiles of the instances of one set read once
 // (CompileAllWith): the parameters of each instance, and the contracts
-// and the charts that several instances read from the same file system.
+// that several instances read from the same file system.
 //
 // It is valid for one run of compiles: the instances, their files and
-// layers, and the contracts and charts file systems must not change
-// meanwhile. It is safe for concurrent use.
+// layers, and the contracts file system must not change meanwhile. It is safe for concurrent use.
 type Memo struct {
 	mu        sync.Mutex
 	params    map[int]*paramsMemo
 	contracts []*contractCache
-	charts    merge.Caches
 }
 
 // NewMemo returns an empty Memo.
@@ -35,7 +32,6 @@ func NewMemo() *Memo { return &Memo{params: map[int]*paramsMemo{}} }
 type instanceMemo struct {
 	params    *paramsMemo
 	contracts *contractCache
-	charts    *merge.ChartCache
 }
 
 // forInstance returns the memo for the compile of instance i of the set.
@@ -60,7 +56,6 @@ func (m *Memo) forInstance(i int, def *Definition, in Inputs) *instanceMemo {
 		out.contracts = newContractCache(in.Contracts)
 		m.contracts = append(m.contracts, out.contracts)
 	}
-	out.charts = m.charts.Get(in.Charts)
 	return out
 }
 

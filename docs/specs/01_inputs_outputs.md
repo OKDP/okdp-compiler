@@ -11,7 +11,6 @@ the `TestHelm*` tests named below are okdp-gitops', but `testdata/rules`.
 | Input | Field | Required | Section |
 |---|---|---|---|
 | Package files | `Definition.Files` (`fs.FS`) | yes | [Package files](#package-files) |
-| Chart cache | `Inputs.Charts` (`fs.FS`) | no: the checks of the final values | [Chart cache](#chart-cache) |
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
 | Context values layers | `Inputs.Context` (`[]ContextLayer`) | no | [Parameters](#parameters), [Context values](#context-values), [Values files](#values-files) |
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
@@ -23,8 +22,7 @@ the `TestHelm*` tests named below are okdp-gitops', but `testdata/rules`.
 | The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; a tree's instance's, its `instance.yaml`'s `claimers` | [Providers](#providers) |
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
 | The rule set | `Inputs.Rules` (`*RuleSet`) | no: the mandatory set alone | [Rule set](#rule-set) |
-| The final values, and what a project sets of `global` | `Inputs.Finalize`, `Inputs.CheckGlobals` | no: Helm's merge, no policy | [Rule set](#rule-set) |
-| The charts that could not be fetched, and whether the host renders the charts | `Inputs.ChartFailures` (`map[chart.Ref]error`), `Inputs.RequireRender` | no: every chart in the cache, no rendering; `CompileTree` sets `ChartFailures` | [Hosts](#hosts) |
+| The final values, and what a project sets of `global` | `Inputs.Finalize`, `Inputs.CheckGlobals` | no: Helm's merge, no policy, no check against the upstream charts | [Rule set](#rule-set), [Chart cache](#chart-cache) |
 | Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret, of a `provides` `secret` or of the objects, fails | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
 
 A nil `*Definition`, context or file system panics: the caller gives them.
@@ -92,16 +90,20 @@ values is no rule of the compile: it is the host's, through two hooks.
 Helm's merge when nil, with no policy; `Inputs.CheckGlobals` checks the
 keys of `global` a project sets, before the mapping, none when nil.
 `FinalInput` gives a `Finalize` what it renders one chart key with: the
-chart (`Specs[key].Source`), the `Release` and the `Namespace`, the final
-values it returns and `ChartFailures` (the charts it cannot render).
-`compiler.CheckObjects` and `compiler.CheckIngressHosts`
-check the manifests it renders with the rule set of the compile, the
-walks a compile runs on its own objects; a project that is not
-privileged giving upstream values to a chart that could not be fetched is
-refused when the host requires rendering (`Inputs.RequireRender`).
+chart (`Specs[key].Source`), the `Release` and the `Namespace`, and the
+final values it returns; the compiler reads no upstream chart, so a host
+that checks or renders one fetches it itself.
+`compiler.FinalValues` is Helm's merge, for a `Finalize` to add to; its
+`FinalValuesOf.Appended` gives the lists the instance appended to
+([append](#append)). `compiler.CheckObjects` and
+`compiler.CheckIngressHosts` check the manifests it renders with the rule
+set of the compile, the walks a compile runs on its own objects.
 okdp-gitops sets both (`internal/policy`, `deploy.Build`): the
 [upstream policy](#upstream-policy) and the hosts in upstream values below
-are enforced there.
+are enforced there, and the final values checked against the upstream
+charts ([chart cache](#chart-cache)); a project that is not privileged
+giving upstream values to a chart it could not fetch is refused there
+when the build renders.
 
 ## Package files
 
@@ -166,16 +168,16 @@ app: open app.defaults.yaml: no such file or directory
 
 ### Values files
 
-Every values file is read as Helm 3 reads one: the upstream charts'
-`values.yaml` a check reads ([chart cache](#chart-cache)), the defaults
-files, and the values layers read by `compiler.ParseValues` (a tree's
-context files and `config.yaml`).
+Every values file is read as Helm 3 reads one: the defaults files, the
+values layers read by `compiler.ParseValues` (a tree's context files and
+`config.yaml`), and the upstream charts' `values.yaml` okdp-gitops' check
+reads with `chart.ParseValues` ([chart cache](#chart-cache)).
 
 - Documents: the first YAML document of the file only. Helm 4 merges the
   later ones; the compiler ignores them: of an upstream chart whose
-  `values.yaml` has several documents, it reads, checks and writes the
+  `values.yaml` has several documents, okdp-gitops' check reads the
   defaults of the first document, and a key of the first document that a
-  later one deletes is back in the final values, under Helm 4 too.
+  later one deletes is still among the defaults it checks against.
 - Decoding: by `sigs.k8s.io/yaml`, YAML 1.1. A plain `y`,
   `yes`, `on`, `n`, `no`, `off` (and their capitalized forms) is a boolean,
   as a key too (`on:` is the key `"true"`); keys are strings; every number is
@@ -209,18 +211,25 @@ context layer 1 (level 0): json: cannot marshal from Go float64 within "/global/
 values layer 1: jsontext: duplicate object member name "1" within "/labels"
 ```
 
-JSON files (`config.schema.json` of the package, `values.schema.json` of
-the upstream charts, the contracts) are strict JSON: no comments.
+JSON files (`config.schema.json` of the package, the contracts, and the
+`values.schema.json` of the upstream charts okdp-gitops' check reads with
+`chart.ParseSchema`) are strict JSON: no comments.
 
 ## Chart cache
 
-`Inputs.Charts`, optional: the upstream charts the compiled charts are
-rendered by, for the [checks of the final values](#checks-of-the-final-values).
-Without it, a compile reads no chart; with it, its final values are the
-same, checked. Each chart is unpacked under its repository's directory, as
+The compiler reads no upstream chart: a compile's final values are the
+same whatever the charts hold, and nothing of them is checked. The
+[checks of the final values](#checks-of-the-final-values) against the
+upstream charts are okdp-gitops': its `deploy.Build` fetches the charts
+of the tree's `Chart.yaml` files once per build, before the compile
+(`BuildOptions.Loaded`), and its Finalize checks each key with them.
+Its `okdp-compile --check --charts <dir>` reads them from a chart cache
+filled by hand, which this section describes; its `chartcache` pulls
+them into one
+([okdp-compile --check](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md#okdp-compile---check)).
+Each chart is unpacked under its repository's directory, as
 `helm pull --untar -d <cache>/<repository>/<chart>-<version>` writes it
-(`helm pull` creates the directory). okdp-gitops' `--check --charts`
-gives one; its `chartcache` fills one.
+(`helm pull` creates the directory).
 
 ```
 <cache>/
@@ -231,11 +240,10 @@ gives one; its `chartcache` fills one.
 `https://`) and a trailing `/`: its host, port and path.
 `oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.6.0
 `quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`; `https://localhost:8080/charts`
-is `localhost:8080/charts/`. A repository whose host and path are no
-directory of the cache (empty; an empty, `.` or `..` segment; a `\`) is
-refused, with or without a chart cache, and so is an `http://` one, the
-chart fetched in clear
-([dependencies](02_service_definition.md#dependencies),
+is `localhost:8080/charts/`. The compile refuses a repository whose host
+and path cannot be laid out so (empty; an empty, `.` or `..` segment; a
+`\`), and an `http://` one, the chart fetched in clear (`Ref.Check`:
+[dependencies](02_service_definition.md#dependencies),
 [platform charts](#platform-charts)). Two repositories that differ only by
 their scheme share a directory.
 
@@ -244,28 +252,23 @@ and nowhere else: a chart archive (`helm pull -d` without `--untar`), a
 chart at the root of the cache or unpacked directly in
 `<chart>-<version>/` is not read, and one chart name and version from two
 repositories (a fork, a generic name such as `app`) are two entries. Of a
-chart, a check reads `values.yaml` and `values.schema.json` only, at
+chart, the check reads `values.yaml` and `values.schema.json` only, at
 the root of its directory, not those of its subcharts
 (`<chart>/charts/<sub>/values.yaml`). A chart without `values.yaml` has no
 defaults, one without `values.schema.json` no schema check
 ([checks of the final values](#checks-of-the-final-values)).
 
-The files are read without a cap. Helm 4.2 and 3.19, which the
-deployers embed
-(okdp-gitops' fixtures), refuse a file over 5 MiB; Helm 4.3
-no longer does, nor does the compiler: such a chart compiles, and fails to
-render with them. A UTF-8 byte order mark at the start of either file is
-dropped, as Helm drops it. Each chart is read once
-per compile, whatever the number of keys it renders, and only when a chart
-it renders is compiled.
-`examples/03_full/.charts/` of okdp-gitops holds the
-full example's charts unpacked, their `values.yaml` and the workspace
-chart's `values.schema.json` only: enough to check, not to render
+A UTF-8 byte order mark at the start of either file is dropped, as Helm
+drops it. Each chart is read once per build, whatever the number of keys
+it renders. `examples/03_full/.charts/` of okdp-gitops holds the full
+example's charts unpacked, their `values.yaml` and the workspace chart's
+`values.schema.json` only: enough to check, not to render
 (`charts.example.org/workspace-3.2.0/workspace/`...).
 
 A chart its directory does not hold, even when the cache holds its archive
 or the chart elsewhere, fails with the command that downloads it there,
-prefixed with the chart key; a file that does not read, with its path:
+prefixed with the chart key; a file that does not read, with its path
+(okdp-gitops' messages):
 
 ```
 app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0
@@ -334,8 +337,8 @@ does not override it.
 1. The layers are merged in order, as Helm merges `-f` files (`MergeMaps`):
    maps merge key by key, lists and scalars replace, a `null` replaces too
    and stays `null`.
-2. The result is coalesced over the [defaults](#defaults)
-   (`CoalesceValues`): a `null` over a default deletes the key; a `null`
+2. The result is coalesced over the [defaults](#defaults), as Helm's
+   `CoalesceValues` does: a `null` over a default deletes the key; a `null`
    where there is no default is kept; the `null` defaults are dropped; when
    a value and its default are not both maps, the value wins.
 
@@ -1664,8 +1667,10 @@ given must be a list; a `null` is refused too:
 The chart's own default list is not among them: Helm replaces it with the
 final list, as it replaces a default list with that of a `-f` file. A
 package that keeps its items restates them in its defaults or values file
-of the key; with a chart cache, a compile warns of an appended list that
-lacks some of them ([checks of the final values](#checks-of-the-final-values)).
+of the key. The compiler reads no chart: it gives the paths appended to
+(`FinalValuesOf.Appended`), and okdp-gitops' check warns of an appended
+list that lacks some of them
+([checks of the final values](#checks-of-the-final-values)).
 
 With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
@@ -1711,8 +1716,8 @@ Helm coalesces the final values over them when it renders the chart, as
 it coalesces `-f` files ([Equivalence with Helm](#equivalence-with-helm)).
 The final values hold what OKDP decides of the chart's values, and nothing
 of its defaults: new defaults, in another version of the chart, change no
-final value. A check reads them ([checks of the final
-values](#checks-of-the-final-values)).
+final value. The compiler never reads them; okdp-gitops' check does
+([checks of the final values](#checks-of-the-final-values)).
 
 ### Nulls
 
@@ -1743,7 +1748,7 @@ helm template <release> <source> -f <defaults> -f <computed> -f <upstream>
 renders, `global` and the [appended](#append) lists aside. `<source>`:
 `Result.Charts[key]`, `<chart> --repo <repository> --version <version>`,
 `oci://<repository>/<chart> --version <version>`, or the chart unpacked in
-the chart cache.
+a [chart cache](#chart-cache).
 `testdata/helm/values` holds what Helm computes on each case
 (`TestHelmValues`), with Helm 4.3.0 and the versions the deployers embed
 (okdp-gitops): Helm 4.2.4, 4.2.1 and 4.2.0 render as
@@ -1754,16 +1759,25 @@ that `values.yaml` and the values both set to `null` is deleted:
 
 ### Checks of the final values
 
-With a [chart cache](#chart-cache) (`Inputs.Charts`), the final values of
-each compiled chart are checked against its upstream chart; without one,
-no chart is read and nothing below is checked. The final values are the
-same either way.
+The compiler reads no upstream chart and checks nothing below: these
+checks are okdp-gitops', in the Finalize of its `deploy.Build`, with the
+charts it fetched or its `okdp-compile --check --charts` found in a
+[chart cache](#chart-cache). The final values are the same, checked or
+not. The compiler gives them what they need: the final values and the
+chart of each key, and the lists the instance appended to
+(`compiler.FinalValues`, `FinalValuesOf`). A chart okdp-gitops could not
+fetch leaves its keys unchecked, reported; a project that is not
+privileged giving it upstream values is refused when the build renders.
 
 Each compiled chart whose source has a `values.schema.json` in the
 chart cache is checked on its final values coalesced over
-its defaults: what its templates see, a `null` that deletes a default
-checked as absent. The check is the [parameter check](#schema-check); the
-violations of every chart are reported together, sorted, under
+its defaults by Helm's own `chartutil.CoalesceValues` (Helm 3.22): what
+its templates see, a `null` that deletes a default checked as absent; a
+`null` default the values do not set is kept, as Helm 3.22 keeps it
+(Helm 4 and 3.19 drop it). The schema is compiled by the compiler's
+`chart.ParseSchema`, the [parameter check](#schema-check)'s, which loads
+no `$ref`: one to a URL or a file is never fetched, and fails the check.
+The violations of every chart are reported together, sorted, under
 `<key> (<chart>-<version>)` (here `app` and `canary` share the source
 `app` 1.8.0):
 
@@ -1780,9 +1794,10 @@ A schema that does not compile, or holds a number outside the range of a
 float64 (`1e400`), fails with its path in the cache, prefixed with the
 chart key (`app: charts.example.org/app-1.8.0/app/values.schema.json: ...`).
 
-A list the instance appended to ([append](#append)) where the chart's
-defaults hold a list some item of which the final list lacks is a warning
-(`Result.Warnings`), one per path, in key order: Helm replaces the
+A list the instance appended to ([append](#append),
+`FinalValuesOf.Appended`) where the chart's defaults hold a list some
+item of which the final list lacks is a warning (`Result.Warnings`, by
+the Finalize), one per path, in key order: Helm replaces the
 chart's list with the final one, and the instance's items do not extend
 it. Items compare by value, in any position; an empty default list, a
 path the instance does not append to, or a package that restates the
@@ -2530,8 +2545,8 @@ upstream values). Release
 `Result.Dependencies` lists `demo-db`, the provider of its claims, twice, for
 `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
-`$if`, is no dependency, and its chart is not in the chart cache of the
-check. Its
+`$if`, is no dependency, and its chart is not in okdp-gitops' chart cache
+of the example. Its
 `okdp.info.yaml` lists three outputs, one with its credentials, whose
 Secret is generated: its objects hold the `Password` generators and
 the `ExternalSecret`, then the `objects` section.

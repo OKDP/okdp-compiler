@@ -57,7 +57,8 @@ A package is a version directory of a catalog,
 `okdp-compile --repository` compiles the instances of a tree, and `--check
 --charts` checks them against the upstream charts' defaults and schemas,
 from a chart cache
-([chart cache](specs/01_inputs_outputs.md#chart-cache)).
+([chart cache](specs/01_inputs_outputs.md#chart-cache)): the compiler
+reads no upstream chart, those checks are okdp-gitops'.
 
 ## Integrating a chart
 
@@ -93,10 +94,11 @@ Each upstream chart the service is made of is a dependency of
 `Chart.yaml`: the chart's name, its chart repository (`https://`) or OCI
 registry path (`oci://`), and a pinned version. The package holds
 no copy of it: a deployer renders the chart from its repository, over its
-defaults. A compile reads none of it; a check (okdp-gitops' `okdp-compile
---check --charts`) reads its `values.yaml` and `values.schema.json` from a chart
-cache, filled with `helm pull --untar`, each chart unpacked under its
-repository's directory, the URL without its scheme
+defaults. The compiler reads none of it; okdp-gitops' check
+(`okdp-compile --check --charts`, its `deploy.Build`) reads its
+`values.yaml` and `values.schema.json` from a chart cache, filled with
+`helm pull --untar`, each chart unpacked under its repository's
+directory, the URL without its scheme
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ```yaml
@@ -639,7 +641,7 @@ tested by the unit tests (`internal/okdp/oidc_test.go`), with no example
 output.
 
 ```bash
-export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of --check, filled with helm pull --untar
+export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of okdp-gitops' --check, filled with helm pull --untar
 # okdp-compile is okdp-gitops'
 # /tmp/polaris-dcr: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
 okdp-compile --repository . --repository /tmp/polaris-dcr --check   # against the upstream charts' defaults and schemas
@@ -1170,8 +1172,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   `platform.oidc.dcr.enabled ? mySecret : oidcClientSecret('n')`.
 - **A dependency is pinned.** `version` is one version, not a range
   (`^1.2`, `1.x` fail): bump it in `Chart.yaml`, then pull the new version
-  into the chart cache of the checks. The final values do not change with
-  it: they hold none of the chart's defaults.
+  into the chart cache of okdp-gitops' checks. The final values do not
+  change with it: they hold none of the chart's defaults.
 
 ## Checklist
 

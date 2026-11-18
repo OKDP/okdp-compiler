@@ -1,6 +1,7 @@
 // Package chart is what the compiler reproduces of Helm and needs of the
-// upstream charts: values read and coalesced as Helm does (values.go) and
-// checked against a schema (schema.go, parameters.go), the compiler's own
+// upstream charts: values read as Helm does, a package's parameters
+// coalesced over its schema's defaults (values.go) and checked against a
+// schema (schema.go, parameters.go), the compiler's own
 // checks of values (check.go), a package's Chart.yaml (metadata.go), its
 // dependencies with what okdp.yaml says of them (spec.go, paths.go), and
 // the chart references (ref.go). It knows neither the mapping language nor
@@ -12,9 +13,10 @@
 //
 // Helm's own functions are not imported: helm.sh/helm/v4 pulls in
 // client-go, and a newer Go and Kubernetes than the programs that embed
-// this package have. They are reproduced from helm v4.3.0
-// (pkg/chart/common/util/coalesce.go), and testdata/helm holds what
-// `helm template` computes on each case.
+// this package have. Its coalescing is reproduced from helm v4.3.0
+// (pkg/chart/common/util/coalesce.go). The compiler reads no upstream
+// chart: the checks against them, with Helm's own functions, are
+// okdp-gitops'.
 package chart
 
 import (
@@ -61,10 +63,6 @@ func ParseValues(b []byte) (M, error) {
 func coalesceValues(defaults, user M) M {
 	return coalesce(defaults, user, true)
 }
-
-// Coalesce is coalesceValues, exported for a caller that shows the values
-// a chart's templates see.
-func Coalesce(defaults, user M) M { return coalesceValues(defaults, user) }
 
 // coalesce is coalesceValues at any depth. Below the top level (top is
 // false), a user null over a null default stays, as in Helm.

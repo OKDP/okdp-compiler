@@ -111,74 +111,44 @@ func TestFinalValuesNoUpstream(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	specs := Specs{"": {Source: src, Upstream: true}, "app": {Source: src}}
 	values := M{"upstream": M{"": M{"a": 1.0}}}
-	cache := fstest.MapFS{"x/app-1.0.0/app/values.yaml": {Data: []byte("b: 2\n")}}
-	out, _, _, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, specs, "values.cel.yaml", M{"app": M{}}, values, nil)
-	if err != nil || out["app"]["a"] != nil {
-		t.Errorf("app: %v %#v", err, out["app"])
+	f, err := FinalValues(fstest.MapFS{}, specs, "values.cel.yaml", M{"app": M{}}, values, nil)
+	if err != nil || f.Values["app"]["a"] != nil {
+		t.Errorf("app: %v %#v", err, f.Values["app"])
 	}
 }
 
-// TestFinalValuesCheck: the final values hold no chart default, an empty
-// global left out, and are the same with the chart cache; with it, the
-// schema of each chart is checked over its defaults, and an instance list
-// appended to that leaves out items of the chart's default list is warned
-// of, once per path.
-func TestFinalValuesCheck(t *testing.T) {
+// TestFinalValues: the final values hold no chart default, an empty
+// global left out; the lists an instance appended to are reported by key,
+// each path once.
+func TestFinalValues(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	specs := Specs{"app": {Source: src, Upstream: true, Append: []string{"env", "args", "extra"}}}
-	cache := fstest.MapFS{
-		"x/app-1.0.0/app/values.yaml":        {Data: []byte("replicas: 1\nenv: [A, B]\nargs: [a]\nextra: []\n")},
-		"x/app-1.0.0/app/values.schema.json": {Data: []byte(`{"required": ["replicas"], "properties": {"replicas": {"maximum": 3}}}`)},
-	}
 	for name, tc := range map[string]struct {
 		computed, user M
 		global         M
-		want           M        // app's final values
-		warnings       []string // with the cache
+		want           M          // app's final values
+		appended       [][]string // app's appended paths
 	}{
-		"no default":       {M{"image": "x"}, nil, nil, M{"image": "x"}, nil},
-		"a global":         {M{}, nil, M{"g": float64(1)}, M{"global": M{"g": float64(1)}}, nil},
-		"a list kept":      {M{"env": []any{"A", "B"}}, M{"env": []any{"C"}}, nil, M{"env": []any{"A", "B", "C"}}, nil},
-		"an item lost":     {M{"env": []any{"B"}}, M{"env": []any{"C"}}, nil, M{"env": []any{"B", "C"}}, []string{"upstream.app.env: appended to the package's list, not to the default list of app-1.0.0, which Helm replaces: the final list lacks 1 of its 2 items; restate them in the package's values of app (its defaults or values file) to keep them"}},
-		"all items lost":   {M{}, M{"env": []any{"C"}, "args": []any{"b"}}, nil, M{"env": []any{"C"}, "args": []any{"b"}}, []string{"upstream.app.env: appended to the package's list, not to the default list of app-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of app (its defaults or values file) to keep them", "upstream.app.args: appended to the package's list, not to the default list of app-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of app (its defaults or values file) to keep them"}},
-		"not appended":     {M{"env": []any{"C"}}, nil, nil, M{"env": []any{"C"}}, nil},
-		"an empty default": {M{}, M{"extra": []any{"x"}}, nil, M{"extra": []any{"x"}}, nil},
+		"no default":     {M{"image": "x"}, nil, nil, M{"image": "x"}, nil},
+		"a global":       {M{}, nil, M{"g": float64(1)}, M{"global": M{"g": float64(1)}}, nil},
+		"a list":         {M{"env": []any{"B"}}, M{"env": []any{"C"}}, nil, M{"env": []any{"B", "C"}}, [][]string{{"env"}}},
+		"two lists":      {M{}, M{"env": []any{"C"}, "args": []any{"b"}}, nil, M{"env": []any{"C"}, "args": []any{"b"}}, [][]string{{"env"}, {"args"}}},
+		"not appended":   {M{"env": []any{"C"}}, nil, nil, M{"env": []any{"C"}}, nil},
+		"a replaced key": {M{"image": "x"}, M{"image": "y"}, nil, M{"image": "y"}, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			values := M{"upstream": M{"app": tc.user}, "global": tc.global}
-			out, refs, warnings, err := FinalValues(nil, nil, fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
-			if err != nil || warnings != nil || refs["app"] != src || !reflect.DeepEqual(out["app"], tc.want) {
-				t.Fatalf("without the cache: %v %q %#v", err, warnings, out["app"])
+			f, err := FinalValues(fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
+			if err != nil || f.Charts["app"] != src || !reflect.DeepEqual(f.Values["app"], tc.want) {
+				t.Fatalf("%v %#v", err, f.Values["app"])
 			}
-			checked, _, warnings, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, specs, "values.yaml", M{"app": tc.computed}, values, nil)
-			if err != nil || !reflect.DeepEqual(checked, out) {
-				t.Errorf("with the cache: %v %#v", err, checked["app"])
-			}
-			if !reflect.DeepEqual(warnings, tc.warnings) {
-				t.Errorf("warnings:\n got %q\nwant %q", warnings, tc.warnings)
+			if got := f.Appended["app"]; !reflect.DeepEqual(got, tc.appended) {
+				t.Errorf("appended: got %q, want %q", got, tc.appended)
 			}
 		})
 	}
-	// The schema, over the chart's defaults (replicas required, set by
-	// them); a chart missing from the cache.
-	_, _, _, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, specs, "values.yaml", M{"app": M{"replicas": float64(5)}}, M{}, nil)
-	if want := "compiled values don't meet the specifications of the schema(s) in the following chart(s):\napp (app-1.0.0):\n- at '/replicas': maximum: got 5, want 3"; err == nil || err.Error() != want {
-		t.Errorf("schema: got %v, want %q", err, want)
-	}
-	_, _, _, err = FinalValues(NewChartCache(fstest.MapFS{}), nil, fstest.MapFS{}, specs, "values.yaml", M{"app": M{}}, M{}, nil)
-	if want := "app: chart app-1.0.0 is not in the chart cache: "; err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("no chart: got %v, want an error starting with %q", err, want)
-	}
-}
-
-// TestFinalValuesCheckGlobal: values without a global are checked with an
-// empty one, as Helm gives every subchart: a schema that refuses it fails.
-func TestFinalValuesCheckGlobal(t *testing.T) {
-	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
-	cache := fstest.MapFS{"x/app-1.0.0/app/values.schema.json": {Data: []byte(`{"additionalProperties": false, "properties": {"a": {}}}`)}}
-	out, _, _, err := FinalValues(NewChartCache(cache), nil, fstest.MapFS{}, Specs{"app": {Source: src}}, "values.yaml", M{"app": M{"a": 1.0}}, M{}, nil)
-	if want := "- at '': additional properties 'global' not allowed"; err == nil || !strings.HasSuffix(err.Error(), want) || out != nil {
-		t.Errorf("got %v, want an error ending with %q", err, want)
+	if _, err := FinalValues(fstest.MapFS{}, specs, "values.yaml", M{"other": M{}}, M{}, nil); err == nil || err.Error() != "values.yaml: other: not a dependency of Chart.yaml" {
+		t.Errorf("a key of no dependency: %v", err)
 	}
 }
 
@@ -262,24 +232,5 @@ func TestMerged(t *testing.T) {
 	}
 	if value.AsMap(first["b"])["c"] != float64(1) {
 		t.Errorf("a layer changed: %#v", first)
-	}
-}
-
-// TestFinalValuesUnfetched: a chart that could not be fetched takes no
-// check, its final values the same; the other keys are checked.
-func TestFinalValuesUnfetched(t *testing.T) {
-	ok, gone := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}, Ref{Repository: "https://x", Chart: "gone", Version: "1.0.0"}
-	specs := Specs{"app": {Source: ok}, "gone": {Source: gone}}
-	output := M{"app": M{}, "gone": M{"a": 1.0}}
-	cache := fstest.MapFS{"x/app-1.0.0/app/values.schema.json": {Data: []byte(`{"required": ["needed"]}`)}}
-	unfetched := map[Ref]error{gone: errors.New("away")}
-	_, _, _, err := FinalValues(NewChartCache(cache), unfetched, fstest.MapFS{}, specs, "values.yaml", output, M{}, nil)
-	if err == nil || !strings.Contains(err.Error(), "needed") {
-		t.Fatalf("the fetched chart's schema: %v", err)
-	}
-	cache["x/app-1.0.0/app/values.schema.json"] = &fstest.MapFile{Data: []byte(`{}`)}
-	out, refs, _, err := FinalValues(NewChartCache(cache), unfetched, fstest.MapFS{}, specs, "values.yaml", output, M{}, nil)
-	if err != nil || out["gone"]["a"] != 1.0 || refs["gone"] != gone {
-		t.Errorf("got %v %v %v", err, out, refs)
 	}
 }

@@ -5,7 +5,6 @@
 //
 //	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"))
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
-//		Charts:    os.DirFS("charts"),
 //		Contracts: os.DirFS("contracts"),
 //		Context:   []compiler.ContextLayer{{Values: platformValues}, {Level: 2, Values: instanceConnections}},
 //		Values:    []map[string]any{instanceValues},
@@ -17,8 +16,9 @@
 // A package is a Helm chart. Each dependency of its Chart.yaml is the
 // upstream chart that renders the values of its key, and a deployer
 // renders that chart with the final values (Result.Charts). A compile
-// reads no chart. With a chart cache (Inputs.Charts), it checks the final
-// values against each chart's defaults and schema.
+// reads no upstream chart: fetching the charts and checking the final
+// values against their defaults and schemas belong to the host, in its
+// Finalize (Inputs.Finalize), as okdp-gitops does.
 //
 // CompileAll compiles instances together, each with what the others
 // publish. LoadRepository reads the instances of a tree, and Build
@@ -39,6 +39,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"slices"
 	"time"
 
 	"github.com/okdp/okdp-compiler/chart"
@@ -122,9 +123,6 @@ type (
 	TreeInstance = tree.Instance
 	// ProvidedClaim is a claim bound to a provider, with its claimer.
 	ProvidedClaim = tree.Provided
-	// ChartSource is a chart cache that fetches the upstream charts it
-	// lacks and holds them unpacked, as Inputs.Charts reads them.
-	ChartSource = tree.ChartSource
 	// LoadError holds the problems of a tree that does not load, each a
 	// whole message that names its repository and path.
 	LoadError = repository.Error
@@ -332,14 +330,10 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 // the Tree gives its outcome, the problem of the graph at its release
 // and the claims bound to it as a provider. It does not change instances.
 //
-// With charts, it fetches the upstream charts the compile names and
-// compiles the instances again with them, so that their final values are
-// checked against the charts. A chart that cannot be fetched leaves only
-// itself unchecked, and is reported (Tree.ChartFailures). When the host
-// requires rendering (Inputs.RequireRender), an instance that gives such
-// a chart upstream values is refused, unless its project is privileged.
-func CompileTree(ctx context.Context, instances []Instance, charts ChartSource) *Tree {
-	return tree.Compile(ctx, instances, charts)
+// The compile reads no upstream chart: a host that checks the final
+// values against the charts does it in its Finalize (Inputs.Finalize).
+func CompileTree(ctx context.Context, instances []Instance) *Tree {
+	return tree.Compile(ctx, instances)
 }
 
 // LoadRepository returns every instance of the tree that repos make
@@ -371,8 +365,7 @@ func AddedProblems(before, after *LoadError) []string {
 // about ten times the cost of the dearest case of the catalogs.
 const DefaultCostLimit = 1_000_000
 
-// BuildOptions is what Build sets on each instance of a tree, plus the
-// chart cache of its checks.
+// BuildOptions is what Build sets on each instance of a tree.
 type BuildOptions struct {
 	CostLimit uint64 // Inputs.CostLimit of each instance; 0 sets no limit
 	// InstanceTimeout is Inputs.Timeout of each instance; 0 sets no
@@ -380,15 +373,17 @@ type BuildOptions struct {
 	// compiled. The deadline of ctx bounds the whole tree beside it.
 	InstanceTimeout   time.Duration
 	AllowPlainSecrets bool // Inputs.AllowPlainSecrets of each instance
-	// Charts is the chart cache that CompileTree checks the final values
-	// against: StaticCharts, or a cache that fetches what it lacks. With
-	// nil, they are not checked.
-	Charts ChartSource
 	// Rules is Inputs.Rules of each instance. Nil applies the mandatory
 	// rules alone.
 	Rules        *RuleSet
 	Finalize     Finalize                                  // Inputs.Finalize; nil is Helm's merge
 	CheckGlobals func(context.Context, GlobalsInput) error // Inputs.CheckGlobals; nil checks nothing
+	// Loaded, when set, is given the instances of the projects that load,
+	// before they compile, with ctx: what a host's Finalize reads that the
+	// compiler does not (okdp-gitops fetches the upstream charts of their
+	// Chart.yaml there, so that no fetch counts against InstanceTimeout).
+	// It does not change them.
+	Loaded func(context.Context, []Instance)
 }
 
 // LoadRules reads the rule set of fsys, rules.yaml at its root, and adds
@@ -421,7 +416,10 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 		instances[i].Inputs.Rules = opts.Rules
 		instances[i].Inputs.CheckGlobals = opts.CheckGlobals
 	}
-	t := CompileTree(ctx, instances, opts.Charts)
+	if opts.Loaded != nil {
+		opts.Loaded(ctx, slices.Clone(instances))
+	}
+	t := CompileTree(ctx, instances)
 	for _, r := range loaded.Refused {
 		r.Inputs.Rules = opts.Rules // CheckProject reads them for a project that does not load
 		t.Refused = append(t.Refused, RefusedProject{Namespace: r.Project, Problems: r.Problems, Errs: r.Errs, Inputs: r.Inputs, Own: r.Own})
@@ -442,12 +440,6 @@ func LoadErrorOf(t *Tree) *LoadError {
 	}
 	return repository.JoinErrors(errs)
 }
-
-// StaticCharts returns a chart cache that is filled already and fetches
-// nothing. fsys holds each chart unpacked with helm pull --untar, as
-// Inputs.Charts reads it. A chart the cache lacks fails the check of the
-// instance that names it.
-func StaticCharts(fsys fs.FS) ChartSource { return tree.Dir{FS: fsys} }
 
 // Partial splits the projects of t into those written and those kept.
 // results are the compiled instances of the projects written, and g is

@@ -10,8 +10,8 @@ import (
 )
 
 // Ref is an upstream chart as its repository publishes it. It renders the
-// values of a chart key, and it is where the chart cache keeps the chart's
-// defaults and schema (Dir).
+// values of a chart key. The compiler never fetches it: a host does, to
+// check the final values against it (okdp-gitops).
 type Ref struct {
 	Repository string `yaml:"repository" json:"repository"` // https://... or oci://...
 	Chart      string `yaml:"chart" json:"chart"`           // the chart's name in the repository
@@ -94,17 +94,17 @@ func compareNumbers(a, b string) int {
 	return strings.Compare(a, b)
 }
 
-// Check verifies the reference: a repository URL that names a directory of
-// the chart cache (CacheDir), a chart name and a pinned version. http://
-// is refused because the chart would be fetched in clear. where names the
-// reference in the errors.
+// Check verifies the reference: a repository URL with a path a chart
+// cache can lay out (repoPath), a chart name and a pinned version.
+// http:// is refused because the chart would be fetched in clear. where
+// names the reference in the errors.
 func (r Ref) Check(where string) error {
 	switch {
 	case r == Ref{}:
 		return fmt.Errorf("%s is required: the upstream chart (repository, chart, version)", where)
 	case strings.HasPrefix(r.Repository, "http://"):
 		return fmt.Errorf("%s.repository %q: http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
-	case r.CacheDir() == "":
+	case r.repoPath() == "":
 		return fmt.Errorf("%s.repository %q: the URL of a chart repository (https://... or oci://...)", where, r.Repository)
 	case !isChartName(r.Chart):
 		return fmt.Errorf("%s.chart %q: the name of a chart of the repository", where, r.Chart)
@@ -115,7 +115,7 @@ func (r Ref) Check(where string) error {
 }
 
 // isChartName reports whether name can name a chart and its directory in
-// the chart cache: one path element, without a space at either end.
+// a chart cache: one path element, without a space at either end.
 func isChartName(name string) bool {
 	return name != "" && name == path.Base(name) && name != "." && name != ".." && strings.TrimSpace(name) == name
 }
@@ -126,23 +126,18 @@ func IsFileName(s string) bool {
 	return fs.ValidPath(s) && s != "." && !strings.ContainsAny(s, `/\`)
 }
 
-// ID returns <chart>-<version>, as the chart cache and the errors name it.
+// ID returns <chart>-<version>, as a chart cache and the errors name it.
 func (r Ref) ID() string {
 	return r.Chart + "-" + r.Version
 }
 
-// repoDir returns the directory of the chart cache that holds the charts
-// of the repository: the URL without its scheme and trailing /
-// (quay.io/adaltas for oci://quay.io/adaltas). It returns "" when the
-// scheme is not https:// or oci://, or when the rest is not a path inside
-// the chart cache (a segment that is empty, . or .., or holds \, ? or #).
-// http:// is accepted only when http is true.
-func (r Ref) repoDir(http bool) string {
-	schemes := []string{"oci://", "https://"}
-	if http {
-		schemes = append(schemes, "http://")
-	}
-	for _, scheme := range schemes {
+// repoPath returns the URL of the repository without its scheme and
+// trailing / (quay.io/adaltas for oci://quay.io/adaltas), what a chart
+// cache lays out as directories (okdp-gitops' chartcache). It returns ""
+// when the scheme is not https:// or oci://, or when the rest is not a
+// relative path (a segment that is empty, . or .., or holds \, ? or #).
+func (r Ref) repoPath() string {
+	for _, scheme := range []string{"oci://", "https://"} {
 		if rest, ok := strings.CutPrefix(r.Repository, scheme); ok {
 			dir := strings.TrimSuffix(rest, "/")
 			for segment := range strings.SplitSeq(dir, "/") {
@@ -154,43 +149,6 @@ func (r Ref) repoDir(http bool) string {
 		}
 	}
 	return ""
-}
-
-// CacheDir returns the chart cache directory of the repository, for a
-// chart that is fetched, or "" when it has none. http:// has none: a
-// chart is not fetched in clear.
-func (r Ref) CacheDir() string { return r.repoDir(false) }
-
-// Dir returns the directory of the chart in the chart cache, with slashes:
-//
-//	<repository without scheme>/<chart>-<version>/<chart>
-//
-// Unlike CacheDir, Dir gives http:// a directory, for a cache that pulls
-// from a host the platform trusts (RepositoryPuller.InsecureHosts). Check
-// still refuses http:// in a package. Dir fails when the repository, the
-// chart or the version cannot be a directory of the cache.
-func (r Ref) Dir() (string, error) {
-	repo := r.repoDir(true)
-	if repo == "" {
-		return "", fmt.Errorf("repository %q is no directory of the chart cache", r.Repository)
-	}
-	for _, s := range []string{r.Chart, r.Version} {
-		if s == "" || strings.ContainsAny(s, `/\?#`) || s == "." || s == ".." {
-			return "", fmt.Errorf("chart %q %q is no directory of the chart cache", r.Chart, r.Version)
-		}
-	}
-	return path.Join(repo, r.ID(), r.Chart), nil
-}
-
-// Pull returns the command that downloads the chart and unpacks it into
-// its entry of the chart cache. helm pull --untar creates the <chart>
-// directory itself.
-func (r Ref) Pull() string {
-	to := path.Join("<chart cache>", r.CacheDir(), r.ID())
-	if strings.HasPrefix(r.Repository, "oci://") {
-		return fmt.Sprintf("helm pull %s/%s --version %s --untar -d %s", strings.TrimSuffix(r.Repository, "/"), r.Chart, r.Version, to)
-	}
-	return fmt.Sprintf("helm pull %s --repo %s --version %s --untar -d %s", r.Chart, r.Repository, r.Version, to)
 }
 
 // dnsLabel matches the characters of a DNS-1123 label.

@@ -17,8 +17,10 @@ type (
 	GlobalLayer = okdp.GlobalLayer
 	// GlobalsInput is what Inputs.CheckGlobals checks.
 	GlobalsInput = okdp.GlobalsInput
-	// ChartCaches holds the chart caches of a set of compiles.
-	ChartCaches = merge.Caches
+	// FinalValuesOf is Helm's merge of the final values of a compile
+	// (FinalValues): the values, the chart of each key and the lists the
+	// instance appended to.
+	FinalValuesOf = merge.Final
 	// KeepSync tells Argo CD's sync options for the objects Helm keeps.
 	KeepSync = ruleset.KeepSync
 	// InstanceSpec is an instance.yaml, as ParseInstance reads it.
@@ -56,10 +58,12 @@ const (
 )
 
 // FinalValues returns Helm's merge of the final values of in, as a
-// compile does without a Finalize; a Finalize calls it to add a policy.
-// check tells what to refuse of the upstream values; nil refuses nothing.
-func FinalValues(caches *ChartCaches, in FinalInput, check chart.UpstreamCheck) (map[string]map[string]any, map[string]ChartRef, []string, error) {
-	return merge.FinalValues(caches.Get(in.Charts), in.ChartFailures, in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, check)
+// compile does without a Finalize; a Finalize calls it to add a policy and
+// the checks against the upstream charts, which the compiler does not
+// read (FinalValuesOf.Appended). check tells what to refuse of the
+// upstream values; nil refuses nothing.
+func FinalValues(in FinalInput, check chart.UpstreamCheck) (FinalValuesOf, error) {
+	return merge.FinalValues(in.Files, in.Specs, in.ValuesFile, in.Output, in.Values, check)
 }
 
 // CheckObjects returns nil when the objects of an instance of svc in

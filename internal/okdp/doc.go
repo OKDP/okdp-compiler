@@ -18,9 +18,10 @@
 // dependency of Chart.yaml is an upstream chart, which renders the
 // values under its alias or its name.
 //
-// A compile reads no chart: Helm coalesces the final values over the
-// chart's defaults when it renders it. A check does read the chart's
-// defaults and schema, from the chart cache (Inputs.Charts).
+// A compile reads no upstream chart: Helm coalesces the final values
+// over the chart's defaults when it renders it. A host that checks them
+// against the chart's defaults and schema fetches the chart itself, in its
+// Finalize (Inputs.Finalize).
 //
 // # Claims
 //

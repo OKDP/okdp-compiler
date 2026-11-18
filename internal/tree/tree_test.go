@@ -27,7 +27,7 @@ func TestBuild(t *testing.T) {
 		{Result: &okdp.Result{Namespace: "demo", Release: "demo-lost", Dependencies: []okdp.Dependency{{Instance: "demo-gone", Contract: "database", Field: "database", Output: "x"}}}},
 		{Err: errors.New("refused")},
 	}
-	tr := build(instances, outcomes, nil)
+	tr := build(instances, outcomes)
 
 	pg := tr.Instance("data", "pg")
 	var ids []string
@@ -60,7 +60,7 @@ func TestBuild(t *testing.T) {
 
 // TestBuildGraph: the graph of a tree without problems.
 func TestBuildGraph(t *testing.T) {
-	tr := build([]okdp.Instance{instance("demo", "a")}, []okdp.Outcome{{Result: &okdp.Result{Namespace: "demo", Release: "demo-a"}}}, nil)
+	tr := build([]okdp.Instance{instance("demo", "a")}, []okdp.Outcome{{Result: &okdp.Result{Namespace: "demo", Release: "demo-a"}}})
 	if tr.Graph == nil || tr.Problems() != nil {
 		t.Errorf("graph %v, problems %v", tr.Graph, tr.Problems())
 	}
