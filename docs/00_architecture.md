@@ -6,13 +6,12 @@ specified in [service definition](specs/02_service_definition.md) and
 
 The compiler's rules are data, in two rule sets ([Rules](#rules)). The
 mandatory set, embedded
-([`internal/rules/mandatory`](../internal/rules/mandatory)), applied to every compile, gives the schema of the platform's settings,
-the workload fragments and the OAuth clients. A rule set added to it
-(`Inputs.Rules`, read by `LoadRules`) gives the checks, their tables, the
-schema of a mapping and the charts the compiler adds. okdp-gitops holds
-the standard set, `rules/v1`, and [`testdata/rules`](../testdata/rules)
-is the copy this module's tests compile with: every `testdata/rules/...`
-path below is a file of that set.
+([`internal/rules/mandatory`](../internal/rules/mandatory)), applied to
+every compile, gives the schema of the platform's settings, the workload
+fragments, the OAuth clients, the checks, their tables, the schema of a
+mapping and the charts the compiler adds. A rule set added to it
+(`Inputs.Rules`, read by `LoadRules`) gives a platform's own rules, and
+replaces none of the mandatory set's.
 
 ## Position in OKDP
 
@@ -31,8 +30,8 @@ values layers (the context's,
 instance's, `Values`), and the release and
 namespace, shared by all the instance's charts; what the other instances
 of the namespace publish (`Published`), the outputs a connection reference
-may name; for a check, the chart
-cache (the upstream charts' defaults and schemas)
+may name. It reads no upstream chart: a host checks the final values
+against them in its Finalize (okdp-gitops)
 ([Inputs and outputs](specs/01_inputs_outputs.md)).
 It returns, in `Result`: `Values`, the final values each upstream chart is
 rendered with by `helm template`; `Charts`, the upstream chart that renders
@@ -79,7 +78,6 @@ flowchart TD
   published["published<br/>the other instances' okdp.info.yaml"]
   bindings["bindings<br/>the providers of its claims"]
   claims["claims<br/>bound to this provider"]
-  cache["chart cache, optional<br/>repository/chart-version: values.yaml, values.schema.json"]
   tmpl["objects of the rule set<br/>oidc-dcr.cel.yaml, oidc-clients.cel.yaml"]
 
   layers --> s1["1: parameters<br/>merged, coalesced, schema-checked"]
@@ -112,10 +110,12 @@ flowchart TD
   pkg -. defaults .-> s9
   layers -. "upstream.key" .-> s9
   s9 --> vals["Result.Values, Result.Charts"]
-  s9 --> s10["10: upstream charts<br/>with a chart cache: schemas, appended default lists"]
-  cache -- "defaults, schemas" --> s10
-  s10 -- warnings --> warn["Result.Warnings"]
+  s9 -- "a host's Finalize: its warnings" --> warn["Result.Warnings"]
 ```
+
+No upstream chart is read: a host checks the final values against the
+charts in its `Inputs.Finalize`, fetching them itself (okdp-gitops: their
+schemas, the default lists an instance appended to).
 
 `okdp.LoadDefinition` (`internal/okdp/load.go`) reads `Chart.yaml` into
 `chart.Metadata` (`chart.ReadMetadata`, `chart/metadata.go`:
@@ -287,7 +287,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    compiler's templates, each evaluation cancelled with the context. It reads the
    platform's charts, `global.okdp.charts` (`platformCharts`,
    `internal/okdp/objects.go`): each chart of the rule set (`RuleSet.Charts`:
-   in the standard set `objects`, the `okdp-objects` chart, 0.1.0), unless
+   in the mandatory set `objects`, the `okdp-objects` chart, 0.1.0), unless
    the platform sets it, checked as a source is ([Platform
    charts](specs/01_inputs_outputs.md#platform-charts)).
 5. **Mapping** (`runMapping`, `internal/okdp/mapping.go`, on
@@ -312,10 +312,9 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    each writes at its top level, kept or not (`Doc.Written`: those of its
    map as written, not those its `$merge` or a `$for` gives). They are
    checked together against the rule set's mapping schema,
-   `testdata/rules/schemas/mapping.schema.json` (`RuleSet.MappingSchema`,
-   parsed once by `LoadRules`; none with the mandatory set alone), as
-   `global.okdp`
-   is (`schemaValues`; a
+   `internal/rules/mandatory/schemas/mapping.schema.json`
+   (`RuleSet.MappingSchema`, parsed once when the set is read), as
+   `global.okdp` is (`schemaValues`; a
    null section is not set, another null refused where no default exists),
    every violation at once: the values a map of maps or nulls; `instance`
    a map, its `url` and `usage` strings; the others lists, an `objects`
@@ -375,7 +374,7 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    `Inputs.AllowPlainSecrets`, the check `plainSecret`
    (`checkPlainSecrets`): no Secret holds values in clear, no
    ExternalSecret's template a literal at a sensitive key, no Fake
-   generator values. With the mandatory set alone these checks pass.
+   generator values.
 9. **Final values** (`Inputs.Finalize`, else `merge.FinalValues`,
    `internal/merge/merge.go`), for
    each dependency of `Chart.yaml` the values file does not leave out
@@ -394,36 +393,31 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    over it when it renders. When the chart accepts upstream values, the
    instance's `upstream.<key>` values go through `applyUpstream`: the `{{`
    check, `protect`, the caller's check (`chart.UpstreamCheck`), `append`,
-   then the merge. A host's `Inputs.Finalize` wraps this merge: okdp-gitops'
-   adds the upstream policy (`policy.UpstreamCheck`, for a project that is
-   not privileged), the hosts of the charts' ingresses
-   (`policy.CheckIngressValues`) and the warning of a literal of the
-   upstream values at a sensitive key (`policy.PlainUpstream`). Last,
-   `global` is set, left out when empty. `Result.Charts` records the
-   source of each compiled key. The layers and the rules: [Merge
+   then the merge; the paths of the lists appended to are kept by key
+   (`Final.Appended`). Last, `global` is set, left out when empty.
+   `merge.FinalValues` returns a `merge.Final` (`compiler.FinalValuesOf`):
+   the values, the source of each compiled key, which `Result.Charts`
+   records, and the appended lists. The compiler reads no upstream chart.
+   A host's `Inputs.Finalize` wraps this merge (`compiler.FinalValues`):
+   okdp-gitops' adds the upstream policy (`policy.UpstreamCheck`, for a
+   project that is not privileged), the hosts of the charts' ingresses
+   (`policy.CheckIngressValues`), the warning of a literal of the
+   upstream values at a sensitive key (`policy.PlainUpstream`), and the
+   checks against the upstream charts it fetched (`chartcheck`): the
+   final values, coalesced over the chart's `values.yaml` by Helm's
+   `chartutil.CoalesceValues`, against its `values.schema.json`, and a
+   warning for an appended list whose final list lacks items of the
+   chart's default list
+   ([checks of the final values](specs/01_inputs_outputs.md#checks-of-the-final-values)).
+   The layers and the rules: [Merge
    precedence](specs/01_inputs_outputs.md#merge-precedence), [Upstream
    values](specs/01_inputs_outputs.md#upstream-values).
-10. **Upstream charts** (`checkKey`, `internal/merge/merge.go`), with a
-    chart cache only (`Inputs.Charts`):
-    without one, no chart is read. The cache (`ChartCache.get`,
-    `internal/merge/cache.go`) reads each upstream chart once per compile
-    (its own `values.yaml` and `values.schema.json`, not its subcharts'),
-    from `<repository>/<chart>-<version>/<chart>/` (`Ref.Dir`); a
-    chart the cache does not hold there fails with the `helm pull --untar`
-    command that fetches it there. The final values, coalesced over the
-    chart defaults as Helm will coalesce them, are checked against the
-    chart's `values.schema.json` (`validate`, `internal/merge/cache.go`)
-    when it has one; the violations of every chart are reported together,
-    under the key and its upstream chart (`app (app-1.8.0)`). A list the
-    instance appended to whose final list lacks items of the chart's
-    default list is a warning (`Result.Warnings`): Helm replaces that
-    list. The final values are not changed.
 
 Errors: a compile stops at its first error, except where the whole list
 helps the author: the `errors` messages, the parameter schema violations,
-the connection references that do not resolve, the violations of all
-compiled charts. The first error is the same from one compile to the next:
-a check over the keys of a map visits them sorted, a list in its order
+the connection references that do not resolve. The first error is the
+same from one compile to the next: a check over the keys of a map visits
+them sorted, a list in its order
 (`provides`, first error by position). A message says where: the chart, the
 parameter path, the mapping's file and path (`values.cel.yaml: app:
 env[2]: value: ...`, `okdp.yaml: vars host: ...`), the `vars` or `$vars`
@@ -443,7 +437,8 @@ each import only those below them: `compiler` -> `repository` and `tree`
 -> `graph` -> `okdp` -> `merge`, `rules` -> `compile` and `chart` ->
 `value`: the compile knows no tree and no graph, the graph no tree
 (`TestLayers`). okdp-gitops holds the writers: the command line, the
-targets and their output, `treeedit` and `chartcache`.
+targets and their output, `treeedit`, `chartcache` and the checks against
+the upstream charts (`chartcheck`).
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -454,16 +449,15 @@ neither knows OKDP.
 | | `redact.go` | what a message does not print: `Sensitive`, a key whose value may be a credential (`password`, `token`, `clientSecret`, `apiKey`, a key ending with one, or with `Key`), `SensitivePath`, the key of a path, a list item's its list's, `Redact`, a value with those of its sensitive keys `Redacted` (`<redacted>`), `ShortAt`, a value of a key for a message | `Short`; `chart.Validate` |
 | | `path.go` | the path of a value, as messages write it (`Key`, `Index`): plain keys joined by dots, a key that is empty or holds a special character in brackets, the form of the `protect` paths; read back as its keys and indexes (`Split`, `Join`), a JSON pointer (`Pointer`) | `formatPath` and `NoTemplate` (`chart`); the parameter paths of the connections and `Dependency.Field`, the fields of the contract violations (`okdp`) |
 | `compile` | `compile.go` | the top level of a mapping, over the language of github.com/okdp/cel2yaml (`cel2yaml.Session`, opened with `cel2yaml.NewSession`: its CEL cost limit, the caller's host functions and the CEL environments built with them); documents read from one file or several (`Source`: a name, the first segment of its errors; a file of top-level keys, some skipped for another reader, or one section whole) with `cel2yaml.Parse`, each `vars` binding, `errors` and each section compiled to a `cel2yaml.Template` in the names in scope at its place, all before any is evaluated, then evaluated with the names of their sections: `vars` and `errors`, then the sections (`Eval`, a `Doc`: their values, and the keys each writes, `Written`), as one `cel2yaml.Session.Document` | `cel2yaml.Session.Template`, `cel2yaml.Template.Eval` |
-| `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values | stages 1, 9 and 10 |
-| | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report), the value of a sensitive key not printed (`redactCauses`: a pattern, a format, a numeric bound, `<redacted>` in its place), each violation apart too (`Violation`, `violations`: the leaves of the report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1, 2 and 10; the contracts (`internal/okdp/connections.go`) |
-| | `ref.go` | `Ref`, an upstream chart, its check, its repository's directory of the chart cache (`cacheDir`) and the chart's (`Dir`, the one layout); SemVer precedence (`CompareVersions`); the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`) | the dependencies of `metadata.go`, the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`); the chart keys (`metadata.go`, `spec.go`); the release, the namespace and an internal reference (`okdp`) |
+| `chart` | `values.go` | Helm's reading (`ParseValues`) and coalescing of values (`coalesceValues`: the parameters over the defaults of `config.schema.json`) | stages 1 and 9; okdp-gitops' `chartcheck` (`ParseValues`) |
+| | `schema.go` | JSON Schema validation, reported as Helm reports it (sorted, for a stable report), the value of a sensitive key not printed (`redactCauses`: a pattern, a format, a numeric bound, `<redacted>` in its place), each violation apart too (`Violation`, `violations`: the leaves of the report); `CompileSchema`, a schema compiled as Helm compiles it | stages 1 and 2; the contracts (`internal/okdp/connections.go`); okdp-gitops' `chartcheck` (`ParseSchema`, `SchemaError`) |
+| | `ref.go` | `Ref`, an upstream chart, its check (`Check`: an `https://` or `oci://` repository whose path a chart cache can lay out, `repoPath`; the layout itself is okdp-gitops' `chartdir`); SemVer precedence (`CompareVersions`); the names Kubernetes and Helm accept: `IsDNSLabel`, `IsRelease` (`ReleaseMax`) | the dependencies of `metadata.go`, the sources of `spec.go`, the platform's charts (`internal/okdp/objects.go`); the chart keys (`metadata.go`, `spec.go`); the release, the namespace and an internal reference (`okdp`) |
 | | `metadata.go` | `Chart.yaml`: `Metadata`, Helm's fields in Helm's order, the order okdp-gitops' umbrella writes them in; `Dependency`, its key (`Key`: the alias, else the name) and its upstream chart (`Ref`); `Maintainer`; `ReadMetadata`, the strict reader of one YAML document, and `Metadata.Check`: `apiVersion: v2`, a name, a SemVer version, an application chart, each dependency's name, key (a DNS label, unique), repository and pinned version, Helm's `condition`, `tags`, `enabled` and `import-values` refused | `ref.go` (`Ref.Check`, `IsDNSLabel`, `IsVersion`); read by `LoadDefinition`, `compiler.ChartMetadata`; written back by okdp-gitops' umbrella |
 | | `spec.go` | the charts of a package, by key: `Spec` (its source, its OKDP defaults, the instance upstream values it accepts, their `protect` and `append` paths), built from the dependencies of `Chart.yaml` and the `defaults` and `upstream` of `okdp.yaml` (`NewSpecs`; `Upstream`, the forms of `upstream`, decoded by its `UnmarshalYAML`); `Specs.Check` (the `protect` and `append` paths) | `metadata.go`, `paths.go`; built by `okdp.Definition.service` |
 | | `paths.go` | the grammar of the `protect` and `append` paths (`parsePath`); `formatPath`, the keys a value was found at, written back | `spec.go`, `merge.go`; `value.Key` |
 | | `parameters.go` | stage 1: `Schema`, a values schema decoded and compiled once, its defaults read (`ParseSchema`), its values coalesced over them and checked (`Schema.Values`); the package's `config.schema.json`, read once per compile, `{}` when missing (`ReadParameterSchema`); `Parameters`, `connections` and `claims` apart, its violations a `ValuesError` | `values.go`, `schema.go`; read by `okdp` (`context.go`: the parameters, the platform schema) |
 | | `check.go` | what is checked of values whatever the chart: `NoTemplate`, the `{{` check; `Overlap`, a layer setting what a lower one set; `UpstreamCheck`, the type of the caller's check of upstream values | `okdp` (`layers.go`, `connections.go`), `merge` |
-| `merge` | `merge.go` | stages 9 and 10 (`FinalValues`: `keyValues`, then `checkKey` with a chart cache), the instance's upstream values, `protect`, the caller's check (`chart.UpstreamCheck`) and `append` | `chart`; `compiler.FinalValues` for a host's `Inputs.Finalize` |
-| | `cache.go` | the chart cache of stage 10 (`ChartCache`: `<repository>/<chart>-<version>/<chart>/`, `readEntry`, each upstream chart read and its schema compiled once), `Caches`, one per file system | `merge.go` |
+| `merge` | `merge.go` | stage 9 (`FinalValues`, a `Final`: the values by key from `keyValues`, the source of each, the paths appended to, `Appended`), the instance's upstream values, `protect`, the caller's check (`chart.UpstreamCheck`) and `append`; no upstream chart read | `chart`; `compiler.FinalValues` for a host's `Inputs.Finalize` |
 | | `paths.go` | the paths the merge walks | `merge.go` |
 | `rules` | `rules.go` | the rule sets (`LoadRules`, the set given added to the mandatory one, `Mandatory`, it alone, embedded from `mandatory/`, `RuleSet`; its zero value holds no rule, its checks failing with `ErrNotLoaded`; a rule that refuses is a `*Failure`, `errors.Is(err, ErrRefused)`, values that violate a schema a `*SchemaError`): its tables, each with what the platform adds to it (`addFrom`), its schemas, fragments and templates, labels, names and charts; every table and check required of the two sets together, an unknown one refused, a rule of both refused | `chart`, `compile`; the walkers of `okdp` |
 | | `check.go` | its documents, prepared once per set in free sessions (`checker`, `get`, `put`) and evaluated by the walkers (`Refuse`, `Problem`, `Values`), a check that fails to evaluate an error; the functions they call (`ruleFunctions`) | `compile.Prepare` |
@@ -471,8 +465,8 @@ neither knows OKDP.
 | `okdp` | `doc.go` | the package doc | |
 | | `service.go` | `Definition` (the `Chart.yaml` metadata, the package keys of `okdp.yaml`, `okdp.yaml` and the values file as bytes, the values file's name, the package's files, the warnings of its load); `Package`, the package keys of `okdp.yaml` (`require` a list of keys, `defaults`, `upstream`, `provisions`, each a `Provision`, a contract and its claimers, read from its name or `{contract, claimers}`; the mapping's sections held as `yaml.Node`, unread); `Service` (the name and version of `Chart.yaml`, the requirements and catalog metadata of `okdp.yaml`, the charts), built from a `Definition` and checked, at load and before every compile (`Definition.service`, its messages naming `Chart.yaml` or `okdp.yaml`); `platformValue`, the end of the error of a missing platform value, which names the input | `chart.Metadata.Check`, `chart.NewSpecs`; read by `LoadDefinition` and `Compile`; `platformValue` by `pipeline.go` |
 | | `load.go` | `LoadDefinition`: `Chart.yaml`, read and checked (`chart.ReadMetadata`); `okdp.yaml`, its package keys decoded strictly (`output` refused), the keys of `defaults` and `upstream` those of dependencies; the values file, `values.cel.yaml` or `values.yaml` (both refused), a `values.yaml` checked for expressions and `$`-keys, a warning (`holdsExpressions`); the `Service` built from them and checked | `chart.ReadMetadata`, `Definition.service` |
-| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, each a method of `run`, the state of one compile (`checkInputs`; `platformInstance`, stages 1 to 4, the platform requirements among them; `mapping`, stages 5 and 6, in the compile's CEL session; `provides`, stage 7; `objects`, stage 8; `finalValues`, stages 9 and 10, the dependencies rendered by `rendered`) | calls `newInstance`, `cel2yaml.NewSession` (with `functions`, the context given to each evaluation), `platformCharts`, `runMapping`, `ownObjects`, `provided`, `published`, `checkObjectsChart`, `Inputs.Finalize` or `merge.FinalValues` |
-| | `memo.go` | `Memo`: what the compiles of a set of instances read once, an instance's parameters (`paramsMemo`), the contracts of a file system (`contractCache`), the chart cache's upstream charts (`merge.Caches`); `CompileAllWith` (`tree.Compile` runs twice with a chart cache and shares one) | `Compile`, `claimsOf`, `newInstance`, `resolver` |
+| | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, each a method of `run`, the state of one compile (`checkInputs`; `platformInstance`, stages 1 to 4, the platform requirements among them; `mapping`, stages 5 and 6, in the compile's CEL session; `provides`, stage 7; `objects`, stage 8; `finalValues`, stage 9, the dependencies rendered by `rendered`) | calls `newInstance`, `cel2yaml.NewSession` (with `functions`, the context given to each evaluation), `platformCharts`, `runMapping`, `ownObjects`, `provided`, `published`, `checkObjectsChart`, `Inputs.Finalize` or `merge.FinalValues` |
+| | `memo.go` | `Memo`: what the compiles of a set of instances read once, an instance's parameters (`paramsMemo`), the contracts of a file system (`contractCache`); `CompileAllWith`, for a caller that compiles the same instances again | `Compile`, `claimsOf`, `newInstance`, `resolver` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, nothing of `global.okdp` but `provisioning` above level 0 (`platformOnly`), no key of `global` but those `policy.projectGlobals` lists (`projectGlobals`), checked by the upstream policy (`upstreamGlobals`), no `claims` at level 0, no `{{` above it; the context's `global.okdp`, level 0's and the classes above it) then the instance's, normalized (`value.Normalize`); `global`, `connections` and `claims` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
 | | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` of the context's layers alone, `contextLayers`, checked against the rule set's platform schema, `platformSettings`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against a schema of the rule set, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; the rule set's document `scope`; the `instance` is read by `mapping.go`, `objects.go`, `provides.go` |
 | | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection, a named claim's or a claim template's output of `Inputs.Bindings`, or an output of `Inputs.Published` (`resolver`: `resolve`, then one resolution per source, `resolveNamed`, `resolveClaim`, `resolveExternal`, its contract's fields apart from its own keys (`connectionFields`), as written (`Connection`, `ParseConnection`, `MarshalYAML`), `resolveOutput`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled once for the compiles of a set (`readContract`, `contractCache`), its claim schema with it, `x-okdp-internal` refused, and the checks of values against one (`fields`, `complete`, `check`), of a claim's request against its claim schema (`contract.request`); every connection of an instance's context checked at its declaration, referenced or not (`declaredConnections`, `declared`, `declaration`, `CheckConnection`, `Connection.Entry`); what a reference requires (`requirement`, `require`): compiled (`readRequirement`), those of the parameter schema at stage 1, with the request each fixes (`requirements`), found as the walk finds them, one out of its reach refused (`schemaRefs`, `ConnectionRefs`), its fields against the contract (`contract.requires`), the connection against it (`requirement.check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
@@ -495,18 +489,18 @@ neither knows OKDP.
 | | `catalog.go` | the catalog of the repositories, as `Load` indexes it: `LoadCatalog`, `Catalog`, its services and their versions, highest first (`sortVersions`), a package (`packageDir`, shared with `definition`), the contracts; `ErrNotInCatalog` | `index`, `chart.CompareVersions` |
 | | `catalogs.go` | `CatalogsFile`, `catalogs.yaml` beside `platform.yaml`, read strictly (`ParseCatalogs`: `Catalogs`, `CatalogRepository`, its ref `DefaultCatalogRef` by default, `MenuCategory`, `MenuService`, every problem at once, `parser`), checked by `Load` when a repository of the tree holds it, its menu's services those of the catalogs (`checkCatalogs`, `menu`, `Catalog.CheckMenu`) | `index`, `packageDir` |
 | `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
-| `tree` | `tree.go` | a tree's instances compiled together and read as a caller asks of them: `Compile` (`okdp.CompileAll`, again with the charts a `ChartSource` fetched, `refs`, their values then checked; a chart that cannot be fetched left unchecked for that chart alone, `Tree.ChartFailures`, `Instance.ChartFailures`, `Inputs.ChartFailures`, the check of an instance's upstream values on it refused when the host requires rendering, `Inputs.RequireRender`; a `Dir`, a cache filled already, set at once, compiled once; then `graph.New`), each problem of the graph at its instance (`Instance.GraphErr`, `atInstances`), the claims bound to each provider (`Provided`), what it granted each (`Granted`), why an instance does not deploy (`Err`, `Problems`), the projects that do not load (`Refused`) | `okdp.CompileAll`, `graph.New`, `chart.Ref` |
+| `tree` | `tree.go` | a tree's instances compiled together and read as a caller asks of them: `Compile` (`okdp.CompileAll`, once, no upstream chart read; then `graph.New`), each problem of the graph at its instance (`Instance.GraphErr`, `atInstances`), the claims bound to each provider (`Provided`), what it granted each (`Granted`), why an instance does not deploy (`Err`, `Problems`), the projects that do not load (`Refused`) | `okdp.CompileAll`, `graph.New` |
 | | `partial.go` | the projects of a tree written and kept (`Partial`, `Kept`, `KeptInstance`): those that do not load (`Tree.Refused`, `Kept.Unloaded`), those of the refused instances and of the instances a caller keeps too (`PartialWith`), then, round after round, of an instance at which the graph of what is left has a problem of its own (its dependencies on kept projects left out), or that depends on a release of a kept project (`dependsOnKept`), until the graph of what is left has none; `Regressions`, the instances a change broke | `graph.New` |
-| `compiler` | `compiler.go`, `exports.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `LoadCatalog`, `LoadRules`, `ParseConnection`, `ParseClaim`, `CompileAll`, `CompileTree`, `Build` (`BuildOptions`), `DefaultCostLimit`, `LoadErrorOf`, `StaticCharts`, `Partial`, `PartialWith`, `Regressions`, `AddedProblems`, `CheckProjectName`, `NewGraph`, `FinalValues`, `ParseValues`; aliases of the types a caller names; the names of the tree (`PlatformFile`, `ContractsDir`, `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`, `InstanceFile`, `ConnectionsFile`, `ConfigFile`), its release rule (`ReleaseName`) and its names (`IsName`); what a host reads of a rule set (`Roles`, `EngineNamespaces`, `PlatformObjectNames`, the `Table*` names) | wraps `okdp`, `repository`, `graph`, `tree`, `merge`, `chart` |
+| `compiler` | `compiler.go`, `exports.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `LoadCatalog`, `LoadRules`, `ParseConnection`, `ParseClaim`, `CompileAll`, `CompileTree`, `Build` (`BuildOptions`, its `Loaded` given the instances that load before they compile), `DefaultCostLimit`, `LoadErrorOf`, `Partial`, `PartialWith`, `Regressions`, `AddedProblems`, `CheckProjectName`, `NewGraph`, `FinalValues` (`FinalValuesOf`: `Values`, `Charts`, `Appended`), `ParseValues`; aliases of the types a caller names; the names of the tree (`PlatformFile`, `ContractsDir`, `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`, `InstanceFile`, `ConnectionsFile`, `ConfigFile`), its release rule (`ReleaseName`) and its names (`IsName`); what a host reads of a rule set (`Roles`, `EngineNamespaces`, `PlatformObjectNames`, the `Table*` names) | wraps `okdp`, `repository`, `graph`, `tree`, `merge`, `chart` |
 | | `write.go` | the files of a compile (`Write`: `ValuesFile`, `ObjectsValuesFile`, `InfoFile`), `ChartValues`, `ObjectsChartValues`, the objects Helm keeps given Argo CD's sync options (`keepSynced`, `RuleSet.Keep`) | `okdp.Result` |
-| | `accessors.go` | what the compile decides, for a caller that answers before it writes: `CheckConnection`, `FieldErrors`, a compile's error as the problems of its fields (`FieldError`: `Path`, `Pointer`, `Message`; `okdp.FieldError`, `chart.ValuesError`, a `LoadError` a problem each); `ConnectionRefs` (`ConnectionRef`); `ReadContract`, `ReadContracts` (`ContractDescriptor`, `ContractField`); `MergeValues`, `CoalesceValues`; `NamedClaimID`, `IsClaimID`, `CheckProvider` | `okdp`, `chart`, `value` |
+| | `accessors.go` | what the compile decides, for a caller that answers before it writes: `CheckConnection`, `FieldErrors`, a compile's error as the problems of its fields (`FieldError`: `Path`, `Pointer`, `Message`; `okdp.FieldError`, `chart.ValuesError`, a `LoadError` a problem each); `ConnectionRefs` (`ConnectionRef`); `ReadContract`, `ReadContracts` (`ContractDescriptor`, `ContractField`); `MergeValues`; `NamedClaimID`, `IsClaimID`, `CheckProvider` | `okdp`, `chart`, `value` |
 
 Layers: `value`, `chart/values.go` and `chart/schema.go`
 reproduce Helm and know nothing of OKDP; github.com/okdp/cel2yaml
 reproduces Helm's and sprig's functions, bound to CEL;
 `chart/ref.go` holds the names Kubernetes and Helm accept;
 `internal/merge` applies the rules of the package's charts (`okdp.yaml`'s
-`defaults` and `upstream`) and reads the chart cache; `internal/okdp`
+`defaults` and `upstream`) and reads no upstream chart; `internal/okdp`
 binds claims and resolves connections, its walkers running what the rule
 set says, and `internal/okdp/pipeline.go` orders the stages. Each rule is
 computed in one place and reused: the labels of the context, of
@@ -518,19 +512,19 @@ the rule set's templates.
 ### Rules
 
 A rule set is a directory: `rules.yaml` and the files it names, read once
-against `rules.schema.json`. A compile applies two: the mandatory set,
-`internal/rules/mandatory`, embedded, and the one it is given
+against `rules.schema.json`. A compile applies the mandatory set,
+`internal/rules/mandatory`, embedded, and the one it is given, if any
 (`Inputs.Rules`, read by `LoadRules`), added to it. Each rule is in one
-of them: a table, a document, a function, a template, a section, a chart
-or a schema of the mandatory set is refused in the other, and so are
-`names`, `labels` and `keepSync`, each given whole. There is no precedence
-to read: both apply. Their checks and documents are prepared in one
-session, each able to call any other with `rule`.
+of them: a table, a check, a document, a function, a template, a
+section, a chart or a schema of the mandatory set is refused in the
+other, and so are `names`, `labels` and `keepSync`, each given whole.
+There is no precedence to read: both apply. Their checks and documents
+are prepared in one session, each able to call any other with `rule`.
 
-`LoadRules` fails closed: a table or a check neither set gives, or unknown,
-no mapping schema or no `objects` chart refuses the set, never a rule
-turned off; an empty table is written `values: []`. A role other than
-`viewer`, `editor` or `admin` refuses it too: what each may do is code.
+`LoadRules` fails closed: a table or a check that is unknown refuses the
+set, never a rule turned off or replaced. A role other than `viewer`,
+`editor` or `admin` refuses the mandatory set too: what each may do is
+code.
 
 | Part of `rules.yaml` | Holds |
 |---|---|
@@ -546,12 +540,9 @@ The checks run in a session of the rule set's own, prepared once and kept
 in a free list: a compile pays neither to build them nor in its cost,
 which bounds what a package's expressions compute.
 
-`Inputs.Rules` nil is the mandatory set alone (`rules.Mandatory`): its
-tables, the others empty, every check passing, no mapping schema and no
-default for the objects chart. Its functions, its OAuth clients, its
-platform schema and its documents apply, and claims bind across
-namespaces. `LoadRules` stays strict: the mandatory set alone is a
-compile that gives none, not a `rules.yaml` that leaves things out.
+`Inputs.Rules` nil is the mandatory set alone (`rules.Mandatory`): every
+table, every check, the schemas and the default of the objects chart
+apply, as in any compile.
 
 ## Design decisions
 
@@ -563,9 +554,9 @@ same way, and the fixtures check it against the helm binary
 1.2, an upstream default `enabled: no` is the string `"no"`, which a
 template's `if` takes as true.
 
-- Reading: values files, the upstream charts' `values.yaml` included, as
-  Helm 3 reads them, the first document only (`ParseValues`,
-  `sigs.k8s.io/yaml`, YAML 1.1)
+- Reading: values files as Helm 3 reads them, the first document only
+  (`ParseValues`, `sigs.k8s.io/yaml`, YAML 1.1); okdp-gitops reads the
+  upstream charts' `values.yaml` with it
   ([Values files](specs/01_inputs_outputs.md#values-files)).
 - Merging: `value.Merge` is Helm's `MergeMaps`, `coalesceValues` Helm 4's
   `CoalesceValues`
@@ -678,7 +669,7 @@ needs:
 - the checks across clients
   ([oidcClients](specs/02_service_definition.md#oidcclients)), with errors
   naming the client; the form of each client is the mapping schema's,
-  `testdata/rules/schemas/mapping.schema.json`;
+  `internal/rules/mandatory/schemas/mapping.schema.json`;
 - the mode (no chart in `existing` mode) and what `dcr` mode requires of
   the platform's settings (their types and defaults are the platform
   schema's, `internal/rules/mandatory/schemas/platform.schema.json`);
@@ -711,13 +702,13 @@ The compiler stops at values:
   its own repository, by Helm itself: hooks, `.Files`, `.Capabilities`,
   subcharts and the chart's schema behave as upstream intends. OKDP keeps
   no copy of it and publishes no chart of the service: a compile reads
-  none of it, Helm applying its defaults when it renders; a check reads
-  only the chart's `values.yaml` and `values.schema.json`, from a chart
-  cache ([Chart cache](specs/01_inputs_outputs.md#chart-cache));
+  none of it, Helm applying its defaults when it renders; okdp-gitops'
+  check reads only the chart's `values.yaml` and `values.schema.json`,
+  from a chart cache ([Chart cache](specs/01_inputs_outputs.md#chart-cache));
 - the result is data, what OKDP decides of the chart's values and nothing
   of its defaults: a chart bump changes none of it, a pull request diffs
   only OKDP's decisions; checked against the upstream schema before it is
-  committed (a check, `Inputs.Charts`), compared with a previous render;
+  committed (okdp-gitops' Finalize), compared with a previous render;
 - no Helm template code runs in the compiler, and none can come in through
   instance values: `{{` is refused in the context's layers above level 0,
   the instance's layers and every resolved connection.
@@ -744,9 +735,9 @@ them: a Job per client, the same for every service
   prepared in sessions of its own. A `Definition` can be shared between
   goroutines, and is not changed (`TestConcurrentCompile` races it under
   `go test -race`). A compile
-  reads no upstream chart; a check reads each from the chart cache once,
-  however many keys it renders. Caching across compiles, if any, is the
-  caller's: a chart cache keyed by pinned versions never goes stale.
+  reads no upstream chart: fetching and caching them is the host's
+  (okdp-gitops reads each once per build, however many keys it renders),
+  and a chart cache keyed by pinned versions never goes stale.
 - No clock, random number, environment variable, network, or file outside
   the given filesystems: the same inputs give the same result. GitOps tools
   render on every sync (Argo CD with `helm template`), and a value that
@@ -889,20 +880,20 @@ for it: the root package and `chart`, `value` are public.
 
 ### Everything through fs.FS
 
-The compiler opens no path itself: the package, the contracts and the
-chart cache of a check are `fs.FS`, the values layers are
-in-memory maps, the rule set an `fs.FS` read once.
+The compiler opens no path itself: the package and the contracts are
+`fs.FS`, the values layers are in-memory maps, the rule set an `fs.FS`
+read once. It reads no upstream chart.
 
 - A server compiles from a git tree or an `embed.FS`, tests
   from `fstest.MapFS`; the contracts from any of them, an `embed.FS` of
   the contract schemas included.
 - The paths written in `okdp.yaml` (`defaults`) are cleaned and opened
   inside the package, and an `fs.FS` path cannot contain `..`: a package
-  cannot read outside itself. A chart cache entry,
-  `<repository>/<chart>-<version>`, is named by a checked source or
-  platform chart (a repository whose host and path are an `fs.ValidPath`
-  without `\`, a chart name without `/`, `.` or `..`, a pinned version), so
-  it stays inside the cache.
+  cannot read outside itself. A source or platform chart is checked so
+  that a chart cache's entry, `<repository>/<chart>-<version>`, stays
+  inside the cache (a repository whose host and path are an
+  `fs.ValidPath` without `\`, a chart name without `/`, `.` or `..`, a
+  pinned version); the cache is okdp-gitops'.
 - What a command reads of a directory, symbolic links refused, bounded,
   is okdp-gitops' (`internal/dirfs`).
 - A schema `$ref` to a file, a URL or a `urn:` fails the compile instead of
@@ -914,13 +905,14 @@ The package, with the upstream charts its sources pin, is reviewed in its
 repository; the contracts, the platform's charts and the platform values
 with the platform. The context's layers above level 0 (a project's), from
 their owners, and the instance's layers and files are input, from a
-console user or a GitOps pull request. The chart cache of a check is the
-caller's, filled from the pinned references. The [threat
+console user or a GitOps pull request. The upstream charts are read by
+the host alone (okdp-gitops' chart cache, filled from the pinned
+references), never by the compiler. The [threat
 model](04_threat_model.md) takes these boundaries by author, with what
-the compiler cannot enforce. Rules named after the rule set hold with the
-standard set, none with the mandatory one alone. The fixtures `testdata/...` and
-`.txtar` are okdp-gitops', which compiles whole trees with that set, and
-so are the upstream and ingress policy it adds through `Inputs.Finalize`.
+the compiler cannot enforce. Rules named after the rule set are the
+mandatory set's, which every compile applies. The fixtures `testdata/...`
+and `.txtar` are okdp-gitops', which compiles whole trees, and so are the
+upstream and ingress policy it adds through `Inputs.Finalize`.
 The compiler enforces:
 
 | Boundary | Where | Reason | Fixture |
@@ -935,8 +927,8 @@ The compiler enforces:
 | Protected upstream paths | `applyUpstream` | `protect` paths, and always `global`, cannot be set by an instance, nor replaced by setting a parent to a non-map | `testdata/protected-upstream.yaml`, `protected-annotation.yaml` |
 | Upstream policy | okdp-gitops' `policy.UpstreamCheck`, from `applyUpstream` through `Inputs.Finalize` | whatever its package accepts, an instance of a project that is not privileged (`global.okdp.policy.privileged`) sets, at any depth of its upstream values, no key of a pod's privileges, security context, identity, containers or objects (`deniedKeys`, and the platform's `policy.upstream.deny`), nor `runAsUser: 0` nor `runAsNonRoot: false`, in a string that reads as YAML too (charts render some with `tpl`); and with `policy.upstream.registries`, its images come from those registries: `upstream: true` would otherwise let a project's instance run a privileged pod, mount the node's disk, take another ServiceAccount or pull any image. The package's values are reviewed with it, not checked; a privilege a chart grants from keys of other names (`rbac.create`) is the platform's to deny by name, and Pod Security Admission and the engine's identity are the second line | `testdata/denied-upstream.yaml`, `denied-upstream-text.yaml`, `testdata/context/0/unlisted-registry.yaml` |
 | No templates in instance values | `chart.NoTemplate`, from `valuesLayers`, `resolve`, `applyUpstream` | some upstream charts pass values to `tpl`, where template code could call `lookup` and read the cluster's Secrets, and a parameter reaches the charts through the mapping: `{{` is refused in any key or string of the context's layers above level 0 and of the instance's layers (parameters, `global`, upstream values) and of a resolved connection, whatever layer or default it comes from. A value of a type values do not hold fails: the check does not let through what it cannot read | `testdata/template-code.yaml`, `testdata/context/1/template-code.yaml` |
-| Upstream schemas | stage 10, with a chart cache | an upstream chart's rules fail the check, not the deployment | `TestFinalValuesCheck`, `testdata/cli/check.txtar` |
-| Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart a check holds the values to is the chart the deployer renders; and a repository over `https://` or `oci://`, never `http://`: a chart fetched in clear could be swapped on the way, by a check and by the deployer | `testdata/cli/chart-sources.txtar`, `testdata/context/0/http-chart-repository.yaml` |
+| Upstream schemas | okdp-gitops' `chartcheck`, through `Inputs.Finalize`, with the charts it fetched | an upstream chart's rules fail the check, not the deployment; the compiler gives the final values, the chart of each key and the lists appended to (`FinalValuesOf`) | okdp-gitops' `TestCheck`, `testdata/cli/check.txtar` |
+| Pinned charts | `chart.Ref.Check` | a source and a platform chart name one version, not a range: the chart okdp-gitops' check holds the values to is the chart the deployer renders; and a repository over `https://` or `oci://`, never `http://`: a chart fetched in clear could be swapped on the way, by okdp-gitops' chart cache and by the deployer | `testdata/cli/chart-sources.txtar`, `testdata/context/0/http-chart-repository.yaml` |
 | Declared charts only | `checkObjectsChart`, `merge.FinalValues` | the values file cannot give values to a chart that `Chart.yaml` does not declare, nor take the key of the objects' chart | `TestDcrCompile` |
 | Credentials across namespaces | `pushSecrets`, `pullSecret`, `storeKey` | the compiler writes the keys of the platform's secret store, `<provider namespace>/<id>`, the ID starting with the claimers' namespace, and the platform's under `platform/`, a namespace no project may have, and cannot enforce who reads them: the layout lets a path-based store (OpenBao, Vault, a cloud secret manager) scope each namespace's identity, the SecretStore of its namespace with `secrets.provider`, with one policy: write its own segment, read `+/<namespace>.*` and `platform/*`. Without a provider, a ClusterSecretStore is one identity for every namespace, one trust domain; a backend without paths (External Secrets' Kubernetes provider) cannot hold the keys of the claims across namespaces. A key goes with its claim (`deletionPolicy: Delete`). A package's `objects` may reference the store too, reviewed with the package ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) | `examples/04_claims` (its PushSecrets and ExternalSecrets) |
 | One writer per Secret | `compilation.refuseSecretTargets`, `isSecretName`, `mapping.schema.json` | two of OKDP's objects of a namespace, of one instance or of two, that write one Secret (a v1 Secret, an ExternalSecret's target) or one key of the store (a PushSecret's) refuse the instances that hold them: they would overwrite each other's credentials, and a provider's `secretRef.name`, a DNS-1123 subdomain, names its claimers' copies, `<release>-<name>`, which could otherwise be another instance's connection Secret, `<release>.<connection>-credentials` | `testdata/cli/secrets.txtar`, `TestCompileAllSecretTargets` |
@@ -982,11 +974,9 @@ with the package
 
 ## Testing
 
-`go test ./...` runs everything offline. The tests compile with
-`testdata/rules`, the copy of the standard set (`internal/testrules`):
-those of `internal/okdp` swap the package's default for it
-(`testrules_test.go`), the others give it through `Inputs.Rules` or
-`BuildOptions.Rules`.
+`go test ./...` runs everything offline. The tests compile with the
+mandatory set (`internal/testrules`), given through `Inputs.Rules` or
+`BuildOptions.Rules`, or by leaving them nil.
 
 ### Helm fixtures
 
@@ -1001,16 +991,20 @@ Most source files have their `_test.go`, in memory (`fstest.MapFS`, as a
 server passes its inputs). github.com/okdp/cel2yaml covers the language in
 its own tests. At the root: `TestLayers`, the packages each import only
 those below them; `TestConcurrentCompile`, a compile raced; `TestBuild`
-and `TestCompileTree`, a tree compiled; `TestCompileWithoutRules`, the
-mandatory set alone, its functions applied and nothing refused;
+(`BuildOptions.Loaded` among it) and `TestCompileTree`, a tree compiled;
+`TestCompileWithoutRules`, the
+mandatory set alone, its functions and checks applied;
 `TestCheckProjectName`, the compile's rule; `TestWrite`, `TestKeepSynced`,
 the files of a compile. `internal/rules` tests the loader failing closed,
 the mandatory set and the two sets together (`TestLoadRules`,
 `TestMandatory`, `TestBothSets`, `TestSetsDisjoint`), `internal/merge` the
-merge and the chart cache (`TestFinalValuesCheck`, `TestChartCache`),
+merge and the lists appended to (`TestFinalValues`); the checks against
+the upstream charts are okdp-gitops' `internal/chartcheck`'s (`TestCheck`,
+`TestCheckMissing`, `TestCheckGlobal`, `TestCheckSchemaRef`,
+`TestCheckNull`, `TestFetch`, `TestCoalesce`);
 `internal/okdp` the stages, the claims and their binding
 (`TestCompileAll`, `TestCompileAllClaims`, `TestCompileAllConsent`...),
-the layers, the walkers driven by the standard set (`TestObjectsPolicy`,
+the layers, the walkers driven by the rule set (`TestObjectsPolicy`,
 `TestPlainSecrets`, `TestIngressHostsObjects`) and the OAuth clients
 (`oidc_test.go`). `BenchmarkCompileAll` measures a compile of a tree.
 
@@ -1050,7 +1044,7 @@ under `output/` what `Write` gives of each instance. A single package has
 `output/<project>/<instance>/`. `exampleRepository` builds the tree
 `LoadRepository` reads from them, in memory, its single package in the
 project `demo`. `TestExample` compiles the instances of each example
-together, with the standard set and no `Inputs.Finalize`, and compares
+together, with the mandatory set and no `Inputs.Finalize`, and compares
 `Write`'s files byte for byte (`go test . -run TestExample -update`
 rewrites them; the diff is the change's effect, reviewed as such).
 okdp-gitops holds the examples of its command line, the tree on disk with
@@ -1111,15 +1105,18 @@ report a vulnerability, the versions supported and the disclosure.
   removed; a chart cannot be cut down to a part of it (only its CRDs); the
   CRDs of `crds/` are upgraded by the deployer's settings, not turned into
   templates.
-- **Subcharts of an upstream chart** are left to Helm: the schema check
-  uses the chart's own `values.yaml` and `values.schema.json`; the
-  defaults and schemas of its subcharts apply only when Helm renders it.
-- **Upstream checks need a chart cache.** A compile reads no chart: a
-  value the chart's `values.schema.json` refuses, or an appended list that
-  drops the chart's default items, is found by a check (`Inputs.Charts`),
-  else by Helm when it renders.
+- **Subcharts of an upstream chart** are left to Helm: okdp-gitops'
+  schema check uses the chart's own `values.yaml` and
+  `values.schema.json`; the defaults and schemas of its subcharts apply
+  only when Helm renders it.
+- **Upstream checks are the host's.** A compile reads no chart: a value
+  the chart's `values.schema.json` refuses, or an appended list that drops
+  the chart's default items, is found by okdp-gitops' check, in its
+  Finalize, else by Helm when it renders. A program that compiles through
+  this library alone checks nothing against the upstream charts.
 - **One chart cache directory per repository URL without its scheme.**
-  `oci://x/charts` and `https://x/charts` share `x/charts/`
+  `oci://x/charts` and `https://x/charts` share `x/charts/` in
+  okdp-gitops' cache
   ([chart cache](specs/01_inputs_outputs.md#chart-cache)); a chart is
   pulled once, by version, with no digest pinned nor expiry: the cache
   directory is the platform's, trusted as its writers are.
@@ -1179,7 +1176,8 @@ report a vulnerability, the versions supported and the disclosure.
   `charts/oidc-dcr.cel.yaml` of the mandatory set, with its expectations in
   `oidc_test.go`, not in Go
   ([The oidc-dcr template](#the-oidc-dcr-template)). A new client key also
-  goes in `testdata/rules/schemas/mapping.schema.json`, with its type and its
+  goes in `internal/rules/mandatory/schemas/mapping.schema.json`, with its
+  type and its
   `description`, and in
   [oidcClients](specs/02_service_definition.md#oidcclients).
 - **Contracts** are data: a new contract, or new `x-okdp-secret`,
@@ -1193,7 +1191,6 @@ report a vulnerability, the versions supported and the disclosure.
   cache, a new platform chart version a platform value.
 - **Callers.** Anything that provides `fs.FS` inputs and values maps. A
   caller writes the result where it keeps it, the files of `compiler.Write`.
-- **Rules.** A check or a platform's table changes in the standard set
-  (okdp-gitops' `rules/v1` and its copy), a fragment, a template or what
-  else a compile needs in `internal/rules/mandatory`; a new kind of rule
-  is a walker here and a key of `rules.schema.json`.
+- **Rules.** A check, a platform's table, a fragment, a template or what
+  else a compile needs changes in `internal/rules/mandatory`; a new kind
+  of rule is a walker here and a key of `rules.schema.json`.

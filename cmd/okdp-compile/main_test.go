@@ -161,7 +161,6 @@ func TestRefusedOptions(t *testing.T) {
 		{"no output", options{repositories: []string{repo}}, "--output (-o) is required"},
 		{"check with output", options{repositories: []string{repo}, check: true, output: dir}, "--check writes nothing"},
 		{"check with force", options{repositories: []string{repo}, check: true, force: true}, "--check writes nothing"},
-		{"charts without check", options{repositories: []string{repo}, output: dir, charts: dir}, "--charts is read by --check only"},
 		{"repository twice", options{repositories: []string{repo, repo}, check: true}, "is given twice"},
 		{"output in repository", options{repositories: []string{repo}, output: filepath.Join(repo, "out")}, "must not contain one another"},
 		{"output in rules", options{repositories: []string{repo}, rules: dir, output: filepath.Join(dir, "out")}, "must not contain one another"},

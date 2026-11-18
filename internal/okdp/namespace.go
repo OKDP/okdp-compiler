@@ -67,9 +67,9 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 }
 
 // CompileAllWith is CompileAll with a memo, for a caller that compiles the
-// same instances again: the second run reuses the parameters, the
-// contracts and the charts the first one read. The memo is only valid for
-// the same instances with unchanged files and layers.
+// same instances again: the second run reuses the parameters and the
+// contracts the first one read. The memo is only valid for the same
+// instances with unchanged files and layers.
 //
 // The steps:
 //

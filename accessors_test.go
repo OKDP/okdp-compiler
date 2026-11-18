@@ -104,10 +104,6 @@ func TestValuesAndNames(t *testing.T) {
 	if x := merged["x"].(map[string]any); x["a"] != 1.0 || x["b"] != nil || len(merged["l"].([]any)) != 1 || a["x"].(map[string]any)["b"] != 2.0 {
 		t.Errorf("merged = %v (a %v)", merged, a)
 	}
-	co := compiler.CoalesceValues(map[string]any{"x": map[string]any{"b": nil}}, map[string]any{"x": map[string]any{"a": 1.0, "b": 2.0}, "n": nil})
-	if x := co["x"].(map[string]any); x["a"] != 1.0 || len(x) != 1 || len(co) != 1 {
-		t.Errorf("coalesced = %v", co)
-	}
 	if compiler.NamedClaimID("demo", "analytics") != "demo.analytics" || !compiler.IsClaimID("demo.app.db") || compiler.IsClaimID("web") || compiler.IsClaimID("Demo.x") {
 		t.Error("claim IDs")
 	}

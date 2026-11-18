@@ -5,8 +5,9 @@
 //	OKDP's defaults < computed values < instance upstream values
 //
 // The chart's own defaults are not a layer: Helm coalesces the values over
-// them when it renders the chart. A check reads them, with the chart's
-// schema, from the chart cache.
+// them when it renders the chart. The compiler reads no upstream chart: a
+// host checks the final values against the chart's defaults and schema
+// (okdp-gitops), with the lists an instance appended to (Final.Appended).
 //
 // The instance's upstream values are upstream.<chart> of its values. The
 // mapping sees them as written. They are applied after the mapping, behind
@@ -18,68 +19,62 @@ import (
 	"io/fs"
 	"maps"
 	"path"
-	"reflect"
 	"slices"
 
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
 )
 
+// Final is what FinalValues makes of a compile.
+type Final struct {
+	// Values holds the final values of each chart key.
+	Values map[string]map[string]any
+	// Charts names the upstream chart that renders each key.
+	Charts map[string]Ref
+	// Appended gives, by key, the paths of the lists of the instance's
+	// upstream values that were appended to the package's (append of
+	// okdp.yaml), each once, nil when none was. Helm replaces the chart's
+	// default list with the final one, so a host warns when the final list
+	// lacks items of the chart's.
+	Appended map[string][][]string
+}
+
 // FinalValues returns the final values of each chart key of the mapping's
-// output, and the upstream chart that renders each key. Every key of
-// output must be a key of specs. The keys are handled in key order, so the
-// first error is the same from one compile to the next.
+// output, the upstream chart that renders each key, and the lists the
+// instance appended to. Every key of output must be a key of specs. The
+// keys are handled in key order, so the first error is the same from one
+// compile to the next.
 //
-//   - charts is the chart cache; nil reads no chart. With a cache, the
-//     final values of each key are checked against its upstream chart: the
-//     schema violations of every key are reported together, and the
-//     warnings are returned in key order. The final values are the same
-//     with or without a cache.
-//   - unfetched holds the charts a chart source could not fetch
-//     (Inputs.ChartFailures). Their keys skip the check against their
-//     chart only.
 //   - file is the values file the output is read from, for the errors.
 //   - values holds the instance's merged values (global, upstream).
 //   - check is the caller's UpstreamCheck; nil refuses nothing.
-func FinalValues(charts *ChartCache, unfetched map[Ref]error, pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (map[string]map[string]any, map[string]Ref, []string, error) {
-	out, refs := map[string]map[string]any{}, map[string]Ref{}
-	violations := map[string]string{}
-	var warnings []string
+func FinalValues(pkg fs.FS, specs Specs, file string, output M, values M, check UpstreamCheck) (Final, error) {
+	out := Final{Values: map[string]map[string]any{}, Charts: map[string]Ref{}}
 	for _, key := range slices.Sorted(maps.Keys(output)) {
 		spec, ok := specs[key]
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("%s: %s: not a dependency of Chart.yaml", file, key)
+			return Final{}, fmt.Errorf("%s: %s: not a dependency of Chart.yaml", file, key)
 		}
 		f, appended, err := keyValues(pkg, key, spec, value.AsMap(output[key]), values, check)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
+			return Final{}, fmt.Errorf("%s: %w", key, err)
 		}
-		out[key], refs[key] = f, spec.Source
-		if charts == nil || unfetched[spec.Source] != nil {
-			continue
+		out.Values[key], out.Charts[key] = f, spec.Source
+		if len(appended) > 0 {
+			if out.Appended == nil {
+				out.Appended = map[string][][]string{}
+			}
+			out.Appended[key] = appended
 		}
-		u, err := charts.get(spec.Source)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
-		}
-		bad, w, err := checkKey(u, key, spec.Source, f, appended)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %w", key, err)
-		}
-		violations[key+" ("+spec.Source.ID()+")"] = bad
-		warnings = append(warnings, w...)
 	}
-	if err := chart.SchemaError("compiled values", violations); err != nil {
-		return nil, nil, nil, err
-	}
-	return out, refs, warnings, nil
+	return out, nil
 }
 
 // keyValues returns what the upstream chart is rendered with: OKDP's
 // defaults, the computed values and the instance's upstream values, merged
 // as Helm merges -f files (maps merge, lists and scalars replace, a null
 // replaces and stays). It also returns the paths of the instance's lists
-// that were appended, for checkKey.
+// that were appended (Final.Appended).
 func keyValues(files fs.FS, key string, spec Spec, computed M, values M, check UpstreamCheck) (M, [][]string, error) {
 	// First OKDP's defaults for this chart, then what the mapping computed.
 	okdpDefaults := M{}
@@ -117,52 +112,6 @@ func merged(layers ...M) M {
 		out = value.Merge(out, l)
 	}
 	return out
-}
-
-// checkKey checks the final values of a key against its upstream chart u.
-// It returns the violations of the chart's schema ("" when the values
-// hold), and a warning for each appended list where the chart's defaults
-// hold items the final list lacks: Helm replaces the chart's list, and
-// append extends the package's list only.
-func checkKey(u *upstreamChart, key string, src Ref, final M, appended [][]string) (string, []string, error) {
-	var warnings []string
-	for _, p := range appended {
-		defaults, _ := valueAt(u.defaults, p).([]any)
-		list, _ := valueAt(final, p).([]any)
-		lost := 0
-		for _, item := range defaults {
-			if !slices.ContainsFunc(list, func(x any) bool { return reflect.DeepEqual(x, item) }) {
-				lost++
-			}
-		}
-		if lost == 0 {
-			continue
-		}
-		items := fmt.Sprintf("%d of its %d items", lost, len(defaults))
-		if lost == len(defaults) {
-			items = "all its items"
-		}
-		warnings = append(warnings, fmt.Sprintf("%s: appended to the package's list, not to the default list of %s, which Helm replaces: the final list lacks %s; restate them in the package's values of %s (its defaults or values file) to keep them", source{chart: key}.at(chart.FormatPath(p)), src.ID(), items, key))
-	}
-	// The chart is checked as a subchart of the umbrella: Helm gives it a
-	// global, empty when the values have none.
-	values := chart.Coalesce(u.defaults, final)
-	if _, ok := values["global"]; !ok {
-		values["global"] = M{}
-	}
-	v, err := u.validate(values)
-	return v, warnings, err
-}
-
-func valueAt(v any, keys []string) any {
-	for _, k := range keys {
-		m, ok := v.(M)
-		if !ok {
-			return nil
-		}
-		v = m[k]
-	}
-	return v
 }
 
 // source names where instance upstream values come from, for the errors.

@@ -4,8 +4,9 @@
 //	[--force] [--allow-plain-secrets]
 //
 // The command compiles every instance of a tree together and writes the
-// files of each for helm install. With --check [--charts <dir>] in place
-// of -o, it checks the compile and writes nothing.
+// files of each for helm install. With --check in place of -o, it checks
+// the compile and writes nothing. It reads no upstream chart: the checks
+// of the final values against the charts are okdp-gitops' okdp-compile's.
 //
 // It is a thin wrapper of compiler.Build and compiler.Write. The Flux and
 // Argo CD targets belong to okdp-gitops' okdp-compile.
@@ -36,7 +37,6 @@ type options struct {
 	repositories      []string      // --repository: the tree's parts (compiler.RoleTree)
 	catalogs          []string      // --catalog: catalog/ and contracts/ only (compiler.RoleCatalog)
 	rules             string        // --rules: the rule set added to the mandatory one; "" adds none
-	charts            string        // --charts, with --check
 	output            string        // --output, -o
 	check             bool          // --check
 	costLimit         uint64        // --cost-limit, per instance; 0 for no limit
@@ -65,8 +65,7 @@ func main() {
 	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository", func(s string) error { o.repositories = append(o.repositories, s); return nil })
 	flag.Func("catalog", "a catalog of packages, its directory, repeatable: catalog/ and contracts/ only; one that holds platform.yaml or projects/ is refused", func(s string) error { o.catalogs = append(o.catalogs, s); return nil })
 	flag.StringVar(&o.rules, "rules", "", "a rule set's directory, rules.yaml at its root, added to the compiler's mandatory rules (the functions, the templates and the checks), which every compile applies; it adds rules and replaces none")
-	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output; with --charts, the final values checked against the upstream charts")
-	flag.StringVar(&o.charts, "charts", "", "chart cache directory, read by --check only: the upstream charts unpacked, <repository>/<chart>-<version>/<chart>/ (helm pull --untar -d <dir>/<repository>/<chart>-<version>), <repository> the URL without its scheme (default $OKDP_CHARTS with --check)")
+	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output")
 	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, values.yaml, the values of the catalog's chart (helm install <release> <package> -f values.yaml), okdp-objects.values.yaml, those of the "+compiler.ObjectsChart+" chart, when it has objects, installed first, okdp.info.yaml, what it publishes, when it publishes something; then the dependencies printed on stderr")
 	flag.StringVar(&o.output, "o", "", "shorthand for --output")
 	flag.Uint64Var(&o.costLimit, "cost-limit", defaultCostLimit, "the CEL cost each instance's expressions may use together, past which the instance is refused; 0: no limit")
@@ -75,9 +74,6 @@ func main() {
 	flag.BoolVar(&o.allowPlainSecrets, "allow-plain-secrets", false, "accept credentials written in clear (Inputs.AllowPlainSecrets of every instance): a provides secret without generate, a Secret of the objects with data or stringData")
 	flag.BoolVar(&o.force, "force", false, "write into an <output>/projects/ that okdp-compile did not write (no "+outdir.MarkerFile+"), removing from it every file it does not write")
 	flag.Parse()
-	if o.check && o.charts == "" {
-		o.charts = os.Getenv("OKDP_CHARTS")
-	}
 	switch {
 	case flag.NArg() > 0:
 		fmt.Fprintf(os.Stderr, "unexpected argument %q: every input is a flag (--repository before each directory)\n", flag.Arg(0))
@@ -157,8 +153,6 @@ func checkOptions(o options) error {
 		return errors.New("--repository is required")
 	case o.check && o.output != "":
 		return errors.New("--check writes nothing: no --output (-o)")
-	case !o.check && o.charts != "":
-		return errors.New("--charts is read by --check only: a compile reads no chart")
 	case !o.check && o.output == "":
 		return errors.New("--output (-o) is required")
 	case o.check && o.force:
@@ -170,8 +164,7 @@ func checkOptions(o options) error {
 // inputs holds what the command reads, once open.
 type inputs struct {
 	repos   []compiler.Repository
-	rules   *compiler.RuleSet    // nil without --rules: the mandatory set alone
-	charts  compiler.ChartSource // nil without --charts
+	rules   *compiler.RuleSet // nil without --rules: the mandatory set alone
 	closers []func()
 }
 
@@ -181,8 +174,8 @@ func (in *inputs) close() {
 	}
 }
 
-// openInputs opens the directories of --repository, --catalog, --rules
-// and --charts through dirfs, which bounds what is read and follows no
+// openInputs opens the directories of --repository, --catalog and
+// --rules through dirfs, which bounds what is read and follows no
 // symbolic link. When one fails, it closes those already opened.
 func openInputs(o options) (*inputs, error) {
 	in := &inputs{}
@@ -208,14 +201,6 @@ func openInputs(o options) (*inputs, error) {
 			return fail(fmt.Errorf("--rules %s: %w", o.rules, err))
 		}
 	}
-	if o.charts != "" {
-		fsys, err := dirfs.NewCharts("--charts", o.charts)
-		if err != nil {
-			return fail(err)
-		}
-		in.closers = append(in.closers, fsys.Close)
-		in.charts = compiler.StaticCharts(fsys)
-	}
 	return in, nil
 }
 
@@ -231,7 +216,6 @@ func buildTree(o options, in *inputs) (*compiler.Tree, error) {
 		CostLimit:         o.costLimit,
 		InstanceTimeout:   o.instanceTimeout,
 		AllowPlainSecrets: o.allowPlainSecrets,
-		Charts:            in.charts,
 		Rules:             in.rules,
 	})
 	if err != nil {

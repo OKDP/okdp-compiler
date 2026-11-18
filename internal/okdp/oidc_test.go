@@ -531,9 +531,7 @@ app:
 		if existing {
 			value.Dig(p, "global.okdp.oidc").(M)["clientProvisioning"] = "existing"
 		}
-		in := inputs(p, values)
-		in.Charts = charts
-		return Compile(context.Background(), &d, in)
+		return Compile(context.Background(), &d, inputs(p, values))
 	}
 	app := []chart.Dependency{appDep}
 	jobs := func(res *Result) []string {

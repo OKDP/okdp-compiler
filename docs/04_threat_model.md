@@ -277,7 +277,9 @@ tree without following a symbolic link, bounded, and bounds each
 compile's CEL cost.
 
 The chart cache it fills, package `chartcache`, the control plane's too,
-is read for the checks and the console's defaults, never deployed; what
+is read for the checks of the final values against the upstream charts
+(`chartcheck`, which the compiler does not run) and the console's
+defaults, never deployed; what
 it pulls is bounded and must be the chart the instance names:
 
 | | Rule | Enforced by | Fixture |
@@ -455,8 +457,11 @@ these lines.
   time when it passes `Inputs.Timeout` (`okdp-compile` does); the files
   read are bounded by okdp-gitops' reader, a library caller's `fs.FS`
   being its own.
-- **The upstream schemas** are checked with a chart cache only
-  (`Inputs.Charts`), else by Helm when it renders.
+- **The upstream schemas** are not checked by the compiler, which reads
+  no upstream chart: okdp-gitops checks them, in its Finalize, with the
+  charts it fetched; else Helm does when it renders. A chart okdp-gitops
+  cannot fetch leaves its keys unchecked, and a project that is not
+  privileged giving it upstream values is refused when the build renders.
 - **The token of the CI.** Whoever can push a workflow to a repository
   of the sources reads `OKDP_GITOPS_TOKEN`, which writes the output
   repository: the repositories of the sources are the platform's, their

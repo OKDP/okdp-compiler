@@ -8,12 +8,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"maps"
 	"slices"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/graph"
 	"github.com/okdp/okdp-compiler/internal/okdp"
 )
@@ -24,10 +21,6 @@ type Tree struct {
 	// Graph orders the releases of the instances that compile. It is nil
 	// when the graph has a problem (Instance.GraphErr).
 	Graph *graph.Graph
-	// ChartFailures says why the ChartSource could not fetch a chart, by
-	// chart. It is nil when every chart was fetched. An instance that names
-	// a failed chart lists its key in its own ChartFailures.
-	ChartFailures map[chart.Ref]error
 	// Refused lists the projects that do not load, in name order. Instances
 	// holds no instance of them. Partial keeps their output.
 	Refused []Refused
@@ -45,18 +38,6 @@ type Refused struct {
 	Own bool
 }
 
-// ChartSource is a chart cache that fetches the upstream charts it lacks
-// and gives them unpacked (okdp.Inputs.Charts). Each chart is fetched on
-// its own: a tree does not depend on every chart being available.
-type ChartSource interface {
-	// Ensure returns the chart cache, which holds every chart of refs it
-	// could fetch, and a map that says why each of the others could not be
-	// fetched. A non-nil entry of the map leaves its chart unchecked. A
-	// chart of refs that is in neither the cache nor the map counts as
-	// missing from a filled cache: the instance that names it is refused.
-	Ensure(ctx context.Context, refs []chart.Ref) (fs.FS, map[chart.Ref]error)
-}
-
 // Instance is an instance of a Tree, with its compile.
 type Instance struct {
 	okdp.Instance
@@ -66,10 +47,6 @@ type Instance struct {
 	// GraphErr is the problem of the deployment graph at its release, nil
 	// when there is none. Several problems are joined (errors.Join).
 	GraphErr error
-	// ChartFailures says why charts of its result could not be fetched, by
-	// chart key (Result.Charts), nil when there is none. The values of
-	// these keys were not checked: the instance compiled without the charts.
-	ChartFailures map[string]error
 	// Provided lists the claims bound to it as a provider, sorted by ID.
 	Provided []Provided
 }
@@ -80,72 +57,16 @@ type Provided struct {
 	Claimer *Instance
 }
 
-// Dir is a chart cache that is filled already: a directory of unpacked
-// charts (helm pull --untar). It fetches nothing, so Compile sets it on
-// every instance up front and compiles them once.
-type Dir struct{ FS fs.FS }
-
-// Ensure returns the directory as it is and reports no failure, so a chart
-// it lacks fails the check of the instance that names it.
-func (d Dir) Ensure(context.Context, []chart.Ref) (fs.FS, map[chart.Ref]error) { return d.FS, nil }
-
 // Compile compiles instances together (okdp.CompileAll). It then builds the
 // graph of those that compile, puts its problems at their releases, and
 // lists the claims bound to each provider. It does not change instances.
-//
-// With charts, Compile fetches the upstream charts the first compile names
-// (Result.Charts). It then compiles the instances again with them, which
-// checks their final values against the charts' defaults and schemas. A
-// chart that cannot be fetched leaves the keys of the instances that name
-// it unchecked, and nothing else. A Dir needs no fetch: the instances are
-// compiled once.
-func Compile(ctx context.Context, instances []okdp.Instance, charts ChartSource) *Tree {
-	if d, ok := charts.(Dir); ok {
-		checked := withCharts(instances, d.FS, nil)
-		return build(checked, okdp.CompileAll(ctx, checked), nil)
-	}
-	// The memo lets the second run reuse the parameters and the contracts
-	// the first run read.
-	memo := okdp.NewMemo()
-	outcomes := okdp.CompileAllWith(ctx, instances, memo)
-	if charts == nil {
-		return build(instances, outcomes, nil)
-	}
-	cache, failed := charts.Ensure(ctx, refs(outcomes))
-	checked := withCharts(instances, cache, failed)
-	return build(checked, okdp.CompileAllWith(ctx, checked, memo), failed)
-}
-
-func withCharts(instances []okdp.Instance, charts fs.FS, failed map[chart.Ref]error) []okdp.Instance {
-	checked := slices.Clone(instances)
-	for i := range checked {
-		checked[i].Inputs.Charts, checked[i].Inputs.ChartFailures = charts, failed
-	}
-	return checked
-}
-
-// refs returns the upstream charts of the compiled instances, once each.
-func refs(outcomes []okdp.Outcome) []chart.Ref {
-	var out []chart.Ref
-	for _, o := range outcomes {
-		if o.Result == nil {
-			continue
-		}
-		for _, key := range slices.Sorted(maps.Keys(o.Result.Charts)) {
-			if ref := o.Result.Charts[key]; !slices.Contains(out, ref) {
-				out = append(out, ref)
-			}
-		}
-	}
-	return out
+func Compile(ctx context.Context, instances []okdp.Instance) *Tree {
+	return build(instances, okdp.CompileAll(ctx, instances))
 }
 
 // build makes the tree of instances and their outcomes, in their order.
-func build(instances []okdp.Instance, outcomes []okdp.Outcome, failed map[chart.Ref]error) *Tree {
+func build(instances []okdp.Instance, outcomes []okdp.Outcome) *Tree {
 	t := &Tree{}
-	if len(failed) > 0 {
-		t.ChartFailures = failed
-	}
 	var results []*okdp.Result
 	for i, inst := range instances {
 		ti := &Instance{Instance: inst, Outcome: outcomes[i]}
@@ -155,14 +76,6 @@ func build(instances []okdp.Instance, outcomes []okdp.Outcome, failed map[chart.
 			continue
 		}
 		results = append(results, res)
-		for key, ref := range res.Charts {
-			if why := failed[ref]; why != nil {
-				if ti.ChartFailures == nil {
-					ti.ChartFailures = map[string]error{}
-				}
-				ti.ChartFailures[key] = why
-			}
-		}
 	}
 	g, err := graph.New(results)
 	if err != nil {

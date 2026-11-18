@@ -27,15 +27,10 @@ var (
 	// The platform values every compile gets, the first context layer of
 	// inputs, at level 0.
 	platformValues = map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}}
-	// The chart cache of the checks (withCharts): the upstream charts'
-	// defaults.
-	charts = fstest.MapFS{
-		"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("replicaCount: 1\nimage: {tag: latest}\nlabels: {}\n")},
-	}
-	appSource = chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
-	appDep    = chart.Dependency{Name: "app", Repository: appSource.Repository, Version: appSource.Version}
-	contracts = fstest.MapFS{}
-	def       = &Definition{
+	appSource      = chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
+	appDep         = chart.Dependency{Name: "app", Repository: appSource.Repository, Version: appSource.Version}
+	contracts      = fstest.MapFS{}
+	def            = &Definition{
 		Chart:   chart.Metadata{APIVersion: "v2", Name: "demo", Version: "1.2.3", Dependencies: []chart.Dependency{appDep}},
 		Package: Package{Require: []string{"ingress.suffix"}, Defaults: map[string]string{"app": "app.defaults.yaml"}},
 		Files:   pkg,
@@ -71,7 +66,7 @@ func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
 	return chart.Upstream{Keys: map[string]chart.UpstreamKey{key: k}}
 }
 
-// inputs: the in-memory contracts, no chart cache, with these values
+// inputs: the in-memory contracts, with these values
 // layers: the global of each, a context layer at level 0 (Inputs.Context),
 // its connections, one at level 2, the instance's own, its claims, one at
 // level 1, the project's, the rest, an instance layer (Inputs.Values).
@@ -93,14 +88,6 @@ func inputs(layers ...map[string]any) Inputs {
 		}
 		in.Values = append(in.Values, l)
 	}
-	return in
-}
-
-// withCharts: inputs with the chart cache, these files added to it.
-func withCharts(in Inputs, files fstest.MapFS) Inputs {
-	cs := maps.Clone(charts)
-	maps.Copy(cs, files)
-	in.Charts = cs
 	return in
 }
 
@@ -201,19 +188,19 @@ func TestCompileErrors(t *testing.T) {
 	}{
 		"mapping error":   {inputs(map[string]any{"replicas": 11}), "at most 10 replicas"},
 		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"ingress": M{"suffix": ""}}}}), "global.okdp.ingress.suffix is required"},
-		"missing release": {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Namespace: "demo"}, `Inputs.Release "": a release name`},
-		"no namespace":    {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app"}, `Inputs.Namespace "": a namespace name`},
-		"release":         {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo_app", Namespace: "demo"}, `Inputs.Release "demo_app": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`},
-		"long release":    {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: strings.Repeat("a", 54), Namespace: "demo"}, `Inputs.Release "aaaa`},
-		"namespace":       {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
-		"long namespace":  {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
-		"platform":        {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
-		"kube-system":     {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "kube-system"}, `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`},
-		"kube-node-lease": {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "kube-node-lease"}, `Inputs.Namespace "kube-node-lease": the namespace is reserved: kube-* is Kubernetes' own`},
-		"flux-system":     {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "flux-system"}, `Inputs.Namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`},
-		"argocd":          {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "argocd"}, `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's`},
-		"okdp-releases":   {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "okdp-releases"}, `Inputs.Namespace "okdp-releases": the namespace is reserved: a deployer engine's`},
-		"name":            {Inputs{Rules: testrules.Standard(), Charts: charts, Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
+		"missing release": {Inputs{Rules: testrules.Standard(), Contracts: contracts, Namespace: "demo"}, `Inputs.Release "": a release name`},
+		"no namespace":    {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app"}, `Inputs.Namespace "": a namespace name`},
+		"release":         {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo_app", Namespace: "demo"}, `Inputs.Release "demo_app": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`},
+		"long release":    {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: strings.Repeat("a", 54), Namespace: "demo"}, `Inputs.Release "aaaa`},
+		"namespace":       {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
+		"long namespace":  {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
+		"platform":        {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
+		"kube-system":     {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "kube-system"}, `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`},
+		"kube-node-lease": {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "kube-node-lease"}, `Inputs.Namespace "kube-node-lease": the namespace is reserved: kube-* is Kubernetes' own`},
+		"flux-system":     {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "flux-system"}, `Inputs.Namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`},
+		"argocd":          {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "argocd"}, `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's`},
+		"okdp-releases":   {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "okdp-releases"}, `Inputs.Namespace "okdp-releases": the namespace is reserved: a deployer engine's`},
+		"name":            {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Compile(context.Background(), def, tc.in)
@@ -371,44 +358,19 @@ errors:
 	}
 }
 
-// TestCompileSchemas: the parameters, then the final values of each chart,
-// against their schemas; every violation is reported with its path.
+// TestCompileSchemas: the parameters against the package's schema, every
+// violation reported with its path; a null of the upstream values is kept
+// in the final values, for Helm to delete the chart's default. The final
+// values are checked against the upstream charts by the host (okdp-gitops).
 func TestCompileSchemas(t *testing.T) {
-	schema := `{"$schema": "http://json-schema.org/draft-07/schema#",
-		"properties": {"replicaCount": {"type": "integer", "maximum": 3}, "image": {"properties": {"tag": {"type": "string", "pattern": "^[0-9.]+$"}}}}}`
-	for name, tc := range map[string]struct {
-		files  fstest.MapFS
-		values M
-		want   string
-	}{
-		"parameters": {
-			nil, M{"replicas": 1.5},
-			"values don't meet the specifications of the schema(s) in the following chart(s):\ndemo:\n- at '/replicas': got number, want integer",
-		},
-		"final values": {
-			fstest.MapFS{"charts.example.org/app-1.0.0/app/values.schema.json": {Data: []byte(schema)}},
-			M{"replicas": float64(5), "upstream": M{"app": M{"image": M{"tag": "latest"}}}},
-			"compiled values don't meet the specifications of the schema(s) in the following chart(s):\napp (app-1.0.0):\n- at '/image/tag': 'latest' does not match pattern '^[0-9.]+$'\n- at '/replicaCount': maximum: got 5, want 3",
-		},
-		"a $ref to a URL": {
-			fstest.MapFS{"charts.example.org/app-1.0.0/app/values.schema.json": {Data: []byte(`{"$ref": "https://example.org/x.json"}`)}},
-			M{}, `failing loading "https://example.org/x.json": no URLLoader registered for "https://example.org/x.json"`,
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := *def
-			d.Package.Upstream = chart.Upstream{All: true}
-			_, err := Compile(context.Background(), &d, withCharts(inputs(tc.values), tc.files))
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error containing %q", err, tc.want)
-			}
-		})
-	}
-	// A null that deletes a default is checked as Helm checks it: gone.
 	d := *def
-	d.Package.Defaults, d.Package.Upstream = nil, chart.Upstream{All: true}
-	in := withCharts(inputs(M{"upstream": M{"app": M{"labels": nil}}}), fstest.MapFS{"charts.example.org/app-1.0.0/app/values.schema.json": {Data: []byte(`{"properties": {"labels": {"type": "object"}}}`)}})
-	res, err := Compile(context.Background(), &d, in)
+	d.Package.Upstream = chart.Upstream{All: true}
+	_, err := Compile(context.Background(), &d, inputs(M{"replicas": 1.5}))
+	if want := "values don't meet the specifications of the schema(s) in the following chart(s):\ndemo:\n- at '/replicas': got number, want integer"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("got %v, want an error containing %q", err, want)
+	}
+	d.Package.Defaults = nil
+	res, err := Compile(context.Background(), &d, inputs(M{"upstream": M{"app": M{"labels": nil}}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,34 +609,6 @@ func TestSharedSource(t *testing.T) {
 	canary := res.Values["canary"]
 	if canary["replicaCount"] != float64(2) || value.Dig(canary, "image.tag") != "4.5" || canary["labels"] != nil {
 		t.Errorf("canary: OKDP's defaults, then the computed ones: %#v", canary)
-	}
-	// app's schema, reported under each chart's key.
-	in := withCharts(inputs(M{"replicas": 5}), fstest.MapFS{"charts.example.org/app-1.0.0/app/values.schema.json": {Data: []byte(`{"properties": {"replicaCount": {"maximum": 3}}}`)}})
-	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "canary (app-1.0.0):\n- at '/replicaCount': maximum: got 5, want 3") {
-		t.Errorf("schema: got %v", err)
-	}
-}
-
-// TestCheckWarnings: with a chart cache, an instance list appended to that
-// leaves out items of the chart's default list is warned of, after the
-// package's warnings; the final values are the same without the cache,
-// which warns of nothing.
-func TestCheckWarnings(t *testing.T) {
-	d := *def
-	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Append: []string{"env"}})
-	d.Warnings = []string{"the package's"}
-	in := inputs(M{"upstream": M{"app": M{"env": []any{"B"}}}})
-	res, err := Compile(context.Background(), &d, in)
-	if err != nil || !slices.Equal(res.Warnings, d.Warnings) {
-		t.Fatalf("without the cache: %v %q", err, res.Warnings)
-	}
-	checked, err := Compile(context.Background(), &d, withCharts(in, fstest.MapFS{"charts.example.org/app-1.0.0/app/values.yaml": {Data: []byte("env: [A]\n")}}))
-	if err != nil || !reflect.DeepEqual(checked.Values, res.Values) {
-		t.Fatalf("with the cache: %v %#v", err, checked.Values)
-	}
-	want := []string{"the package's", "upstream.app.env: appended to the package's list, not to the default list of app-1.0.0, which Helm replaces: the final list lacks all its items; restate them in the package's values of app (its defaults or values file) to keep them"}
-	if !slices.Equal(checked.Warnings, want) {
-		t.Errorf("warnings:\n got %q\nwant %q", checked.Warnings, want)
 	}
 }
 

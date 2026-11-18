@@ -36,8 +36,8 @@ compile reads its other files, `config.schema.json` and the defaults files
 `Definition` built in memory again: its name and version, its chart keys,
 their upstream charts and their `protect` and `append` paths.
 
-The other inputs of a compile (contracts, platform and instance values,
-the chart cache of a check) and its outputs are specified in
+The other inputs of a compile (contracts, platform and instance values)
+and its outputs are specified in
 [01_inputs_outputs.md](01_inputs_outputs.md).
 
 ## Chart.yaml
@@ -116,8 +116,8 @@ key names the dependency's values everywhere: its key in the
 
 A deployer renders the chart from its repository, the final values over
 its defaults ([merge precedence](01_inputs_outputs.md#merge-precedence)).
-A compile reads no chart; a check reads its `values.yaml` and
-`values.schema.json`, from the chart cache
+A compile reads no upstream chart. okdp-gitops' check reads its
+`values.yaml` and `values.schema.json`, from its chart cache
 (`<repository>/<name>-<version>/<name>/`, `<repository>` the URL without
 its scheme: [chart cache](01_inputs_outputs.md#chart-cache)), and checks
 the final values against them.
@@ -130,7 +130,7 @@ it, each with its own values (polaris-admin's bootstrap and principals
 phases). Every dependency is rendered, as Helm renders a chart's
 dependencies, unless the values file leaves it out: a key it writes that
 is left out by `$if` or null. A dependency left out is not rendered, and
-the chart cache of a check need not hold its chart
+the chart cache of okdp-gitops' check need not hold its chart
 ([rendered dependencies](#rendered-dependencies)).
 
 `condition`, `tags`, `enabled` and `import-values`, Helm's means of
@@ -151,7 +151,7 @@ key:
 | the key `global`, an `alias` or a `name`: Helm's values of every chart of the package, which a dependency's values would replace | `Chart.yaml: dependencies[<i>] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias` |
 | the key of an earlier dependency (a chart rendered twice without an alias) | `Chart.yaml: dependencies[<i>] (<key>): the key of dependencies[<j>] too: give one of them an alias` |
 | `repository` starting with `http://`, the chart fetched in clear | `Chart.yaml: dependencies[<i>].repository "<repository>": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)` |
-| `repository` not starting with `https://` or `oci://`, or whose host and path are no directory of the [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
+| `repository` not starting with `https://` or `oci://`, or whose host and path cannot be laid out as directories of a [chart cache](01_inputs_outputs.md#chart-cache) (empty; an empty, `.` or `..` segment; a `\`) | `Chart.yaml: dependencies[<i>].repository "<repository>": the URL of a chart repository (https://... or oci://...)` |
 | `name` holding a `/`, `.` or `..`, or with leading or trailing spaces | `Chart.yaml: dependencies[<i>].name "<name>": the name of a chart of the repository` |
 | `version` not a SemVer version (`1.2.3`, `v1.2.3`, `1.2.3-rc.1`, `1.2.3+build`): a range, a partial version | `Chart.yaml: dependencies[<i>].version "<version>": a pinned chart version (1.2.3), not a range` |
 
@@ -434,8 +434,8 @@ its key at its top level and the key is left out by `$if`
 (`{$if: false, ...}`, or the whole file under a top-level `$if` false) or
 null (`backup: ~`, `backup: ${{ null }}`). It has no `Result.Values`
 entry, `<key>: {enabled: false}` of `values.yaml`, for which `Chart.yaml`
-says `condition: <key>.enabled`, and the chart cache of a check need not
-hold its chart.
+says `condition: <key>.enabled`, and the chart cache of okdp-gitops'
+check need not hold its chart.
 
 - A dependency the file does not write is rendered with `{}` as its
   computed values: its OKDP defaults (`defaults`), the instance's upstream
@@ -546,7 +546,7 @@ metrics:
   $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
   # ...
 backup:
-  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read by a check
+  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read by okdp-gitops' check
   # ...
 ```
 

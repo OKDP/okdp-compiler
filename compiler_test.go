@@ -177,7 +177,7 @@ func TestCompileTree(t *testing.T) {
 	for i := range instances {
 		instances[i].Inputs.Rules = testrules.Standard()
 	}
-	tree := compiler.CompileTree(t.Context(), instances, nil)
+	tree := compiler.CompileTree(t.Context(), instances)
 	if tree.Graph == nil || tree.Problems() != nil {
 		t.Fatalf("problems: %q", tree.Problems())
 	}
@@ -291,14 +291,23 @@ func TestBuild(t *testing.T) {
 	}
 	// A project that does not load is refused, not the tree: no instance
 	// of it, the others compiled, its problems LoadErrorOf's.
+	// Loaded is given the instances that compile, before they do.
+	var loaded []string
 	tr, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
 		"catalog/app/1.0.0/Chart.yaml":            {Data: []byte("apiVersion: v2\nname: app\nversion: 1.0.0\n")},
 		"projects/good/instances/a/instance.yaml": {Data: []byte("service: app\nversion: 1.0.0\n")},
 		"projects/bad/instances/a/instance.yaml":  {Data: []byte("service: nope\nversion: 1.0.0\n")},
 		"projects/bad/instances/b/instance.yaml":  {Data: []byte("service: app\nversion: 1.0.0\n")},
-	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: testrules.Standard()})
+	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: testrules.Standard(), Loaded: func(_ context.Context, instances []compiler.Instance) {
+		for _, in := range instances {
+			loaded = append(loaded, in.Inputs.Namespace+"/"+in.Name)
+		}
+	}})
 	if err != nil || len(tr.Instances) != 1 || tr.Instances[0].Namespace() != "good" || len(tr.Refused) != 1 || tr.Refused[0].Namespace != "bad" {
 		t.Fatalf("a project that does not load: %v %+v", err, tr)
+	}
+	if !slices.Equal(loaded, []string{"good/a"}) {
+		t.Errorf("Loaded: got %q, want the instances of the projects that load", loaded)
 	}
 	if tr.Refused[0].Inputs.Rules != testrules.Standard() {
 		t.Error("a project that does not load lost the rule set of the build")

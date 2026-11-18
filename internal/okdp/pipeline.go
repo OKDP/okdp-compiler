@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"slices"
 	"time"
 
@@ -28,11 +27,6 @@ type M = value.M
 // (map[string]string, int32, a struct with json tags); another one (a
 // func, a NaN) fails the compile.
 type Inputs struct {
-	// Charts is the chart cache, used for checks only; nil for none. It holds
-	// the charts unpacked by helm pull --untar, at
-	// <repository>/<chart>-<version>/<chart>/, where <repository> is the URL
-	// without its scheme.
-	Charts    fs.FS
 	Contracts fs.FS // the contract schemas, <contract>.schema.json
 	// Context holds the context's values layers (global, global.okdp,
 	// connections). They merge by level, lowest first, and in order within a
@@ -70,14 +64,6 @@ type Inputs struct {
 	// past it. The limit is shared: an expression may spend what is left.
 	CostLimit uint64
 	Timeout   time.Duration // bounds this compile, on top of ctx's deadline; 0 means no limit
-	// ChartFailures maps each chart that could not be fetched to the reason.
-	// The keys it renders are not checked against it, and no instance fails
-	// for a missing chart alone. CompileTree sets it.
-	ChartFailures map[chart.Ref]error
-	// RequireRender says the host renders the charts. An instance of a
-	// project that is not privileged is then refused when it gives upstream
-	// values to a chart of ChartFailures, because nothing can check them.
-	RequireRender bool
 	// AllowPlainSecrets accepts credentials written in clear: a provides
 	// secret without generate, and a Secret object with data or stringData.
 	// By default they fail: no credential goes to the deployments repository.
@@ -94,10 +80,9 @@ type Inputs struct {
 }
 
 // FinalInput is what a Finalize makes the final values from. A host also
-// renders each chart key with it: the chart is Specs[key].Source, and
-// ChartFailures says which charts to skip.
+// checks each chart key against its chart, Specs[key].Source, which it
+// fetches itself: the compiler reads no upstream chart.
 type FinalInput struct {
-	Charts            fs.FS       // Inputs.Charts, passed through unread
 	Files             fs.FS       // the package
 	Specs             chart.Specs // the charts of the compile by key, the compiler's own among them
 	ValuesFile        string      // the values file Output was read from, for errors
@@ -107,9 +92,8 @@ type FinalInput struct {
 	Settings          M           // the platform's settings, global.okdp
 	Release           string      // the Helm release name the charts render with
 	Namespace         string
-	Privileged        bool                // the project is one of the platform's own
-	AllowPlainSecrets bool                // Inputs.AllowPlainSecrets
-	ChartFailures     map[chart.Ref]error // Inputs.ChartFailures: the charts a host cannot render
+	Privileged        bool // the project is one of the platform's own
+	AllowPlainSecrets bool // Inputs.AllowPlainSecrets
 }
 
 // GlobalLayer is the global one layer of a project sets. Name identifies
@@ -423,16 +407,10 @@ func (c *run) finalValues() error {
 		return err
 	}
 	out.Computed = value.AsMap(value.Copy(output))
-	if in.RequireRender && !out.Privileged {
-		if err := unrenderedUpstream(specs, c.inst.values, in.ChartFailures); err != nil {
-			return err
-		}
-	}
 	var warnings []string
 	var err error
 	if in.Finalize != nil {
 		out.Values, out.Charts, warnings, err = in.Finalize(c.ctx, FinalInput{
-			Charts:            in.Charts,
 			Files:             def.Files,
 			Specs:             specs,
 			ValuesFile:        def.valuesName(),
@@ -444,28 +422,16 @@ func (c *run) finalValues() error {
 			Namespace:         in.Namespace,
 			Privileged:        out.Privileged,
 			AllowPlainSecrets: in.AllowPlainSecrets,
-			ChartFailures:     in.ChartFailures,
 		})
 	} else {
-		out.Values, out.Charts, warnings, err = merge.FinalValues(in.memo.charts, in.ChartFailures, def.Files, specs, def.valuesName(), output, c.inst.values, nil)
+		var f merge.Final
+		f, err = merge.FinalValues(def.Files, specs, def.valuesName(), output, c.inst.values, nil)
+		out.Values, out.Charts = f.Values, f.Charts
 	}
 	if err != nil {
 		return err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
-	return nil
-}
-
-// unrenderedUpstream refuses upstream values given to a chart that could
-// not be fetched, because the checks a render would run on them cannot
-// run. It reports the first such key, in key order.
-func unrenderedUpstream(specs chart.Specs, values M, failed map[chart.Ref]error) error {
-	for _, key := range slices.Sorted(maps.Keys(specs)) {
-		spec := specs[key]
-		if why := failed[spec.Source]; why != nil && spec.Upstream && len(value.AsMap(value.AsMap(values["upstream"])[key])) > 0 {
-			return fmt.Errorf("upstream.%s: the chart %s could not be fetched (%v): its upstream values are refused, nothing can check them", key, spec.Source.ID(), why)
-		}
-	}
 	return nil
 }
 

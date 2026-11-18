@@ -8,14 +8,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"strings"
 	"sync"
 )
 
 // The bounds of what an FS reads, in bytes. A file holds at most
 // MaxFileSize. The files read of one FS hold at most MaxDirSize together,
-// each counted once; a chart cache counts them per chart (NewCharts).
+// each counted once.
 const (
 	MaxFileSize = 4 << 20
 	MaxDirSize  = 64 << 20
@@ -34,15 +33,13 @@ var ErrSymlink = errors.New("a symbolic link, not followed")
 // concurrent use.
 type FS struct {
 	root    *os.Root
-	label   string // what messages name: --repository <dir>, --charts <dir>
+	label   string // what messages name: --repository <dir>, --rules <dir>
 	fileCap int64
 	dirCap  int64
 
-	perDir bool // count the files of each directory apart (NewCharts)
-
-	mu     sync.Mutex
-	sizes  map[string]int64 // the size of each regular file opened, by name
-	totals map[string]int64 // the sum of sizes: by directory when perDir, else under ""
+	mu    sync.Mutex
+	sizes map[string]int64 // the size of each regular file opened, by name
+	total int64            // the sum of sizes
 }
 
 // New opens the FS of dir, bounded by MaxFileSize and MaxDirSize. label
@@ -52,19 +49,7 @@ func New(label, dir string) (*FS, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", label, err)
 	}
-	return &FS{root: root, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}, totals: map[string]int64{}}, nil
-}
-
-// NewCharts opens the FS of dir, a chart cache. MaxDirSize applies to
-// each chart, not to the whole cache: with one budget, the charts that
-// one project names could exhaust it, and every later instance would be
-// refused, those of other projects included.
-func NewCharts(label, dir string) (*FS, error) {
-	d, err := New(label, dir)
-	if err == nil {
-		d.perDir = true
-	}
-	return d, err
+	return &FS{root: root, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}}, nil
 }
 
 // Close releases the directory. The files already opened stay readable.
@@ -150,16 +135,11 @@ func (d *FS) count(name string, size int64) error {
 	if _, ok := d.sizes[name]; ok {
 		return nil
 	}
-	scope, label := "", d.label
-	if d.perDir {
-		scope = path.Dir(name)
-		label = d.label + ", " + scope + ","
-	}
-	if d.totals[scope]+size > d.dirCap {
-		return fmt.Errorf("the files read of %s pass %s together", label, mib(d.dirCap))
+	if d.total+size > d.dirCap {
+		return fmt.Errorf("the files read of %s pass %s together", d.label, mib(d.dirCap))
 	}
 	d.sizes[name] = size
-	d.totals[scope] += size
+	d.total += size
 	return nil
 }
 
