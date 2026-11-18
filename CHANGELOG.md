@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.8.1](https://github.com/OKDP/okdp-compiler/compare/v0.7.0...v0.8.1) (2026-11-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* the chart cache and the chart checks out of the compiler, a host's hook on the loaded instances, the docs shortened
+* the mandatory rules embedded in the compiler, the okdp-compile command, a compile as the stages of a run, the comments in plain sentences
+* the OAuth clients as objects of the compile, the object and host checks exported, the chart failures per instance, hosts <label>.<namespace>.<suffix>, a context through the checks
+* the standard rule set out of the compiler, a compile without a rule set applies none
+* the okdp-objects chart 2.0.0 holding the OAuth clients, no global.okdp.charts.oidcDcr, condition: <key>.enabled accepted
+* the compiler is claims, the compile of a tree and its errors: the deployers' output, the chart cache, treeedit, the CLI and Helm's merge are okdp-gitops'
+* an instance's objects rendered by the okdp-objects chart from one string value of the umbrella, Inputs.Finalize making a compile's final values
+
+### Features
+
+* an instance's objects rendered by the okdp-objects chart from one string value of the umbrella, Inputs.Finalize making a compile's final values ([210b1b0](https://github.com/OKDP/okdp-compiler/commit/210b1b05eb1f6571d99c84368d36cec4f137a7a2))
+* chart and value public packages, what the writers of a compiled tree read of its compile exported from the module root ([b921498](https://github.com/OKDP/okdp-compiler/commit/b9214989596e76a841036eb5ac82b85481871b90))
+* Helm's merge of the final values back in the compiler, a compile giving installable values without a host ([f998106](https://github.com/OKDP/okdp-compiler/commit/f99810605841c8ccf36e5c7b918844a1be6858ff))
+* the CEL engine compiled by cel2yaml v0.1.0 ([b7c09bf](https://github.com/OKDP/okdp-compiler/commit/b7c09bfc60dce555d787c2088a8aa24eb4da3846))
+* the chart cache and the chart checks out of the compiler, a host's hook on the loaded instances, the docs shortened ([2790a92](https://github.com/OKDP/okdp-compiler/commit/2790a92a304149b6739757a45375adcccd766ea9))
+* the compiler is claims, the compile of a tree and its errors: the deployers' output, the chart cache, treeedit, the CLI and Helm's merge are okdp-gitops' ([894c5ce](https://github.com/OKDP/okdp-compiler/commit/894c5ce009178834b11dc44de02a0a3aa247b779))
+* the mandatory rules embedded in the compiler, the okdp-compile command, a compile as the stages of a run, the comments in plain sentences ([32ce718](https://github.com/OKDP/okdp-compiler/commit/32ce718db6349be39ea58d56ebea6a96f1dbdcb9))
+* the OAuth clients as objects of the compile, the object and host checks exported, the chart failures per instance, hosts &lt;label&gt;.&lt;namespace&gt;.&lt;suffix&gt;, a context through the checks ([2b8835a](https://github.com/OKDP/okdp-compiler/commit/2b8835a31d2fe2928dc09b87064e081402311ea8))
+* the okdp-objects chart 2.0.0 holding the OAuth clients, no global.okdp.charts.oidcDcr, condition: &lt;key&gt;.enabled accepted ([3ee8e4c](https://github.com/OKDP/okdp-compiler/commit/3ee8e4c3b0a7cb363f6211b7d8dae36b4d8a5322))
+* the platform's rules read from a versioned rule set: tables, checks, hosts, schemas, fragments, OAuth clients, context levels and secret store ([1caa0d3](https://github.com/OKDP/okdp-compiler/commit/1caa0d34e778a59fbbbaa686be256d873acfb117))
+* the standard rule set out of the compiler, a compile without a rule set applies none ([ee2e8dc](https://github.com/OKDP/okdp-compiler/commit/ee2e8dc53fdbe2da628b811de01cbd1238a39d3b))
+* Write, the values of a compile and those of the okdp-objects chart, and examples/ laid out as a package ([c7ae287](https://github.com/OKDP/okdp-compiler/commit/c7ae2873d174517b5d08245faf43359212f05a74))
+
 ## [0.7.0](https://github.com/OKDP/okdp-compiler/compare/v0.6.0...v0.7.0) (2026-11-08)
 
 
