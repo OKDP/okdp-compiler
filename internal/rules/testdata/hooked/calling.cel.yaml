@@ -1,0 +1,5 @@
+# A document that calls colour: its message is colour's. Input: value.
+errors:
+  - $if: >-
+      ${{ rule("colour", {"value": value, "sets": sets, "tables": tables}) != null }}
+    $value: unreachable

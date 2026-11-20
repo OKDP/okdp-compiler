@@ -73,6 +73,7 @@ type parts struct {
 	projects  map[string]*Repository // the owner of projects/<project>/, by project
 	contracts contractsFS            // every contract file
 	packages  map[[2]string]*okdp.Definition
+	rules     *okdp.RuleSet // the rule set the packages are read for; nil, the mandatory one
 }
 
 // Load returns every instance of the tree that repos make together, sorted
@@ -91,7 +92,14 @@ type parts struct {
 // once. A tree with any problem gives no instance: LoadProjects loads what
 // it can.
 func Load(ctx context.Context, repos []Repository) ([]okdp.Instance, error) {
-	l, err := LoadProjects(ctx, repos)
+	return LoadWith(ctx, repos, nil)
+}
+
+// LoadWith is Load for the compiles of rules: okdp.yaml of a package may
+// hold their sections (okdp.LoadDefinitionWith). Nil rules stand for the
+// mandatory set.
+func LoadWith(ctx context.Context, repos []Repository, rules *okdp.RuleSet) ([]okdp.Instance, error) {
+	l, err := LoadProjectsWith(ctx, repos, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -138,10 +146,17 @@ func (e *packageError) Unwrap() error { return e.err }
 // projects too. A problem of a project's own refuses that project alone:
 // Loaded.Refused lists it, and the instances of the other projects load.
 func LoadProjects(ctx context.Context, repos []Repository) (*Loaded, error) {
+	return LoadProjectsWith(ctx, repos, nil)
+}
+
+// LoadProjectsWith is LoadProjects for the compiles of rules, as LoadWith
+// is Load.
+func LoadProjectsWith(ctx context.Context, repos []Repository, rules *okdp.RuleSet) (*Loaded, error) {
 	t, err := index(repos)
 	if err != nil {
 		return nil, newError([]error{err})
 	}
+	t.rules = rules
 	var errs []error // every problem, in Load's order
 	var platformErrs []error
 	for _, r := range repos {
@@ -404,7 +419,7 @@ func (t *parts) definition(service, version string) (*okdp.Definition, error) {
 	if err != nil {
 		return nil, &packageError{err}
 	}
-	def, err := okdp.LoadDefinition(files)
+	def, err := okdp.LoadDefinitionWith(files, t.rules)
 	if err == nil && (def.Chart.Name != service || def.Chart.Version != version) {
 		err = fmt.Errorf("its Chart.yaml is %s %s", def.Chart.Name, def.Chart.Version)
 	}

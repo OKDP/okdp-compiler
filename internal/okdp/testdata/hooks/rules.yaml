@@ -1,0 +1,17 @@
+# A rule set added to the mandatory one, for the tests of the hooks and of a
+# section of its own: notes, whose items add a ConfigMap each.
+apiVersion: okdp-compiler/rules.v1
+name: hooks
+version: 1.0.0
+hooks:
+  objects: [labelled]
+  finalValues: [bounded]
+sections: [notes]
+templates:
+  note: note.cel.yaml
+ownObjects:
+  - {section: notes, list: noteList, objects: note}
+documents:
+  labelled: labelled.cel.yaml
+  bounded: bounded.cel.yaml
+  noteList: note-list.cel.yaml

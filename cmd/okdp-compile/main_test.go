@@ -102,7 +102,7 @@ func TestRun(t *testing.T) {
 func TestRunWithRules(t *testing.T) {
 	repo, _ := example(t, "00_passthrough", "echo", "1.2.0")
 	added := t.TempDir()
-	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nversion: 1.0.0\n"})
+	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\n"})
 	out := t.TempDir()
 	if err := run(options{repositories: []string{repo}, rules: added, output: out}); err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestRunWithRules(t *testing.T) {
 	if _, ok := files(t, out)["projects/demo/instances/demo-echo/values.yaml"]; !ok {
 		t.Errorf("no values.yaml: %v", files(t, out))
 	}
-	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nversion: 1.0.0\ntables:\n  engineNamespaces: {values: []}\n"})
+	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\ntables:\n  engineNamespaces: {values: []}\n"})
 	if err := run(options{repositories: []string{repo}, rules: added, check: true}); err == nil || !strings.Contains(err.Error(), "replaces none") {
 		t.Errorf("a set that replaces a mandatory table: %v", err)
 	}

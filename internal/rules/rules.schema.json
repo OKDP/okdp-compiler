@@ -6,11 +6,18 @@
   "required": ["apiVersion", "version"],
   "properties": {
     "apiVersion": {"const": "okdp-compiler/rules.v1"},
-    "version": {"type": "string", "minLength": 1},
+    "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The set's name: core for the mandatory set; required for a set added to it, a name no other set has. A tree requires a set by its name (global.okdp.ruleSets)."},
+    "version": {"type": "string", "minLength": 1, "description": "The set's version, MAJOR.MINOR.PATCH with an optional -prerelease."},
     "schemas": {
       "type": "object",
       "additionalProperties": false,
+      "description": "The schemas of the platform's settings and of a mapping. The first set that gives one gives the schema; a set added to it adds properties and $defs, and changes nothing the first gives.",
       "properties": {"platform": {"type": "string", "minLength": 1}, "mapping": {"type": "string", "minLength": 1}}
+    },
+    "scopes": {
+      "type": "array",
+      "description": "The documents that compute what a mapping sees as platform, names of documents, evaluated in order, the sets' in the order they are read.",
+      "items": {"type": "string", "minLength": 1}
     },
     "functions": {
       "type": "object",
@@ -83,14 +90,37 @@
     },
     "tables": {
       "type": "object",
+      "description": "Each table of the set, or values the set adds to an extensible table a set read before gives.",
       "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["values"],
-        "properties": {
-          "values": {"type": "array", "items": {"type": "string"}},
-          "addFrom": {"type": "string", "minLength": 1, "description": "The path under global.okdp of a list the platform adds to the table."}
-        }
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["values"],
+            "properties": {
+              "values": {"type": "array", "items": {"type": "string"}},
+              "addFrom": {"type": "string", "minLength": 1, "description": "The path under global.okdp of a list the platform adds to the table."},
+              "extensible": {"type": "boolean", "description": "A set read later may add values to the table (add)."}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["add"],
+            "properties": {
+              "add": {"type": "array", "items": {"type": "string"}, "description": "The values added to the extensible table of that name."}
+            }
+          }
+        ]
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "description": "The documents the compiler calls at each hook, names of documents.",
+      "additionalProperties": false,
+      "properties": {
+        "objects": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "finalValues": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
     }
   }

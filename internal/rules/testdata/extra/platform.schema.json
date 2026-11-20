@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "global": {
+      "properties": {
+        "okdp": {
+          "properties": {
+            "policy": {
+              "properties": {
+                "extraNames": {"type": "array", "items": {"type": "string"}, "description": "A key added to a map the mandatory schema closes."}
+              }
+            },
+            "extra": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "A subtree the mandatory schema does not hold, with its defaults.",
+              "properties": {
+                "level": {"type": "integer", "default": 3},
+                "label": {"type": "string", "default": "plain"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

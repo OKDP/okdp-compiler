@@ -68,10 +68,22 @@ func FinalValues(in FinalInput, check chart.UpstreamCheck) (FinalValuesOf, error
 
 // CheckObjects returns nil when the objects of an instance of svc in
 // namespace are allowed to a project that is not privileged: each is in
-// that namespace or names none, and none is cluster-scoped or of an
-// engine's API group. A host calls it for the objects it adds itself.
-func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, objects []map[string]any) error {
-	return okdp.CheckObjects(ctx, rules, svc, namespace, objects)
+// that namespace or names none, none is cluster-scoped or of an engine's
+// API group, and the rule set's objects hook passes on each. settings are
+// the platform's (Result.Settings), which the hook reads. A host calls it
+// for the objects it adds itself.
+func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, objects []map[string]any) error {
+	return okdp.CheckObjects(ctx, rules, svc, namespace, settings, objects)
+}
+
+// CheckFinalValues returns nil when the rule set's finalValues hook
+// passes on the final values of each chart key of an instance of svc in
+// namespace, a project that is not privileged; keys in order, the first
+// message refusing. settings are the platform's (Result.Settings). A
+// compile runs it (FinalInput.CheckFinalValues); a host calls it on
+// final values it reads outside a compile.
+func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, values map[string]map[string]any) error {
+	return okdp.CheckFinalValues(ctx, rules, svc, namespace, settings, values)
 }
 
 // CheckIngressHosts returns nil when the objects of an instance of svc in

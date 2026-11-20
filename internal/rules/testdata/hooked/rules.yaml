@@ -1,0 +1,24 @@
+# A rule set added to the mandatory one, for the tests: tables of its own,
+# values added to the extensible tables, hooks and the helper functions.
+apiVersion: okdp-compiler/rules.v1
+name: hooked
+version: 1.0.0
+tables:
+  colours:
+    values: [red, green]
+  shapes:
+    addFrom: shapes.extra
+    values: [circle]
+  platformObjectNames:
+    add: [extra-object]
+  platformObjectSettings:
+    add: [extra.objectName]
+hooks:
+  objects: [labelled]
+  finalValues: [bounded]
+documents:
+  colour: colour.cel.yaml
+  labelled: labelled.cel.yaml
+  bounded: bounded.cel.yaml
+  helpers: helpers.cel.yaml
+  calling: calling.cel.yaml

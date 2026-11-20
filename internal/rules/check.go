@@ -39,7 +39,7 @@ const (
 var ruleChecks = []string{CheckContextLayer, CheckHost, CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule, CheckUpstreamKey, CheckValuesLayer}
 
 // ruleInputs lists what the checks may read, besides their sets and tables.
-var ruleInputs = []string{"added", "arg", "at", "declared", "field", "host", "items", "key", "layer", "level", "listed", "name", "ns", "object", "platform", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}
+var ruleInputs = []string{"added", "arg", "at", "declared", "field", "host", "items", "key", "layer", "level", "listed", "name", "ns", "object", "platform", "privileged", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}
 
 // checker holds the checks prepared in one session. A session is not safe
 // for concurrent use, so a rule set keeps the checkers that are free. ctx
@@ -113,7 +113,8 @@ func (r *RuleSet) put(c *checker) {
 
 // eval evaluates the document on input, with the sets and tables of the
 // rule set. It returns its first message (empty when none) and its values.
-// A document r does not hold fails.
+// The first message of a document it calls through rule is its own, as
+// written. A document r does not hold fails.
 func (r *RuleSet) eval(ctx context.Context, document string, input M) (compile.Problem, M, error) {
 	if !r.Loaded() {
 		return compile.Problem{}, nil, fmt.Errorf("the rule set: %w", ErrNotLoaded)
@@ -131,6 +132,10 @@ func (r *RuleSet) eval(ctx context.Context, document string, input M) (compile.P
 	maps.Copy(scope, input)
 	scope["sets"], scope["tables"] = r.sets, r.lists
 	sections, problems, err := c.docs[document].Eval(ctx, scope)
+	if f, ok := errors.AsType[*Failure](err); ok {
+		// A document that rule calls refused: its message is this one's.
+		return compile.Problem{Path: f.Path, Message: f.Message}, nil, nil
+	}
 	if err != nil {
 		return compile.Problem{}, nil, fmt.Errorf("the rule set: %w", err)
 	}
@@ -153,9 +158,10 @@ func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, erro
 	return v, nil
 }
 
-// Refuse runs the check on input. It returns nil when the check passes, and
-// its first message as a *Failure. A check that fails to evaluate gives
-// another error: it never counts as a rule passed.
+// Refuse runs the check on input: one of ruleChecks, or a document of any
+// set, by name. It returns nil when the check passes, and its first message
+// as a *Failure. A check that fails to evaluate gives another error: it
+// never counts as a rule passed.
 func (r *RuleSet) Refuse(ctx context.Context, check string, input M) error {
 	p, _, err := r.eval(ctx, check, input)
 	if err != nil {
@@ -265,5 +271,15 @@ func ruleFunctions(c *checker) []cel.EnvOption {
 		native("sensitive", func(k any) any { return value.Sensitive(value.Str(k)) }),
 		native("credentialReference", func(k any) any { return value.CredentialReference(value.Str(k)) }),
 		native("credentialLiteral", func(v any) any { return value.CredentialLiteral(v) }),
+		cel.Function("leaves", cel.Overload("leaves_dyn", []*cel.Type{cel.DynType}, cel.DynType,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				x, err := cel2yaml.ToData(v)
+				if err != nil {
+					return types.WrapErr(err)
+				}
+				return types.DefaultTypeAdapter.NativeToValue(leaves(x))
+			}))),
+		binary("fields", func(s, seps ref.Val) (any, error) { return fields(value.Str(s.Value()), value.Str(seps.Value())), nil }),
+		native("urlParse", func(s any) any { return urlParse(value.Str(s)) }),
 	}
 }

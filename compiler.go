@@ -279,6 +279,14 @@ func LoadDefinition(fsys fs.FS) (*Definition, error) {
 	return okdp.LoadDefinition(fsys)
 }
 
+// LoadDefinitionWith is LoadDefinition for the compiles of rules:
+// okdp.yaml may hold, besides its own keys, the sections the rule set
+// adds to a mapping (rules.yaml's sections), and no other key. Nil rules
+// stand for the mandatory set, as for LoadDefinition.
+func LoadDefinitionWith(fsys fs.FS, rules *RuleSet) (*Definition, error) {
+	return okdp.LoadDefinitionWith(fsys, rules)
+}
+
 // Compile runs the mapping of def on one instance. ctx cancels it, between
 // stages and within the evaluation of an expression. Compile keeps no
 // state between calls, so it is safe for concurrent use.
@@ -354,6 +362,13 @@ func LoadRepository(ctx context.Context, repos []Repository) ([]Instance, error)
 	return repository.Load(ctx, repos)
 }
 
+// LoadRepositoryWith is LoadRepository for the compiles of rules: the
+// packages are read as LoadDefinitionWith reads them. Build reads them for
+// BuildOptions.Rules.
+func LoadRepositoryWith(ctx context.Context, repos []Repository, rules *RuleSet) ([]Instance, error) {
+	return repository.LoadWith(ctx, repos, rules)
+}
+
 // AddedProblems returns the problems of after that before does not have,
 // in the order of after: what a change added to the reasons a tree does
 // not load. A nil before has no problem.
@@ -410,7 +425,7 @@ func Mandatory() *RuleSet { return okdp.Mandatory() }
 // other projects compile. A refused instance is not an error either: it
 // is the tree's answer (TreeInstance.Err).
 func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, error) {
-	loaded, err := repository.LoadProjects(ctx, repos)
+	loaded, err := repository.LoadProjectsWith(ctx, repos, opts.Rules)
 	if err != nil {
 		return nil, err
 	}

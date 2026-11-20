@@ -1,0 +1,10 @@
+# The ConfigMap of a note. Input: the mapping's context, client (the note).
+values:
+  objects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${{ release.name + "-" + client.name }}
+        labels: ${{ client.?labels.orValue({}) }}
+      data:
+        text: ${{ str(client.?text.orValue("")) }}

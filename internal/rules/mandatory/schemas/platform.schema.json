@@ -232,6 +232,19 @@
                 }
               }
             },
+            "ruleSets": {
+              "type": "array",
+              "description": "The rule sets the platform requires: each by its name, core for the compiler's mandatory set, and optionally a constraint on its version (comparators separated by commas, each =, !=, >, >=, <, <=, ~ or ^ followed by a version MAJOR.MINOR.PATCH, or a version alone). A compile that was not given a set listed, or of a version its constraint refuses, is refused: the settings a set reads would be read by none.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The set's name, its rules.yaml's."},
+                  "version": {"type": "string", "minLength": 1, "description": "A constraint on the set's version; absent, any version."}
+                }
+              }
+            },
             "policy": {
               "type": "object",
               "additionalProperties": false,

@@ -215,7 +215,7 @@ helm install demo-webapp charts/catalog/webapp/1.0.0 -n demo \
 |---|---|
 | `--repository <dir>` | a part of the tree, repeatable, one required |
 | `--catalog <dir>` | a catalog, `catalog/` and `contracts/` only, repeatable |
-| `--rules <dir>` | a platform's rule set, `rules.yaml` at its root, added to the mandatory one, of which it replaces no rule; none, and the mandatory rules alone apply, their checks among them |
+| `--rules <dir>` | a platform's rule set, `rules.yaml` at its root, with a `name`, added to the mandatory one, of which it replaces no rule; none, and the mandatory rules alone apply, their checks among them; a tree whose `global.okdp.ruleSets` requires a set not given is refused |
 | `--output`, `-o <dir>` | where to write; the command owns its `projects/` |
 | `--check` | compile and check, write nothing, no `-o`; no upstream chart read |
 | `--cost-limit`, `--instance-timeout`, `--timeout` | the bounds of a compile, those of okdp-gitops' command by default |
@@ -383,7 +383,9 @@ app:
 
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
-`compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`:
+`compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`
+(`LoadDefinitionWith(fsys, rules)` for the compiles of a rule set, whose
+sections `okdp.yaml` may then hold):
 `Chart.yaml`, `okdp.yaml` and the values file, `values.cel.yaml` or
 `values.yaml`, then keeps `fsys` (`Definition.Files`) for the files each
 compile reads, `config.schema.json` and the defaults files. A `Definition`
@@ -437,10 +439,14 @@ Secret its checks deny.
 
 `compiler.LoadRules(fsys)` reads a platform's own set, `rules.yaml` at
 the root of `fsys`, and adds it to the mandatory one, in a
-`*compiler.RuleSet`: its documents, functions, templates, sections. Both
-apply. It fails on a rule the mandatory set gives, a table, a check, a
-schema, a chart or a document (a rule set replaces none), and on a table
-or a check that is unknown: never a rule turned off or replaced.
+`*compiler.RuleSet`: its documents, functions, templates, sections,
+the keys it adds to the schemas and its scope documents. Both apply. It
+fails on a set without a `name`, on a rule the mandatory set gives, a
+table, a check, a key of a schema, a chart or a document (a rule set
+replaces none), and on a table or a check that is unknown: never a rule
+turned off or replaced. A tree lists the sets it requires in
+`global.okdp.ruleSets`, and a compile not given one of them fails
+([the rule set](specs/05_rules.md#platform-settings)).
 
 The helpers that read rules take the set first, nil being the mandatory
 one: `compiler.Roles(rules)`, `EngineNamespaces(rules)`,
@@ -467,7 +473,11 @@ the compile of the instance, and an error of either refuses it:
   final values against them, may render each chart key with
   `FinalInput`'s `Release`, `Namespace` and `Specs[key].Source`, and
   checks the manifests with `compiler.CheckObjects` and
-  `compiler.CheckIngressHosts`.
+  `compiler.CheckIngressHosts`. It runs the rule set's `finalValues`
+  hook with `FinalInput.CheckFinalValues`, on the values it returns, at
+  the point of its own checks it chooses; when it does not, the compile
+  runs it on what Finalize returns. `compiler.CheckFinalValues` runs the
+  hook on final values a host reads outside a compile.
 - `Inputs.CheckGlobals` (`BuildOptions.CheckGlobals`) checks the keys of
   `global` a project sets, before the mapping runs; nil, none.
 
@@ -508,7 +518,9 @@ upstream values is refused when the build renders
   instance, each named after its directory (`Instance.Name`), the name of
   its outputs that name none and of its claims' IDs
   ([repository layout](#repository-layout)); every problem at once, each
-  naming its repository and path.
+  naming its repository and path. `LoadRepositoryWith(ctx, repos,
+  rules)` reads its packages for a rule set, as `Build` does for
+  `BuildOptions.Rules`.
 - `compiler.LoadCatalog(repos)` is the catalog of the same repositories,
   as `LoadRepository` reads it, for a caller that lists the packages
   (a console's menu): `Services()`, each a `compiler.CatalogService`

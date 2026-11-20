@@ -1,0 +1,5 @@
+# The helper functions on input. Input: value, raw, field.
+values:
+  leaves: ${{ leaves(value) }}
+  fields: ${{ fields(raw, field) }}
+  url: ${{ urlParse(raw) }}

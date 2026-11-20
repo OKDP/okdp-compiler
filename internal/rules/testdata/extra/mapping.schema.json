@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "extraItems": {"type": "array", "items": {"$ref": "#/$defs/extraItem"}}
+  },
+  "$defs": {
+    "extraItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {"name": {"type": "string", "minLength": 1}}
+    }
+  }
+}

@@ -1752,6 +1752,12 @@ chart of each key, and the lists the instance appended to
 fetch leaves its keys unchecked, reported; a project that is not
 privileged giving it upstream values is refused when the build renders.
 
+The compiler itself runs one check of the final values: the rule set's
+`finalValues` hook, on the values of each key, for a project that is not
+privileged ([hooks](05_rules.md#hooks)). A Finalize runs it where it
+chooses (`FinalInput.CheckFinalValues`); else the compile runs it on
+what Finalize returns, or right after Helm's merge.
+
 Each compiled chart whose source has a `values.schema.json` in the
 chart cache is checked on its final values coalesced over
 its defaults by Helm's own `chartutil.CoalesceValues` (Helm 3.22): what

@@ -9,11 +9,13 @@ once (`compiler.Mandatory()`): every compile applies it.
 of its rules. This page is the reference of the set: every table, check,
 schema, function and document, and where each is applied.
 
+- [How the sets add up](#how-the-sets-add-up)
 - [Who applies it](#who-applies-it)
 - [What is not in the rule set](#what-is-not-in-the-rule-set)
 - [When each rule applies](#when-each-rule-applies)
 - [Tables](#tables)
 - [Checks](#checks)
+- [Hooks](#hooks)
 - [What okdp-gitops adds](#what-okdp-gitops-adds)
 - [Platform settings](#platform-settings)
 - [What a mapping sees as platform](#what-a-mapping-sees-as-platform)
@@ -54,16 +56,61 @@ internal/rules/mandatory/     what every compile applies
 Every rule file this page names is of this tree, at its relative path;
 `rules.schema.json` is beside it, in `internal/rules`.
 
-`rules.yaml` is `apiVersion: okdp-compiler/rules.v1`, `version: 1.0.0`.
-`compiler.LoadRules` (`okdp-compile --rules`) reads a platform's set,
-`rules.yaml` at its root, adds it to the mandatory set and fails closed.
-It refuses a file that does not meet its `rules.schema.json`, another
-major `apiVersion`, a rule the mandatory set gives (`a rule set adds
-rules, it replaces none`): a table, a check, a schema, a chart, a
-document, a function, a template, a section, `names`, `labels` or
-`keepSync`; a table or a check that is unknown, and a file it names that
-does not exist or does not compile. What a platform's set adds is its own
-documents, functions, templates, sections and `ownObjects`.
+`rules.yaml` is `apiVersion: okdp-compiler/rules.v1`, `name: core`,
+`version: 1.0.0`. `compiler.LoadRules` (`okdp-compile --rules`) reads a
+platform's set, `rules.yaml` at its root, adds it to the mandatory set
+and fails closed. It refuses a file that does not meet its
+`rules.schema.json`, another major `apiVersion`, a set without a `name`
+or of a name a set read before has, a `version` that is not
+`MAJOR.MINOR.PATCH` with an optional `-prerelease`, a rule the mandatory
+set gives (`a rule set adds rules, it replaces none`): a table, a check,
+a key of a schema, a chart, a document, a scope document, a function, a
+template, a section, `names`, `labels` or `keepSync`; a check that is
+unknown, values added to a table that is not extensible, and a file it
+names that does not exist or does not compile. What a platform's set
+adds is its own tables, documents, hooks, functions, templates, sections
+and `ownObjects`, values to the extensible tables of the mandatory set,
+keys of the schemas and scope documents
+([how the sets add up](#how-the-sets-add-up)).
+
+## How the sets add up
+
+The sets apply together, the mandatory set first, and each part of an
+added set stands beside the mandatory set's. Three parts add to what
+the sets read before give.
+
+**Schemas.** `schemas.platform` and `schemas.mapping` of an added set
+are merged into the schema of that name, then the merged document is
+parsed once (`chart.ParseSchema`, never Helm's schema validation). The
+merge goes through `properties` and `$defs`, at any depth. A key the
+schema does not hold is added, with its defaults, which apply as the
+mandatory schema's do. A key both hold is merged further when the
+mandatory one has `properties` or `$defs`; otherwise it is a leaf, and
+refused. Any other keyword of an added node that is merged must be the
+mandatory node's, with the same value: an added schema changes no
+`required`, `additionalProperties`, `type` or `default`. A key may so
+join a map the mandatory schema closes (`additionalProperties: false`),
+and that map refuses every other key as before. The error names the key
+or the keyword by its JSON pointer, as in `schemas: platform:
+#/properties/global/properties/okdp/properties/policy/additionalProperties:
+given by another rule set`.
+
+**Scopes.** `scopes` lists the documents, names of `documents` of the
+set or of a set read before, that compute what a mapping sees as
+`platform`. The compiler evaluates those of every set, in the order the
+sets are read, each with the same input (`settings`, `release`,
+`items`), and merges their `values.platform` key by key. A value two
+documents give at one path, unless both are maps, is an error that names
+both: `the rule set: scopes: platform.<path> is given by both <first>
+and <second>`. A document is listed once. With the mandatory set alone,
+`platform` is what its `scope` gives.
+
+**Names.** Each set names itself: the mandatory set is `core`, and a set
+added to it gives a `name`, a DNS label, that no other set has.
+`RuleSet.Names` lists them in the order they are read,
+`RuleSet.SetVersion` gives the version of each and `RuleSet.Version`
+that of the last set read. A tree states the sets it requires in
+`global.okdp.ruleSets` ([platform settings](#platform-settings)).
 
 ## Who applies it
 
@@ -116,6 +163,8 @@ instance. A project is privileged when its namespace is listed in
 | `object` | each object, items of a List too | compiler | skipped | applies |
 | `host` on objects | each object, items of a List too | compiler | skipped | applies |
 | `plainSecret` | each object, items of a List too | compiler | applies | skipped |
+| hook `objects` | each object, items of a List too, after `object` | compiler | skipped | applies |
+| hook `finalValues` | the final values of each chart key | compiler, in or after `Inputs.Finalize` | skipped | applies |
 | `upstreamKey`, registries | an instance's upstream values | okdp-gitops' `internal/policy`, during the Helm merge | skipped | applies |
 | `upstreamKey`, registries | `global` of each layer above level 0 | okdp-gitops' `internal/policy`, `CheckGlobals` | skipped | applies |
 | `host` on values | the final values of the charts | okdp-gitops' `internal/policy`, after the merge | skipped | applies |
@@ -136,7 +185,27 @@ place of `Inputs.Namespace` in the message.
 ## Tables
 
 A check reads a table as `sets.<name>` or `tables.<name>`. A walker reads
-it through `RuleSet.Has` or `RuleSet.List`.
+it through `RuleSet.Has` or `RuleSet.List`, and what the platform adds to
+it through `RuleSet.Added`.
+
+The mandatory set gives the tables below, and no other: `LoadRules`
+refuses a name it does not know there. A set added to it gives tables of
+any name that no set read before gives, read the same ways, with
+`addFrom` as here. It adds values to a table of the mandatory set only
+when that table is marked `extensible: true`, by `add`:
+
+```yaml
+tables:
+  colours: {values: [red, green]}            # a table of its own
+  platformObjectNames: {add: [extra-object]} # values added, at the end
+```
+
+The extensible tables are those where more values mean more refusals:
+`engineNamespaces`, `clusterScopedKinds`, `deployerApiGroups`,
+`platformObjectNames` and `platformObjectSettings`. `add` on any other
+table, or on a table no set read before gives, is an error; `values` on a
+table a set read before gives is one too (`taken`). A value added twice
+is kept once.
 
 ### engineNamespaces
 
@@ -248,7 +317,15 @@ policy](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#the
 `okdp-dcr-token`.
 
 The platform writes objects of these names in every project's namespace.
-A release may not take one (check `release`).
+A release may not take one (check `release`). Extensible.
+
+### platformObjectSettings
+
+`secrets.store`, `secrets.serviceAccount`, `oidc.dcr.tokenSecret`.
+
+Paths under `global.okdp` of settings that name an object the platform
+writes in every project's namespace. Check `release` takes their values
+as it takes `platformObjectNames`. Extensible.
 
 ### hostAnnotations
 
@@ -314,8 +391,26 @@ A check is a document of `vars` and `errors` in the mapping language. It
 sees its inputs, `sets` and `tables`, and these functions besides the
 language's: `dig`, `pathKey`, `merge`, `rule`, `asList`, `asMap`,
 `truthy`, `keys`, `sensitive`, `credentialReference`,
-`credentialLiteral`. Checks run in a session of their own, so their cost
-does not count against a package's limit.
+`credentialLiteral`, `leaves`, `fields` and `urlParse`. Checks run in a
+session of their own, so their cost does not count against a package's
+limit. The inputs are a closed list (`ruleInputs`, `check.go`): `added`,
+`arg`, `at`, `declared`, `field`, `host`, `items`, `key`, `layer`,
+`level`, `listed`, `name`, `ns`, `object`, `platform`, `privileged`,
+`raw`, `release`, `settings`, `suffix`, `svc`, `value`.
+
+| Function | Returns |
+|---|---|
+| `leaves(v)` | every scalar under `v`, null among them, as a list of `{path, value}`: depth first, map keys sorted, list items in order, a list index an int of `path`; an empty map or list gives nothing |
+| `fields(s, seps)` | `s` split on any character of `seps`, empty fields dropped |
+| `urlParse(s)` | `{ok, scheme, host, user}` of Go's `url.Parse`: `host` without its port, `user` whether user information is given; `ok` false, the rest empty, when it fails |
+
+`rule(name, input)` evaluates another document on `input` alone, which
+must pass it `sets` and `tables` if it reads them. When that document
+refuses, the caller refuses with its message, as written.
+
+The checks are the compiler's own, one per name below: a set added gives
+none. Its own refusals are documents, which its hooks, `rule` or a host's
+Go (`RuleSet.Refuse`, any document by name) call.
 
 Conditions are listed in evaluation order. Below, `...` shortens a
 message; the full text is in the check's file.
@@ -345,8 +440,9 @@ Input: `field`, `ns`, `settings`. `checks/platform-namespace.cel.yaml`.
 
 Input: `field`, `release`, `settings`. `checks/release.cel.yaml`.
 
-The names taken are `platformObjectNames` plus the values of
-`secrets.store`, `secrets.serviceAccount` and `oidc.dcr.tokenSecret`.
+The names taken are `platformObjectNames` plus the values of the
+settings that `platformObjectSettings` lists: `secrets.store`,
+`secrets.serviceAccount` and `oidc.dcr.tokenSecret`.
 A package names its objects `<release>` and `<release>-<x>`, so a release
 is refused when it equals a taken name or is the part before a `-` of
 one: `okdp` is refused because of `okdp-project`.
@@ -463,6 +559,31 @@ Final values are the package's computed values with the instance's
 upstream values over them. The upstream chart's own defaults are not
 seen.
 
+## Hooks
+
+`hooks` in `rules.yaml` lists, for each point the compiler calls a
+set's documents at, documents of the sets read so far. A set added lists
+its own after the mandatory set's, which lists none. Each document gives
+`errors`; the first message refuses the instance, as the document writes
+it: the compiler adds nothing to it. They run in the rule set's session
+and are skipped for a privileged project.
+
+| Hook | Called | Input |
+|---|---|---|
+| `objects` | on each object of an instance, items of a List too, once every object passed check `object`; also by `compiler.CheckObjects`, on a host's objects | `svc`, `ns`, `object` (as check `object` reads it), `settings` |
+| `finalValues` | on the final values of each chart key, keys in order, whether `Inputs.Finalize` or Helm's merge made them; also by `compiler.CheckFinalValues` | `svc`, `ns`, `key`, `value` (the key's values), `settings` |
+
+`settings` is `global.okdp`, the platform's, never null. A message in
+the shape of the compiler's own is written by the document:
+`<svc>: objects: <Kind>/<name>: <path>: ...` (`object.id` is
+`<Kind>/<name>`) and `<key>: <path>: ...`.
+
+A `Finalize` runs `finalValues` itself through
+`FinalInput.CheckFinalValues`, at the point of its own checks it
+chooses, on the values it returns. When it does not, the compile runs
+the hook on what it returns. Without a `Finalize`, the compile runs it
+right after Helm's merge.
+
 ## What okdp-gitops adds
 
 okdp-gitops adds the upstream and ingress policy, which runs checks
@@ -524,6 +645,28 @@ a default.
 | `policy.projectApiGroups` | list of strings | | the API groups added to the Role a project's releases are installed with (Flux; see [the deployer's Role](#the-deployers-role)) |
 | `policy.upstream.deny` | list | | no other key than `deny` and `registries` |
 | `policy.upstream.registries` | list | | see [the upstream policy](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#the-upstream-policy) |
+| `ruleSets[]` | `name` (required), `version` | | the rule sets the compile must be given; no other key is accepted |
+
+`ruleSets` lists the rule sets the platform requires, each by its
+`name`, `core` for the mandatory set, and optionally a constraint on its
+`version`. A constraint is comparators separated by commas, all of
+which must hold: each is `=`, `!=`, `>`, `>=`, `<`, `<=`, `~` (from the
+version on, of the same major and minor) or `^` (from the version on, of
+the same major, or of the same minor when the major is 0) followed by a
+version, or a version alone, which stands for `=`. Versions compare as
+Semantic Versioning 2.0.0 orders them, a `-prerelease` before its
+release. Every compile, `PlatformOf` and `CheckProject` refuse a tree
+that requires a set the compile was not given, or one of a version its
+constraint refuses:
+
+```text
+global.okdp.ruleSets: the platform requires the rule set <name>, which the compile was not given: give it with okdp-compile --rules (compiler.LoadRules)
+global.okdp.ruleSets: the platform requires the rule set <name> <constraint>, the compile was given its version <version>: give a matching one with okdp-compile --rules (compiler.LoadRules)
+```
+
+`global.okdp` takes keys its schema does not describe, so the settings
+an added set reads would otherwise pass unread in a compile without it:
+the requirement lives in the tree, and holds with the compiler alone.
 
 ## The deployer's Role
 
@@ -544,8 +687,11 @@ identity. Argo CD confines by the AppProject instead
 
 ## What a mapping sees as platform
 
-`scope.cel.yaml` computes `platform`. Its inputs are `settings`,
-`release`, and `items`, the project's groups with their roles.
+`scope.cel.yaml`, the mandatory set's scope document (`scopes`),
+computes `platform`; an added set's scope documents add keys to it
+([how the sets add up](#how-the-sets-add-up)). Its inputs are
+`settings`, `release`, and `items`, the project's groups with their
+roles.
 
 | Value | How it is computed |
 |---|---|
@@ -564,6 +710,10 @@ identity. Argo CD confines by the AppProject instead
 `schemas/mapping.schema.json` checks a mapping's result and the arguments
 of the functions. The sections are the compiler's `output`, `instance`,
 `provides` and `objects`, and `oidcClients` from `rules.yaml` `sections`.
+`okdp.yaml` may hold the sections of the rule set it is read for
+(`compiler.LoadDefinitionWith`, `LoadRepositoryWith`, `Build` for
+`BuildOptions.Rules`), and no other key: `LoadDefinition` reads it for
+the mandatory set.
 
 | Section | Rule |
 |---|---|
@@ -872,14 +1022,17 @@ Only the sandbox's local registry holds `okdp-objects`, and the sandbox
 overrides `charts.objects` to reach it.
 
 `ownObjects` ties the section `oidcClients` to the
-list document `oidcClients` and the template `oidcClient`.
+list document `oidcClients` and the template `oidcClient`. A list
+document reads the section's `items`, `release`, `platform`,
+`privileged` and `settings`; its first message refuses the instance.
 
 ## What a platform can change
 
 `platform.yaml` cannot add a check, a function or a schema. A
-platform's rule set (`LoadRules`) adds its own documents, functions,
-templates, sections and `ownObjects`, and changes none of the rules
-below. Of them, `platform.yaml` can only set these:
+platform's rule set (`LoadRules`) adds its own tables, documents, hooks,
+functions, templates, sections, `ownObjects`, scope documents and keys
+of the schemas, and values to the extensible tables, and changes none of
+the rules below. Of them, `platform.yaml` can only set these:
 
 | Setting | Effect on the rules |
 |---|---|
@@ -893,6 +1046,7 @@ below. Of them, `platform.yaml` can only set these:
 | `ingress.suffix` | sets the host pattern of check `host` |
 | `secrets.store`, `secrets.serviceAccount`, `oidc.dcr.tokenSecret` | add names to check `release` |
 | `charts.objects` | replaces the `objects` chart |
+| `ruleSets` | refuses every compile without the sets it requires |
 
 Only `deniedUpstreamKeys` is added to through `addFrom`. Nothing in
 `platform.yaml` removes a value from a table.
@@ -902,8 +1056,17 @@ Only `deniedUpstreamKeys` is added to through `addFrom`. Nothing in
 Edit [`internal/rules/mandatory`](../../internal/rules/mandatory) and
 run `make check`. A rule's message is part of its contract: the tests of
 `internal/rules`, `internal/okdp` and `compiler_test.go` compare them. A
-new table or check name also needs a change in `internal/rules`
-(`ruleTables`, `ruleChecks`): `LoadRules` refuses names it does not know.
+new table or check name of the mandatory set also needs a change in
+`internal/rules` (`ruleTables`, `ruleChecks`): `LoadRules` refuses names
+it does not know there. A set added to it needs none for its tables,
+documents and hooks.
+
+A platform's own set changes the same way, in its own tree: a key of a
+schema comes in its `schemas`, merged, and a value a mapping sees as
+`platform` in a document of its `scopes`. Raise its `version` with each
+change, the major one when a change breaks what a tree relies on: a tree
+that requires the set (`global.okdp.ruleSets`) states the versions it
+accepts, and a compile given another is refused.
 
 A release of the compiler carries the change, and a host takes it by
 taking the release: okdp-gitops' fixtures (`testdata/cli`, the tests of

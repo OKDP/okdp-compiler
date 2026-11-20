@@ -220,12 +220,15 @@ mode, the dependencies, and what the mapping sees (its `scope`):
    reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)). Nulls
    are read as Helm reads them in a chart's values: a `null` deletes the
    setting's default, and is refused by its type where there is none; an
-   empty string is a value.
+   empty string is a value. A platform whose `global.okdp.ruleSets`
+   requires a rule set the compile was not given, or of a version out of
+   its constraint, is refused there (`requiredRuleSets`).
    The mapping sees `global.okdp` as the context wrote it (`global`); the
    compiler reads the checked copy (`instance.okdp`: the privileged
    projects, the store, the upstream policy, the platform charts, the
    classes). What the mapping sees as `platform` is the rule set's
-   document `scope` (`scope.cel.yaml`), computed from it: OIDC, the client
+   scope documents (`RuleSet.Scope`: the mandatory `scope.cel.yaml`, then
+   those of an added set, merged), computed from it: OIDC, the client
    provisioning mode in effect (`existing`, `dcr`) among it ([OAuth client
    settings](specs/01_inputs_outputs.md#oauth-client-settings)).
 3. **Connections** (`newInstance`; `resolver`, `internal/okdp/connections.go`).
@@ -459,7 +462,7 @@ neither knows OKDP.
 | | `check.go` | what is checked of values whatever the chart: `NoTemplate`, the `{{` check; `Overlap`, a layer setting what a lower one set; `UpstreamCheck`, the type of the caller's check of upstream values | `okdp` (`layers.go`, `connections.go`), `merge` |
 | `merge` | `merge.go` | stage 9 (`FinalValues`, a `Final`: the values by key from `keyValues`, the source of each, the paths appended to, `Appended`), the instance's upstream values, `protect`, the caller's check (`chart.UpstreamCheck`) and `append`; no upstream chart read | `chart`; `compiler.FinalValues` for a host's `Inputs.Finalize` |
 | | `paths.go` | the paths the merge walks | `merge.go` |
-| `rules` | `rules.go` | the rule sets (`LoadRules`, the set given added to the mandatory one, `Mandatory`, it alone, embedded from `mandatory/`, `RuleSet`; its zero value holds no rule, its checks failing with `ErrNotLoaded`; a rule that refuses is a `*Failure`, `errors.Is(err, ErrRefused)`, values that violate a schema a `*SchemaError`): its tables, each with what the platform adds to it (`addFrom`), its schemas, fragments and templates, labels, names and charts; every table and check required of the two sets together, an unknown one refused, a rule of both refused | `chart`, `compile`; the walkers of `okdp` |
+| `rules` | `rules.go` | the rule sets (`LoadRules`, the set given added to the mandatory one, `Mandatory`, it alone, embedded from `mandatory/`, `RuleSet`; its zero value holds no rule, its checks failing with `ErrNotLoaded`; a rule that refuses is a `*Failure`, `errors.Is(err, ErrRefused)`, values that violate a schema a `*SchemaError`): its tables, each with what the platform adds to it (`addFrom`), its schemas, fragments and templates, labels, names and charts; every table and check required of the two sets together, an unknown one refused, a rule of both refused; the schemas merged (`schemas.go`), the scope documents (`scopes.go`, `RuleSet.Scope`), the sets' names and versions and the constraints on them (`versions.go`, `Names`, `SetVersion`, `Require`) | `chart`, `compile`; the walkers of `okdp` |
 | | `check.go` | its documents, prepared once per set in free sessions (`checker`, `get`, `put`) and evaluated by the walkers (`Refuse`, `Problem`, `Values`), a check that fails to evaluate an error; the functions they call (`ruleFunctions`) | `compile.Prepare` |
 | | `rules.schema.json` | the form of `rules.yaml`, embedded | `LoadRules` |
 | `okdp` | `doc.go` | the package doc | |
@@ -468,7 +471,7 @@ neither knows OKDP.
 | | `pipeline.go` | `Inputs`, `ContextLayer`, `Result` (with the definition's warnings), `Compile`: the order of the stages, each a method of `run`, the state of one compile (`checkInputs`; `platformInstance`, stages 1 to 4, the platform requirements among them; `mapping`, stages 5 and 6, in the compile's CEL session; `provides`, stage 7; `objects`, stage 8; `finalValues`, stage 9, the dependencies rendered by `rendered`) | calls `newInstance`, `cel2yaml.NewSession` (with `functions`, the context given to each evaluation), `platformCharts`, `runMapping`, `ownObjects`, `provided`, `published`, `checkObjectsChart`, `Inputs.Finalize` or `merge.FinalValues` |
 | | `memo.go` | `Memo`: what the compiles of a set of instances read once, an instance's parameters (`paramsMemo`), the contracts of a file system (`contractCache`); `CompileAllWith`, for a caller that compiles the same instances again | `Compile`, `claimsOf`, `newInstance`, `resolver` |
 | | `layers.go` | stage 1: the values layers, the context's by level (`contextLayers`: a level adds to the lower levels' values and changes none, nothing of `global.okdp` but `provisioning` above level 0 (`platformOnly`), no key of `global` but those `policy.projectGlobals` lists (`projectGlobals`), checked by the upstream policy (`upstreamGlobals`), no `claims` at level 0, no `{{` above it; the context's `global.okdp`, level 0's and the classes above it) then the instance's, normalized (`value.Normalize`); `global`, `connections` and `claims` are the context's, no `{{` in the instance's (`valuesLayers`) | the keys of `global` the parameter schema declares (`chart.Schema.Doc`), `chart.NoTemplate`; called by `context.go` |
-| | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` of the context's layers alone, `contextLayers`, checked against the rule set's platform schema, `platformSettings`) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against a schema of the rule set, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; the rule set's document `scope`; the `instance` is read by `mapping.go`, `objects.go`, `provides.go` |
+| | `context.go` | stages 1 to 3: `instance`, the typed state of a compile, built by one function (`newInstance`): the parameters (`chart.ReadParameterSchema`, the references' requirements, `valuesLayers`, `chart.Parameters`), the platform context (`global.okdp` of the context's layers alone, `contextLayers`, checked against the rule set's platform schema, `platformSettings`, which refuses the rule sets `global.okdp.ruleSets` requires and the compile was not given) and the connections (`resolver`), which end with what the mapping sees (`instance.scope`); values checked against a schema of the rule set, the platform's or the mapping's (`schemaValues`) | `chart.ParseSchema`, `chart.Schema.Values`; `connections.go`, `labels.go`; the rule set's scope documents (`RuleSet.Scope`); the `instance` is read by `mapping.go`, `objects.go`, `provides.go` |
 | | `connections.go` | the references of the parameters, visited (`refs`), resolved to a connection, a named claim's or a claim template's output of `Inputs.Bindings`, or an output of `Inputs.Published` (`resolver`: `resolve`, then one resolution per source, `resolveNamed`, `resolveClaim`, `resolveExternal`, its contract's fields apart from its own keys (`connectionFields`), as written (`Connection`, `ParseConnection`, `MarshalYAML`), `resolveOutput`), `Dependency`; the outputs no instance publishes, said by the error (`missingOutputs`); the contracts: `contract`, read, decoded and compiled once for the compiles of a set (`readContract`, `contractCache`), its claim schema with it, `x-okdp-internal` refused, and the checks of values against one (`fields`, `complete`, `check`), of a claim's request against its claim schema (`contract.request`); every connection of an instance's context checked at its declaration, referenced or not (`declaredConnections`, `declared`, `declaration`, `CheckConnection`, `Connection.Entry`); what a reference requires (`requirement`, `require`): compiled (`readRequirement`), those of the parameter schema at stage 1, with the request each fixes (`requirements`), found as the walk finds them, one out of its reach refused (`schemaRefs`, `ConnectionRefs`), its fields against the contract (`contract.requires`), the connection against it (`requirement.check`) | used by `context.go` with the context's `connections`, recording dependencies; the contracts by `provides.go` |
 | | `descriptor.go` | a contract as the compile reads it, for a caller that shows it (`ReadContract`, `ReadContracts`, `ContractDescriptor`, `ContractField`): `readContract`, its fields in the order of the file (`propertyOrder`) | `readContract` |
 | | `accessors.go` | the errors of a field (`FieldError`, `atField`: the references, the claims bound, the named claims); the names of the claims (`NamedClaimID`, `IsClaimID`, `CheckProvider`) | `connections.go`, `namespace.go`, `claims.go` |
@@ -516,10 +519,19 @@ against `rules.schema.json`. A compile applies the mandatory set,
 `internal/rules/mandatory`, embedded, and the one it is given, if any
 (`Inputs.Rules`, read by `LoadRules`), added to it. Each rule is in one
 of them: a table, a check, a document, a function, a template, a
-section, a chart or a schema of the mandatory set is refused in the
-other, and so are `names`, `labels` and `keepSync`, each given whole.
-There is no precedence to read: both apply. Their checks and documents
-are prepared in one session, each able to call any other with `rule`.
+section or a chart of the mandatory set is refused in the other, and so
+are `names`, `labels` and `keepSync`, each given whole. There is no
+precedence to read: both apply. Their checks and documents are prepared
+in one session, each able to call any other with `rule`.
+
+Three parts add up rather than stand beside each other. An added set's
+`schemas` are merged into the mandatory ones through `properties` and
+`$defs`, a key added and none changed, and the merged document is
+parsed once. Its `scopes`, documents evaluated after the mandatory
+set's `scope`, add keys to what a mapping sees as `platform`, a value
+two of them give refused. Each set has a `name`, `core` for the
+mandatory one: a tree requires sets by name and version
+(`global.okdp.ruleSets`), and a compile not given one is refused.
 
 `LoadRules` fails closed: a table or a check that is unknown refuses the
 set, never a rule turned off or replaced. A role other than `viewer`,
@@ -530,7 +542,9 @@ code.
 |---|---|
 | `tables` | lists the checks and walkers read, a table with `addFrom` also read from the list of `global.okdp` at that path: the platform adds to it, never removes |
 | `checks` | documents of the mapping language with `vars` and `errors`, one per walker |
-| `schemas` | the platform's settings, a mapping's sections and the arguments of its functions |
+| `name`, `version` | the set's name, `core` for the mandatory one, and its version, which a tree's `global.okdp.ruleSets` constrains |
+| `schemas` | the platform's settings, a mapping's sections and the arguments of its functions; an added set's merged into them |
+| `scopes` | the documents that compute what a mapping sees as `platform`, every set's, merged |
 | `functions` | the fragments and functions a mapping calls |
 | `templates`, `documents` | the objects and values the compiler has the rule set compute: a generated Secret, the secret store's objects, `scope` (what a mapping sees as `platform`) |
 | `sections`, `ownObjects`, `charts` | the sections of a mapping, those whose items add objects, the charts' defaults |
@@ -997,7 +1011,10 @@ mandatory set alone, its functions and checks applied;
 `TestCheckProjectName`, the compile's rule; `TestWrite`, `TestKeepSynced`,
 the files of a compile. `internal/rules` tests the loader failing closed,
 the mandatory set and the two sets together (`TestLoadRules`,
-`TestMandatory`, `TestBothSets`, `TestSetsDisjoint`), `internal/merge` the
+`TestMandatory`, `TestBothSets`, `TestSetsDisjoint`), what an added set
+adds to (`TestSchemasAdd`, `TestSchemasCollide`, `TestScopes`,
+`TestSetNames`, `TestRequire`, `TestConstraints`, with the set of
+`testdata/extra`), `internal/merge` the
 merge and the lists appended to (`TestFinalValues`); the checks against
 the upstream charts are okdp-gitops' `internal/chartcheck`'s (`TestCheck`,
 `TestCheckMissing`, `TestCheckGlobal`, `TestCheckSchemaRef`,

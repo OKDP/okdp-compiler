@@ -11,7 +11,10 @@ cannot be enforced](#what-cannot-be-enforced) closes it.
 These rules are data. The walkers of `internal/okdp` (`policy.go`,
 `hosts.go`, `release.go`) run the checks of the compiler's mandatory rule
 set, which every compile applies; a rule set a compile is given
-(`Inputs.Rules`) adds to it and replaces none of its rules.
+(`Inputs.Rules`) adds to it and replaces none of its rules. A tree that
+requires a set (`global.okdp.ruleSets`) is refused by every compile not
+given it, or given a version its constraint refuses, so that the
+settings only that set reads are never left unchecked.
 
 This module's own `cmd/okdp-compile` holds the lines of okdp-gitops'
 command about what it reads and writes, with copies of `dirfs` and

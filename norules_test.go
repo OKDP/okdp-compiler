@@ -84,10 +84,10 @@ func TestCompileWithoutRules(t *testing.T) {
 func TestCheckRendered(t *testing.T) {
 	rules := testrules.Standard()
 	settings := map[string]any{"ingress": map[string]any{"suffix": "example.org"}}
-	if err := compiler.CheckObjects(context.Background(), rules, "web", "demo", []map[string]any{{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "a"}}}); err != nil {
+	if err := compiler.CheckObjects(context.Background(), rules, "web", "demo", nil, []map[string]any{{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "a"}}}); err != nil {
 		t.Errorf("an object of the namespace: %v", err)
 	}
-	err := compiler.CheckObjects(context.Background(), rules, "web", "demo", []map[string]any{{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": map[string]any{"name": "a"}}})
+	err := compiler.CheckObjects(context.Background(), rules, "web", "demo", nil, []map[string]any{{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": map[string]any{"name": "a"}}})
 	if err == nil || !strings.Contains(err.Error(), "web: objects: ClusterRole/a") {
 		t.Errorf("a cluster-scoped kind: %v", err)
 	}

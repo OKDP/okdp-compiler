@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"sort"
 
@@ -107,11 +108,10 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 	for g, role := range groups {
 		roles[g] = string(role)
 	}
-	derived, err := inst.rules.Values(ctx, "scope", M{"settings": inst.okdp, "release": release, "items": roles})
+	platform, err := inst.rules.Scope(ctx, M{"settings": inst.okdp, "release": release, "items": roles})
 	if err != nil {
 		return nil, err
 	}
-	platform := value.AsMap(derived["platform"])
 	inst.scope = M{
 		"service":        M{"name": svc.Name, "version": svc.Version},
 		"labels":         inst.rules.Labels(svc.Name, in.Release, "", false),
@@ -170,11 +170,30 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 // platformSettings returns global.okdp of platform, the context's values,
 // checked against the platform schema with its defaults applied. A value
 // of another type is refused rather than read as not set: oidc: false
-// would leave OIDC enabled.
+// would leave OIDC enabled. A platform that requires a rule set the
+// compile was not given is refused (requiredRuleSets).
 func platformSettings(rules *RuleSet, platform M) (M, error) {
 	settings, err := schemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}
-	return value.AsMap(value.Dig(settings, "global.okdp")), nil
+	okdp := value.AsMap(value.Dig(settings, "global.okdp"))
+	if err := requiredRuleSets(rules, okdp); err != nil {
+		return nil, err
+	}
+	return okdp, nil
+}
+
+// requiredRuleSets checks that rules holds every set that
+// global.okdp.ruleSets of okdp, the platform's settings, requires, of a
+// version its constraint accepts. Without it, a tree whose settings a set
+// reads would compile without that set's rules.
+func requiredRuleSets(rules *RuleSet, okdp M) error {
+	for _, v := range value.AsList(okdp["ruleSets"]) {
+		m := value.AsMap(v)
+		if err := rules.Require(value.Str(m["name"]), value.Str(m["version"])); err != nil {
+			return fmt.Errorf("global.okdp.ruleSets: %w", err)
+		}
+	}
+	return nil
 }

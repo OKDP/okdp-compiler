@@ -196,7 +196,10 @@ OKDP sections.
 The package keys are decoded by `go.yaml.in/yaml/v3`, YAML 1.2, strictly:
 any other key fails rather than being ignored, where a misspelt `upstream`
 would accept no upstream values, each reported, one per line, as yaml.v3
-reports it (`okdp.Package` the type of the top level):
+reports it (`okdp.Package` the type of the top level). The sections of
+the rule set the package is read for (`rules.yaml`'s `sections`;
+`compiler.LoadDefinitionWith`, `Build` for `BuildOptions.Rules`) are
+keys of the file too; `LoadDefinition` reads it for the mandatory set:
 
 ```text
 okdp.yaml: yaml: unmarshal errors:

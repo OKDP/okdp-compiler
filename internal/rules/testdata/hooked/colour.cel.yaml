@@ -1,0 +1,4 @@
+# A colour of the table colours, or a shape of shapes. Input: value.
+errors:
+  - $if: ${{ !(value in sets.colours) && !(value in tables.shapes) }}
+    $value: "${{ value }}: neither ${{ tables.colours.join(\", \") }} nor ${{ tables.shapes.join(\", \") }}"

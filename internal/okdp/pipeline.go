@@ -94,6 +94,12 @@ type FinalInput struct {
 	Namespace         string
 	Privileged        bool // the project is one of the platform's own
 	AllowPlainSecrets bool // Inputs.AllowPlainSecrets
+	// CheckFinalValues runs the rule set's finalValues hook on values, the
+	// final values by chart key; it checks nothing for a privileged project.
+	// A Finalize calls it on the values it returns, before it returns, at
+	// the point of its own checks it chooses. When it does not, the compile
+	// runs the hook on the values once Finalize has returned them.
+	CheckFinalValues func(ctx context.Context, values map[string]map[string]any) error
 }
 
 // GlobalLayer is the global one layer of a project sets. Name identifies
@@ -115,7 +121,9 @@ type GlobalsInput struct {
 
 // Finalize returns the final values of each key of in.Output, the chart
 // that renders each, and warnings. It runs inside the compile of the
-// instance, so its error refuses the instance like any other stage's.
+// instance, so its error refuses the instance like any other stage's. It
+// runs the rule set's finalValues hook through in.CheckFinalValues, or
+// leaves it to the compile, which then runs it after Finalize returns.
 type Finalize func(ctx context.Context, in FinalInput) (values map[string]map[string]any, charts map[string]chart.Ref, warnings []string, err error)
 
 // ContextLayer is one values layer of the context (Inputs.Context), read
@@ -372,7 +380,7 @@ func (c *run) objects() error {
 		out.Objects = append(out.Objects, o)
 	}
 	if !out.Privileged {
-		if err := CheckObjects(c.ctx, rules, c.svc.Name, in.Namespace, out.Objects); err != nil {
+		if err := CheckObjects(c.ctx, rules, c.svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
 			return err
 		}
 		if err := CheckIngressHosts(c.ctx, rules, c.svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
@@ -409,6 +417,16 @@ func (c *run) finalValues() error {
 	out.Computed = value.AsMap(value.Copy(output))
 	var warnings []string
 	var err error
+	// The rule set's finalValues hook runs once on the final values: where
+	// Finalize calls it, else after Finalize or Helm's merge.
+	checked := false
+	check := func(ctx context.Context, values map[string]map[string]any) error {
+		checked = true
+		if out.Privileged {
+			return nil
+		}
+		return CheckFinalValues(ctx, in.rules(), c.svc.Name, in.Namespace, c.inst.okdp, values)
+	}
 	if in.Finalize != nil {
 		out.Values, out.Charts, warnings, err = in.Finalize(c.ctx, FinalInput{
 			Files:             def.Files,
@@ -422,6 +440,7 @@ func (c *run) finalValues() error {
 			Namespace:         in.Namespace,
 			Privileged:        out.Privileged,
 			AllowPlainSecrets: in.AllowPlainSecrets,
+			CheckFinalValues:  check,
 		})
 	} else {
 		var f merge.Final
@@ -430,6 +449,11 @@ func (c *run) finalValues() error {
 	}
 	if err != nil {
 		return err
+	}
+	if !checked {
+		if err := check(c.ctx, out.Values); err != nil {
+			return err
+		}
 	}
 	out.Warnings = append(out.Warnings, warnings...)
 	return nil

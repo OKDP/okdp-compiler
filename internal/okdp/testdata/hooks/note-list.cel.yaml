@@ -1,0 +1,24 @@
+# The notes of a mapping: a shared note is a privileged project's only, and
+# its text names no word of settings.banned. Input: items, release, platform,
+# privileged, settings.
+vars:
+  banned: ${{ asList(settings.?banned.orValue([])) }}
+errors:
+  - $for: i in lists.range(size(items))
+    $each:
+      $if: ${{ !privileged && truthy(items[i].?shared.orValue(false)) }}
+      $value: "notes[${{ string(i) }}]: a shared note is the platform's projects' (global.okdp.policy.privileged)"
+  - $for: i in lists.range(size(items))
+    $vars:
+      words: ${{ fields(str(items[i].?text.orValue("")), " ,") }}
+    $each:
+      $if: ${{ words.exists(w, w in banned) }}
+      $value: "notes[${{ string(i) }}]: a word of global.okdp.banned"
+values:
+  items:
+    - $for: i in lists.range(size(items))
+      $each:
+        of: notes[${{ string(i) }}]
+        render: true
+        client: ${{ items[i] }}
+        names: {}

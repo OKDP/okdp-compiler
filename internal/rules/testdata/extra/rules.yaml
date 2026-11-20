@@ -1,0 +1,11 @@
+# A rule set added to the mandatory one, for the tests of the loader: it
+# adds to both schemas and to what a mapping sees as platform.
+apiVersion: okdp-compiler/rules.v1
+name: extra
+version: 1.2.0
+schemas:
+  platform: platform.schema.json
+  mapping: mapping.schema.json
+documents:
+  extraScope: scope.cel.yaml
+scopes: [extraScope]

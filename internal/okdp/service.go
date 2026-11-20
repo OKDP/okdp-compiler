@@ -42,14 +42,14 @@ type Package struct {
 	// of, one connection per claim bound to an instance.
 	Provisions []Provision `yaml:"provisions"`
 
-	// The mapping reads the keys below. They are declared here so that
-	// okdp.yaml is read strictly: any other key fails.
-	Vars        yaml.Node `yaml:"vars"`
-	Errors      yaml.Node `yaml:"errors"`
-	Instance    yaml.Node `yaml:"instance"`
-	Provides    yaml.Node `yaml:"provides"`
-	Objects     yaml.Node `yaml:"objects"`
-	OIDCClients yaml.Node `yaml:"oidcClients"`
+	// The mapping reads the keys below, and the sections of the rule set
+	// (RuleSet.Sections). They are declared here, and those are known to
+	// the read of okdp.yaml, so that it is strict: any other key fails.
+	Vars     yaml.Node `yaml:"vars"`
+	Errors   yaml.Node `yaml:"errors"`
+	Instance yaml.Node `yaml:"instance"`
+	Provides yaml.Node `yaml:"provides"`
+	Objects  yaml.Node `yaml:"objects"`
 }
 
 // Provision is an entry of the provisions of okdp.yaml, written as the

@@ -4,8 +4,11 @@
 # and the tables they read), as data. Another rule set given to the compile
 # (LoadRules, --rules) adds to this one without replacing any of it. A table
 # with addFrom also reads the list global.okdp.<addFrom>: the platform adds
-# to the table, it never removes from it.
+# to the table, it never removes from it. An extensible table is one where
+# more values mean more refusals: a rule set added to this one may add values
+# to it (add), never remove one.
 apiVersion: okdp-compiler/rules.v1
+name: core
 version: 1.0.0
 tables:
   # The paths of the context a level gives whole, or not at all: * stands for
@@ -29,6 +32,7 @@ tables:
   # the engine's sources, its Applications or HelmReleases, the other
   # projects' identities.
   engineNamespaces:
+    extensible: true
     values: [argocd, flux-system, okdp-releases]
   # The well-known cluster-scoped kinds, <group>/<kind>, the group of the
   # apiVersion, empty for the core group: Kubernetes' own, and those of the
@@ -36,6 +40,7 @@ tables:
   # them. A kind that is not listed is assumed namespaced: the engine's
   # identity, confined to the namespace, refuses it in the cluster.
   clusterScopedKinds:
+    extensible: true
     values:
       - /Namespace
       - /Node
@@ -90,6 +95,7 @@ tables:
   # in a project's namespace lets it drive the engine with the engine's own
   # identity.
   deployerApiGroups:
+    extensible: true
     values:
       - helm.toolkit.fluxcd.io
       - kustomize.toolkit.fluxcd.io
@@ -141,6 +147,7 @@ tables:
   # The names of the objects the platform writes in the namespace of every
   # project besides its instances': a release may not take one.
   platformObjectNames:
+    extensible: true
     values:
       - okdp-project
       - okdp-control-plane
@@ -149,6 +156,12 @@ tables:
       - okdp-access-admin
       - okdp-secrets
       - okdp-dcr-token
+  # The settings, paths under global.okdp, that name an object the platform
+  # writes in the namespace of every project: their values are taken as
+  # platformObjectNames are.
+  platformObjectSettings:
+    extensible: true
+    values: [secrets.store, secrets.serviceAccount, oidc.dcr.tokenSecret]
   # The annotations that name hosts, their values lists of hosts separated
   # by commas and spaces.
   hostAnnotations:
@@ -209,6 +222,13 @@ templates:
 # The sections of a mapping besides the compiler's own (output, instance,
 # provides, objects).
 sections: [oidcClients]
+# The documents the compiler calls besides the checks, the first message of
+# each refusing, in a project that is not privileged: objects on each object
+# of an instance, once every object passed check object; finalValues on the
+# final values of each chart key.
+hooks:
+  objects: []
+  finalValues: []
 # Documents the others call: rule(<name>, input) in a document, a function of
 # functions, scope (what a mapping sees as platform); deployerRole, which the
 # targets call, the Role of a project's releases.
@@ -220,6 +240,10 @@ documents:
   pushSecret: objects/push-secret.cel.yaml
   pullSecret: objects/pull-secret.cel.yaml
   deployerRole: objects/deployer-role.cel.yaml
+# The documents that compute what a mapping sees as platform, from the
+# platform's settings, the release and the project's groups: those of every
+# set, in the order the sets are read, their platform merged.
+scopes: [scope]
 # A section whose items add objects: list gives them, objects the template
 # of the objects of each it says to render.
 ownObjects:

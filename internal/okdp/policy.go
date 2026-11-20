@@ -12,6 +12,7 @@ package okdp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -93,11 +94,47 @@ func apiGroup(apiVersion string) string {
 // be in the instance's namespace when it sets metadata.namespace, and of
 // no cluster-scoped kind: only the platform's projects install
 // cluster-scoped objects and write in other namespaces. The items of a
-// List are checked too, because Helm installs them one by one.
-func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, objects []M) error {
-	return eachObject(objects, func(o M) error {
+// List are checked too, because Helm installs them one by one. Once
+// every object passes, each goes through the rule set's objects hook,
+// which reads settings, the platform's.
+func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, settings M, objects []M) error {
+	if err := eachObject(objects, func(o M) error {
 		return rules.Refuse(ctx, ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": objectInput(o)})
+	}); err != nil {
+		return err
+	}
+	return eachObject(objects, func(o M) error {
+		return rules.RunHook(ctx, ruleset.HookObjects, M{"svc": svc, "ns": namespace, "object": objectInput(o), "settings": settingsOr(settings)})
 	})
+}
+
+// CheckFinalValues runs the rule set's finalValues hook on the final
+// values of each chart key of an instance of svc that is not privileged,
+// keys in order. settings are the platform's. The first message refuses,
+// as the hook's document writes it.
+func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string, settings M, values map[string]map[string]any) error {
+	if !rules.Loaded() {
+		return fmt.Errorf("the rule set: %w", ruleset.ErrNotLoaded)
+	}
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		v := values[key]
+		if v == nil {
+			v = M{}
+		}
+		if err := rules.RunHook(ctx, ruleset.HookFinalValues, M{"svc": svc, "ns": namespace, "key": key, "value": v, "settings": settingsOr(settings)}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// settingsOr returns settings, or an empty map for none: a hook reads the
+// settings of any platform.
+func settingsOr(settings M) M {
+	if settings == nil {
+		return M{}
+	}
+	return settings
 }
 
 // checkDuplicateObjects checks that no two objects of an instance have

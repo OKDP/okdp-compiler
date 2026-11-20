@@ -23,23 +23,25 @@ import (
 // RulesFile is the file of a rule set, at the root of its file system.
 const RulesFile = "rules.yaml"
 
-// The tables of a rule set. LoadRules requires every one of them: a table
-// left out would silently turn its rule off.
+// The tables of the mandatory rule set. LoadRules requires every one of
+// them: a table left out would silently turn its rule off. A set added to
+// it gives tables of other names besides.
 const (
-	TableEngineNamespaces      = "engineNamespaces"
-	TableClusterScopedKinds    = "clusterScopedKinds"
-	TableDeployerAPIGroups     = "deployerApiGroups"
-	TableDeniedUpstreamKeys    = "deniedUpstreamKeys"
-	TableImageKeySuffixes      = "imageKeySuffixes"
-	TablePlatformObjectNames   = "platformObjectNames"
-	TableHostAnnotations       = "hostAnnotations"
-	TableIngressValueKeys      = "ingressValueKeys"
-	TableIngressHostKeys       = "ingressHostKeys"
-	TableIngressHostListKeys   = "ingressHostListKeys"
-	TableDefaultProjectGlobals = "defaultProjectGlobals"
-	TableWholePaths            = "wholePaths"
-	TableProjectRoles          = "projectRoles"
-	TablePlatformKeysAbove     = "projectPlatformKeys"
+	TableEngineNamespaces       = "engineNamespaces"
+	TableClusterScopedKinds     = "clusterScopedKinds"
+	TableDeployerAPIGroups      = "deployerApiGroups"
+	TableDeniedUpstreamKeys     = "deniedUpstreamKeys"
+	TableImageKeySuffixes       = "imageKeySuffixes"
+	TablePlatformObjectNames    = "platformObjectNames"
+	TablePlatformObjectSettings = "platformObjectSettings"
+	TableHostAnnotations        = "hostAnnotations"
+	TableIngressValueKeys       = "ingressValueKeys"
+	TableIngressHostKeys        = "ingressHostKeys"
+	TableIngressHostListKeys    = "ingressHostListKeys"
+	TableDefaultProjectGlobals  = "defaultProjectGlobals"
+	TableWholePaths             = "wholePaths"
+	TableProjectRoles           = "projectRoles"
+	TablePlatformKeysAbove      = "projectPlatformKeys"
 )
 
 // The roles a project's group may hold (TableProjectRoles). The code of the
@@ -50,11 +52,11 @@ const (
 	RoleAdmin  = "admin"
 )
 
-// ruleTables lists the names of the tables of a rule set, sorted.
+// ruleTables lists the names of the tables of the mandatory set, sorted.
 var ruleTables = []string{
 	TableClusterScopedKinds, TableDefaultProjectGlobals, TableDeniedUpstreamKeys, TableDeployerAPIGroups,
 	TableEngineNamespaces, TableHostAnnotations, TableImageKeySuffixes, TableIngressHostKeys,
-	TableIngressHostListKeys, TableIngressValueKeys, TablePlatformObjectNames, TablePlatformKeysAbove, TableProjectRoles, TableWholePaths,
+	TableIngressHostListKeys, TableIngressValueKeys, TablePlatformObjectNames, TablePlatformObjectSettings, TablePlatformKeysAbove, TableProjectRoles, TableWholePaths,
 }
 
 // ruleTable is a table of a rule set.
@@ -62,6 +64,8 @@ type ruleTable struct {
 	values  []string        // in order
 	set     map[string]bool // the same values, for lookups
 	addFrom string          // the path, under global.okdp, of the list the platform adds
+	// extensible says a set read later may add values to the table (add).
+	extensible bool
 }
 
 // RuleSet is the rules a compile applies: the mandatory set alone
@@ -71,7 +75,8 @@ type ruleTable struct {
 // a rule passed.
 type RuleSet struct {
 	loaded  bool
-	version string
+	version string     // the version of the last set read
+	named   []namedSet // the sets read, in order
 	tables  map[string]*ruleTable
 	sets    M // each table as a set, as the checks read it
 	lists   M // each table as a list, as the checks read it
@@ -89,7 +94,11 @@ type RuleSet struct {
 	ownObjects                    []OwnObjectsSpec     // the sections whose items add objects
 	selectorLabels, commonLabels  map[string]string
 	componentLabel                string
-	wholePaths                    [][]string // TableWholePaths, split
+	wholePaths                    [][]string          // TableWholePaths, split
+	hooks                         map[string][]string // the documents of each hook, in the order the sets list them
+
+	schemaFiles map[string]*schemaFile // the schemas as the sets give them, by key
+	scopes      []string               // the scope documents, in order
 }
 
 // Loaded reports whether r was read. It is false for the zero value.
@@ -180,39 +189,17 @@ func readTemplate(fsys fs.FS, file string) (Template, error) {
 	return Template{Name: path.Base(file), Data: b}, nil
 }
 
-func readSchema(fsys fs.FS, file string) (*chart.Schema, error) {
-	t, err := readTemplate(fsys, file)
-	if err != nil {
-		return nil, err
-	}
-	s, err := chart.ParseSchema(t.Name, t.Data)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", RulesFile, err)
-	}
-	return s, nil
-}
-
 const templateGeneratedSecret = "generatedSecret"
-
-// loadSchema reads the schema name of a rule set into to. A schema an
-// earlier set already gave is refused, so that no set replaces it.
-func loadSchema(fsys fs.FS, schemas M, name string, to **chart.Schema) (err error) {
-	if _, ok := schemas[name]; !ok {
-		return nil
-	}
-	if *to != nil {
-		return taken("schemas", name)
-	}
-	*to, err = readSchema(fsys, value.Str(schemas[name]))
-	return err
-}
 
 func (r *RuleSet) loadFiles(fsys fs.FS, doc M) error {
 	schemas := value.AsMap(doc["schemas"])
-	if err := loadSchema(fsys, schemas, "platform", &r.platformSchema); err != nil {
+	if err := r.loadSchema(fsys, schemas, schemaPlatform); err != nil {
 		return err
 	}
-	if err := loadSchema(fsys, schemas, "mapping", &r.mappingSchema); err != nil {
+	if err := r.loadSchema(fsys, schemas, schemaMapping); err != nil {
+		return err
+	}
+	if err := r.loadScopes(doc); err != nil {
 		return err
 	}
 	templates := value.AsMap(doc["templates"])
@@ -347,7 +334,8 @@ func taken(section, name string) error {
 	return fmt.Errorf("%s: %s: given by another rule set, the compiler's mandatory one: a rule set adds rules, it replaces none", RulesFile, section)
 }
 
-// Version returns the version the rule set gives itself.
+// Version returns the version the last set read gives itself: the
+// mandatory set's alone, the added set's with one (SetVersion for each).
 func (r *RuleSet) Version() string { return r.version }
 
 // table returns the named table, an empty one when r does not hold it.
@@ -412,8 +400,9 @@ var mandatorySet = sync.OnceValue(func() *RuleSet {
 
 // LoadRules reads the rule set of fsys, with RulesFile at its root, and
 // adds it to the mandatory one. It fails closed: a rule the mandatory set
-// already gives, its checks among them, and a table or a check that is
-// unknown, are errors, never a rule turned off or replaced. An empty table is written
+// already gives, its checks and tables among them, a check that is
+// unknown, and values added to a table that is not extensible, are errors,
+// never a rule turned off or replaced. An empty table is written
 // values: [].
 func LoadRules(fsys fs.FS) (*RuleSet, error) { return loadOver(mandatoryFS(), fsys) }
 
@@ -421,13 +410,16 @@ func LoadRules(fsys fs.FS) (*RuleSet, error) { return loadOver(mandatoryFS(), fs
 // it, if any.
 func loadOver(base, fsys fs.FS) (*RuleSet, error) {
 	r := newRuleSet()
-	if err := r.add(base); err != nil {
+	if err := r.add(base, true); err != nil {
 		return nil, fmt.Errorf("the mandatory rule set: %w", err)
 	}
 	if fsys != nil {
-		if err := r.add(fsys); err != nil {
+		if err := r.add(fsys, false); err != nil {
 			return nil, err
 		}
+	}
+	if err := r.parseSchemas(); err != nil {
+		return nil, err
 	}
 	if err := r.complete(); err != nil {
 		return nil, err
@@ -439,8 +431,9 @@ func loadOver(base, fsys fs.FS) (*RuleSet, error) {
 }
 
 // add adds the set of fsys to r. It refuses a rule that a set read before
-// already gives: the sets are disjoint, so that all of them apply.
-func (r *RuleSet) add(fsys fs.FS) error {
+// already gives: the sets are disjoint, so that all of them apply. The
+// mandatory set is the first read.
+func (r *RuleSet) add(fsys fs.FS, mandatory bool) error {
 	b, err := fs.ReadFile(fsys, RulesFile)
 	if err != nil {
 		return fmt.Errorf("the rule set: %w", err)
@@ -457,29 +450,69 @@ func (r *RuleSet) add(fsys fs.FS) error {
 	if err != nil {
 		return err
 	}
-	tables, checks := value.AsMap(doc["tables"]), value.AsMap(doc["checks"])
-	if err := knownKeys("tables", tables, ruleTables); err != nil {
-		return err
-	}
+	checks := value.AsMap(doc["checks"])
 	if err := knownKeys("checks", checks, ruleChecks); err != nil {
 		return err
 	}
-	r.version = value.Str(doc["version"])
-	for _, name := range slices.Sorted(maps.Keys(tables)) {
-		if _, ok := r.tables[name]; ok {
-			return taken("tables", name)
-		}
-		t := value.AsMap(tables[name])
-		var values []string
-		for _, v := range value.AsList(t["values"]) {
-			values = append(values, value.Str(v))
-		}
-		r.addTable(name, values, value.Str(t["addFrom"]))
+	if err := r.addSet(value.Str(doc["name"]), value.Str(doc["version"])); err != nil {
+		return err
+	}
+	if err := r.loadTables(value.AsMap(doc["tables"]), mandatory); err != nil {
+		return err
 	}
 	if err := r.loadChecks(fsys, checks, value.AsMap(doc["documents"])); err != nil {
 		return err
 	}
+	if err := r.loadHooks(value.AsMap(doc["hooks"])); err != nil {
+		return err
+	}
 	return r.loadFiles(fsys, doc)
+}
+
+// loadTables reads the tables of a set. The mandatory set gives those of
+// ruleTables, no other. A set added to it gives tables of any name that no
+// set read before gives, and adds values to a table marked extensible
+// (add): it never removes one.
+func (r *RuleSet) loadTables(tables M, mandatory bool) error {
+	if mandatory {
+		if err := knownKeys("tables", tables, ruleTables); err != nil {
+			return err
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(tables)) {
+		t := value.AsMap(tables[name])
+		before, given := r.tables[name]
+		if add, ok := t["add"]; ok {
+			switch {
+			case !given:
+				return fmt.Errorf("%s: tables: %s: add: no rule set read before gives the table", RulesFile, name)
+			case !before.extensible:
+				return fmt.Errorf("%s: tables: %s: add: the table is not extensible: a rule set adds values to the tables marked extensible only", RulesFile, name)
+			}
+			values := slices.Clone(before.values)
+			for _, v := range stringList(add) {
+				if !slices.Contains(values, v) {
+					values = append(values, v)
+				}
+			}
+			r.addTable(name, values, before.addFrom, true)
+			continue
+		}
+		if given {
+			return taken("tables", name)
+		}
+		r.addTable(name, stringList(t["values"]), value.Str(t["addFrom"]), value.Truthy(t["extensible"]))
+	}
+	return nil
+}
+
+// stringList returns the list v as strings.
+func stringList(v any) []string {
+	var out []string
+	for _, x := range value.AsList(v) {
+		out = append(out, value.Str(x))
+	}
+	return out
 }
 
 // complete checks that the sets read give, together, every table, every
@@ -594,12 +627,14 @@ func newRuleSet() *RuleSet {
 	return &RuleSet{
 		loaded: true, tables: map[string]*ruleTable{}, sets: M{}, lists: M{},
 		sources: map[string]compile.Source{}, templates: map[string]Template{}, charts: map[string]chart.Ref{},
+		schemaFiles: map[string]*schemaFile{},
 	}
 }
 
-// addTable adds the table, with the forms of it that the checks read.
-func (r *RuleSet) addTable(name string, values []string, addFrom string) {
-	rt := &ruleTable{values: values, set: make(map[string]bool, len(values)), addFrom: addFrom}
+// addTable adds the table, with the forms of it that the checks read, or
+// replaces it with the values a set adds to it.
+func (r *RuleSet) addTable(name string, values []string, addFrom string, extensible bool) {
+	rt := &ruleTable{values: values, set: make(map[string]bool, len(values)), addFrom: addFrom, extensible: extensible}
 	set := make(M, len(values))
 	list := make([]any, len(values))
 	for i, v := range values {

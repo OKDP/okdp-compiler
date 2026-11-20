@@ -39,7 +39,7 @@ func loadEdited(t *testing.T, edit func(string) string) (*RuleSet, error) {
 // then rest; the files of the mandatory set beside it, which it may name.
 func addedSet(t *testing.T, rest string) fstest.MapFS {
 	t.Helper()
-	return mandatoryCopy(t, func(string) string { return "apiVersion: okdp-compiler/rules.v1\nversion: 1.0.0\n" + rest })
+	return mandatoryCopy(t, func(string) string { return "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\n" + rest })
 }
 
 // TestLoadRules: a set added to the mandatory one loads; the mandatory set
