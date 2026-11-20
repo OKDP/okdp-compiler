@@ -360,7 +360,7 @@ errors:
 // TestCompileSchemas: the parameters against the package's schema, every
 // violation reported with its path; a null of the upstream values is kept
 // in the final values, for Helm to delete the chart's default. The final
-// values are checked against the upstream charts by the host (okdp-gitops).
+// values are checked against the upstream charts by the host.
 func TestCompileSchemas(t *testing.T) {
 	d := *def
 	d.Package.Upstream = chart.Upstream{All: true}

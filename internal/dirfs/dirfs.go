@@ -1,6 +1,5 @@
 // Package dirfs gives the files under a directory as an fs.FS that bounds
-// what is read and follows no symbolic link. It is a copy of okdp-gitops'
-// internal/dirfs, so that the two commands apply the same rules.
+// what is read and follows no symbolic link.
 package dirfs
 
 import (

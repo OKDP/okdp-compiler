@@ -18,12 +18,12 @@
 // renders that chart with the final values (Result.Charts). A compile
 // reads no upstream chart: fetching the charts and checking the final
 // values against their defaults and schemas belong to the host, in its
-// Finalize (Inputs.Finalize), as okdp-gitops does.
+// Finalize (Inputs.Finalize).
 //
 // CompileAll compiles instances together, each with what the others
 // publish. LoadRepository reads the instances of a tree, and Build
 // compiles a tree as a CLI or a control plane asks for it. Writing a tree
-// for a deployer (Helm, Flux, Argo CD) belongs to okdp-gitops. Every
+// for a deployer engine (Flux, Argo CD) belongs to the host. Every
 // compile applies the compiler's mandatory rule set, its checks among
 // them; Inputs.Rules adds a platform's own set to it.
 //
@@ -389,8 +389,8 @@ type BuildOptions struct {
 	CheckGlobals func(context.Context, GlobalsInput) error // Inputs.CheckGlobals; nil checks nothing
 	// Loaded, when set, is given the instances of the projects that load,
 	// before they compile, with ctx: what a host's Finalize reads that the
-	// compiler does not (okdp-gitops fetches the upstream charts of their
-	// Chart.yaml there, so that no fetch counts against InstanceTimeout).
+	// compiler does not (the upstream charts of their Chart.yaml, fetched
+	// there so that no fetch counts against InstanceTimeout).
 	// It does not change them.
 	Loaded func(context.Context, []Instance)
 }

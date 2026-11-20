@@ -98,11 +98,10 @@ helm install <release> <package> -n <namespace> -f values.yaml
   and a null would be deleted against the chart's defaults. A string
   reaches the template as written: Helm renders each document as one
   manifest, its strings, nulls and numbers unchanged.
-- **Under Flux and Argo CD: one release.** okdp-gitops writes an umbrella
-  over the catalog's dependencies and this chart, one HelmRelease or
-  Application per instance
-  ([output](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/03_output.md)):
-  the objects are rendered with the upstream charts, under the release
+- **Under Flux and Argo CD: one release.** A host that writes the files
+  of these engines writes an umbrella over the catalog's dependencies and
+  this chart, one HelmRelease or Application per instance: the objects
+  are rendered with the upstream charts, under the release
   name and namespace of the compile, by the same deployer, and pruned with
   them. An object the next compile no longer writes, or the whole instance
   removed, is deleted with the release, but one Helm keeps
@@ -124,7 +123,7 @@ helm install <release> <package> -n <namespace> -f values.yaml
   chart that renders its `manifests` value as written.
 - **Under Flux.** The objects travel with the values, in the ConfigMap
   `values-<release>` of the namespace `okdp-releases`, at most 1 MiB,
-  which okdp-gitops' flux target enforces. With
+  which a host that writes Flux's files enforces. With
   `Inputs.AllowPlainSecrets`, the data of a plain Secret is in that
   ConfigMap too.
 - **Plain manifests.** The value is the objects as applied: a deployer
@@ -135,7 +134,7 @@ helm install <release> <package> -n <namespace> -f values.yaml
 
 The objects cannot go: consumers find a provider's credentials through the
 Secret its `secretRef` names, and a password generated at compile time
-would change at every render, which GitOps tools do at every sync
+would change at every render, which deployer engines do at every sync
 ([stateless, hermetic](00_architecture.md#stateless-hermetic-concurrent)):
 External Secrets generates them in the cluster. Only the vehicle can
 change.
@@ -170,10 +169,9 @@ with a Kustomization, Argo CD with a directory source.
 
 The NetworkPolicy of a project's namespace (`global.okdp.network.policy`)
 is no object of an instance: it is the platform's decision, as the
-Namespace and the roles are, and okdp-gitops' targets write it with the
-project's manifests, `projects/<namespace>/project/network-policy.yaml`,
-for a project kept too. An
-instance's own NetworkPolicy, of its `objects` section, adds to it (the
+Namespace and the roles are, and a host writes it with the project's
+manifests, for a project kept too. An instance's own NetworkPolicy, of
+its `objects` section, adds to it (the
 policies of a namespace are a union): it may open its pods further, to
 another namespace, never close what the platform's lets in. Its ingress
 is the namespace's, the platform's ingress namespaces' and the

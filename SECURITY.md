@@ -17,8 +17,8 @@ private report with GitHub's
 with:
 
 - the version (`okdp-compile --version`, or the module version of the
-  library), and how the compiler is run (the CLI, okdp-gitops, a
-  control plane);
+  library), and how the compiler is run (the CLI, a host that embeds
+  the library, a control plane);
 - what an attacker controls (a package, an instance's `config.yaml`, a
   project's `project.yaml`, the platform values) and what it gains;
 - a tree that reproduces it, the smallest you can, and its output.
@@ -46,8 +46,8 @@ older minor release.
    security advisory, a CVE requested through GitHub when it warrants
    one.
 3. We release the fix, then publish the advisory, crediting you unless
-   you ask us not to; the projects that embed the compiler (okdp-gitops,
-   the OKDP control plane) are told before the advisory is public.
+   you ask us not to; the projects that embed the compiler, the OKDP
+   control plane among them, are told before the advisory is public.
 
 A flaw already exploited, or already public, is fixed and disclosed as
 soon as a release is ready.

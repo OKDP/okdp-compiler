@@ -5,11 +5,11 @@
 //
 // The command compiles every instance of a tree together and writes the
 // files of each for helm install. With --check in place of -o, it checks
-// the compile and writes nothing. It reads no upstream chart: the checks
-// of the final values against the charts are okdp-gitops' okdp-compile's.
+// the compile and writes nothing. It reads no upstream chart and runs no
+// check of the final values against the charts: a host does those.
 //
-// It is a thin wrapper of compiler.Build and compiler.Write. The Flux and
-// Argo CD targets belong to okdp-gitops' okdp-compile.
+// It is a thin wrapper of compiler.Build and compiler.Write. It writes no
+// file for a deployer engine (Flux, Argo CD): a host does.
 
 package main
 
@@ -46,7 +46,7 @@ type options struct {
 	allowPlainSecrets bool          // --allow-plain-secrets, for every instance
 }
 
-// The defaults of the flags, the same as okdp-gitops' okdp-compile's.
+// The defaults of the flags, the compiler's own.
 const (
 	defaultCostLimit       = compiler.DefaultCostLimit
 	defaultInstanceTimeout = time.Minute

@@ -6,8 +6,8 @@
 //
 // The chart's own defaults are not a layer: Helm coalesces the values over
 // them when it renders the chart. The compiler reads no upstream chart: a
-// host checks the final values against the chart's defaults and schema
-// (okdp-gitops), with the lists an instance appended to (Final.Appended).
+// host checks the final values against the chart's defaults and schema,
+// with the lists an instance appended to (Final.Appended).
 //
 // The instance's upstream values are upstream.<chart> of its values. The
 // mapping sees them as written. They are applied after the mapping, behind

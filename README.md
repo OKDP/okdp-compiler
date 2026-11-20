@@ -34,9 +34,9 @@ for _, ti := range tree.Instances {
 - `CompileAll` compiles instances together, `Compile` a single one; both
   are stateless and safe for concurrent use.
 - `Inputs.Finalize` and `BuildOptions.Loaded` are where a host adds what
-  the compiler does not do (okdp-gitops: the render of the upstream
-  charts, the chart checks, the security set's policy on upstream
-  values).
+  the compiler does not do: a host may fetch the upstream charts, check
+  the final values against them, and add the security set's policy on
+  upstream values.
 - Accessors let a caller check before it compiles, without restating a
   rule: `FieldErrors`, `ConnectionRefs`, `CheckConnection`,
   `CheckProjectName`, `ReadContract`, `MergeValues`...
@@ -81,7 +81,7 @@ Two rule sets apply together, both data, the walkers in Go:
 The hosts a project serves, the OAuth clients, the hardened pod and the
 policy on upstream values are such a set,
 [okdp-compiler-security](https://github.com/OKDP/okdp-compiler-security),
-which okdp-gitops gives to every compile. A tree that relies on a set
+which a host gives to every compile. A tree that relies on a set
 requires it (`global.okdp.ruleSets`), and a compile without it is
 refused.
 
@@ -108,9 +108,9 @@ bin/okdp-compile --check --repository <dir>... [--catalog <dir>]... [--rules <di
 ```
 
 It writes the files of [Output](#output) under
-`projects/<namespace>/instances/<release>/`. Flux and Argo CD targets,
-`--partial`, `--report` and `--charts` are okdp-gitops' `okdp-compile`
-([usage](docs/01_usage.md#command-line)).
+`projects/<namespace>/instances/<release>/`. It writes no file for a
+deployer engine such as Flux or Argo CD and reads no upstream chart: a
+host does ([usage](docs/01_usage.md#command-line)).
 
 ## Layout
 

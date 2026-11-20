@@ -111,11 +111,9 @@ that of the last set read. A tree states the sets it requires in
 Every compile: `Inputs.Rules` and `BuildOptions.Rules` nil stand for the
 mandatory set, and a set of `LoadRules` holds it. A host gives its
 compiles a set through `BuildOptions.Rules`, or nil. `okdp-compile`
-gives the mandatory set, with the sets of `--rules` added. okdp-gitops'
-`deploy.Build` gives the mandatory set with the security set added
-unless its caller gives another; where okdp-gitops honours a caller's
-set: [who applies
-it](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#who-applies-it).
+gives the mandatory set, with the sets of `--rules` added. A host may
+give the mandatory set with the security set added, or the set its
+caller gives.
 
 A program that calls `compiler.Build` or `compiler.Compile` itself, this
 module's `okdp-compile` among them, applies the sets it gives, their
@@ -137,11 +135,11 @@ These stay in the compiler's Go code and apply whatever the rule set:
 - `okdpFullname`, `okdpSqlName`, `okdpObjectName`, and the walkers that
   call the checks below.
 
-What each role may do is also fixed in Go, okdp-gitops'
-`target.ClusterRole` and `argocd.Policies`. The roles are the mandatory
-set's, `viewer`, `editor` and `admin`, and no rule set changes them: a
-role other than these refuses the set. Neither function treats an
-unknown role as `admin`; given one, they panic.
+What each role may do is not in the rule set either: the host that
+writes a project's roles (Kubernetes' ClusterRoles, Argo CD's policies)
+fixes it. The roles are the mandatory set's, `viewer`, `editor` and
+`admin`, and no rule set changes them: a role other than these refuses
+the set.
 
 ## When each rule applies
 
@@ -172,8 +170,8 @@ applies only where that host compiles ([what a host
 adds](#what-a-host-adds)).
 
 `namespace` and `platformNamespace` also run when a project is created
-(`compiler.CheckProjectName`; okdp-gitops' `treeedit`), with `project` in
-place of `Inputs.Namespace` in the message.
+(`compiler.CheckProjectName`, for a host that edits the tree), with
+`project` in place of `Inputs.Namespace` in the message.
 
 ## Tables
 
@@ -490,13 +488,11 @@ after Helm's merge.
 A host's `Inputs.Finalize` makes the final values in the host's own
 Helm merge, and `Inputs.CheckGlobals` checks `global` of every layer
 above level 0; the hooks of the set still run on what `Finalize`
-returns. okdp-gitops' `deploy.Build` sets both: it renders the upstream
-charts, whose manifests go through `compiler.CheckObjects` (check
-`object`, then the hook `objects`), and applies the security set's
-policy on upstream values, the package `policy` of okdp-compiler-security
-([the upstream
-policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md);
-[the render](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#the-render)).
+returns. A host may set both: render the upstream charts, whose
+manifests go through `compiler.CheckObjects` (check `object`, then the
+hook `objects`), and apply the security set's policy on upstream values,
+the package `policy` of okdp-compiler-security ([the upstream
+policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md)).
 A compile without such a host, `okdp-compile` among them, does neither.
 
 ## Platform settings
@@ -561,7 +557,7 @@ the requirement lives in the tree, and holds with the compiler alone.
 ## The deployer's Role
 
 The Role `okdp-project` of a project's namespace, which helm-controller
-impersonates for its releases (Flux; okdp-gitops' `flux.ServiceAccount`),
+impersonates for its releases (Flux, the ServiceAccount a host writes),
 is the document `objects/deployer-role.cel.yaml`, its input the groups of
 `global.okdp.policy.projectApiGroups`: explicit API groups, every verb
 on every resource of each, and `roles`, `rolebindings` of
@@ -768,5 +764,5 @@ that requires the set (`global.okdp.ruleSets`) states the versions it
 accepts, and a compile given another is refused.
 
 A release of the compiler carries the change, and a host takes it by
-taking the release: okdp-gitops' fixtures (`testdata/cli`) compare the
-messages too. There is no copy to keep in sync.
+taking the release: its tests that compare the messages see it. There
+is no copy to keep in sync.

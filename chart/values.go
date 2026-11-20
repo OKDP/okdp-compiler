@@ -15,8 +15,8 @@
 // client-go, and a newer Go and Kubernetes than the programs that embed
 // this package have. Its coalescing is reproduced from helm v4.3.0
 // (pkg/chart/common/util/coalesce.go). The compiler reads no upstream
-// chart: the checks against them, with Helm's own functions, are
-// okdp-gitops'.
+// chart: the checks against them, with Helm's own functions, are the
+// host's.
 package chart
 
 import (

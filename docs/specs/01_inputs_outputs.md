@@ -5,8 +5,7 @@ Normative reference of what a compile reads besides the service definition
 [02_service_definition.md](02_service_definition.md)),
 and of what it produces. The library's calls are in
 [01_usage.md](../01_usage.md); how the compiler works inside, in
-[00_architecture.md](../00_architecture.md). The `testdata/` fixtures and
-the `TestHelm*` tests named below are okdp-gitops'.
+[00_architecture.md](../00_architecture.md).
 
 | Input | Field | Required | Section |
 |---|---|---|---|
@@ -37,10 +36,10 @@ empty one fails as another:
 | a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
 | a release that is the name of an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-viewer`, `-editor`, `-admin`, `okdp-secrets`, the names `global.okdp.secrets` gives, and those an added rule set lists), or its beginning up to a `-` (`okdp`, `okdp-access`): the objects of a release are named `<release>` and `<release>-<x>`, and would take its place | `Inputs.Release "okdp-project": the name of an object the platform writes in every namespace (okdp-project), or its beginning up to a "-": ...` |
 | a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
-| the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce); `testdata/cli/secrets.txtar`) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
+| the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce)) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
 | a namespace `kube-*`, Kubernetes' own (`kube-system`, `kube-public`, `kube-node-lease`) | `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)` |
-| a namespace of the deployer engines or of the objects the targets write there, `flux-system`, `argocd`, `okdp-releases`: a project's releases, with every verb of their namespace, would rewrite the engine's sources, Applications, HelmReleases or the other projects' identities ([targets](#targets); `testdata/cli/policy.txtar`) | `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine` |
-| a namespace the platform reserves, `global.okdp.policy.reserved` ([fields the compiler reads](#fields-the-compiler-reads)), checked once the platform's settings are read; one `policy.privileged` lists too is reserved all the same (`testdata/context/0/reserved-namespace.yaml`, `reserved-and-privileged.yaml`) | `Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`, then `, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins` |
+| a namespace of the deployer engines or of the objects the targets write there, `flux-system`, `argocd`, `okdp-releases`: a project's releases, with every verb of their namespace, would rewrite the engine's sources, Applications, HelmReleases or the other projects' identities ([targets](#targets)) | `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine` |
+| a namespace the platform reserves, `global.okdp.policy.reserved` ([fields the compiler reads](#fields-the-compiler-reads)), checked once the platform's settings are read; one `policy.privileged` lists too is reserved all the same | `Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`, then `, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins` |
 | an instance name that is set and not a DNS-1123 label | `Inputs.Name "<name>": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 
 Those of the namespaces and the platform's object names are the mandatory
@@ -87,11 +86,9 @@ set's `finalValues` hook on the values a `Finalize` returns ([checks of
 the final values](#checks-of-the-final-values)).
 `compiler.CheckObjects` checks the manifests a host renders with the
 rule set of the compile, as a compile checks its own objects: check
-`object`, then the `objects` hook. okdp-gitops sets both hooks
-(`deploy.Build`): the final values are checked against the upstream
-charts there ([chart cache](#chart-cache)), and a project that is not
-privileged giving upstream values to a chart it could not fetch is
-refused there when the build renders.
+`object`, then the `objects` hook. A host may set both hooks to check
+the final values against the upstream charts ([chart
+cache](#chart-cache)) and to render them.
 
 ## Package files
 
@@ -156,14 +153,15 @@ app: open app.defaults.yaml: no such file or directory
 
 Every values file is read as Helm 3 reads one: the defaults files, the
 values layers read by `compiler.ParseValues` (a tree's context files and
-`config.yaml`), and the upstream charts' `values.yaml` okdp-gitops' check
+`config.yaml`), and the upstream charts' `values.yaml` a host's check
 reads with `chart.ParseValues` ([chart cache](#chart-cache)).
 
 - Documents: the first YAML document of the file only. Helm 4 merges the
   later ones; the compiler ignores them: of an upstream chart whose
-  `values.yaml` has several documents, okdp-gitops' check reads the
-  defaults of the first document, and a key of the first document that a
-  later one deletes is still among the defaults it checks against.
+  `values.yaml` has several documents, a host's check that reads it with
+  `chart.ParseValues` reads the defaults of the first document, and a key
+  of the first document that a later one deletes is still among the
+  defaults it checks against.
 - Decoding: by `sigs.k8s.io/yaml`, YAML 1.1. A plain `y`,
   `yes`, `on`, `n`, `no`, `off` (and their capitalized forms) is a boolean,
   as a key too (`on:` is the key `"true"`); keys are strings; every number is
@@ -171,7 +169,6 @@ reads with `chart.ParseValues` ([chart cache](#chart-cache)).
 - Shape: the document must be a map (`cannot unmarshal yaml document: ...`); a
   null key fails (`unsupported map key`).
 
-`testdata/helm/values/yaml11` holds what Helm reads from such a file.
 Values built in memory and given in `Inputs.Context`
 (`ContextLayer.Values`) or `Inputs.Values` are read as the values they
 would be once written to a file and read back, at any depth, whatever
@@ -198,7 +195,7 @@ values layer 1: jsontext: duplicate object member name "1" within "/labels"
 ```
 
 JSON files (`config.schema.json` of the package, the contracts, and the
-`values.schema.json` of the upstream charts okdp-gitops' check reads with
+`values.schema.json` of the upstream charts a host's check reads with
 `chart.ParseSchema`) are strict JSON: no comments.
 
 ## Chart cache
@@ -206,16 +203,15 @@ JSON files (`config.schema.json` of the package, the contracts, and the
 The compiler reads no upstream chart: a compile's final values are the
 same whatever the charts hold, and nothing of them is checked. The
 [checks of the final values](#checks-of-the-final-values) against the
-upstream charts are okdp-gitops': its `deploy.Build` fetches the charts
-of the tree's `Chart.yaml` files once per build, before the compile
-(`BuildOptions.Loaded`), and its Finalize checks each key with them.
-Its `okdp-compile --check --charts <dir>` reads them from a chart cache
-filled by hand, which this section describes; its `chartcache` pulls
-them into one
-([okdp-compile --check](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md#okdp-compile---check)).
-Each chart is unpacked under its repository's directory, as
-`helm pull --untar -d <cache>/<repository>/<chart>-<version>` writes it
-(`helm pull` creates the directory).
+upstream charts are a host's: it may fetch the charts of the tree's
+`Chart.yaml` files once per build, before the compile
+(`BuildOptions.Loaded`), and check each key with them in its Finalize.
+This section describes a chart cache such a host may read them from,
+filled by hand or by the host, a layout the compiler keeps possible: it
+refuses a repository that cannot be laid out so. Each chart is unpacked
+under its repository's directory, as `helm pull --untar -d
+<cache>/<repository>/<chart>-<version>` writes it (`helm pull` creates the
+directory).
 
 ```
 <cache>/
@@ -248,15 +244,12 @@ defaults, one without `values.schema.json` no schema check
 
 A UTF-8 byte order mark at the start of either file is dropped, as Helm
 drops it. Each chart is read once per build, whatever the number of keys
-it renders. `examples/03_full/.charts/` of okdp-gitops holds the full
-example's charts unpacked, their `values.yaml` and the workspace chart's
-`values.schema.json` only: enough to check, not to render
-(`charts.example.org/workspace-3.2.0/workspace/`...).
+it renders.
 
 A chart its directory does not hold, even when the cache holds its archive
 or the chart elsewhere, fails with the command that downloads it there,
 prefixed with the chart key; a file that does not read, with its path
-(okdp-gitops' messages):
+(a host's messages):
 
 ```
 app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0
@@ -338,7 +331,7 @@ does not override it.
 | `env: [A]` | `env: [B]` | `env: [B]` |
 
 The corner cases (a `null` at the top level or in a nested map, over a
-`null` default) follow Helm 4: `testdata/helm/values/nulls`. Helm 3 keeps
+`null` default) follow Helm 4. Helm 3 keeps
 the `null` defaults the values leave unset, and deletes a key below the
 top level that the defaults and the values both set to `null`
 ([Equivalence with Helm](#equivalence-with-helm)).
@@ -360,8 +353,7 @@ as Helm 4 checks the values of a chart:
 
 Every violation is reported with its path, sorted by path (and the keys of
 `additional properties ... not allowed` sorted: Helm's order varies), under
-the name of the service, `name` of `Chart.yaml`
-(`testdata/schema-violation.yaml`):
+the name of the service, `name` of `Chart.yaml`:
 
 ```
 values don't meet the specifications of the schema(s) in the following chart(s):
@@ -370,9 +362,8 @@ webapp:
 - at '/replicas': minimum: got 0, want 1
 ```
 
-`testdata/helm/schema` holds what Helm reports on each case
-(`TestHelmSchema`): Helm 4.3.0 and the versions the deployers embed, 4.2
-and 3.19, report the same.
+Helm 4.3.0 and the versions the deployers embed, 4.2 and 3.19, report
+the same on each case.
 
 ### Reserved keys
 
@@ -728,10 +719,7 @@ A `remoteKey` with a `name`, not a non-empty string or holding `{{`, a
 platform without a store, a connection's name that is not a DNS-1123
 label, a contract without secret field, a key that is no path, or one
 outside the namespace above level 0 refuse the reference, after the
-fields of the connection ([connection errors](#connection-errors);
-`testdata/context/2/remote-key-of-another-namespace.yaml`,
-`testdata/context/1/remote-key-of-the-platform.yaml`,
-`testdata/cli/secrets.txtar`).
+fields of the connection ([connection errors](#connection-errors)).
 
 ### What a reference requires
 
@@ -825,49 +813,48 @@ another contract, in release order:
 storage: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "s3" is expected)
 ```
 
-| Case | Error | `testdata/` |
-|---|---|---|
-| neither a string nor `null`, nor a claim of a reference that takes them | `<path>: a connection reference must be a string, got <value>` | |
-| a claim template with another key than `class`, `provider` and `request` | `<path>: claim: unknown key "<key>": class, provider and request only` | |
-| a claim's `class` or `provider` not a string | `<path>: claim: <key> must be a string, got <value>` | |
-| a claim's `request` not a map | `<path>: claim: request must be an object, got <value>` | |
-| a `provider` that is not `<name>` or `<namespace>/<name>` ([providers](#providers)) | `<path>: claim: provider "<provider>": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>` | |
-| a named claim of another contract | `<path>: claim "<name>" has contract "<c>", "<contract>" is expected` | |
-| a named claim, the reference taking none (no `provision`) | `<path>: "<name>" is a claim: the reference takes none (x-okdp-connection-ref's provision)` | |
-| a claim with no binding | `<path>: claim (<contract>): no provider is bound to it: the claims bind when the instances compile together (CompileAll)` | |
-| a binding of another contract (built by hand, through the library) | `<path>: claim (<contract>): bound as a <binding's contract> claim` | |
-| a binding without its output | `<path>: claim "<id>" (<contract>): <namespace>/<release> publishes no output for it` | |
-| no `<contract>.schema.json`, or one that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` | |
-| external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` | `context/2/wrong-contract.yaml` |
-| output, of several instances | `<path>: "<name>" names <contract> outputs of several instances of the namespace: <instance>, <instance>`, in release order | |
-| external or output, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `context/2/unknown-field.yaml` |
-| external or output, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` | `context/2/secret-in-connection.yaml` |
-| external, a `secretRef` with both `name` and `remoteKey` | `<path>: connection "<name>": secretRef: name or remoteKey, not both` | `context/2/remote-key-and-name.yaml` |
-| external, a `secretRef` that is not a map, or without `remoteKey` nor a `name` that is a non-empty string | `<path>: connection "<name>": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got <value>` | |
-| external, a `remoteKey` that is not a string, or empty | `<path>: connection "<name>": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got <value>` | |
-| external, `{{` in a `remoteKey` (of level 0: above, the layer fails first) | `<path> (connection "<name>"): field "secretRef.remoteKey": the value contains "{{"` | |
-| external, a `remoteKey` without `global.okdp.secrets.store` | `<path>: connection "<name>": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set` | `context/2/remote-key-without-store.yaml` |
-| external, a `remoteKey` of a connection whose name is not a DNS-1123 label | `<path>: connection "<name>": secretRef.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials` | |
-| external, a `remoteKey` of a contract without `x-okdp-secret` field | `<path>: connection "<name>": secretRef.remoteKey: the <contract> contract has no secret field (x-okdp-secret): there are no credentials to read` | |
-| external, a `remoteKey` that is no path of the store: an empty, `.` or `..` segment | `<path>: connection "<name>": secretRef.remoteKey "<key>": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."` | `context/2/remote-key-not-a-path.yaml` |
-| external, a `remoteKey` under `platform/` when the platform gives `secrets.provider` | `<path>: connection "<name>": secretRef.remoteKey "<key>": no namespace reads platform/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>, read through a connection of the project (level 1)` | `testdata/cli/secrets.txtar` (`provider`) |
-| external, above level 0, a `remoteKey` outside the instance's namespace, `<namespace>/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) | `<path>: connection "<name>": secretRef.remoteKey "<key>": a key of the platform's secret store a project may not read: a connection above level 0 (level <level>) names a key under "<namespace>/", its namespace; the platform's keys are read through the platform's connections (level 0)` | `context/2/remote-key-of-another-namespace.yaml` |
-| output, values that values cannot hold (a NaN) | `<path>: output "<name>" of <instance>: json: <cause>` | |
-| neither a connection nor an output | `<path>: "<name>" is not a connection`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` when instances publish an output of that name of another contract | |
-| required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field | |
-| external or output, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation | `context/2/connection-types.yaml` |
-| a connection that does not meet the reference's requirement | `<path> (connection "<name>"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):` then `- at '/<field>': <violation>`, one line per violation; a claim of the default class, `; <namespace>/<release> is the provider of the default class <class> of <contract> connections (global.okdp.provisioning.<contract>.default): name a class whose provider meets it (class), or change the default` before the colon | `context/2/no-secret-ref.yaml` |
-| a requirement that names a field not of the contract | `<path>: x-okdp-connection-ref: require: field "<key>" is not part of the <contract> contract` | |
-| a requirement that names a secret field | `<path>: x-okdp-connection-ref: require: "<key>" is a secret field, in the credentials Secret, never in the connection: require secretRef` | |
-| a requirement that is not an object or not a valid JSON Schema, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: require: a JSON Schema, an object, got <value>`; `... require: <cause>`. `<place>`: the reference's place in the schema, `properties.catalogs.items.properties.database` | |
-| a fixed request that is not an object, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: request: an object, got <value>` | |
-| `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) | |
+| Case | Error |
+|---|---|
+| neither a string nor `null`, nor a claim of a reference that takes them | `<path>: a connection reference must be a string, got <value>` |
+| a claim template with another key than `class`, `provider` and `request` | `<path>: claim: unknown key "<key>": class, provider and request only` |
+| a claim's `class` or `provider` not a string | `<path>: claim: <key> must be a string, got <value>` |
+| a claim's `request` not a map | `<path>: claim: request must be an object, got <value>` |
+| a `provider` that is not `<name>` or `<namespace>/<name>` ([providers](#providers)) | `<path>: claim: provider "<provider>": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>` |
+| a named claim of another contract | `<path>: claim "<name>" has contract "<c>", "<contract>" is expected` |
+| a named claim, the reference taking none (no `provision`) | `<path>: "<name>" is a claim: the reference takes none (x-okdp-connection-ref's provision)` |
+| a claim with no binding | `<path>: claim (<contract>): no provider is bound to it: the claims bind when the instances compile together (CompileAll)` |
+| a binding of another contract (built by hand, through the library) | `<path>: claim (<contract>): bound as a <binding's contract> claim` |
+| a binding without its output | `<path>: claim "<id>" (<contract>): <namespace>/<release> publishes no output for it` |
+| no `<contract>.schema.json`, or one that cannot be read, is not JSON, not an object or not a valid JSON Schema | `<path>: the <contract> contract cannot be read: <contract>.schema.json: <cause>` |
+| external, another contract | `<path>: connection "<name>" has contract "<c>", "<contract>" is expected` |
+| output, of several instances | `<path>: "<name>" names <contract> outputs of several instances of the namespace: <instance>, <instance>`, in release order |
+| external or output, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` |
+| external or output, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` |
+| external, a `secretRef` with both `name` and `remoteKey` | `<path>: connection "<name>": secretRef: name or remoteKey, not both` |
+| external, a `secretRef` that is not a map, or without `remoteKey` nor a `name` that is a non-empty string | `<path>: connection "<name>": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got <value>` |
+| external, a `remoteKey` that is not a string, or empty | `<path>: connection "<name>": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got <value>` |
+| external, `{{` in a `remoteKey` (of level 0: above, the layer fails first) | `<path> (connection "<name>"): field "secretRef.remoteKey": the value contains "{{"` |
+| external, a `remoteKey` without `global.okdp.secrets.store` | `<path>: connection "<name>": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set` |
+| external, a `remoteKey` of a connection whose name is not a DNS-1123 label | `<path>: connection "<name>": secretRef.remoteKey: the connection's name is not a DNS-1123 label: its credentials Secret is named after it, <release>.<name>-credentials` |
+| external, a `remoteKey` of a contract without `x-okdp-secret` field | `<path>: connection "<name>": secretRef.remoteKey: the <contract> contract has no secret field (x-okdp-secret): there are no credentials to read` |
+| external, a `remoteKey` that is no path of the store: an empty, `.` or `..` segment | `<path>: connection "<name>": secretRef.remoteKey "<key>": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."` |
+| external, a `remoteKey` under `platform/` when the platform gives `secrets.provider` | `<path>: connection "<name>": secretRef.remoteKey "<key>": no namespace reads platform/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>, read through a connection of the project (level 1)` |
+| external, above level 0, a `remoteKey` outside the instance's namespace, `<namespace>/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) | `<path>: connection "<name>": secretRef.remoteKey "<key>": a key of the platform's secret store a project may not read: a connection above level 0 (level <level>) names a key under "<namespace>/", its namespace; the platform's keys are read through the platform's connections (level 0)` |
+| output, values that values cannot hold (a NaN) | `<path>: output "<name>" of <instance>: json: <cause>` |
+| neither a connection nor an output | `<path>: "<name>" is not a connection`; with `Inputs.Published`, `<path>: "<name>" is not a connection, nor an output of an instance of the namespace`, then ` (<instance> publishes it with contract "<c>", <instance> with contract "<c>", "<contract>" is expected)` when instances publish an output of that name of another contract |
+| required field not set | `<path> (connection "<name>"): field "<key>" is required by the <contract> contract`, one line per field |
+| external or output, a value the contract's schema refuses | `<path> (connection "<name>"): the fields violate the <contract> contract:` then `- at '/<field>': <violation>`, one line per violation |
+| a connection that does not meet the reference's requirement | `<path> (connection "<name>"): the connection does not meet the package's requirement (x-okdp-connection-ref.require):` then `- at '/<field>': <violation>`, one line per violation; a claim of the default class, `; <namespace>/<release> is the provider of the default class <class> of <contract> connections (global.okdp.provisioning.<contract>.default): name a class whose provider meets it (class), or change the default` before the colon |
+| a requirement that names a field not of the contract | `<path>: x-okdp-connection-ref: require: field "<key>" is not part of the <contract> contract` |
+| a requirement that names a secret field | `<path>: x-okdp-connection-ref: require: "<key>" is a secret field, in the credentials Secret, never in the connection: require secretRef` |
+| a requirement that is not an object or not a valid JSON Schema, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: require: a JSON Schema, an object, got <value>`; `... require: <cause>`. `<place>`: the reference's place in the schema, `properties.catalogs.items.properties.database` |
+| a fixed request that is not an object, whether the parameters set the reference or not, every one | `config.schema.json: <place>: x-okdp-connection-ref: request: an object, got <value>` |
+| `{{` in the connection | `<path> (connection "<name>"): field "<field>": the value contains "{{"`; `... the key contains "{{"` for a key. `<field>`: a path in the connection (`host`, `secretRef.name`, `tags[1]`) |
 
 An external connection without `secretRef` resolves without one: a
 reference whose mapping reads credentials requires them, `"require":
 {"required": ["secretRef"]}`, as the example webapp's do
-(`testdata/context/2/no-secret-ref.yaml`,
-[what a reference requires](#what-a-reference-requires)).
+([what a reference requires](#what-a-reference-requires)).
 
 ## Contracts
 
@@ -1024,8 +1011,7 @@ typically a project's, and each level above adds to the lower ones
 ([Levels](#levels)). The context's layers are merged by level over the
 package's [defaults](#defaults), before the instance's, `Inputs.Values`
 ([parameters](#parameters)); a later layer of a level may change or delete
-(`null`) a value of the previous ones of that level, as
-`testdata/context/0/missing-platform-value.yaml` does.
+(`null`) a value of the previous ones of that level.
 
 ```yaml
 global:
@@ -1048,8 +1034,7 @@ else ([Levels](#levels)); its own settings go beside `okdp`,
 fails before the parameter schema is checked, naming the layer by its
 position in `Inputs.Values`, from 1 (a tree's `config.yaml` the first),
 and the first key of `global` it may not set, in key order; `global` set
-to a non-map, `null` included, fails as a whole
-(`testdata/instance-sets-global.yaml`):
+to a non-map, `null` included, fails as a whole:
 
 ```
 values layer 1: global.okdp is set by the context (Inputs.Context)
@@ -1090,10 +1075,9 @@ values are the package's: a context file every service shares keeps to
 `connections` is the context's only: an instance's own connections are a
 context layer of a level of their own ([Levels](#levels)). An instance
 layer that sets `connections`, to any value, fails before the parameter
-schema is checked, after the check of `global`
-(`testdata/instance-sets-connections.yaml`); one that sets `claims`, after
-it: the named claims are a project's, a layer of level 1 or above, never
-the platform's ([claims](#claims)):
+schema is checked, after the check of `global`; one that sets `claims`,
+after it: the named claims are a project's, a layer of level 1 or above,
+never the platform's ([claims](#claims)):
 
 ```
 values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level
@@ -1133,13 +1117,9 @@ or a connection, `connections.<name>`, a named claim, `claims.<name>`, a
 class, `global.okdp.provisioning.<contract>.classes.<name>`, or a default
 class, `global.okdp.provisioning.<contract>.default`, taken whole: a layer
 may not give a field the lower level's connection leaves out, a `port` to
-its contract's default
-(`testdata/context/1/redefines-platform-connection.yaml`), nor change the
-platform's default class
-(`testdata/context/1/redefines-platform-class.yaml`): a project that
-wants another provider adds a class and names it. The
-layer is named by its position in `Inputs.Context`, from 1, and its
-level:
+its contract's default, nor change the platform's default class: a project
+that wants another provider adds a class and names it. The layer is named
+by its position in `Inputs.Context`, from 1, and its level:
 
 ```
 context layer 2 (level 1): global.okdp.tls.clusterIssuer is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
@@ -1162,11 +1142,7 @@ chart its objects are rendered with, the secret store its credentials go
 through, nor make itself privileged; its own settings, which its
 packages' mappings read, go under `global` beside `okdp`
 (`global.project`). The layer fails at the first such key, in key order,
-after the check against the lower levels
-(`testdata/context/1/sets-platform-charts.yaml`,
-`sets-platform-policy.yaml`, `sets-platform-secrets.yaml`,
-`sets-platform-tls.yaml`, `sets-platform-proxy.yaml`,
-`sets-unknown-platform-key.yaml`):
+after the check against the lower levels:
 
 ```
 context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
@@ -1183,10 +1159,7 @@ key order, a field problem at `global.<key>`. The keys the platform lists
 are checked as the upstream values are, by a host's
 `Inputs.CheckGlobals` ([rule set](#rule-set)). Level 0's `global` is the
 platform's,
-reviewed with it
-(`testdata/context/1/sets-global-image-registry.yaml`,
-`sets-global-security.yaml`, `sets-global-security-context.yaml`,
-`global-none-listed.yaml`, `testdata/cli/policy.txtar`):
+reviewed with it:
 
 ```
 context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; every chart of the instances receives global, past their package's protect and the upstream policy
@@ -1195,8 +1168,7 @@ context layer 2 (level 1): global.imageRegistry: a key of global the platform do
 Only level 0 is reviewed with the platform: above it, as in an
 instance layer, no key or string of a layer may contain `{{`
 ([Layers](#layers)), the first one found by path reported,
-`context layer 3 (level 1): connections.team-db.host: the value contains "{{"`
-(`testdata/context/1/template-code.yaml`).
+`context layer 3 (level 1): connections.team-db.host: the value contains "{{"`.
 The layers are checked in merge order, each normalized ([values
 files](#values-files)), then against the lower levels, then for the
 platform's settings, then for `{{`.
@@ -1242,8 +1214,7 @@ built: after the
 [parameter schema](#schema-check), the platform schema ([settings the
 compiler reads](#fields-the-compiler-reads)) and the
 [connections](#connections), before the [platform
-charts](#platform-charts) and the mapping. The first missing key fails
-(`testdata/context/0/missing-platform-value.yaml` for another key):
+charts](#platform-charts) and the mapping. The first missing key fails:
 
 ```
 global.okdp.tls.clusterIssuer is required. It is a context value: the platform's or a project's (Inputs.Context)
@@ -1279,9 +1250,9 @@ reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/0
 | `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's `project.yaml`, an instance's `connections.yaml`), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to a host's policy, as the upstream values are |
 | `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them; the compiler writes nothing of them, the platform's bootstrap binds them once, a program that mirrors the platform's authority reads them (`compiler.PlatformAdmins`) ([access](#access)) |
 | `access.groupPrefix` | `""` by default: the prefix the Kubernetes API server gives the groups of its OIDC users (`--oidc-groups-prefix`), which the RoleBindings of the projects' groups name them with ([access](#access)) |
-| `network.policy` | `false` by default: `true`, okdp-gitops' [targets](#targets) write a NetworkPolicy in each project's namespace but the platform's own (`policy.privileged`), its ingress denied but from the namespace itself, `network.ingressNamespaces` and the namespaces whose claims its instances provide, its egress open (`Result.Network`); off by default, as the compiler knows neither the cluster's ingress controller nor whether its network plugin enforces a policy: on, without the ingress controller's namespace, the services lose their ingress |
+| `network.policy` | `false` by default: `true`, a host's [targets](#targets) write a NetworkPolicy in each project's namespace but the platform's own (`policy.privileged`), its ingress denied but from the namespace itself, `network.ingressNamespaces` and the namespaces whose claims its instances provide, its egress open (`Result.Network`); off by default, as the compiler knows neither the cluster's ingress controller nor whether its network plugin enforces a policy: on, without the ingress controller's namespace, the services lose their ingress |
 | `network.ingressNamespaces` | none by default: the namespaces whose pods reach every project's pods with `network.policy`: the ingress controller's, a monitoring's; DNS labels, once each |
-| `controlPlane.serviceAccount` | no default: the identity of the optional control plane, `{namespace, name}`, a DNS label and a DNS subdomain, both required; okdp-gitops' [targets](#targets) bind it in each project's namespace to what it needs there (`Result.ControlPlane`); absent, the platform has no control plane, and nothing is written |
+| `controlPlane.serviceAccount` | no default: the identity of the optional control plane, `{namespace, name}`, a DNS label and a DNS subdomain, both required; a host's [targets](#targets) bind it in each project's namespace to what it needs there (`Result.ControlPlane`); absent, the platform has no control plane, and nothing is written |
 
 Every compile checks `global` against the schema, in every mode, before
 the [connections](#connections) and the [requirements](#requirements), and
@@ -1334,8 +1305,7 @@ and `version` strings (its other keys are ignored). Then, after the
 the mapping, each is checked as a source when set, in every mode: a
 repository URL (`https://` or `oci://`; `http://`, the chart fetched in
 clear, is refused), the name of a chart, a pinned version. The first
-violation is reported, in this order
-(`testdata/context/0/http-chart-repository.yaml`):
+violation is reported, in this order:
 
 ```
 global.okdp.charts.objects.repository "http://charts.example.org/mirror": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)
@@ -1367,7 +1337,7 @@ upstream charts pass their values to `tpl`, where template code could call
 normalized as it is merged, before the [schema check](#schema-check); the
 first `{{` in path order (keys sorted, items in order) fails, the layer
 numbered from 1 and the path written as in [protect](#protect) errors, a
-list item `[<i>]` (`testdata/template-code.yaml`):
+list item `[<i>]`:
 
 ```
 values layer 1: database: the value contains "{{"
@@ -1416,7 +1386,7 @@ precedence](#merge-precedence)):
   those of the package's defaults and of the platform's layers, level 0;
 - [protect](#protect): `global` and the protected paths are refused;
 - a host's policy, in its `Inputs.Finalize`, for a project that is not
-  privileged ([rule set](#rule-set)): okdp-gitops applies the security
+  privileged ([rule set](#rule-set)): a host may apply the security
   set's, which refuses the keys of a pod's privileges, identity,
   containers or objects and the images of other registries than the
   platform's ([the upstream
@@ -1438,8 +1408,7 @@ map (`null` included). The keys beside a protected path are free:
 | `image: {tag: "2.0"}` | accepted |
 
 The error names the path set and the protected path: the first one hit,
-`global` first, then in `protect` order
-(`testdata/protected-upstream.yaml` for another path):
+`global` first, then in `protect` order:
 
 ```
 app: upstream.app.image.registry: image.registry is set by the platform and cannot be changed
@@ -1463,9 +1432,9 @@ The chart's own default list is not among them: Helm replaces it with the
 final list, as it replaces a default list with that of a `-f` file. A
 package that keeps its items restates them in its defaults or values file
 of the key. The compiler reads no chart: it gives the paths appended to
-(`FinalValuesOf.Appended`), and okdp-gitops' check warns of an appended
-list that lacks some of them
-([checks of the final values](#checks-of-the-final-values)).
+(`FinalValuesOf.Appended`), with which a host's check may warn of an
+appended list that lacks some of them ([checks of the final
+values](#checks-of-the-final-values)).
 
 With the example (`append: [env]`), the computed `DB_*` and `AUDIT_DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
@@ -1513,7 +1482,7 @@ Helm coalesces the final values over them when it renders the chart, as
 it coalesces `-f` files ([Equivalence with Helm](#equivalence-with-helm)).
 The final values hold what OKDP decides of the chart's values, and nothing
 of its defaults: new defaults, in another version of the chart, change no
-final value. The compiler never reads them; okdp-gitops' check does
+final value. The compiler never reads them; a host's check may
 ([checks of the final values](#checks-of-the-final-values)).
 
 ### Nulls
@@ -1546,25 +1515,21 @@ renders, `global` and the [appended](#append) lists aside. `<source>`:
 `Result.Charts[key]`, `<chart> --repo <repository> --version <version>`,
 `oci://<repository>/<chart> --version <version>`, or the chart unpacked in
 a [chart cache](#chart-cache).
-`testdata/helm/values` holds what Helm computes on each case
-(`TestHelmValues`), with Helm 4.3.0 and the versions the deployers embed
-(okdp-gitops): Helm 4.2.4, 4.2.1 and 4.2.0 render as
-Helm 4.3.0. Helm 3.19.4 and 3.19.2 coalesce some nulls differently (a
-`null` default the values leave unset is kept, a key below the top level
-that `values.yaml` and the values both set to `null` is deleted:
-`helm3.json`), and render the final values as they render the layers.
+Of Helm 4.3.0 and the versions the deployers embed, Helm 4.2.4, 4.2.1 and
+4.2.0 render as Helm 4.3.0. Helm 3.19.4 and 3.19.2 coalesce some nulls
+differently (a `null` default the values leave unset is kept, a key below
+the top level that `values.yaml` and the values both set to `null` is
+deleted), and render the final values as they render the layers.
 
 ### Checks of the final values
 
 The compiler reads no upstream chart and checks nothing below: these
-checks are okdp-gitops', in the Finalize of its `deploy.Build`, with the
-charts it fetched or its `okdp-compile --check --charts` found in a
-[chart cache](#chart-cache). The final values are the same, checked or
-not. The compiler gives them what they need: the final values and the
-chart of each key, and the lists the instance appended to
-(`compiler.FinalValues`, `FinalValuesOf`). A chart okdp-gitops could not
-fetch leaves its keys unchecked, reported; a project that is not
-privileged giving it upstream values is refused when the build renders.
+checks are a host's, in its Finalize, with the charts it fetched or
+found in a [chart cache](#chart-cache). The final values are the same,
+checked or not. The compiler gives them what they need: the final values
+and the chart of each key, and the lists the instance appended to
+(`compiler.FinalValues`, `FinalValuesOf`). What a host does of a chart it
+could not fetch is its own.
 
 The compiler itself runs one check of the final values: the rule set's
 `finalValues` hook, on the values of each key, for a project that is not
@@ -1620,13 +1585,13 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Charts` | `map[string]compiler.ChartRef` | chart key -> the upstream chart that renders its values ([Chart index](#chart-index)) |
 | `Objects` | `[]map[string]any` | OKDP's own objects, whole manifests: the [credentials Secrets](#credentials-secrets), then the [objects section](#objects-section), then the PushSecrets and ExternalSecrets of the [credentials across namespaces](#credentials-across-namespaces) and the ExternalSecrets of the [credentials in the platform's secret store](#credentials-in-the-platforms-secret-store), in parameter path order; written to [the objects chart](#the-objects-chart); nil when none |
 | `Info` | `compiler.Info` | what the instance publishes: its URL, its usage and the connections it provides ([The info file](#the-info-file)) |
-| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by an output or a claim, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. okdp-gitops prints each, `depends on <instance> (<contract> <output>, <field>)` |
+| `Dependencies` | `[]compiler.Dependency` | the instances the parameters reference, by an output or a claim, for a deployer that orders the releases ([Dependencies](#dependencies)); in no file. `okdp-compile` prints each, `depends on <instance> (<contract> <output>, <field>)` |
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml` |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written |
 | `ObjectsSource` | `compiler.ChartRef` | the chart of the objects, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)) |
 | `Computed` | `map[string]any` | chart key -> what the mapping computed for it, before `Finalize` made `Values` of it |
-| `Groups`, `Privileged`, `SecretStore`, `Settings`, `KeepSync`, `Claims` | | what okdp-gitops' writers read: the project's groups, whether it is one of the platform's own, the platform's store and settings, what Argo CD is told of the objects Helm keeps, the claims bound to the instance |
+| `Groups`, `Privileged`, `SecretStore`, `Settings`, `KeepSync`, `Claims` | | what a host's writers read: the project's groups, whether it is one of the platform's own, the platform's store and settings, what Argo CD is told of the objects Helm keeps, the claims bound to the instance |
 | `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); a list appended to that drops a chart's defaults ([append](#append)); a literal of the upstream values at a sensitive key ([objects section](#objects-section)); nil when none. The binary prints each on stderr, `warning: <message>` |
 
 `Values` and `Charts` have one entry per compiled chart: every dependency
@@ -1782,8 +1747,7 @@ in the release's manifests. They are generated in the cluster
 (`secretRef`: an operator's, an upstream chart's, an ExternalSecret
 reading the platform's secret store). `Inputs.AllowPlainSecrets` accepts
 a plain Secret, for a caller that knows its repository private, and the
-[objects section](#objects-section)'s alike
-(`testdata/cli/plain-secrets.txtar`).
+[objects section](#objects-section)'s alike.
 
 A generated Secret is what `okdpGeneratedSecret` renders
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key
@@ -1885,8 +1849,7 @@ an object Helm keeps) walks them so (`eachObject`). A kind the compiler does
 not know, without a namespace, is assumed namespaced: the engine's identity,
 confined to the namespace, is the second line ([targets](#targets)). The
 first refused object, in the order of `Objects`, fails the compile, named
-`<kind>/<name>` (`testdata/cli/policy.txtar`); a privileged project's
-instance is not checked:
+`<kind>/<name>`; a privileged project's instance is not checked:
 
 ```
 web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them
@@ -1926,7 +1889,7 @@ functions [`okdpSqlName` and
 name per ID. A Secret is left to the check of two objects that
 write one Secret (all of a namespace's instances together). An object has
 a name (the mapping schema requires it)
-(`testdata/cli/policy.txtar`, `TestDuplicateObjects`):
+(`TestDuplicateObjects`):
 
 ```
 web: objects: ConfigMap/demo-web-a-b-c: two objects of one kind (core), namespace (demo) and name: object 1 and object 2; the second would replace the first. A name derived from a claim's ID must be one per ID (okdpSqlName, okdpObjectName)
@@ -1944,7 +1907,7 @@ store](#credentials-in-the-platforms-secret-store)), never written to the
 deployments repository. A Secret with only `metadata` and `type` (a
 ServiceAccount token's, which Kubernetes fills) passes. The first
 refused, in the order of `Objects`, fails, named `Secret/<name>`, `data`
-before `stringData` (`testdata/cli/plain-secrets.txtar`):
+before `stringData`:
 
 ```
 web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it
@@ -2066,9 +2029,9 @@ A dependency holds when its `instance` publishes an output named `output`
 of `contract`, as resolution found it; the [deployment
 graph](#the-deployment-graph) checks it again, and orders the releases
 with the list, read from `Result.Dependencies`: each release waits for the
-instances it depends on, Flux `dependsOn` and Argo CD sync waves in
-okdp-gitops. No file of a compile holds it. okdp-gitops' commands print
-each item once the files are written, after the warnings, `depends on
+instances it depends on, Flux `dependsOn` and Argo CD sync waves in a
+host's files. No file of a compile holds it. `okdp-compile` prints each
+item once the files are written, after the warnings, `depends on
 <instance> (<contract> <output>, <field>)`, `depends on demo-pg
 (database-server pg-hive, db)`, `<namespace>/<instance>` for one of
 another namespace.
@@ -2101,9 +2064,8 @@ Release and namespace are those the values were compiled for. `values.yaml`
 is given as user values (`helm -f`): as a chart's own values they would be
 defaults, and Helm drops the nulls of defaults
 ([Layers and nulls](#layers-and-nulls)). The single release of a deployer,
-an umbrella over the package's charts and the objects chart, is
-okdp-gitops' (`--target umbrella`, Flux, Argo CD): its values and its
-dependencies are these.
+an umbrella over the package's charts and the objects chart, is a
+host's: its values and its dependencies are these.
 
 Helm gives each subchart the final values of its key, as the chart alone
 receives them ([Equivalence with Helm](#equivalence-with-helm)), and adds
@@ -2119,12 +2081,11 @@ A template reads an absent key and a null the same way (`{{ .Values.x }}`,
 `if`, `default`), but for `hasKey`, `toYaml`, and `range` over the map.
 Each key's own `global` reaches its subchart, and the subcharts of that
 chart, as when the chart is alone: there is no `global` at the top for Helm
-to merge over it. `testdata/helm/umbrella` checks it, an umbrella over
-the charts of the values fixtures with one chart under two keys, with Helm
-4.3.0 and the versions the deployers embed: Helm 4.3.0, 4.2.4, 4.2.1 and
-4.2.0 render one output (`helm.json`), Helm 3.19.4 and 3.19.2 another
-(`helm3.json`). With each, a null of the final values deletes the upstream
-default. Helm 3 differs from Helm 4 on these values:
+to merge over it. Of an umbrella with one chart under two keys, Helm
+4.3.0, 4.2.4, 4.2.1 and 4.2.0, the versions the deployers embed, render
+one output, Helm 3.19.4 and 3.19.2 another. With each, a null of the final
+values deletes the upstream default. Helm 3 differs from Helm 4 on these
+values:
 
 | Values | Helm 4 | Helm 3.19 |
 |---|---|---|
@@ -2260,11 +2221,10 @@ upstream values). Release
 `Result.Dependencies` lists `demo-db`, the provider of its claims, twice, for
 `catalogs[1].database` and `database`, and
 `demo-alerts` for `notifications.webhook`; the chart `backup`, left out by
-`$if`, is no dependency, and its chart is not in okdp-gitops' chart cache
-of the example. Its
+`$if`, is no dependency, and a host's check does not read its chart. Its
 `okdp.info.yaml` lists three outputs, one with its credentials, whose
-Secret is generated: its objects hold the `Password` generators and
-the `ExternalSecret`, then the `objects` section.
+Secret is generated: its objects hold the `Password` generators and the
+`ExternalSecret`, then the `objects` section.
 
 ## Compiling instances together
 
@@ -2377,22 +2337,20 @@ The graph gives:
 
 ## Targets
 
-What a deployer needs is compiled here and written by okdp-gitops: its
-targets (`deploy.Target`: `helm`, `umbrella`, `flux`, `argocd`) write the
-files of compiled instances under `projects/<namespace>/`, from
+What a deployer needs is compiled here and written by a host: its
+targets (Helm releases, an umbrella, Flux, Argo CD) write the files of
+compiled instances under `projects/<namespace>/`, from
 `Result.Namespace`, `Result.Release`, the [deployment
 graph](#the-deployment-graph) and the fields `Result` holds for them. A
 project's directory of the tree is the namespace: every target installs
-there. See its
-[output](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/03_output.md).
-The engine's identity, confined to the namespace, and Pod Security
+there. The engine's identity, confined to the namespace, and Pod Security
 Admission are the second line behind the compile's policy.
 
 ### Access
 
 Who sees, operates and administers a project is decided by the platform
 and the project, without a control plane: the identity provider's
-groups hold the people, and okdp-gitops' targets write their roles into
+groups hold the people, and a host's targets write their roles into
 each project's manifests, which Argo CD and the API server enforce. A
 control plane, optional, mirrors the same authority (it reads it with
 `compiler.ParseAccess` and `compiler.PlatformAdmins`), never adds a
@@ -2526,7 +2484,7 @@ connection, it never selects one. No persisted binding: the binding is
 computed from the tree at each compile, never stored, so a changed
 default class, or a class's provider, moves every claim of it, each to a
 new, empty connection, the data left at the former one: the binding lines
-of okdp-gitops' commands show the move before it is deployed.
+`okdp-compile` prints show the move before it is deployed.
 
 A consumer claims a connection with a reference that takes claims
 (`x-okdp-connection-ref`'s `provision: true`, [declaring a
@@ -2653,12 +2611,11 @@ bound publishes
 provider by its name or by its release is one binding; an instance
 added whose name or release is the provider's name refuses its claims,
 it moves none ([providers](#providers)). Another
-provider gives its claimers a new connection, the former one's data
-where it was. okdp-gitops' commands print
-each binding. A claim template that does not bind
-refuses its instance, whose other claims go to no provider; a named claim
-that does not bind, every instance whose context declares it, the error
-under `claims.<name>` for `<field>`; every problem at once:
+provider gives its claimers a new connection, the former one's data where
+it was. `okdp-compile` prints each binding. A claim template that does not
+bind refuses its instance, whose other claims go to no provider; a named
+claim that does not bind, every instance whose context declares it, the
+error under `claims.<name>` for `<field>`; every problem at once:
 
 | Case | Error |
 |---|---|
@@ -2721,7 +2678,7 @@ or names a class whose provider it is, is refused ([the
 errors](#claims)), and the instances it names are compiled. The claim
 names the one it means otherwise (`demo/a`, `demo/demo-demo-a`), or one
 of them is renamed. The messages, the bindings (`Bound`, `Binding`,
-okdp-gitops' commands) and the dependencies name the provider by
+what `okdp-compile` prints) and the dependencies name the provider by
 its release, whatever named it.
 
 A provider serves the claims of its own namespace, and those of another
@@ -2818,7 +2775,7 @@ declaration, is refused, every such key, in key order:
 |---|---|
 | a request that sets a key of the class | `<field>: claim: request.<key>: set by the class <class> (global.okdp.provisioning.<contract>.classes.<class>): remove it, or name another class` |
 
-okdp-gitops' commands print a binding with its class:
+`okdp-compile` prints a binding with its class:
 `<field>: claim <id> (<contract>) bound to <namespace>/<release>, class
 <class>` for a class named, `, the default class <class>` for the default
 one, nothing after the instance for a provider named.

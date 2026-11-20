@@ -3,22 +3,20 @@
 How to package an upstream application for OKDP: a directory of
 parameters, OKDP's defaults and a service definition, compiled by
 okdp-compiler (the `okdp-compile` of its
-[command line](01_usage.md#command-line), okdp-gitops' with the deployer
-targets). The steps follow a `webapp` service, of which the example of
-this repository is a smaller version
-(`examples/02_advanced/input/catalog/webapp/`, which calls a function of
-the example's rule set, `examples/02_advanced/rules`;
+[command line](01_usage.md#command-line), or a host that embeds it). The
+steps follow a `webapp` service, of which the example of this repository
+is a smaller version (`examples/02_advanced/input/catalog/webapp/`, which
+calls a function of the example's rule set, `examples/02_advanced/rules`;
 `examples/00_passthrough/input/catalog/` is the smallest package, a chart
 and its values, `examples/01_minimal/input/catalog/` the smallest with a
-mapping, `examples/04_claims/input/catalog/` a provider and its
-claimers, each commented); the recipes and pitfalls come from the
-services packaged in `OKDP/platform-charts` and `OKDP/sandbox-charts`.
-A package that serves a host, signs its users in or adds workloads of
-its own does so with the security rule set:
-okdp-compiler-security's [writing a
+mapping, `examples/04_claims/input/catalog/` a provider and its claimers,
+each commented); the recipes and pitfalls come from the services packaged
+in `OKDP/platform-charts` and `OKDP/sandbox-charts`. A package that serves
+a host, signs its users in or adds workloads of its own does so with the
+security rule set: okdp-compiler-security's [writing a
 package](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md),
-whose examples use every part of the mapping language. What each file
-may contain is specified in [the service
+whose examples use every part of the mapping language. What each file may
+contain is specified in [the service
 definition](specs/02_service_definition.md), its [control
 flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
 and [inputs and outputs](specs/01_inputs_outputs.md), the command line in
@@ -61,12 +59,11 @@ the package is published as a chart.
 
 A package is a version directory of a catalog,
 `catalog/<service>/<version>/`, which its `Chart.yaml` names
-([repository layout](01_usage.md#repository-layout)); okdp-gitops'
-`okdp-compile --repository` compiles the instances of a tree, and `--check
---charts` checks them against the upstream charts' defaults and schemas,
-from a chart cache
-([chart cache](specs/01_inputs_outputs.md#chart-cache)): the compiler
-reads no upstream chart, those checks are okdp-gitops'.
+([repository layout](01_usage.md#repository-layout)); `okdp-compile
+--repository` compiles the instances of a tree. The compiler reads no
+upstream chart: checking the final values against the upstream charts'
+defaults and schemas, from a chart cache, is a host's
+([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ## Integrating a chart
 
@@ -102,8 +99,7 @@ Each upstream chart the service is made of is a dependency of
 `Chart.yaml`: the chart's name, its chart repository (`https://`) or OCI
 registry path (`oci://`), and a pinned version. The package holds
 no copy of it: a deployer renders the chart from its repository, over its
-defaults. The compiler reads none of it; okdp-gitops' check
-(`okdp-compile --check --charts`, its `deploy.Build`) reads its
+defaults. The compiler reads none of it; a host's check may read its
 `values.yaml` and `values.schema.json` from a chart cache, filled with
 `helm pull --untar`, each chart unpacked under its repository's
 directory, the URL without its scheme
@@ -118,7 +114,7 @@ dependencies:
 ```
 
 ```bash
-helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d "$OKDP_CHARTS/airflow.apache.org/airflow-1.22.0"
+helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d "<chart cache>/airflow.apache.org/airflow-1.22.0"
 ```
 
 - The key, the `alias` when given, else the chart's `name`, names the
@@ -318,10 +314,10 @@ upstream:
   ([upstream](specs/02_service_definition.md#upstream)). Leave out
   a chart an instance has no reason to set (the webapp's `metrics`).
   Whatever it accepts, a host that applies the upstream policy of the
-  security set, as okdp-gitops does, denies a project's instances the
-  keys of a pod's privileges, identity, containers and objects
-  (`hostPath`, `serviceAccount`, `sidecars`, `extraObjects`...) and may
-  hold their images to the platform's registries ([upstream
+  security set denies a project's instances the keys of a pod's
+  privileges, identity, containers and objects (`hostPath`,
+  `serviceAccount`, `sidecars`, `extraObjects`...) and may hold their
+  images to the platform's registries ([upstream
   values](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#upstream-values)):
   a parameter is the way to offer one of them, the package reviewed with
   it.
@@ -483,12 +479,12 @@ own, which `demo-db`, the provider of the platform's default class of
 database connections, publishes under the claim's ID: host
 `demo-db-db.demo.svc`, Secret `demo.webapp.database-credentials`, and
 a dependency (`Result.Dependencies`), which the deployment graph orders
-the releases with (Flux `dependsOn`, Argo CD sync waves, in okdp-gitops;
-claims below). The mapping reads both the
-same way, credentials through a `secretKeyRef` on `secretRef.name`; the
-reference requires them, `"require": {"required": ["secretRef"]}`
-(`examples/02_advanced/input/catalog/webapp/config.schema.json`),
-and a connection without a Secret is refused before the mapping runs.
+the releases with (Flux `dependsOn`, Argo CD sync waves, in a host's
+files; claims below). The mapping reads both the same way, credentials
+through a `secretKeyRef` on `secretRef.name`; the reference requires them,
+`"require": {"required": ["secretRef"]}`
+(`examples/02_advanced/input/catalog/webapp/config.schema.json`), and a
+connection without a Secret is refused before the mapping runs.
 cnpg-postgresql publishes one `database-server` output per database: an
 instance of the namespace references it by that name (`database:
 pg-hive`), which resolves to the output's values and `secretRef`, and
@@ -639,40 +635,34 @@ set, each optional chart on, upstream values with appended lists, and
 each mode of the settings a rule set reads (the security set's:
 [test cases](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#test-cases)).
 A test tree whose platform requires a rule set (`global.okdp.ruleSets`)
-fails a compile not given it: okdp-compiler's `okdp-compile` takes it
-with `--rules`, okdp-gitops' gives the security set to every compile.
+fails a compile not given it: `okdp-compile` takes it with `--rules`,
+and a host may give the security set to every compile.
 
 ```bash
-export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of okdp-gitops' --check, filled with helm pull --untar
-# okdp-compile is okdp-gitops'
 # /tmp/polaris-case: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
-okdp-compile --repository . --repository /tmp/polaris-case --check   # against the upstream charts' defaults and schemas
-okdp-compile --repository . --repository /tmp/polaris-case --target umbrella -o /tmp/out
+okdp-compile --repository . --repository /tmp/polaris-case --check   # compile and check, write nothing
+okdp-compile --repository . --repository /tmp/polaris-case -o /tmp/out
 i=/tmp/out/projects/demo/instances/demo-polaris
-yq '.dependencies' $i/Chart.yaml   # the source of each key
-chart=$(mktemp -d) && cp -R $i/. "$chart" && helm dependency build "$chart"
-helm template demo-polaris "$chart" -n demo -f $i/instance.values.yaml
+chart=$(mktemp -d) && cp -R catalog/polaris/<version>/. "$chart" && helm dependency build "$chart"
+helm template demo-polaris-okdp ../okdp-objects-chart -n demo -f $i/okdp-objects.values.yaml
+helm template demo-polaris "$chart" -n demo -f $i/values.yaml
 scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and rendered
 ```
 
 - Render with the release name and namespace of the compile,
   `<project>-<instance>` and the project's directory, `demo-polaris` and
   `demo`: the upstream charts derive their names from the release.
-- `--target umbrella` is okdp-gitops' single release of an instance: its
-  dependencies are the sources the index names for the keys,
-  `polaris-admin-principals` the source of `polaris-admin` under its own
-  alias, and the okdp-objects chart, which renders OKDP's own objects as
-  written; `helm dependency build` fetches
-  them, in a copy of the directory, since the next compile into the
-  directory refuses `Chart.lock` and `charts/`.
+- `helm dependency build` fetches the upstream charts of the package's
+  `Chart.yaml`, `polaris-admin-principals` the chart of `polaris-admin`
+  under its own alias, in a copy of the package, so that the catalog's
+  directory gets no `Chart.lock` nor `charts/`; the okdp-objects chart
+  renders OKDP's own objects as written.
 - The library gives the final values alone, `values.yaml` and
   `okdp-objects.values.yaml`, for the catalog's chart as it is
   ([installing an instance](01_usage.md#installing-an-instance)).
 - A case whose first line is `# error: <message>` must fail with that
-  message (`scripts/compile-charts.sh`, and okdp-gitops' `testdata/`:
-  `protected-upstream.yaml` starts with the message of a protected path;
-  `testdata/context/0/` holds the platform files that must fail). Add one
-  per `errors` entry, per protected path that matters, per schema rule.
+  message (`scripts/compile-charts.sh`). Add one per `errors` entry, per
+  protected path that matters, per schema rule.
 
 [Troubleshooting](01_usage.md#troubleshooting) explains the error messages.
 
@@ -1059,8 +1049,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   or a key of the values file of that name fails, in every mode.
 - **A dependency is pinned.** `version` is one version, not a range
   (`^1.2`, `1.x` fail): bump it in `Chart.yaml`, then pull the new version
-  into the chart cache of okdp-gitops' checks. The final values do not
-  change with it: they hold none of the chart's defaults.
+  into a host's chart cache. The final values do not change with it: they
+  hold none of the chart's defaults.
 
 ## Checklist
 

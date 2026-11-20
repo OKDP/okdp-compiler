@@ -10,8 +10,8 @@ import (
 )
 
 // Ref is an upstream chart as its repository publishes it. It renders the
-// values of a chart key. The compiler never fetches it: a host does, to
-// check the final values against it (okdp-gitops).
+// values of a chart key. The compiler never fetches it: a host may, to
+// check the final values against it.
 type Ref struct {
 	Repository string `yaml:"repository" json:"repository"` // https://... or oci://...
 	Chart      string `yaml:"chart" json:"chart"`           // the chart's name in the repository

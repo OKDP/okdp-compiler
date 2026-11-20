@@ -28,7 +28,7 @@ instance's release by its umbrella, created and deleted with it.
 - **The cluster says what runs.** The ConfigMap exists once the release is
   applied and goes when it is uninstalled: a reader lists the instances
   deployed, not those git holds or a sync has yet to apply, without reading
-  the status of the GitOps engine.
+  the status of the deployer engine.
 - **One way to find every instance**, whoever deployed it: a console, a
   pipeline running `okdp-compile` then `helm upgrade`, plain Flux or Argo CD
   objects. A tool lists a namespace's instances by label, with no access to
@@ -113,9 +113,8 @@ opens rather than text it shows. The info file keeps `url` and
 - **Argo CD has none.** It renders the umbrella with `helm template`,
   which leaves `NOTES.txt` out, and keeps no release: the notes are
   neither printed nor stored, and the instance's usage would be nowhere.
-  okdp-gitops targets Flux and Argo CD alike
-  ([the engines](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md#the-engines));
-  so is any deployer that renders the manifests and applies them itself.
+  A host may write the files of Flux and of Argo CD alike, and so is any
+  deployer that renders the manifests and applies them itself.
 - **A failed release for a sentence.** A mistake in `NOTES.txt`, a value
   path a chart bump moved (`nil pointer evaluating interface {}.config`),
   fails the whole install or upgrade, in the cluster, not the compile nor

@@ -116,10 +116,10 @@ key names the dependency's values everywhere: its key in the
 
 A deployer renders the chart from its repository, the final values over
 its defaults ([merge precedence](01_inputs_outputs.md#merge-precedence)).
-A compile reads no upstream chart. okdp-gitops' check reads its
-`values.yaml` and `values.schema.json`, from its chart cache
+A compile reads no upstream chart. A host's check may read its
+`values.yaml` and `values.schema.json`, from a chart cache
 (`<repository>/<name>-<version>/<name>/`, `<repository>` the URL without
-its scheme: [chart cache](01_inputs_outputs.md#chart-cache)), and checks
+its scheme: [chart cache](01_inputs_outputs.md#chart-cache)), and check
 the final values against them.
 `Result.Charts` maps each compiled key to its upstream chart, the
 dependency's `name` as `Chart`
@@ -130,7 +130,7 @@ it, each with its own values (polaris-admin's bootstrap and principals
 phases). Every dependency is rendered, as Helm renders a chart's
 dependencies, unless the values file leaves it out: a key it writes that
 is left out by `$if` or null. A dependency left out is not rendered, and
-the chart cache of okdp-gitops' check need not hold its chart
+a host's chart cache need not hold its chart
 ([rendered dependencies](#rendered-dependencies)).
 
 `condition`, `tags`, `enabled` and `import-values`, Helm's means of
@@ -141,8 +141,7 @@ chart, installed as it is, leaves out a dependency the values file
 leaves out ([rendered dependencies](#rendered-dependencies)).
 
 Each dependency is checked when the file is loaded, the first failing
-check reported (`testdata/cli/chart-sources.txtar`: `http://`, a
-range); `<i>` is its position in the list, from 0, `<key>` its
+check reported; `<i>` is its position in the list, from 0, `<key>` its
 key:
 
 | Case | Error |
@@ -294,7 +293,7 @@ are ignored. How they are written and applied:
 [upstream values](01_inputs_outputs.md#upstream-values). Whatever the
 package accepts, a host may refuse what the upstream values of a project
 that is not one of the platform's own (`global.okdp.policy.privileged`)
-set, in Helm's merge: okdp-gitops applies the security set's policy, no
+set, in Helm's merge: a host may apply the security set's policy, no
 key of a pod's privileges, identity, containers or objects, images from
 the platform's registries only ([the upstream
 policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md)).
@@ -439,8 +438,8 @@ its key at its top level and the key is left out by `$if`
 (`{$if: false, ...}`, or the whole file under a top-level `$if` false) or
 null (`backup: ~`, `backup: ${{ null }}`). It has no `Result.Values`
 entry, `<key>: {enabled: false}` of `values.yaml`, for which `Chart.yaml`
-says `condition: <key>.enabled`, and the chart cache of okdp-gitops'
-check need not hold its chart.
+says `condition: <key>.enabled`, and a host's chart cache need not hold
+its chart.
 
 - A dependency the file does not write is rendered with `{}` as its
   computed values: its OKDP defaults (`defaults`), the instance's upstream
@@ -474,7 +473,7 @@ of them: both fail when it is loaded,
   an expression, a directive or an escape, compiles all the same, with a
   warning: `LoadDefinition` gives it once (`Definition.Warnings`), each
   compile with its result (`Result.Warnings`:
-  [outputs](01_inputs_outputs.md#outputs)), okdp-gitops printing it,
+  [outputs](01_inputs_outputs.md#outputs)), `okdp-compile` printing it,
   `warning: <message>`, and succeeding: `values.yaml
   holds expressions or directives (${{ }}, $-keys): name it
   values.cel.yaml`. The check reads the YAML only: a string holding `${{`
@@ -548,7 +547,7 @@ metrics:
   $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
   # ...
 backup:
-  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read by okdp-gitops' check
+  $if: ${{ values.features.backup.enabled }}     # false here: no backup chart, not read by a host's check
   # ...
 ```
 
@@ -1151,4 +1150,4 @@ Other errors of the mapping:
 `values.yaml`. `<value>`: the value as Go's `%#v` prints it (`"x"`,
 `true`).
 
-okdp-gitops' commands print them after `error: `.
+`okdp-compile` prints them after `error: `.

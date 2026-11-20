@@ -30,16 +30,17 @@ same checks on every pull request.
 
 - A source file's tests are in its `_test.go`, in memory (`fstest.MapFS`)
   where they can be.
-- Test data lives at the repository root, in `testdata/`, never under
-  `internal/`. Keep a fixture small, the least input that shows the
-  behaviour, and add a case only for what no other case covers.
+- Test data lives in the `testdata/` of the package that reads it
+  (`internal/okdp/testdata`, `internal/rules/testdata`). Keep a fixture
+  small, the least input that shows the behaviour, and add a case only
+  for what no other case covers.
 - The rules every compile applies, the checks and their tables among
   them, have one home, `internal/rules/mandatory`: the tests compile with
   that set (`Mandatory`). A compile given no rule set, the
   mandatory one alone, is tested too (`TestCompileWithoutRules`).
 - A boundary of the [threat model](docs/04_threat_model.md), what an
   author may not do, has one case that must fail: a unit test here, or a
-  fixture of okdp-gitops, where a whole tree compiles. A new check gets
+  fixture of a host, where a whole tree compiles. A new check gets
   its case, its row in the threat model and in the [security
   boundaries](docs/00_architecture.md#security-boundaries), named in
   both.
@@ -51,9 +52,9 @@ same checks on every pull request.
 ## Helm fixtures
 
 What the compiler copies from Helm is compared with what `helm template`
-computes in okdp-gitops, whose `testdata/helm` holds the fixtures, with
-each deployer's Helm. A change of the merge (`internal/merge`, `chart/`)
-is checked there too.
+computes, with each deployer's Helm. This module runs no Helm: a host
+that renders the charts holds those fixtures, and a change of the merge
+(`internal/merge`, `chart/`) is checked there too.
 
 ## Documentation
 
@@ -76,8 +77,8 @@ what:
   design decisions, the tests:
   [docs/00_architecture.md](docs/00_architecture.md).
 
-An error message is quoted in tests, in `testdata/` first lines and in the
-docs: grep for it when you change it.
+An error message is quoted in tests and in the docs: grep for it when
+you change it.
 
 ## Commits and releases
 

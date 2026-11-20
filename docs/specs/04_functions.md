@@ -45,9 +45,8 @@ The host functions are plain Go, and share these properties:
   `release` does not change `okdpFullname`
   ([context](02_service_definition.md#context)).
 - **Helm's output.** A function reproducing a Helm or sprig one is compared
-  with what `helm template` prints for the same inputs (`testdata/helm`):
-  `testdata/helm/functions` of okdp-gitops for `sha256`, `toJson`,
-  `toPrettyJson`, `toYaml` and `quote`
+  with what `helm template` prints for the same inputs: `sha256`,
+  `toJson`, `toPrettyJson`, `toYaml` and `quote`
   ([testing](../00_architecture.md#helm-fixtures)).
 
 Adding a function: [extension points](../00_architecture.md#extension-points).
