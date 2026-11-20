@@ -164,7 +164,7 @@ func (p *Prepared) Eval(ctx context.Context, scope M) (M, []Problem, error) {
 
 // bind returns the scope of the sections of t: the context outer plus
 // the vars bindings. It then evaluates the errors section, and returns
-// its messages joined, a Refusal each.
+// its messages joined, an error each.
 func (t *document) bind(ctx context.Context, outer M) (M, error) {
 	scope, err := t.vars2scope(ctx, outer)
 	if err != nil {
@@ -177,7 +177,7 @@ func (t *document) bind(ctx context.Context, outer M) (M, error) {
 	var refused []error
 	for _, r := range value.AsList(rules) {
 		if msg := value.Str(r); msg != "" {
-			refused = append(refused, Refusal{msg})
+			refused = append(refused, errors.New(msg))
 		}
 	}
 	if len(refused) > 0 {
@@ -185,12 +185,6 @@ func (t *document) bind(ctx context.Context, outer M) (M, error) {
 	}
 	return scope, nil
 }
-
-// Refusal is a message of the errors section of a document.
-type Refusal struct{ Message string }
-
-// Error returns the message.
-func (r Refusal) Error() string { return r.Message }
 
 // vars2scope returns a copy of the context outer with the vars bindings
 // added in order. Each binding sees the previous ones.

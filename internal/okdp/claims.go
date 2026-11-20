@@ -64,45 +64,48 @@ type ClaimSpec struct {
 // contract; a claim template may not set one, because it has the contract
 // of its reference. class and provider exclude each other, and a claim
 // that names neither takes the default class of its contract: {} thus
-// claims a connection of its own, of the default class.
-func parseClaim(m M, path string, named bool) (*ClaimSpec, error) {
+// claims a connection of its own, of the default class. The claim is
+// returned even when it fails, as ParseClaim says.
+func parseClaim(m M, path string, named bool) (ClaimSpec, error) {
+	c := ClaimSpec{Contract: value.Str(m["contract"]), Class: value.Str(m["class"]), Provider: value.Str(m["provider"])}
+	if r, ok := m["request"].(M); ok {
+		c.Request = r
+	}
 	keys, allowed := []string{"class", "provider", "request"}, "class, provider and request only"
 	if named {
 		keys, allowed = []string{"class", "contract", "provider", "request"}, "contract, class, provider and request only"
 	}
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		if !slices.Contains(keys, k) {
-			return nil, fmt.Errorf("%s: claim: unknown key %q: %s", path, k, allowed)
+			return c, fmt.Errorf("%s: claim: unknown key %q: %s", path, k, allowed)
 		}
 		if _, ok := m[k].(M); k == "request" && !ok && m[k] != nil {
-			return nil, fmt.Errorf("%s: claim: request must be an object, got %s", path, value.ShortAt(k, m[k]))
+			return c, fmt.Errorf("%s: claim: request must be an object, got %s", path, value.ShortAt(k, m[k]))
 		}
 		if _, ok := m[k].(string); k != "request" && !ok && m[k] != nil {
-			return nil, fmt.Errorf("%s: claim: %s must be a string, got %s", path, k, value.ShortAt(k, m[k]))
+			return c, fmt.Errorf("%s: claim: %s must be a string, got %s", path, k, value.ShortAt(k, m[k]))
 		}
-	}
-	c := &ClaimSpec{Contract: value.Str(m["contract"]), Class: value.Str(m["class"]), Provider: value.Str(m["provider"])}
-	if r, ok := m["request"].(M); ok {
-		c.Request = r
 	}
 	switch {
 	case named && c.Contract == "":
-		return nil, fmt.Errorf("%s: claim: contract is required, the contract of the connection it claims", path)
+		return c, fmt.Errorf("%s: claim: contract is required, the contract of the connection it claims", path)
 	case named && !chart.IsFileName(c.Contract):
-		return nil, fmt.Errorf("%s: claim: contract %q is not a contract name", path, c.Contract)
+		return c, fmt.Errorf("%s: claim: contract %q is not a contract name", path, c.Contract)
 	}
-	if _, _, ok := providerName(c.Provider, ""); c.Provider != "" && !ok {
-		return nil, fmt.Errorf("%s: claim: provider %q: %s", path, c.Provider, providerForms)
+	if c.Provider != "" {
+		if err := CheckProvider(path+": claim", c.Provider); err != nil {
+			return c, err
+		}
 	}
 	if c.Class != "" && c.Provider != "" {
-		return nil, fmt.Errorf("%s: claim: class or provider, not both", path)
+		return c, fmt.Errorf("%s: claim: class or provider, not both", path)
 	}
 	return c, nil
 }
 
 // namedClaims returns the named claims of the merged values of an
 // instance, by name. They are its context's: its own values set none.
-// Every problem is reported, in name order.
+// Every problem is reported, in name order, with the claims that hold.
 func namedClaims(values M) (map[string]ClaimSpec, error) {
 	v, set := values["claims"]
 	if !set {
@@ -128,10 +131,7 @@ func namedClaims(values M) (map[string]ClaimSpec, error) {
 		}
 		out[name] = c
 	}
-	if err := errors.Join(errs...); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return out, errors.Join(errs...)
 }
 
 // ParseClaim reads the named claim name from v, its entry as written in
@@ -140,22 +140,15 @@ func namedClaims(values M) (map[string]ClaimSpec, error) {
 func ParseClaim(name string, v any) (ClaimSpec, error) {
 	where := value.Key("claims", name)
 	decl, ok := v.(M)
-	c := ClaimSpec{Name: name, Contract: value.Str(decl["contract"]), Class: value.Str(decl["class"]), Provider: value.Str(decl["provider"])}
-	if r, isMap := decl["request"].(M); isMap {
-		c.Request = r
-	}
+	c, err := parseClaim(decl, where, true)
+	c.Name = name
 	switch {
 	case !chart.IsDNSLabel(name):
 		return c, fmt.Errorf("%s: claim: its name is a DNS-1123 label", where)
 	case !ok:
 		return c, fmt.Errorf("%s: a claim, an object, got %s", where, value.ShortAt(name, v))
 	}
-	parsed, err := parseClaim(decl, where, true)
-	if err != nil {
-		return c, err
-	}
-	parsed.Name = name
-	return *parsed, nil
+	return c, err
 }
 
 const providerForms = "<instance>, <release>, <namespace>/<instance> or <namespace>/<release>"
@@ -257,9 +250,10 @@ func claimsScope(claims []Claim) []any {
 	return out
 }
 
-// claimRef is a claim of a reference of an instance, at the parameter
-// path field. name is "" for a claim template, whose spec holds the
-// instance's request merged over the one the package fixes.
+// claimRef is a claim at field: of a reference of an instance, at its
+// parameter path, or a named claim, at claims.<name>. name is "" for a
+// claim template, whose spec holds the instance's request merged over the
+// one the package fixes.
 type claimRef struct {
 	field, contract, name string
 	spec                  ClaimSpec
@@ -323,7 +317,7 @@ func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
 				if fixed, ok := ref["request"].(M); ok {
 					spec.Request = value.Merge(value.AsMap(value.Copy(fixed)), spec.Request)
 				}
-				out = append(out, claimRef{path, contract, "", *spec})
+				out = append(out, claimRef{path, contract, "", spec})
 			}
 		case string:
 			if spec, ok := named[t]; ok && spec.Contract == contract {
@@ -335,16 +329,10 @@ func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
 	return instanceClaims{out, named, value.AsMap(settings["provisioning"]), platformClasses(in.Context)}
 }
 
-func namedClaimID(namespace, name string) string { return claimID(namespace, "", "", name) }
-
-func templateClaimID(namespace, instance, field string) string {
-	return claimID(namespace, instance, field, "")
-}
-
-// claimID builds the ID of a claim:
+// claimID builds the ID of a claim from its namespace and its parts:
 //
-//	<namespace>.<name>              a named claim (name is set)
-//	<namespace>.<instance>.<field>  the claim template at field
+//	<namespace>.<name>              a named claim: claimID(namespace, name)
+//	<namespace>.<instance>.<field>  the claim template at field: claimID(namespace, instance, field)
 //
 // Each part is made a DNS-1123 label, so no part holds a dot: two sources
 // give two IDs, and the dots tell the kind.
@@ -353,11 +341,8 @@ func templateClaimID(namespace, instance, field string) string {
 // whole, the rest is cut, and 8 hexadecimal digits of the SHA-256 of the
 // whole ID end it. A namespace too long to keep its prefix gives an ID cut
 // whole, which checkClaims refuses.
-func claimID(namespace, instance, field, name string) string {
-	parts := []string{namespace, name}
-	if name == "" {
-		parts = []string{namespace, instance, field}
-	}
+func claimID(namespace string, parts ...string) string {
+	parts = append([]string{namespace}, parts...)
 	for i, p := range parts {
 		var b strings.Builder
 		for _, r := range strings.ToLower(p) {
@@ -406,29 +391,25 @@ func CheckDeclarations(ctx context.Context, in Inputs) error {
 	if err := upstreamGlobals(ctx, in, layers, settings); err != nil {
 		return err
 	}
-	if err := declaredConnections(ctx, in); err != nil {
+	if err := checkDeclared(in, layers, platform, nil); err != nil {
 		return err
 	}
 	merged := M{}
 	for _, l := range layers {
 		merged = value.Merge(merged, value.AsMap(value.Copy(l)))
 	}
-	claims, ok := merged["claims"].(M)
-	if !ok {
-		_, err := namedClaims(merged)
-		return err
+	// The claims that fail are reported first, one error each.
+	named, err := namedClaims(merged)
+	var errs []error
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = j.Unwrap()
+	} else {
+		errs = append(errs, err)
 	}
 	classes := value.AsMap(settings["provisioning"])
-	var errs []error
-	for _, name := range slices.Sorted(maps.Keys(claims)) {
-		// Each claim is checked alone, so that the errors come in name order.
-		named, err := namedClaims(M{"claims": M{name: claims[name]}, "connections": merged["connections"]})
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
+	for _, name := range slices.Sorted(maps.Keys(named)) {
 		spec, where := named[name], value.Key("claims", name)
-		site := claimSite{in.Namespace, where, spec.Contract, spec}
+		site := claimSite{in.Namespace, claimRef{where, spec.Contract, name, spec}}
 		ch, _, _, err := claimClass(classes, site)
 		if err == nil {
 			_, err = claimRequest(in, site, ch)

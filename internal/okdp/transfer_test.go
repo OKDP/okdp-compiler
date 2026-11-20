@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -35,7 +34,7 @@ func TestSecretStore(t *testing.T) {
 // the provider's namespace then the claim's ID.
 func TestStoreRef(t *testing.T) {
 	of := func(okdp M) (M, string) {
-		v, err := storeOf(context.Background(), testrules.Standard(), okdp)
+		v, err := storeOf(context.Background(), Mandatory(), okdp)
 		if err != nil {
 			t.Fatal(err)
 		}

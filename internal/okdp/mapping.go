@@ -78,7 +78,7 @@ func runMapping(ctx context.Context, rules *RuleSet, session *cel2yaml.Session, 
 		return nil, nil, err
 	}
 	maps.DeleteFunc(doc.Sections, func(_ string, v any) bool { return v == nil })
-	res, err = schemaValues(rules.MappingSchema(), "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
+	res, err = ruleset.SchemaValues(rules.MappingSchema(), "the mapping's sections don't meet the specifications of mapping.schema.json", doc.Sections)
 	return res, doc.Written["output"], err
 }
 
@@ -97,17 +97,16 @@ func functions(ctx context.Context, inst *instance, session **cel2yaml.Session) 
 				cel.FunctionBinding(func(...ref.Val) ref.Val { return types.String(fullname(release, "")) })),
 			cel.Overload("okdpFullname_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 				cel2yaml.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
-		cel2yaml.Costed(cel.Function("okdpGeneratedSecret", cel.Overload("okdpGeneratedSecret_map", []*cel.Type{cel.DynType}, cel.DynType,
-			cel2yaml.Unary(func(v any) (any, error) {
-				if inst.rules.GeneratedSecret().Data == nil {
-					return nil, errors.New("okdpGeneratedSecret: the rule set of the compile has no such template")
-				}
-				args, err := schemaValues(inst.rules.MappingSchema(), "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
-				if err != nil {
-					return nil, err
-				}
-				return generatedSecret(ctx, *session, inst, value.AsMap(args["okdpGeneratedSecret"]))
-			}))), "okdpGeneratedSecret_map"),
+		unary("okdpGeneratedSecret", "okdpGeneratedSecret_map", func(v any) (any, error) {
+			if inst.rules.GeneratedSecret().Data == nil {
+				return nil, errors.New("okdpGeneratedSecret: the rule set of the compile has no such template")
+			}
+			args, err := ruleset.SchemaValues(inst.rules.MappingSchema(), "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
+			if err != nil {
+				return nil, err
+			}
+			return generatedSecret(ctx, *session, inst, value.AsMap(args["okdpGeneratedSecret"]))
+		}),
 	}
 	opts = append(opts, labelFunctions(inst.rules, inst.svc.Name, release)...)
 	opts = append(opts, nameFunctions()...)
@@ -129,17 +128,21 @@ func generatedSecret(ctx context.Context, session *cel2yaml.Session, inst *insta
 func documentFunctions(ctx context.Context, inst *instance) []cel.EnvOption {
 	var opts []cel.EnvOption
 	for _, f := range inst.rules.DocumentFuncs() {
-		id := f.Name + "_dyn"
-		opts = append(opts, cel2yaml.Costed(cel.Function(f.Name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
-			cel2yaml.Unary(func(v any) (any, error) {
-				values, err := inst.rules.Values(ctx, f.Document, M{"arg": v, "release": inst.scope["release"], "platform": inst.scope["platform"]})
-				if err != nil {
-					return nil, err
-				}
-				return values[f.Result], nil
-			}))), id))
+		opts = append(opts, unary(f.Name, f.Name+"_dyn", func(v any) (any, error) {
+			values, err := inst.rules.Values(ctx, f.Document, M{"arg": v, "release": inst.scope["release"], "platform": inst.scope["platform"]})
+			if err != nil {
+				return nil, err
+			}
+			return values[f.Result], nil
+		}))
 	}
 	return opts
+}
+
+// unary returns the host function name of one argument, f, whose overload
+// is id. Each call counts in the session's cost.
+func unary(name, id string, f func(any) (any, error)) cel.EnvOption {
+	return cel2yaml.Costed(cel.Function(name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType, cel2yaml.Unary(f))), id)
 }
 
 // evalTemplate evaluates t, a template of the rule set, on scope and

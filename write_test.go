@@ -52,9 +52,6 @@ func TestKeepSynced(t *testing.T) {
 			t.Errorf("%s: got %v, want %v", name, got, want[name])
 		}
 	}
-	if !reflect.DeepEqual(shared, M{keepRules.Annotation: "keep"}) {
-		t.Errorf("a shared map changed: %v", shared)
-	}
 	if !reflect.DeepEqual(objects[8], map[string]any{"kind": "Secret"}) {
 		t.Errorf("an object without metadata: %v", objects[8])
 	}

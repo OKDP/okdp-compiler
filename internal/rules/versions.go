@@ -34,7 +34,6 @@ func (r *RuleSet) addSet(name, version string) error {
 		return taken("name", name)
 	}
 	r.named = append(r.named, namedSet{name, version})
-	r.version = version
 	return nil
 }
 

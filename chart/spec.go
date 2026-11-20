@@ -1,5 +1,6 @@
 // This file joins each dependency of Chart.yaml with what okdp.yaml says
 // of it.
+
 package chart
 
 import (

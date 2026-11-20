@@ -76,7 +76,7 @@ type Inputs struct {
 	// sets. It runs before the mapping. Nil means none.
 	CheckGlobals func(context.Context, GlobalsInput) error
 
-	memo *instanceMemo // what the compiles of a set read once (Memo); nil for this compile's own
+	memo *instanceMemo // what the compiles of a set read once (setMemo); nil for this compile's own
 }
 
 // FinalInput is what a Finalize makes the final values from. A host also
@@ -94,12 +94,6 @@ type FinalInput struct {
 	Namespace         string
 	Privileged        bool // the project is one of the platform's own
 	AllowPlainSecrets bool // Inputs.AllowPlainSecrets
-	// CheckFinalValues runs the rule set's finalValues hook on values, the
-	// final values by chart key; it checks nothing for a privileged project.
-	// A Finalize calls it on the values it returns, before it returns, at
-	// the point of its own checks it chooses. When it does not, the compile
-	// runs the hook on the values once Finalize has returned them.
-	CheckFinalValues func(ctx context.Context, values map[string]map[string]any) error
 }
 
 // GlobalLayer is the global one layer of a project sets. Name identifies
@@ -121,9 +115,8 @@ type GlobalsInput struct {
 
 // Finalize returns the final values of each key of in.Output, the chart
 // that renders each, and warnings. It runs inside the compile of the
-// instance, so its error refuses the instance like any other stage's. It
-// runs the rule set's finalValues hook through in.CheckFinalValues, or
-// leaves it to the compile, which then runs it after Finalize returns.
+// instance, so its error refuses the instance like any other stage's. The
+// compile runs the rule set's finalValues hook on the values it returns.
 type Finalize func(ctx context.Context, in FinalInput) (values map[string]map[string]any, charts map[string]chart.Ref, warnings []string, err error)
 
 // ContextLayer is one values layer of the context (Inputs.Context), read
@@ -183,9 +176,8 @@ type run struct {
 	def *Definition
 	in  Inputs
 
-	svc          *Service        // the package's service (checkInputs)
-	inst         *instance       // parameters, settings and connections (platformInstance)
-	groups       map[string]Role // the project's groups (platformInstance)
+	svc          *Service  // the package's service (checkInputs)
+	inst         *instance // parameters, settings and connections (platformInstance)
 	session      *cel2yaml.Session
 	objectsChart chart.Ref // the chart that renders the instance's objects (mapping)
 	res          M         // the mapping's result (mapping)
@@ -241,9 +233,11 @@ func (c *run) checkInputs() error {
 		return fmt.Errorf("Inputs.Rules: %w", ruleset.ErrNotLoaded)
 	case !chart.IsRelease(in.Release):
 		return fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
-	case checkNamespace(c.ctx, in.rules(), "Inputs.Namespace", in.Namespace) != nil:
-		return checkNamespace(c.ctx, in.rules(), "Inputs.Namespace", in.Namespace)
-	case in.Name != "" && !chart.IsDNSLabel(in.Name):
+	}
+	if err := checkNamespace(c.ctx, in.rules(), "Inputs.Namespace", in.Namespace); err != nil {
+		return err
+	}
+	if in.Name != "" && !chart.IsDNSLabel(in.Name) {
 		return fmt.Errorf("Inputs.Name %q: an instance name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", in.Name)
 	}
 	// Checked again here because a Definition may be built in memory.
@@ -259,7 +253,7 @@ func (c *run) checkInputs() error {
 	}
 	c.svc = svc
 	if c.in.memo == nil {
-		c.in.memo = NewMemo().forInstance(0, c.def, c.in)
+		c.in.memo = &instanceMemo{params: &paramsMemo{}, contracts: newContractCache(in.Contracts)}
 	}
 	return nil
 }
@@ -282,11 +276,6 @@ func (c *run) platformInstance() error {
 	if err := checkRelease(c.ctx, rules, "Inputs.Release", in.Release, inst.okdp); err != nil {
 		return err
 	}
-	// A project file with bad access refuses every instance of the project.
-	groups, err := projectAccess(rules, in.Context, in.Namespace)
-	if err != nil {
-		return err
-	}
 	// 4. Platform requirements. Null, false, "", 0, [] and {} count as not
 	// set.
 	for _, k := range c.svc.Require {
@@ -294,7 +283,7 @@ func (c *run) platformInstance() error {
 			return fmt.Errorf("global.okdp.%s is required. %s", k, platformValue)
 		}
 	}
-	c.inst, c.groups = inst, groups
+	c.inst = inst
 	return nil
 }
 
@@ -347,7 +336,7 @@ func (c *run) provides() error {
 // in clear, and no two objects share a kind, namespace and name.
 func (c *run) objects() error {
 	in, inst, rules := c.in, c.inst, c.in.rules()
-	store, err := secretStore(c.ctx, rules, inst.okdp)
+	store, err := inst.account(c.ctx)
 	if err != nil {
 		return err
 	}
@@ -362,9 +351,9 @@ func (c *run) objects() error {
 		Version:       c.svc.Version,
 		Chart:         c.def.Chart,
 		Warnings:      slices.Clone(c.def.Warnings),
-		Privileged:    privileged(inst.okdp, in.Namespace),
-		SecretStore:   store,
-		Groups:        c.groups,
+		Privileged:    Privileged(inst.okdp, in.Namespace),
+		SecretStore:   secretStore(store),
+		Groups:        inst.groups,
 		Settings:      inst.okdp,
 		Claims:        in.Claims,
 	}
@@ -414,16 +403,6 @@ func (c *run) finalValues() error {
 	out.Computed = value.AsMap(value.Copy(output))
 	var warnings []string
 	var err error
-	// The rule set's finalValues hook runs once on the final values: where
-	// Finalize calls it, else after Finalize or Helm's merge.
-	checked := false
-	check := func(ctx context.Context, values map[string]map[string]any) error {
-		checked = true
-		if out.Privileged {
-			return nil
-		}
-		return CheckFinalValues(ctx, in.rules(), c.svc.Name, in.Namespace, c.inst.okdp, values)
-	}
 	if in.Finalize != nil {
 		out.Values, out.Charts, warnings, err = in.Finalize(c.ctx, FinalInput{
 			Files:             def.Files,
@@ -437,7 +416,6 @@ func (c *run) finalValues() error {
 			Namespace:         in.Namespace,
 			Privileged:        out.Privileged,
 			AllowPlainSecrets: in.AllowPlainSecrets,
-			CheckFinalValues:  check,
 		})
 	} else {
 		var f merge.Final
@@ -447,8 +425,9 @@ func (c *run) finalValues() error {
 	if err != nil {
 		return err
 	}
-	if !checked {
-		if err := check(c.ctx, out.Values); err != nil {
+	// The rule set's finalValues hook, on the final values.
+	if !out.Privileged {
+		if err := CheckFinalValues(c.ctx, in.rules(), c.svc.Name, in.Namespace, c.inst.okdp, out.Values); err != nil {
 			return err
 		}
 	}

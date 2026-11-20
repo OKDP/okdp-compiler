@@ -13,16 +13,18 @@ import (
 	"sort"
 
 	"github.com/okdp/okdp-compiler/chart"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
 // instance is what a compile knows of its instance. The first stages
 // build it once (newInstance) and the others read it.
 type instance struct {
-	rules              *RuleSet // Inputs.Rules
-	release, namespace string   // Inputs.Release, Inputs.Namespace
-	name               string   // Inputs.Name, or the release when it is empty
-	svc                *Service // the package: Chart.yaml's name and version
+	rules              *RuleSet        // Inputs.Rules
+	release, namespace string          // Inputs.Release, Inputs.Namespace
+	name               string          // Inputs.Name, or the release when it is empty
+	svc                *Service        // the package: Chart.yaml's name and version
+	groups             map[string]Role // the project's groups (access of its project file)
 	// values are the merged parameters as the user wrote them, with global,
 	// connections and the upstream values.
 	values M
@@ -35,6 +37,13 @@ type instance struct {
 	// namespace (pullSecret): those of its claims of another namespace, and
 	// those of its connections in the platform's secret store.
 	transfers []transfer
+	// store is the rule set's account of the platform's secret store
+	// (storeOf), evaluated once by the first stage that asks (account).
+	store struct {
+		read bool
+		v    M
+		err  error
+	}
 }
 
 // newInstance runs stages 1 to 3 and returns the instance of a compile of
@@ -54,6 +63,11 @@ type instance struct {
 // parameters), global as written, platform (what the compiler derives from
 // global.okdp), service, labels, selectorLabels and claims.
 func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*instance, error) {
+	// A project file with bad access refuses every instance of the project.
+	groups, err := projectAccess(in.rules(), in.Context, in.Namespace)
+	if err != nil {
+		return nil, err
+	}
 	schema, values, settings, err := in.memo.paramsOf().get(ctx, files, in, svc)
 	if err != nil {
 		return nil, err
@@ -64,6 +78,7 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 		namespace: in.Namespace,
 		name:      cmp.Or(in.Name, in.Release),
 		svc:       svc,
+		groups:    groups,
 		values:    values,
 		okdp:      settings,
 	}
@@ -87,7 +102,7 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 		namespace: in.Namespace,
 		draft:     schema.Doc["$schema"],
 	}
-	if r.walk(schema.Doc, params); r.errs != nil {
+	if refs(schema.Doc, params, "", "", r.reference); r.errs != nil {
 		err := errors.Join(r.errs...)
 		if r.missing != nil {
 			err = &missingOutputs{outputs: r.missing, err: err}
@@ -103,7 +118,6 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 	inst.deps, inst.transfers = r.deps, r.transfers
 	// platform, as the mapping sees it, derives from the platform's settings.
 	release := M{"name": in.Release, "namespace": in.Namespace}
-	groups, _ := projectAccess(in.rules(), in.Context, in.Namespace) // a project file refused is Compile's to report: no group
 	roles := M{}
 	for g, role := range groups {
 		roles[g] = string(role)
@@ -173,7 +187,7 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 // would read as no proxy. A platform that requires a rule set the
 // compile was not given is refused (requiredRuleSets).
 func platformSettings(rules *RuleSet, platform M) (M, error) {
-	settings, err := schemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
+	settings, err := ruleset.SchemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}

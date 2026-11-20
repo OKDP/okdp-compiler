@@ -68,7 +68,7 @@ func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, se
 // passes on the final values of each chart key of an instance of svc in
 // namespace, a project that is not privileged; keys in order, the first
 // message refusing. settings are the platform's (Result.Settings). A
-// compile runs it (FinalInput.CheckFinalValues); a host calls it on
+// compile runs it on the values its Finalize returns; a host calls it on
 // final values it reads outside a compile.
 func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, values map[string]map[string]any) error {
 	return okdp.CheckFinalValues(ctx, rules, svc, namespace, settings, values)

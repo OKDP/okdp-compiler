@@ -155,13 +155,13 @@ func (e *NamespaceError) Unwrap() error { return e.Err }
 // namespace is refused, and any other error when the platform's settings
 // are invalid.
 func CheckProject(ctx context.Context, in Inputs) error {
-	_, err := platformOf(ctx, in)
+	_, err := PlatformOf(ctx, in)
 	return err
 }
 
-// platformOf returns the platform's settings (global.okdp) of in, once
+// PlatformOf returns the platform's settings (global.okdp) of in, once
 // its namespace passes CheckProject.
-func platformOf(ctx context.Context, in Inputs) (M, error) {
+func PlatformOf(ctx context.Context, in Inputs) (M, error) {
 	if err := checkNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace); err != nil {
 		return nil, &NamespaceError{err}
 	}
@@ -195,10 +195,6 @@ func PlatformAdmins(ctx context.Context, rules *RuleSet, platform map[string]any
 	return admins(okdp), nil
 }
 
-// PlatformOf returns the platform's settings (global.okdp) of in. It
-// fails when the namespace of in may not be a project's.
-func PlatformOf(ctx context.Context, in Inputs) (M, error) { return platformOf(ctx, in) }
-
 // ProjectGroups returns the roles of the groups of the project of in.
 func ProjectGroups(in Inputs) (map[string]Role, error) {
 	return projectAccess(in.rules(), in.Context, in.Namespace)
@@ -207,8 +203,6 @@ func ProjectGroups(in Inputs) (map[string]Role, error) {
 // SecretStoreOf returns the platform's secret store in settings, or nil
 // without one.
 func SecretStoreOf(ctx context.Context, in Inputs, settings M) (*SecretStore, error) {
-	return secretStore(ctx, in.rules(), settings)
+	v, err := storeOf(ctx, in.rules(), settings)
+	return secretStore(v), err
 }
-
-// Privileged reports whether namespace is a project of the platform's own.
-func Privileged(settings M, namespace string) bool { return privileged(settings, namespace) }

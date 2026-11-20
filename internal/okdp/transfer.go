@@ -38,17 +38,23 @@ func storeOf(ctx context.Context, rules *RuleSet, okdp M) (M, error) {
 	return rules.Values(ctx, "secretStore", M{"settings": okdp})
 }
 
-// secretStore returns nil without a store or a provider.
-func secretStore(ctx context.Context, rules *RuleSet, okdp M) (*SecretStore, error) {
-	v, err := storeOf(ctx, rules, okdp)
-	if err != nil {
-		return nil, err
+// account returns storeOf the instance's settings, evaluated once.
+func (inst *instance) account(ctx context.Context) (M, error) {
+	if s := &inst.store; !s.read {
+		s.read = true
+		s.v, s.err = storeOf(ctx, inst.rules, inst.okdp)
 	}
+	return inst.store.v, inst.store.err
+}
+
+// secretStore returns the store of v, an account of storeOf, or nil
+// without a store or a provider.
+func secretStore(v M) *SecretStore {
 	s := value.AsMap(v["store"])
 	if len(s) == 0 {
-		return nil, nil
+		return nil
 	}
-	return &SecretStore{Name: value.Str(s["name"]), ServiceAccount: value.Str(s["serviceAccount"]), Provider: value.AsMap(s["provider"])}, nil
+	return &SecretStore{Name: value.Str(s["name"]), ServiceAccount: value.Str(s["serviceAccount"]), Provider: value.AsMap(s["provider"])}
 }
 
 // platformKeys is the first segment of the platform's keys in the secret
@@ -96,11 +102,7 @@ func pushSecrets(ctx context.Context, inst *instance, contracts *contractCache, 
 		if storeName(inst.okdp) == "" {
 			return nil, fmt.Errorf("claim %q (%s): claimed of namespace %s: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set", c.ID, c.Contract, c.Namespace)
 		}
-		fieldList := make([]any, len(fields))
-		for k, f := range fields {
-			fieldList[k] = f
-		}
-		o, err := storeObject(ctx, inst, "pushSecret", M{"id": c.ID, "key": storeKey(inst.namespace, c.ID), "secret": outputs[i].SecretRef.Name, "fields": fieldList, "labels": inst.rules.Labels(inst.svc.Name, inst.release, "", false), "namespace": inst.namespace})
+		o, err := storeObject(ctx, inst, "pushSecret", M{"id": c.ID, "key": storeKey(inst.namespace, c.ID), "secret": outputs[i].SecretRef.Name, "fields": anyList(fields), "labels": inst.rules.Labels(inst.svc.Name, inst.release, "", false), "namespace": inst.namespace})
 		if err != nil {
 			return nil, err
 		}
@@ -116,17 +118,22 @@ func pushSecrets(ctx context.Context, inst *instance, contracts *contractCache, 
 func pullSecret(ctx context.Context, inst *instance, x transfer) (M, error) {
 	l := inst.rules.Labels(inst.svc.Name, inst.release, "", false)
 	l[inst.rules.Name("credentialsLabel", "contract", x.contract)] = "true"
-	fields := make([]any, len(x.fields))
-	for i, f := range x.fields {
-		fields[i] = f
+	return storeObject(ctx, inst, "pullSecret", M{"secret": x.secret, "key": x.key, "fields": anyList(x.fields), "labels": l, "namespace": inst.namespace})
+}
+
+// anyList returns l as a list of values.
+func anyList(l []string) []any {
+	out := make([]any, len(l))
+	for i, s := range l {
+		out[i] = s
 	}
-	return storeObject(ctx, inst, "pullSecret", M{"secret": x.secret, "key": x.key, "fields": fields, "labels": l, "namespace": inst.namespace})
+	return out
 }
 
 // storeObject returns the object that the document of the rule set
 // builds from arg and the platform's secret store.
 func storeObject(ctx context.Context, inst *instance, document string, arg M) (M, error) {
-	store, err := storeOf(ctx, inst.rules, inst.okdp)
+	store, err := inst.account(ctx)
 	if err != nil {
 		return nil, err
 	}

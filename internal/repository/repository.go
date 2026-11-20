@@ -13,11 +13,13 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"testing/fstest"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/internal/tree"
 )
 
 // Repository is one part of the tree. Name identifies it in messages. Role
@@ -71,7 +73,7 @@ type parts struct {
 	platform  *Repository            // the owner of PlatformFile, nil when none
 	services  map[string]*Repository // the owner of catalog/<service>/, by service
 	projects  map[string]*Repository // the owner of projects/<project>/, by project
-	contracts contractsFS            // every contract file
+	contracts fstest.MapFS           // every contract file; index writes it, then it is only read
 	packages  map[[2]string]*okdp.Definition
 	rules     *okdp.RuleSet // the rule set the packages are read for; nil, the mandatory one
 }
@@ -91,20 +93,17 @@ type parts struct {
 // The error lists every problem at once. A package that fails is reported
 // once. A tree with any problem gives no instance: LoadProjects loads what
 // it can.
-func Load(ctx context.Context, repos []Repository) ([]okdp.Instance, error) {
-	return LoadWith(ctx, repos, nil)
-}
-
-// LoadWith is Load for the compiles of rules: okdp.yaml of a package may
-// hold their sections (okdp.LoadDefinitionWith). Nil rules stand for the
-// mandatory set.
-func LoadWith(ctx context.Context, repos []Repository, rules *okdp.RuleSet) ([]okdp.Instance, error) {
-	l, err := LoadProjectsWith(ctx, repos, rules)
+//
+// The packages are read for rules: okdp.yaml of a package may hold their
+// sections (okdp.LoadDefinitionWith). Nil rules stand for the mandatory
+// set.
+func Load(ctx context.Context, repos []Repository, rules *okdp.RuleSet) ([]okdp.Instance, error) {
+	l, err := LoadProjects(ctx, repos, rules)
 	if err != nil {
 		return nil, err
 	}
-	if len(l.Refused) > 0 {
-		return nil, newError(l.errs)
+	if err := newError(refusedErrs(l.Refused)); err != nil {
+		return nil, err
 	}
 	return l.Instances, nil
 }
@@ -113,25 +112,12 @@ func LoadWith(ctx context.Context, repos []Repository, rules *okdp.RuleSet) ([]o
 type Loaded struct {
 	Instances []okdp.Instance // the instances of the projects that load
 	Refused   []Refused       // the projects that do not load, in name order
-
-	errs []error // every problem, in the order Load lists them
 }
 
-// Refused is a project that does not load. One problem of its own refuses
-// the project as a whole: none of its instances load. It does not refuse
-// the tree.
-type Refused struct {
-	Project  string   // its directory name
-	Problems []string // why, as an *Error lists them
-	Errs     []error  // the error behind each problem, in the same order
-	// Inputs is the project's context, without any instance: its Namespace,
-	// the layers of the platform and of the project, and the contracts.
-	Inputs okdp.Inputs
-	// Own reports whether Inputs holds the project's own layer. It is false
-	// when ProjectFile cannot be read: Inputs then holds the platform's
-	// layers alone.
-	Own bool
-}
+// Refused is a project that does not load (tree.Refused). One problem of
+// its own refuses the project as a whole: none of its instances load. It
+// does not refuse the tree.
+type Refused = tree.Refused
 
 // packageError marks a package that fails to load. This is a problem of the
 // catalog, not of the instance that names the package.
@@ -140,45 +126,35 @@ type packageError struct{ err error }
 func (e *packageError) Error() string { return e.err.Error() }
 func (e *packageError) Unwrap() error { return e.err }
 
-// LoadProjects is Load, project by project. A problem of the platform (the
-// repositories and their roles, PlatformFile, CatalogsFile, a package or
-// its contracts) is an error: an *Error with every problem, those of the
-// projects too. A problem of a project's own refuses that project alone:
-// Loaded.Refused lists it, and the instances of the other projects load.
-func LoadProjects(ctx context.Context, repos []Repository) (*Loaded, error) {
-	return LoadProjectsWith(ctx, repos, nil)
-}
-
-// LoadProjectsWith is LoadProjects for the compiles of rules, as LoadWith
-// is Load.
-func LoadProjectsWith(ctx context.Context, repos []Repository, rules *okdp.RuleSet) (*Loaded, error) {
+// LoadProjects is Load, project by project, the packages read for rules
+// as Load reads them. A problem of the platform (the repositories and
+// their roles, PlatformFile, CatalogsFile, a package or its contracts) is
+// an error: an *Error with every problem, the platform's first, then
+// those of the projects. A problem of a project's own refuses that
+// project alone: Loaded.Refused lists it, and the instances of the other
+// projects load.
+func LoadProjects(ctx context.Context, repos []Repository, rules *okdp.RuleSet) (*Loaded, error) {
 	t, err := index(repos)
 	if err != nil {
 		return nil, newError([]error{err})
 	}
 	t.rules = rules
-	var errs []error // every problem, in Load's order
-	var platformErrs []error
+	var platformErrs []error // the problems of the platform's parts and of the packages
 	for _, r := range repos {
 		if r.Role == RoleTree {
-			p := t.checkCatalogs(r)
-			errs = append(errs, p...)
-			platformErrs = append(platformErrs, p...)
+			platformErrs = append(platformErrs, t.checkCatalogs(r)...)
 		}
 	}
 	var platform []okdp.ContextLayer
 	if t.platform != nil {
 		platform, err = readLayer(*t.platform, PlatformFile, 0)
-		errs = append(errs, err)
 		platformErrs = append(platformErrs, err)
 		// Named claims belong to a project and its namespace. The
 		// platform's connections serve every project, so PlatformFile
 		// declares no claims.
 		for _, l := range platform {
 			if _, set := l.Values["claims"]; set {
-				err := fmt.Errorf("%s: claims: a project's (%s)", where(*t.platform, PlatformFile), ProjectFile)
-				errs = append(errs, err)
-				platformErrs = append(platformErrs, err)
+				platformErrs = append(platformErrs, fmt.Errorf("%s: claims: a project's (%s)", where(*t.platform, PlatformFile), ProjectFile))
 			}
 		}
 	}
@@ -205,9 +181,7 @@ func LoadProjectsWith(ctx context.Context, repos []Repository, rules *okdp.RuleS
 		for _, name := range names {
 			inst, err := t.instance(repo, project, name, slices.Clip(layers))
 			if pe, ok := errors.AsType[*packageError](err); ok {
-				// This is the catalog's problem, not the project's. It is
-				// listed at the project's place all the same.
-				own = append(own, pe)
+				// This is the catalog's problem, not the project's.
 				platformErrs = append(platformErrs, pe)
 				continue
 			}
@@ -217,11 +191,6 @@ func LoadProjectsWith(ctx context.Context, repos []Repository, rules *okdp.RuleS
 			}
 			instances = append(instances, inst)
 		}
-		errs = append(errs, own...)
-		own = slices.DeleteFunc(own, func(err error) bool {
-			_, catalog := errors.AsType[*packageError](err)
-			return catalog
-		})
 		if r := refusal(project, own); r != nil {
 			r.Inputs = okdp.Inputs{Contracts: t.contracts, Context: slices.Clip(slices.Clone(platform)), Namespace: project}
 			if readable {
@@ -232,11 +201,19 @@ func LoadProjectsWith(ctx context.Context, repos []Repository, rules *okdp.RuleS
 		}
 		l.Instances = append(l.Instances, instances...)
 	}
-	l.errs = errs
-	if err := newError(platformErrs); err != nil {
-		return nil, newError(errs)
+	if newError(platformErrs) != nil {
+		return nil, newError(slices.Concat(platformErrs, refusedErrs(l.Refused)))
 	}
 	return l, nil
+}
+
+// refusedErrs returns the errors of the refused projects, in their order.
+func refusedErrs(refused []Refused) []error {
+	var errs []error
+	for _, r := range refused {
+		errs = append(errs, r.Errs...)
+	}
+	return errs
 }
 
 // refusal builds the Refused of project, nil when errs holds no problem.
@@ -245,7 +222,7 @@ func refusal(project string, errs []error) *Refused {
 	if !ok {
 		return nil
 	}
-	return &Refused{Project: project, Problems: e.Problems, Errs: e.errs}
+	return &Refused{Namespace: project, Problems: e.Problems, Errs: e.errs}
 }
 
 // instance loads the instance name of project from repo. layers are the
@@ -431,21 +408,16 @@ func (t *parts) definition(service, version string) (*okdp.Definition, error) {
 }
 
 // index records the owner of each part of the tree. It reads the
-// repositories in name order and reports every conflict at once. In a
+// repositories in name order and reports every conflict at once, those of
+// the parts in two repositories last, sorted by part. In a
 // catalog, PlatformFile or projects/ is refused as soon as it exists (a
 // file, an empty directory); the rest of the catalog is still read.
 func index(repos []Repository) (*parts, error) {
 	repos = slices.SortedFunc(slices.Values(repos), func(a, b Repository) int { return strings.Compare(a.Name, b.Name) })
-	t := &parts{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: contractsFS{}, packages: map[[2]string]*okdp.Definition{}}
+	t := &parts{services: map[string]*Repository{}, projects: map[string]*Repository{}, contracts: fstest.MapFS{}, packages: map[[2]string]*okdp.Definition{}}
 	var errs []error
 	owners := map[string][]string{} // a part, as messages name it: the repositories that have it
-	var parts []string
-	own := func(part string, repo *Repository) {
-		if owners[part] == nil {
-			parts = append(parts, part)
-		}
-		owners[part] = append(owners[part], repo.Name)
-	}
+	own := func(part string, repo *Repository) { owners[part] = append(owners[part], repo.Name) }
 	from := map[string]string{} // a contract file: the first repository that has it
 	for i := range repos {
 		repo := &repos[i]
@@ -507,14 +479,14 @@ func index(repos []Repository) (*parts, error) {
 			case err != nil:
 				errs = append(errs, fmt.Errorf("%s: %w", where(*repo, file), unwrapPath(err)))
 			case !seen:
-				t.contracts[e.Name()] = b
+				t.contracts[e.Name()] = &fstest.MapFile{Data: b}
 				from[e.Name()] = repo.Name
-			case !bytes.Equal(prev, b):
+			case !bytes.Equal(prev.Data, b):
 				errs = append(errs, fmt.Errorf("contract %s differs between the repositories %s and %s", name, from[e.Name()], repo.Name))
 			}
 		}
 	}
-	for _, part := range parts {
+	for _, part := range slices.Sorted(maps.Keys(owners)) {
 		if names := owners[part]; len(names) > 1 {
 			errs = append(errs, fmt.Errorf("%s is in the repositories %s and %s", part, strings.Join(names[:len(names)-1], ", "), names[len(names)-1]))
 		}

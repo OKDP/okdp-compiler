@@ -3,10 +3,8 @@
 package okdp
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"reflect"
 	"slices"
@@ -110,41 +108,36 @@ func decodePackage(b []byte) (Package, error) {
 
 // decodePackageWith decodes the package keys of okdp.yaml strictly: an
 // unknown key fails. Otherwise a misspelt require would leave the
-// platform values unchecked. A top-level key of sections, the rule set's
-// sections of a mapping, is known: the mapping reads it. The charts'
+// platform values unchecked. The mapping's keys are known: vars, errors,
+// the compiler's sections and ruleSections, the rule set's. The charts'
 // values (output) and the keys of Chart.yaml fail with their own message.
-func decodePackageWith(b []byte, sections []string) (Package, error) {
+func decodePackageWith(b []byte, ruleSections []string) (Package, error) {
 	var p Package
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return p, fmt.Errorf("okdp.yaml: %w", err)
 	}
-	// The decoder's error for each section key, which is not one.
-	var known []string
-	if len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
-		top := doc.Content[0].Content
-		for i := 0; i < len(top); i += 2 {
-			switch k := top[i].Value; k {
-			case "output":
+	if len(doc.Content) == 0 {
+		return p, nil
+	}
+	// The decoder checks no key: Package declares only the package's.
+	var unknown []string
+	if top := doc.Content[0]; top.Kind == yaml.MappingNode {
+		for i := 0; i < len(top.Content); i += 2 {
+			switch k := top.Content[i]; {
+			case k.Value == "output":
 				return p, errors.New("okdp.yaml: output: the charts' values are in values.cel.yaml (or values.yaml)")
-			case "name", "version", "charts":
-				return p, fmt.Errorf("okdp.yaml: %s: the name, version and charts are Chart.yaml's", k)
-			}
-			if slices.Contains(sections, top[i].Value) {
-				known = append(known, fmt.Sprintf("line %d: field %s not found in type %s", top[i].Line, top[i].Value, reflect.TypeFor[Package]()))
+			case k.Value == "name", k.Value == "version", k.Value == "charts":
+				return p, fmt.Errorf("okdp.yaml: %s: the name, version and charts are Chart.yaml's", k.Value)
+			case !slices.Contains(packageKeys, k.Value) && k.Value != "vars" && k.Value != "errors" && !slices.Contains(sections, k.Value) && !slices.Contains(ruleSections, k.Value):
+				unknown = append(unknown, fmt.Sprintf("line %d: field %s not found in type %s", k.Line, k.Value, reflect.TypeFor[Package]()))
 			}
 		}
 	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	err := dec.Decode(&p)
-	if te, ok := errors.AsType[*yaml.TypeError](err); ok {
-		te.Errors = slices.DeleteFunc(te.Errors, func(e string) bool { return slices.Contains(known, e) })
-		if len(te.Errors) == 0 {
-			err = nil
-		}
+	if unknown != nil {
+		return p, fmt.Errorf("okdp.yaml: %w", &yaml.TypeError{Errors: unknown})
 	}
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err := doc.Decode(&p); err != nil {
 		return p, fmt.Errorf("okdp.yaml: %w", err)
 	}
 	return p, nil

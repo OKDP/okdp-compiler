@@ -21,7 +21,7 @@ import (
 // args in the compile's session. It checks args against
 // mapping.schema.json.
 func callFragment(ctx context.Context, f ruleset.Fragment, session *cel2yaml.Session, inst *instance, args any) (any, error) {
-	checked, err := schemaValues(inst.rules.MappingSchema(), f.Name+": the arguments don't meet the specifications of mapping.schema.json", M{f.Name: args})
+	checked, err := ruleset.SchemaValues(inst.rules.MappingSchema(), f.Name+": the arguments don't meet the specifications of mapping.schema.json", M{f.Name: args})
 	if err != nil {
 		return nil, err
 	}
@@ -47,14 +47,12 @@ func callFragment(ctx context.Context, f ruleset.Fragment, session *cel2yaml.Ses
 func fragmentFunctions(ctx context.Context, inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	var opts []cel.EnvOption
 	for _, f := range inst.rules.Fragments() {
-		id := f.Name + "_map"
-		opts = append(opts, cel2yaml.Costed(cel.Function(f.Name, cel.Overload(id, []*cel.Type{cel.DynType}, cel.DynType,
-			cel2yaml.Unary(func(v any) (any, error) {
-				if _, ok := v.(M); !ok {
-					return nil, fmt.Errorf("%s: the arguments are a map, got %s", f.Name, value.ShortAt("args", v))
-				}
-				return callFragment(ctx, f, *session, inst, v)
-			}))), id))
+		opts = append(opts, unary(f.Name, f.Name+"_map", func(v any) (any, error) {
+			if _, ok := v.(M); !ok {
+				return nil, fmt.Errorf("%s: the arguments are a map, got %s", f.Name, value.ShortAt("args", v))
+			}
+			return callFragment(ctx, f, *session, inst, v)
+		}))
 	}
 	return opts
 }

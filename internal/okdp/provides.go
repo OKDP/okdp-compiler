@@ -75,10 +75,7 @@ func (c *run) provided() error {
 		if err := contract.fields(o.Values, where); err != nil {
 			return err
 		}
-		if err := contract.complete(o.Values, where); err != nil {
-			return err
-		}
-		if err := contract.check(o.Values, where); err != nil {
+		if err := contract.validate(o.Values, where); err != nil {
 			return err
 		}
 		secret := value.AsMap(p["secret"])
@@ -104,22 +101,16 @@ func (c *run) provided() error {
 	return twice(c.outputs)
 }
 
-// twice reports the outputs that share a contract and a name.
+// twice reports the outputs that share a contract and a name, each at its
+// second output.
 func twice(outputs []Output) error {
 	type key struct{ contract, name string }
 	count := map[key]int{}
-	var names []key // in the order of their first output
+	var errs []error
 	for _, o := range outputs {
 		k := key{o.Contract, o.Name}
-		if count[k] == 0 {
-			names = append(names, k)
-		}
-		count[k]++
-	}
-	var errs []error
-	for _, k := range names {
-		if count[k] > 1 {
-			errs = append(errs, fmt.Errorf("two %s outputs are named %q", k.contract, k.name))
+		if count[k]++; count[k] == 2 {
+			errs = append(errs, fmt.Errorf("two %s outputs are named %q", o.Contract, o.Name))
 		}
 	}
 	return errors.Join(errs...)

@@ -509,11 +509,10 @@ the compile of the instance, and an error of either refuses it:
   final values against them, may render each chart key with
   `FinalInput`'s `Release`, `Namespace` and `Specs[key].Source`, and
   checks the manifests with `compiler.CheckObjects`, which runs check
-  `object` and the rule set's `objects` hook. It runs its `finalValues`
-  hook with `FinalInput.CheckFinalValues`, on the values it returns, at
-  the point of its own checks it chooses; when it does not, the compile
-  runs it on what Finalize returns. `compiler.CheckFinalValues` runs the
-  hook on final values a host reads outside a compile.
+  `object` and the rule set's `objects` hook. The compile runs the
+  `finalValues` hook on the values Finalize returns, after the host's
+  own checks. `compiler.CheckFinalValues` runs the hook on final values
+  a host reads outside a compile.
 - `Inputs.CheckGlobals` (`BuildOptions.CheckGlobals`) checks the keys of
   `global` a project sets, before the mapping runs; nil, none.
 
@@ -661,8 +660,8 @@ build renders
   the platform's parts (a
   repository, `platform.yaml`, `catalogs.yaml`, a package, a contract) is
   a `*compiler.LoadError`, `Problems` one per problem (a report of several
-  lines one of them), the projects' among them; `LoadRepository` returns
-  one for any problem, a project's too. A project that does not load is
+  lines one of them), the platform's first, then the projects';
+  `LoadRepository` returns one for any problem, a project's too. A project that does not load is
   refused as a whole, not the tree: no instance of it, a
   `compiler.RefusedProject` in `Tree.Refused` (`Namespace`, `Problems`,
   `Errs`), kept by `Partial` like a project of a refused instance;

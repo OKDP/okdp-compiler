@@ -105,7 +105,7 @@ func TestProvidesErrors(t *testing.T) {
 		"empty secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {}}}\n", `demo: output "other": secret needs stringData or generate`},
 		"plain secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n", `demo: output "other": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: https://demo-app.example.org}}\n", `two http outputs are named "demo-app"`},
-		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"b\"\ntwo api outputs are named \"a\""},
+		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"a\"\ntwo api outputs are named \"b\""},
 		"a naming convention": {
 			"  - {contract: conv, values: {url: u}}\n",
 			`provides "demo-app" (conv): the conv contract cannot be read: conv.schema.json: x-okdp-internal: naming conventions are gone, a provider publishes its connections (provides)`,

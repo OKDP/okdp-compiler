@@ -861,19 +861,23 @@ func TestClaimID(t *testing.T) {
 		{"demo", "app", "db", "", "demo.app.db"},
 		{"demo", "", "", "app-db", "demo.app-db"},
 	} {
-		if got := claimID(tc.namespace, tc.release, tc.field, tc.name); got != tc.want {
+		got := claimID(tc.namespace, tc.release, tc.field)
+		if tc.name != "" {
+			got = claimID(tc.namespace, tc.name)
+		}
+		if got != tc.want {
 			t.Errorf("got %q, want %q", got, tc.want)
 		}
 	}
-	long := claimID("demo", strings.Repeat("a", 53), "database", "")
-	if len(long) != 63 || !strings.HasPrefix(long, "demo."+strings.Repeat("a", 49)+"-") || !chart.IsClaimID(long) || long == claimID("demo", strings.Repeat("a", 53), "databases", "") {
+	long := claimID("demo", strings.Repeat("a", 53), "database")
+	if len(long) != 63 || !strings.HasPrefix(long, "demo."+strings.Repeat("a", 49)+"-") || !chart.IsClaimID(long) || long == claimID("demo", strings.Repeat("a", 53), "databases") {
 		t.Errorf("long: %q (%d)", long, len(long))
 	}
 	// Cut, the ID keeps its namespace whole, whatever its length up to
 	// 54: the claimers' (checkClaims).
 	for n := 1; n <= 54; n++ {
 		ns := strings.Repeat("n", n)
-		for _, id := range []string{claimID(ns, strings.Repeat("a", 60), "db", ""), claimID(ns, "", "", strings.Repeat("b", 63))} {
+		for _, id := range []string{claimID(ns, strings.Repeat("a", 60), "db"), claimID(ns, strings.Repeat("b", 63))} {
 			if len(id) > 63 || !strings.HasPrefix(id, ns+".") || !chart.IsClaimID(id) {
 				t.Errorf("a namespace of %d: %q (%d)", n, id, len(id))
 			}

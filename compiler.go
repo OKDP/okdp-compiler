@@ -360,14 +360,14 @@ func CompileTree(ctx context.Context, instances []Instance) *Tree {
 // the whole load. Build is more lenient: it refuses only the project
 // that does not load.
 func LoadRepository(ctx context.Context, repos []Repository) ([]Instance, error) {
-	return repository.Load(ctx, repos)
+	return repository.Load(ctx, repos, nil)
 }
 
 // LoadRepositoryWith is LoadRepository for the compiles of rules: the
 // packages are read as LoadDefinitionWith reads them. Build reads them for
 // BuildOptions.Rules.
 func LoadRepositoryWith(ctx context.Context, repos []Repository, rules *RuleSet) ([]Instance, error) {
-	return repository.LoadWith(ctx, repos, rules)
+	return repository.Load(ctx, repos, rules)
 }
 
 // AddedProblems returns the problems of after that before does not have,
@@ -406,7 +406,7 @@ type BuildOptions struct {
 // LoadRules reads the rule set of fsys, rules.yaml at its root, and adds
 // it to the compiler's mandatory one: a compile applies both. The file
 // never turns a rule off: it is an error for it to give a rule the
-// mandatory set gives, or to name a table or a check that is unknown.
+// mandatory set gives, or to name a check that is unknown.
 func LoadRules(fsys fs.FS) (*RuleSet, error) { return okdp.LoadRules(fsys) }
 
 // Mandatory returns the compiler's mandatory rule set, read once: what a
@@ -426,7 +426,7 @@ func Mandatory() *RuleSet { return okdp.Mandatory() }
 // other projects compile. A refused instance is not an error either: it
 // is the tree's answer (TreeInstance.Err).
 func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, error) {
-	loaded, err := repository.LoadProjectsWith(ctx, repos, opts.Rules)
+	loaded, err := repository.LoadProjects(ctx, repos, opts.Rules)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +445,7 @@ func Build(ctx context.Context, repos []Repository, opts BuildOptions) (*Tree, e
 	t := CompileTree(ctx, instances)
 	for _, r := range loaded.Refused {
 		r.Inputs.Rules = opts.Rules // CheckProject reads them for a project that does not load
-		t.Refused = append(t.Refused, RefusedProject{Namespace: r.Project, Problems: r.Problems, Errs: r.Errs, Inputs: r.Inputs, Own: r.Own})
+		t.Refused = append(t.Refused, r)
 	}
 	return t, nil
 }

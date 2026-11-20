@@ -14,7 +14,6 @@ import (
 	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
-	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 var update = flag.Bool("update", false, "rewrite the examples' outputs from the current compiler")
@@ -113,7 +112,7 @@ func exampleRepository(name string) fs.FS {
 func exampleRules(name string) *compiler.RuleSet {
 	dir := filepath.Join("examples", name, "rules")
 	if _, err := os.Stat(dir); err != nil {
-		return testrules.Standard()
+		return compiler.Mandatory()
 	}
 	rules, err := compiler.LoadRules(os.DirFS(dir))
 	if err != nil {

@@ -51,13 +51,13 @@ func FuzzLoad(f *testing.F) {
 			"projects/other/instances/b/instance.yaml":             {Data: []byte("service: app\nversion: 1.0.0\n")},
 		}
 		repos := []Repository{{Name: "db", FS: tree, Role: RoleTree}}
-		got, err := Load(context.Background(), repos)
-		again, err2 := Load(context.Background(), repos)
+		got, err := Load(context.Background(), repos, nil)
+		again, err2 := Load(context.Background(), repos, nil)
 		if errorString(err) != errorString(err2) || len(got) != len(again) {
 			t.Fatalf("Load: not the same twice: %v / %v", err, err2)
 		}
-		l, lerr := LoadProjects(context.Background(), repos)
-		if lerr2 := func() error { _, e := LoadProjects(context.Background(), repos); return e }(); errorString(lerr) != errorString(lerr2) {
+		l, lerr := LoadProjects(context.Background(), repos, nil)
+		if lerr2 := func() error { _, e := LoadProjects(context.Background(), repos, nil); return e }(); errorString(lerr) != errorString(lerr2) {
 			t.Fatalf("LoadProjects: not the same twice: %v / %v", lerr, lerr2)
 		}
 		if err != nil {
@@ -80,11 +80,11 @@ func FuzzLoad(f *testing.F) {
 			return
 		}
 		for _, r := range l.Refused {
-			if len(r.Problems) == 0 || len(r.Problems) != len(r.Errs) || r.Inputs.Namespace != r.Project {
-				t.Fatalf("project %s refused: %q, %v", r.Project, r.Problems, r.Errs)
+			if len(r.Problems) == 0 || len(r.Problems) != len(r.Errs) || r.Inputs.Namespace != r.Namespace {
+				t.Fatalf("project %s refused: %q, %v", r.Namespace, r.Problems, r.Errs)
 			}
-			if slices.ContainsFunc(l.Instances, func(i okdp.Instance) bool { return i.Inputs.Namespace == r.Project }) {
-				t.Fatalf("project %s refused and loaded", r.Project)
+			if slices.ContainsFunc(l.Instances, func(i okdp.Instance) bool { return i.Inputs.Namespace == r.Namespace }) {
+				t.Fatalf("project %s refused and loaded", r.Namespace)
 			}
 		}
 	})

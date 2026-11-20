@@ -13,7 +13,6 @@ import (
 
 	"github.com/okdp/okdp-compiler/internal/compile"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
-	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -30,7 +29,7 @@ func mapCtx() M {
 // testInstance: the instance whose mapping sees scope, as a test writes
 // it: its release and service read back from it.
 func testInstance(scope M) *instance {
-	return &instance{rules: testrules.Standard(),
+	return &instance{rules: Mandatory(),
 		release:   value.Str(value.Dig(scope, "release.name")),
 		namespace: value.Str(value.Dig(scope, "release.namespace")),
 		svc:       &Service{Name: value.Str(value.Dig(scope, "service.name")), Version: value.Str(value.Dig(scope, "service.version"))},
@@ -69,7 +68,7 @@ func eval(s *cel2yaml.Session, expr string, scope M) (any, error) {
 // TestMappingSections: vars in order, output, instance and provides, read
 // from okdp.yaml, its package keys skipped, and values.cel.yaml.
 func TestMappingSections(t *testing.T) {
-	res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping(`
+	res, _, err := runMapping(context.Background(), Mandatory(), newSession(mapCtx()), mapCtx(), mapping(`
 roles: [web]
 require: [a.b]
 upstream: {x: {protect: [a]}}
@@ -100,7 +99,7 @@ provides:
 // TestMappingFunctions: OKDP's host functions beside the language's, next
 // to a vars binding named fullname (the function is okdpFullname).
 func TestMappingFunctions(t *testing.T) {
-	res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
+	res, _, err := runMapping(context.Background(), Mandatory(), newSession(mapCtx()), mapCtx(), mapping("vars:\n  fullname: ${{ release.name }}-mine\n", `
 x:
   name: ${{ fullname }}
   okdp: ${{ okdpFullname('app') }}
@@ -119,7 +118,7 @@ x:
 // and $vars bindings and $for variables shadow them.
 func TestMappingService(t *testing.T) {
 	ctx := mapCtx()
-	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": testrules.Standard().Labels("demo", "demo-x", "", false), "selectorLabels": testrules.Standard().Labels("demo", "demo-x", "", true)})
+	maps.Copy(ctx, M{"service": M{"name": "demo", "version": "1.0.0"}, "labels": Mandatory().Labels("demo", "demo-x", "", false), "selectorLabels": Mandatory().Labels("demo", "demo-x", "", true)})
 	src := `
 x:
   version: ${{ service.version }}
@@ -127,7 +126,7 @@ x:
   selector: ${{ okdpSelectorLabels('db') }}
   loop: [{$for: "service in ['a']", $vars: {selectorLabels: '${{ service }}'}, $each: '${{ selectorLabels }}'}]
 `
-	res, _, err := runMapping(context.Background(), testrules.Standard(), newSession(ctx), ctx, mapping("", src)...)
+	res, _, err := runMapping(context.Background(), Mandatory(), newSession(ctx), ctx, mapping("", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +149,7 @@ x:
 		t.Errorf("$for and $vars shadow service and selectorLabels: %#v", x["loop"])
 	}
 	// A mapping's own labels binding wins over the context's.
-	res, _, err = runMapping(context.Background(), testrules.Standard(), newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
+	res, _, err = runMapping(context.Background(), Mandatory(), newSession(ctx), ctx, mapping("vars:\n  labels: {mine: 'yes'}\n", src)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +162,7 @@ x:
 // kept, which Compile leaves out, with the keys output writes; a null key of
 // an item of a rule set's section is refused by its type.
 func TestMappingNulls(t *testing.T) {
-	res, written, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "{x: '${{ null }}', web: ~, z: {}}\n")...)
+	res, written, err := runMapping(context.Background(), Mandatory(), newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "{x: '${{ null }}', web: ~, z: {}}\n")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +211,7 @@ func TestMappingErrors(t *testing.T) {
 	}
 	// The mandatory set alone has no section of its own.
 	want := "okdp.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects)"
-	if _, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("outptu: {x: {}}\n", "")...); err == nil || err.Error() != want {
+	if _, _, err := runMapping(context.Background(), Mandatory(), newSession(mapCtx()), mapCtx(), mapping("outptu: {x: {}}\n", "")...); err == nil || err.Error() != want {
 		t.Errorf("the mandatory set: got %v, want %q", err, want)
 	}
 }

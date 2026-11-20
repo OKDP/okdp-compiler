@@ -54,11 +54,8 @@ func (r *RuleSet) loadSchema(fsys fs.FS, schemas M, key string) error {
 	}
 	f, ok := r.schemaFiles[key]
 	if !ok {
-		m, isMap := doc.(map[string]any)
+		m, _ := doc.(map[string]any) // nil for a boolean schema: chart.ParseSchema reads it, and no set adds to it
 		r.schemaFiles[key] = &schemaFile{name: path.Base(file), data: b, doc: m}
-		if !isMap { // a boolean schema: chart.ParseSchema reads it, and no set adds to it
-			r.schemaFiles[key].doc = nil
-		}
 		return nil
 	}
 	add, isMap := doc.(map[string]any)

@@ -12,6 +12,7 @@
 // The instance's upstream values are upstream.<chart> of its values. The
 // mapping sees them as written. They are applied after the mapping, behind
 // two checks: the package's (protect) and the caller's (UpstreamCheck).
+
 package merge
 
 import (

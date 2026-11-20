@@ -13,7 +13,6 @@ import (
 
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/rules"
-	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -71,7 +70,7 @@ func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
 // its connections, one at level 2, the instance's own, its claims, one at
 // level 1, the project's, the rest, an instance layer (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
-	in := Inputs{Rules: testrules.Standard(), Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
+	in := Inputs{Rules: Mandatory(), Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
 	for _, l := range layers {
 		l = maps.Clone(l)
 		if g, ok := l["global"]; ok {
@@ -188,19 +187,19 @@ func TestCompileErrors(t *testing.T) {
 	}{
 		"mapping error":   {inputs(map[string]any{"replicas": 11}), "at most 10 replicas"},
 		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"cluster": M{"domain": ""}}}}), "global.okdp.cluster.domain is required"},
-		"missing release": {Inputs{Rules: testrules.Standard(), Contracts: contracts, Namespace: "demo"}, `Inputs.Release "": a release name`},
-		"no namespace":    {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app"}, `Inputs.Namespace "": a namespace name`},
-		"release":         {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo_app", Namespace: "demo"}, `Inputs.Release "demo_app": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`},
-		"long release":    {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: strings.Repeat("a", 54), Namespace: "demo"}, `Inputs.Release "aaaa`},
-		"namespace":       {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
-		"long namespace":  {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
-		"platform":        {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
-		"kube-system":     {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "kube-system"}, `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`},
-		"kube-node-lease": {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "kube-node-lease"}, `Inputs.Namespace "kube-node-lease": the namespace is reserved: kube-* is Kubernetes' own`},
-		"flux-system":     {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "flux-system"}, `Inputs.Namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`},
-		"argocd":          {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "argocd"}, `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's`},
-		"okdp-releases":   {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "okdp-releases"}, `Inputs.Namespace "okdp-releases": the namespace is reserved: a deployer engine's`},
-		"name":            {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
+		"missing release": {Inputs{Rules: Mandatory(), Contracts: contracts, Namespace: "demo"}, `Inputs.Release "": a release name`},
+		"no namespace":    {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app"}, `Inputs.Namespace "": a namespace name`},
+		"release":         {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo_app", Namespace: "demo"}, `Inputs.Release "demo_app": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`},
+		"long release":    {Inputs{Rules: Mandatory(), Contracts: contracts, Release: strings.Repeat("a", 54), Namespace: "demo"}, `Inputs.Release "aaaa`},
+		"namespace":       {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "Demo"}, `Inputs.Namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
+		"long namespace":  {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
+		"platform":        {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
+		"kube-system":     {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "kube-system"}, `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`},
+		"kube-node-lease": {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "kube-node-lease"}, `Inputs.Namespace "kube-node-lease": the namespace is reserved: kube-* is Kubernetes' own`},
+		"flux-system":     {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "flux-system"}, `Inputs.Namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`},
+		"argocd":          {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "argocd"}, `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's`},
+		"okdp-releases":   {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "okdp-releases"}, `Inputs.Namespace "okdp-releases": the namespace is reserved: a deployer engine's`},
+		"name":            {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Compile(context.Background(), def, tc.in)
@@ -560,7 +559,7 @@ objects:
 	}
 	// The chart of the objects, by default and the platform's; its key the
 	// compiler's.
-	if res.ObjectsSource != testrules.Standard().Charts()["objects"] {
+	if res.ObjectsSource != Mandatory().Charts()["objects"] {
 		t.Errorf("the default chart of the objects: %v", res.ObjectsSource)
 	}
 	own := chart.Ref{Repository: "oci://registry.example.org/okdp", Chart: "own-objects", Version: "2.0.0"}

@@ -149,13 +149,6 @@ charts:
 # The compiler's own templates: the objects of a generated Secret.
 templates:
   generatedSecret: fragments/generated-secret.cel.yaml
-# The documents the compiler calls besides the checks, the first message of
-# each refusing, in a project that is not privileged: objects on each object
-# of an instance, once every object passed check object; finalValues on the
-# final values of each chart key.
-hooks:
-  objects: []
-  finalValues: []
 # Documents the others call: rule(<name>, input) in a document, a function of
 # a set's functions, scope (what a mapping sees as platform); deployerRole,
 # which the targets call, the Role of a project's releases.

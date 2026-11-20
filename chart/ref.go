@@ -94,10 +94,10 @@ func compareNumbers(a, b string) int {
 	return strings.Compare(a, b)
 }
 
-// Check verifies the reference: a repository URL with a path a chart
-// cache can lay out (repoPath), a chart name and a pinned version.
-// http:// is refused because the chart would be fetched in clear. where
-// names the reference in the errors.
+// Check verifies the reference: a repository URL whose path is plain
+// segments (repoPath), a chart name and a pinned version. http:// is
+// refused because the chart would be fetched in clear. where names the
+// reference in the errors.
 func (r Ref) Check(where string) error {
 	switch {
 	case r == Ref{}:
@@ -114,8 +114,8 @@ func (r Ref) Check(where string) error {
 	return nil
 }
 
-// isChartName reports whether name can name a chart and its directory in
-// a chart cache: one path element, without a space at either end.
+// isChartName reports whether name can name a chart: one path element,
+// without a space at either end.
 func isChartName(name string) bool {
 	return name != "" && name == path.Base(name) && name != "." && name != ".." && strings.TrimSpace(name) == name
 }
@@ -126,16 +126,16 @@ func IsFileName(s string) bool {
 	return fs.ValidPath(s) && s != "." && !strings.ContainsAny(s, `/\`)
 }
 
-// ID returns <chart>-<version>, as a chart cache and the errors name it.
+// ID returns <chart>-<version>, the name of the chart at its version.
 func (r Ref) ID() string {
 	return r.Chart + "-" + r.Version
 }
 
 // repoPath returns the URL of the repository without its scheme and
-// trailing / (quay.io/adaltas for oci://quay.io/adaltas), what a chart
-// cache lays out as directories (okdp-gitops' chartcache). It returns ""
-// when the scheme is not https:// or oci://, or when the rest is not a
-// relative path (a segment that is empty, . or .., or holds \, ? or #).
+// trailing / (quay.io/adaltas for oci://quay.io/adaltas): plain path
+// segments. It returns "" when the scheme is not https:// or oci://, or
+// when the rest is not a relative path (a segment that is empty, . or
+// .., or holds \, ? or #).
 func (r Ref) repoPath() string {
 	for _, scheme := range []string{"oci://", "https://"} {
 		if rest, ok := strings.CutPrefix(r.Repository, scheme); ok {

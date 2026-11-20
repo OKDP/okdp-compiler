@@ -58,7 +58,7 @@ func TestLoadCatalogsFile(t *testing.T) {
 	tree := maps.Clone(whole)
 	tree["catalogs.yaml"] = file("repositories: [{name: c, url: u}]\ncategories:\n  - title: Apps\n    services: [{name: app, default: 2.0.0}, {name: gone}, {name: app2, default: 9.0.0}]\n")
 	tree["catalog/app2/1.0.0/Chart.yaml"] = file("apiVersion: v2\nname: app2\nversion: 1.0.0\n")
-	_, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}})
+	_, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}}, nil)
 	want := []string{
 		`db/catalogs.yaml: categories[0].services[1]: service "gone" is in no catalog (catalog/gone/ of no repository)`,
 		`db/catalogs.yaml: categories[0].services[2].default: version "9.0.0" of service "app2"`,
@@ -67,11 +67,11 @@ func TestLoadCatalogsFile(t *testing.T) {
 		t.Errorf("got\n%v\nwant\n%s", err, strings.Join(want, "\n"))
 	}
 	tree["catalogs.yaml"] = file("repositories: [{name: c, url: u}]\ncategories: [{title: Apps, services: [{name: app}]}]\n")
-	if _, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}}); err != nil {
+	if _, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	other := fstest.MapFS{"catalogs.yaml": file("repositories: []\n")}
-	if _, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}, {"other", other, RoleTree}}); err == nil || !strings.Contains(err.Error(), "catalogs.yaml is in the repositories db and other") {
+	if _, err := Load(context.Background(), []Repository{{"db", tree, RoleTree}, {"other", other, RoleTree}}, nil); err == nil || !strings.Contains(err.Error(), "catalogs.yaml is in the repositories db and other") {
 		t.Errorf("two catalogs.yaml: %v", err)
 	}
 }

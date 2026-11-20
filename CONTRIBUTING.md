@@ -35,7 +35,7 @@ same checks on every pull request.
   behaviour, and add a case only for what no other case covers.
 - The rules every compile applies, the checks and their tables among
   them, have one home, `internal/rules/mandatory`: the tests compile with
-  that set (`internal/testrules`). A compile given no rule set, the
+  that set (`Mandatory`). A compile given no rule set, the
   mandatory one alone, is tested too (`TestCompileWithoutRules`).
 - A boundary of the [threat model](docs/04_threat_model.md), what an
   author may not do, has one case that must fail: a unit test here, or a

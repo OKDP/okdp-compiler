@@ -12,22 +12,19 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// Memo holds what the compiles of the instances of one set read once
-// (CompileAllWith): the parameters of each instance, and the contracts
-// that several instances read from the same file system.
-//
-// It is valid for one run of compiles: the instances, their files and
-// layers, and the contracts file system must not change meanwhile. It is safe for concurrent use.
-type Memo struct {
+// setMemo holds what the compiles of the instances of one CompileAll
+// read once: the parameters of each instance, and the contracts that
+// several instances read from the same file system. It is safe for
+// concurrent use.
+type setMemo struct {
 	mu        sync.Mutex
 	params    map[int]*paramsMemo
 	contracts []*contractCache
 }
 
-// NewMemo returns an empty Memo.
-func NewMemo() *Memo { return &Memo{params: map[int]*paramsMemo{}} }
+func newSetMemo() *setMemo { return &setMemo{params: map[int]*paramsMemo{}} }
 
-// instanceMemo is the part of a Memo that one compile of an instance
+// instanceMemo is the part of a setMemo that one compile of an instance
 // reads (Inputs.memo). A nil field shares nothing.
 type instanceMemo struct {
 	params    *paramsMemo
@@ -35,14 +32,12 @@ type instanceMemo struct {
 }
 
 // forInstance returns the memo for the compile of instance i of the set.
-// It reuses the parameters stored for i only when they were read from
-// the same def.
-func (m *Memo) forInstance(i int, def *Definition, in Inputs) *instanceMemo {
+func (m *setMemo) forInstance(i int, in Inputs) *instanceMemo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p := m.params[i]
-	if p == nil || p.def != def {
-		p = &paramsMemo{def: def}
+	if p == nil {
+		p = &paramsMemo{}
 		m.params[i] = p
 	}
 	out := &instanceMemo{params: p}
@@ -76,10 +71,9 @@ func sameFS(a, b fs.FS) bool {
 	return va.Comparable() && vb.Comparable() && va.Equal(vb)
 }
 
-// paramsMemo holds the parameters of one instance, read from def. The
-// first compile that asks computes them.
+// paramsMemo holds the parameters of one instance. The first compile
+// that asks computes them.
 type paramsMemo struct {
-	def              *Definition
 	once             sync.Once
 	schema           *chart.Schema
 	values, settings M
@@ -133,7 +127,7 @@ func (s *contractCache) get(name string) (*contract, error) {
 	return r.c, r.err
 }
 
-// contractCacheOf returns the Memo's contract cache when the compile has
+// contractCacheOf returns the memo's contract cache when the compile has
 // one, else a new one.
 func contractCacheOf(in Inputs) *contractCache {
 	if in.memo != nil {

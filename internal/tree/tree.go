@@ -30,7 +30,7 @@ type Tree struct {
 type Refused struct {
 	Namespace string      // the project
 	Problems  []string    // why, each naming its repository and path
-	Errs      []error     // the errors behind Problems
+	Errs      []error     // the error behind each problem, in the same order
 	Inputs    okdp.Inputs // the project's context (Namespace, Context, Contracts)
 	// Own reports whether Inputs holds the project's own layer. It is false
 	// when its project.yaml cannot be read: Inputs then holds the

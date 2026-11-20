@@ -109,8 +109,9 @@ func encode(v any) ([]byte, error) {
 }
 
 // keepSynced adds Argo CD's sync options of k to the sync-options
-// annotation of each object that Helm keeps, and of the items of a List.
-// It leaves an option the object already sets, whatever its value.
+// annotation of each object that Helm keeps, and of the items of a List,
+// in place: the caller gives copies. It leaves an option the object
+// already sets, whatever its value.
 func keepSynced(k KeepSync, objects []map[string]any) {
 	if k.Annotation == "" {
 		return
@@ -132,11 +133,7 @@ func keepSynced(k KeepSync, objects []map[string]any) {
 					options = append(options, opt)
 				}
 			}
-			annotations = maps.Clone(annotations)
 			annotations[k.SyncOptions] = strings.Join(options, ",")
-			meta = maps.Clone(meta)
-			meta["annotations"] = annotations
-			o["metadata"] = meta
 		}
 		var items []map[string]any
 		for _, i := range value.AsList(o["items"]) {

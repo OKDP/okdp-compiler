@@ -1,16 +1,7 @@
 // This file matches the protect and append paths of the upstream section
-// of okdp.yaml against values. A path names keys of a chart's values:
-// plain keys joined by dots, a literal key in brackets when it contains a
-// dot, and a bracketed key that ends with * (a glob) for every key with
-// that prefix:
-//
-//	service.ports
-//	filer.servers.http.annotations["example.org/auth-*"]
-//	config["spark.ui.filters"]
-//	config["spark.history.*"]
-//
-// The grammar, and the reason for the brackets, are in chart/paths.go
-// (chart.ParsePath).
+// of okdp.yaml against values. Their grammar is chart.ParsePath's
+// (chart/paths.go).
+
 package merge
 
 import (

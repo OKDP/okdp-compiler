@@ -61,15 +61,8 @@ type Bound struct {
 }
 
 // CompileAll compiles instances together and returns their outcomes in the
-// same order, which changes none of them. See CompileAllWith for the steps.
-func CompileAll(ctx context.Context, instances []Instance) []Outcome {
-	return CompileAllWith(ctx, instances, NewMemo())
-}
-
-// CompileAllWith is CompileAll with a memo, for a caller that compiles the
-// same instances again: the second run reuses the parameters and the
-// contracts the first one read. The memo is only valid for the same
-// instances with unchanged files and layers.
+// same order, which changes none of them. The compiles read the
+// parameters of each instance and each contract once.
 //
 // The steps:
 //
@@ -85,21 +78,22 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 //     refused (refuseSecretTargets).
 //  6. Instances that depend on an instance refused since they compiled
 //     are compiled again (refuseClaimers).
-func CompileAllWith(ctx context.Context, instances []Instance, memo *Memo) []Outcome {
-	if memo == nil {
-		memo = NewMemo()
-	}
-	t := &compilation{ctx: ctx, memo: memo, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}}
+func CompileAll(ctx context.Context, instances []Instance) []Outcome {
+	memo := newSetMemo()
+	t := &compilation{ctx: ctx, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}, declared: map[string]error{}}
 	releases, names := map[instKey]int{}, map[instKey]int{}
 	for i, inst := range instances {
-		m := &member{Instance: inst, index: i, outcome: &t.out[i]}
+		m := &member{Instance: inst, index: i, outcome: &t.out[i], in: inst.Inputs}
+		if inst.Definition != nil {
+			m.in.memo = memo.forInstance(i, inst.Inputs)
+		}
 		t.members = append(t.members, m)
 		releases[m.key()]++
 		names[instKey{inst.Inputs.Namespace, inst.name()}]++
 	}
 	var ms []*member
 	for _, m := range t.members {
-		in := t.inputs(m)
+		in := m.in
 		switch {
 		case releases[m.key()] > 1:
 			m.outcome.Err = fmt.Errorf("release %q is given twice in namespace %q", in.Release, in.Namespace)
@@ -107,7 +101,7 @@ func CompileAllWith(ctx context.Context, instances []Instance, memo *Memo) []Out
 			// Its outputs and its claims are named after it.
 			m.outcome.Err = fmt.Errorf("instance name %q is given twice in namespace %q", m.name(), in.Namespace)
 		default:
-			if err := declaredConnections(ctx, in); err != nil {
+			if err := declaredConnections(ctx, in, t.declared); err != nil {
 				m.outcome.Err = err
 				continue
 			}
@@ -140,17 +134,18 @@ type instKey struct{ namespace, name string }
 // member is one instance of a compilation.
 type member struct {
 	Instance
-	index   int      // its position in the instances, and its slot in the Memo
+	index   int      // its position in the instances, and its slot in the memo
 	outcome *Outcome // its entry in compilation.out
+	in      Inputs   // its inputs with its part of the memo, which compile completes
 
 	claims   []Claim            // as a provider: the claims bound to it, in ID order
 	bindings map[string]Binding // as a claimer: the provider of each claim, by parameter path; Output is set at each compile
 
 	// What bind reads and records for the instance.
-	classes  M              // the provisioning classes of its context, by contract
-	platform M              // those of them the platform defines (level 0)
-	rank     map[string]int // the position of each of its references, in parameter path order
-	errs     []claimError   // why its claims do not bind
+	classes  M          // the provisioning classes of its context, by contract
+	platform M          // those of them the platform defines (level 0)
+	refs     []claimRef // the claims of its references, in parameter path order
+	errs     []error    // why its claims do not bind, in the order they are reported
 }
 
 func (m *member) key() instKey { return instKey{m.Inputs.Namespace, m.Inputs.Release} }
@@ -158,27 +153,19 @@ func (m *member) key() instKey { return instKey{m.Inputs.Namespace, m.Inputs.Rel
 // compilation is the state of one CompileAll.
 type compilation struct {
 	ctx       context.Context
-	memo      *Memo
 	members   []*member // every instance, in order
 	out       []Outcome
 	published map[string]map[string]Info // what the compiled instances publish, by namespace and release
 	byRelease map[instKey]*member        // the instances that reach the compile, by namespace and release
 	byName    map[instKey][]*member      // the same, by namespace and by each name a provider may use: release and name
-}
-
-func (t *compilation) inputs(m *member) Inputs {
-	in := m.Inputs
-	if m.Definition != nil {
-		in.memo = t.memo.forInstance(m.index, m.Definition, in)
-	}
-	return in
+	declared  map[string]error           // the connections checked at their declaration (checkDeclared)
 }
 
 // compile compiles m with what its namespace publishes so far, its claims
 // and its bindings. It records the outcome, and publishes the result or
 // withdraws what m published before when it fails.
 func (t *compilation) compile(m *member) error {
-	in := t.inputs(m)
+	in := m.in
 	ns := in.Namespace
 	if t.published[ns] == nil {
 		t.published[ns] = map[string]Info{}
@@ -252,14 +239,17 @@ func (t *compilation) compileAll(ms []*member) {
 // publishes reports whether every output of keys is published. A key
 // without namespace is looked up in namespace.
 func (t *compilation) publishes(namespace string, keys []outputKey) bool {
+	has := func(k outputKey, release string, info Info) bool {
+		return (k.release == "" || k.release == release) && slices.ContainsFunc(info.Provides, func(o Output) bool { return o.Contract == k.contract && o.Name == k.name })
+	}
+next:
 	for _, k := range keys {
-		found := false
 		for release, info := range t.published[cmp.Or(k.namespace, namespace)] {
-			found = found || (k.release == "" || k.release == release) && slices.ContainsFunc(info.Provides, func(o Output) bool { return o.Contract == k.contract && o.Name == k.name })
+			if has(k, release, info) {
+				continue next
+			}
 		}
-		if !found {
-			return false
-		}
+		return false
 	}
 	return true
 }
@@ -333,23 +323,30 @@ func notCompiled(err error, others []string) error {
 // reference uses it or not. One declared differently in two contexts
 // refuses every instance of the namespace; one that does not bind, every
 // instance whose context declares it.
+//
+// The named claims bind first, then the references of each instance in
+// parameter path order: the errors of an instance come in the order they
+// are reported, the claims of its context in name order, then its
+// references.
 func (t *compilation) bind(ms []*member) []*member {
 	b := t.newBinder(ms)
 	for _, m := range ms {
-		b.instance(m)
+		b.read(m)
 	}
 	named := b.named(ms)
-	b.attachNamed(named)
+	for _, m := range ms {
+		b.instance(m, named)
+	}
 	b.give(ms, named)
 	return b.outcomes(ms)
 }
 
-// claimSite is where a claim is declared, for binding and for errors.
+// claimSite is where a claim is declared, for binding and for errors: the
+// namespace of its claimers, and the claim, whose field is the parameter
+// path of the reference or claims.<name> for a named claim.
 type claimSite struct {
-	namespace string    // the namespace of the claimers
-	field     string    // the parameter path of the reference, or claims.<name> for a named claim
-	contract  string    // the contract claimed
-	spec      ClaimSpec // the claim as written
+	namespace string
+	claimRef
 }
 
 func (s claimSite) where() string { return fmt.Sprintf("%s: claim (%s)", s.field, s.contract) }
@@ -371,11 +368,6 @@ type boundClaim struct {
 	request M // the class's fixed keys, then the claim's own, checked, with the claim schema's defaults
 }
 
-type claimError struct {
-	field string
-	err   error
-}
-
 // declaredClaim is a named claim as one instance's context declares it.
 type declaredClaim struct {
 	by   *member
@@ -387,7 +379,6 @@ type binder struct {
 	t            *compilation
 	provisioning map[string][]*member                  // the instances that provision each contract
 	claims       []boundClaim                          // the claims bound so far
-	toNamed      []boundClaim                          // the references to a named claim, waiting for its provider
 	decls        map[string]map[string][]declaredClaim // the named claims declared, by namespace and name
 }
 
@@ -408,51 +399,60 @@ func (t *compilation) newBinder(ms []*member) *binder {
 	return b
 }
 
-// bindOne binds the claim at s: it picks the provider, checks its consent
-// and the request. self is the claiming instance, nil for a named claim.
-func (b *binder) bindOne(in Inputs, of *member, s claimSite, id string, self *member) (choice, M, error) {
+// bindOne binds the claim at s, in the context of the instance of: it
+// picks the provider, checks its consent and the request. self is the
+// claiming instance, nil for a named claim.
+func (b *binder) bindOne(of *member, s claimSite, id string, self *member) (choice, M, error) {
 	ch, err := b.t.provider(of.classes, s, self, b.provisioning[s.contract])
 	if err == nil {
 		err = consent(s, id, ch, of.platform)
 	}
-	request, rerr := claimRequest(in, s, ch)
+	request, rerr := claimRequest(of.in, s, ch)
 	return ch, request, errors.Join(err, rerr)
 }
 
-// instance reads the claims of m: it binds its claim templates, and leaves
-// its references to a named claim waiting until those are bound (toNamed).
-func (b *binder) instance(m *member) {
-	t := b.t
-	in := t.inputs(m)
-	c := claimsOf(t.ctx, m.Definition, in)
-	m.classes, m.platform = c.classes, c.platform
-	// The checks below run in any order, so the rank orders the report as
-	// the connection errors are ordered: by parameter path (outcomes).
-	m.rank = map[string]int{}
-	for k, ref := range c.refs {
-		m.rank[ref.field] = k
-	}
+// read reads the claims of m and records the named claims its context
+// declares (decls).
+func (b *binder) read(m *member) {
+	c := claimsOf(b.t.ctx, m.Definition, m.in)
+	m.classes, m.platform, m.refs = c.classes, c.platform, c.refs
+	ns := m.in.Namespace
 	for name, spec := range c.named {
-		if b.decls[in.Namespace] == nil {
-			b.decls[in.Namespace] = map[string][]declaredClaim{}
+		if b.decls[ns] == nil {
+			b.decls[ns] = map[string][]declaredClaim{}
 		}
-		b.decls[in.Namespace][name] = append(b.decls[in.Namespace][name], declaredClaim{m, spec})
+		b.decls[ns][name] = append(b.decls[ns][name], declaredClaim{m, spec})
 	}
+}
+
+// instance binds the claims of the references of m, in parameter path
+// order: a claim template to its provider, a reference to a named claim
+// to the provider of that claim (named). A reference whose provider is
+// its own instance fails.
+func (b *binder) instance(m *member, named map[instKey]boundClaim) {
+	ns := m.in.Namespace
 	fields := map[string]string{} // the field of each claim template of m, by ID
-	for _, ref := range c.refs {
+	for _, ref := range m.refs {
 		if ref.name != "" {
-			b.toNamed = append(b.toNamed, boundClaim{claimer: m, ref: ref, id: namedClaimID(in.Namespace, ref.name)})
+			nb, ok := named[instKey{ns, ref.name}]
+			switch {
+			case !ok: // refused by named
+			case nb.provider == m:
+				m.errs = append(m.errs, atField(ref.field, fmt.Errorf("%s: claim (%s): the instance provisions it itself: a claim is of another instance", ref.field, ref.contract)))
+			default:
+				b.claims = append(b.claims, boundClaim{claimer: m, choice: nb.choice, ref: ref, id: nb.id, request: nb.request})
+			}
 			continue
 		}
-		id := templateClaimID(in.Namespace, m.name(), ref.field)
+		id := claimID(ns, m.name(), ref.field)
 		if first, dup := fields[id]; dup {
-			m.errs = append(m.errs, claimError{ref.field, fmt.Errorf("%s: claim: it gives the same ID (%s) as %s: rename one of the parameters", ref.field, id, first)})
+			m.errs = append(m.errs, atField(ref.field, fmt.Errorf("%s: claim: it gives the same ID (%s) as %s: rename one of the parameters", ref.field, id, first)))
 			continue
 		}
 		fields[id] = ref.field
-		ch, request, err := b.bindOne(in, m, claimSite{in.Namespace, ref.field, ref.contract, ref.spec}, id, m)
+		ch, request, err := b.bindOne(m, claimSite{ns, ref}, id, m)
 		if err != nil {
-			m.errs = append(m.errs, claimError{ref.field, err})
+			m.errs = append(m.errs, atField(ref.field, err))
 			continue
 		}
 		b.claims = append(b.claims, boundClaim{claimer: m, choice: ch, ref: ref, id: id, request: request})
@@ -469,42 +469,26 @@ func (b *binder) named(ms []*member) map[instKey]boundClaim {
 			ds := slices.SortedFunc(slices.Values(b.decls[ns][name]), func(a, c declaredClaim) int { return strings.Compare(release(a), release(c)) })
 			where := value.Key("claims", name)
 			if k := slices.IndexFunc(ds, func(d declaredClaim) bool { return !reflect.DeepEqual(d.spec, ds[0].spec) }); k > 0 {
-				err := fmt.Errorf("%s: declared differently in the context of %s and %s", where, release(ds[0]), release(ds[k]))
+				err := atField(where, fmt.Errorf("%s: declared differently in the context of %s and %s", where, release(ds[0]), release(ds[k])))
 				for _, m := range ms {
 					if m.Inputs.Namespace == ns {
-						m.errs = append(m.errs, claimError{where, err})
+						m.errs = append(m.errs, err)
 					}
 				}
 				continue
 			}
-			first, spec, id := ds[0].by, ds[0].spec, namedClaimID(ns, name)
-			ch, request, err := b.bindOne(b.t.inputs(first), first, claimSite{ns, where, spec.Contract, spec}, id, nil)
+			first, ref, id := ds[0].by, claimRef{where, ds[0].spec.Contract, name, ds[0].spec}, claimID(ns, name)
+			ch, request, err := b.bindOne(first, claimSite{ns, ref}, id, nil)
 			if err != nil {
 				for _, d := range ds {
-					d.by.errs = append(d.by.errs, claimError{where, err})
+					d.by.errs = append(d.by.errs, atField(where, err))
 				}
 				continue
 			}
-			bound[instKey{ns, name}] = boundClaim{choice: ch, ref: claimRef{where, spec.Contract, name, spec}, id: id, request: request}
+			bound[instKey{ns, name}] = boundClaim{choice: ch, ref: ref, id: id, request: request}
 		}
 	}
 	return bound
-}
-
-// attachNamed gives each reference to a named claim the provider of that
-// claim. A reference whose provider is its own instance fails.
-func (b *binder) attachNamed(named map[instKey]boundClaim) {
-	for _, c := range b.toNamed {
-		nb, ok := named[instKey{c.claimer.Inputs.Namespace, c.ref.name}]
-		switch {
-		case !ok: // refused by named
-		case nb.provider == c.claimer:
-			c.claimer.errs = append(c.claimer.errs, claimError{c.ref.field, fmt.Errorf("%s: claim (%s): the instance provisions it itself: a claim is of another instance", c.ref.field, c.ref.contract)})
-		default:
-			c.choice, c.request = nb.choice, nb.request
-			b.claims = append(b.claims, c)
-		}
-	}
 }
 
 // give hands the claims to their providers, once per ID: the named claims
@@ -550,8 +534,7 @@ func (b *binder) give(ms []*member, named map[instKey]boundClaim) {
 }
 
 // outcomes returns the instances of ms that are not refused, in order.
-// Each of the others gets its errors as its outcome, in parameter path
-// order.
+// Each of the others gets its errors as its outcome.
 func (b *binder) outcomes(ms []*member) []*member {
 	var kept []*member
 	for _, m := range ms {
@@ -559,19 +542,7 @@ func (b *binder) outcomes(ms []*member) []*member {
 			kept = append(kept, m)
 			continue
 		}
-		at := func(r claimError) int {
-			k, ok := m.rank[r.field]
-			if !ok {
-				return -1
-			}
-			return k
-		}
-		slices.SortStableFunc(m.errs, func(a, c claimError) int { return cmp.Or(cmp.Compare(at(a), at(c)), strings.Compare(a.field, c.field)) })
-		joined := make([]error, len(m.errs))
-		for k, e := range m.errs {
-			joined[k] = atField(e.field, e.err)
-		}
-		*m.outcome = Outcome{Err: errors.Join(joined...)}
+		*m.outcome = Outcome{Err: errors.Join(m.errs...)}
 	}
 	return kept
 }
@@ -637,8 +608,8 @@ func claimClass(classes M, s claimSite) (ch choice, name, which string, err erro
 		return ch, "", "", fmt.Errorf("%s: %s is not a class of %s connections (%s.classes): %s", where, which, contract, key, these)
 	}
 	name, ch.fixed = value.Str(class["provider"]), value.AsMap(class["request"])
-	if _, _, ok := providerName(name, s.namespace); !ok {
-		return ch, "", "", fmt.Errorf("%s: %s (%s): provider %q: %s", where, which, value.Key(key+".classes", ch.class), name, providerForms)
+	if err := CheckProvider(fmt.Sprintf("%s: %s (%s)", where, which, value.Key(key+".classes", ch.class)), name); err != nil {
+		return ch, "", "", err
 	}
 	return ch, name, which, nil
 }
@@ -813,8 +784,8 @@ func secretTargets(ns string, o M) []secretTarget {
 // instance's connection (<release>.<connection>-credentials) through its
 // secretRef.name, which names its claimers' copies (<release>-<name>).
 func (t *compilation) refuseSecretTargets(ms []*member) {
-	type writer struct{ release, object string }
-	writers := map[secretTarget][]writer{}
+	writers := map[secretTarget][]string{}  // "<kind> <name> of <release>", by target
+	targets := map[*member][]secretTarget{} // what each instance writes, in object order
 	for _, m := range ms {
 		res := m.outcome.Result
 		if res == nil {
@@ -822,8 +793,8 @@ func (t *compilation) refuseSecretTargets(ms []*member) {
 		}
 		_ = eachObject(res.Objects, func(o M) error {
 			for _, x := range secretTargets(res.Namespace, o) {
-				w := writer{res.Release, value.Str(o["kind"]) + " " + value.Str(value.Dig(o, "metadata.name"))}
-				writers[x] = append(writers[x], w)
+				writers[x] = append(writers[x], fmt.Sprintf("%s %s of %s", value.Str(o["kind"]), value.Str(value.Dig(o, "metadata.name")), res.Release))
+				targets[m] = append(targets[m], x)
 			}
 			return nil
 		})
@@ -835,31 +806,28 @@ func (t *compilation) refuseSecretTargets(ms []*member) {
 		}
 		var errs []error
 		seen := map[secretTarget]bool{}
-		_ = eachObject(res.Objects, func(o M) error {
-			for _, x := range secretTargets(res.Namespace, o) {
-				if len(writers[x]) < 2 || seen[x] {
-					continue
-				}
-				seen[x] = true
-				count := map[string]int{}
-				for _, w := range writers[x] {
-					count[fmt.Sprintf("%s of %s", w.object, w.release)]++
-				}
-				var each []string
-				for _, w := range slices.Sorted(maps.Keys(count)) {
-					if n := count[w]; n > 1 {
-						w += fmt.Sprintf(" (%d times)", n)
-					}
-					each = append(each, w)
-				}
-				what := fmt.Sprintf("Secret %q", x.name)
-				if x.kind == "push" {
-					what = fmt.Sprintf("the key %s of the secret store", x.name)
-				}
-				errs = append(errs, fmt.Errorf("%s of namespace %s is written by %s: two objects may not write one Secret", what, x.ns, strings.Join(each, " and ")))
+		for _, x := range targets[m] {
+			if len(writers[x]) < 2 || seen[x] {
+				continue
 			}
-			return nil
-		})
+			seen[x] = true
+			count := map[string]int{}
+			for _, w := range writers[x] {
+				count[w]++
+			}
+			var each []string
+			for _, w := range slices.Sorted(maps.Keys(count)) {
+				if n := count[w]; n > 1 {
+					w += fmt.Sprintf(" (%d times)", n)
+				}
+				each = append(each, w)
+			}
+			what := fmt.Sprintf("Secret %q", x.name)
+			if x.kind == "push" {
+				what = fmt.Sprintf("the key %s of the secret store", x.name)
+			}
+			errs = append(errs, fmt.Errorf("%s of namespace %s is written by %s: two objects may not write one Secret", what, x.ns, strings.Join(each, " and ")))
+		}
 		if errs != nil {
 			*m.outcome = Outcome{Err: errors.Join(errs...), Claims: m.outcome.Claims}
 			delete(t.published[res.Namespace], res.Release)

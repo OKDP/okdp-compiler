@@ -3,7 +3,6 @@ package okdp
 import (
 	"io/fs"
 
-	"github.com/okdp/okdp-compiler/chart"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
@@ -18,10 +17,6 @@ func LoadRules(fsys fs.FS) (*RuleSet, error) { return ruleset.LoadRules(fsys) }
 
 // Mandatory returns the mandatory rule set alone.
 func Mandatory() *RuleSet { return ruleset.Mandatory() }
-
-func schemaValues(schema *chart.Schema, heading string, user M) (M, error) {
-	return ruleset.SchemaValues(schema, heading, user)
-}
 
 func (in Inputs) rules() *RuleSet { return rulesOr(in.Rules) }
 

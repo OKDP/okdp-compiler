@@ -232,7 +232,7 @@ platform's manifests, which the compiler does not see.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may not | a project of a namespace a target writes in (`okdp-releases`, `argocd`, Flux's `Source`'s): the engine's objects there, rewritten with the project's every verb | `policy.go: reservedNamespace`, `target.OwnNamespaces` | `TestOwnNamespaces`, `testdata/cli/policy.txtar` |
+| may not | a project of a namespace a target writes in (`okdp-releases`, `argocd`, Flux's `Source`'s): the engine's objects there, rewritten with the project's every verb | `policy.go: checkNamespace`, `target.OwnNamespaces` | `TestOwnNamespaces`, `testdata/cli/policy.txtar` |
 | may not | an object of the platform's of the same name as a release's in the engines' namespaces, when the platform names its own with a dot | the platform's naming rule, not the compiler | |
 
 ## The secret store

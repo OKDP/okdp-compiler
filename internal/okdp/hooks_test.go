@@ -133,7 +133,7 @@ func TestHookFinalValues(t *testing.T) {
 	if err := compileWith(nil, M{"count": 9}, privileged); err != nil {
 		t.Errorf("Helm's merge, a privileged project: %v", err)
 	}
-	// A Finalize that leaves the hook to the compile: run on what it returns.
+	// A Finalize: the hook runs on what it returns.
 	nested := map[string]map[string]any{"app": {"nested": []any{M{"count": 7}}}}
 	returns := func(values map[string]map[string]any, err error) Finalize {
 		return func(context.Context, FinalInput) (map[string]map[string]any, map[string]chart.Ref, []string, error) {
@@ -148,30 +148,6 @@ func TestHookFinalValues(t *testing.T) {
 	}
 	if err := compileWith(returns(nested, nil), privileged); err != nil {
 		t.Errorf("after Finalize, a privileged project: %v", err)
-	}
-	// A Finalize that runs the hook itself, before its own last check: the
-	// hook's message comes first, and the compile does not run it again on
-	// what Finalize returns.
-	calling := func(on map[string]map[string]any, last error) Finalize {
-		return func(ctx context.Context, in FinalInput) (map[string]map[string]any, map[string]chart.Ref, []string, error) {
-			if err := in.CheckFinalValues(ctx, on); err != nil {
-				return nil, nil, nil, err
-			}
-			return nested, map[string]chart.Ref{"app": appSource}, nil, last
-		}
-	}
-	bounded := map[string]map[string]any{"app": {"count": 1}}
-	if err := compileWith(calling(map[string]map[string]any{"app": {"count": 9}}, errors.New("later"))); err == nil || err.Error() != refused {
-		t.Errorf("the hook in Finalize: got %v, want %q", err, refused)
-	}
-	if err := compileWith(calling(bounded, errors.New("later"))); err == nil || err.Error() != "later" {
-		t.Errorf("the hook in Finalize, then its own check: got %v", err)
-	}
-	if err := compileWith(calling(bounded, nil)); err != nil {
-		t.Errorf("the hook run once, in Finalize: %v", err)
-	}
-	if err := compileWith(calling(map[string]map[string]any{"app": {"count": 9}}, nil), privileged); err != nil {
-		t.Errorf("the hook in Finalize, a privileged project: %v", err)
 	}
 	// Outside a compile: keys in order, the first message refusing.
 	ctx := context.Background()

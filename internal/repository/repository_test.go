@@ -85,7 +85,7 @@ func TestLoad(t *testing.T) {
 		"demo/demo-b (b) app-1.0.0 global@0 claims,global@1",
 		"other/other-c (c) app-2.0.0 global@0 claimers demo,*",
 	}
-	instances, err := Load(context.Background(), []Repository{{"db", whole, RoleTree}})
+	instances, err := Load(context.Background(), []Repository{{"db", whole, RoleTree}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestLoad(t *testing.T) {
 		{"demo", split("projects/demo/", "contracts/"), RoleTree}, {"other", split("projects/other/"), RoleTree},
 	}
 	for _, repos := range [][]Repository{parts, {parts[3], parts[2], parts[1], parts[0]}} {
-		instances, err := Load(context.Background(), repos)
+		instances, err := Load(context.Background(), repos, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,11 +132,11 @@ func TestLoadErrors(t *testing.T) {
 			"projects/demo/project.yaml":     file("{}\n"),
 			"contracts/database.schema.json": file(`{"type": "object"}`),
 		}, RoleTree},
-	})
+	}, nil)
 	want := `contract database differs between the repositories a and b
 platform.yaml is in the repositories a and b
-service "app" is in the repositories a and b
-project "demo" is in the repositories a and b`
+project "demo" is in the repositories a and b
+service "app" is in the repositories a and b`
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
 	}
@@ -158,13 +158,13 @@ project "demo" is in the repositories a and b`
 		"projects/demo/instances/j/instance.yaml":    file("service: app\nversion: 1.0.0\nclaimers: [demo, Demo]\n"),
 		"projects/demo/instances/k/instance.yaml":    file("service: app\nversion: 1.0.0\nclaimers: ['*', '*']\n"),
 		"projects/bad/project.yaml":                  file("description: {text: d}\n"),
-	}, RoleTree}})
+	}, RoleTree}}, nil)
 	for _, w := range []string{
-		"db/platform.yaml: claims: a project's (project.yaml)",
+		"db/platform.yaml: claims: a project's (project.yaml)\ndb/projects/demo/instances/d/instance.yaml: the package db/catalog/bad/1.0.0: its Chart.yaml is other 1.0.0\ndb/projects/bad/",
 		"db/projects/demo/instances/a/instance.yaml: yaml: unmarshal errors:\n  line 3: field replicas not found: service, version and claimers only",
 		`db/projects/demo/instances/b/instance.yaml: service "nope" is in the catalog of no repository`,
 		`db/projects/demo/instances/c/instance.yaml: version "9.0.0" of service "app" is not in db/catalog/app`,
-		"db/projects/demo/instances/d/instance.yaml: the package db/catalog/bad/1.0.0: its Chart.yaml is other 1.0.0\ndb/projects/demo/instances/f/config.yaml: ",
+		"db/projects/demo/instances/f/config.yaml: ",
 		"db/projects/demo/instances/g/instance.yaml: file does not exist",
 		`db/projects/demo/instances/h/instance.yaml: version "../1.0.0" of service "app" is not in db/catalog/app`,
 		"db/projects/demo/instances/i/connections.yaml: global: the instance's own connections only (connections): the rest of the context is the platform's or the project's",
@@ -189,7 +189,7 @@ func TestError(t *testing.T) {
 		"catalog/app/1.0.0/Chart.yaml":            file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 		"projects/demo/instances/a/instance.yaml": file("service: app\nversion: 1.0.0\nreplicas: 2\n"),
 		"projects/demo/instances/b/instance.yaml": file("service: nope\nversion: 1.0.0\n"),
-	}, RoleTree}})
+	}, RoleTree}}, nil)
 	le, ok := errors.AsType[*Error](err)
 	if !ok {
 		t.Fatalf("%v: not an *Error", err)
@@ -269,7 +269,7 @@ func TestLoadRoles(t *testing.T) {
 		"projects/kube-system/instances/y/instance.yaml": file("service: app\nversion: 1.0.0\n"),
 		"platform.yaml": file("{}\n"),
 	}
-	_, err := Load(context.Background(), []Repository{{"tree", tree, RoleTree}, {"evil", catalog, RoleCatalog}})
+	_, err := Load(context.Background(), []Repository{{"tree", tree, RoleTree}, {"evil", catalog, RoleCatalog}}, nil)
 	for _, w := range []string{
 		"evil/platform.yaml: a catalog repository holds catalog/ and contracts/ only: platform.yaml is the deployment's (a repository of role tree)",
 		"evil/projects: a catalog repository holds catalog/ and contracts/ only: projects is the deployment's (a repository of role tree)",
@@ -283,7 +283,7 @@ func TestLoadRoles(t *testing.T) {
 	}
 	for _, repos := range [][]Repository{{{"tree", tree, ""}}, {{"tree", tree, "platform"}}} {
 		for name, load := range map[string]func([]Repository) error{
-			"Load":        func(r []Repository) error { _, err := Load(context.Background(), r); return err },
+			"Load":        func(r []Repository) error { _, err := Load(context.Background(), r, nil); return err },
 			"LoadCatalog": func(r []Repository) error { _, err := LoadCatalog(r); return err },
 		} {
 			if err := load(repos); err == nil || !strings.Contains(err.Error(), "repository tree: ") || !strings.Contains(err.Error(), "tree, a part of the deployment, or catalog, packages and contracts only") {
@@ -297,7 +297,7 @@ func TestLoadRoles(t *testing.T) {
 	delete(catalog, "projects/strimzi/instances/x/instance.yaml")
 	delete(catalog, "projects/kube-system/instances/y/instance.yaml")
 	tree["projects/demo/instances/web/instance.yaml"] = file("service: app\nversion: 1.0.0\n")
-	instances, err := Load(context.Background(), []Repository{{"tree", tree, RoleTree}, {"charts", catalog, RoleCatalog}})
+	instances, err := Load(context.Background(), []Repository{{"tree", tree, RoleTree}, {"charts", catalog, RoleCatalog}}, nil)
 	if err != nil || len(instances) != 1 || instances[0].Inputs.Namespace != "demo" || instances[0].Inputs.Contracts == nil {
 		t.Errorf("got %v, %v", instances, err)
 	}
@@ -325,7 +325,7 @@ func TestLoadProjects(t *testing.T) {
 		"projects/broken/instances/a/instance.yaml":  file("service: app\nversion: 1.0.0\n"),
 		"projects/old/instances/a/instance.yaml":     file("service: app\nversion: 9.0.0\n"),
 	}
-	l, err := LoadProjects(context.Background(), []Repository{{"db", tree, RoleTree}})
+	l, err := LoadProjects(context.Background(), []Repository{{"db", tree, RoleTree}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,12 +334,12 @@ func TestLoadProjects(t *testing.T) {
 	}
 	var names []string
 	for _, r := range l.Refused {
-		names = append(names, r.Project)
+		names = append(names, r.Namespace)
 		if len(r.Problems) == 0 || len(r.Problems) != len(r.Errs) || r.Problems[0] != r.Errs[0].Error() {
-			t.Errorf("%s: problems %q, errors %v", r.Project, r.Problems, r.Errs)
+			t.Errorf("%s: problems %q, errors %v", r.Namespace, r.Problems, r.Errs)
 		}
-		if r.Inputs.Namespace != r.Project || r.Own != (r.Project != "broken") {
-			t.Errorf("%s: inputs %+v, own %v", r.Project, r.Inputs, r.Own)
+		if r.Inputs.Namespace != r.Namespace || r.Own != (r.Namespace != "broken") {
+			t.Errorf("%s: inputs %+v, own %v", r.Namespace, r.Inputs, r.Own)
 		}
 	}
 	if want := []string{"broken", "old", "stray", "unknown"}; !reflect.DeepEqual(names, want) {
@@ -359,7 +359,7 @@ func TestLoadProjects(t *testing.T) {
 		t.Errorf("old: %v", l.Refused[1].Errs[0])
 	}
 	// Load: any problem fails the tree, every one listed, in name order.
-	_, err = Load(context.Background(), []Repository{{"db", tree, RoleTree}})
+	_, err = Load(context.Background(), []Repository{{"db", tree, RoleTree}}, nil)
 	le, ok := errors.AsType[*Error](err)
 	if !ok || len(le.Problems) != 4 || !strings.HasPrefix(le.Problems[0], "db/projects/broken/project.yaml: ") || !errors.Is(err, ErrNotInCatalog) {
 		t.Errorf("Load: %v", err)
@@ -370,7 +370,7 @@ func TestLoadProjects(t *testing.T) {
 	tree["catalog/bad/1.0.0/Chart.yaml"] = file("apiVersion: v2\nname: other\nversion: 1.0.0\n")
 	tree["projects/good/instances/b/instance.yaml"] = file("service: bad\nversion: 1.0.0\n")
 	tree["projects/good2/instances/c/instance.yaml"] = file("service: bad\nversion: 1.0.0\n")
-	l, err = LoadProjects(context.Background(), []Repository{{"db", tree, RoleTree}})
+	l, err = LoadProjects(context.Background(), []Repository{{"db", tree, RoleTree}}, nil)
 	if l != nil || err == nil {
 		t.Fatalf("a platform that does not parse: %v %v", l, err)
 	}
@@ -382,7 +382,7 @@ func TestLoadProjects(t *testing.T) {
 	// A package that fails is the catalog's, not a project's: the tree
 	// fails, whatever project names it first.
 	delete(tree, "platform.yaml")
-	l, err = LoadProjects(context.Background(), []Repository{{"db", tree, RoleTree}})
+	l, err = LoadProjects(context.Background(), []Repository{{"db", tree, RoleTree}}, nil)
 	if l != nil || err == nil || strings.Count(err.Error(), "its Chart.yaml is other") != 1 {
 		t.Errorf("a package that fails: %v %v", l, err)
 	}

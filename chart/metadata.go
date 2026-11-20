@@ -1,6 +1,7 @@
 // This file reads the Chart.yaml of a package. A package is the umbrella
 // chart of its instances, and its dependencies are the upstream charts
 // that render the values under their keys.
+
 package chart
 
 import (

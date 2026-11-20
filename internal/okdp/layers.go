@@ -159,5 +159,5 @@ func upstreamGlobals(ctx context.Context, in Inputs, layers []map[string]any, ok
 			named = append(named, GlobalLayer{Name: name, Global: g})
 		}
 	}
-	return in.CheckGlobals(ctx, GlobalsInput{Rules: in.rules(), Settings: okdp, Namespace: in.Namespace, Privileged: privileged(okdp, in.Namespace), Layers: named})
+	return in.CheckGlobals(ctx, GlobalsInput{Rules: in.rules(), Settings: okdp, Namespace: in.Namespace, Privileged: Privileged(okdp, in.Namespace), Layers: named})
 }

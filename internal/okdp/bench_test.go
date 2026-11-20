@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-
-	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 // benchInstances: a namespace of 20 instances that each write 8 objects,
@@ -50,7 +48,7 @@ func benchCompile(b *testing.B, instances []Instance) {
 // mandatory set: what its rules cost beside the mapping, the checks of
 // every object among them.
 func BenchmarkCompileAll(b *testing.B) {
-	benchCompile(b, benchInstances(testrules.Standard()))
+	benchCompile(b, benchInstances(Mandatory()))
 }
 
 // BenchmarkCompileAllHooks: the same namespace with the rule set of

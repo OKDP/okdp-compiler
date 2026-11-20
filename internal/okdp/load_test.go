@@ -47,7 +47,7 @@ instance: {usage: '${{ n }}'}
 		t.Errorf("got %#v", d)
 	}
 	svc, err := d.service()
-	want := &Service{Name: "demo", Version: "1.0.0", Roles: []string{"web"}, DependsOn: []string{"database"}, Require: []string{"a", "b"}, Charts: chart.Specs{
+	want := &Service{Name: "demo", Version: "1.0.0", Require: []string{"a", "b"}, Charts: chart.Specs{
 		"app": {Source: app.Ref(), Defaults: "app.defaults.yaml", Upstream: true, Protect: []string{"p"}},
 	}}
 	if err != nil || !reflect.DeepEqual(svc, want) {

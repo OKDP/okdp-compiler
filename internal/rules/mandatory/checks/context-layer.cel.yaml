@@ -6,12 +6,13 @@ vars:
   global: ${{ asMap(dig(layer, "global")) }}
   okdp: ${{ dig(layer, "global.okdp") }}
   okdpSet: ${{ "okdp" in global }}
-  # A key of global.okdp a project may not set; global.okdp itself when it
-  # is not a map.
+  # The keys of global.okdp a project may not set.
+  foreign: ${{ keys(okdp).filter(k, !(k in sets.projectPlatformKeys)) }}
+  # The first of them; global.okdp itself when it is not a map.
   platformOnly: >-
     ${{ !above || !okdpSet ? ""
       : type(okdp) != map ? "global.okdp"
-      : keys(okdp).exists(k, !(k in sets.projectPlatformKeys)) ? pathKey("global.okdp", keys(okdp).filter(k, !(k in sets.projectPlatformKeys))[0]) : "" }}
+      : size(foreign) > 0 ? pathKey("global.okdp", foreign[0]) : "" }}
   listed: ${{ dig(platform, "global.okdp.policy.projectGlobals") }}
   allowed: >-
     ${{ listed == null ? tables.defaultProjectGlobals : asList(listed).map(k, str(k)) }}

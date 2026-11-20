@@ -54,7 +54,7 @@ func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, 
 		items = append(items, value.AsList(res[spec.Section])...)
 		listed, err := inst.rules.Values(ctx, spec.List, M{
 			"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"],
-			"privileged": privileged(inst.okdp, inst.namespace), "settings": settingsOr(inst.okdp),
+			"privileged": Privileged(inst.okdp, inst.namespace), "settings": settingsOr(inst.okdp),
 		})
 		if err != nil {
 			return nil, err

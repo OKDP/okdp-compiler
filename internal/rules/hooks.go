@@ -25,15 +25,10 @@ const (
 	HookFinalValues = "finalValues"
 )
 
-// ruleHooks lists the names of the hooks, sorted.
-var ruleHooks = []string{HookFinalValues, HookObjects}
-
 // loadHooks reads the hooks of a set. Each names documents of the sets
 // read so far, this one's among them. A document is listed once per hook.
+// rules.schema.json allows the hooks above, no other.
 func (r *RuleSet) loadHooks(hooks M) error {
-	if err := knownKeys("hooks", hooks, ruleHooks); err != nil {
-		return err
-	}
 	for _, hook := range slices.Sorted(maps.Keys(hooks)) {
 		for _, name := range stringList(hooks[hook]) {
 			if _, ok := r.sources[name]; !ok || slices.Contains(ruleChecks, name) {
@@ -41,9 +36,6 @@ func (r *RuleSet) loadHooks(hooks M) error {
 			}
 			if slices.Contains(r.hooks[hook], name) {
 				return taken("hooks", hook+": "+name)
-			}
-			if r.hooks == nil {
-				r.hooks = map[string][]string{}
 			}
 			r.hooks[hook] = append(r.hooks[hook], name)
 		}

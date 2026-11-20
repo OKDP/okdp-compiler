@@ -41,15 +41,6 @@ type Package struct {
 	// Provisions lists the contracts the package provisions connections
 	// of, one connection per claim bound to an instance.
 	Provisions []Provision `yaml:"provisions"`
-
-	// The mapping reads the keys below, and the sections of the rule set
-	// (RuleSet.Sections). They are declared here, and those are known to
-	// the read of okdp.yaml, so that it is strict: any other key fails.
-	Vars     yaml.Node `yaml:"vars"`
-	Errors   yaml.Node `yaml:"errors"`
-	Instance yaml.Node `yaml:"instance"`
-	Provides yaml.Node `yaml:"provides"`
-	Objects  yaml.Node `yaml:"objects"`
 }
 
 // Provision is an entry of the provisions of okdp.yaml, written as the
@@ -98,8 +89,6 @@ var packageKeys = []string{"require", "roles", "dependsOn", "defaults", "upstrea
 type Service struct {
 	Name       string      // the name of Chart.yaml; the labels and the schema errors use it
 	Version    string      // from Chart.yaml, also the umbrella's
-	Roles      []string    // okdp.yaml: catalog, not read by the compiler
-	DependsOn  []string    // okdp.yaml: catalog, not read by the compiler
 	Require    []string    // okdp.yaml: the global.okdp keys the service needs
 	Charts     chart.Specs // Chart.yaml's dependencies, with the defaults and upstream of okdp.yaml
 	Provisions []string    // okdp.yaml: the contracts the package provisions connections of
@@ -124,7 +113,7 @@ func (d *Definition) service() (*Service, error) {
 	if err := checkProvisions(p.Provisions); err != nil {
 		return nil, err
 	}
-	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Roles: p.Roles, DependsOn: p.DependsOn, Require: p.Require, Charts: specs, Provisions: p.contracts()}, nil
+	return &Service{Name: d.Chart.Name, Version: d.Chart.Version, Require: p.Require, Charts: specs, Provisions: p.contracts()}, nil
 }
 
 func (p Package) contracts() []string {

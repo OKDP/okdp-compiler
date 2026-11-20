@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -88,7 +87,7 @@ func TestFragmentErrors(t *testing.T) {
 			}
 		})
 	}
-	_, err := functionCompile(testrules.Standard(), "vars:\n  m: \"${{ values.replicas > 5 ? exampleConfigMap({'name': 'a'}) : [] }}\"\n", "app: {}\n")
+	_, err := functionCompile(Mandatory(), "vars:\n  m: \"${{ values.replicas > 5 ? exampleConfigMap({'name': 'a'}) : [] }}\"\n", "app: {}\n")
 	if err == nil || !strings.Contains(err.Error(), "okdp.yaml: vars m: ${{ values.replicas > 5 ? exampleConfigMap({'name': 'a'}) : [] }}: ERROR: <input>:1:40: undeclared reference to 'exampleConfigMap'") {
 		t.Errorf("without the set: got %v", err)
 	}

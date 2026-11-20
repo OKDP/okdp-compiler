@@ -2,7 +2,6 @@ package compile
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -342,14 +341,13 @@ errors:
 }
 
 // TestRefusals: the messages of a document's errors, one error each,
-// joined: one a line, each a Refusal.
+// joined: one a line, each an error.
 func TestRefusals(t *testing.T) {
 	_, err := Eval(context.Background(), cel2yaml.NewSession(0), M{}, []string{"output"}, Source{Name: "m.yaml", Data: []byte("errors:\n  - first\n  - second\n")})
 	if err == nil || err.Error() != "first\nsecond" {
 		t.Fatalf("got %v", err)
 	}
-	var r Refusal
-	if !errors.As(err, &r) || r.Message != "first" {
-		t.Errorf("a Refusal: %v %v", r, err)
+	if u, ok := err.(interface{ Unwrap() []error }); !ok || len(u.Unwrap()) != 2 || u.Unwrap()[0].Error() != "first" {
+		t.Errorf("one error a message: %v", err)
 	}
 }

@@ -31,10 +31,9 @@ func TestRequireYAML(t *testing.T) {
 // checks of Chart.yaml, okdp.yaml's defaults and upstream.
 func TestDefinitionService(t *testing.T) {
 	d := *def
-	d.Package.Roles, d.Package.DependsOn = []string{"web"}, []string{"database"}
 	d.Package.Upstream = chart.Upstream{All: true}
 	svc, err := d.service()
-	want := &Service{Name: "demo", Version: "1.2.3", Roles: []string{"web"}, DependsOn: []string{"database"}, Require: []string{"cluster.domain"}, Charts: chart.Specs{
+	want := &Service{Name: "demo", Version: "1.2.3", Require: []string{"cluster.domain"}, Charts: chart.Specs{
 		"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true},
 	}}
 	if err != nil || !reflect.DeepEqual(svc, want) {

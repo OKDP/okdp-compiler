@@ -23,13 +23,13 @@ func TestLoadWithSections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if instances, err := LoadWith(context.Background(), repos, rules); err != nil || len(instances) != 1 {
-		t.Errorf("LoadWith: %v %v", instances, err)
+	if instances, err := Load(context.Background(), repos, rules); err != nil || len(instances) != 1 {
+		t.Errorf("Load: %v %v", instances, err)
 	}
-	if l, err := LoadProjectsWith(context.Background(), repos, rules); err != nil || len(l.Instances) != 1 {
-		t.Errorf("LoadProjectsWith: %v %v", l, err)
+	if l, err := LoadProjects(context.Background(), repos, rules); err != nil || len(l.Instances) != 1 {
+		t.Errorf("LoadProjects: %v %v", l, err)
 	}
-	if _, err := Load(context.Background(), repos); err == nil || !strings.Contains(err.Error(), "line 1: field notes not found in type okdp.Package") {
+	if _, err := Load(context.Background(), repos, nil); err == nil || !strings.Contains(err.Error(), "line 1: field notes not found in type okdp.Package") {
 		t.Errorf("Load, the mandatory set: got %v", err)
 	}
 }

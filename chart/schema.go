@@ -1,4 +1,5 @@
 // This file checks values against a schema, as Helm 4 does before it renders.
+
 package chart
 
 import (

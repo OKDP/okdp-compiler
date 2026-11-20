@@ -39,24 +39,17 @@ func (r *RuleSet) Scope(ctx context.Context, input M) (M, error) {
 	}
 	platform := M{}
 	given := make([]M, 0, len(r.scopes))
-	for i, name := range r.scopes {
+	for _, name := range r.scopes {
 		v, err := r.Values(ctx, name, input)
 		if err != nil {
 			return nil, err
 		}
 		p := value.AsMap(v["platform"])
-		given = append(given, p)
-		switch i {
-		case 0:
-			platform = p
-			continue
-		case 1:
-			platform = value.AsMap(value.Copy(platform))
-		}
 		if at := mergeScope(platform, p, nil); at != nil {
 			first := slices.IndexFunc(given, func(g M) bool { return holds(g, at) })
 			return nil, fmt.Errorf("the rule set: scopes: platform.%s is given by both %s and %s", strings.Join(at, "."), r.scopes[first], name)
 		}
+		given = append(given, p)
 	}
 	return platform, nil
 }

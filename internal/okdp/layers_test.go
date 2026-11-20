@@ -9,7 +9,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -265,7 +264,7 @@ func TestDeclarationsGlobals(t *testing.T) {
 		"unlisted": {M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := CheckDeclarations(context.Background(), Inputs{Rules: testrules.Standard(), Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
+			err := CheckDeclarations(context.Background(), Inputs{Rules: Mandatory(), Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}

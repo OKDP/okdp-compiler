@@ -21,9 +21,9 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// privileged reports whether namespace is one of the platform's own
+// Privileged reports whether namespace is one of the platform's own
 // projects, global.okdp.policy.privileged.
-func privileged(okdp M, namespace string) bool {
+func Privileged(okdp M, namespace string) bool {
 	return slices.ContainsFunc(value.AsList(value.Dig(okdp, "policy.privileged")), func(v any) bool { return value.Str(v) == namespace })
 }
 
@@ -39,23 +39,18 @@ func EngineNamespaces(rules *RuleSet) []string {
 	return rulesOr(rules).List(ruleset.TableEngineNamespaces)
 }
 
-// reservedNamespace returns why namespace cannot be a project's on any
-// platform, or nil when it can. A check that cannot be evaluated
-// reserves the namespace, and its error says so.
-func reservedNamespace(ctx context.Context, rules *RuleSet, namespace string) error {
-	return rules.Refuse(ctx, ruleset.CheckNamespaceRule, M{"ns": namespace})
-}
-
 // The rule on a project's namespace has two parts: the compiler's own,
 // then the platform's. field names the namespace in the errors.
 
 // checkNamespace returns nil when namespace may be a project's on any
-// platform: it is a DNS label that the compiler does not reserve.
+// platform: it is a DNS label that the compiler does not reserve. A
+// check that cannot be evaluated reserves the namespace, and its error
+// says so.
 func checkNamespace(ctx context.Context, rules *RuleSet, field, namespace string) error {
 	if !chart.IsDNSLabel(namespace) {
 		return fmt.Errorf("%s %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", field, namespace)
 	}
-	if err := reservedNamespace(ctx, rules, namespace); err != nil {
+	if err := rules.Refuse(ctx, ruleset.CheckNamespaceRule, M{"ns": namespace}); err != nil {
 		return fmt.Errorf("%s %q: the namespace is reserved: %w", field, namespace, err)
 	}
 	return nil
@@ -94,17 +89,16 @@ func apiGroup(apiVersion string) string {
 // be in the instance's namespace when it sets metadata.namespace, and of
 // no cluster-scoped kind: only the platform's projects install
 // cluster-scoped objects and write in other namespaces. The items of a
-// List are checked too, because Helm installs them one by one. Once
-// every object passes, each goes through the rule set's objects hook,
-// which reads settings, the platform's.
+// List are checked too, because Helm installs them one by one. An object
+// that passes then goes through the rule set's objects hook, which reads
+// settings, the platform's.
 func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, settings M, objects []M) error {
-	if err := eachObject(objects, func(o M) error {
-		return rules.Refuse(ctx, ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": objectInput(o)})
-	}); err != nil {
-		return err
-	}
 	return eachObject(objects, func(o M) error {
-		return rules.RunHook(ctx, ruleset.HookObjects, M{"svc": svc, "ns": namespace, "object": objectInput(o), "settings": settingsOr(settings)})
+		in := objectInput(o)
+		if err := rules.Refuse(ctx, ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": in}); err != nil {
+			return err
+		}
+		return rules.RunHook(ctx, ruleset.HookObjects, M{"svc": svc, "ns": namespace, "object": in, "settings": settingsOr(settings)})
 	})
 }
 

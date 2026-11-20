@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/okdp/okdp-compiler/chart"
-	"github.com/okdp/okdp-compiler/internal/testrules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -48,8 +47,8 @@ func FuzzParseAccess(f *testing.F) {
 			return
 		}
 		access := doc[AccessKey]
-		got, err := ParseAccess(testrules.Standard(), access, namespace)
-		again, err2 := ParseAccess(testrules.Standard(), access, namespace)
+		got, err := ParseAccess(Mandatory(), access, namespace)
+		again, err2 := ParseAccess(Mandatory(), access, namespace)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(got, again) {
 			t.Fatalf("%q: not the same twice: %v %v / %v %v", b, got, err, again, err2)
 		}
@@ -70,7 +69,7 @@ func FuzzParseAccess(f *testing.F) {
 			t.Fatalf("%q: read as %v", b, got)
 		}
 		for group, role := range got {
-			if !IsGroup(group) || !slices.Contains(Roles(testrules.Standard()), role) || m[group] != string(role) {
+			if !IsGroup(group) || !slices.Contains(Roles(Mandatory()), role) || m[group] != string(role) {
 				t.Fatalf("%q: group %q role %q of %v", b, group, role, m)
 			}
 		}
@@ -105,14 +104,18 @@ func FuzzClaimID(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, namespace, instance, field, name string) {
 		args := []string{namespace, instance, field, name}
-		id := claimID(namespace, instance, field, name)
-		if again := claimID(namespace, instance, field, name); again != id {
+		parts := []string{instance, field}
+		if name != "" {
+			parts = []string{name}
+		}
+		id := claimID(namespace, parts...)
+		if again := claimID(namespace, parts...); again != id {
 			t.Fatalf("%q: %q then %q", args, id, again)
 		}
 		if len(id) > 63 || strings.Trim(id, "abcdefghijklmnopqrstuvwxyz0123456789-.") != "" {
 			t.Fatalf("%q: ID %q", args, id)
 		}
-		parts := []string{norm(namespace), norm(instance), norm(field)}
+		parts = []string{norm(namespace), norm(instance), norm(field)}
 		if name != "" {
 			parts = []string{norm(namespace), norm(name)}
 		}
@@ -155,8 +158,8 @@ func FuzzContextLayers(f *testing.F) {
 			layers = append(layers, ContextLayer{Level: uint(level), Values: v})
 			before = append(before, ContextLayer{Level: uint(level), Values: value.AsMap(value.Copy(v))})
 		}
-		out, platform, err := contextLayers(context.Background(), testrules.Standard(), layers)
-		out2, platform2, err2 := contextLayers(context.Background(), testrules.Standard(), layers)
+		out, platform, err := contextLayers(context.Background(), Mandatory(), layers)
+		out2, platform2, err2 := contextLayers(context.Background(), Mandatory(), layers)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(out, out2) || !reflect.DeepEqual(platform, platform2) {
 			t.Fatalf("%q: not the same twice: %v / %v", [][]byte{b0, b1, b2}, err, err2)
 		}
@@ -220,7 +223,7 @@ func FuzzValuesLayers(f *testing.F) {
 			return
 		}
 		before := value.Copy(M{"c": c, "v": v})
-		in := Inputs{Rules: testrules.Standard(), Context: []ContextLayer{{Values: c}}, Values: []map[string]any{v}}
+		in := Inputs{Rules: Mandatory(), Context: []ContextLayer{{Values: c}}, Values: []map[string]any{v}}
 		got, _, err := valuesLayers(context.Background(), schema, in)
 		got2, _, err2 := valuesLayers(context.Background(), schema, in)
 		if errorString(err) != errorString(err2) || !reflect.DeepEqual(got, got2) {

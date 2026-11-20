@@ -17,7 +17,6 @@ import (
 	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
-	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 // example: the example package
@@ -174,7 +173,7 @@ func TestCompileTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range instances {
-		instances[i].Inputs.Rules = testrules.Standard()
+		instances[i].Inputs.Rules = compiler.Mandatory()
 	}
 	tree := compiler.CompileTree(t.Context(), instances)
 	if tree.Graph == nil || tree.Problems() != nil {
@@ -230,7 +229,7 @@ func TestCheckProjectName(t *testing.T) {
 		"openbao":       `project "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`,
 		"vault":         `project "vault": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins`,
 	} {
-		err := compiler.CheckProjectName(context.Background(), testrules.Standard(), name, platform)
+		err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), name, platform)
 		switch {
 		case want == "" && err != nil:
 			t.Errorf("%q: %v", name, err)
@@ -241,10 +240,10 @@ func TestCheckProjectName(t *testing.T) {
 		}
 	}
 	// Without a platform, the compiler's rule alone.
-	if err := compiler.CheckProjectName(context.Background(), testrules.Standard(), "openbao", nil); err != nil {
+	if err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), "openbao", nil); err != nil {
 		t.Errorf("openbao, no platform: %v", err)
 	}
-	if err := compiler.CheckProjectName(context.Background(), testrules.Standard(), "kube-system", nil); err == nil {
+	if err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), "kube-system", nil); err == nil {
 		t.Error("kube-system, no platform: no error")
 	}
 	// The compile refuses what CheckProjectName refuses, in the same
@@ -256,7 +255,7 @@ func TestCheckProjectName(t *testing.T) {
 	for _, ns := range []string{"kube-foo", "platform", "demo"} {
 		in.Namespace, in.Release = ns, ns+"-webapp"
 		_, cerr := compiler.Compile(context.Background(), def, in)
-		err := compiler.CheckProjectName(context.Background(), testrules.Standard(), ns, example)
+		err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), ns, example)
 		if cerr == nil || err == nil || strings.Replace(cerr.Error(), "Inputs.Namespace", "project", 1) != err.Error() {
 			t.Errorf("%s: compile %v, check %v", ns, cerr, err)
 		}
@@ -268,7 +267,7 @@ func TestCheckProjectName(t *testing.T) {
 // errors it is of unwrapped.
 func TestBuild(t *testing.T) {
 	repos := []compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}}
-	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{Rules: testrules.Standard(), CostLimit: 1_000_000, AllowPlainSecrets: true})
+	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{Rules: compiler.Mandatory(), CostLimit: 1_000_000, AllowPlainSecrets: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +282,7 @@ func TestBuild(t *testing.T) {
 	_, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
 		"projects/demo/instances/a/instance.yaml": {Data: []byte("service: nope\nversion: 1.0.0\n")},
 		"platform.yaml": {Data: []byte("global: [\n")},
-	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: testrules.Standard()})
+	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: compiler.Mandatory()})
 	le, ok := errors.AsType[*compiler.LoadError](err)
 	if !ok || len(le.Problems) != 2 || !errors.Is(err, compiler.ErrNotInCatalog) {
 		t.Errorf("a tree that does not load: %#v", err)
@@ -297,7 +296,7 @@ func TestBuild(t *testing.T) {
 		"projects/good/instances/a/instance.yaml": {Data: []byte("service: app\nversion: 1.0.0\n")},
 		"projects/bad/instances/a/instance.yaml":  {Data: []byte("service: nope\nversion: 1.0.0\n")},
 		"projects/bad/instances/b/instance.yaml":  {Data: []byte("service: app\nversion: 1.0.0\n")},
-	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: testrules.Standard(), Loaded: func(_ context.Context, instances []compiler.Instance) {
+	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: compiler.Mandatory(), Loaded: func(_ context.Context, instances []compiler.Instance) {
 		for _, in := range instances {
 			loaded = append(loaded, in.Inputs.Namespace+"/"+in.Name)
 		}
@@ -308,7 +307,7 @@ func TestBuild(t *testing.T) {
 	if !slices.Equal(loaded, []string{"good/a"}) {
 		t.Errorf("Loaded: got %q, want the instances of the projects that load", loaded)
 	}
-	if tr.Refused[0].Inputs.Rules != testrules.Standard() {
+	if tr.Refused[0].Inputs.Rules != compiler.Mandatory() {
 		t.Error("a project that does not load lost the rule set of the build")
 	}
 	if le := compiler.LoadErrorOf(tr); le == nil || len(le.Problems) != 1 || !errors.Is(le, compiler.ErrNotInCatalog) {

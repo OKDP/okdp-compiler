@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	compiler "github.com/okdp/okdp-compiler"
-	"github.com/okdp/okdp-compiler/internal/testrules"
 )
 
 // compileExample: the outcomes of the instances of the example, by release,
@@ -113,7 +112,7 @@ func TestCompileWithoutRules(t *testing.T) {
 // object without a namespace is the release's; a cluster-scoped kind is
 // refused, named.
 func TestCheckRendered(t *testing.T) {
-	rules := testrules.Standard()
+	rules := compiler.Mandatory()
 	if err := compiler.CheckObjects(context.Background(), rules, "web", "demo", nil, []map[string]any{{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "a"}}}); err != nil {
 		t.Errorf("an object of the namespace: %v", err)
 	}

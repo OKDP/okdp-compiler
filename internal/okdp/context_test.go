@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/chart"
-	"github.com/okdp/okdp-compiler/internal/testrules"
+	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -86,7 +86,7 @@ func TestPlatformSchema(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
-			_, err := schemaValues(testrules.Standard().PlatformSchema(), heading, M{"global": value.Copy(tc.global)})
+			_, err := ruleset.SchemaValues(Mandatory().PlatformSchema(), heading, M{"global": value.Copy(tc.global)})
 			want := heading + ":\n" + tc.want
 			if (err == nil) != (tc.want == "") || (err != nil && err.Error() != want) {
 				t.Errorf("got %v, want %q", err, tc.want)
@@ -99,7 +99,7 @@ func TestPlatformSchema(t *testing.T) {
 	if _, err := platformCtx(t, M{"proxy": false}); err == nil || !strings.HasSuffix(err.Error(), "- at '/global/okdp/proxy': got boolean, want object") {
 		t.Errorf("compile: got %v", err)
 	}
-	settings, err := platformSettings(testrules.Standard(), M{"global": M{"okdp": M{"secrets": M{"serviceAccount": nil, "refreshInterval": ""}}}})
+	settings, err := platformSettings(Mandatory(), M{"global": M{"okdp": M{"secrets": M{"serviceAccount": nil, "refreshInterval": ""}}}})
 	secrets := value.AsMap(settings["secrets"])
 	if _, set := secrets["serviceAccount"]; err != nil || set || secrets["refreshInterval"] != "" {
 		t.Errorf("serviceAccount: null: %v %#v", err, secrets)
@@ -241,7 +241,7 @@ func TestPlatformFromContext(t *testing.T) {
 					view = value.Merge(view, M{"global": M{"okdp": M{"provisioning": value.AsMap(okdp)["provisioning"]}}})
 				}
 			}
-			want, err := platformSettings(testrules.Standard(), view)
+			want, err := platformSettings(Mandatory(), view)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -254,7 +254,7 @@ func TestPlatformFromContext(t *testing.T) {
 					t.Errorf("shape %d %s, context %d: global.okdp of %s\n got %#v\nwant %#v", i, doc, j, name, got, written)
 				}
 			}
-			if privileged(inst.okdp, "demo") || storeName(inst.okdp) == "evil" {
+			if Privileged(inst.okdp, "demo") || storeName(inst.okdp) == "evil" {
 				t.Errorf("shape %d %s, context %d: a package schema's default reached the platform's policy", i, doc, j)
 			}
 		}
@@ -276,7 +276,8 @@ func TestPlatformFromContext(t *testing.T) {
 // TestPlatformAccess: platform.access, the groups of the project (its
 // file's access, the default group an editor without one) and the
 // platform's administrators: each role's list holds the higher roles'
-// groups and the administrators, sorted, once each.
+// groups and the administrators, sorted, once each. A refused access
+// refuses the instance.
 func TestPlatformAccess(t *testing.T) {
 	list := func(g ...string) []any {
 		out := []any{}
@@ -297,7 +298,6 @@ func TestPlatformAccess(t *testing.T) {
 		"roles":                         {M{}, project(M{"readers": "viewer", "devs": "editor", "leads": "admin"}), M{"viewers": list("devs", "leads", "readers"), "editors": list("devs", "leads"), "admins": list("leads"), "platformAdmins": list()}},
 		"no group":                      {M{}, project(M{}), M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
 		"the platform's administrators": {M{"access": M{"admins": []any{"ops", "okdp-admins", "ops"}}}, project(M{"devs": "editor", "ops": "viewer"}), M{"viewers": list("devs", "okdp-admins", "ops"), "editors": list("devs", "okdp-admins", "ops"), "admins": list("okdp-admins", "ops"), "platformAdmins": list("okdp-admins", "ops")}},
-		"a refused access":              {M{"access": M{"admins": []any{"ops"}}}, project(M{"a/b": "viewer"}), M{"viewers": list("ops"), "editors": list("ops"), "admins": list("ops"), "platformAdmins": list("ops")}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"global": M{"okdp": tc.okdp}})
@@ -310,5 +310,11 @@ func TestPlatformAccess(t *testing.T) {
 				t.Errorf("got  %#v\nwant %#v", got, tc.want)
 			}
 		})
+	}
+	// A refused access refuses the instance.
+	in := inputs()
+	in.Context = append(in.Context, project(M{"a/b": "viewer"})...)
+	if _, err := newInstance(context.Background(), pkg, in, defService); err == nil || !strings.HasPrefix(err.Error(), "the project's file (level 1): access.a/b: a group name") {
+		t.Errorf("a refused access: got %v", err)
 	}
 }

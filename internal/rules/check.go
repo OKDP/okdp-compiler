@@ -109,20 +109,20 @@ func (r *RuleSet) put(c *checker) {
 	}
 }
 
-// eval evaluates the document on input, with the sets and tables of the
-// rule set. It returns its first message (empty when none) and its values.
-// The first message of a document it calls through rule is its own, as
-// written. A document r does not hold fails.
-func (r *RuleSet) eval(ctx context.Context, document string, input M) (compile.Problem, M, error) {
+// Values evaluates the document on input, with the sets and tables of the
+// rule set, and returns its values. Its first message is an error (a
+// *Failure); the first message of a document it calls through rule is its
+// own, as written. A document r does not hold fails.
+func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, error) {
 	if !r.Loaded() {
-		return compile.Problem{}, nil, fmt.Errorf("the rule set: %w", ErrNotLoaded)
+		return nil, fmt.Errorf("the rule set: %w", ErrNotLoaded)
 	}
 	if _, ok := r.sources[document]; !ok {
-		return compile.Problem{}, nil, fmt.Errorf("the rule set: no document %s", document)
+		return nil, fmt.Errorf("the rule set: no document %s", document)
 	}
 	c, err := r.get()
 	if err != nil {
-		return compile.Problem{}, nil, fmt.Errorf("the rule set: %w", err)
+		return nil, fmt.Errorf("the rule set: %w", err)
 	}
 	c.ctx = ctx
 	defer func() { c.ctx = nil; r.put(c) }()
@@ -131,29 +131,15 @@ func (r *RuleSet) eval(ctx context.Context, document string, input M) (compile.P
 	scope["sets"], scope["tables"] = r.sets, r.lists
 	sections, problems, err := c.docs[document].Eval(ctx, scope)
 	if f, ok := errors.AsType[*Failure](err); ok {
-		// A document that rule calls refused: its message is this one's.
-		return compile.Problem{Path: f.Path, Message: f.Message}, nil, nil
+		return nil, f // a document that rule calls refused: its message is this one's
 	}
 	if err != nil {
-		return compile.Problem{}, nil, fmt.Errorf("the rule set: %w", err)
+		return nil, fmt.Errorf("the rule set: %w", err)
 	}
 	if len(problems) > 0 {
-		return problems[0], nil, nil
+		return nil, failure(problems[0])
 	}
-	return compile.Problem{}, value.AsMap(sections["values"]), nil
-}
-
-// Values evaluates the document on input and returns its values. The first
-// message of the document is an error (a *Failure).
-func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, error) {
-	p, v, err := r.eval(ctx, document, input)
-	if err == nil {
-		err = failure(document, p)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return v, nil
+	return value.AsMap(sections["values"]), nil
 }
 
 // Refuse runs the check on input: one of ruleChecks, or a document of any
@@ -161,11 +147,8 @@ func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, erro
 // as a *Failure. A check that fails to evaluate gives another error: it
 // never counts as a rule passed.
 func (r *RuleSet) Refuse(ctx context.Context, check string, input M) error {
-	p, _, err := r.eval(ctx, check, input)
-	if err != nil {
-		return err
-	}
-	return failure(check, p)
+	_, err := r.Values(ctx, check, input)
+	return err
 }
 
 // ErrRefused is what a *Failure matches (errors.Is): a rule of the rule set
@@ -178,7 +161,7 @@ var ErrNotLoaded = errors.New("no rule set was loaded (LoadRules)")
 // Failure is a rule that refused. Path is the field the message is about,
 // when it names one: value.FieldError then wraps the Failure.
 type Failure struct {
-	Check, Path, Message string
+	Path, Message string
 }
 
 // Error returns the message.
@@ -188,11 +171,11 @@ func (f *Failure) Error() string { return f.Message }
 func (f *Failure) Is(target error) bool { return target == ErrRefused }
 
 // failure turns the message p into an error, nil without a message.
-func failure(name string, p compile.Problem) error {
+func failure(p compile.Problem) error {
 	if p.Message == "" {
 		return nil
 	}
-	f := &Failure{Check: name, Path: p.Path, Message: p.Message}
+	f := &Failure{Path: p.Path, Message: p.Message}
 	if p.Path != "" {
 		return value.AtField(p.Path, f)
 	}
@@ -252,7 +235,7 @@ func ruleFunctions(c *checker) []cel.EnvOption {
 				return nil, err
 			}
 			if len(problems) > 0 {
-				return nil, failure(value.Str(name.Value()), compile.Problem{Message: problems[0].Message})
+				return nil, failure(compile.Problem{Message: problems[0].Message})
 			}
 			return sections["values"], nil
 		}),

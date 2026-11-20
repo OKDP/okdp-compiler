@@ -82,9 +82,9 @@ renders one chart key with: the chart (`Specs[key].Source`), the
 compiler reads no upstream chart, so a host that checks or renders one
 fetches it itself. `compiler.FinalValues` is Helm's merge, for a
 `Finalize` to add to; its `FinalValuesOf.Appended` gives the lists the
-instance appended to ([append](#append)). `FinalInput.CheckFinalValues`
-runs the rule set's `finalValues` hook on the values a `Finalize`
-returns ([checks of the final values](#checks-of-the-final-values)).
+instance appended to ([append](#append)). The compile runs the rule
+set's `finalValues` hook on the values a `Finalize` returns ([checks of
+the final values](#checks-of-the-final-values)).
 `compiler.CheckObjects` checks the manifests a host renders with the
 rule set of the compile, as a compile checks its own objects: check
 `object`, then the `objects` hook. okdp-gitops sets both hooks
@@ -1565,9 +1565,9 @@ privileged giving it upstream values is refused when the build renders.
 
 The compiler itself runs one check of the final values: the rule set's
 `finalValues` hook, on the values of each key, for a project that is not
-privileged ([hooks](05_rules.md#hooks)). A Finalize runs it where it
-chooses (`FinalInput.CheckFinalValues`); else the compile runs it on
-what Finalize returns, or right after Helm's merge.
+privileged ([hooks](05_rules.md#hooks)). The compile runs it on what
+Finalize returns, after the host's own checks, or right after Helm's
+merge.
 
 Each compiled chart whose source has a `values.schema.json` in the
 chart cache is checked on its final values coalesced over
@@ -1734,7 +1734,8 @@ reported, as for an expression of the mapping: `provides` is the package's
 to fix, not the instance's, and the error is the same from one compile to
 the next; the required fields that item lacks, and the schema's violations
 of that item, all at once, one line each ([Checks](#checks)). Once every
-item passes, two items of one contract and name fail, one line per name.
+item passes, two items of one contract and name fail, one line per name,
+in the order of the second item of each.
 `<out>`: `provides "<name>" (<contract>)`; `<i>`: the item's position.
 
 | Case | Error |
@@ -1903,7 +1904,7 @@ drive the engine with its own identity, past the project's
 web: objects: HelmRelease/demo-web-override: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
 ```
 
-Once every object passed these rules, each, the items of a `List` too,
+Each object that passed these rules, the items of a `List` too, then
 goes through the documents of the rule set's `objects` hook, for a
 project that is not privileged ([hooks](05_rules.md#hooks)); the
 mandatory set lists none, and an added set refuses with its own

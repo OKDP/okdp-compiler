@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"maps"
 	"path"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -46,8 +47,16 @@ type resolver struct {
 	namespace string
 	draft     any          // $schema of the parameter schema, for the requirements that name no draft
 	deps      []Dependency // the references to an instance that resolve, in order
-	errs      []error      // the references that do not resolve, in order (walk)
+	errs      []error      // the references that do not resolve, in order (refs)
 	missing   []outputKey  // the outputs references name that nobody publishes, in order
+	// reqs holds the requirement of each reference read so far, by the
+	// address of its x-okdp-connection-ref: every item of a list has one.
+	reqs map[uintptr]requirementRead
+}
+
+type requirementRead struct {
+	req *requirement
+	err error
 }
 
 // outputKey identifies an output by namespace, contract and name. An
@@ -108,10 +117,6 @@ func refs(s M, v any, path, key string, visit func(ref M, v any, path, key strin
 	return v
 }
 
-// walk replaces every reference of the parameters v, of schema s, by the
-// connection it resolves to, and records the errors (errs).
-func (r *resolver) walk(s M, v any) any { return refs(s, v, "", "", r.reference) }
-
 // reference resolves v, the value of a reference (ref) at path. Null or
 // "" means not set, a string names a connection, a named claim or an
 // output, and an object is a claim template. Any other value is refused,
@@ -123,26 +128,23 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 	}
 	contract, provision := value.Str(ref["contract"]), value.Truthy(ref["provision"])
 	// It compiles: requirements checked it with the parameter schema.
-	req, err := readRequirement(ref, r.draft)
+	req, err := r.requirement(ref)
 	if err != nil {
 		r.errs = append(r.errs, atField(path, fmt.Errorf("%s: x-okdp-connection-ref: %w", path, err)))
 		return v
 	}
 	var c M
 	l := lookup{field: path, contract: contract, req: req, provision: provision}
-	switch t := v.(type) {
-	case string:
-		l.name = t
-		c, err = r.resolve(l)
-	case M:
-		if !provision {
-			err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
-			break
-		}
-		if l.claim, err = parseClaim(t, path, false); err == nil {
+	if m, ok := v.(M); ok && provision {
+		var spec ClaimSpec
+		if spec, err = parseClaim(m, path, false); err == nil {
+			l.claim = &spec
 			c, err = r.resolve(l)
 		}
-	default:
+	} else if s, ok := v.(string); ok {
+		l.name = s
+		c, err = r.resolve(l)
+	} else {
 		err = fmt.Errorf("%s: a connection reference must be a string, got %s", path, value.ShortAt(key, v))
 	}
 	if err != nil {
@@ -152,15 +154,38 @@ func (r *resolver) reference(ref M, v any, path, key string) any {
 	return c
 }
 
+// requirement returns the requirement of ref (readRequirement), read once
+// per resolver.
+func (r *resolver) requirement(ref M) (*requirement, error) {
+	k := reflect.ValueOf(ref).Pointer()
+	x, ok := r.reqs[k]
+	if !ok {
+		x.req, x.err = readRequirement(ref, r.draft)
+		if r.reqs == nil {
+			r.reqs = map[uintptr]requirementRead{}
+		}
+		r.reqs[k] = x
+	}
+	return x.req, x.err
+}
+
 // declaredConnections checks every connection of the context of in at its
 // declaration, whatever its level and whether a reference names it or not.
 // It returns nil when the context's layers fail: the instance's compile
-// reports them.
-func declaredConnections(ctx context.Context, in Inputs) error {
+// reports them. seen is as checkDeclared's.
+func declaredConnections(ctx context.Context, in Inputs, seen map[string]error) error {
 	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
 	if err != nil {
 		return nil //nolint:nilerr // the instance's compile reports it
 	}
+	return checkDeclared(in, layers, platform, seen)
+}
+
+// checkDeclared is declaredConnections once the context's layers are read
+// (contextLayers). seen, when not nil, holds the outcome of each
+// connection checked so far, by what its check reads (declarationKey): the
+// instances of a project check its connections and the platform's once.
+func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[string]error) error {
 	conns := M{}
 	for _, l := range layers {
 		if c, ok := l["connections"].(M); ok {
@@ -177,7 +202,7 @@ func declaredConnections(ctx context.Context, in Inputs) error {
 		release:   in.Release,
 		namespace: in.Namespace,
 	}
-	return r.declared()
+	return r.declared(seen)
 }
 
 // CheckConnection checks one connection as CompileAll checks it at its
@@ -197,18 +222,40 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, lev
 		store:     store,
 		namespace: namespace,
 	}
-	return r.declared()
+	return r.declared(nil)
 }
 
 // declared checks every connection of the context, in name order, and
-// reports every one that fails, each at connections.<name>.
-func (r *resolver) declared() error {
+// reports every one that fails, each at connections.<name>. seen, when not
+// nil, holds the outcome of the connections checked before, by
+// declarationKey, and receives those it checks.
+func (r *resolver) declared(seen map[string]error) error {
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(r.conns)) {
-		field := value.Key("connections", name)
-		errs = append(errs, atField(field, r.declaration(name, field)))
+		key, keyed := r.declarationKey(name)
+		err, done := seen[key]
+		if !keyed || !done {
+			field := value.Key("connections", name)
+			err = atField(field, r.declaration(name, field))
+		}
+		if keyed && seen != nil {
+			seen[key] = err
+		}
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// declarationKey identifies what the check of the connection name at its
+// declaration reads: its entry, its level, the namespace, the secret
+// store and its provider, and the contracts. keyed is false when the entry
+// cannot be encoded.
+func (r *resolver) declarationKey(name string) (key string, keyed bool) {
+	b, err := json.Marshal(r.conns[name])
+	if err != nil {
+		return "", false
+	}
+	return fmt.Sprintf("%p %q %q %t %d %q %s", r.contracts, r.namespace, r.store, r.provider, r.levels[name], name, b), true
 }
 
 // declaration checks the connection name, declared at field, as a
@@ -233,10 +280,7 @@ func (r *resolver) declaration(name, field string) error {
 	if err != nil {
 		return err
 	}
-	if err := c.complete(x.values, x.where); err != nil {
-		return err
-	}
-	if err := c.check(x.values, x.where); err != nil {
+	if err := c.validate(x.values, x.where); err != nil {
 		return err
 	}
 	return chart.NoTemplate(x.values, func(p string) string { return fmt.Sprintf("%s: field %q", x.where, p) })
@@ -289,10 +333,16 @@ func (r *resolver) resolve(l lookup) (M, error) {
 		return nil, err
 	}
 	var x *resolved
+	// A named claim has no connection's name (namedClaims), and a claim
+	// template no name.
 	named, isNamed := r.claims[ref]
 	switch conn, external := r.conns[ref].(M); {
-	case isNamed && claim == nil && r.conns[ref] == nil:
-		x, err = r.resolveNamed(c, ref, field, named, l.provision)
+	case isNamed && !l.provision:
+		return nil, fmt.Errorf("%s: %q is a claim: the reference takes none (x-okdp-connection-ref's provision)", field, ref)
+	case isNamed && named.Contract != c.name:
+		return nil, fmt.Errorf("%s: claim %q has contract %q, %q is expected", field, ref, named.Contract, c.name)
+	case isNamed:
+		x, err = r.resolveClaim(c, ref, field, &named)
 	case claim != nil:
 		x, err = r.resolveClaim(c, ref, field, claim)
 	case external:
@@ -304,10 +354,7 @@ func (r *resolver) resolve(l lookup) (M, error) {
 		return nil, err
 	}
 	out := x.values
-	if err := c.complete(out, x.where); err != nil {
-		return nil, err
-	}
-	if err := c.check(out, x.where); err != nil {
+	if err := c.validate(out, x.where); err != nil {
 		return nil, err
 	}
 	if x.secretRef != nil {
@@ -333,16 +380,6 @@ func (r *resolver) resolve(l lookup) (M, error) {
 		r.deps = append(r.deps, Dependency{Instance: x.instance, Namespace: x.namespace, Contract: c.name, Field: field, Output: x.ref})
 	}
 	return out, nil
-}
-
-func (r *resolver) resolveNamed(c *contract, ref, field string, spec ClaimSpec, provision bool) (*resolved, error) {
-	switch {
-	case !provision:
-		return nil, fmt.Errorf("%s: %q is a claim: the reference takes none (x-okdp-connection-ref's provision)", field, ref)
-	case spec.Contract != c.name:
-		return nil, fmt.Errorf("%s: claim %q has contract %q, %q is expected", field, ref, spec.Contract, c.name)
-	}
-	return r.resolveClaim(c, ref, field, &spec)
 }
 
 // resolveClaim resolves the claim at field to the output its binding
@@ -464,12 +501,7 @@ func ParseConnection(name string, v any) Connection {
 // Entry returns the connection as written at connections.<name>. A key of
 // Values named contract, description or secretRef is left out.
 func (c Connection) Entry() map[string]any {
-	out := M{}
-	for k, v := range c.Values {
-		if k != "contract" && k != "description" && k != "secretRef" {
-			out[k] = v
-		}
-	}
+	out := c.fields()
 	out["contract"] = c.Contract
 	if c.Description != "" {
 		out["description"] = c.Description
@@ -503,13 +535,20 @@ func (c Connection) MarshalYAML() (any, error) {
 	if c.SecretRef != "" || c.RemoteKey != "" {
 		entry.SecretRef = &ref{Name: c.SecretRef, RemoteKey: c.RemoteKey}
 	}
-	entry.Fields = M{}
+	entry.Fields = c.fields()
+	return entry, nil
+}
+
+// fields returns Values without the keys the connection's own fields
+// give: contract, description and secretRef.
+func (c Connection) fields() M {
+	out := M{}
 	for k, v := range c.Values {
 		if k != "contract" && k != "description" && k != "secretRef" {
-			entry.Fields[k] = v
+			out[k] = v
 		}
 	}
-	return entry, nil
+	return out
 }
 
 // storeSecret handles the secretRef {remoteKey} of the external connection
@@ -532,7 +571,7 @@ func (c Connection) MarshalYAML() (any, error) {
 func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
 	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
 	key, ok := secretRef["remoteKey"].(string)
-	fields := c.secretFields()
+	fields, level := c.secretFields(), r.levels[ref]
 	switch {
 	case secretRef["name"] != nil:
 		return "", fmt.Errorf("%s: name or remoteKey, not both", where)
@@ -541,12 +580,6 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 		// printed as the messages below print it. value.Short is used, not
 		// ShortAt, which reads remoteKey as an API key.
 		return "", fmt.Errorf("%s.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got %s", where, value.Short(secretRef["remoteKey"]))
-	}
-	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
-		return "", err
-	}
-	level := r.levels[ref]
-	switch {
 	case r.store == "":
 		return "", fmt.Errorf("%s.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set", where)
 	case !chart.IsDNSLabel(ref):
@@ -559,6 +592,9 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 		return "", fmt.Errorf("%s.remoteKey %q: no namespace reads %s/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>, read through a connection of the project (level 1)", where, key, platformKeys)
 	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
 		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
+	}
+	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
+		return "", err
 	}
 	name := r.rules.Name("connectionSecret", "release", r.release, "connection", ref)
 	r.addTransfer(transfer{secret: name, key: key, contract: c.name, fields: fields})
@@ -1062,6 +1098,15 @@ func (c *contract) complete(out M, where string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// validate completes values against the contract (complete), then checks
+// them (check).
+func (c *contract) validate(values M, where string) error {
+	if err := c.complete(values, where); err != nil {
+		return err
+	}
+	return c.check(values, where)
 }
 
 // check validates values, the completed fields of a connection or an

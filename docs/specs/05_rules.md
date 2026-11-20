@@ -364,8 +364,7 @@ The checks are the compiler's own, one per name below: a set added gives
 none. Its own refusals are documents, which its hooks, `rule` or a host's
 Go (`RuleSet.Refuse`, any document by name) call.
 
-Conditions are listed in evaluation order. Below, `...` shortens a
-message; the full text is in the check's file.
+Below, `...` shortens a message; the full text is in the check's file.
 
 ### namespace
 
@@ -475,7 +474,7 @@ and are skipped for a privileged project.
 
 | Hook | Called | Input |
 |---|---|---|
-| `objects` | on each object of an instance, items of a List too, once every object passed check `object`; also by `compiler.CheckObjects`, on a host's objects | `svc`, `ns`, `object` (as check `object` reads it), `settings` |
+| `objects` | on each object of an instance, items of a List too, once it passed check `object`; also by `compiler.CheckObjects`, on a host's objects | `svc`, `ns`, `object` (as check `object` reads it), `settings` |
 | `finalValues` | on the final values of each chart key, keys in order, whether `Inputs.Finalize` or Helm's merge made them; also by `compiler.CheckFinalValues` | `svc`, `ns`, `key`, `value` (the key's values), `settings` |
 
 `settings` is `global.okdp`, the platform's, never null. A message in
@@ -485,11 +484,9 @@ the shape of the compiler's own is written by the document:
 hosts of objects and of final values this way ([its
 hooks](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#hooks)).
 
-A `Finalize` runs `finalValues` itself through
-`FinalInput.CheckFinalValues`, at the point of its own checks it
-chooses, on the values it returns. When it does not, the compile runs
-the hook on what it returns. Without a `Finalize`, the compile runs it
-right after Helm's merge.
+The compile runs `finalValues` on the values a `Finalize` returns, after
+the host's own checks. Without a `Finalize`, it runs the hook right
+after Helm's merge.
 
 ## What a host adds
 

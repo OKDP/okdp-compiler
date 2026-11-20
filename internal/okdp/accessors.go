@@ -19,7 +19,7 @@ func atField(field string, err error) error { return value.AtField(field, err) }
 
 // NamedClaimID returns the ID of the named claim name of namespace:
 // <namespace>.<name>.
-func NamedClaimID(namespace, name string) string { return claimID(namespace, "", "", name) }
+func NamedClaimID(namespace, name string) string { return claimID(namespace, name) }
 
 // IsClaimID reports whether name has the form of a claim's ID: two or
 // more DNS-1123 labels joined by dots. An output that the mapping names

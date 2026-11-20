@@ -6,6 +6,7 @@
 //	["a.b"]
 //
 // The protect and append paths of okdp.yaml have the same form.
+
 package value
 
 import (

@@ -54,9 +54,8 @@ var ruleTables = []string{
 
 // ruleTable is a table of a rule set.
 type ruleTable struct {
-	values  []string        // in order
-	set     map[string]bool // the same values, for lookups
-	addFrom string          // the path, under global.okdp, of the list the platform adds
+	values  []string // in order
+	addFrom string   // the path, under global.okdp, of the list the platform adds
 	// extensible says a set read later may add values to the table (add).
 	extensible bool
 }
@@ -68,11 +67,10 @@ type ruleTable struct {
 // a rule passed.
 type RuleSet struct {
 	loaded  bool
-	version string     // the version of the last set read
 	named   []namedSet // the sets read, in order
 	tables  map[string]*ruleTable
-	sets    M // each table as a set, as the checks read it
-	lists   M // each table as a list, as the checks read it
+	sets    M // each table as a set, as the checks read it (ready)
+	lists   M // each table as a list, as the checks read it (ready)
 	sources map[string]compile.Source
 	free    chan *checker
 
@@ -184,41 +182,8 @@ func readTemplate(fsys fs.FS, file string) (Template, error) {
 
 const templateGeneratedSecret = "generatedSecret"
 
-func (r *RuleSet) loadFiles(fsys fs.FS, doc M) error {
-	schemas := value.AsMap(doc["schemas"])
-	if err := r.loadSchema(fsys, schemas, schemaPlatform); err != nil {
-		return err
-	}
-	if err := r.loadSchema(fsys, schemas, schemaMapping); err != nil {
-		return err
-	}
-	if err := r.loadScopes(doc); err != nil {
-		return err
-	}
-	templates := value.AsMap(doc["templates"])
-	for _, name := range slices.Sorted(maps.Keys(templates)) {
-		if _, ok := r.templates[name]; ok {
-			return taken("templates", name)
-		}
-		t, err := readTemplate(fsys, value.Str(templates[name]))
-		if err != nil {
-			return err
-		}
-		r.templates[name] = t
-	}
-	if err := r.loadNames(doc); err != nil {
-		return err
-	}
-	if err := r.loadCharts(doc); err != nil {
-		return err
-	}
-	if err := r.loadOwnObjects(doc); err != nil {
-		return err
-	}
-	return r.loadFunctions(fsys, doc)
-}
-
-// loadNames reads names, keepSync and labels, which one set only may give.
+// loadNames reads names, keepSync and labels, which one set only may give,
+// and sections, which each set adds to.
 func (r *RuleSet) loadNames(doc M) error {
 	if names, ok := doc["names"]; ok {
 		if r.names != nil {
@@ -329,7 +294,12 @@ func taken(section, name string) error {
 
 // Version returns the version the last set read gives itself: the
 // mandatory set's alone, the added set's with one (SetVersion for each).
-func (r *RuleSet) Version() string { return r.version }
+func (r *RuleSet) Version() string {
+	if r == nil || len(r.named) == 0 {
+		return ""
+	}
+	return r.named[len(r.named)-1].version
+}
 
 // table returns the named table, an empty one when r does not hold it.
 func (r *RuleSet) table(name string) *ruleTable {
@@ -342,7 +312,7 @@ func (r *RuleSet) table(name string) *ruleTable {
 }
 
 // Has reports whether v is in the table.
-func (r *RuleSet) Has(table, v string) bool { return r.table(table).set[v] }
+func (r *RuleSet) Has(table, v string) bool { return slices.Contains(r.List(table), v) }
 
 // List returns the values of the table, in order, not to be changed.
 func (r *RuleSet) List(table string) []string { return r.table(table).values }
@@ -459,7 +429,37 @@ func (r *RuleSet) add(fsys fs.FS, mandatory bool) error {
 	if err := r.loadHooks(value.AsMap(doc["hooks"])); err != nil {
 		return err
 	}
-	return r.loadFiles(fsys, doc)
+	schemas := value.AsMap(doc["schemas"])
+	if err := r.loadSchema(fsys, schemas, schemaPlatform); err != nil {
+		return err
+	}
+	if err := r.loadSchema(fsys, schemas, schemaMapping); err != nil {
+		return err
+	}
+	if err := r.loadScopes(doc); err != nil {
+		return err
+	}
+	templates := value.AsMap(doc["templates"])
+	for _, name := range slices.Sorted(maps.Keys(templates)) {
+		if _, ok := r.templates[name]; ok {
+			return taken("templates", name)
+		}
+		t, err := readTemplate(fsys, value.Str(templates[name]))
+		if err != nil {
+			return err
+		}
+		r.templates[name] = t
+	}
+	if err := r.loadNames(doc); err != nil {
+		return err
+	}
+	if err := r.loadCharts(doc); err != nil {
+		return err
+	}
+	if err := r.loadOwnObjects(doc); err != nil {
+		return err
+	}
+	return r.loadFunctions(fsys, doc)
 }
 
 // loadTables reads the tables of a set. The mandatory set gives those of
@@ -482,19 +482,17 @@ func (r *RuleSet) loadTables(tables M, mandatory bool) error {
 			case !before.extensible:
 				return fmt.Errorf("%s: tables: %s: add: the table is not extensible: a rule set adds values to the tables marked extensible only", RulesFile, name)
 			}
-			values := slices.Clone(before.values)
 			for _, v := range stringList(add) {
-				if !slices.Contains(values, v) {
-					values = append(values, v)
+				if !slices.Contains(before.values, v) {
+					before.values = append(before.values, v)
 				}
 			}
-			r.addTable(name, values, before.addFrom, true)
 			continue
 		}
 		if given {
 			return taken("tables", name)
 		}
-		r.addTable(name, stringList(t["values"]), value.Str(t["addFrom"]), value.Truthy(t["extensible"]))
+		r.tables[name] = &ruleTable{values: stringList(t["values"]), addFrom: value.Str(t["addFrom"]), extensible: value.Truthy(t["extensible"])}
 	}
 	return nil
 }
@@ -537,16 +535,27 @@ func (r *RuleSet) complete() error {
 	return nil
 }
 
-// ready finishes the rule set once every set is read. It prepares the
-// checks and the documents together, so that each can call any other, and
-// keeps that session for the first compile.
+// ready finishes the rule set once every set is read: the tables as the
+// checks read them, the whole paths split. It prepares the checks and the
+// documents together, so that each can call any other, and keeps that
+// session for the first compile.
 func (r *RuleSet) ready() error {
 	for _, role := range r.List(TableProjectRoles) {
 		if !slices.Contains([]string{RoleViewer, RoleEditor, RoleAdmin}, role) {
 			return fmt.Errorf("%s: tables: %s: %q is no role: %s, %s or %s", RulesFile, TableProjectRoles, role, RoleViewer, RoleEditor, RoleAdmin)
 		}
 	}
-	r.splitWholePaths()
+	r.sets, r.lists = make(M, len(r.tables)), make(M, len(r.tables))
+	for name, t := range r.tables {
+		set, list := make(M, len(t.values)), make([]any, len(t.values))
+		for i, v := range t.values {
+			set[v], list[i] = true, v
+		}
+		r.sets[name], r.lists[name] = set, list
+	}
+	for _, p := range r.List(TableWholePaths) {
+		r.wholePaths = append(r.wholePaths, strings.Split(p, "."))
+	}
 	first, err := prepare(r.sources)
 	if err != nil {
 		return fmt.Errorf("%s: checks: %w", RulesFile, err)
@@ -618,34 +627,15 @@ func knownKeys(what string, m M, want []string) error {
 
 func newRuleSet() *RuleSet {
 	return &RuleSet{
-		loaded: true, tables: map[string]*ruleTable{}, sets: M{}, lists: M{},
-		sources: map[string]compile.Source{}, templates: map[string]Template{}, charts: map[string]chart.Ref{},
-		schemaFiles: map[string]*schemaFile{},
-	}
-}
-
-// addTable adds the table, with the forms of it that the checks read, or
-// replaces it with the values a set adds to it.
-func (r *RuleSet) addTable(name string, values []string, addFrom string, extensible bool) {
-	rt := &ruleTable{values: values, set: make(map[string]bool, len(values)), addFrom: addFrom, extensible: extensible}
-	set := make(M, len(values))
-	list := make([]any, len(values))
-	for i, v := range values {
-		rt.set[v], set[v], list[i] = true, true, v
-	}
-	r.tables[name], r.sets[name], r.lists[name] = rt, set, list
-}
-
-func (r *RuleSet) splitWholePaths() {
-	for _, p := range r.List(TableWholePaths) {
-		r.wholePaths = append(r.wholePaths, strings.Split(p, "."))
+		loaded: true, tables: map[string]*ruleTable{}, sources: map[string]compile.Source{}, templates: map[string]Template{},
+		charts: map[string]chart.Ref{}, schemaFiles: map[string]*schemaFile{}, hooks: map[string][]string{},
 	}
 }
 
 // SchemaValues coalesces user over the defaults of schema and checks the
-// result against it, as Helm reads a chart's values. The error is a
-// *SchemaError with every violation, under heading. Without a schema it
-// returns user as it is.
+// result against it, as Helm reads a chart's values. The error is heading,
+// then every violation on the lines below it. Without a schema it returns
+// user as it is.
 func SchemaValues(schema *chart.Schema, heading string, user M) (M, error) {
 	if schema == nil {
 		return user, nil
@@ -655,18 +645,10 @@ func SchemaValues(schema *chart.Schema, heading string, user M) (M, error) {
 		return nil, err
 	}
 	if v != "" {
-		return nil, &SchemaError{Heading: heading, Violations: v}
+		return nil, fmt.Errorf("%s:\n%s", heading, v)
 	}
 	return values, nil
 }
-
-// SchemaError reports values that violate a schema, as Helm prints them.
-type SchemaError struct {
-	Heading, Violations string
-}
-
-// Error returns the heading, then the violations on the lines below it.
-func (e *SchemaError) Error() string { return e.Heading + ":\n" + e.Violations }
 
 // Kept reports whether annotations say Helm keeps the object. It reads the
 // annotation as Helm does: trimmed, in any case.

@@ -3,6 +3,7 @@ package rules
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ func TestFailure(t *testing.T) {
 	r := Mandatory()
 	err := r.Refuse(context.Background(), CheckNamespaceRule, M{"ns": "kube-system"})
 	var f *Failure
-	if !errors.As(err, &f) || !errors.Is(err, ErrRefused) || f.Check != CheckNamespaceRule || f.Message != err.Error() {
+	if !errors.As(err, &f) || !errors.Is(err, ErrRefused) || f.Message != err.Error() {
 		t.Fatalf("a refusal: %v (%+v)", err, f)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -41,13 +42,12 @@ func TestFailure(t *testing.T) {
 	}
 }
 
-// TestSchemaError: the values a schema refuses, a *SchemaError, whose
-// message is the heading, then the violations.
+// TestSchemaError: the values a schema refuses, an error whose message is
+// the heading, then the violations.
 func TestSchemaError(t *testing.T) {
 	r := Mandatory()
 	_, err := SchemaValues(r.PlatformSchema(), "heading", M{"global": M{"okdp": M{"policy": "x"}}})
-	var se *SchemaError
-	if !errors.As(err, &se) || err.Error() != "heading:\n"+se.Violations || se.Violations == "" {
+	if err == nil || !strings.HasPrefix(err.Error(), "heading:\n") || err.Error() == "heading:\n" {
 		t.Errorf("got %v", err)
 	}
 }
