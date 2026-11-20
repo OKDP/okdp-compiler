@@ -1,9 +1,9 @@
 # Service definition
 
 Normative reference of a service definition: the files at the root of a
-package that `compiler.LoadDefinition(fsys)` reads. A package is laid out
-as a Helm chart over the service's upstream charts, plus OKDP's own
-files; it is installed as it is, with the values of a compile.
+package that `compiler.LoadDefinition(fsys, rules)` reads. A package is
+laid out as a Helm chart over the service's upstream charts, plus OKDP's
+own files; it is installed as it is, with the values of a compile.
 
 The function `okdpGeneratedSecret`, what the mapping sees as `platform`
 and the shape of the mapping's sections come from the compiler's
@@ -201,8 +201,8 @@ would accept no upstream values, each reported, one per line, as yaml.v3
 reports it (`okdp.Package` the type of the top level). The unknown keys
 are reported first, before the type of any key is checked. The sections of
 the rule set the package is read for (`rules.yaml`'s `sections`;
-`compiler.LoadDefinitionWith`, `Build` for `BuildOptions.Rules`) are
-keys of the file too; `LoadDefinition` reads it for the mandatory set:
+`compiler.LoadDefinition`, `Build` for `BuildOptions.Rules`) are keys
+of the file too; nil rules read it for the mandatory set:
 
 ```text
 okdp.yaml: yaml: unmarshal errors:
@@ -822,7 +822,7 @@ Secrets](01_inputs_outputs.md#credentials-secrets).
 
 A rule set added to the mandatory one may add sections to the mapping
 (`rules.yaml` `sections`), which `okdp.yaml` then holds besides its own:
-`compiler.LoadDefinitionWith`, `LoadRepositoryWith` and `Build` read
+`compiler.LoadDefinition`, `LoadRepository` and `Build` read
 `okdp.yaml` for the rule set they are given ([okdp.yaml](#okdpyaml)). A
 section is evaluated after `objects`, as any node is, and its shape is
 the mapping schema's, under the section's name

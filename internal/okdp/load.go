@@ -15,18 +15,14 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 )
 
-// LoadDefinition reads and checks the package at the root of fsys:
-// Chart.yaml, then okdp.yaml and the values file when the package has
-// them. A values.yaml that holds expressions is still read, with a
-// warning (Definition.Warnings). It is LoadDefinitionWith the mandatory
-// rule set.
-func LoadDefinition(fsys fs.FS) (*Definition, error) { return LoadDefinitionWith(fsys, nil) }
-
-// LoadDefinitionWith is LoadDefinition for the compiles of rules: a
-// top-level key of okdp.yaml that Package does not declare is one of the
-// sections of rules (RuleSet.Sections), or an error. Nil rules stand for
-// the mandatory set.
-func LoadDefinitionWith(fsys fs.FS, rules *RuleSet) (*Definition, error) {
+// LoadDefinition reads and checks the package at the root of fsys for
+// the compiles of rules, nil for the mandatory set alone: Chart.yaml,
+// then okdp.yaml and the values file when the package has them. A
+// top-level key of okdp.yaml is a package key, a key of the mapping or
+// one of the sections of rules (RuleSet.Sections), or an error. A
+// values.yaml that holds expressions is still read, with a warning
+// (Definition.Warnings).
+func LoadDefinition(fsys fs.FS, rules *RuleSet) (*Definition, error) {
 	b, err := fs.ReadFile(fsys, chart.MetadataFile)
 	if err != nil {
 		return nil, err
@@ -38,7 +34,7 @@ func LoadDefinitionWith(fsys fs.FS, rules *RuleSet) (*Definition, error) {
 	if def.Okdp, err = readOptional(fsys, "okdp.yaml"); err != nil {
 		return nil, err
 	}
-	if def.Package, err = decodePackageWith(def.Okdp, rulesOr(rules).Sections()); err != nil {
+	if def.Package, err = decodePackage(def.Okdp, rules); err != nil {
 		return nil, err
 	}
 	if _, err := def.service(); err != nil {
@@ -100,18 +96,13 @@ func readOptional(fsys fs.FS, name string) ([]byte, error) {
 	return b, err
 }
 
-// decodePackage decodes the package keys of okdp.yaml strictly, for the
-// mandatory rule set (decodePackageWith).
-func decodePackage(b []byte) (Package, error) {
-	return decodePackageWith(b, Mandatory().Sections())
-}
-
-// decodePackageWith decodes the package keys of okdp.yaml strictly: an
+// decodePackage decodes the package keys of okdp.yaml strictly: an
 // unknown key fails. Otherwise a misspelt require would leave the
 // platform values unchecked. The mapping's keys are known: vars, errors,
-// the compiler's sections and ruleSections, the rule set's. The charts'
-// values (output) and the keys of Chart.yaml fail with their own message.
-func decodePackageWith(b []byte, ruleSections []string) (Package, error) {
+// the compiler's sections and those of rules (nil: the mandatory set).
+// The charts' values (output) and the keys of Chart.yaml fail with their
+// own message.
+func decodePackage(b []byte, rules *RuleSet) (Package, error) {
 	var p Package
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
@@ -122,6 +113,7 @@ func decodePackageWith(b []byte, ruleSections []string) (Package, error) {
 	}
 	// The decoder checks no key: Package declares only the package's.
 	var unknown []string
+	ruleSections := rulesOr(rules).Sections()
 	if top := doc.Content[0]; top.Kind == yaml.MappingNode {
 		for i := 0; i < len(top.Content); i += 2 {
 			switch k := top.Content[i]; {

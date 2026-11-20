@@ -2,11 +2,9 @@
 # compile needs to write values a chart installs (the templates and the
 # names of a mapping), and what it refuses (the checks, and the tables they
 # read), as data. Another rule set given to the compile
-# (LoadRules, --rules) adds to this one without replacing any of it. A table
-# with addFrom also reads the list global.okdp.<addFrom>: the platform adds
-# to the table, it never removes from it. An extensible table is one where
-# more values mean more refusals: a rule set added to this one may add values
-# to it (add), never remove one.
+# (LoadRules, --rules) adds to this one without replacing any of it. An
+# extensible table is one where more values mean more refusals: a rule set
+# added to this one may add values to it (add), never remove one.
 apiVersion: okdp-compiler/rules.v1
 name: core
 version: 1.0.0

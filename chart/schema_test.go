@@ -20,7 +20,7 @@ func TestValidateRedacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := Validate("values.schema.json", s.root, map[string]any{
+	got, err := s.Validate(map[string]any{
 		"realm":      "Hunter2",
 		"password":   "Hunter2",
 		"tokens":     []any{"t-ok", "Hunter2"},

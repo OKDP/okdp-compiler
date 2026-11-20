@@ -104,7 +104,7 @@ claim "demo.b" (api): provides publishes no api output of that name`
 // twice, a claimer that is no namespace name nor "*", or listed twice,
 // fail when the package is loaded, and so does another key or form.
 func TestProvisions(t *testing.T) {
-	p, err := decodePackage([]byte("provisions: [database-server, {contract: s3, claimers: [demo, '*']}, {contract: api}]\n"))
+	p, err := decodePackage([]byte("provisions: [database-server, {contract: s3, claimers: [demo, '*']}, {contract: api}]\n"), nil)
 	want := []Provision{{Contract: "database-server"}, {Contract: "s3", Claimers: []string{"demo", "*"}}, {Contract: "api"}}
 	if err != nil || !reflect.DeepEqual(p.Provisions, want) {
 		t.Errorf("got %#v (%v)", p.Provisions, err)
@@ -126,7 +126,7 @@ func TestProvisions(t *testing.T) {
 		"[{contract: s3, claimers: ['*', '*']}]": `okdp.yaml: provisions[0] (s3): claimers: * is listed twice`,
 	} {
 		d := *def
-		p, err := decodePackage([]byte("provisions: " + list + "\n"))
+		p, err := decodePackage([]byte("provisions: "+list+"\n"), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +140,7 @@ func TestProvisions(t *testing.T) {
 		"[[s3]]":                        "okdp.yaml: provisions (line 1): an entry is a contract name, or {contract, claimers}",
 		"[{contract: s3, claimers: a}]": "okdp.yaml: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into []string",
 	} {
-		if _, err := decodePackage([]byte("provisions: " + list + "\n")); err == nil || err.Error() != want {
+		if _, err := decodePackage([]byte("provisions: "+list+"\n"), nil); err == nil || err.Error() != want {
 			t.Errorf("%s: got %v, want %s", list, err, want)
 		}
 	}

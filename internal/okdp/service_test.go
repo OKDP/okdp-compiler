@@ -12,7 +12,7 @@ import (
 // TestRequireYAML: require in okdp.yaml, a list of keys; an entry of
 // another form fails with its line.
 func TestRequireYAML(t *testing.T) {
-	if p, err := decodePackage([]byte("require: [cluster.domain, tls.clusterIssuer]\n")); err != nil || !reflect.DeepEqual(p.Require, []string{"cluster.domain", "tls.clusterIssuer"}) {
+	if p, err := decodePackage([]byte("require: [cluster.domain, tls.clusterIssuer]\n"), nil); err != nil || !reflect.DeepEqual(p.Require, []string{"cluster.domain", "tls.clusterIssuer"}) {
 		t.Errorf("got %#v (%v)", p.Require, err)
 	}
 	for src, want := range map[string]string{
@@ -20,7 +20,7 @@ func TestRequireYAML(t *testing.T) {
 		"require: [a, [b]]":   "line 1: cannot unmarshal !!seq into string",
 		"require: [{key: a}]": "line 1: cannot unmarshal !!map into string",
 	} {
-		if _, err := decodePackage([]byte(src)); err == nil || err.Error() != "okdp.yaml: yaml: unmarshal errors:\n  "+want {
+		if _, err := decodePackage([]byte(src), nil); err == nil || err.Error() != "okdp.yaml: yaml: unmarshal errors:\n  "+want {
 			t.Errorf("%s: got %v, want %q", src, err, want)
 		}
 	}

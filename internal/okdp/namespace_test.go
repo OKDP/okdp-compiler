@@ -11,7 +11,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -848,7 +847,7 @@ func TestCompileAllProviderNames(t *testing.T) {
 }
 
 // TestClaimID: a claim's ID, DNS-1123 labels joined by dots, 63
-// characters at most (chart.IsClaimID): what the dashes of a join made one
+// characters at most (claimIDForm): what the dashes of a join made one
 // ID are two; a longer one cut, ended with a hash.
 func TestClaimID(t *testing.T) {
 	for _, tc := range []struct{ namespace, release, field, name, want string }{
@@ -870,7 +869,7 @@ func TestClaimID(t *testing.T) {
 		}
 	}
 	long := claimID("demo", strings.Repeat("a", 53), "database")
-	if len(long) != 63 || !strings.HasPrefix(long, "demo."+strings.Repeat("a", 49)+"-") || !chart.IsClaimID(long) || long == claimID("demo", strings.Repeat("a", 53), "databases") {
+	if len(long) != 63 || !strings.HasPrefix(long, "demo."+strings.Repeat("a", 49)+"-") || !claimIDForm(long) || long == claimID("demo", strings.Repeat("a", 53), "databases") {
 		t.Errorf("long: %q (%d)", long, len(long))
 	}
 	// Cut, the ID keeps its namespace whole, whatever its length up to
@@ -878,7 +877,7 @@ func TestClaimID(t *testing.T) {
 	for n := 1; n <= 54; n++ {
 		ns := strings.Repeat("n", n)
 		for _, id := range []string{claimID(ns, strings.Repeat("a", 60), "db"), claimID(ns, strings.Repeat("b", 63))} {
-			if len(id) > 63 || !strings.HasPrefix(id, ns+".") || !chart.IsClaimID(id) {
+			if len(id) > 63 || !strings.HasPrefix(id, ns+".") || !claimIDForm(id) {
 				t.Errorf("a namespace of %d: %q (%d)", n, id, len(id))
 			}
 		}

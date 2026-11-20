@@ -11,7 +11,7 @@ import (
 // nothing: its tables are empty, its checks fail, naming ErrNotLoaded.
 func TestZeroValue(t *testing.T) {
 	var r RuleSet
-	if r.Loaded() || r.Has(TableProjectRoles, "viewer") || r.List(TableProjectRoles) != nil || len(r.Added(TableProjectRoles, M{})) != 0 {
+	if r.Loaded() || r.Has(TableProjectRoles, "viewer") || r.List(TableProjectRoles) != nil {
 		t.Errorf("the zero value holds something: %+v", r)
 	}
 	if err := r.Refuse(context.Background(), CheckNamespaceRule, M{"ns": "demo"}); !errors.Is(err, ErrNotLoaded) {

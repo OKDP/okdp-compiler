@@ -16,8 +16,6 @@ import (
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"github.com/okdp/cel2yaml"
-
-	"github.com/okdp/okdp-compiler/chart"
 )
 
 const (
@@ -32,7 +30,7 @@ const (
 // digit, so a dot is never next to a dash. fn names the caller in the
 // error.
 func checkDotted(fn, id string) error {
-	if !chart.IsClaimID(id) {
+	if !claimIDForm(id) {
 		return fmt.Errorf("%s: %q is not a claim's ID: DNS-1123 labels joined by dots, 63 characters at most", fn, id)
 	}
 	return nil

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -24,7 +23,7 @@ func NamedClaimID(namespace, name string) string { return claimID(namespace, nam
 // IsClaimID reports whether name has the form of a claim's ID: two or
 // more DNS-1123 labels joined by dots. An output that the mapping names
 // after the instance is a single label, so it is not one.
-func IsClaimID(name string) bool { return strings.Contains(name, ".") && chart.IsClaimID(name) }
+func IsClaimID(name string) bool { return strings.Contains(name, ".") && claimIDForm(name) }
 
 // CheckProvider returns nil when s may name the provider of a claim or
 // of a class: an instance or a release, with or without its namespace

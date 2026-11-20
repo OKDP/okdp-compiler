@@ -207,7 +207,7 @@ func checkClaims(svc *Service, claims []Claim) error {
 	for i, c := range claims {
 		_, err := value.Normalize(c.Request)
 		switch where := fmt.Sprintf("Inputs.Claims[%d] (%s)", i, c.ID); {
-		case !chart.IsClaimID(c.ID):
+		case !claimIDForm(c.ID):
 			errs = append(errs, fmt.Errorf("%s: the ID is a claim ID, DNS-1123 labels joined by dots, 63 characters at most", where))
 		case !chart.IsDNSLabel(c.Namespace):
 			errs = append(errs, fmt.Errorf("%s: the namespace is a DNS-1123 label", where))

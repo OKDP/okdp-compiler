@@ -99,7 +99,6 @@
             "required": ["values"],
             "properties": {
               "values": {"type": "array", "items": {"type": "string"}},
-              "addFrom": {"type": "string", "minLength": 1, "description": "The path under global.okdp of a list the platform adds to the table."},
               "extensible": {"type": "boolean", "description": "A set read later may add values to the table (add)."}
             }
           },

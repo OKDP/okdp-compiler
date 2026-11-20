@@ -52,7 +52,7 @@ func labelled(name, team string) M {
 // it; skipped for a privileged project.
 func TestHookObjects(t *testing.T) {
 	r := hookRules(t)
-	d, err := LoadDefinitionWith(hookPackage(hookOkdp), r)
+	d, err := LoadDefinition(hookPackage(hookOkdp), r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestHookObjects(t *testing.T) {
 // calls it or after it; skipped for a privileged project.
 func TestHookFinalValues(t *testing.T) {
 	r := hookRules(t)
-	d, err := LoadDefinitionWith(hookPackage(hookOkdp), r)
+	d, err := LoadDefinition(hookPackage(hookOkdp), r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestHookFinalValues(t *testing.T) {
 // reads privileged and settings, and its first message refuses.
 func TestOwnObjectsList(t *testing.T) {
 	r := hookRules(t)
-	d, err := LoadDefinitionWith(hookPackage(hookOkdp), r)
+	d, err := LoadDefinition(hookPackage(hookOkdp), r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,24 +212,21 @@ func TestOwnObjectsList(t *testing.T) {
 func TestOkdpSections(t *testing.T) {
 	r := hookRules(t)
 	files := hookPackage("vars: {}\nnotes: []\n")
-	if _, err := LoadDefinitionWith(files, r); err != nil {
+	if _, err := LoadDefinition(files, r); err != nil {
 		t.Errorf("a section of the rule set: %v", err)
 	}
 	want := "okdp.yaml: yaml: unmarshal errors:\n  line 2: field notes not found in type okdp.Package"
-	if _, err := LoadDefinition(files); err == nil || err.Error() != want {
+	if _, err := LoadDefinition(files, nil); err == nil || err.Error() != want {
 		t.Errorf("the mandatory set: got %v, want %q", err, want)
-	}
-	if _, err := LoadDefinitionWith(files, nil); err == nil || err.Error() != want {
-		t.Errorf("no rule set: got %v, want %q", err, want)
 	}
 	files = hookPackage("notes: []\nrequires: [a]\nvar: {}\n")
 	want = "okdp.yaml: yaml: unmarshal errors:\n  line 2: field requires not found in type okdp.Package\n  line 3: field var not found in type okdp.Package"
-	if _, err := LoadDefinitionWith(files, r); err == nil || err.Error() != want {
+	if _, err := LoadDefinition(files, r); err == nil || err.Error() != want {
 		t.Errorf("unknown keys beside a section: got %v, want %q", err, want)
 	}
 	files = hookPackage("notes: []\nrequire: a\n")
 	want = "okdp.yaml: yaml: unmarshal errors:\n  line 2: cannot unmarshal !!str `a` into []string"
-	if _, err := LoadDefinitionWith(files, r); err == nil || err.Error() != want {
+	if _, err := LoadDefinition(files, r); err == nil || err.Error() != want {
 		t.Errorf("another error beside a section: got %v, want %q", err, want)
 	}
 	if !slices.Contains(r.Sections(), "notes") {

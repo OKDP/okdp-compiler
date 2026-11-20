@@ -95,7 +95,7 @@ type parts struct {
 // it can.
 //
 // The packages are read for rules: okdp.yaml of a package may hold their
-// sections (okdp.LoadDefinitionWith). Nil rules stand for the mandatory
+// sections (okdp.LoadDefinition). Nil rules stand for the mandatory
 // set.
 func Load(ctx context.Context, repos []Repository, rules *okdp.RuleSet) ([]okdp.Instance, error) {
 	l, err := LoadProjects(ctx, repos, rules)
@@ -396,7 +396,7 @@ func (t *parts) definition(service, version string) (*okdp.Definition, error) {
 	if err != nil {
 		return nil, &packageError{err}
 	}
-	def, err := okdp.LoadDefinitionWith(files, t.rules)
+	def, err := okdp.LoadDefinition(files, t.rules)
 	if err == nil && (def.Chart.Name != service || def.Chart.Version != version) {
 		err = fmt.Errorf("its Chart.yaml is %s %s", def.Chart.Name, def.Chart.Version)
 	}

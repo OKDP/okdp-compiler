@@ -133,7 +133,7 @@ func TestValuesYAML(t *testing.T) {
 	files := maps.Clone(pkg)
 	files["Chart.yaml"] = &fstest.MapFile{Data: []byte("apiVersion: v2\nname: demo\nversion: 1.2.3\ndependencies: [{name: app, repository: https://charts.example.org, version: 1.0.0}]\n")}
 	files["values.yaml"] = &fstest.MapFile{Data: []byte("app: {replicaCount: '${{ values.replicas }}'}\n")}
-	d, err := LoadDefinition(files)
+	d, err := LoadDefinition(files, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ version: 1.0.0
 dependencies:
   - {name: app, repository: https://charts.example.org, version: 1.0.0}
   - {name: app, alias: canary, repository: https://charts.example.org, version: 1.0.0}
-`)}})
+`)}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

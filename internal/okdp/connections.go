@@ -725,8 +725,8 @@ type contract struct {
 	// secret holds the fields marked x-okdp-secret. They are credentials:
 	// in the Secret, never in the values.
 	secret   map[string]bool
-	required []string           // the required fields, without the secret ones, sorted
-	schema   *jsonschema.Schema // validates the values of its connections and outputs
+	required []string      // the required fields, without the secret ones, sorted
+	schema   *chart.Schema // validates the values of its connections and outputs
 	// claim is x-okdp-claim: the schema of what a claim may request of a
 	// provider, with its defaults. Nil when the contract declares none.
 	claim *chart.Schema
@@ -790,7 +790,7 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 			delete(d, "required") // draft-04 refuses an empty list
 		}
 	}
-	if c.schema, err = chart.CompileSchema("file:///"+file, d); err != nil {
+	if c.schema, err = chart.NewSchema(file, "file:///"+file, d); err != nil {
 		return nil, fail(err)
 	}
 	if claim, set := d["x-okdp-claim"]; set {
@@ -841,7 +841,7 @@ func (c *contract) request(req M, field string) (M, error) {
 // beyond the contract: a JSON Schema of its fields and secretRef.
 type requirement struct {
 	doc    M
-	schema *jsonschema.Schema
+	schema *chart.Schema
 }
 
 // readRequirement compiles the requirement of ref, in the draft of the
@@ -859,7 +859,7 @@ func readRequirement(ref M, draft any) (*requirement, error) {
 	if _, ok := doc["$schema"]; !ok && draft != nil {
 		doc["$schema"] = draft
 	}
-	s, err := chart.CompileSchema("file:///require.schema.json", doc)
+	s, err := chart.NewSchema("require.schema.json", "file:///require.schema.json", doc)
 	if err != nil {
 		return nil, fmt.Errorf("require: %w", err)
 	}
@@ -1020,7 +1020,7 @@ func (req *requirement) check(values M, where, advice string) error {
 	if req == nil {
 		return nil
 	}
-	v, err := chart.Validate("require.schema.json", req.schema, values)
+	v, err := req.schema.Validate(values)
 	if err == nil && v != "" {
 		err = fmt.Errorf("the connection does not meet the package's requirement (x-okdp-connection-ref.require)%s:\n%s", advice, v)
 	}
@@ -1115,7 +1115,7 @@ func (c *contract) validate(values M, where string) error {
 //	<where>: the fields violate the database contract:
 //	- at '/port': got string, want integer
 func (c *contract) check(values M, where string) error {
-	v, err := chart.Validate(c.name+".schema.json", c.schema, values)
+	v, err := c.schema.Validate(values)
 	if err == nil && v != "" {
 		err = fmt.Errorf("the fields violate the %s contract:\n%s", c.name, v)
 	}

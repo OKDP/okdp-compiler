@@ -3,7 +3,7 @@
 // compiles it for one instance (Compile), and gives the files that
 // okdp-compile writes (Write).
 //
-//	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"))
+//	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"), nil)
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 //		Contracts: os.DirFS("contracts"),
 //		Context:   []compiler.ContextLayer{{Values: platformValues}, {Level: 2, Values: instanceConnections}},
@@ -270,21 +270,16 @@ func PlatformAdmins(ctx context.Context, rules *RuleSet, platform map[string]any
 	return okdp.PlatformAdmins(ctx, rules, platform)
 }
 
-// LoadDefinition reads and checks the package at the root of fsys:
-// Chart.yaml, then okdp.yaml and its values file (values.cel.yaml or
-// values.yaml) when the package has them. Each compile reads the other
-// files of the package. A values.yaml that holds expressions is still
-// read, with a warning.
-func LoadDefinition(fsys fs.FS) (*Definition, error) {
-	return okdp.LoadDefinition(fsys)
-}
-
-// LoadDefinitionWith is LoadDefinition for the compiles of rules:
-// okdp.yaml may hold, besides its own keys, the sections the rule set
-// adds to a mapping (rules.yaml's sections), and no other key. Nil rules
-// stand for the mandatory set, as for LoadDefinition.
-func LoadDefinitionWith(fsys fs.FS, rules *RuleSet) (*Definition, error) {
-	return okdp.LoadDefinitionWith(fsys, rules)
+// LoadDefinition reads and checks the package at the root of fsys for
+// the compiles of rules: Chart.yaml, then okdp.yaml and its values file
+// (values.cel.yaml or values.yaml) when the package has them. okdp.yaml
+// may hold, besides its own keys, the sections the rule set adds to a
+// mapping (rules.yaml's sections), and no other key. Nil rules stand for
+// the mandatory set alone, as for Inputs.Rules. Each compile reads the
+// other files of the package. A values.yaml that holds expressions is
+// still read, with a warning.
+func LoadDefinition(fsys fs.FS, rules *RuleSet) (*Definition, error) {
+	return okdp.LoadDefinition(fsys, rules)
 }
 
 // Compile runs the mapping of def on one instance. ctx cancels it, between
@@ -359,14 +354,11 @@ func CompileTree(ctx context.Context, instances []Instance) *Tree {
 // It reports every problem at once in a *LoadError. Any problem fails
 // the whole load. Build is more lenient: it refuses only the project
 // that does not load.
-func LoadRepository(ctx context.Context, repos []Repository) ([]Instance, error) {
-	return repository.Load(ctx, repos, nil)
-}
-
-// LoadRepositoryWith is LoadRepository for the compiles of rules: the
-// packages are read as LoadDefinitionWith reads them. Build reads them for
-// BuildOptions.Rules.
-func LoadRepositoryWith(ctx context.Context, repos []Repository, rules *RuleSet) ([]Instance, error) {
+//
+// The packages are read for the compiles of rules, as LoadDefinition
+// reads them; nil rules stand for the mandatory set. Build reads them
+// for BuildOptions.Rules.
+func LoadRepository(ctx context.Context, repos []Repository, rules *RuleSet) ([]Instance, error) {
 	return repository.Load(ctx, repos, rules)
 }
 
@@ -468,15 +460,16 @@ func LoadErrorOf(t *Tree) *LoadError {
 // results are the compiled instances of the projects written, and g is
 // their graph. kept holds the other projects, by namespace.
 //
-// A project is kept when one of its instances is refused. Then, round
-// after round, a project is kept when one of its instances has a problem
-// in the graph of the projects not kept yet, or depends on a release of
-// a kept project: that instance was compiled with what the release
-// publishes now, which is not deployed.
+// A project is kept when one of its instances is refused, or is in also,
+// which treats it as refused for the error it maps to (nil also keeps
+// none this way). Then, round after round, a project is kept when one of
+// its instances has a problem in the graph of the projects not kept yet,
+// or depends on a release of a kept project: that instance was compiled
+// with what the release publishes now, which is not deployed.
 //
 // g is nil only when the graph has a problem at no instance of t.
-func Partial(t *Tree) (results []*Result, g *Graph, kept []KeptProject) {
-	return tree.Partial(t)
+func Partial(t *Tree, also map[*TreeInstance]error) (results []*Result, g *Graph, kept []KeptProject) {
+	return tree.Partial(t, also)
 }
 
 // Regressions returns the instances of after that do not deploy

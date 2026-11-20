@@ -96,10 +96,11 @@ refused there when the build renders.
 ## Package files
 
 A package is a directory: the service definition and the parameters of the
-service. `compiler.LoadDefinition(fsys)` reads `Chart.yaml`, `okdp.yaml`
-and the values file, `values.cel.yaml` or `values.yaml`, at the root of
-`fsys` ([service definition](02_service_definition.md)) and keeps `fsys` as
-`Definition.Files`, from which each compile reads the other files; a
+service. `compiler.LoadDefinition(fsys, rules)` reads `Chart.yaml`,
+`okdp.yaml` and the values file, `values.cel.yaml` or `values.yaml`, at
+the root of `fsys` ([service definition](02_service_definition.md)) and
+keeps `fsys` as `Definition.Files`, from which each compile reads the
+other files; a
 `Definition` built in memory sets `Files` itself. The compiler reads these
 files, and no other:
 

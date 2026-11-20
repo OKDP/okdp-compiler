@@ -30,7 +30,7 @@ instance: {usage: '${{ n }}'}
 		"okdp.yaml":       {Data: []byte(okdpYAML)},
 		"values.cel.yaml": {Data: []byte("app: {}\n")},
 	}
-	d, err := LoadDefinition(ok)
+	d, err := LoadDefinition(ok, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +54,13 @@ instance: {usage: '${{ n }}'}
 		t.Errorf("Service: got %#v (%v)", svc, err)
 	}
 	// Chart.yaml alone: no package key, no mapping.
-	if d, err := LoadDefinition(fstest.MapFS{"Chart.yaml": ok["Chart.yaml"]}); err != nil || d.Okdp != nil || d.Values != nil || d.ValuesFile != "" || !reflect.DeepEqual(d.Package, Package{}) {
+	if d, err := LoadDefinition(fstest.MapFS{"Chart.yaml": ok["Chart.yaml"]}, nil); err != nil || d.Okdp != nil || d.Values != nil || d.ValuesFile != "" || !reflect.DeepEqual(d.Package, Package{}) {
 		t.Errorf("Chart.yaml alone: got %#v (%v)", d, err)
 	}
-	if d, err := LoadDefinition(with(ok, "okdp.yaml", "require: [a]\n---\nrequire: [b]\n")); err != nil || !reflect.DeepEqual(d.Package.Require, []string{"a"}) {
+	if d, err := LoadDefinition(with(ok, "okdp.yaml", "require: [a]\n---\nrequire: [b]\n"), nil); err != nil || !reflect.DeepEqual(d.Package.Require, []string{"a"}) {
 		t.Errorf("okdp.yaml: a second document is ignored: got %v", err)
 	}
-	if _, err := LoadDefinition(with(ok, "okdp.yaml", "# nothing\n")); err != nil {
+	if _, err := LoadDefinition(with(ok, "okdp.yaml", "# nothing\n"), nil); err != nil {
 		t.Errorf("an empty okdp.yaml: %v", err)
 	}
 	dir := maps.Clone(ok)
@@ -86,7 +86,7 @@ instance: {usage: '${{ n }}'}
 		"upstream path":       {with(ok, "okdp.yaml", "upstream: {app: {protect: [a, 'b[']}}\n"), `okdp.yaml: upstream.app.protect[1] "b[": not a path`},
 		"values.cel.yaml dir": {dir, "values.cel.yaml"},
 	} {
-		if _, err := LoadDefinition(tc.fsys); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, err := LoadDefinition(tc.fsys, nil); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want an error containing %q", name, err, tc.want)
 		}
 	}
@@ -111,7 +111,7 @@ func TestLoadValuesFile(t *testing.T) {
 		"not YAML":        {"values.yaml", "app: [\n", false},
 		"values.cel.yaml": {"values.cel.yaml", "app: {a: '${{ 1 }}'}\n", false},
 	} {
-		d, err := LoadDefinition(with(chartOnly, tc.file, tc.data))
+		d, err := LoadDefinition(with(chartOnly, tc.file, tc.data), nil)
 		if err != nil {
 			t.Errorf("%s: %v", name, err)
 			continue
@@ -125,7 +125,7 @@ func TestLoadValuesFile(t *testing.T) {
 		}
 	}
 	both := with(with(chartOnly, "values.yaml", "app: {}\n"), "values.cel.yaml", "app: {}\n")
-	if _, err := LoadDefinition(both); err == nil || err.Error() != "values.yaml and values.cel.yaml: a package has one of them" {
+	if _, err := LoadDefinition(both, nil); err == nil || err.Error() != "values.yaml and values.cel.yaml: a package has one of them" {
 		t.Errorf("both: got %v", err)
 	}
 }

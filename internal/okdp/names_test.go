@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/okdp/okdp-compiler/chart"
 )
 
 var (
@@ -15,14 +13,14 @@ var (
 	dnsLabel      = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 )
 
-// claimIDs: every claim ID (chart.IsClaimID) of the alphabet a, b, 1, "-"
+// claimIDs: every claim ID (claimIDForm) of the alphabet a, b, 1, "-"
 // and ".", up to n characters; and count random ones of up to four labels of twelve
 // characters, to make the names past the length asked for.
 func claimIDs(n, count int) []string {
 	var out []string
 	var walk func(s string)
 	walk = func(s string) {
-		if s != "" && chart.IsClaimID(s) {
+		if s != "" && claimIDForm(s) {
 			out = append(out, s)
 		}
 		if len(s) == n {
@@ -49,7 +47,7 @@ func claimIDs(n, count int) []string {
 			}
 			b.Write(label)
 		}
-		if chart.IsClaimID(b.String()) {
+		if claimIDForm(b.String()) {
 			out = append(out, b.String())
 		}
 	}
@@ -178,7 +176,7 @@ func TestNameFunctions(t *testing.T) {
 }
 
 // TestNamesIDLength: an ID of 63 characters is a claim's, one longer is not
-// (chart.IsClaimID).
+// (claimIDForm).
 func TestNamesIDLength(t *testing.T) {
 	s := newSession(M{})
 	fits := strings.Repeat("a", 31) + "." + strings.Repeat("b", 31)

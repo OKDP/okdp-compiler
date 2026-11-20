@@ -44,7 +44,9 @@ type KeptInstance struct {
 
 // Partial splits the projects of t into those written (results, with their
 // graph g) and those kept, in namespace order. A project is kept when it
-// does not load or one of its instances is refused. Then, round after round
+// does not load or one of its instances is refused. Each instance of also
+// that compiled is kept like a refused one, with also[ti] as its problem:
+// a target passes an instance it cannot write. Then, round after round
 // until no project is added, a project is kept when one of its instances
 // has a graph problem of its own, or depends on a release of a kept
 // project: it compiled with what that release publishes now, which is not
@@ -52,14 +54,7 @@ type KeptInstance struct {
 // dependencies on kept projects left out.
 //
 // g is nil only when the graph has a problem that is at no instance of t.
-func Partial(t *Tree) (results []*okdp.Result, g *graph.Graph, kept []Kept) {
-	return PartialWith(t, nil)
-}
-
-// PartialWith is Partial with more instances kept. Each instance of also
-// that compiled is kept like a refused one, with also[ti] as its problem. A
-// target uses it for an instance it cannot write.
-func PartialWith(t *Tree, also map[*Instance]error) (results []*okdp.Result, g *graph.Graph, kept []Kept) {
+func Partial(t *Tree, also map[*Instance]error) (results []*okdp.Result, g *graph.Graph, kept []Kept) {
 	byNamespace := map[string]*Kept{}
 	keep := func(ti *Instance, err error, depends bool) {
 		k := byNamespace[ti.Namespace()]

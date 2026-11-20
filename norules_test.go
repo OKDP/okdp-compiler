@@ -14,7 +14,7 @@ import (
 // each compiled with rules.
 func compileExample(t *testing.T, name string, rules *compiler.RuleSet) map[string]compiler.Outcome {
 	t.Helper()
-	instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: name, FS: exampleRepository(name), Role: compiler.RoleTree}})
+	instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: name, FS: exampleRepository(name), Role: compiler.RoleTree}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

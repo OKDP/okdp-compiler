@@ -46,7 +46,7 @@ func hookedCopy(t *testing.T, edit func(string) string) fstest.MapFS {
 func TestAddedTables(t *testing.T) {
 	r := hookedSet(t)
 	ctx := context.Background()
-	if !r.Has("colours", "green") || !slices.Equal(r.List("shapes"), []string{"circle"}) || !r.Added("shapes", M{"shapes": M{"extra": []any{"square"}}})["square"] {
+	if !r.Has("colours", "green") || !slices.Equal(r.List("shapes"), []string{"circle"}) {
 		t.Errorf("the tables of the set added: %v %v", r.List("colours"), r.List("shapes"))
 	}
 	if err := r.Refuse(ctx, "colour", M{"value": "circle"}); err != nil {
@@ -127,7 +127,7 @@ func TestAddedTablesRefused(t *testing.T) {
 	// The mandatory set marks a table extensible for the sets after it; a
 	// set added marks its own.
 	fsys := hookedCopy(t, func(s string) string {
-		return strings.Replace(s, "    addFrom: shapes.extra\n", "    addFrom: shapes.extra\n    extensible: true\n", 1)
+		return strings.Replace(s, "  shapes:\n", "  shapes:\n    extensible: true\n", 1)
 	})
 	if r, err := LoadRules(fsys); err != nil || !slices.Equal(r.List("shapes"), []string{"circle"}) {
 		t.Errorf("an extensible table of a set added: %v", err)

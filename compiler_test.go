@@ -25,7 +25,7 @@ import (
 // and its database's claim, bound to demo-db, with what demo-db publishes
 // for it; the rule set the example's platform requires.
 func example() (*compiler.Definition, compiler.Inputs) {
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"))
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -168,7 +168,7 @@ func TestLayers(t *testing.T) {
 // provider granted it, and the namespaces it lets claim of it, its
 // instance.yaml's claimers.
 func TestCompileTree(t *testing.T) {
-	instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}})
+	instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

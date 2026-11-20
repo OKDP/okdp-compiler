@@ -8,7 +8,6 @@ import (
 	"github.com/okdp/okdp-compiler/internal/okdp"
 	"github.com/okdp/okdp-compiler/internal/repository"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
-	"github.com/okdp/okdp-compiler/internal/tree"
 )
 
 // The types that a program that writes or edits a tree needs.
@@ -115,10 +114,4 @@ func Privileged(settings map[string]any, namespace string) bool {
 // ParseAccess reads v, a project's access, as the roles of its groups.
 func ParseAccess(rules *RuleSet, v any, namespace string) (map[string]AccessRole, error) {
 	return okdp.ParseAccess(rules, v, namespace)
-}
-
-// PartialWith works as Partial, and also treats each instance of also as
-// refused, for the error it maps to.
-func PartialWith(t *Tree, also map[*TreeInstance]error) (results []*Result, g *Graph, kept []KeptProject) {
-	return tree.PartialWith(t, also)
 }

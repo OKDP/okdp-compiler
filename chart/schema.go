@@ -20,20 +20,14 @@ import (
 // schemaURL is the URL schemas compile at, so that a $ref to itself resolves.
 const schemaURL = "file:///values.schema.json"
 
-// Validate checks v against sch, a schema read from the file name. It
+// validate checks v against sch, a schema read from the file name. It
 // returns one line per violation with its path, as Helm prints them, or ""
-// when v holds:
+// when v holds, and the violations one by one:
 //
 //   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
 //
 // The violations are sorted by path, because Helm's order varies between
 // runs. The value of a sensitive key is never printed (redactCauses).
-func Validate(name string, sch *jsonschema.Schema, v any) (string, error) {
-	msg, _, err := validate(name, sch, v)
-	return msg, err
-}
-
-// validate is Validate, and also returns the violations one by one.
 func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, error) {
 	verr := sch.Validate(v)
 	if verr == nil {
@@ -53,8 +47,8 @@ func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, 
 	return msg, violations(ve), nil
 }
 
-// Violation is one violation of a values schema: a leaf of Validate's
-// report.
+// Violation is one violation of a values schema: a leaf of the report of
+// Schema.Validate.
 type Violation struct {
 	Location []string // the keys and indexes from the root; none for the values as a whole
 	Message  string   // its line of the report, already redacted: "at '<pointer>': <message>"
@@ -78,7 +72,7 @@ func violations(e *jsonschema.ValidationError) []Violation {
 	return out
 }
 
-// CompileSchema compiles the JSON schema doc (as jsonschema.UnmarshalJSON
+// compileSchema compiles the JSON schema doc (as jsonschema.UnmarshalJSON
 // reads it), registered at url, as Helm 4.3 compiles a chart's
 // values.schema.json: the draft is the one $schema names, or 2020-12
 // without one, formats are asserted for drafts before 2019-09 only, and
@@ -86,7 +80,7 @@ func violations(e *jsonschema.ValidationError) []Violation {
 //
 // Unlike Helm, it fetches nothing: a $ref to a file, a URL or a urn:
 // fails, because the loader knows no scheme.
-func CompileSchema(url string, doc any) (*jsonschema.Schema, error) {
+func compileSchema(url string, doc any) (*jsonschema.Schema, error) {
 	c := jsonschema.NewCompiler()
 	c.DefaultDraft(jsonschema.Draft2020)
 	c.UseLoader(jsonschema.SchemeURLLoader{})

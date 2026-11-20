@@ -7,7 +7,6 @@ tables:
   colours:
     values: [red, green]
   shapes:
-    addFrom: shapes.extra
     values: [circle]
   platformObjectNames:
     add: [extra-object]

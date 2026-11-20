@@ -29,7 +29,7 @@ type Schema struct {
 	// empty for a boolean schema.
 	Doc      M
 	name     string             // the file the schema is read from, for the errors
-	root     *jsonschema.Schema // validates the values (CompileSchema)
+	root     *jsonschema.Schema // validates the values (compileSchema)
 	defaults M                  // the values' defaults, laid out as in a values file
 }
 
@@ -70,19 +70,30 @@ func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 // several defaults lie on one path, the outermost is read. A default that
 // does not meet its schema fails the check of the values that keep it.
 func ParseSchema(name string, b []byte) (*Schema, error) {
-	sdoc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
+	if err == nil {
+		var s *Schema
+		if s, err = NewSchema(name, schemaURL, doc); err == nil {
+			return s, nil
+		}
 	}
-	doc, err := value.Normalize(sdoc)
+	return nil, fmt.Errorf("%s: %w", name, err)
+}
+
+// NewSchema compiles the values schema doc, as jsonschema.UnmarshalJSON
+// reads it, registered at url: a compile error quotes url. name is the
+// file doc is read from, for the errors of Validate; NewSchema's own do
+// not name it. Its defaults are read as ParseSchema reads them.
+func NewSchema(name, url string, doc any) (*Schema, error) {
+	values, err := value.Normalize(doc)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
+		return nil, err
 	}
-	root, err := CompileSchema(schemaURL, sdoc)
+	root, err := compileSchema(url, doc)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
+		return nil, err
 	}
-	return &Schema{Doc: value.AsMap(doc), name: name, root: root, defaults: schemaDefaults(doc)}, nil
+	return &Schema{Doc: value.AsMap(values), name: name, root: root, defaults: schemaDefaults(values)}, nil
 }
 
 // Values coalesces user over the defaults of s, then checks the result
@@ -149,5 +160,14 @@ func schemaDefaults(s any) M {
 	return out
 }
 
-// Validate checks v against the schema, as the function Validate does.
-func (s *Schema) Validate(name string, v any) (string, error) { return Validate(name, s.root, v) }
+// Validate checks v against the schema, as Helm does. It returns one line
+// per violation with its path, as Helm prints them, or "" when v holds:
+//
+//   - at '/realm': '...' does not match pattern '^[A-Za-z0-9_.-]+$'
+//
+// The violations are sorted by path, because Helm's order varies between
+// runs. The value of a sensitive key is never printed (redactCauses).
+func (s *Schema) Validate(v any) (string, error) {
+	msg, _, err := validate(s.name, s.root, v)
+	return msg, err
+}

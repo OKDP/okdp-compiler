@@ -54,8 +54,7 @@ var ruleTables = []string{
 
 // ruleTable is a table of a rule set.
 type ruleTable struct {
-	values  []string // in order
-	addFrom string   // the path, under global.okdp, of the list the platform adds
+	values []string // in order
 	// extensible says a set read later may add values to the table (add).
 	extensible bool
 }
@@ -317,16 +316,6 @@ func (r *RuleSet) Has(table, v string) bool { return slices.Contains(r.List(tabl
 // List returns the values of the table, in order, not to be changed.
 func (r *RuleSet) List(table string) []string { return r.table(table).values }
 
-// Added returns what the platform adds to the table: the list at the
-// table's addFrom in okdp, the platform's settings.
-func (r *RuleSet) Added(table string, okdp M) map[string]bool {
-	out := map[string]bool{}
-	for _, v := range value.AsList(value.Dig(okdp, r.table(table).addFrom)) {
-		out[value.Str(v)] = true
-	}
-	return out
-}
-
 // M is a values map.
 type M = value.M
 
@@ -492,7 +481,7 @@ func (r *RuleSet) loadTables(tables M, mandatory bool) error {
 		if given {
 			return taken("tables", name)
 		}
-		r.tables[name] = &ruleTable{values: stringList(t["values"]), addFrom: value.Str(t["addFrom"]), extensible: value.Truthy(t["extensible"])}
+		r.tables[name] = &ruleTable{values: stringList(t["values"]), extensible: value.Truthy(t["extensible"])}
 	}
 	return nil
 }

@@ -44,7 +44,7 @@ func TestPartial(t *testing.T) {
 	add("g", "g1", compiled("g", "g1", on("a", "a-a1")))
 	tr := build(instances, outcomes)
 
-	results, g, kept := Partial(tr)
+	results, g, kept := Partial(tr, nil)
 	if g == nil || len(results) != 1 || results[0].Release != "f-f1" {
 		t.Fatalf("written: %v %v", results, g)
 	}
@@ -77,7 +77,7 @@ func TestPartial(t *testing.T) {
 	}
 
 	// Nothing refused, no problem: everything written, nothing kept.
-	results, g, kept = Partial(build(instances[7:8], outcomes[7:8]))
+	results, g, kept = Partial(build(instances[7:8], outcomes[7:8]), nil)
 	if g == nil || len(results) != 1 || kept != nil {
 		t.Errorf("a tree that deploys: %v %v %v", results, g, kept)
 	}
@@ -91,7 +91,7 @@ func TestPartialRefused(t *testing.T) {
 	outcomes := []okdp.Outcome{compiled("b", "b1", on("a", "a-a1")), compiled("f", "f1")}
 	tr := build(instances, outcomes)
 	tr.Refused = []Refused{{Namespace: "a", Problems: []string{"db/projects/a/instances/x/values.yaml: not a file"}}}
-	results, g, kept := Partial(tr)
+	results, g, kept := Partial(tr, nil)
 	if g == nil || len(results) != 1 || results[0].Release != "f-f1" {
 		t.Fatalf("written: %v %v", results, g)
 	}

@@ -275,7 +275,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp")) // the package
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"), nil) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -362,7 +362,7 @@ dependencies:
 		"values.cel.yaml":    {Data: []byte("app:\n  replicaCount: ${{ values.replicas }}\n")},
 		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
 		"app.defaults.yaml":  {Data: []byte("image: {tag: \"4.5\"}\n")},
-	})
+	}, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -393,9 +393,9 @@ app:
 
 Any `fs.FS` works: `embed.FS` (`fs.Sub` for a subdirectory), a git tree.
 
-`compiler.LoadDefinition(fsys)` reads the package at the root of `fsys`
-(`LoadDefinitionWith(fsys, rules)` for the compiles of a rule set, whose
-sections `okdp.yaml` may then hold):
+`compiler.LoadDefinition(fsys, rules)` reads the package at the root of
+`fsys` for the compiles of a rule set, whose sections `okdp.yaml` may
+then hold (nil rules: the mandatory set alone):
 `Chart.yaml`, `okdp.yaml` and the values file, `values.cel.yaml` or
 `values.yaml`, then keeps `fsys` (`Definition.Files`) for the files each
 compile reads, `config.schema.json` and the defaults files. A `Definition`
@@ -473,7 +473,7 @@ if err != nil {
 	log.Fatal(err)
 }
 in.Rules = rules
-def, err := compiler.LoadDefinitionWith(fsys, rules) // okdp.yaml may hold the set's sections
+def, err := compiler.LoadDefinition(fsys, rules) // okdp.yaml may hold the set's sections
 ```
 
 A tree lists the sets it requires in `global.okdp.ruleSets`, and a
@@ -549,15 +549,15 @@ build renders
   the claim's ID
   ([dependencies](specs/01_inputs_outputs.md#dependencies)): what a
   deployer orders the releases with. `Write` writes them in no file.
-- `compiler.LoadRepository(ctx, repos)` reads a tree, in one or more
-  repositories, each a `compiler.Repository` (its name in messages, its
-  `fs.FS`), as the instances `CompileAll` compiles, by project then
+- `compiler.LoadRepository(ctx, repos, rules)` reads a tree, in one or
+  more repositories, each a `compiler.Repository` (its name in messages,
+  its `fs.FS`), as the instances `CompileAll` compiles, by project then
   instance, each named after its directory (`Instance.Name`), the name of
   its outputs that name none and of its claims' IDs
   ([repository layout](#repository-layout)); every problem at once, each
-  naming its repository and path. `LoadRepositoryWith(ctx, repos,
-  rules)` reads its packages for a rule set, as `Build` does for
-  `BuildOptions.Rules`.
+  naming its repository and path. It reads the packages for the rule set
+  `rules`, as `Build` does for `BuildOptions.Rules`; nil rules stand for
+  the mandatory set.
 - `compiler.LoadCatalog(repos)` is the catalog of the same repositories,
   as `LoadRepository` reads it, for a caller that lists the packages
   (a console's menu): `Services()`, each a `compiler.CatalogService`
@@ -668,18 +668,18 @@ build renders
   `compiler.LoadErrorOf(tree)` is their problems as one `*LoadError`, nil
   when every project loads, and `compiler.AddedProblems(before, after)`
   the problems a change added.
-- `compiler.Partial(tree)` is what a caller writes of a tree some of whose
-  instances do not deploy: the results of the projects written and their
-  graph, and the projects kept, each a `compiler.KeptProject`
+- `compiler.Partial(tree, also)` is what a caller writes of a tree some
+  of whose instances do not deploy: the results of the projects written
+  and their graph, and the projects kept, each a `compiler.KeptProject`
   (`Namespace`; `Dropped`, why a project whose namespace is reserved now
   is dropped from the output; `Problems`, `<namespace>/<instance>: <why>`;
   `Instances`, each a `compiler.KeptInstance`, its `Err`, and `Depends`
   for one that compiled but depends on a release of a project kept;
   `Unloaded`, a project that does not load, its `Problems` its load
-  problems and no instance). `compiler.PartialWith(tree, also)` is
-  `Partial` with the instances of `also` refused too, each for its error.
-  Writing the files of the projects, and keeping those of the others, is
-  okdp-gitops' (`deploy.TreeFiles`).
+  problems and no instance). The instances of `also` are refused too,
+  each for its error; a nil `also` refuses none. Writing the files of the
+  projects, and keeping those of the others, is okdp-gitops'
+  (`deploy.TreeFiles`).
 - `compiler.Regressions(before, after)` are the instances that deployed
   in a tree before a change and do not after.
 - The compile's rules, for a program that answers before it compiles

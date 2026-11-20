@@ -178,16 +178,13 @@ place of `Inputs.Namespace` in the message.
 ## Tables
 
 A check reads a table as `sets.<name>` or `tables.<name>`. Go reads it
-through `RuleSet.Has` or `RuleSet.List`, and what the platform adds to
-it through `RuleSet.Added`.
+through `RuleSet.Has` or `RuleSet.List`.
 
 The mandatory set gives the tables below, and no other: `LoadRules`
 refuses a name it does not know there. A set added to it gives tables of
-any name that no set read before gives, read the same ways. A table of
-an added set may give `addFrom: <path>`: it then also holds the list
-`global.okdp.<path>`, so that a platform adds values to it, never
-removes one. It adds values to a table of the mandatory set only
-when that table is marked `extensible: true`, by `add`:
+any name that no set read before gives, read the same ways. It adds
+values to a table of the mandatory set only when that table is marked
+`extensible: true`, by `add`:
 
 ```yaml
 tables:
@@ -600,9 +597,9 @@ roles.
 of the functions. The sections are the compiler's `output`, `instance`,
 `provides` and `objects`, and those of `rules.yaml` `sections` of a set
 added to the mandatory set, which gives none. `okdp.yaml` may hold the
-sections of the rule set it is read for (`compiler.LoadDefinitionWith`,
-`LoadRepositoryWith`, `Build` for `BuildOptions.Rules`), and no other
-key: `LoadDefinition` reads it for the mandatory set.
+sections of the rule set it is read for (`compiler.LoadDefinition`,
+`LoadRepository`, `Build` for `BuildOptions.Rules`), and no other
+key; nil rules read it for the mandatory set.
 
 | Section | Rule |
 |---|---|
@@ -749,10 +746,8 @@ the rules below. Of them, `platform.yaml` can only set these:
 | `charts.objects` | replaces the `objects` chart |
 | `ruleSets` | refuses every compile without the sets it requires |
 
-No table of the mandatory set has `addFrom`; a set added to it may give
-one ([tables](#tables)). Nothing in `platform.yaml` removes a value from
-a table. What a platform sets of the security set's rules: [its
-reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#what-a-platform-can-change).
+Nothing in `platform.yaml` changes a table. What a platform sets of
+the security set's rules: [its reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#what-a-platform-can-change).
 
 ## Changing a rule
 

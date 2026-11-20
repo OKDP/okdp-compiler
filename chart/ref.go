@@ -161,21 +161,6 @@ func IsDNSLabel(s string) bool {
 	return len(s) <= 63 && dnsLabel.MatchString(s)
 }
 
-// IsClaimID reports whether s is a claim ID: DNS-1123 labels joined by
-// dots, 63 characters at most. Such an ID is a Kubernetes name (a DNS
-// subdomain), and the dots separate its parts.
-func IsClaimID(s string) bool {
-	if len(s) > 63 {
-		return false
-	}
-	for l := range strings.SplitSeq(s, ".") {
-		if !dnsLabel.MatchString(l) {
-			return false
-		}
-	}
-	return true
-}
-
 // ReleaseMax is the longest release name Helm accepts. It leaves room for
 // the suffixes of the names derived from the release.
 const ReleaseMax = 53
