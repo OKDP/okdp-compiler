@@ -1,0 +1,15 @@
+# exampleConfigMap: a ConfigMap named <release>-<name>, OKDP's labels, the
+# data of the argument and the replicas, 1 when not given. Input: args,
+# release, labels, platform, global.
+values:
+  objects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${{ release.name + "-" + args.name }}
+        namespace: ${{ args.?namespace.orValue(release.namespace) }}
+        labels: ${{ labels }}
+      data:
+        $merge: ${{ args.?data.orValue({}) }}
+        replicas: ${{ str(args.?replicas.orValue(1)) }}
+        domain: ${{ str(global.okdp.?cluster.?domain.orValue("")) }}

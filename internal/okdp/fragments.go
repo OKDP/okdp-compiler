@@ -1,8 +1,8 @@
-// Fragments: the workloads OKDP provides to packages as CEL functions
-// that return objects: a pod spec, a Job, a sign-in proxy, a web
-// workload. A package calls them instead of writing its own, so there is
-// one hardening and one proxy, reviewed once. The objects they return
-// belong to the package, so the compile's policy over objects applies.
+// Fragments: the functions a rule set provides to packages, each a
+// template evaluated on the arguments of the call, typically objects a
+// package calls for instead of writing its own, so that they are written
+// and reviewed once. The objects they return belong to the package, so
+// the compile's policy over objects applies.
 
 package okdp
 

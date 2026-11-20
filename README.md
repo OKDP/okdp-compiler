@@ -34,7 +34,9 @@ for _, ti := range tree.Instances {
 - `CompileAll` compiles instances together, `Compile` a single one; both
   are stateless and safe for concurrent use.
 - `Inputs.Finalize` and `BuildOptions.Loaded` are where a host adds what
-  the compiler does not do (okdp-gitops: its policy, the chart checks).
+  the compiler does not do (okdp-gitops: the render of the upstream
+  charts, the chart checks, the security set's policy on upstream
+  values).
 - Accessors let a caller check before it compiles, without restating a
   rule: `FieldErrors`, `ConnectionRefs`, `CheckConnection`,
   `CheckProjectName`, `ReadContract`, `MergeValues`...
@@ -67,11 +69,21 @@ Two rule sets apply together, both data, the walkers in Go:
 
 - the mandatory set, embedded
   ([`internal/rules/mandatory`](internal/rules/mandatory)), is what every
-  compile needs and what it refuses: workload fragments, OAuth clients,
-  the platform schema, labels, names, roles, the checks and their tables,
-  the mapping schema, the default objects chart;
-- a rule set given (`LoadRules`) adds a platform's own rules to it, and
-  replaces none.
+  compile needs and what it refuses: the platform schema, labels, names,
+  roles, the checks and their tables, the mapping schema, the generated
+  Secrets, the secret store's objects, the default objects chart;
+- a rule set given (`LoadRules`, `okdp-compile --rules`) adds a
+  platform's own rules to it, and replaces none: tables, documents,
+  functions, sections, keys of the schemas, what a mapping sees as
+  `platform`, and hooks the compiler calls on every object and on the
+  final values.
+
+The hosts a project serves, the OAuth clients, the hardened pod and the
+policy on upstream values are such a set,
+[okdp-compiler-security](https://github.com/OKDP/okdp-compiler-security),
+which okdp-gitops gives to every compile. A tree that relies on a set
+requires it (`global.okdp.ruleSets`), and a compile without it is
+refused.
 
 Every table, check and function: [the rule set](docs/specs/05_rules.md).
 
@@ -112,7 +124,7 @@ It writes the files of [Output](#output) under
 | `internal/compile/` | the mapping language over cel2yaml |
 | `chart/`, `value/` | what the compiler reproduces of Helm; the values helpers |
 | `cmd/okdp-compile/` | the command line |
-| `examples/` | packages from `00_passthrough` to `05_fragments`, each with its expected output, checked by `go test` |
+| `examples/` | packages, `00_passthrough`, `01_minimal`, `02_advanced` and `04_claims`, each with its expected output, checked by `go test`; those of the security set are in okdp-compiler-security |
 | `docs/` | the [documentation](docs/README.md) |
 
 ## Contributing, security, license

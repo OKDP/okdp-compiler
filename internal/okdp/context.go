@@ -169,8 +169,8 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 
 // platformSettings returns global.okdp of platform, the context's values,
 // checked against the platform schema with its defaults applied. A value
-// of another type is refused rather than read as not set: oidc: false
-// would leave OIDC enabled. A platform that requires a rule set the
+// of another type is refused rather than read as not set: proxy: false
+// would read as no proxy. A platform that requires a rule set the
 // compile was not given is refused (requiredRuleSets).
 func platformSettings(rules *RuleSet, platform M) (M, error) {
 	settings, err := schemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))

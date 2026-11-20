@@ -28,7 +28,7 @@ type Definition struct {
 // Package holds the package keys of okdp.yaml.
 type Package struct {
 	// Require lists the global.okdp keys the service needs, dotted
-	// (ingress.suffix). Each must be set and not empty.
+	// (tls.clusterIssuer). Each must be set and not empty.
 	Require   []string `yaml:"require"`
 	Roles     []string `yaml:"roles"`     // catalog data, not read by the compiler
 	DependsOn []string `yaml:"dependsOn"` // catalog data, not read by the compiler

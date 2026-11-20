@@ -14,12 +14,12 @@ import (
 // TestApplyUpstream: instance upstream values over the computed ones, with
 // the protected and appended paths of chart c.
 func TestApplyUpstream(t *testing.T) {
-	protect := []string{"ingress.hosts", "fullnameOverride"}
+	protect := []string{"service.ports", "fullnameOverride"}
 	appendPaths := []string{"env", "pod.volumes"}
 	computed := func() M {
 		return M{
 			"fullnameOverride": "x",
-			"ingress":          M{"hosts": []any{"h"}, "className": "nginx"},
+			"service":          M{"ports": []any{"h"}, "type": "ClusterIP"},
 			"env":              []any{"A"},
 			"pod":              M{"volumes": []any{"v1"}},
 			"args":             []any{"a"},
@@ -32,7 +32,7 @@ func TestApplyUpstream(t *testing.T) {
 	}{
 		"nothing":                 {M{}, M{}, nil},
 		"a free key":              {M{"replicas": float64(2)}, M{"replicas": float64(2)}, nil},
-		"beside a protected path": {M{"ingress": M{"className": "other"}}, M{"ingress": M{"hosts": []any{"h"}, "className": "other"}}, nil},
+		"beside a protected path": {M{"service": M{"type": "other"}}, M{"service": M{"ports": []any{"h"}, "type": "other"}}, nil},
 		"appended list":           {M{"env": []any{"B"}}, M{"env": []any{"A", "B"}}, [][]string{{"env"}}},
 		"nested appended list":    {M{"pod": M{"volumes": []any{"v2"}}}, M{"pod": M{"volumes": []any{"v1", "v2"}}}, [][]string{{"pod", "volumes"}}},
 		"other list replaced":     {M{"args": []any{"b"}}, M{"args": []any{"b"}}, nil},
@@ -61,15 +61,15 @@ func TestApplyUpstreamErrors(t *testing.T) {
 		user M
 		want string
 	}{
-		"protected leaf":          {M{"ingress": M{"hosts": []any{}}}, "upstream.c.ingress.hosts: ingress.hosts is set by the platform"},
-		"protected as a non-map":  {M{"ingress": "off"}, "upstream.c.ingress: ingress.hosts is set by the platform"},
+		"protected leaf":          {M{"service": M{"ports": []any{}}}, "upstream.c.service.ports: service.ports is set by the platform"},
+		"protected as a non-map":  {M{"service": "off"}, "upstream.c.service: service.ports is set by the platform"},
 		"protected top-level key": {M{"fullnameOverride": "y"}, "upstream.c.fullnameOverride"},
 		"global is protected":     {M{"global": M{"a": float64(1)}}, "upstream.c.global: global is set by the platform"},
 		"a template":              {M{"name": "{{ .Release.Name }}"}, `upstream.c.name: the value contains "{{"`},
 		"append to a non-list":    {M{"env": "A"}, "upstream.c.env must be a list"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := applyUpstream(M{}, tc.user, source{chart: "c"}, []string{"ingress.hosts", "fullnameOverride"}, []string{"env"}, nil)
+			_, err := applyUpstream(M{}, tc.user, source{chart: "c"}, []string{"service.ports", "fullnameOverride"}, []string{"env"}, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
@@ -156,18 +156,18 @@ func TestFinalValues(t *testing.T) {
 // keys (dots in them) and globs: the keys a plain dotted path cannot name.
 func TestUpstreamBrackets(t *testing.T) {
 	protect := []string{
-		`annotations["nginx.ingress.kubernetes.io/auth-*"]`,
+		`annotations["example.org/auth-*"]`,
 		`config["spark.ui.filters"]`,
 		`config["spark.history.ui.acls.*"]`,
-		`ingresses["*"].tls`,
+		`servers["*"].tls`,
 	}
 	appendPaths := []string{`config["spark.extra.list"]`, `envs["*"]`, `envs["main"]`}
 	computed := func() M {
 		return M{
-			"annotations": M{"nginx.ingress.kubernetes.io/auth-type": "basic", "nginx.ingress.kubernetes.io/auth-url": "u"},
+			"annotations": M{"example.org/auth-type": "basic", "example.org/auth-url": "u"},
 			"config":      M{"spark.ui.filters": "f", "spark.extra.list": []any{"a"}},
 			"envs":        M{"main": []any{"A"}},
-			"ingresses":   M{"http": M{"tls": []any{"t"}, "host": "h"}},
+			"servers":     M{"http": M{"tls": []any{"t"}, "host": "h"}},
 		}
 	}
 	for name, tc := range map[string]struct {
@@ -176,16 +176,16 @@ func TestUpstreamBrackets(t *testing.T) {
 		path string // the key changed, when no error
 		v    any    // its value
 	}{
-		"other annotation":           {M{"annotations": M{"nginx.ingress.kubernetes.io/proxy-body-size": "1m"}}, "", "annotations", M{"nginx.ingress.kubernetes.io/auth-type": "basic", "nginx.ingress.kubernetes.io/auth-url": "u", "nginx.ingress.kubernetes.io/proxy-body-size": "1m"}},
-		"a glob's annotation":        {M{"annotations": M{"nginx.ingress.kubernetes.io/auth-type": nil}}, `upstream.c.annotations["nginx.ingress.kubernetes.io/auth-type"]: annotations["nginx.ingress.kubernetes.io/auth-*"] is set by the platform and cannot be changed`, "", nil},
-		"a new key of the glob":      {M{"annotations": M{"nginx.ingress.kubernetes.io/auth-signin": "x"}}, `upstream.c.annotations["nginx.ingress.kubernetes.io/auth-signin"]: annotations["nginx.ingress.kubernetes.io/auth-*"]`, "", nil},
-		"the glob's parent":          {M{"annotations": nil}, `upstream.c.annotations: annotations["nginx.ingress.kubernetes.io/auth-*"] is set by the platform`, "", nil},
+		"other annotation":           {M{"annotations": M{"example.org/proxy-body-size": "1m"}}, "", "annotations", M{"example.org/auth-type": "basic", "example.org/auth-url": "u", "example.org/proxy-body-size": "1m"}},
+		"a glob's annotation":        {M{"annotations": M{"example.org/auth-type": nil}}, `upstream.c.annotations["example.org/auth-type"]: annotations["example.org/auth-*"] is set by the platform and cannot be changed`, "", nil},
+		"a new key of the glob":      {M{"annotations": M{"example.org/auth-signin": "x"}}, `upstream.c.annotations["example.org/auth-signin"]: annotations["example.org/auth-*"]`, "", nil},
+		"the glob's parent":          {M{"annotations": nil}, `upstream.c.annotations: annotations["example.org/auth-*"] is set by the platform`, "", nil},
 		"a literal dotted key":       {M{"config": M{"spark.ui.filters": "other"}}, `upstream.c.config["spark.ui.filters"]: config["spark.ui.filters"] is set by the platform`, "", nil},
 		"a key the literal is not":   {M{"config": M{"spark.ui.filters.x": "1"}}, "", "config", M{"spark.ui.filters": "f", "spark.ui.filters.x": "1", "spark.extra.list": []any{"a"}}},
 		"a glob's prefix itself":     {M{"config": M{"spark.history.ui.acls.": "1"}}, `upstream.c.config["spark.history.ui.acls."]`, "", nil},
-		"a glob on the way":          {M{"ingresses": M{"grpc": M{"tls": []any{}}}}, `upstream.c.ingresses.grpc.tls: ingresses["*"].tls is set by the platform`, "", nil},
-		"beside a glob on the way":   {M{"ingresses": M{"http": M{"host": "other"}}}, "", "ingresses", M{"http": M{"tls": []any{"t"}, "host": "other"}}},
-		"a non-map on the way":       {M{"ingresses": M{"http": "off"}}, `upstream.c.ingresses.http: ingresses["*"].tls`, "", nil},
+		"a glob on the way":          {M{"servers": M{"grpc": M{"tls": []any{}}}}, `upstream.c.servers.grpc.tls: servers["*"].tls is set by the platform`, "", nil},
+		"beside a glob on the way":   {M{"servers": M{"http": M{"host": "other"}}}, "", "servers", M{"http": M{"tls": []any{"t"}, "host": "other"}}},
+		"a non-map on the way":       {M{"servers": M{"http": "off"}}, `upstream.c.servers.http: servers["*"].tls`, "", nil},
 		"appended dotted key":        {M{"config": M{"spark.extra.list": []any{"b"}}}, "", "config", M{"spark.ui.filters": "f", "spark.extra.list": []any{"a", "b"}}},
 		"appended once per key":      {M{"envs": M{"main": []any{"B"}, "side": []any{"S"}}}, "", "envs", M{"main": []any{"A", "B"}, "side": []any{"S"}}},
 		"appended a non-list":        {M{"envs": M{"side": "S"}}, "upstream.c.envs.side must be a list", "", nil},

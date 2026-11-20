@@ -30,14 +30,8 @@ const (
 	TableEngineNamespaces       = "engineNamespaces"
 	TableClusterScopedKinds     = "clusterScopedKinds"
 	TableDeployerAPIGroups      = "deployerApiGroups"
-	TableDeniedUpstreamKeys     = "deniedUpstreamKeys"
-	TableImageKeySuffixes       = "imageKeySuffixes"
 	TablePlatformObjectNames    = "platformObjectNames"
 	TablePlatformObjectSettings = "platformObjectSettings"
-	TableHostAnnotations        = "hostAnnotations"
-	TableIngressValueKeys       = "ingressValueKeys"
-	TableIngressHostKeys        = "ingressHostKeys"
-	TableIngressHostListKeys    = "ingressHostListKeys"
 	TableDefaultProjectGlobals  = "defaultProjectGlobals"
 	TableWholePaths             = "wholePaths"
 	TableProjectRoles           = "projectRoles"
@@ -54,9 +48,8 @@ const (
 
 // ruleTables lists the names of the tables of the mandatory set, sorted.
 var ruleTables = []string{
-	TableClusterScopedKinds, TableDefaultProjectGlobals, TableDeniedUpstreamKeys, TableDeployerAPIGroups,
-	TableEngineNamespaces, TableHostAnnotations, TableImageKeySuffixes, TableIngressHostKeys,
-	TableIngressHostListKeys, TableIngressValueKeys, TablePlatformObjectNames, TablePlatformObjectSettings, TablePlatformKeysAbove, TableProjectRoles, TableWholePaths,
+	TableClusterScopedKinds, TableDefaultProjectGlobals, TableDeployerAPIGroups, TableEngineNamespaces,
+	TablePlatformObjectNames, TablePlatformObjectSettings, TablePlatformKeysAbove, TableProjectRoles, TableWholePaths,
 }
 
 // ruleTable is a table of a rule set.

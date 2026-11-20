@@ -18,8 +18,8 @@
 // that text itself included, and ["*"] names every key. Any bracketed key
 // of a path may be a glob, not only the last. Examples:
 //
-//	ingress.hosts
-//	filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]
+//	service.ports
+//	filer.servers.http.annotations["example.org/auth-*"]
 //	config["spark.ui.filters"]
 //	config["spark.history.*"]
 package chart

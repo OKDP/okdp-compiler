@@ -1,0 +1,3 @@
+# exampleName: <release>-<arg>. Input: arg, release, platform.
+values:
+  name: ${{ release.name + "-" + str(arg) }}

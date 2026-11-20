@@ -62,7 +62,7 @@ func TestKeepSynced(t *testing.T) {
 
 // TestWrite: a plain helm install: no chart, the package's values, a
 // dependency the mapping leaves out switched off, the okdp-objects chart's
-// values apart, the OAuth clients among them.
+// values apart.
 func TestWrite(t *testing.T) {
 	app := chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.8.0"}
 	res := &Result{

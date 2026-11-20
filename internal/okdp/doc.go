@@ -6,9 +6,10 @@
 //
 // The package holds OKDP's rules: the package read from a filesystem
 // (LoadDefinition), the platform context derived from global.okdp, the
-// connections and their contracts, the outputs, the OAuth clients, and
-// the order of the stages (Compile). The values are read, merged and
-// checked against the charts' schemas as Helm does (internal/chart).
+// connections and their contracts, the outputs, the objects of the rule
+// set's sections, and the order of the stages (Compile). The values are
+// read, merged and checked against the charts' schemas as Helm does
+// (internal/chart).
 //
 // # Packages
 //
@@ -40,5 +41,5 @@
 // appending to the append lists. In a path, brackets name a key that
 // contains dots, and a final glob names a family of keys:
 //
-//	annotations["nginx.ingress.kubernetes.io/auth-*"]
+//	annotations["example.org/auth-*"]
 package okdp

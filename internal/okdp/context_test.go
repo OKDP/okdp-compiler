@@ -26,114 +26,31 @@ func platformCtx(t *testing.T, okdp M) (M, error) {
 	return value.AsMap(inst.scope["platform"]), nil
 }
 
-// TestPlatformDefaults: OIDC defaults to an existing client, no proxy, the
-// oidc-dcr Jobs without a CA bundle; the ingress annotations name the
-// platform's ClusterIssuer.
+// TestPlatformDefaults: what the mandatory set's scope gives a mapping
+// as platform by default: no proxy, the project's group in every role.
 func TestPlatformDefaults(t *testing.T) {
 	p, err := platformCtx(t, M{"tls": M{"clusterIssuer": "ca"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := M{
-		"oidc": M{
-			"enabled":            true,
-			"scope":              "openid profile email groups",
-			"clientProvisioning": "existing",
-			"existing":           true,
-			"dcr":                M{"enabled": false, "caSecret": "", "ttlSeconds": float64(30), "backoffLimit": float64(6)},
-		},
-		"oidcClientSecret":   "creds-demo-app-oauth2",
-		"ingressAnnotations": M{"cert-manager.io/cluster-issuer": "ca"},
-		"proxyEnv":           M{},
-		"access":             M{"viewers": []any{"okdp-project-demo"}, "editors": []any{"okdp-project-demo"}, "admins": []any{}, "platformAdmins": []any{}},
+		"proxyEnv": M{},
+		"access":   M{"viewers": []any{"okdp-project-demo"}, "editors": []any{"okdp-project-demo"}, "admins": []any{}, "platformAdmins": []any{}},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("got  %#v\nwant %#v", p, want)
 	}
 }
 
-// TestPlatformIngressAnnotations: the platform's ingress annotations,
-// those of its controller, merged over the ClusterIssuer's; a value that is
-// not a string refused.
-func TestPlatformIngressAnnotations(t *testing.T) {
-	p, err := platformCtx(t, M{"tls": M{"clusterIssuer": "ca"}, "ingress": M{"annotations": M{
-		"traefik.ingress.kubernetes.io/router.middlewares": "okdp-auth@kubernetescrd",
-		"cert-manager.io/cluster-issuer":                   "acme",
-	}}})
+// TestPlatformProxy: the proxy settings become environment variables,
+// those that are set only.
+func TestPlatformProxy(t *testing.T) {
+	p, err := platformCtx(t, M{"proxy": M{"httpProxy": "http://p:3128", "noProxy": ".svc"}})
 	if err != nil {
 		t.Fatal(err)
-	}
-	want := M{"cert-manager.io/cluster-issuer": "acme", "traefik.ingress.kubernetes.io/router.middlewares": "okdp-auth@kubernetescrd"}
-	if !reflect.DeepEqual(p["ingressAnnotations"], want) {
-		t.Errorf("got  %#v\nwant %#v", p["ingressAnnotations"], want)
-	}
-	if _, err := platformCtx(t, M{"ingress": M{"annotations": M{"a": 1}}}); err == nil || !strings.Contains(err.Error(), "/global/okdp/ingress/annotations/a") {
-		t.Errorf("a number: got %v", err)
-	}
-}
-
-// TestPlatformDcr: a DCR client has its own Secret; proxy settings become env.
-func TestPlatformDcr(t *testing.T) {
-	p, err := platformCtx(t, M{
-		"oidc":  M{"clientProvisioning": "dcr", "scope": "openid"},
-		"proxy": M{"httpProxy": "http://p:3128", "noProxy": ".svc"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	oidc := value.AsMap(p["oidc"])
-	if value.AsMap(oidc["dcr"])["enabled"] != true || oidc["existing"] != false || oidc["scope"] != "openid" {
-		t.Errorf("oidc: %#v", oidc)
-	}
-	if p["oidcClientSecret"] != "demo-app-demo-dcr" {
-		t.Errorf("client secret: %#v", p["oidcClientSecret"])
 	}
 	if want := (M{"HTTP_PROXY": "http://p:3128", "NO_PROXY": ".svc"}); !reflect.DeepEqual(p["proxyEnv"], want) {
 		t.Errorf("proxy env: %#v", p["proxyEnv"])
-	}
-}
-
-// TestPlatformDisabled: OIDC off, neither client mode is active.
-func TestPlatformDisabled(t *testing.T) {
-	p, err := platformCtx(t, M{"oidc": M{"enabled": false, "clientProvisioning": "dcr"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	oidc := value.AsMap(p["oidc"])
-	if value.AsMap(oidc["dcr"])["enabled"] != false || oidc["existing"] != false {
-		t.Errorf("oidc: %#v", oidc)
-	}
-}
-
-// TestPlatformDcrSettings: the settings of the oidc-dcr Jobs
-// (global.okdp.oidc.dcr), defaults applied, the image passed as written;
-// their CA bundle the platform's (tls.caBundleSecret) unless they set
-// theirs, "" for none.
-func TestPlatformDcrSettings(t *testing.T) {
-	defaults := M{"caSecret": "", "ttlSeconds": float64(30), "backoffLimit": float64(6)}
-	bundle := M{"caBundleSecret": "certs-bundle"}
-	for name, tc := range map[string]struct{ tls, dcr, want M }{
-		"defaults":          {nil, M{"registrationUrl": "u"}, M{"registrationUrl": "u"}},
-		"the platform's CA": {bundle, M{}, M{"caSecret": "certs-bundle"}},
-		"empty":             {bundle, M{"caSecret": ""}, M{"caSecret": ""}},
-		"set":               {bundle, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}, M{"caSecret": "ca", "ttlSeconds": float64(0), "backoffLimit": float64(1), "waitTtlSeconds": float64(60)}},
-		"camelCase":         {nil, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}, M{"image": M{"registry": "r", "pullPolicy": "Always", "pullSecrets": []any{"s"}}}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			okdp := M{"oidc": M{"clientProvisioning": "dcr", "dcr": tc.dcr}}
-			if tc.tls != nil {
-				okdp["tls"] = tc.tls
-			}
-			p, err := platformCtx(t, okdp)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := value.Merge(M{"enabled": true}, defaults)
-			want = value.Merge(want, tc.want)
-			if got := value.AsMap(value.Dig(p, "oidc.dcr")); !reflect.DeepEqual(got, want) {
-				t.Errorf("got  %#v\nwant %#v", got, want)
-			}
-		})
 	}
 }
 
@@ -148,26 +65,24 @@ func TestPlatformSchema(t *testing.T) {
 	}{
 		"global":      {"x", "- at '/global': got string, want object"},
 		"global.okdp": {M{"okdp": []any{}}, "- at '/global/okdp': got array, want object"},
-		"each map and setting": {M{"okdp": M{"proxy": "p", "oidc": M{"enabled": "false", "clientProvisioning": "manual"}}},
-			"- at '/global/okdp/oidc': validation failed\n  - at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'\n  - at '/global/okdp/oidc/enabled': got string, want boolean\n- at '/global/okdp/proxy': got string, want object"},
-		"dcr": {M{"okdp": M{"oidc": M{"dcr": M{"image": "quay.io/x:1", "caSecret": true, "ttlSeconds": "30s", "backoffLimit": float64(-1), "waitTtlSeconds": 1.5}}}},
-			"- at '/global/okdp/oidc/dcr/backoffLimit': minimum: got -1, want 0\n- at '/global/okdp/oidc/dcr/caSecret': got boolean, want string\n- at '/global/okdp/oidc/dcr/image': got string, want object\n- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer\n- at '/global/okdp/oidc/dcr/waitTtlSeconds': got number, want integer"},
-		"image": {M{"okdp": M{"oidc": M{"dcr": M{"image": M{"tag": "1", "pull_policy": "Never"}}}}},
-			"- at '/global/okdp/oidc/dcr/image/pull_policy': false schema"},
+		"each map and setting": {M{"okdp": M{"proxy": "p", "network": M{"policy": "true", "ingressNamespaces": []any{"Nginx"}}}},
+			"- at '/global/okdp/network': validation failed\n  - at '/global/okdp/network/ingressNamespaces/0': 'Nginx' does not match pattern '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'\n  - at '/global/okdp/network/policy': got string, want boolean\n- at '/global/okdp/proxy': got string, want object"},
+		"secrets": {M{"okdp": M{"secrets": M{"store": true, "provider": "vault", "refreshInterval": float64(60)}}},
+			"- at '/global/okdp/secrets/provider': got string, want object\n- at '/global/okdp/secrets/refreshInterval': got number, want string\n- at '/global/okdp/secrets/store': got boolean, want string"},
 		"tls": {M{"okdp": M{"tls": M{"clusterIssuer": true, "caBundleSecret": nil}, "certificateIssuers": M{"selfSigned": M{"name": "ca"}}}},
 			"- at '/global/okdp/certificateIssuers': false schema\n- at '/global/okdp/tls': validation failed\n  - at '/global/okdp/tls/caBundleSecret': got null, want string\n  - at '/global/okdp/tls/clusterIssuer': got boolean, want string"},
 		"serviceCatalog": {M{"okdp": M{"serviceCatalog": M{"categories": []any{}}}}, "- at '/global/okdp/serviceCatalog': false schema"},
-		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "oidcDcr": M{"version": float64(1)}, "dcr": nil}}},
-			"- at '/global/okdp/charts': additional properties 'dcr', 'oidcDcr' not allowed\n- at '/global/okdp/charts/objects': got string, want object"},
+		"charts": {M{"okdp": M{"charts": M{"objects": "okdp-objects", "other": M{"version": float64(1)}, "extra": nil}}},
+			"- at '/global/okdp/charts': additional properties 'extra', 'other' not allowed\n- at '/global/okdp/charts/objects': got string, want object"},
 		"classes": {M{"okdp": M{"provisioning": M{
 			"server":   M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg", "request": M{"size": "1Gi"}}}},
 			"database": M{"default": float64(1), "other": true, "classes": M{"Fast": M{"provider": "data/pg"}, "slow": M{"request": "1Gi", "tier": "b"}}},
 		}}},
 			"- at '/global/okdp/provisioning/database': additional properties 'other' not allowed\n- at '/global/okdp/provisioning/database/classes': validation failed\n  - at '/global/okdp/provisioning/database/classes': additional properties 'Fast' not allowed\n  - at '/global/okdp/provisioning/database/classes/slow': validation failed\n    - at '/global/okdp/provisioning/database/classes/slow': additional properties 'tier' not allowed\n    - at '/global/okdp/provisioning/database/classes/slow': missing property 'provider'\n    - at '/global/okdp/provisioning/database/classes/slow/request': got string, want object\n- at '/global/okdp/provisioning/database/default': got number, want string"},
-		"null, a default":  {M{"okdp": M{"oidc": M{"scope": "", "clientProvisioning": nil, "dcr": M{"caSecret": "", "ttlSeconds": nil}}}}, ""},
-		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "ingress": nil, "charts": M{"objects": nil}}}, "- at '/global/okdp/charts/objects': got null, want object\n- at '/global/okdp/ingress': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
+		"null, a default":  {M{"okdp": M{"secrets": M{"serviceAccount": nil, "refreshInterval": ""}}}, ""},
+		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "access": nil, "charts": M{"objects": nil}}}, "- at '/global/okdp/access': got null, want object\n- at '/global/okdp/charts/objects': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
 		"no global":        {nil, ""},
-		"unread is unread": {M{"okdp": M{"ingress": M{"className": 1}, "oidc": M{"dcr": M{"registrationUrl": 1}}}, "imageRegistry": 1}, ""},
+		"unread is unread": {M{"okdp": M{"cluster": M{"domain": 1}, "monitoring": M{"enabled": "yes"}}, "imageRegistry": 1}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
@@ -178,16 +93,16 @@ func TestPlatformSchema(t *testing.T) {
 			}
 		})
 	}
-	// Checked before the platform context is derived: false no longer leaves
-	// OIDC enabled; a null enabled deletes its default, and OIDC is off; an
-	// empty scope is a value.
-	if _, err := platformCtx(t, M{"oidc": false}); err == nil || !strings.HasSuffix(err.Error(), "- at '/global/okdp/oidc': got boolean, want object") {
+	// Checked before the platform context is derived: false is not read as
+	// no proxy; a null deletes a default, and the setting is absent; an
+	// empty string is a value.
+	if _, err := platformCtx(t, M{"proxy": false}); err == nil || !strings.HasSuffix(err.Error(), "- at '/global/okdp/proxy': got boolean, want object") {
 		t.Errorf("compile: got %v", err)
 	}
-	p, err := platformCtx(t, M{"oidc": M{"enabled": nil, "clientProvisioning": "dcr", "scope": ""}})
-	oidc := value.AsMap(p["oidc"])
-	if _, set := oidc["enabled"]; err != nil || set || oidc["existing"] != false || value.Dig(oidc, "dcr.enabled") != false || oidc["scope"] != "" {
-		t.Errorf("enabled: null: %v %#v", err, oidc)
+	settings, err := platformSettings(testrules.Standard(), M{"global": M{"okdp": M{"secrets": M{"serviceAccount": nil, "refreshInterval": ""}}}})
+	secrets := value.AsMap(settings["secrets"])
+	if _, set := secrets["serviceAccount"]; err != nil || set || secrets["refreshInterval"] != "" {
+		t.Errorf("serviceAccount: null: %v %#v", err, secrets)
 	}
 }
 
@@ -214,7 +129,7 @@ func TestContextValues(t *testing.T) {
 	if want := (M{"replicas": float64(2)}); !reflect.DeepEqual(inst.scope["values"], want) {
 		t.Errorf("values in the context: %#v", inst.scope["values"])
 	}
-	if want := (M{"okdp": M{"ingress": M{"suffix": "example.org"}}, "project": M{"name": "demo"}}); !reflect.DeepEqual(inst.scope["global"], want) {
+	if want := (M{"okdp": M{"cluster": M{"domain": "example.org"}}, "project": M{"name": "demo"}}); !reflect.DeepEqual(inst.scope["global"], want) {
 		t.Errorf("global in the context: %#v", inst.scope["global"])
 	}
 	for _, k := range []string{"global", "connections"} {
@@ -252,7 +167,7 @@ func TestContextUpstream(t *testing.T) {
 // view as written; a schema whose defaults give global.okdp is refused, as
 // one that declares it.
 func TestPlatformFromContext(t *testing.T) {
-	okdpDefault := M{"policy": M{"privileged": []any{"demo"}}, "secrets": M{"store": "evil"}, "charts": M{"oidcDcr": M{"repository": "oci://evil.example.org"}}}
+	okdpDefault := M{"policy": M{"privileged": []any{"demo"}}, "secrets": M{"store": "evil"}, "charts": M{"objects": M{"repository": "oci://evil.example.org"}}}
 	shapes := []any{
 		M{"type": "object", "default": M{"okdp": okdpDefault}},
 		M{"default": M{"okdp": nil}},
@@ -330,15 +245,7 @@ func TestPlatformFromContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// oidc gets what newInstance derives of it (existing,
-			// dcr.enabled, dcr.caSecret): compared without them.
-			got := value.AsMap(value.Copy(inst.okdp))
-			if oidc, ok := got["oidc"].(M); ok {
-				delete(oidc, "existing")
-				delete(value.AsMap(oidc["dcr"]), "enabled")
-				delete(value.AsMap(oidc["dcr"]), "caSecret")
-			}
-			if !reflect.DeepEqual(got, want) {
+			if !reflect.DeepEqual(inst.okdp, want) {
 				t.Errorf("shape %d %s, context %d: the platform's settings\n got %#v\nwant %#v", i, doc, j, inst.okdp, want)
 			}
 			written, set := value.AsMap(view["global"])["okdp"]

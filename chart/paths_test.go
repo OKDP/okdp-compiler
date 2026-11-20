@@ -17,13 +17,13 @@ var parsePathCases = map[string][]PathSeg{
 	"controller.extraArgs.enable-ssl-passthrough": {{Key: "controller"}, {Key: "extraArgs"}, {Key: "enable-ssl-passthrough"}},
 	`config["spark.ui.filters"]`:                  {{Key: "config"}, {Key: "spark.ui.filters"}},
 	`config["spark.history.*"]`:                   {{Key: "config"}, {Key: "spark.history.", Glob: true}},
-	`filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]`: {
-		{Key: "filer"}, {Key: "ingresses"}, {Key: "http"}, {Key: "annotations"}, {Key: "nginx.ingress.kubernetes.io/auth-", Glob: true},
+	`filer.servers.http.annotations["example.org/auth-*"]`: {
+		{Key: "filer"}, {Key: "servers"}, {Key: "http"}, {Key: "annotations"}, {Key: "example.org/auth-", Glob: true},
 	},
-	`["a.b"]`:             {{Key: "a.b"}},
-	`["a.b"]["c"].d`:      {{Key: "a.b"}, {Key: "c"}, {Key: "d"}},
-	`ingresses["*"].tls`:  {{Key: "ingresses"}, {Key: "", Glob: true}, {Key: "tls"}},
-	`env.VITE_OIDC_SCOPE`: {{Key: "env"}, {Key: "VITE_OIDC_SCOPE"}},
+	`["a.b"]`:            {{Key: "a.b"}},
+	`["a.b"]["c"].d`:     {{Key: "a.b"}, {Key: "c"}, {Key: "d"}},
+	`servers["*"].tls`:   {{Key: "servers"}, {Key: "", Glob: true}, {Key: "tls"}},
+	`env.VITE_API_SCOPE`: {{Key: "env"}, {Key: "VITE_API_SCOPE"}},
 }
 
 // parsePathErrors: malformed paths, for TestParsePath and FuzzParsePath.
@@ -86,10 +86,10 @@ func FuzzParsePath(f *testing.F) {
 // formatPathCases: keys and their path, for TestFormatPath and
 // FuzzFormatPath.
 var formatPathCases = map[string][]string{
-	"ingress.hosts": {"ingress", "hosts"},
-	`filer.annotations["nginx.ingress.kubernetes.io/auth-type"]`: {"filer", "annotations", "nginx.ingress.kubernetes.io/auth-type"},
-	`["spark.ui.filters"]`: {"spark.ui.filters"},
-	`a[""]`:                {"a", ""},
+	"service.ports": {"service", "ports"},
+	`filer.annotations["example.org/auth-type"]`: {"filer", "annotations", "example.org/auth-type"},
+	`["spark.ui.filters"]`:                       {"spark.ui.filters"},
+	`a[""]`:                                      {"a", ""},
 }
 
 // TestFormatPath: the key a value was found at, as the errors show it;

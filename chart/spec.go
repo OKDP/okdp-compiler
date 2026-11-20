@@ -59,7 +59,7 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	u.Keys = map[string]UpstreamKey{}
 	for _, key := range slices.Sorted(maps.Keys(keys)) {
 		v := keys[key]
-		k, ok, err := upstreamKey(&v)
+		k, ok, err := upstreamEntry(&v)
 		if err != nil {
 			return err
 		}
@@ -71,8 +71,9 @@ func (u *Upstream) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// upstreamKey decodes an entry; ok is false when n is no form of UpstreamKey.
-func upstreamKey(n *yaml.Node) (k UpstreamKey, ok bool, err error) {
+// upstreamEntry decodes an entry; ok is false when n is no form of
+// UpstreamKey.
+func upstreamEntry(n *yaml.Node) (k UpstreamKey, ok bool, err error) {
 	switch n.Kind {
 	case yaml.ScalarNode:
 		ok = n.ShortTag() != "!!null" && n.Decode(&k.Accept) == nil

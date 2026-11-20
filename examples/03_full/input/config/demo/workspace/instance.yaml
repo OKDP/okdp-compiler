@@ -1,5 +1,0 @@
-# The instance's package: catalog/workspace/. The release is
-# demo-workspace, <project>-<instance>, the project's directory the
-# namespace, demo.
-service: workspace
-version: 3.2.0-1.4.0

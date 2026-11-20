@@ -139,8 +139,8 @@ func FuzzContextLayers(f *testing.F) {
 	platform := "global: {labels: {okdp.io/tier: gold}, okdp: {registry: null, provisioning: {server: {default: standard, classes: {standard: {provider: data/pg}}}}}}\nconnections: {shared-db: {contract: database, host: db.example.org}}\n"
 	f.Add([]byte(platform), []byte(""), []byte(""))
 	f.Add([]byte(platform), []byte("global: {storageClass: fast, project: {name: demo}}\nconnections: {team-db: {contract: database, host: a}}\n"), []byte("connections: {mine: {contract: database, host: b}}\n"))
-	f.Add([]byte(platform), []byte("global: {okdp: {ingress: {suffix: other.example.org}}}\n"), []byte(""))
-	f.Add([]byte(platform), []byte("global: {okdp: {charts: {oidcDcr: {repository: 'oci://x/y', chart: c, version: 1.0.0}}}}\n"), []byte(""))
+	f.Add([]byte(platform), []byte("global: {okdp: {cluster: {domain: other.example.org}}}\n"), []byte(""))
+	f.Add([]byte(platform), []byte("global: {okdp: {charts: {objects: {repository: 'oci://x/y', chart: c, version: 1.0.0}}}}\n"), []byte(""))
 	f.Add([]byte(platform), []byte("global: {okdp: {provisioning: {s3: {classes: {fast: {provider: data/minio}}}}}}\n"), []byte("global: {okdp: {proxy: {noProxy: .svc}}}\n"))
 	f.Add([]byte(platform), []byte("claims: {reports: {contract: database}}\naccess: {analysts: viewer}\n"), []byte("claims: {reports: {provider: data/pg}}\n"))
 	f.Add([]byte(platform), []byte("connections: {t: {host: '{{ .Release.Name }}'}}\n"), []byte(""))
@@ -206,7 +206,7 @@ func FuzzContextLayers(f *testing.F) {
 func FuzzValuesLayers(f *testing.F) {
 	ctx := "global: {storageClass: fast}\n"
 	for _, s := range []string{
-		"", "replicas: 2", "global: {storageClass: instance}", "global: {okdp: {ingress: {suffix: x}}}", "global: {proxy: p}", "global: null",
+		"", "replicas: 2", "global: {storageClass: instance}", "global: {okdp: {cluster: {domain: x}}}", "global: {proxy: p}", "global: null",
 		"connections: {}", "connections: null", "claims: {reports: {contract: database}}", "access: {a: viewer}", "upstream: {app: {tags: ['{{ .Release.Name }}']}}",
 		"upstream: {app: {'{{ x }}': y}}", "global: {storageClass: '{{ x }}'}",
 	} {

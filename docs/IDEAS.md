@@ -80,7 +80,7 @@ compiled values by chart key, not the parameters nor the `vars` of the
 mapping. The webapp's:
 
 ```
-A web application. Open https://{{ (index .Values.app.ingress.hosts 0).host }}
+A web application. Open {{ .Values.app.config.publicUrl }}
 ```
 
 `instance.usage` would go, and with it the `usage` key of
@@ -117,7 +117,7 @@ opens rather than text it shows. The info file keeps `url` and
   ([the engines](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md#the-engines));
   so is any deployer that renders the manifests and applies them itself.
 - **A failed release for a sentence.** A mistake in `NOTES.txt`, a value
-  path a chart bump moved (`nil pointer evaluating interface {}.ingress`),
+  path a chart bump moved (`nil pointer evaluating interface {}.config`),
   fails the whole install or upgrade, in the cluster, not the compile nor
   `--check` in CI: the compiler embeds no Helm to render it. The `instance`
   section is checked by the compile, its expressions on every branch,

@@ -28,15 +28,13 @@ const (
 	CheckPlatformNSRule = "platformNamespace"
 	CheckReleaseRule    = "release"
 	CheckObjectRule     = "object"
-	CheckUpstreamKey    = "upstreamKey"
 	CheckPlainSecret    = "plainSecret"
-	CheckHost           = "host"
 	CheckContextLayer   = "contextLayer"
 	CheckValuesLayer    = "valuesLayer"
 )
 
 // ruleChecks lists the names of the checks of a rule set, sorted.
-var ruleChecks = []string{CheckContextLayer, CheckHost, CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule, CheckUpstreamKey, CheckValuesLayer}
+var ruleChecks = []string{CheckContextLayer, CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule, CheckValuesLayer}
 
 // ruleInputs lists what the checks may read, besides their sets and tables.
 var ruleInputs = []string{"added", "arg", "at", "declared", "field", "host", "items", "key", "layer", "level", "listed", "name", "ns", "object", "platform", "privileged", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}

@@ -1,0 +1,34 @@
+{
+  "properties": {
+    "notes": {
+      "type": "array",
+      "description": "The notes of a mapping, a section of the set.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$", "maxLength": 20},
+          "text": {"type": "string"}
+        }
+      }
+    },
+    "exampleConfigMap": {
+      "type": "object",
+      "description": "Not a section: the argument of exampleConfigMap.",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+        "namespace": {"type": "string"},
+        "data": {"type": "object", "additionalProperties": {"type": "string"}},
+        "replicas": {"type": "integer", "minimum": 1}
+      }
+    },
+    "exampleSettings": {
+      "type": "object",
+      "description": "Not a section: the argument of exampleSettings.",
+      "properties": {"prefix": {"type": "string"}}
+    }
+  }
+}

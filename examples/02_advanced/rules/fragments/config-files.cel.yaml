@@ -1,0 +1,15 @@
+# exampleConfigFiles: a ConfigMap of files, named <release>-<name>, with
+# OKDP's labels, and the checksum of the files: a pod annotated with it
+# restarts when they change. Evaluated by okdp-compiler at each call (a
+# function of rules.yaml), with the mapping engine. Input: args (checked
+# against mapping.schema.json), release, labels, platform, global.
+values:
+  objects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${{ release.name + "-" + args.name }}
+        namespace: ${{ release.namespace }}
+        labels: ${{ labels }}
+      data: ${{ args.files }}
+  checksum: ${{ sha256(toJson(args.files)) }}

@@ -5,23 +5,23 @@ package that `compiler.LoadDefinition(fsys)` reads. A package is laid out
 as a Helm chart over the service's upstream charts, plus OKDP's own
 files; it is installed as it is, with the values of a compile.
 
-The `oidcClients` section, the functions `okdpPodSpec`, `okdpJob`,
-`okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret` and
-`okdpGeneratedSecret`, what the mapping sees as `platform` and the shape
-of the mapping's sections come from the compiler's mandatory rule set,
-which every compile applies ([rule set](01_inputs_outputs.md#rule-set)).
+The function `okdpGeneratedSecret`, what the mapping sees as `platform`
+and the shape of the mapping's sections come from the compiler's
+mandatory rule set, which every compile applies
+([rule set](01_inputs_outputs.md#rule-set)). A rule set added to it adds
+sections, functions and keys of `platform` of its own
+([a rule set's sections](#a-rule-sets-sections)).
 
 | File | Required | Content |
 |---|---|---|
 | [`Chart.yaml`](#chartyaml) | yes | Helm's chart metadata: the service's name and version, and its upstream charts, the `dependencies`, each by its name, repository and pinned version |
-| [`okdp.yaml`](#okdpyaml) | no | OKDP's part: the platform values the service needs, catalog metadata, OKDP's defaults for each dependency, the instance upstream values each accepts; then the sections of the mapping that are not chart values: `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` |
+| [`okdp.yaml`](#okdpyaml) | no | OKDP's part: the platform values the service needs, catalog metadata, OKDP's defaults for each dependency, the instance upstream values each accepts; then the sections of the mapping that are not chart values: `vars`, `errors`, `instance`, `provides`, `objects` and the rule set's |
 | [`values.cel.yaml`](#valuescelyaml) | no | the values file: the values of each dependency, by key, YAML shaped like the upstream values, with `${{ CEL }}` expressions and directives |
 | [`values.yaml`](#valuesyaml) | no | the values file under the name of a chart's values, conventionally without expressions: a package has one of them |
 
 The mapping is the sections of `okdp.yaml` and the values file
 ([sections](#sections)): it computes the values of each chart, OKDP's own
-objects and what the instance publishes, and declares the service's OAuth
-clients.
+objects and what the instance publishes.
 
 `LoadDefinition` reads `Chart.yaml` and checks it: a missing one fails with
 the read error (`open Chart.yaml: ...`). It then decodes the package keys of
@@ -93,7 +93,7 @@ dependencies:
     alias: scheduler
     repository: https://charts.example.org
     version: 3.2.0
-  - name: gateway                      # its key: gateway
+  - name: cache                        # its key: cache
     repository: oci://registry.example.org/charts
     version: 1.4.2
 ```
@@ -136,7 +136,9 @@ the chart cache of okdp-gitops' check need not hold its chart
 `condition`, `tags`, `enabled` and `import-values`, Helm's means of
 choosing what renders and of passing values between charts, fail: the
 values file decides what is rendered, and each chart's values are its
-key's.
+key's. The one `condition` accepted is `<key>.enabled`, by which the
+chart, installed as it is, leaves out a dependency the values file
+leaves out ([rendered dependencies](#rendered-dependencies)).
 
 Each dependency is checked when the file is loaded, the first failing
 check reported (`testdata/cli/chart-sources.txtar`: `http://`, a
@@ -145,7 +147,7 @@ key:
 
 | Case | Error |
 |---|---|
-| `condition` set (`tags`, `enabled`, `import-values` alike) | `Chart.yaml: dependencies[<i>] (<key>): condition: the values decide what is rendered ($if on <key> in values.cel.yaml)` |
+| `condition` set to another value than `<key>.enabled` (`tags`, `enabled`, `import-values` set at all) | `Chart.yaml: dependencies[<i>] (<key>): condition: the values decide what is rendered ($if on <key> in values.cel.yaml)` |
 | no `name` | `Chart.yaml: dependencies[<i>].name is required` |
 | a key that is not a DNS label ([chart keys](#chart-keys)) | `Chart.yaml: dependencies[<i>] (<key>): key "<key>": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias` |
 | the key `global`, an `alias` or a `name`: Helm's values of every chart of the package, which a dependency's values would replace | `Chart.yaml: dependencies[<i>] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias` |
@@ -181,13 +183,13 @@ with the mapping, the package keys skipped ([sections](#sections)).
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `require` | list of keys | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`ingress.suffix`), each of which must be set and not empty: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
+| `require` | list of keys | `[]` | Platform values the service needs: dotted paths under `global.okdp` (`tls.clusterIssuer`), each of which must be set and not empty: [require](#require), [requirements](01_inputs_outputs.md#requirements). |
 | `roles` | list of strings | `[]` | Catalog metadata: what the service provides. Not read by the compiler. |
 | `dependsOn` | list of strings | `[]` | Catalog metadata: the platform services the service needs. Not read by the compiler. |
 | `defaults` | map: key → path | `{}` | OKDP's defaults for a dependency: [defaults](#defaults). |
 | `upstream` | `true`, `false`, or a map: key → `true`, `false` or `{protect, append}` | `false` | The instance upstream values each dependency accepts: [upstream](#upstream). |
 | `provisions` | list of contracts, each its name or `{contract, claimers}` | `[]` | The contracts the package provisions connections of, one per claim bound to an instance, and the namespaces that may claim of its instances from another namespace: [provisions](#provisions). |
-| `vars`, `errors`, `instance`, `provides`, `objects`, `oidcClients` | | | The sections of the mapping, not read when the file is loaded: [sections](#sections). |
+| `vars`, `errors`, `instance`, `provides`, `objects`, the rule set's sections | | | The sections of the mapping, not read when the file is loaded: [sections](#sections). |
 
 Absent, or empty, `okdp.yaml` is a package with no requirements, no catalog
 metadata, no OKDP defaults, no upstream values accepted, no `vars` and no
@@ -226,8 +228,8 @@ An entry is a key under `global.okdp`, required in every case:
 
 ```yaml
 require:
-  - ingress.suffix
-  - oidc.issuerUri
+  - tls.clusterIssuer
+  - secrets.store
 ```
 
 Every compile checks the entries in order, once the context is built and
@@ -266,7 +268,7 @@ the computed values and the instance upstream values combine:
 ```yaml
 upstream:
   api:                                 # the instance's upstream.api
-    protect: [fullnameOverride, ingress.hosts, 'ingress.annotations["cert-manager.io/*"]']
+    protect: [fullnameOverride, persistence.size, 'podAnnotations["prometheus.io/*"]']
     append: [env, tolerations]
   admin: true                          # the instance's upstream.admin, any value
 ```
@@ -289,11 +291,12 @@ The dependencies that accept the instance's upstream values,
 The instance's values for a dependency that accepts none
 are ignored. How they are written and applied:
 [upstream values](01_inputs_outputs.md#upstream-values). Whatever the
-package accepts, the upstream values of a project that is not one of the
-platform's own (`global.okdp.policy.privileged`) set no key of a pod's
-privileges, identity, containers or objects, and take their images from
-the platform's registries:
-[upstream policy](01_inputs_outputs.md#upstream-policy).
+package accepts, a host may refuse what the upstream values of a project
+that is not one of the platform's own (`global.okdp.policy.privileged`)
+set, in Helm's merge: okdp-gitops applies the security set's policy, no
+key of a pod's privileges, identity, containers or objects, images from
+the platform's registries only ([the upstream
+policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md)).
 
 Another form fails when `okdp.yaml` is loaded:
 
@@ -305,10 +308,10 @@ Another form fails when `okdp.yaml` is loaded:
 
 ### protect and append
 
-Paths of keys separated by dots (`ingress.hosts`). A key containing dots
+Paths of keys separated by dots (`persistence.size`). A key containing dots
 is written in brackets, as one literal key (`config["spark.ui.filters"]`);
 a bracketed key ending with `*` names every key starting with the text
-before it (`ingress.annotations["cert-manager.io/*"]`; `["*"]` names every
+before it (`podAnnotations["prometheus.io/*"]`; `["*"]` names every
 key); no key holds a quote, a backslash or a star but a glob's. A
 malformed path fails when `okdp.yaml` is loaded: `okdp.yaml:
 upstream.<key>.protect[<i>] "<path>": not a path: keys joined by dots, a
@@ -400,10 +403,8 @@ computed layer of that dependency's final values
 app:
   fullnameOverride: ${{ release.name }}-app
   replicaCount: ${{ values.replicas }}          # a number: the expression is the whole scalar
-  ingress:
-    annotations: ${{ platform.ingressAnnotations }}
-    hosts:
-      - host: ${{ host }}                       # host: a vars binding of okdp.yaml
+  config:
+    publicUrl: https://${{ host }}              # host: a vars binding of okdp.yaml
   env:
     - $if: ${{ db.size() > 0 }}                 # the item is left out when false
       name: DB_URL
@@ -451,7 +452,7 @@ check need not hold its chart.
 - Without the file, or empty, every dependency is rendered.
 
 ```yaml
-gateway: {}                                     # rendered: its defaults, OKDP's, the upstream values
+cache: {}                                       # rendered: its defaults, OKDP's, the upstream values
 metrics:
   $if: ${{ values.metrics.enabled }}            # left out when false
 backup: ~                                       # left out
@@ -488,9 +489,11 @@ of them: both fail when it is loaded,
 
 ## Example
 
-`examples/03_full/input/catalog/workspace/`, abridged: the
-package of the `workspace` service, five dependencies, two of them renders
-of one chart.
+The package of the `workspace` service of okdp-compiler-security's
+[`examples/03_full`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/catalog/workspace),
+abridged to what this page describes: five dependencies, two of them
+renders of one chart; the hosts and the OAuth clients of the security
+set are left out.
 
 ```yaml
 # Chart.yaml
@@ -500,7 +503,7 @@ version: 3.2.0-1.4.0                   # <upstream>-<okdp semver>
 dependencies:
   - {name: workspace, alias: api, repository: https://charts.example.org, version: 3.2.0}
   - {name: workspace, alias: scheduler, repository: https://charts.example.org, version: 3.2.0}
-  - {name: gateway, repository: oci://registry.example.org/charts, version: 1.4.2}
+  # ...
   - {name: metrics-exporter, alias: metrics, repository: oci://registry.example.org/charts, version: 0.7.0}
   - {name: backup, repository: oci://registry.example.org/charts, version: 2.0.1}
 ```
@@ -508,21 +511,18 @@ dependencies:
 ```yaml
 # okdp.yaml
 roles: [notebooks, sql]                # catalog metadata, not read by the compiler
-dependsOn: [database-server, object-store, ingress]
 require:                               # global.okdp.<path>, each set and not empty
-  - ingress.suffix
-  - ingress.className
   - tls.clusterIssuer
-  - oidc.issuerUri
+  # ...
 defaults:                              # OKDP's defaults, over the chart's values.yaml
   api: api.defaults.yaml
   scheduler: scheduler.defaults.yaml   # the second render's own
 upstream:                              # api only: the instance's upstream.api
   api:
-    protect: [fullnameOverride, mode, catalogs, ingress.enabled, ingress.hosts, ingress.tls, 'config["workspace.auth.*"]']
+    protect: [fullnameOverride, mode, catalogs, 'config["workspace.auth.*"]']   # ...
     append: [env, tolerations]         # the instance's lists added after the computed ones
 vars:                                  # the mapping's sections
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  api: ${{ okdpFullname('api') }}
   # ...
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
@@ -531,7 +531,7 @@ errors:
 instance:
   url: https://${{ host }}
   # ...
-# provides, objects, oidcClients
+# provides, objects, and the security set's section
 ```
 
 ```yaml
@@ -542,8 +542,6 @@ api:
   # ...
 scheduler:                             # the second render of the workspace chart
   fullnameOverride: ${{ okdpFullname('scheduler') }}
-  # ...
-gateway:
   # ...
 metrics:
   $if: ${{ values.features.metrics.enabled }}    # the chart is rendered only when true
@@ -571,16 +569,16 @@ values file, a section whole.
 | [`objects`](#objects) | `okdp.yaml` | list | OKDP's own objects, whole manifests |
 | [`instance`](#instance) | `okdp.yaml` | map | `url` and `usage` of the instance |
 | [`provides`](#provides) | `okdp.yaml` | list | the connections the instance publishes |
-| [`oidcClients`](#oidcclients) | `okdp.yaml` | list | the OAuth clients of the service |
+| [a rule set's](#a-rule-sets-sections) | `okdp.yaml` | as its schema says | what the rule set reads of the mapping |
 
 Every section is optional. `okdp.yaml` holds no other key than its package
-keys and these sections: any other, a directive included, fails when it is
-loaded ([okdp.yaml](#okdpyaml)).
+keys, these sections and those of the rule set it is read for: any other,
+a directive included, fails when it is loaded ([okdp.yaml](#okdpyaml)).
 
 ```yaml
 # okdp.yaml, after the package keys
 vars:
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}.${{ release.namespace }}.${{ values.domain }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
@@ -596,9 +594,6 @@ provides:
   - contract: http
     values:
       url: https://${{ host }}
-oidcClients:
-  - redirectUris: ['https://${{ host }}/oauth2/callback']
-    grantTypes: [authorization_code, refresh_token]
 ```
 
 ### Evaluation order
@@ -615,22 +610,23 @@ mistake fails the compile before anything is evaluated. Then:
    bindings before it.
 2. `errors`, every entry, then the messages fail the compile together
    ([the errors section](#the-errors-section)).
-3. The values file, `instance`, `provides`, `objects`, `oidcClients`, in
-   this order: each sees the context and every `vars` binding. Then they
-   are checked together for their shapes.
-4. The OAuth clients are checked across clients, their objects added in
-   `dcr` mode ([oidcClients](#oidcclients)); then the
-   compile checks `provides` against the contracts, renders the
-   credentials Secrets, and computes the final values of each dependency
-   the values file gives.
+3. The values file, `instance`, `provides`, `objects`, then the rule
+   set's sections, in this order: each sees the context and every `vars`
+   binding. Then they are checked together for their shapes.
+4. Each section of the rule set's `ownObjects` is checked by its list
+   document, and the objects it adds rendered
+   ([a rule set's sections](#a-rule-sets-sections)); then the compile
+   checks `provides` against the contracts, renders the credentials
+   Secrets, and computes the final values of each dependency the values
+   file gives.
 
 A section does not see the others: there is no variable of the values or
 of `instance`. A value used by several sections is a `vars` binding.
 
 Each section has a shape: the values file and `instance` are maps,
-`provides`, `objects` and `oidcClients` lists. So have the items and keys
-the compiler reads in them, described by the mapping schema of the
-mandatory rule set,
+`provides` and `objects` lists. So have the items and keys the compiler
+reads in them, described by the mapping schema of the mandatory rule set,
+with the keys a rule set added to it gives for its own sections,
 [`internal/rules/mandatory/schemas/mapping.schema.json`](../../internal/rules/mandatory/schemas/mapping.schema.json),
 where the values file is the section `output`:
 their types, the keys required, the keys allowed where another is
@@ -650,7 +646,7 @@ Helm's words, as those of the
 ```text
 the mapping's sections don't meet the specifications of mapping.schema.json:
 - at '/instance/url': got number, want string
-- at '/oidcClients/0': missing property 'grantTypes'
+- at '/objects/0': missing property 'kind'
 - at '/output/app': got string, want null or object
 ```
 
@@ -663,7 +659,7 @@ Each file is its first YAML document. An empty or null document
 
 ```yaml
 vars:
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ service.name }}.${{ release.namespace }}.${{ values.domain }}
   settingsName: ${{ okdpFullname('settings') }}
   settings:                                   # any node: a map, a list, directives
     APP_URL: https://${{ host }}              # host: the binding above
@@ -742,7 +738,7 @@ provides:
       realm: ${{ str(values.realm) }}
   - contract: s3                              # another output: named
     name: store-a
-    values: {apiUrl: 'https://a.${{ global.okdp.ingress.suffix }}'}
+    values: {apiUrl: 'https://a.${{ values.domain }}'}
     secret:                                   # Secret store-a-s3-credentials, generated
       generate: [{key: accessKey, length: 20}, {key: secretKey, length: 40}]
       stringData: {region: eu}
@@ -821,68 +817,23 @@ stringData or generate` (`<service>`: the `name` of `Chart.yaml`). The
 rendered objects and their labels: [credentials
 Secrets](01_inputs_outputs.md#credentials-secrets).
 
-### oidcClients
+### A rule set's sections
 
-```yaml
-oidcClients:
-  - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client: no name
-    grantTypes: [authorization_code, refresh_token]
-    scope: ${{ platform.oidc.scope }} offline_access
-  - $if: ${{ values.console.enabled }}                       # the client is left out when false
-    name: console                                            # objects <release>-console-oidc-dcr
-    public: true
-    redirectUris: ['https://${{ consoleHost }}/auth/callback']
-    grantTypes: [authorization_code]
-```
+A rule set added to the mandatory one may add sections to the mapping
+(`rules.yaml` `sections`), which `okdp.yaml` then holds besides its own:
+`compiler.LoadDefinitionWith`, `LoadRepositoryWith` and `Build` read
+`okdp.yaml` for the rule set they are given ([okdp.yaml](#okdpyaml)). A
+section is evaluated after `objects`, as any node is, and its shape is
+the mapping schema's, under the section's name
+([evaluation order](#evaluation-order)). When the set ties the section to
+objects (`ownObjects`), its list document checks the section's items,
+the first of its messages failing the compile, and says which items add
+objects, which its template renders, with the instance's other objects
+([what a mapping writes](05_rules.md#what-a-mapping-writes)).
 
-A list of the OAuth clients of the service, each a map. Items are
-evaluated as any other: `$if` leaves a client out, `$for` with `$each`, or
-`$spread`, gives several. A value that is not a list fails; absent or
-null, there are none. The platform provides the clients, or each service
-registers its own by OIDC Dynamic Client Registration, per
-`global.okdp.oidc.clientProvisioning` ([context](#context)):
-
-| Mode | The compiler |
-|---|---|
-| `dcr` (`platform.oidc.dcr.enabled`) | adds one Job per client and the objects it needs to the instance's objects: `<release>-oidc-dcr` for the main client, `<release>-<name>-oidc-dcr` for a named one. Its Job registers the client, keeps it as asked and writes its Secret ([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)); the platform's registration settings are then required ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)). |
-| otherwise (`existing`, or `platform.oidc.enabled` false) | adds no object: the platform provides each client's Secret |
-
-| Key | Type | Default | Meaning |
-|---|---|---|---|
-| `name` | string | `""` | `""`: the service's main client, one at most. Else the client's name, unique: lowercase letters, digits and `-`, starting and ending with a letter or a digit, 54 characters at most (its chart key `<name>-oidc-dcr` is a DNS-1123 label). It names the client's chart, its objects and its Secret. |
-| `grantTypes` | list of strings | required | The OAuth grant types the client registers (`authorization_code`, `refresh_token`, `client_credentials`...), a non-empty list of non-empty strings. |
-| `redirectUris` | list of strings | `[]` | Its redirect URIs, each non-empty. |
-| `scope` | string | `platform.oidc.scope` | The scope it requests, space separated. |
-| `clientName` | string | `<release>-<namespace>`, then `-<name>` for a named client | Its name at the identity provider. |
-| `public` | boolean | `false` | A public client (a browser application), without a client secret. |
-| `request` | map | `{}` | Fields of the registration request (snake_case, as OIDC Dynamic Client Registration names them): they override the computed ones. |
-| `secret` | string | [`oidcClientSecret(<name>)`](04_functions.md#oidcclientsecret) | The Secret the Job writes the client to, the release's: `<release>-<name>` exactly (`${{ release.name }}-console`), `<release>-oidc` for the main client. |
-| `caSecret` | string | `platform.oidc.dcr.caSecret` | The Secret holding the CA bundle the Job trusts; the platform's default is its CA bundle, `global.okdp.tls.caBundleSecret`, `""` (none) when unset. |
-
-A key left out by `$if` is not set, a null one is refused by its type,
-and `""` takes the default of a string key. Only `dcr` mode uses the
-keys; how they become the client's objects:
-[OAuth client objects](01_inputs_outputs.md#oauth-client-objects).
-
-Every mode checks the clients, after the mapping: each client is a map,
-its `name` of the form above, of these keys only, each of its type,
-`grantTypes` given and not empty ([sections](#evaluation-order)); then one
-client at most has no name, names are unique, and a `secret` given is
-the release's, `<release>-<name>` exactly (`<release>-oidc` for the main
-client): the Job's Role writes it, and would write another Secret of the
-namespace, another instance's credentials, were any name that starts with
-`<release>-` accepted (the instances `web` and `web-x` share the prefix).
-A client's `request` sets no URL the provider trusts (`redirect_uris`
-and its kind). In `dcr` mode, no two clients write one Secret, and the
-hosts of a client's `redirectUris`, of a project that is not privileged,
-are the project's. The first failing
-check stops the compile ([compile errors](#compile-errors)).
-
-The mapping reads the name of a client's Secret with
-[`oidcClientSecret(name)`](04_functions.md#oidcclientsecret) (the main
-client's is also `platform.oidcClientSecret`), in any section; a client
-that sets `secret` references that name itself. The keys the Secret holds:
-[OAuth client objects](01_inputs_outputs.md#oauth-client-objects).
+The security set's section, `oidcClients`, the OAuth clients of a service
+and the Jobs that register them: [its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/02_service_definition.md#oidcclients).
 
 ## Expressions
 
@@ -1044,17 +995,17 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 
 | Variable | Value |
 |---|---|
-| `platform.oidc` | `global.okdp.oidc`, its defaults applied, a `null` deleting a default ([fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads)): `enabled` true when the key is absent; `scope` `"openid profile email groups"`; `clientProvisioning` `"existing"`, else `existing` or `dcr` (any other value fails the compile); `dcr`: `global.okdp.oidc.dcr`, the settings of the oidc-dcr Jobs, defaults applied, its `caSecret` `global.okdp.tls.caBundleSecret` (else `""`) when it sets none ([OAuth client settings](01_inputs_outputs.md#oauth-client-settings)), and `enabled` set to `enabled && clientProvisioning == "dcr"` (a written value is replaced); `existing`: `enabled && clientProvisioning == "existing"`. |
-| `platform.oidcClientSecret` | The Secret holding the instance's main OAuth client: [`oidcClientSecret('')`](04_functions.md#oidcclientsecret). |
-| `platform.ingressAnnotations` | `{"cert-manager.io/cluster-issuer": <global.okdp.tls.clusterIssuer>}`, the platform's ClusterIssuer, `""` when unset, and `global.okdp.ingress.annotations` over it, the ingress controller's. |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
 | `platform.access` | who may use the project's services: the groups of the project (its `project.yaml` `access`, `okdp-project-<namespace>` an editor when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A project file whose `access` is refused gives no project group (the compile fails anyway). |
 
 The settings these are derived from are checked against the platform
-schema first (`- at '/global/okdp/oidc': got boolean, want object`):
+schema first (`- at '/global/okdp/access': got boolean, want object`):
 [fields the compiler reads](01_inputs_outputs.md#fields-the-compiler-reads).
-`enabled` is `true` or `false`; a `null`, unlike another setting's, is
-kept, and reads as false.
+A rule set added to the mandatory one adds keys to `platform` through its
+scope documents ([what a mapping sees as
+platform](05_rules.md#what-a-mapping-sees-as-platform)): the security
+set's, [its
+context](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/02_service_definition.md#context).
 
 `labels` and `selectorLabels` (and the functions [`okdpLabels`,
 `okdpSelectorLabels`](04_functions.md#okdplabels-and-okdpselectorlabels)),
@@ -1075,8 +1026,8 @@ No `helm.sh/chart`: the objects belong to no chart of the service.
 Bindings shadow context variables of the same name in expressions. The host
 functions do not see bindings: `okdpFullname`, `okdpLabels`,
 `okdpSelectorLabels` and `okdpGeneratedSecret` read `release` and `service`
-of the compile context, `oidcClientSecret` its `release` and
-`platform.oidc.dcr.enabled`.
+of the compile context, a rule set's functions the compile context too
+([a rule set's functions](04_functions.md#a-rule-sets-functions)).
 
 ## Functions
 
@@ -1084,8 +1035,7 @@ Besides CEL's standard library, an expression calls the CEL libraries the
 language enables, each at a pinned version, and the host functions: `str`,
 `first`, `sha256`, `toJson`, `toPrettyJson`, `toYaml`, `quote`,
 `okdpFullname`, `okdpLabels`, `okdpSelectorLabels`, `okdpGeneratedSecret`,
-`okdpSqlName`, `okdpObjectName`, the fragments `okdpPodSpec`, `okdpJob`,
-`okdpSignInProxy`, `okdpWebWorkload`, `oidcClientSecret`:
+`okdpSqlName`, `okdpObjectName`, and the functions of the rule set:
 [functions](04_functions.md).
 
 ## Errors
@@ -1096,7 +1046,7 @@ language enables, each at a pinned version, and the host functions: `str`,
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
     $value: "webapp: replicas > 1 needs a database"
-  - $for: p in ['s3SecretRef', 'trinoOidcSecretRef']
+  - $for: p in ['s3SecretRef', 'jdbcSecretRef']
     $each:
       $if: ${{ first([values[p]]) == '' }}
       $value: "okdp-examples: ${{ p }} is required"
@@ -1140,12 +1090,13 @@ The first error stops the compile (the `errors` section and the schema
 violations excepted). An error found reading or evaluating the mapping
 starts with the name of its file, `okdp.yaml: ` or `values.cel.yaml: `
 (`values.yaml: `: [values.yaml](#valuesyaml)), the messages of its
-`errors` section excepted; one of a template of the compiler, with the
-template's (`oidc-dcr.cel.yaml: `). The errors of loading the package are
-those of [`Chart.yaml`](#chartyaml), of its [dependencies](#dependencies),
-of [`okdp.yaml`](#okdpyaml)'s package keys, and of both values files
-given ([values.yaml](#valuesyaml)). An error of an expression reads
-`<where>${{ <expression> }}: <cause>`, `<where>` being:
+`errors` section excepted; one of a template of the rule set, with the
+template's (`generated-secret.cel.yaml: `). The errors of loading the
+package are those of [`Chart.yaml`](#chartyaml), of its
+[dependencies](#dependencies), of [`okdp.yaml`](#okdpyaml)'s package
+keys, and of both values files given ([values.yaml](#valuesyaml)). An
+error of an expression reads `<where>${{ <expression> }}: <cause>`,
+`<where>` being:
 
 | Expression in | `<where>` |
 |---|---|
@@ -1166,7 +1117,7 @@ source line, reported when the mapping is loaded whatever branch holds the
 expression, or an evaluation error:
 
 ```text
-values.cel.yaml: app: ingress: hosts[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
+values.cel.yaml: app: servers[0]: host: ${{ hots }}: ERROR: <input>:1:2: undeclared reference to 'hots' (in container '')
  |  hots
  | .^
 okdp.yaml: vars db: ${{ values.databse }}: no such key: databse
@@ -1187,25 +1138,15 @@ Other errors of the mapping:
 | `<where><key>: not allowed here (allowed: <directives>)`, `<where>$for: in a map, needs $key and $value`, `<where>$for: in a list item, needs $each` | a directive ([errors](03_control_flow.md#errors)) |
 | `<where>unterminated ${{ in "<scalar>"` | an expression without its `}}` |
 | `<where>$for: "<spec>" is not "<name> in <expression>"`, `<where>$for "<spec>": not a list` | [`$for`](03_control_flow.md#for) |
-| `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [the values file](#valuescelyaml) (`/output`), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [`oidcClients`](#oidcclients) |
+| `the mapping's sections don't meet the specifications of mapping.schema.json:` then `- at '<path>': <violation>`, one line each | a section, or an item or a key of one, of another shape, a key it requires missing, a key it does not allow ([sections](#evaluation-order)): [the values file](#valuescelyaml) (`/output`), [`instance`](#instance), [`objects`](#objects), [`provides`](#provides), [a rule set's](#a-rule-sets-sections) |
 | `<where>${{ <expression> }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:` then `- at '/okdpGeneratedSecret<path>': <violation>`, one line each | an argument of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret) missing, unknown or of another type |
 | `values.cel.yaml: <key>: not a dependency of Chart.yaml` | a key of the [values file](#valuescelyaml) |
 | `provides "<name>" (<contract>): <message>`, `two <contract> outputs are named "<name>"`, `<service>: output "<name>": secret needs stringData or generate`, `<service>: output "<name>": secret: a plain value (stringData): ...` | [`provides`](#provides) |
-| `<client>: <other> has no name either: only the service's main client (chart oidc-dcr) has none, name the others`, `<client>: <other> has the same name: client names must be unique` | two clients without a name, two clients of the same name |
-| `<client>: secret "<secret>": the Secret the client is written to is the release's, "<release>-<name>" (<release>-<client name>, <release>-oidc for the main client)` | a client's `secret` that is not that name, in every mode |
-| `<client>: <other> writes the same Secret, "<secret>": give each client its own secret` | `dcr` mode: a client's `secret` is the Secret of another client, given or [`oidcClientSecret`](04_functions.md#oidcclientsecret)'s |
+| `<message>`, `<of>: <template>: <error>` | a section of the rule set its list document refuses, the first message as the document writes it; an expression of the template of its objects failing, after the item's `of` ([a rule set's sections](#a-rule-sets-sections)); the security set's: [its errors](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/02_service_definition.md#compile-errors) |
 | `Chart.yaml: dependencies[<i>] (okdp-objects): the chart of the instance's objects is added by the compiler: remove it`, `values.cel.yaml: okdp-objects: the chart of the instance's objects is compiled from the objects section: remove it` | the compiler's chart key, a dependency of `Chart.yaml` or a key of the values file |
-| `<client>: request.<field>: a URL the provider trusts is not set through request` | a client's `request` sets `redirect_uris` or its kind, in every mode |
-| `<client>: redirectUris[<i>]: "<url>": an http or https URL with a host and no user information`, `<client>: redirectUris[<i>]: host "<host>" is not served by <namespace>: ...` | `dcr` mode, a project that is not privileged: the URI has no host to check, or a host the project does not serve |
-| `global.okdp.oidc.dcr.image: tag <tag> without a digest: the Jobs run by digest, give it too` | `dcr` mode, at least one client: the platform's image names a tag and no digest |
-| `<client>: oidc-dcr.cel.yaml: <error>` | an expression of the client's objects template failing on the context, e.g. a `global.okdp.oidc.scope` that is not a string |
 
 `<file>`: `okdp.yaml` or the values file, `values.cel.yaml` or
-`values.yaml`. `<client>`, `<other>`:
-`oidcClients[<i>]`, the client's position in the
-evaluated list, followed by ` (<name>)` for a named client.
-`<value>`: the value as Go's `%#v` prints it (`"x"`, `true`). The errors of the
-platform's `global.okdp.oidc.dcr` settings:
-[OAuth client settings](01_inputs_outputs.md#oauth-client-settings).
+`values.yaml`. `<value>`: the value as Go's `%#v` prints it (`"x"`,
+`true`).
 
 okdp-gitops' commands print them after `error: `.

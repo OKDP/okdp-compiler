@@ -14,9 +14,8 @@ Three kinds of document share the directives, the
 | Document | Directives |
 |---|---|
 | the mapping: the sections of `okdp.yaml` and the values file, `values.cel.yaml` ([service definition](02_service_definition.md#sections)) | all |
-| the objects of an OAuth client, `internal/rules/mandatory/charts/oidc-dcr.cel.yaml` of the mandatory rule set ([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)) | all |
 | the objects of [`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), `internal/rules/mandatory/fragments/generated-secret.cel.yaml` of the mandatory rule set | all |
-| the objects of the [fragments](04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload), `internal/rules/mandatory/fragments/fragment-*.cel.yaml` of the mandatory rule set | all |
+| the fragments, templates and documents of a rule set added to the mandatory one ([the rule set](05_rules.md#functions)) | all |
 
 ## Directives
 
@@ -139,25 +138,23 @@ included, fails the load, `undeclared reference to '<name>'`.
 ```yaml
 # okdp.yaml
 vars:
-  suffix: ${{ global.okdp.ingress.suffix }}
+  prefix: ${{ release.name }}
 ```
 
 ```yaml
 # values.cel.yaml
 app:
-  ingress:
-    hosts:
-      - $for: h in values.hosts
-        $vars:
-          fqdn: ${{ h }}.${{ suffix }}    # h, and the vars bindings
-        $each: {host: "${{ fqdn }}"}
-    tls: ${{ fqdn }}                       # fails: undeclared reference to 'fqdn'
+  workers:
+    - $for: w in values.workers
+      $vars:
+        id: ${{ prefix }}-${{ w }}         # w, and the vars bindings
+      $each: {name: "${{ id }}"}
+  leader: ${{ id }}                        # fails: undeclared reference to 'id'
 ```
 
 The host functions do not see bindings: `okdpFullname`, `okdpLabels`,
-`okdpSelectorLabels`, `okdpGeneratedSecret` and `oidcClientSecret` read the
-compile's release, service and OAuth client mode
-([functions](04_functions.md#properties)).
+`okdpSelectorLabels` and `okdpGeneratedSecret` read the compile's release
+and service ([functions](04_functions.md#properties)).
 
 ## `$if`
 
@@ -193,8 +190,8 @@ left out, or is the value of its [`$else`](#else). A map left out is:
 | a section (`instance`, ..., the values file) | the section is empty; the dependencies the values file writes are left out ([rendered dependencies](02_service_definition.md#rendered-dependencies)) |
 
 On a list item carrying `$for` or `$spread`, `$if` fails: put the
-condition in the expression (`$for: "s in (oidcOn ?
-[platform.oidcClientSecret] : [])"`, `$spread: ${{ cond ? list : [] }}`).
+condition in the expression (`$for: "s in (values.tls ?
+[values.tlsSecret] : [])"`, `$spread: ${{ cond ? list : [] }}`).
 
 ## `$value`
 
@@ -207,16 +204,16 @@ included, fails. In a list, a `$value` list is one item, not spliced.
 
 ```yaml
 secretKeyRef:
-  $if: ${{ platform.oidc.dcr.enabled }}
-  $value: {name: "${{ okdpFullname('hub') }}", key: hub.config.CryptKeeper.keys}
-  $else: {name: "${{ platform.oidcClientSecret }}", key: JUPYTERHUB_CRYPT_KEY}
+  $if: ${{ values.existingSecret != "" }}
+  $value: {name: "${{ values.existingSecret }}", key: password}
+  $else: {name: "${{ okdpFullname('db') }}", key: password}
 ```
 
 ```yaml
-# output, release demo, dcr mode
-secretKeyRef: {name: demo-hub, key: hub.config.CryptKeeper.keys}
+# output, release demo, existingSecret: demo-db-admin
+secretKeyRef: {name: demo-db-admin, key: password}
 # otherwise
-secretKeyRef: {name: creds-demo-oauth2, key: JUPYTERHUB_CRYPT_KEY}
+secretKeyRef: {name: demo-db, key: password}
 ```
 
 In a map with `$if` and `$value`, `$else` is the map's value when the
@@ -379,10 +376,10 @@ An error is reported as `$vars <name>: <error>`.
 ## `$merge`
 
 ```yaml
-ingress:
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: 64m
-    $merge: ${{ platform.ingressAnnotations }}  # the platform's annotations win
+app:
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    $merge: ${{ values.podAnnotations }}  # the instance's annotations win
 spark-defaults:
   $merge: ${{ values['spark-defaults'] }}
 ```

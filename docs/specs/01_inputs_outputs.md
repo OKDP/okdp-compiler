@@ -35,7 +35,7 @@ empty one fails as another:
 | Case | Error |
 |---|---|
 | a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
-| a release that is the name of an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-viewer`, `-editor`, `-admin`, `okdp-secrets`, `okdp-dcr-token`, the names `global.okdp.secrets` and `oidc.dcr.tokenSecret` give), or its beginning up to a `-` (`okdp`, `okdp-access`): the objects of a release are named `<release>` and `<release>-<x>`, and would take its place | `Inputs.Release "okdp-project": the name of an object the platform writes in every namespace (okdp-project), or its beginning up to a "-": ...` |
+| a release that is the name of an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-viewer`, `-editor`, `-admin`, `okdp-secrets`, the names `global.okdp.secrets` gives, and those an added rule set lists), or its beginning up to a `-` (`okdp`, `okdp-access`): the objects of a release are named `<release>` and `<release>-<x>`, and would take its place | `Inputs.Release "okdp-project": the name of an object the platform writes in every namespace (okdp-project), or its beginning up to a "-": ...` |
 | a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 | the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce); `testdata/cli/secrets.txtar`) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
 | a namespace `kube-*`, Kubernetes' own (`kube-system`, `kube-public`, `kube-node-lease`) | `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)` |
@@ -54,39 +54,44 @@ A compile applies its rules as data. The mandatory set, embedded
 (`internal/rules/mandatory`), applied to every compile, is what a compile
 needs to write values a chart installs and what it refuses of a
 platform: the schema of `global.okdp` (`platform.schema.json`), with its
-defaults; the values the mapping sees as `platform`; the functions and
-fragments; the `oidcClients` section; the labels of OKDP's objects; the
-names of the Secrets that carry credentials; the documents of the secret
-store's objects; the roles of a project's groups; what a level may not
-change of a lower one; the tables and the CEL checks; the schema of the
-mapping's sections (`mapping.schema.json`); the platform's charts.
+defaults; the values the mapping sees as `platform`; the functions; the
+labels of OKDP's objects; the names of the Secrets that carry
+credentials; the documents of the secret store's objects; the roles of a
+project's groups; what a level may not change of a lower one; the tables
+and the CEL checks; the schema of the mapping's sections
+(`mapping.schema.json`); the platform's charts.
 
 `Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules`), adds a
 platform's own rules to it; nil, the mandatory set alone applies.
 `LoadRules` refuses a set that gives a rule of the mandatory one (`a rule
 set adds rules, it replaces none`). Every rule this document gives as
-OKDP's is the mandatory set's ([the rule set](05_rules.md)).
+OKDP's is the mandatory set's ([the rule set](05_rules.md)). An added set
+brings its own settings, sections, functions and checks: the hosts a
+project serves, its OAuth clients, the hardened pod and the policy on
+upstream values are those of the security set, whose inputs and outputs
+are in [its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md).
 
-The policy over the upstream values and the hosts of an upstream chart's
-values is no rule of the compile: it is the host's, through two hooks.
-`Inputs.Finalize` makes the final values from what the compile computed,
-Helm's merge when nil, with no policy; `Inputs.CheckGlobals` checks the
-keys of `global` a project sets, before the mapping, none when nil.
-`FinalInput` gives a `Finalize` what it renders one chart key with: the
-chart (`Specs[key].Source`), the `Release` and the `Namespace`, and the
-final values it returns; the compiler reads no upstream chart, so a host
-that checks or renders one fetches it itself.
-`compiler.FinalValues` is Helm's merge, for a `Finalize` to add to; its
-`FinalValuesOf.Appended` gives the lists the instance appended to
-([append](#append)). `compiler.CheckObjects` and
-`compiler.CheckIngressHosts` check the manifests it renders with the rule
-set of the compile, the walks a compile runs on its own objects.
-okdp-gitops sets both (`internal/policy`, `deploy.Build`): the
-[upstream policy](#upstream-policy) and the hosts in upstream values below
-are enforced there, and the final values checked against the upstream
-charts ([chart cache](#chart-cache)); a project that is not privileged
-giving upstream values to a chart it could not fetch is refused there
-when the build renders.
+The policy over the upstream values is no rule of the compile: it is the
+host's, through two hooks. `Inputs.Finalize` makes the final values from
+what the compile computed, Helm's merge when nil, with no policy;
+`Inputs.CheckGlobals` checks the keys of `global` a project sets, before
+the mapping, none when nil. `FinalInput` gives a `Finalize` what it
+renders one chart key with: the chart (`Specs[key].Source`), the
+`Release` and the `Namespace`, and the final values it returns; the
+compiler reads no upstream chart, so a host that checks or renders one
+fetches it itself. `compiler.FinalValues` is Helm's merge, for a
+`Finalize` to add to; its `FinalValuesOf.Appended` gives the lists the
+instance appended to ([append](#append)). `FinalInput.CheckFinalValues`
+runs the rule set's `finalValues` hook on the values a `Finalize`
+returns ([checks of the final values](#checks-of-the-final-values)).
+`compiler.CheckObjects` checks the manifests a host renders with the
+rule set of the compile, as a compile checks its own objects: check
+`object`, then the `objects` hook. okdp-gitops sets both hooks
+(`deploy.Build`): the final values are checked against the upstream
+charts there ([chart cache](#chart-cache)), and a project that is not
+privileged giving upstream values to a chart it could not fetch is
+refused there when the build renders.
 
 ## Package files
 
@@ -118,13 +123,10 @@ files, and no other:
 | defaults file | when `defaults.<key>` of `okdp.yaml` names it | values file | second layer of the [final values](#merge-precedence) |
 
 `<key>`: a chart key, the key of a `Chart.yaml` dependency (its `alias`,
-else its `name`) or the chart of an
-OAuth client ([OAuth client objects](#oauth-client-objects)); it names the
-chart's values. A
-compiled chart: a dependency the values file does not leave out (every
-one, but a key it writes that is left out by `$if` or null:
-[rendered dependencies](02_service_definition.md#rendered-dependencies)),
-and in `dcr` mode the chart of each OAuth client. Each is
+else its `name`); it names the chart's values. A compiled chart: a
+dependency the values file does not leave out (every one, but a key it
+writes that is left out by `$if` or null: [rendered
+dependencies](02_service_definition.md#rendered-dependencies)). Each is
 rendered by an upstream chart, its source
 ([chart index](#chart-index)); several keys may share one. The defaults file
 may be any path of the package, `<key>.defaults.yaml` by convention; a
@@ -221,8 +223,10 @@ Each chart is unpacked under its repository's directory, as
 
 `<repository>` is the source's `repository` without its scheme (`oci://`,
 `https://`) and a trailing `/`: its host, port and path.
-`oci://quay.io/adaltas` is `quay.io/adaltas/`, its oidc-dcr 0.6.0
-`quay.io/adaltas/oidc-dcr-0.6.0/oidc-dcr/`; `https://localhost:8080/charts`
+`oci://registry.example.org/charts` is `registry.example.org/charts/`,
+its postgresql 16.4.0
+`registry.example.org/charts/postgresql-16.4.0/postgresql/`;
+`https://localhost:8080/charts`
 is `localhost:8080/charts/`. The compile refuses a repository whose host
 and path cannot be laid out so (empty; an empty, `.` or `..` segment; a
 `\`), and an `http://` one, the chart fetched in clear (`Ref.Check`:
@@ -255,7 +259,7 @@ prefixed with the chart key; a file that does not read, with its path
 
 ```
 app: chart app-1.8.0 is not in the chart cache: helm pull app --repo https://charts.example.org --version 1.8.0 --untar -d <chart cache>/charts.example.org/app-1.8.0
-oidc-dcr: chart oidc-dcr-0.6.0 is not in the chart cache: helm pull oci://quay.io/adaltas/oidc-dcr --version 0.6.0 --untar -d <chart cache>/quay.io/adaltas/oidc-dcr-0.6.0
+db: chart postgresql-16.4.0 is not in the chart cache: helm pull oci://registry.example.org/charts/postgresql --version 16.4.0 --untar -d <chart cache>/registry.example.org/charts/postgresql-16.4.0
 app: charts.example.org/app-1.8.0/app/values.yaml: cannot unmarshal yaml document: ...
 ```
 
@@ -381,7 +385,8 @@ Three top-level keys are not parameters of the service:
 
 `global` and `upstream` are checked with the parameters: a schema with
 `additionalProperties: false` declares them, `{"type": "object"}` at least
-(`examples/03_full/input/catalog/workspace/config.schema.json`).
+(okdp-compiler-security's
+[`examples/03_full/input/catalog/workspace/config.schema.json`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/catalog/workspace/config.schema.json)).
 `connections` is not: a schema does not declare it, and a declaration of
 `connections` has no effect, its `default` included. A connection is
 checked against its contract when a reference resolves to it
@@ -425,7 +430,7 @@ connections.ext: contract is required, the contract of the connection
 ```
 
 ```yaml
-# examples/03_full/input/config/demo/workspace/connections.yaml,
+# okdp-compiler-security: examples/03_full/input/config/demo/workspace/connections.yaml,
 # level 2: the instance's own
 connections:
   scratch:
@@ -593,7 +598,8 @@ database:
   okdp: {ref: shared-db, contract: database, source: external}
 ```
 
-With `examples/03_full/input/contracts/s3.schema.json`, an output
+With okdp-compiler-security's
+[`examples/03_full/input/contracts/s3.schema.json`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/contracts/s3.schema.json), an output
 another instance of the namespace, `demo-store`, publishes:
 
 ```yaml
@@ -636,7 +642,7 @@ enforce](#what-the-store-must-enforce)). An S3 store that OKDP neither
 deploys nor manages, for instance:
 
 ```yaml
-# examples/03_full/input/config/platform.yaml
+# okdp-compiler-security: examples/03_full/input/config/platform.yaml
 global:
   okdp:
     secrets: {store: okdp-secrets}
@@ -1004,8 +1010,8 @@ path in the values, sorted by path, as those of the parameters:
 `Inputs.Context`: the context's values layers, each a `ContextLayer`, its
 `Values` at its `Level`; a tree's `platform.yaml` at level 0, its
 project's `project.yaml` at 1, its own `connections.yaml` at 2. Among them
-`global`, `global.okdp`, the settings of the platform (ingress,
-certificate issuers, OIDC, proxy, the platform's charts...),
+`global`, `global.okdp`, the settings of the platform (certificate
+issuers, proxy, the secret store, the platform's charts...),
 `connections`, which only the context gives, an instance's own included,
 and `claims`, the named claims of a project, which only the context above
 level 0 gives ([claims](#claims)). Level 0 is the platform's:
@@ -1021,19 +1027,18 @@ package's [defaults](#defaults), before the instance's, `Inputs.Values`
 ```yaml
 global:
   okdp:
-    ingress: {suffix: okdp.example.org, className: nginx}
     tls: {clusterIssuer: okdp-ca, caBundleSecret: certs-bundle}
-    oidc: {issuerUri: https://sso.okdp.example.org/realms/okdp}
+    proxy: {httpsProxy: http://proxy.okdp.example.org:3128}
 ```
 
 `global` is the context's: it comes from the package's
 [defaults](#defaults) and the context's layers, each level adding to the
-lower ones ([Levels](#levels)); `global.okdp` decides the instance's host,
-where its OAuth clients register and the chart they are rendered with, and
-every chart receives `global` ([merge precedence](#merge-precedence)).
-`global.okdp` holds the platform's settings, level 0's,
-[Requirements](#requirements) to [OAuth client
-settings](#oauth-client-settings) and the keys the mappings read: a
+lower ones ([Levels](#levels)); `global.okdp` decides the chart the
+instance's objects are rendered with and the store its credentials go
+through, and every chart receives `global` ([merge
+precedence](#merge-precedence)). `global.okdp` holds the platform's
+settings, level 0's, [Requirements](#requirements) to [Platform
+charts](#platform-charts) and the keys the mappings read: a
 project adds its classes to it, `global.okdp.provisioning`, and nothing
 else ([Levels](#levels)); its own settings go beside `okdp`,
 `global.project`. An instance layer that sets `global`
@@ -1134,7 +1139,7 @@ layer is named by its position in `Inputs.Context`, from 1, and its
 level:
 
 ```
-context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
+context layer 2 (level 1): global.okdp.tls.clusterIssuer is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 context layer 2 (level 1): connections.platform-db is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 context layer 2 (level 1): global.okdp.provisioning.database.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's
 ```
@@ -1147,18 +1152,18 @@ a level: a layer of any level overrides a default under `global`, as level
 `global.okdp` is the platform's, level 0's: a layer above level 0 sets
 `provisioning` only, its classes and the default class of a contract the
 platform leaves without one ([classes](#classes)), and no other key of
-it, one the compiler reads (`charts`, `oidc`, `secrets`, `policy`...) or
-one it does not, whether the platform sets it or not; nor `global.okdp`
-itself to anything but a map. A project cannot name the chart its OAuth
-clients are rendered with, where they register, the secret store its
-credentials go through, nor make itself privileged; its own settings,
-which its packages' mappings read, go under `global` beside `okdp`
+it, one the compiler or an added rule set reads (`charts`, `secrets`,
+`policy`...) or one none reads, whether the platform sets it or not; nor
+`global.okdp` itself to anything but a map. A project cannot name the
+chart its objects are rendered with, the secret store its credentials go
+through, nor make itself privileged; its own settings, which its
+packages' mappings read, go under `global` beside `okdp`
 (`global.project`). The layer fails at the first such key, in key order,
 after the check against the lower levels
-(`testdata/context/1/sets-platform-charts.yaml`, `sets-platform-oidc.yaml`,
+(`testdata/context/1/sets-platform-charts.yaml`,
 `sets-platform-policy.yaml`, `sets-platform-secrets.yaml`,
-`sets-platform-ingress.yaml`, `sets-platform-tls.yaml`,
-`sets-platform-proxy.yaml`, `sets-unknown-platform-key.yaml`):
+`sets-platform-tls.yaml`, `sets-platform-proxy.yaml`,
+`sets-unknown-platform-key.yaml`):
 
 ```
 context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp
@@ -1168,12 +1173,13 @@ Of `global` beside `okdp`, a layer above level 0 sets the keys the
 platform lists, `global.okdp.policy.projectGlobals`: `project` and
 `storageClass` unless it lists others. Every chart of an instance
 receives `global`, over its package's `protect` and beside the upstream
-values the platform checks, so `global.imageRegistry` or
-`global.securityContext` would reach the charts that read them past both:
-any other key is refused, for a privileged project too, at the first key
-in key order, a field problem at `global.<key>`. The keys the platform
-lists are checked as the upstream values are ([upstream
-policy](#upstream-policy)). Level 0's `global` is the platform's,
+values a host's policy checks, so `global.imageRegistry` or
+`global.podLabels` would reach the charts that read them past both: any
+other key is refused, for a privileged project too, at the first key in
+key order, a field problem at `global.<key>`. The keys the platform lists
+are checked as the upstream values are, by a host's
+`Inputs.CheckGlobals` ([rule set](#rule-set)). Level 0's `global` is the
+platform's,
 reviewed with it
 (`testdata/context/1/sets-global-image-registry.yaml`,
 `sets-global-security.yaml`, `sets-global-security-context.yaml`,
@@ -1197,7 +1203,7 @@ those its parameter schema declares, over the context's values, no
 `connections` and no `claims` ([Context values](#context-values)).
 
 ```yaml
-# examples/03_full/input/config/demo/project.yaml, level 1,
+# okdp-compiler-security: examples/03_full/input/config/demo/project.yaml, level 1,
 # after platform.yaml at level 0
 global:
   storageClass: fast-ssd
@@ -1213,7 +1219,8 @@ connections:
 ```
 
 Over it, the instance's own connections, its `connections.yaml` in
-`examples/03_full/input/config/demo/workspace/`, at
+[`examples/03_full/input/config/demo/workspace/`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/config/demo/workspace)
+of okdp-compiler-security, at
 level 2 ([Connections](#connections)), add `scratch`. Given after
 `platform.yaml` and `project.yaml`, a file of level 2 that gives
 `demo-warehouse` again, even a field of it, fails:
@@ -1232,12 +1239,11 @@ built: after the
 [parameter schema](#schema-check), the platform schema ([settings the
 compiler reads](#fields-the-compiler-reads)) and the
 [connections](#connections), before the [platform
-charts](#platform-charts) and the mapping
-(`testdata/context/0/missing-platform-value.yaml`). The first missing key
-fails:
+charts](#platform-charts) and the mapping. The first missing key fails
+(`testdata/context/0/missing-platform-value.yaml` for another key):
 
 ```
-global.okdp.ingress.className is required. It is a context value: the platform's or a project's (Inputs.Context)
+global.okdp.tls.clusterIssuer is required. It is a context value: the platform's or a project's (Inputs.Context)
 ```
 
 ### Fields the compiler reads
@@ -1249,61 +1255,56 @@ their types, their defaults and, in its `description`s, what each means.
 It is the platform authors' reference; an editor can check a platform
 values file against it. Every key of `global.okdp`, described there or
 not, is the platform's, set at level 0: a project's layer sets
-`provisioning` only ([Levels](#levels)).
+`provisioning` only ([Levels](#levels)). An added rule set describes its
+own settings in a schema merged into this one
+([how the sets add up](05_rules.md#how-the-sets-add-up)); those of the
+security set, the hosts and the OIDC provider among them, are in [its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#platform-settings).
 
 | `global.okdp` | Used for |
 |---|---|
-| `tls.clusterIssuer` | the cert-manager ClusterIssuer of the services' certificates, whichever cert-manager runs it (OKDP's self-signed CA, an ACME or a corporate one): `platform.ingressAnnotations` (`cert-manager.io/cluster-issuer`), `""` when unset |
-| `ingress.annotations` | no default: annotations of every service's ingress, strings, those the cluster's ingress controller reads (Traefik's middlewares, HAProxy's timeouts, ingress-nginx's), merged over `cert-manager.io/cluster-issuer` in `platform.ingressAnnotations`: a platform whose controller is not the one a package tunes its ingress for adds its own equivalents once |
-| `tls.caBundleSecret` | no default: the Secret, in each namespace, of the platform's CA bundle, `ca.crt` (PEM) and `bundle.p12` (PKCS#12), as a trust-manager Bundle writes one, whichever tool fills it; the packages mount it to trust the platform's certificates (unset: they mount none, the certificates being a public CA's), and it is the default of `oidc.dcr.caSecret` ([OAuth client settings](#oauth-client-settings)) |
+| `tls.clusterIssuer` | the cert-manager ClusterIssuer of the services' certificates, whichever cert-manager runs it (OKDP's self-signed CA, an ACME or a corporate one), which the mappings read; no default |
+| `tls.caBundleSecret` | no default: the Secret, in each namespace, of the platform's CA bundle, `ca.crt` (PEM) and `bundle.p12` (PKCS#12), as a trust-manager Bundle writes one, whichever tool fills it; the packages mount it to trust the platform's certificates (unset: they mount none, the certificates being a public CA's) |
 | `charts.objects` | the chart of the instance's objects ([Platform charts](#platform-charts)) |
-| `oidc.enabled`, `oidc.clientProvisioning` | `platform.oidc`, the Secret names (`platform.oidcClientSecret`, `oidcClientSecret`), whether the [OAuth client objects](#oauth-client-objects) are compiled |
-| `oidc.scope` | `platform.oidc.scope`; the scope a client registers when it sets none |
-| `oidc.dcr` | `platform.oidc.dcr`, the settings of the registration Jobs ([OAuth client settings](#oauth-client-settings)) |
-| `oidc.issuerUri` | the registration Jobs' wait for the provider's discovery document |
 | `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | `platform.proxyEnv` |
 | `provisioning.<contract>` | the classes of the claims of the contract, each a provider and what it fixes of the request, and the default class, of the claims that name neither a class nor a provider ([classes](#classes)): the platform's route every namespace to their providers, a project's reach a provider of another namespace with its consent only ([providers](#providers)) |
 | `secrets.store` | the name of the secret store the credentials of claims across namespaces go through, under `<provider namespace>/<id>` ([credentials across namespaces](#credentials-across-namespaces)), and where a connection may keep its own, the platform's under `platform/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) |
 | `secrets.provider`, `secrets.serviceAccount` | set, the store is a SecretStore in each project's namespace, `provider` its spec verbatim (External Secrets' `spec.provider`), authenticating with the ServiceAccount `serviceAccount` of the namespace, which the [targets](#targets) write (`Result.SecretStore`), and which the PushSecrets and ExternalSecrets reference (`kind: SecretStore`); unset, a ClusterSecretStore of the platform's, one identity for every namespace |
 | `secrets.refreshInterval` | `1h` by default: how often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it |
-| `policy.privileged` | the namespaces of the platform's own projects (cert-manager, ingress-nginx, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to the [upstream policy](#upstream-policy); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
+| `policy.privileged` | the namespaces of the platform's own projects (cert-manager, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to a host's policy ([rule set](#rule-set)); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
 | `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
-| `policy.ingressHosts` | per namespace, the exact host names the project serves beside those of the form `<label>.<namespace>.<ingress.suffix>`, one DNS label (the rule, [hosts](#hosts)); none by default; a privileged project's are not checked |
-| `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's `project.yaml`, an instance's `connections.yaml`), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to the [upstream policy](#upstream-policy) |
-| `policy.upstream.deny` | key names the upstream values of the other projects' instances set nowhere, beside the compiler's ([upstream policy](#upstream-policy)) |
-| `policy.upstream.registries` | the registries the images of the other projects' upstream values come from, each a host, its port and a path prefix optional; unset, the images are not checked ([upstream policy](#upstream-policy)) |
+| `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's `project.yaml`, an instance's `connections.yaml`), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to a host's policy, as the upstream values are |
 | `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them; the compiler writes nothing of them, the platform's bootstrap binds them once, a program that mirrors the platform's authority reads them (`compiler.PlatformAdmins`) ([access](#access)) |
 | `access.groupPrefix` | `""` by default: the prefix the Kubernetes API server gives the groups of its OIDC users (`--oidc-groups-prefix`), which the RoleBindings of the projects' groups name them with ([access](#access)) |
 | `network.policy` | `false` by default: `true`, okdp-gitops' [targets](#targets) write a NetworkPolicy in each project's namespace but the platform's own (`policy.privileged`), its ingress denied but from the namespace itself, `network.ingressNamespaces` and the namespaces whose claims its instances provide, its egress open (`Result.Network`); off by default, as the compiler knows neither the cluster's ingress controller nor whether its network plugin enforces a policy: on, without the ingress controller's namespace, the services lose their ingress |
-| `network.ingressNamespaces` | none by default: the namespaces whose pods reach every project's pods with `network.policy`: the ingress controller's (that of `ingress`'s hosts), a monitoring's; DNS labels, once each |
+| `network.ingressNamespaces` | none by default: the namespaces whose pods reach every project's pods with `network.policy`: the ingress controller's, a monitoring's; DNS labels, once each |
 | `controlPlane.serviceAccount` | no default: the identity of the optional control plane, `{namespace, name}`, a DNS label and a DNS subdomain, both required; okdp-gitops' [targets](#targets) bind it in each project's namespace to what it needs there (`Result.ControlPlane`); absent, the platform has no control plane, and nothing is written |
 
 Every compile checks `global` against the schema, in every mode, before
 the [connections](#connections) and the [requirements](#requirements), and
 applies its defaults. A setting of another type is refused, and so is a
-map on the way to one (`global`, `global.okdp`, `oidc`, `proxy`...) that
-is not a map, rather than read as not set: `oidc: false` would leave OIDC
-enabled, `proxy: <url>` give no proxy environment. A former setting is
+map on the way to one (`global`, `global.okdp`, `proxy`, `secrets`...)
+that is not a map, rather than read as not set: `proxy: <url>` would give
+no proxy environment. A former setting is
 refused, renamed: `certificateIssuers`, whose `selfSigned.name` is
 `tls.clusterIssuer` (`- at '/global/okdp/certificateIssuers': false
 schema`); `serviceCatalog`, the console's menu, now `catalogs.yaml`
 beside `platform.yaml` ([repository
 layout](../01_usage.md#repository-layout)). A `null` is read as in a
 chart's values ([Layers and nulls](#layers-and-nulls)): over a default,
-it deletes the setting (`oidc.enabled: null` turns OIDC off,
-`platform.oidc.enabled` absent;
-`oidc.clientProvisioning: null` leaves no mode); where there is no
-default, it is refused (`ingress: null`). An empty string is a value
-(`oidc.scope: ""`). The other keys of `global.okdp` are not checked, but
-for those of `charts`. Every violation is reported at once, sorted by
+it deletes the setting (`secrets.refreshInterval: null`); where there is
+no default, it is refused (`proxy: null`). An empty string is a value
+(`tls.clusterIssuer: ""`). The other keys of `global.okdp` are not
+checked, but for those of `charts`, and those the schema of an added rule
+set describes. Every violation is reported at once, sorted by
 path, in Helm's words, as those of the [parameters](#schema-check):
 
 ```
 context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:
-- at '/global/okdp/oidc': validation failed
-  - at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'
-  - at '/global/okdp/oidc/enabled': got string, want boolean
 - at '/global/okdp/proxy': got string, want object
+- at '/global/okdp/secrets': validation failed
+  - at '/global/okdp/secrets/refreshInterval': got number, want string
+  - at '/global/okdp/secrets/serviceAccount': got boolean, want string
 ```
 
 The mapping sees `global.okdp` as written and `platform` as derived, with
@@ -1319,7 +1320,7 @@ compiler adds itself, each an upstream chart, checked as a dependency of
 
 | Key | Renders |
 |---|---|
-| `objects` | [the objects chart](#the-objects-chart), the objects of the instance, the registration Jobs of its OAuth clients among them: a chart that renders its `manifests` value as written; the rule set's default, `oci://quay.io/okdp/charts` `okdp-objects` 0.1.0, when unset |
+| `objects` | [the objects chart](#the-objects-chart), the objects of the instance, those of the sections of an added rule set among them: a chart that renders its `manifests` value as written; the rule set's default, `oci://quay.io/okdp/charts` `okdp-objects` 0.1.0, when unset |
 
 Their form is checked with the other [settings the compiler
 reads](#fields-the-compiler-reads), against the platform schema: `charts`
@@ -1337,68 +1338,6 @@ violation is reported, in this order
 global.okdp.charts.objects.repository "http://charts.example.org/mirror": http://, the chart fetched in clear: the URL of a chart repository (https://... or oci://...)
 global.okdp.charts.objects.repository "quay.io": the URL of a chart repository (https://... or oci://...)
 global.okdp.charts.objects.version "1.x": a pinned chart version (1.2.3), not a range
-```
-
-### OAuth client settings
-
-`global.okdp.oidc.dcr`: the settings of the Jobs that register the
-OAuth clients of a service in `dcr` mode
-([OAuth client objects](#oauth-client-objects)). The mapping sees them as
-`platform.oidc.dcr`, defaults applied, `enabled` set by the compiler
-([Context](02_service_definition.md#context)). For example:
-
-```yaml
-global:
-  okdp:
-    oidc:
-      clientProvisioning: dcr
-      dcr:
-        registrationUrl: https://sso.okdp.example.org/realms/okdp/clients-registrations/openid-connect
-        authMethod: anonymous
-        ttlSeconds: 300                # keep the finished Job and its logs 5 minutes
-```
-
-| Key | Client chart value |
-|---|---|
-| `registrationUrl` | `registrationUrl`: the registration endpoint; required in `dcr` mode, with a client |
-| `authMethod` | none: `anonymous`, required in `dcr` mode, with a client; OKDP registers anonymously |
-| `image` | `image` (`registry`, `repository`, `tag`, `pullPolicy`, `pullSecrets`), merged over the chart's |
-| `caSecret` | `tls.certificate`: the Secret holding the CA bundle the Jobs trust; a client's `caSecret` wins. Unset, the platform's, `global.okdp.tls.caBundleSecret`; `""`, or both unset, none: `tls.certificate: ""`, the chart's default, the Job mounting no CA bundle and trusting the CAs of its image (a provider whose certificate a public CA signs) |
-| `ttlSeconds` | `ttlSeconds`: how long a finished Job, and its logs, is kept |
-| `backoffLimit` | `backoffLimit`: the Job's retries |
-| `waitTtlSeconds` | `waitForProvider.ttlSeconds`: the longest wait for the provider's discovery document (the chart's, 600, when unset); the Jobs wait only when `oidc.issuerUri` is set |
-
-Their types and defaults are the platform schema's, applied and checked
-with the other [settings the compiler reads](#fields-the-compiler-reads),
-in every mode (`existing`, OIDC disabled, no client): the three numbers
-whole and `>= 0` (`0` is a value), a quoted number (`"600"`) a string:
-
-```
-- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer
-```
-
-`image`: the image of the Jobs, `registry`, `repository`, `tag`, `digest`,
-`pullPolicy` and `pullSecrets` (a list of Secret names), each over the
-default, `quay.io/adaltas/oidc-dcr-job:0.6.0` by digest. The Jobs always
-run by digest: a mirror that changes only the registry or the repository
-keeps the default digest (copy the image unchanged); a `tag` needs its
-`digest` (`global.okdp.oidc.dcr.image: tag <tag> without a digest`). The
-snake_case keys `pull_policy` and `pull_secrets` are refused (`- at
-'/global/okdp/oidc/dcr/image/pull_policy': false schema`). The other keys
-of `oidc.dcr` are kept in
-`platform.oidc.dcr` and not used. `registrationUrl` and `authMethod` are
-left as written (the schema gives them no type), and checked only in `dcr`
-mode with a client.
-
-In `dcr` mode ([OAuth client objects](#oauth-client-objects)), when the
-mapping declares at least one OAuth client (after `$if`, once the clients
-are checked), `authMethod` must be `anonymous` (unset, it is reported as
-`""`), then `registrationUrl` a non-empty string
-(`testdata/context/0/dcr-without-registration-url.yaml`):
-
-```
-global.okdp.oidc.dcr.authMethod "bearer" is not supported: OKDP registers its OAuth clients anonymously
-global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the oidc-dcr Jobs register the OAuth clients at
 ```
 
 ## Instance values
@@ -1473,10 +1412,12 @@ precedence](#merge-precedence)):
   the layer ([Layers](#layers), [Levels](#levels)); this check covers
   those of the package's defaults and of the platform's layers, level 0;
 - [protect](#protect): `global` and the protected paths are refused;
-- [upstream policy](#upstream-policy): for a project that is not
-  privileged, the keys of a pod's privileges, identity, containers or
-  objects are refused, and the images come from the platform's
-  registries;
+- a host's policy, in its `Inputs.Finalize`, for a project that is not
+  privileged ([rule set](#rule-set)): okdp-gitops applies the security
+  set's, which refuses the keys of a pod's privileges, identity,
+  containers or objects and the images of other registries than the
+  platform's ([the upstream
+  policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#upstream-policy));
 - [append](#append): the listed lists are appended to.
 
 ### protect
@@ -1487,156 +1428,24 @@ always protected. The upstream values fail when they set a protected path
 (to any value, `null` included), or one of its parents to anything but a
 map (`null` included). The keys beside a protected path are free:
 
-| With `protect: [ingress.hosts]` | |
+| With `protect: [image.registry]` | |
 |---|---|
-| `ingress: {hosts: [...]}` | refused |
-| `ingress: null`, `ingress: off` | refused |
-| `ingress: {className: other}` | accepted |
+| `image: {registry: docker.io}` | refused |
+| `image: null`, `image: off` | refused |
+| `image: {tag: "2.0"}` | accepted |
 
 The error names the path set and the protected path: the first one hit,
 `global` first, then in `protect` order
-(`testdata/protected-upstream.yaml`):
+(`testdata/protected-upstream.yaml` for another path):
 
 ```
-app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed
+app: upstream.app.image.registry: image.registry is set by the platform and cannot be changed
 ```
 
 A path listed in both `protect` and `append` is accepted when the
 definition loads; `protect` is checked first, so upstream values setting
-it fail. Whatever `protect` names, the [upstream
-policy](#upstream-policy) applies too: a package does not open what the
-platform denies.
-
-### Hosts
-
-A host is a name every project shares: ingress-nginx merges the rules of
-one host across namespaces (a project's Ingress for `sso.okdp.sandbox`,
-path `/realms`, takes part of the identity provider's traffic), and
-cert-manager signs a certificate for any name from the platform's issuer
-(`default-issuer`, `cert-manager.io/cluster-issuer`). The compile of an
-instance of a project that is not privileged
-(`global.okdp.policy.privileged`) therefore refuses a host that is not
-one DNS label, then the namespace, then the suffix:
-`<label>.<namespace>.<global.okdp.ingress.suffix>`
-(`seaweedfs.demo.okdp.sandbox` for the project `demo`; a package names
-its hosts `${{ instance }}.${{ release.namespace }}.${{ suffix }}`) and
-is not listed
-for the project in `global.okdp.policy.ingressHosts`
-(`{demo: [sso.okdp.sandbox]}`, exact host names, no wildcard). The case
-and a final dot do not count. The rule holds for:
-
-- the instance's objects (every source, the items of a `List` alike): an
-  `Ingress`'s `spec.rules[].host` (a rule without host and a
-  `spec.defaultBackend` answer every host and are refused) and
-  `spec.tls[].hosts`; a cert-manager `Certificate`'s `spec.dnsNames` and
-  `spec.commonName`; a Gateway API `HTTPRoute`, `GRPCRoute` or
-  `TLSRoute`'s `spec.hostnames` and a `Gateway`'s
-  `spec.listeners[].hostname` (a listener of a protocol that matches
-  hosts, `HTTP`, `HTTPS`, `TLS`, without hostname answers every host and
-  is refused); and, on any object, the annotations that name hosts: `cert-manager.io/common-name`,
-  `cert-manager.io/alt-names`,
-  `nginx.ingress.kubernetes.io/server-alias`,
-  `external-dns.alpha.kubernetes.io/hostname` (commas and spaces
-  separate hosts);
-- the final values of each chart (the package's computed values and the
-  instance's upstream values over them; the upstream chart's own defaults
-  are not seen), under a key `ingress` or `ingresses` at any depth: a
-  `host`, `hostname` or `commonName` string, the strings of `hosts`,
-  `hostnames`, `dnsNames` and `extraHosts`, the `name` of an `extraHosts`
-  item, and the annotations above under its `annotations`. A value that is
-  not a string or is empty names no host.
-
-Without `global.okdp.ingress.suffix` only the listed hosts pass. The first
-refused fails the compile, objects before values, in order, named
-(`testdata/denied-ingress-host.yaml`, `denied-ingress-annotation.yaml`,
-`TestIngressHostsObjects`):
-
-```
-web: objects: Ingress/demo-web: spec.rules[0].host: host "sso.okdp.sandbox" is not served by demo: a host <label>.demo.okdp.sandbox (one DNS label), or one listed for it in global.okdp.policy.ingressHosts; the platform's projects serve any host (global.okdp.policy.privileged), demo is not one of them
-seaweedfs: master.ingress.host: host "sso.okdp.sandbox" is not served by demo: ...
-```
-
-What the rule does not see: a host a chart builds from values that are not
-under an `ingress` key, or from its templates; an Ingress an upstream chart
-renders from other values than the ones above. The platform's admission
-policy and cert-manager's approver policy for the issuer are the second
-line. A namespace is one DNS label of the host, so two projects never
-share a form.
-
-### Upstream policy
-
-okdp-gitops enforces this section (`Inputs.Finalize`,
-`Inputs.CheckGlobals`, [rule set](#rule-set)): a compile without its hooks
-applies none of it.
-
-The platform's rules over the upstream values of an instance of a
-project that is not privileged (`global.okdp.policy.privileged`, [fields
-the compiler reads](#fields-the-compiler-reads)), whatever its package's
-`upstream` and `protect`, after `protect`: the package's own values, its
-defaults and values file, are not checked, being reviewed with it. The
-upstream values are `upstream.<key>` of the instance's merged values, its
-context's layers included. The `global` of the layers above level 0, the
-keys the platform lets a project set (`global.okdp.policy.projectGlobals`,
-[levels](#levels)), are checked alike, at their own path
-(`global.project.hostNetwork`): they reach every chart. A privileged
-project's are not checked: the platform's own projects set any upstream
-value.
-
-A key named, at any depth, in a map or in a list's items, one of a pod's
-privileges, security context, identity, containers or objects, is
-refused, whatever its value: `privileged`, `hostPath`, `hostNetwork`,
-`hostPID`, `hostIPC`, `hostPort`, `allowPrivilegeEscalation`,
-`capabilities`, `seccompProfile`, `sysctls`, `securityContext`,
-`podSecurityContext`, `containerSecurityContext`, `serviceAccountName`,
-`serviceAccount`, `automountServiceAccountToken`, `extraContainers`,
-`sidecars`, `initContainers`, `extraInitContainers`, `extraObjects`,
-`extraDeploy`, `extraManifests`, and those of
-`global.okdp.policy.upstream.deny`; so are `runAsUser: 0`, root, and
-`runAsNonRoot: false`. The scheduling keys, `nodeSelector`,
-`tolerations` and `affinity`, stay free. A string that holds a `:` and
-reads as YAML values, a map or a list, each of its documents, is checked
-as values too: some charts render a string value as YAML (`tpl`,
-Bitnami's `tplvalues.render`), a list of volumes written as text.
-
-With `global.okdp.policy.upstream.registries`, every image of the
-upstream values comes from one of them: an `image` string, and the
-reference a `registry` and a `repository` string make, either set by the
-instance, the other the computed one (OKDP's defaults and the mapping's),
-`<registry>/<repository>`, the repository alone without registry; an
-`image` map's `name` is its repository where it has none (Zero to
-JupyterHub's). The reference starts with an entry, then ends, goes on
-with `/` or, after an entry with a path, with `:` or `@` (a tag, a
-digest): `mirror.example.org/okdp` admits
-`mirror.example.org/okdp/app:1.0`, not `mirror.example.org/okdp-x/app`
-nor `mirror.example.org:5000/okdp/app`. A non-empty string at a key whose
-name says it holds an image, a registry or a repository of images, one
-that ends in `image`, `imageRegistry`, `imageRepository` or `imageName`,
-whatever its case (`initImage`, `imageRegistry`,
-`defaultImageRegistry`), is a reference as well. An `image`, a `registry` or a
-`repository` set to `null` leaves the chart's default, which the compile
-does not read: it is refused. Unset, the images are not checked; `[]`,
-none may be set. The chart's defaults are not checked: a package whose
-chart pulls from elsewhere sets the platform's registry in its values.
-
-The first refused, in path order (a map's images, then its keys
-sorted, a list's items in order), fails, the path and the key named
-(`testdata/denied-upstream.yaml`, `testdata/denied-upstream-text.yaml`,
-`testdata/context/0/unlisted-registry.yaml`, and for `global`,
-`testdata/context/1/global-denied-key.yaml`,
-`global-unlisted-registry.yaml`):
-
-```
-app: upstream.app.podSecurityContext: podSecurityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
-app: upstream.app.extraVolumes, read as YAML: [0].hostPath: hostPath is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
-app: upstream.app.image.repository: image docker.io/evil/app is not from a registry of global.okdp.policy.upstream.registries (registry.example.org, mirror.example.org/okdp): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them
-```
-
-A key the lists do not name, a chart's own spelling of a privilege
-(`rbac.create`, a chart's extra RBAC rules), is the platform's to add to
-`global.okdp.policy.upstream.deny`; and a privilege a chart grants from
-keys of other names is out of the compiler's reach: Pod Security
-Admission and the engine's identity, confined to the namespace
-([targets](#targets)), are the second line.
+it fail. Whatever `protect` names, a host's policy on the upstream
+values applies too: a package does not open what the platform denies.
 
 ### append
 
@@ -1655,7 +1464,7 @@ of the key. The compiler reads no chart: it gives the paths appended to
 list that lacks some of them
 ([checks of the final values](#checks-of-the-final-values)).
 
-With the example (`append: [env]`), the computed `OIDC_*` and `DB_*` items
+With the example (`append: [env]`), the computed `DB_*` and `AUDIT_DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
 `config.yaml` (`app` of the example's `values.yaml`,
 [Example](#example)).
@@ -1668,9 +1477,11 @@ come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
 |---|---|
 | a template (in values an instance layer or a context layer above level 0 gives, the layer fails before: [Layers](#layers), [Levels](#levels)) | `<key>: <at>: the value contains "{{"`, `<key>: <at>: the key contains "{{"`; `<key>: <at>: cannot be checked for "{{": <type> is not a values type` |
 | a protected path | `<key>: <at>: <protected> is set by the platform and cannot be changed` |
-| a denied key, of a project that is not privileged ([upstream policy](#upstream-policy)) | `<key>: <at>: <name> is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), <namespace> is not one of them`; `(global.okdp.policy.upstream.deny)` for the platform's; `runAsUser 0, root, is denied...`, `runAsNonRoot false is denied...`; in a string read as YAML, `<at>, read as YAML: <path>: ...` |
-| an image of none of the platform's registries (an `image`, a `registry` and a `repository`, or a key ending in `Image`, `ImageRegistry`, `ImageRepository` or `ImageName`) | `<key>: <at>: image <reference> is not from a registry of global.okdp.policy.upstream.registries (<registries>): the platform's projects pull from any (global.okdp.policy.privileged), <namespace> is not one of them`; `image null, the chart's default,` for a `null` |
 | an appended path, not a list | `<key>: <at> must be a list` |
+
+A host's policy adds its own errors: those of the security set's are in
+[its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#upstream-errors).
 
 ## Merge precedence
 
@@ -1810,7 +1621,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Release`, `Namespace` | `string` | `Inputs.Release` and `Inputs.Namespace`, those the values are compiled for, which render them |
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml` |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written |
-| `ObjectsSource` | `compiler.ChartRef` | the chart of the objects and clients, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)) |
+| `ObjectsSource` | `compiler.ChartRef` | the chart of the objects, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)) |
 | `Computed` | `map[string]any` | chart key -> what the mapping computed for it, before `Finalize` made `Values` of it |
 | `Groups`, `Privileged`, `SecretStore`, `Settings`, `KeepSync`, `Claims` | | what okdp-gitops' writers read: the project's groups, whether it is one of the platform's own, the platform's store and settings, what Argo CD is told of the objects Helm keeps, the claims bound to the instance |
 | `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); a list appended to that drops a chart's defaults ([append](#append)); a literal of the upstream values at a sensitive key ([objects section](#objects-section)); nil when none. The binary prints each on stderr, `warning: <message>` |
@@ -1819,9 +1630,8 @@ upstream.app.env: appended to the package's list, not to the default list of app
 of `Chart.yaml`, its computed values `{}` when the values file does not
 write its key; a dependency the values file leaves out (its key left out
 by `$if`, or null) is in neither, and is not to be rendered
-([rendered dependencies](02_service_definition.md#rendered-dependencies)),
-and in `dcr` mode the chart of each OAuth client. Numbers are float64, as
-in Helm values.
+([rendered dependencies](02_service_definition.md#rendered-dependencies)).
+Numbers are float64, as in Helm values.
 `compiler.Write(res)` gives [the files of a
 compile](#the-files-of-a-compile), name -> content;
 `examples/02_advanced/output/` holds those of the example
@@ -1852,7 +1662,7 @@ The final values of a key are rendered by its upstream chart, from its
 repository, once per key: two keys of one source are two renders of it
 ([equivalence with Helm](#equivalence-with-helm)).
 
-The example's in `dcr` mode (`Result.Charts`):
+The example's (`Result.Charts`):
 
 ```yaml
 app:
@@ -1864,110 +1674,6 @@ app:
 Everything else is keyed by the key
 ([dependencies](02_service_definition.md#dependencies)); installing them:
 [installing an instance](../01_usage.md#installing-an-instance).
-
-### OAuth client objects
-
-In `dcr` mode (`platform.oidc.dcr.enabled`: `global.okdp.oidc.enabled`, true
-by default, and `clientProvisioning: dcr`), the compile adds the objects
-that register each OAuth client of the mapping's `oidcClients` section
-([oidcClients](02_service_definition.md#oidcclients)) to the instance's
-`Objects`, as many clients as it declares, under the policy over objects
-([the objects chart](#the-objects-chart) renders them). In `existing` mode,
-or with OIDC disabled, none is added; the clients are checked all the same.
-
-| Client | Objects | Secret, `dcr` | Secret, `existing` |
-|---|---|---|---|
-| main (no `name`) | `<release>-oidc-dcr` | `<release>-<namespace>-dcr` | `creds-<release>-oauth2` |
-| `name: n` | `<release>-n-oidc-dcr` | `<release>-<namespace>-n-dcr` | `creds-<release>-oauth2-n` |
-
-The objects' name is cut to 56 characters without a trailing `-`, room for
-the suffix of the removal's objects. Each client has:
-
-- a ServiceAccount, Role, RoleBinding and ConfigMap (the script), and a
-  headless Service `<name>-headless`, for providers that reverse-resolve the
-  caller: Helm hooks of weight -10 and Argo CD `PreSync` hooks of sync wave
-  -10;
-- the Job `<name>` of [`okdpJob`](04_functions.md#okdpjob), hook weight and
-  sync wave -5, `pre-install,pre-upgrade` and `PreSync`, before the
-  package's objects and Sync hooks, so that the Secret exists when they
-  start;
-- the same set, but the Service, named `<name>-delete`: a `pre-delete`
-  Helm hook, an Argo CD `PostDelete` hook, created only at uninstall.
-
-The Jobs run on the hardened pod of `okdpJob`: non-root (UID 65534, the
-image's default user being root), no privilege escalation, every
-capability dropped, a read-only root filesystem, the image by digest
-([OAuth client settings](#oauth-client-settings)), memory bounded. They
-mount their ServiceAccount's token, the one thing that writes the Secret.
-The Role of the registration has `create` on Secrets, which Kubernetes
-cannot limit by name, the name being unknown when it authorizes, and
-`get` and `patch` on the client's Secret by name; the Role of the removal
-has `get` and `delete` on it by name. The initial access token
-(`authMethod: initialAccessToken`) is a volume, read by the kubelet, not by
-the Role.
-
-The Job's lifecycle:
-
-- First install: `POST` to `registrationUrl`, the answer written to the
-  Secret: `client_id`, `client_secret` unless `public`,
-  `registration_client_uri` and `registration_access_token`.
-- Every sync: `GET` on `registration_client_uri` with the token. As asked:
-  nothing changes. A field differs (a changed `redirect_uris` above all):
-  `PUT` on `registration_client_uri`, RFC 7592, the rotated token written
-  back to the Secret.
-- A client deleted at the provider (`404`): registered again.
-- A token the provider refuses (`401`, `403`), or a Secret holding none: a
-  new client is registered and its Secret replaces the old one's content;
-  the old client stays at the provider, named in the Job's log, for an
-  administrator to remove. A provider that does not answer fails the Job,
-  which retries (`backoffLimit`) and registers nothing.
-- Uninstall: `DELETE` on `registration_client_uri`, then the Secret is
-  deleted. The removal never fails, a failed pre-delete hook would stop the
-  uninstall: with no Secret there is nothing to do; with a token the
-  provider refuses the client stays, named in the log, and the Secret
-  goes; with a provider that does not answer the Secret stays and so does
-  the client, for a later uninstall or an administrator.
-
-The Job's log holds no answer of the provider, no `client_secret` and no
-token: a failure says the HTTP status and the provider's `error` code.
-
-In `dcr` mode a client's `secret` replaces the Secret name, which
-[`oidcClientSecret`](04_functions.md#oidcclientsecret) does not
-follow, and two clients may not write one Secret
-([compile errors](02_service_definition.md#compile-errors)). The
-Secret is the release's, the default names above and a `secret` given
-alike: a `secret` is `<release>-<name>` exactly (`<release>-oidc` for the
-main client), checked in every mode, so
-that the Job, whose Role changes it, cannot overwrite another Secret of
-the namespace, another instance's credentials
-(`testdata/cli/oidc.txtar`).
-
-A client's `redirectUris`, of a project that is not privileged, are http or
-https URLs with a host and no user information, each host one the project
-serves: the form of its Ingresses, `<label>.<namespace>.<suffix>`, or listed
-for it in `global.okdp.policy.ingressHosts`, in `dcr` mode. A client's
-`request` may not set a URL the provider trusts: `redirect_uris`,
-`post_logout_redirect_uris`, `request_uris`, `sector_identifier_uri`,
-`jwks_uri`, `initiate_login_uri`, `backchannel_logout_uri` and
-`frontchannel_logout_uri` are refused, in every mode.
-
-The objects are not Go code:
-`internal/rules/mandatory/charts/oidc-dcr.cel.yaml`, a template in the
-mapping language of the mandatory rule set, computes
-them for each client from the client (its keys, checked), its names (the
-objects' name, the Secret) and the mapping's context
-([why](../00_architecture.md#the-oidc-dcr-template)). The registration
-request holds the OIDC Dynamic Client Registration fields:
-`application_type: web`; `client_name`: `clientName`, else
-`<release>-<namespace>[-<name>]`; `grant_types`: `grantTypes`; `scope`:
-`scope` without `openid` (Keycloak refuses it as a client scope);
-`redirect_uris`: `redirectUris`, when not empty;
-`token_endpoint_auth_method: none` for a `public` client; then the client's
-`request` merged over them.
-
-The client keys, their types and defaults:
-[oidcClients](02_service_definition.md#oidcclients). The Secret keys the
-service reads: `client_id` and `client_secret`.
 
 ### The info file
 
@@ -2136,9 +1842,10 @@ spec:
 ### Objects section
 
 The mapping's `objects`, after the credentials Secrets, in order, as
-computed: the compiler adds no namespace, label or name. Each is a whole
-manifest, with a `kind` and a `metadata.name`
-([objects](02_service_definition.md#objects)).
+computed, then those the sections of an added rule set add
+(`ownObjects`, [the rule set](05_rules.md#charts)): the compiler adds no
+namespace, label or name. Each is a whole manifest, with a `kind` and a
+`metadata.name` ([objects](02_service_definition.md#objects)).
 
 The platform's policy over `Objects` whole, every source (the credentials
 Secrets, the objects section, the generated Secrets, the PushSecrets and
@@ -2195,6 +1902,13 @@ drive the engine with its own identity, past the project's
 ```
 web: objects: HelmRelease/demo-web-override: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
 ```
+
+Once every object passed these rules, each, the items of a `List` too,
+goes through the documents of the rule set's `objects` hook, for a
+project that is not privileged ([hooks](05_rules.md#hooks)); the
+mandatory set lists none, and an added set refuses with its own
+messages: the security set's checks the hosts an object names ([its
+hosts](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#hosts)).
 
 Whatever the project, privileged or not, no two objects of `Objects`, the
 items of a `List` among them, are of one API group (the version does not
@@ -2369,7 +2083,7 @@ catalog is installed as it is, a release of its own. By name:
   EDIT.` (the line Go, GitHub, linters and editors recognize);
 - `okdp-objects.values.yaml` (`compiler.ObjectsValuesFile`): the values
   of [the objects chart](#the-objects-chart), marked alike, when the
-  instance has objects or OAuth clients;
+  instance has objects;
 - `okdp.info.yaml` (`compiler.InfoFile`, [the info
   file](#the-info-file)), when the instance publishes something.
 
@@ -2419,17 +2133,18 @@ for `hasKey`, `toYaml` and `range`.
 ### Example
 
 `examples/02_advanced/output/demo/webapp/`, what `Write` gives for the
-example: release `demo-webapp`, namespace
-`demo`, the instance's `config.yaml` (`replicas: 2`,
-`database: {}`, a claim, `audit: platform-db`, a memory limit and two `env`
-entries in `upstream.app`), over the context
-`examples/02_advanced/input/config/platform.yaml`, level 0 (`dcr` mode;
-`platform-db`, the connection the instance's `audit` references): the
-objects of the OAuth client ([OAuth client objects](#oauth-client-objects))
-in `okdp-objects.values.yaml`, its Job a pre-install hook that runs
-before the release's other resources. The `existing` mode has no example
-output: no such object, and the client's Secret is
-`creds-demo-webapp-oauth2` ([OAuth client objects](#oauth-client-objects)).
+example: release `demo-webapp`, namespace `demo`, the instance's
+`config.yaml` (`replicas: 2`, `database: {}`, a claim, `audit:
+platform-db`, a memory limit and two `env` entries in `upstream.app`),
+over the context `examples/02_advanced/input/config/platform.yaml`,
+level 0 (`platform-db`, the connection the instance's `audit`
+references; `ruleSets`, which requires the example's rule set). The
+compile is given the mandatory set with the example's set added,
+[`examples/02_advanced/rules`](../../examples/02_advanced/rules)
+(`okdp-compile --rules`), whose function `exampleConfigFiles` writes the
+ConfigMap of the application's settings. The same kind of service with
+an OAuth client, compiled with the security set, is [its
+example](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#example).
 
 `values.yaml`, annotated: the values of `app`:
 
@@ -2437,18 +2152,6 @@ output: no such object, and the client's Secret is
 # Code generated by okdp-compile. DO NOT EDIT.
 app:
   env:
-    - name: OIDC_ISSUER                     # computed
-      value: https://sso.okdp.example.org/realms/okdp
-    - name: OIDC_CLIENT_ID                  # platform.oidcClientSecret, dcr mode
-      valueFrom:
-        secretKeyRef:
-          key: client_id
-          name: demo-webapp-demo-dcr
-    - name: OIDC_CLIENT_SECRET
-      valueFrom:
-        secretKeyRef:
-          key: client_secret
-          name: demo-webapp-demo-dcr
     - name: DB_URL                          # the claimed database, resolved
       value: jdbc:postgresql://demo-db-db.demo.svc:5432/demo_webapp_database
     - name: DB_PASSWORD
@@ -2467,14 +2170,17 @@ app:
       value: Europe/Paris
     - name: LOG_LEVEL                       # upstream.app, appended
       value: debug
+  envFrom:                                  # computed: the settings' ConfigMap
+    - configMapRef:
+        name: demo-webapp-settings
   fullnameOverride: demo-webapp-app         # computed
   global:                                   # the parameters' global
     okdp:
       # ... the platform values
   image:
     tag: "1.8"                              # OKDP's defaults
-  ingress:
-    # ... computed
+  podAnnotations:                           # computed: the settings' checksum
+    checksum/settings: c023628bdbe12e4c8059e7d192b10a069be031168ae8b722bf219d699261e18a
   replicaCount: 2                           # computed: values.replicas
   resources:                                # OKDP's defaults
     limits:
@@ -2484,17 +2190,8 @@ app:
       memory: 128Mi
 ```
 
-`okdp-objects.values.yaml`: the objects of the OAuth client:
-
-```yaml
-# Code generated by okdp-compile. DO NOT EDIT.
-manifests: |
-  # ... the ServiceAccount, the Role, the Job...
-  # (OAuth client objects)
-```
-
 `okdp.info.yaml` ([the info file](#the-info-file)): its URL,
-its usage and its one output, under the release name, without
+its usage and its one output, under the instance's name, without
 credentials:
 
 ```yaml
@@ -2502,25 +2199,50 @@ url: https://webapp.demo.okdp.example.org
 usage: |
   A web application. Open https://webapp.demo.okdp.example.org
 provides:
-  - name: demo-webapp
+  - name: webapp
     contract: http
     values:
       internalUrl: http://demo-webapp-app.demo.svc:8080
       url: https://webapp.demo.okdp.example.org
 ```
 
-The instance has no objects, no credentials Secret and no `objects`
-section. Its dependency, `Result.Dependencies`
-([dependencies](#dependencies)):
+`okdp-objects.values.yaml` ([the objects chart](#the-objects-chart)):
+the instance's `objects` section, the ConfigMap of `exampleConfigFiles`,
+with OKDP's labels:
+
+```yaml
+# Code generated by okdp-compile. DO NOT EDIT.
+manifests: |
+  apiVersion: v1
+  data:
+    app.properties: |
+      url=https://webapp.demo.okdp.example.org
+      replicas=2
+  kind: ConfigMap
+  metadata:
+    labels:
+      app.kubernetes.io/instance: demo-webapp
+      app.kubernetes.io/managed-by: Helm
+      app.kubernetes.io/name: webapp
+      app.kubernetes.io/part-of: okdp
+      okdp.io/instance: demo-webapp
+      okdp.io/service: webapp
+    name: demo-webapp-settings
+    namespace: demo
+```
+
+Its dependency, `Result.Dependencies` ([dependencies](#dependencies)):
 
 ```text
 depends on demo-db (database demo.webapp.database, database)
 ```
 
-`examples/03_full/` compiles the workspace service, a package written to use
-every part of the mapping language, with four values layers:
-`platform.yaml` (level 0: `global.okdp` in `dcr` mode, the registration
-objects chart from a mirror, a proxy, two connections), `project.yaml` (level 1:
+okdp-compiler-security's
+[`examples/03_full/`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full)
+compiles the workspace service, a package written to use every part of
+the mapping language, with four values layers:
+`platform.yaml` (level 0: `global.okdp`, the objects chart from a
+mirror, a proxy, two connections), `project.yaml` (level 1:
 the project's settings under `global`, two connections of its own, a
 named claim),
 `connections.yaml` (level 2: the instance's own connection) and
@@ -2728,9 +2450,10 @@ mapping sees them as `platform.access.viewers`, `.editors` and `.admins`,
 each role's list holding the higher roles' groups and the platform's
 administrators, and `platform.access.platformAdmins`
 ([context](02_service_definition.md#context),
-[who may sign in](../02_writing_package.md#oauth-clients)): a service
-defaults its allowed groups to them, never to the realm's roles, which
-every project's people hold (`TestPlatformAccess`).
+[the sign-in
+proxy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/03_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload)):
+a service defaults its allowed groups to them, never to the realm's
+roles, which every project's people hold (`TestPlatformAccess`).
 
 | Case | Error |
 |---|---|

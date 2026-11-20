@@ -4,15 +4,22 @@ How to package an upstream application for OKDP: a directory of
 parameters, OKDP's defaults and a service definition, compiled by
 okdp-compiler (the `okdp-compile` of its
 [command line](01_usage.md#command-line), okdp-gitops' with the deployer
-targets). The steps follow a `webapp` service, of which the example of this repository is a
-smaller version (`examples/02_advanced/input/catalog/webapp/`;
+targets). The steps follow a `webapp` service, of which the example of
+this repository is a smaller version
+(`examples/02_advanced/input/catalog/webapp/`, which calls a function of
+the example's rule set, `examples/02_advanced/rules`;
 `examples/00_passthrough/input/catalog/` is the smallest package, a chart
 and its values, `examples/01_minimal/input/catalog/` the smallest with a
-mapping, `examples/03_full/input/catalog/workspace/` one that uses every
-part of the mapping language, each commented); the recipes and pitfalls
-come from the services packaged in `OKDP/platform-charts` and
-`OKDP/sandbox-charts`. What each file may contain is specified in [the
-service definition](specs/02_service_definition.md), its [control
+mapping, `examples/04_claims/input/catalog/` a provider and its
+claimers, each commented); the recipes and pitfalls come from the
+services packaged in `OKDP/platform-charts` and `OKDP/sandbox-charts`.
+A package that serves a host, signs its users in or adds workloads of
+its own does so with the security rule set:
+okdp-compiler-security's [writing a
+package](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md),
+whose examples use every part of the mapping language. What each file
+may contain is specified in [the service
+definition](specs/02_service_definition.md), its [control
 flow](specs/03_control_flow.md) and [functions](specs/04_functions.md),
 and [inputs and outputs](specs/01_inputs_outputs.md), the command line in
 [usage](01_usage.md), the internals in [architecture](00_architecture.md).
@@ -28,10 +35,11 @@ the service and the upstream charts it is made of, its dependencies, each
 by its name, repository and pinned version; `okdp.yaml` says what the
 service needs of the platform, which defaults each chart takes and what an
 instance may override, and holds the mapping's sections that are not chart
-values: `vars`, `errors`, the OAuth clients, OKDP's own objects, the
-instance's URL and usage, and the provided connections; `values.cel.yaml`,
-the values file, says how the values of each chart follow from the
-parameters, the platform values (`global.okdp`) and the connections.
+values: `vars`, `errors`, OKDP's own objects, the instance's URL and
+usage, the provided connections, and the sections a rule set adds;
+`values.cel.yaml`, the values file, says how the values of each chart
+follow from the parameters, the platform values (`global.okdp`) and the
+connections.
 A compile turns the values of one instance into the final values of
 every chart, OKDP's own objects and what the instance publishes
 (`okdp.info.yaml`); a deployer then renders each upstream chart from its
@@ -42,7 +50,7 @@ the package is published as a chart.
 ```
 <name>/
 ├── Chart.yaml              name, version, the upstream charts (dependencies), Helm's other metadata
-├── okdp.yaml               required platform values, roles, dependsOn, OKDP's defaults, upstream values, protect, append; vars, errors, OAuth clients, OKDP's own objects, URL and usage, provided connections
+├── okdp.yaml               required platform values, roles, dependsOn, OKDP's defaults, upstream values, protect, append; vars, errors, OKDP's own objects, URL and usage, provided connections, a rule set's sections
 ├── values.cel.yaml         the computed values of each chart (values.yaml when none is computed)
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
@@ -71,7 +79,7 @@ write its key: `Chart.yaml` alone is a package
 ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
 Add `okdp.yaml` when the service needs more: platform values, OKDP's
 defaults, instance upstream values, `vars` and OKDP's sections (URL and
-usage, connections, OAuth clients, objects); and `config.schema.json`
+usage, connections, objects, a rule set's sections); and `config.schema.json`
 when an instance has parameters. Once a value needs an expression or a
 directive (`${{ }}`, `$if`), rename the file `values.cel.yaml`: the
 compiler reads both alike, but a `values.yaml` that holds them, which
@@ -136,10 +144,6 @@ helm pull airflow --repo https://airflow.apache.org --version 1.22.0 --untar -d 
   another package. CRDs upgraded with the release (spark-operator) are a
   deployer setting: `upgrade.crds: CreateReplace` on the Flux HelmRelease;
   Argo CD applies `crds/` on every sync.
-- The registration of the OAuth clients is no dependency of the package:
-  the compile adds a Job per client in `dcr` mode, among the instance's
-  objects ([OAuth client
-  objects](specs/01_inputs_outputs.md#oauth-client-objects)).
 
 Flux (`helm install`) and Argo CD (`helm template`) must render the same
 objects. An upstream feature built on `lookup`, a random function, `genCA` or
@@ -163,7 +167,6 @@ dependencies:             # step 1
 roles: [webapp]           # what the service provides in the catalog
 dependsOn:                # the platform services it needs
   - database-server
-  - ingress
 ```
 
 `apiVersion: v2`, `name` and `version` are required, and `version` is
@@ -189,9 +192,11 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
+  "required": ["host"],
   "properties": {
     "global": {"type": "object", "description": "Platform values: the context's layers, the platform's level then higher ones adding to it, never an instance's."},
     "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
+    "host": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9.-]+$", "title": "Host"},
     "database": {
       "type": "string",
       "default": "",
@@ -284,14 +289,12 @@ chart is reached through `upstream.<chart>`, without a parameter.
 
 ```yaml
 require:                                 # read by the mapping in every case
-  - ingress.suffix
-  - ingress.className
-  - tls.clusterIssuer
+  - storageClass.data
 defaults:
   app: app.defaults.yaml                 # OKDP's defaults, plain YAML; metrics has none
 upstream:
   app:                                   # the instance's upstream.app; metrics: none
-    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls]
+    protect: [fullnameOverride, service.port, auth]
     append: [env]
 ```
 
@@ -314,27 +317,28 @@ upstream:
   `true`, `false` or `{protect, append}`
   ([upstream](specs/02_service_definition.md#upstream)). Leave out
   a chart an instance has no reason to set (the webapp's `metrics`).
-  Whatever it accepts, the platform denies its projects' instances the
+  Whatever it accepts, a host that applies the upstream policy of the
+  security set, as okdp-gitops does, denies a project's instances the
   keys of a pod's privileges, identity, containers and objects
-  (`securityContext`, `hostPath`, `serviceAccount`, `sidecars`,
-  `extraObjects`...) and may hold their images to its registries ([upstream
-  policy](specs/01_inputs_outputs.md#upstream-policy)): a parameter is
-  the way to offer one of them, the package reviewed with it.
+  (`hostPath`, `serviceAccount`, `sidecars`, `extraObjects`...) and may
+  hold their images to the platform's registries ([upstream
+  values](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#upstream-values)):
+  a parameter is the way to offer one of them, the package reviewed with
+  it.
 - `protect` refuses instance values on a path, under it, or a non-map on the
   way to it ([protect](specs/01_inputs_outputs.md#protect)).
   Protect what the platform relies on:
   - names other objects or contracts address: `fullnameOverride`, Service
     names and ports (what `provides` publishes is built from them);
-  - authentication: OIDC settings, auth types, access control;
-  - the exposure: `ingress.enabled`, `className`, `hosts`, `tls` (the host is
-    registered with the identity provider and published in
-    `okdp.info.yaml`);
+  - authentication: the sign-in settings, auth types, access control;
+  - the exposure: the switches, hosts and certificates the service is
+    reached by (the host is published in `okdp.info.yaml`);
   - the wiring of Secrets: `existingSecret`, `*SecretName`, any key that
     would put a credential in the values;
   - the switches of features kept off for determinism (`admissionController`,
     `serviceMonitor`), and the RBAC and ServiceAccounts another service owns.
 
-  Protect the narrowest path: `ingress.hosts` leaves `ingress.annotations`
+  Protect the narrowest path: `service.port` leaves `service.annotations`
   open, `auth` refuses everything under it. A key containing dots is written
   in brackets, a family of keys with a final glob
   ([recipe](#keys-containing-dots)).
@@ -356,13 +360,15 @@ The mapping is YAML shaped like the upstream values, with `${{ CEL }}`
 [sections](specs/02_service_definition.md#sections) follow the package keys
 of `okdp.yaml`. As the webapp writes them (the
 [evaluation order](specs/02_service_definition.md#evaluation-order)
-puts `vars` and `errors` first, `objects` and `oidcClients` last):
+puts `vars` and `errors` first, `objects` and a rule set's sections
+last):
 
 ```yaml
 # values.cel.yaml: chart key -> the values computed for it
 app:
   fullnameOverride: ${{ release.name }}-app   # the name the http contract promises
   replicaCount: ${{ values.replicas }}
+  persistence: {storageClass: '${{ global.okdp.storageClass.data }}'}
 metrics:
   $if: ${{ values.metrics.enabled }}   # left out: the chart is not rendered
   target: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080/metrics
@@ -371,17 +377,13 @@ metrics:
 ```yaml
 # okdp.yaml, after the package keys
 vars:                      # names and hosts computed once, in order
-  host: ${{ service.name }}-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  host: ${{ values.host }}
   db: '${{ type(values.database) == map ? values.database : {} }}'
   sessionSecret: ${{ okdpFullname('session') }}
 
 errors:                    # a message fails the compile when its $if holds
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
     $value: "webapp: replicas > 1 needs a database, sessions are stored there"
-
-oidcClients:               # the OAuth clients: the platform's, or registered by DCR
-  - redirectUris: ['https://${{ host }}/oauth2/callback']
-    grantTypes: [authorization_code, refresh_token]
 
 objects:                   # OKDP's own objects, whole manifests
   - $spread: >-
@@ -403,6 +405,10 @@ provides:                  # the connections the instance publishes
   sees the previous ones, and hides a
   [context](specs/02_service_definition.md#context) variable of the
   same name (`labels`). The values file reads the bindings too (`host`).
+  A platform that applies the security set holds a project to hosts of
+  its own form, and the package then builds the host from the platform's
+  suffix rather than a parameter
+  ([hosts](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#hosts-ingress-and-tls)).
 - The values file holds only what is computed, by key. Every dependency is
   rendered, as Helm renders a chart's dependencies: one the file does not
   write gets `{}` as its computed values, OKDP's defaults, the instance's
@@ -421,9 +427,6 @@ provides:                  # the connections the instance publishes
   `$value` of an item with its condition, `$if`; `$for` checks every
   element of a list.
   Prefix each message with the service and the parameter, and say what to set.
-- `oidcClients` declares the service's OAuth clients; the mapping reads each
-  from its Secret, `platform.oidcClientSecret` for the main client
-  ([recipe](#oauth-clients)).
 - `objects` are whole manifests (a `kind` and a `metadata.name` at least)
   the okdp-objects chart renders as written, after the credentials Secrets
   (a `{{` in them is not Helm's): generated Secrets, hooks, custom
@@ -435,8 +438,8 @@ provides:                  # the connections the instance publishes
 
 Besides CEL's own, [host functions](specs/04_functions.md#host-functions)
 (`str`, `sha256`, `toJson`, `okdpFullname`, `okdpLabels`,
-`okdpGeneratedSecret`, `oidcClientSecret`...) reproduce Helm's functions
-and give OKDP's names, labels and Secrets.
+`okdpGeneratedSecret`...) reproduce Helm's functions and give OKDP's
+names, labels and Secrets; a rule set adds its own.
 
 ### 6. Consume and provide connections
 
@@ -502,7 +505,7 @@ an expression). An output is published under the instance's name, the
 default `name` (`db` for the instance `projects/demo/instances/db/`, not
 its release `demo-db`): other instances reach the instance by it. Its values are
 what the instance is reached at: build the hosts and Service names once,
-in `vars`, for the ingress and `provides` alike. A `name` is for several
+in `vars`, for the values and `provides` alike. A `name` is for several
 outputs of one contract (cnpg-postgresql's `database-server` outputs, one
 per database): the name the other instances of the namespace reference
 each by, unique per contract in the namespace, or their references fail.
@@ -631,21 +634,20 @@ own `ci/<case>-platform.yaml` over it; and the instance,
 `instance.yaml` naming the package, its `config.yaml` the case's values,
 its `connections.yaml` the case's own connections
 (`ci/<case>-connections.yaml`). `scripts/compile-charts.sh` builds one per
-case. Write one case per mode: OIDC `existing`, `dcr` and off, internal
-and external connections, proxy set, each optional chart on, upstream
-values with appended lists. The `dcr` case's platform file gives
-`oidc.clientProvisioning: dcr`, `oidc.dcr.registrationUrl` and
-`authMethod: anonymous` (polaris's `ci/dcr-platform.yaml`). The examples
-of this repository compile in `dcr` mode only; the `existing` mode is
-tested by the unit tests (`internal/okdp/oidc_test.go`), with no example
-output.
+case. Write one case per mode: internal and external connections, proxy
+set, each optional chart on, upstream values with appended lists, and
+each mode of the settings a rule set reads (the security set's:
+[test cases](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#test-cases)).
+A test tree whose platform requires a rule set (`global.okdp.ruleSets`)
+fails a compile not given it: okdp-compiler's `okdp-compile` takes it
+with `--rules`, okdp-gitops' gives the security set to every compile.
 
 ```bash
 export OKDP_CHARTS=~/.cache/okdp/charts   # the chart cache of okdp-gitops' --check, filled with helm pull --untar
 # okdp-compile is okdp-gitops'
-# /tmp/polaris-dcr: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
-okdp-compile --repository . --repository /tmp/polaris-dcr --check   # against the upstream charts' defaults and schemas
-okdp-compile --repository . --repository /tmp/polaris-dcr --target umbrella -o /tmp/out
+# /tmp/polaris-case: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
+okdp-compile --repository . --repository /tmp/polaris-case --check   # against the upstream charts' defaults and schemas
+okdp-compile --repository . --repository /tmp/polaris-case --target umbrella -o /tmp/out
 i=/tmp/out/projects/demo/instances/demo-polaris
 yq '.dependencies' $i/Chart.yaml   # the source of each key
 chart=$(mktemp -d) && cp -R $i/. "$chart" && helm dependency build "$chart"
@@ -659,8 +661,8 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 - `--target umbrella` is okdp-gitops' single release of an instance: its
   dependencies are the sources the index names for the keys,
   `polaris-admin-principals` the source of `polaris-admin` under its own
-  alias, and the okdp-objects chart, which holds the OAuth clients and
-  renders OKDP's own objects as written; `helm dependency build` fetches
+  alias, and the okdp-objects chart, which renders OKDP's own objects as
+  written; `helm dependency build` fetches
   them, in a copy of the directory, since the next compile into the
   directory refuses `Chart.lock` and `charts/`.
 - The library gives the final values alone, `values.yaml` and
@@ -668,8 +670,7 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
   ([installing an instance](01_usage.md#installing-an-instance)).
 - A case whose first line is `# error: <message>` must fail with that
   message (`scripts/compile-charts.sh`, and okdp-gitops' `testdata/`:
-  `protected-upstream.yaml` starts with `# error:
-  upstream.app.ingress.hosts: ingress.hosts is set by the platform`;
+  `protected-upstream.yaml` starts with the message of a protected path;
   `testdata/context/0/` holds the platform files that must fail). Add one
   per `errors` entry, per protected path that matters, per schema rule.
 
@@ -677,45 +678,17 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 
 ## Recipes
 
-### Ingress and TLS
+### Hosts, sign-in and workloads
 
-The host is one DNS label, then the namespace, then the platform suffix,
-`<label>.<namespace>.<suffix>`
-(`${{ service.name }}.${{ release.namespace }}.${{ suffix }}`; `-server`
-or `-api` goes in the label, never after it, and a host has no deeper
-name): a project that is not privileged serves the hosts of that form, or
-that the platform lists for it
-(`global.okdp.policy.ingressHosts`), in the objects and in the `ingress`
-keys of the charts' values, and the compile refuses the others, the
-package's defaults and a host parameter included
-([hosts](specs/01_inputs_outputs.md#hosts)). The class and the certificate
-issuer, `global.okdp.tls.clusterIssuer`, the cert-manager ClusterIssuer
-the platform names whichever cert-manager runs it, are platform values
-(`require` them, `protect` the four ingress paths).
+The host a service is reached at, the OAuth clients its users sign in
+with and the workloads a package adds beside its charts are rules of the
+security set: the form of a project's hosts, the section `oidcClients`
+and the hardened fragments (`okdpPodSpec`, `okdpJob`,
+`okdpSignInProxy`, `okdpWebWorkload`), in okdp-compiler-security's
+[writing a
+package](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md).
 
-```yaml
-# values.cel.yaml
-app:
-  ingress:
-    enabled: true
-    className: ${{ global.okdp.ingress.className }}
-    annotations: ${{ platform.ingressAnnotations }}   # cert-manager.io/cluster-issuer
-    hosts:
-      - host: ${{ host }}
-        paths: [{path: /, pathType: Prefix}]
-    tls:
-      - hosts: ["${{ host }}"]
-        secretName: ${{ release.name }}-tls
-```
-
-To add annotations, write them in a map next to
-`$merge: ${{ platform.ingressAnnotations }}` (airflow, superset). The
-platform's come with them, `global.okdp.ingress.annotations`, those of
-the cluster's ingress controller: an annotation of one controller only
-(`nginx.ingress.kubernetes.io/proxy-body-size`) is a tuning another
-ignores, never what protects the service. A sign-in is the service's own
-(OIDC), or a proxy in front of it (oauth2-proxy): an annotation that
-another controller ignores would leave it open.
+### The platform's CA bundle
 
 A service that calls another of the platform over TLS trusts the
 platform's CA bundle: the Secret `global.okdp.tls.caBundleSecret` of its
@@ -732,76 +705,12 @@ app:
     $value: [{name: ca-bundle, secret: {secretName: '${{ global.okdp.tls.caBundleSecret }}'}}]
 ```
 
-### OAuth clients
+### Who may use the service
 
-A service that signs users in declares its OAuth clients in `oidcClients`,
-and reads each from its Secret: `client_id`, and `client_secret` unless the
-client is public. The main client has no name; any other is named
-(polaris's `console`):
-
-```yaml
-# okdp.yaml
-vars:
-  consoleHost: console-${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
-oidcClients:
-  - redirectUris: ['https://${{ host }}/oauth2/callback']   # the main client: no name
-    grantTypes: [authorization_code, refresh_token]          # required
-    scope: ${{ platform.oidc.scope }} offline_access         # what the application asks for
-  - name: console                                            # a named client
-    public: true                                             # a browser application: no secret
-    redirectUris: ['https://${{ consoleHost }}/auth/callback']
-    grantTypes: [authorization_code]
-```
-
-```yaml
-# values.cel.yaml
-app:
-  env:
-    - name: OIDC_CLIENT_ID
-      valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_id}}
-    - name: OIDC_CLIENT_SECRET
-      valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_secret}}
-    - name: CONSOLE_CLIENT_ID
-      valueFrom: {secretKeyRef: {name: "${{ oidcClientSecret('console') }}", key: client_id}}
-```
-
-The same lines serve both provisioning modes of the platform
-(`global.okdp.oidc.clientProvisioning`); only the Secret's name changes, and
-`platform.oidcClientSecret` (the main client) and `oidcClientSecret('<name>')`
-return it, in any section, `vars` included:
-
-- `existing`, the default: the platform registers the clients and creates
-  their Secrets beforehand. The compiler checks the section and adds
-  nothing.
-- `dcr`: the compile adds one Job per client to the instance's objects,
-  which registers the client and writes its Secret, and keeps it as the
-  mapping asks: a changed `redirect_uris` reaches the provider at the next
-  sync, and uninstalling removes the client.
-
-Write the redirect URIs and the scope the application actually sends
-(airflow and spark-history-server pass their login scope, `offline_access`
-included); `request` adds or overrides registration fields (trino's
-`logo_uri`), never a URL the provider trusts (`redirect_uris` and its
-kind are refused there). The hosts of `redirectUris` are the project's own
-(`<label>.<namespace>.<suffix>`, or listed for it in
-`global.okdp.policy.ingressHosts`). The compiler computes the rest of the
-registration from the client and the platform's
-[OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings).
-The mapping writes nothing else for the clients: no `$if` on the mode, no
-Job, ServiceAccount or Secret name. The keys of a client and their checks:
-[oidcClients](specs/02_service_definition.md#oidcclients); the names of
-the objects and Secrets in each mode, and the keys of the Secret:
-[OAuth client objects](specs/01_inputs_outputs.md#oauth-client-objects).
-
-With OIDC off (`global.okdp.oidc.enabled: false`) no object is added and no
-Secret exists: read the Secrets under `platform.oidc.enabled`
-([conditional items](#conditional-items-maps-from-lists)) when the service
-supports it.
-
-Who may sign in. A realm's roles are the platform's, every project's
-people hold them: a service that lets anyone with a role of the realm in
-runs the code of a project (a notebook, a flow, a UI that submits jobs) for
-the people of the others. The people of a project are its groups, the
+A realm's roles are the platform's, every project's people hold them: a
+service that lets anyone with a role of the realm in runs the code of a
+project (a notebook, a flow, a UI that submits jobs) for the people of
+the others. The people of a project are its groups, the
 roles of its `project.yaml` `access` (`okdp-project-<namespace>`, an
 editor, without one), and the compiler gives them to the mapping:
 
@@ -820,7 +729,7 @@ only to narrow or to widen on purpose:
 ```yaml
 # values.cel.yaml
 app:
-  oidc:
+  auth:
     allowedGroups: ${{ values.?allowedGroups.orValue(platform.access.editors) }}
 ```
 
@@ -894,8 +803,8 @@ objects:
           'keys': [{'key': 'jwt-secret', 'length': 64},
                    {'key': 'fernet-key', 'length': 32, 'transform': 'b64enc'}]}) }}
   - $spread: >-
-      ${{ platform.oidc.enabled ? [] : okdpGeneratedSecret({'name': okdpFullname('admin'),
-          'keys': [{'key': 'password', 'length': 24}]}) }}
+      ${{ values.builtInAdmin ? okdpGeneratedSecret({'name': okdpFullname('admin'),
+          'keys': [{'key': 'password', 'length': 24}]}) : [] }}
 ```
 
 Helm and Flux keep what `helm.sh/resource-policy: keep` marks; the
@@ -943,12 +852,12 @@ env:
   - $if: ${{ db.size() > 0 }}                 # one item
     name: DB_DRIVER
     value: ${{ db.driver }}
-  - $for: "secret in (platform.oidc.enabled ? [platform.oidcClientSecret] : [])"
+  - $for: "secret in (values.smtp.enabled ? [okdpFullname('smtp')] : [])"
     $each:                                     # a group of items, on one condition
-      - name: OIDC_CLIENT_ID
-        valueFrom: {secretKeyRef: {name: "${{ secret }}", key: client_id}}
-      - name: OIDC_CLIENT_SECRET
-        valueFrom: {secretKeyRef: {name: "${{ secret }}", key: client_secret}}
+      - name: SMTP_USER
+        valueFrom: {secretKeyRef: {name: "${{ secret }}", key: username}}
+      - name: SMTP_PASSWORD
+        valueFrom: {secretKeyRef: {name: "${{ secret }}", key: password}}
 catalogs:                                      # trino: one catalog file per item
   $if: ${{ catalogs.size() > 0 }}
   $for: c in catalogs
@@ -962,34 +871,18 @@ spliced with `$spread`.
 
 ### Fragments
 
-A workload a package adds beside the upstream chart, or without one, is
-written with the fragments the compiler provides, not by hand: a Job
-(`okdpJob`), a web service with its volume, Ingress and sign-in proxy
-(`okdpWebWorkload`), the sign-in proxy alone (`okdpSignInProxy`), a pod
-spec (`okdpPodSpec`). They are CEL functions that return the objects,
-`$spread` into `objects`; the pod is hardened (no privilege escalation, no
-capability, non-root, seccomp, a read-only root filesystem, no service
-account token), the sign-in proxy lets in the project's groups
-(`platform.access`), the host is the project's. The arguments, and the
-exceptions a pod may ask for (`readOnlyRootFilesystem: false`, a token),
-are in
-[functions](specs/04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload);
-a complete package is
-`examples/05_fragments/input/catalog/okdp.yaml`.
-
-```yaml
-# okdp.yaml
-objects:
-  - $spread: >-
-      ${{ okdpWebWorkload({'component': 'web', 'port': 8888,
-          'pod': {'containers': [{'name': 'notebook', 'image': image, 'ports': [{'name': 'http', 'containerPort': 8888}],
-                                   'volumeMounts': [{'name': 'data', 'mountPath': '/data'}]}],
-                  'runAsUser': 1000, 'fsGroup': 1000},
-          'storage': {'size': '10Gi'}, 'ingress': {'host': host}, 'signIn': {}}) }}
-```
-
-A package that needs what a fragment refuses, a privileged container, a
-host path, writes its pod itself.
+A fragment is a function of a rule set that returns objects, or a part
+of one, from its arguments, checked against the mapping schema under
+its name: a workload written once and reviewed once, rather than by
+hand in each package. It is a CEL function, its result `$spread` into
+`objects`. The compiler's own is `okdpGeneratedSecret`
+([generated secrets](#generated-secrets)); the security set gives the
+hardened pod and the workloads built on it, a Job, a web service, a
+sign-in proxy
+([workloads of the package](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#workloads-of-the-package));
+a platform's own set may give others
+([functions](specs/04_functions.md)). A package that needs what a
+fragment refuses writes its objects itself.
 
 ### Labels
 
@@ -1067,8 +960,8 @@ mode:
 ```yaml
 # okdp.yaml
 errors:
-  - $if: ${{ platform.oidc.enabled && platform.oidc.?issuerUri.orValue('') == '' }}
-    $value: global.okdp.oidc.issuerUri is required when OIDC is enabled. It is a context value
+  - $if: ${{ values.persistence && global.okdp.?storageClass.?data.orValue('') == '' }}
+    $value: global.okdp.storageClass.data is required with persistence. It is a context value
 ```
 
 Read an optional platform value with `.?` and `orValue`
@@ -1098,14 +991,14 @@ keys with a final glob
 upstream:
   app:
     protect:
-      - 'ingress.annotations["nginx.ingress.kubernetes.io/auth-*"]'   # every auth-* annotation
-      - 'config["spark.ui.filters"]'                                  # one key, dots included
+      - 'podAnnotations["sidecar.istio.io/*"]'   # every sidecar.istio.io/ annotation
+      - 'config["spark.ui.filters"]'             # one key, dots included
 ```
 
 An instance setting one of them fails:
 
 ```text
-app: upstream.app.ingress.annotations["nginx.ingress.kubernetes.io/auth-url"]: ingress.annotations["nginx.ingress.kubernetes.io/auth-*"] is set by the platform and cannot be changed
+app: upstream.app.podAnnotations["sidecar.istio.io/inject"]: podAnnotations["sidecar.istio.io/*"] is set by the platform and cannot be changed
 ```
 
 A rule no path expresses (a value that depends on a parameter) goes in
@@ -1138,9 +1031,8 @@ A rule no path expresses (a value that depends on a parameter) goes in
   compile), but one in a branch no case takes is never evaluated: a type
   error (`no such overload`) or a missing key passes until a case takes it
   ([expressions](specs/02_service_definition.md#lone-expressions-and-interpolation)):
-  give every branch a `ci/` case that takes it, and test both OIDC modes:
-  the clients' charts are compiled, and the platform's `registrationUrl`
-  and `authMethod` required, in `dcr` mode only.
+  give every branch a `ci/` case that takes it, each mode of the
+  platform's settings the mapping reads included.
 - **A null deletes the default.** A key computed as `null`
   (`${{ values.?x.orValue(null) }}`) removes the upstream chart's default at
   render: leave the key out with `$if`. A parameter set to `null` by a values
@@ -1165,11 +1057,6 @@ A rule no path expresses (a value that depends on a parameter) goes in
   reference: test `type(...) == map` first, or report it in `errors`.
 - **`okdp-objects` is the compiler's chart key.** A `Chart.yaml` dependency
   or a key of the values file of that name fails, in every mode.
-- **A client's `secret` is not followed.** It renames the Secret the Job
-  writes, in `dcr` mode only; `oidcClientSecret(name)` still returns the
-  mode's name, and in `existing` mode the platform's Secret keeps its own.
-  Reference the name you set yourself:
-  `platform.oidc.dcr.enabled ? mySecret : oidcClientSecret('n')`.
 - **A dependency is pinned.** `version` is one version, not a range
   (`^1.2`, `1.x` fail): bump it in `Chart.yaml`, then pull the new version
   into the chart cache of okdp-gitops' checks. The final values do not
@@ -1197,11 +1084,11 @@ A rule no path expresses (a value that depends on a parameter) goes in
   can exceed 63 characters; every OKDP object is labelled.
 - [ ] `provides` publishes what the instance is reached at, under the
   release name, and says where the credentials come from.
-- [ ] The OAuth clients are declared in `oidcClients` and read from
-  `platform.oidcClientSecret` and `oidcClientSecret('<name>')`.
-- [ ] One `ci/` case per mode and per branch, OIDC `existing` and `dcr`
-  included, one failing case per check; `scripts/compile-charts.sh` compiles
-  them all and renders each chart with the source the index names.
+- [ ] A host, a sign-in or a workload of the package follows the security
+  set's checklist
+  ([writing a package](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#checklist)).
+- [ ] One `ci/` case per mode and per branch, one failing case per
+  check; `scripts/compile-charts.sh` compiles them all and renders each
+  chart with the source the index names.
 - [ ] `README.md` lists the parameters, the platform values read, the charts
-  and when each is compiled (the clients' charts: `dcr` mode), and the known
-  gaps.
+  and when each is compiled, and the known gaps.

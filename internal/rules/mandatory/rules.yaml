@@ -1,7 +1,7 @@
 # The compiler's mandatory rule set, applied to every compile: what a
-# compile needs to write values a chart installs (the functions, the
-# templates and the names of a mapping), and what it refuses (the checks,
-# and the tables they read), as data. Another rule set given to the compile
+# compile needs to write values a chart installs (the templates and the
+# names of a mapping), and what it refuses (the checks, and the tables they
+# read), as data. Another rule set given to the compile
 # (LoadRules, --rules) adds to this one without replacing any of it. A table
 # with addFrom also reads the list global.okdp.<addFrom>: the platform adds
 # to the table, it never removes from it. An extensible table is one where
@@ -105,45 +105,6 @@ tables:
       - fluxcd.controlplane.io
       - source.extensions.fluxcd.io
       - argoproj.io
-  # The keys the upstream values of an instance of a project that is not
-  # privileged set nowhere, at any depth, to any value: a pod's privileges
-  # on its node, its security context whole, its identity, and the containers
-  # and objects a chart adds from its values. The scheduling keys stay free.
-  deniedUpstreamKeys:
-    addFrom: policy.upstream.deny
-    values:
-      - privileged
-      - hostPath
-      - hostNetwork
-      - hostPID
-      - hostIPC
-      - hostPort
-      - allowPrivilegeEscalation
-      - capabilities
-      - seccompProfile
-      - sysctls
-      - securityContext
-      - podSecurityContext
-      - containerSecurityContext
-      - serviceAccountName
-      - serviceAccount
-      - automountServiceAccountToken
-      - extraContainers
-      - sidecars
-      - initContainers
-      - extraInitContainers
-      - extraObjects
-      - extraDeploy
-      - extraManifests
-      - extraResources
-      - extraSecrets
-      - extraConfigMaps
-      - externalIPs
-  # What the name of a key ends with, in lower case, when the key holds an
-  # image, a registry or a repository of images by its own name. The key
-  # image itself is read with its sibling keys.
-  imageKeySuffixes:
-    values: [image, imageregistry, imagerepository, imagename]
   # The names of the objects the platform writes in the namespace of every
   # project besides its instances': a release may not take one.
   platformObjectNames:
@@ -155,29 +116,12 @@ tables:
       - okdp-access-editor
       - okdp-access-admin
       - okdp-secrets
-      - okdp-dcr-token
   # The settings, paths under global.okdp, that name an object the platform
   # writes in the namespace of every project: their values are taken as
   # platformObjectNames are.
   platformObjectSettings:
     extensible: true
-    values: [secrets.store, secrets.serviceAccount, oidc.dcr.tokenSecret]
-  # The annotations that name hosts, their values lists of hosts separated
-  # by commas and spaces.
-  hostAnnotations:
-    values:
-      - cert-manager.io/common-name
-      - cert-manager.io/alt-names
-      - nginx.ingress.kubernetes.io/server-alias
-      - external-dns.alpha.kubernetes.io/hostname
-  # The keys of the values of a chart that hold its ingress; under them, the
-  # keys that hold one host, and those that hold a list of hosts.
-  ingressValueKeys:
-    values: [ingress, ingresses]
-  ingressHostKeys:
-    values: [host, hostname, commonName]
-  ingressHostListKeys:
-    values: [hosts, hostnames, dnsNames, extraHosts]
+    values: [secrets.store, secrets.serviceAccount]
   # The keys of global a project sets when the platform lists none
   # (global.okdp.policy.projectGlobals).
   defaultProjectGlobals:
@@ -190,9 +134,7 @@ checks:
   platformNamespace: checks/platform-namespace.cel.yaml
   release: checks/release.cel.yaml
   object: checks/objects.cel.yaml
-  upstreamKey: checks/upstream-key.cel.yaml
   plainSecret: checks/plain-secret.cel.yaml
-  host: checks/host.cel.yaml
   contextLayer: checks/context-layer.cel.yaml
   valuesLayer: checks/values-layer.cel.yaml
 # The JSON schemas of the platform's settings, and their defaults, and of
@@ -204,24 +146,9 @@ schemas:
 # global.okdp.charts.objects.
 charts:
   objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 0.1.0}
-# The functions mappings call: each a fragment, a template evaluated on its
-# arguments, checked against the mapping schema under the function's name,
-# and the instance's context; result names the value it returns, all of them
-# when left out.
-functions:
-  okdpPodSpec: {fragment: fragments/fragment-pod.cel.yaml, result: spec}
-  okdpJob: {fragment: fragments/fragment-job.cel.yaml, result: objects}
-  okdpSignInProxy: {fragment: fragments/fragment-proxy.cel.yaml}
-  okdpWebWorkload: {fragment: fragments/fragment-web.cel.yaml, result: objects}
-  oidcClientSecret: {document: oidcSecret, result: secret}
-# The compiler's own templates: the objects of a generated Secret, and those
-# that register an OAuth client.
+# The compiler's own templates: the objects of a generated Secret.
 templates:
   generatedSecret: fragments/generated-secret.cel.yaml
-  oidcClient: charts/oidc-dcr.cel.yaml
-# The sections of a mapping besides the compiler's own (output, instance,
-# provides, objects).
-sections: [oidcClients]
 # The documents the compiler calls besides the checks, the first message of
 # each refusing, in a project that is not privileged: objects on each object
 # of an instance, once every object passed check object; finalValues on the
@@ -230,11 +157,9 @@ hooks:
   objects: []
   finalValues: []
 # Documents the others call: rule(<name>, input) in a document, a function of
-# functions, scope (what a mapping sees as platform); deployerRole, which the
-# targets call, the Role of a project's releases.
+# a set's functions, scope (what a mapping sees as platform); deployerRole,
+# which the targets call, the Role of a project's releases.
 documents:
-  oidcSecret: functions/oidc-secret.cel.yaml
-  oidcClients: charts/oidc-clients.cel.yaml
   scope: scope.cel.yaml
   secretStore: objects/secret-store.cel.yaml
   pushSecret: objects/push-secret.cel.yaml
@@ -244,10 +169,6 @@ documents:
 # platform's settings, the release and the project's groups: those of every
 # set, in the order the sets are read, their platform merged.
 scopes: [scope]
-# A section whose items add objects: list gives them, objects the template
-# of the objects of each it says to render.
-ownObjects:
-  - {section: oidcClients, list: oidcClients, objects: oidcClient}
 # The names the compiler gives credentials: $<word> stands for the value.
 names:
   credentialsSecret: $output-$contract-credentials

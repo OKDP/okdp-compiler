@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"net/url"
 	"slices"
 
 	"github.com/okdp/cel2yaml"
@@ -47,8 +46,7 @@ func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 // ownObjects returns the objects that the sections of the mapping's
 // result res add (the rule set's ownObjects). The list document reads the
 // section's items, the release, platform, privileged and settings; its
-// first message refuses. Before it renders an item, it checks that the
-// project serves the URLs the item names.
+// first message refuses.
 func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, res M) ([]any, error) {
 	var objects []any
 	for _, spec := range inst.rules.OwnObjects() {
@@ -67,9 +65,6 @@ func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, 
 				continue
 			}
 			of := value.Str(c["of"])
-			if err := checkItemURLs(ctx, inst, of, value.AsList(c["urls"])); err != nil {
-				return nil, err
-			}
 			scope := maps.Clone(inst.scope)
 			scope["client"], scope["names"] = c["client"], c["names"]
 			out, err := evalTemplate(ctx, session, spec.Objects, scope)
@@ -80,30 +75,6 @@ func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, 
 		}
 	}
 	return objects, nil
-}
-
-// checkItemURLs checks the URLs that an item registers with an identity
-// provider, for an instance that is not privileged. Each must be http or
-// https, with a host the project serves and no user information. A
-// redirect to the host of another project would hand it the
-// authorization code. url.Parse takes the host from what a browser
-// reads.
-func checkItemURLs(ctx context.Context, inst *instance, of string, urls []any) error {
-	if privileged(inst.okdp, inst.namespace) {
-		return nil
-	}
-	hosts := newHostRules(inst.rules, inst.okdp, inst.namespace)
-	for i, v := range urls {
-		raw, at := value.Str(v), fmt.Sprintf("%s: redirectUris[%d]", of, i)
-		u, err := url.Parse(raw)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil {
-			return fmt.Errorf("%s: %q: an http or https URL with a host and no user information", at, raw)
-		}
-		if err := hosts.check(ctx, at, u.Hostname()); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // platformChart reads and checks a chart of global.okdp.charts, found at

@@ -26,17 +26,17 @@ var (
 	}
 	// The platform values every compile gets, the first context layer of
 	// inputs, at level 0.
-	platformValues = map[string]any{"global": M{"okdp": M{"ingress": M{"suffix": "example.org"}}}}
+	platformValues = map[string]any{"global": M{"okdp": M{"cluster": M{"domain": "example.org"}}}}
 	appSource      = chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
 	appDep         = chart.Dependency{Name: "app", Repository: appSource.Repository, Version: appSource.Version}
 	contracts      = fstest.MapFS{}
 	def            = &Definition{
 		Chart:   chart.Metadata{APIVersion: "v2", Name: "demo", Version: "1.2.3", Dependencies: []chart.Dependency{appDep}},
-		Package: Package{Require: []string{"ingress.suffix"}, Defaults: map[string]string{"app": "app.defaults.yaml"}},
+		Package: Package{Require: []string{"cluster.domain"}, Defaults: map[string]string{"app": "app.defaults.yaml"}},
 		Files:   pkg,
 		Okdp: []byte(`
 vars:
-  host: ${{ release.name + "." + global.okdp.ingress.suffix }}
+  host: ${{ release.name + "." + global.okdp.cluster.domain }}
 errors:
   - {$if: '${{ values.replicas > 10 }}', $value: at most 10 replicas}
 instance:
@@ -114,7 +114,7 @@ func TestCompile(t *testing.T) {
 		"replicaCount": float64(3),
 		"image":        map[string]any{"tag": "4.5"},
 		"labels":       map[string]any{"tier": "ha"},
-		"global":       map[string]any{"okdp": map[string]any{"ingress": map[string]any{"suffix": "example.org"}}},
+		"global":       map[string]any{"okdp": map[string]any{"cluster": map[string]any{"domain": "example.org"}}},
 	}
 	if !reflect.DeepEqual(app, want) {
 		t.Errorf("values:\n got %#v\nwant %#v", app, want)
@@ -187,7 +187,7 @@ func TestCompileErrors(t *testing.T) {
 		want string
 	}{
 		"mapping error":   {inputs(map[string]any{"replicas": 11}), "at most 10 replicas"},
-		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"ingress": M{"suffix": ""}}}}), "global.okdp.ingress.suffix is required"},
+		"platform value":  {inputs(map[string]any{"global": map[string]any{"okdp": map[string]any{"cluster": M{"domain": ""}}}}), "global.okdp.cluster.domain is required"},
 		"missing release": {Inputs{Rules: testrules.Standard(), Contracts: contracts, Namespace: "demo"}, `Inputs.Release "": a release name`},
 		"no namespace":    {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo-app"}, `Inputs.Namespace "": a namespace name`},
 		"release":         {Inputs{Rules: testrules.Standard(), Contracts: contracts, Release: "demo_app", Namespace: "demo"}, `Inputs.Release "demo_app": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)`},

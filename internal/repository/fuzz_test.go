@@ -20,7 +20,7 @@ import (
 // it refuses, which says why. Seeds: the files of TestLoad, TestLoadErrors
 // and TestLoadProjects.
 func FuzzLoad(f *testing.F) {
-	platform := "global: {okdp: {ingress: {suffix: example.org}}}\n"
+	platform := "global: {okdp: {cluster: {domain: example.org}}}\n"
 	instance := "service: app\nversion: 1.0.0\n"
 	for _, s := range [][5]string{
 		{platform, "description: The demo\nglobal: {team: demo}\nclaims: {reports: {contract: database}}\n", instance, "replicas: 2\n", "connections: {ext: {contract: database, host: h}}\n"},

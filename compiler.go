@@ -298,14 +298,15 @@ func LoadDefinitionWith(fsys fs.FS, rules *RuleSet) (*Definition, error) {
 //   - values: the layers of an instance hold no connections, claims,
 //     access nor template code, and no layer sets a key of global that
 //     its level may not set, nor changes a value of a lower level;
-//   - upstream values, for a project that is not privileged: they respect
-//     the package's protect and append paths, set no key of a pod's
-//     privileges, and take images from the platform's registries only;
+//   - upstream values: they respect the package's protect and append
+//     paths; for a project that is not privileged, the rule set's
+//     finalValues hook passes on the final values of each chart, and a
+//     host's Finalize adds its own policy;
 //   - connections: each is of its contract, a store key is under the
 //     project's own, and the claims are those CompileAll bound;
 //   - objects, for a project that is not privileged: each is in the
 //     instance's namespace, none is cluster-scoped or of an engine's API
-//     group, and each host is one the project may serve;
+//     group, and the rule set's objects hook passes on each;
 //   - objects, for any project: no two are the same, and none holds a
 //     credential in clear unless Inputs.AllowPlainSecrets;
 //   - cost: the CEL cost of the expressions (Inputs.CostLimit) and the

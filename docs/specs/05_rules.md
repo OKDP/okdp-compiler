@@ -7,7 +7,11 @@ one set, the mandatory set, embedded in this module
 once (`compiler.Mandatory()`): every compile applies it.
 `compiler.LoadRules` adds a platform's own set to it, and replaces none
 of its rules. This page is the reference of the set: every table, check,
-schema, function and document, and where each is applied.
+schema, function and document, where each is applied, and how a set
+added to it extends it. The hosts a project serves, the OAuth clients,
+the hardened pod and the policy on upstream values are rules of the
+security set, added this way: [its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md).
 
 - [How the sets add up](#how-the-sets-add-up)
 - [Who applies it](#who-applies-it)
@@ -16,12 +20,11 @@ schema, function and document, and where each is applied.
 - [Tables](#tables)
 - [Checks](#checks)
 - [Hooks](#hooks)
-- [What okdp-gitops adds](#what-okdp-gitops-adds)
+- [What a host adds](#what-a-host-adds)
 - [Platform settings](#platform-settings)
 - [What a mapping sees as platform](#what-a-mapping-sees-as-platform)
 - [What a mapping writes](#what-a-mapping-writes)
 - [Functions](#functions)
-- [OAuth clients](#oauth-clients)
 - [The secret store](#the-secret-store)
 - [Names, labels and charts](#names-labels-and-charts)
 - [What a platform can change](#what-a-platform-can-change)
@@ -36,16 +39,7 @@ internal/rules/mandatory/     what every compile applies
     mapping.schema.json       what a mapping writes, and the functions' arguments
   checks/                     one file per check
   fragments/
-    fragment-pod.cel.yaml     okdpPodSpec
-    fragment-job.cel.yaml     okdpJob
-    fragment-proxy.cel.yaml   okdpSignInProxy
-    fragment-web.cel.yaml     okdpWebWorkload
     generated-secret.cel.yaml okdpGeneratedSecret
-  functions/
-    oidc-secret.cel.yaml      oidcClientSecret
-  charts/
-    oidc-clients.cel.yaml     the checks of a mapping's OAuth clients
-    oidc-dcr.cel.yaml         the objects that register each client
   objects/
     secret-store.cel.yaml     the platform's secret store
     push-secret.cel.yaml      the PushSecret of a claim of another namespace
@@ -116,15 +110,18 @@ that of the last set read. A tree states the sets it requires in
 
 Every compile: `Inputs.Rules` and `BuildOptions.Rules` nil stand for the
 mandatory set, and a set of `LoadRules` holds it. A host gives its
-compiles a set through `BuildOptions.Rules`, or nil. okdp-gitops'
-`deploy.Build` gives the mandatory set unless its caller gives another;
-where okdp-gitops honours a caller's set: [who applies
+compiles a set through `BuildOptions.Rules`, or nil. `okdp-compile`
+gives the mandatory set, with the sets of `--rules` added. okdp-gitops'
+`deploy.Build` gives the mandatory set with the security set added
+unless its caller gives another; where okdp-gitops honours a caller's
+set: [who applies
 it](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#who-applies-it).
 
 A program that calls `compiler.Build` or `compiler.Compile` itself, this
-module's `okdp-compile` among them, applies the mandatory set all the
-same, its checks among them, but not what okdp-gitops adds through its
-hooks ([what okdp-gitops adds](#what-okdp-gitops-adds)).
+module's `okdp-compile` among them, applies the sets it gives, their
+checks and hooks among them, but not what a host adds through
+`Inputs.Finalize` and `Inputs.CheckGlobals` ([what a host
+adds](#what-a-host-adds)).
 
 ## What is not in the rule set
 
@@ -161,22 +158,18 @@ instance. A project is privileged when its namespace is listed in
 | `contextLayer` | each context layer | compiler | applies | applies |
 | `valuesLayer` | each values layer | compiler | applies | applies |
 | `object` | each object, items of a List too | compiler | skipped | applies |
-| `host` on objects | each object, items of a List too | compiler | skipped | applies |
 | `plainSecret` | each object, items of a List too | compiler | applies | skipped |
 | hook `objects` | each object, items of a List too, after `object` | compiler | skipped | applies |
 | hook `finalValues` | the final values of each chart key | compiler, in or after `Inputs.Finalize` | skipped | applies |
-| `upstreamKey`, registries | an instance's upstream values | okdp-gitops' `internal/policy`, during the Helm merge | skipped | applies |
-| `upstreamKey`, registries | `global` of each layer above level 0 | okdp-gitops' `internal/policy`, `CheckGlobals` | skipped | applies |
-| `host` on values | the final values of the charts | okdp-gitops' `internal/policy`, after the merge | skipped | applies |
-| plain value warning | an instance's upstream values | okdp-gitops' `internal/policy` | applies | skipped |
+| a list document of `ownObjects` | the items of a section | compiler | as the document reads `privileged` | applies |
 
 "Objects" are all those an instance produces: the `objects` section, the
-credentials Secrets, generated Secrets, PushSecrets and ExternalSecrets.
+objects of a set's sections (`ownObjects`), the credentials Secrets,
+generated Secrets, PushSecrets and ExternalSecrets.
 
-The rows of okdp-gitops run through `Inputs.Finalize` and
-`Inputs.CheckGlobals`, which its `deploy.Build` sets. A host that gives
-other hooks, or none, does not get them, nor okdp-gitops' checks against
-the upstream charts, which run in the same `Finalize`.
+What a host runs through `Inputs.Finalize` and `Inputs.CheckGlobals`
+applies only where that host compiles ([what a host
+adds](#what-a-host-adds)).
 
 `namespace` and `platformNamespace` also run when a project is created
 (`compiler.CheckProjectName`; okdp-gitops' `treeedit`), with `project` in
@@ -184,14 +177,16 @@ place of `Inputs.Namespace` in the message.
 
 ## Tables
 
-A check reads a table as `sets.<name>` or `tables.<name>`. A walker reads
-it through `RuleSet.Has` or `RuleSet.List`, and what the platform adds to
+A check reads a table as `sets.<name>` or `tables.<name>`. Go reads it
+through `RuleSet.Has` or `RuleSet.List`, and what the platform adds to
 it through `RuleSet.Added`.
 
 The mandatory set gives the tables below, and no other: `LoadRules`
 refuses a name it does not know there. A set added to it gives tables of
-any name that no set read before gives, read the same ways, with
-`addFrom` as here. It adds values to a table of the mandatory set only
+any name that no set read before gives, read the same ways. A table of
+an added set may give `addFrom: <path>`: it then also holds the list
+`global.okdp.<path>`, so that a platform adds values to it, never
+removes one. It adds values to a table of the mandatory set only
 when that table is marked `extensible: true`, by `add`:
 
 ```yaml
@@ -285,64 +280,21 @@ An object of one of these groups is refused to a project that is not
 privileged (check `object`): it would drive the engine with the engine's
 own identity.
 
-### deniedUpstreamKeys
-
-`addFrom: policy.upstream.deny`, the only table a platform adds to.
-
-These keys are refused in the upstream values of a project that is not
-privileged, at any depth and with any value (check `upstreamKey`). The
-scheduling keys stay free.
-
-| Purpose | Keys |
-|---|---|
-| a pod's privileges on its node | `privileged`, `hostPath`, `hostNetwork`, `hostPID`, `hostIPC`, `hostPort`, `allowPrivilegeEscalation`, `capabilities`, `seccompProfile`, `sysctls` |
-| its security context | `securityContext`, `podSecurityContext`, `containerSecurityContext` |
-| its identity | `serviceAccountName`, `serviceAccount`, `automountServiceAccountToken` |
-| a Service's external addresses (CVE-2020-8554) | `externalIPs` |
-| containers and objects a chart adds | `extraContainers`, `sidecars`, `initContainers`, `extraInitContainers`, `extraObjects`, `extraDeploy`, `extraManifests`, `extraResources`, `extraSecrets`, `extraConfigMaps` |
-
-### imageKeySuffixes
-
-`image`, `imageregistry`, `imagerepository`, `imagename`.
-
-A key whose lower-case name ends with one of these holds an image
-reference by its own name. The key `image` itself is read with its
-sibling keys. See [the upstream
-policy](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#the-upstream-policy).
-
 ### platformObjectNames
 
 `okdp-project`, `okdp-control-plane`, `okdp-access-viewer`,
-`okdp-access-editor`, `okdp-access-admin`, `okdp-secrets`,
-`okdp-dcr-token`.
+`okdp-access-editor`, `okdp-access-admin`, `okdp-secrets`.
 
 The platform writes objects of these names in every project's namespace.
 A release may not take one (check `release`). Extensible.
 
 ### platformObjectSettings
 
-`secrets.store`, `secrets.serviceAccount`, `oidc.dcr.tokenSecret`.
+`secrets.store`, `secrets.serviceAccount`.
 
 Paths under `global.okdp` of settings that name an object the platform
 writes in every project's namespace. Check `release` takes their values
 as it takes `platformObjectNames`. Extensible.
-
-### hostAnnotations
-
-`cert-manager.io/common-name`, `cert-manager.io/alt-names`,
-`nginx.ingress.kubernetes.io/server-alias`,
-`external-dns.alpha.kubernetes.io/hostname`.
-
-These annotations name hosts, split on commas, spaces, newlines and tabs.
-Each host goes through check `host`.
-
-### ingressValueKeys, ingressHostKeys, ingressHostListKeys
-
-| Table | Values | Meaning |
-|---|---|---|
-| `ingressValueKeys` | `ingress`, `ingresses` | the keys of a chart's values that hold its ingress, at any depth |
-| `ingressHostKeys` | `host`, `hostname`, `commonName` | under them, the keys that hold one host |
-| `ingressHostListKeys` | `hosts`, `hostnames`, `dnsNames`, `extraHosts` | under them, the keys that hold a list of hosts |
 
 ### defaultProjectGlobals
 
@@ -441,8 +393,8 @@ Input: `field`, `ns`, `settings`. `checks/platform-namespace.cel.yaml`.
 Input: `field`, `release`, `settings`. `checks/release.cel.yaml`.
 
 The names taken are `platformObjectNames` plus the values of the
-settings that `platformObjectSettings` lists: `secrets.store`,
-`secrets.serviceAccount` and `oidc.dcr.tokenSecret`.
+settings that `platformObjectSettings` lists: `secrets.store` and
+`secrets.serviceAccount`, and those a set added to it lists.
 A package names its objects `<release>` and `<release>-<x>`, so a release
 is refused when it equals a taken name or is the part before a `-` of
 one: `okdp` is refused because of `okdp-project`.
@@ -512,53 +464,6 @@ These use the compiler's `value` package:
 - A literal is a non-blank string with neither `{{` nor `${`, or a
   number.
 
-### upstreamKey
-
-Input: `key`, `value`, `at`, `ns`, `added` (`policy.upstream.deny`).
-`checks/upstream-key.cel.yaml`.
-
-| Refused when | Message starts with |
-|---|---|
-| `key` is in `deniedUpstreamKeys` | `<at>: <key> is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): ...` |
-| `key` is in `added` | `<at>: <key> is denied to the instance's upstream values (global.okdp.policy.upstream.deny): ...` |
-| `key` is `runAsUser` and the value is `0` (the number or the string `"0"`) | `<at>: runAsUser 0, root, is denied ...` |
-| `key` is `runAsNonRoot` and the value is `false` (the boolean or the string `"false"`) | `<at>: runAsNonRoot false is denied ...` |
-
-### host
-
-Input: `at`, `raw`, `host`, `ns`, `suffix`, `listed`.
-`checks/host.cel.yaml`.
-
-`host` is lower-cased without a final dot. `suffix` is
-`global.okdp.ingress.suffix`, lower-cased and without outer dots. `listed`
-is `global.okdp.policy.ingressHosts.<ns>`, lower-cased. A host passes when
-it is listed, or when `suffix` is set and the host is exactly one DNS
-label, then the namespace, then the suffix: `<label>.<ns>.<suffix>`. So
-`seaweedfs.demo.okdp.sandbox` is served by `demo`; a deeper name
-(`a.seaweedfs.demo.okdp.sandbox`) and the old `seaweedfs-demo.okdp.sandbox`
-are not. With no suffix, only listed hosts pass.
-
-On objects, these are checked:
-
-| Object | Fields |
-|---|---|
-| any object | the `hostAnnotations` in `metadata.annotations` |
-| `networking.k8s.io` `Ingress` | `spec.rules[].host`, `spec.tls[].hosts`; a rule with no host and a `spec.defaultBackend` are refused, each answers every host |
-| `cert-manager.io` `Certificate` | `spec.dnsNames`, `spec.commonName` |
-| `gateway.networking.k8s.io` `HTTPRoute`, `GRPCRoute`, `TLSRoute` | `spec.hostnames` |
-| `gateway.networking.k8s.io` `Gateway` | `spec.listeners[].hostname`; a listener of HTTP, HTTPS or TLS without one is refused |
-
-In the final values, under a key of `ingressValueKeys` at any depth:
-
-- the strings at keys of `ingressHostKeys`;
-- the strings at keys of `ingressHostListKeys`, and the list items;
-- the `name` of an item of `extraHosts`;
-- the `hostAnnotations` of an `annotations` map.
-
-Final values are the package's computed values with the instance's
-upstream values over them. The upstream chart's own defaults are not
-seen.
-
 ## Hooks
 
 `hooks` in `rules.yaml` lists, for each point the compiler calls a
@@ -576,7 +481,9 @@ and are skipped for a privileged project.
 `settings` is `global.okdp`, the platform's, never null. A message in
 the shape of the compiler's own is written by the document:
 `<svc>: objects: <Kind>/<name>: <path>: ...` (`object.id` is
-`<Kind>/<name>`) and `<key>: <path>: ...`.
+`<Kind>/<name>`) and `<key>: <path>: ...`. The security set checks the
+hosts of objects and of final values this way ([its
+hooks](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#hooks)).
 
 A `Finalize` runs `finalValues` itself through
 `FinalInput.CheckFinalValues`, at the point of its own checks it
@@ -584,45 +491,37 @@ chooses, on the values it returns. When it does not, the compile runs
 the hook on what it returns. Without a `Finalize`, the compile runs it
 right after Helm's merge.
 
-## What okdp-gitops adds
+## What a host adds
 
-okdp-gitops adds the upstream and ingress policy, which runs checks
-`upstreamKey` and `host` over an instance's upstream values and the final
-values of the charts, and the render of the upstream charts, whose
-manifests go through checks `object` and `host`. Both run through
-`Inputs.Finalize` and `Inputs.CheckGlobals`, which its `deploy.Build`
-sets: [the
-policy](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md).
+A host's `Inputs.Finalize` makes the final values in the host's own
+Helm merge, and `Inputs.CheckGlobals` checks `global` of every layer
+above level 0; the hooks of the set still run on what `Finalize`
+returns. okdp-gitops' `deploy.Build` sets both: it renders the upstream
+charts, whose manifests go through `compiler.CheckObjects` (check
+`object`, then the hook `objects`), and applies the security set's
+policy on upstream values, the package `policy` of okdp-compiler-security
+([the upstream
+policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md);
+[the render](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#the-render)).
+A compile without such a host, `okdp-compile` among them, does neither.
 
 ## Platform settings
 
 `schemas/platform.schema.json` reads `global.okdp` of the context. Keys
-it does not describe are allowed (`ingress.className`, a key a mapping
-reads), except where a row says no other key is accepted. A null deletes
-a default.
+it does not describe are allowed (a key a mapping reads), except where a
+row says no other key is accepted. A null deletes a default. A set added
+to the mandatory set adds keys to it (`schemas.platform`): those of the
+security set are in [its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#platform-settings).
 
 | Setting | Type | Default | Rule |
 |---|---|---|---|
-| `ingress.suffix` | string | | the domain of the platform's hosts |
-| `ingress.annotations` | map of strings | | merged over the cluster issuer into `platform.ingressAnnotations` |
 | `tls.clusterIssuer` | string | | the cert-manager ClusterIssuer |
 | `tls.caBundleSecret` | string | | the Secret holding `ca.crt` and `bundle.p12` |
 | `certificateIssuers` | | | refused, a former setting |
 | `serviceCatalog` | | | refused, a former setting |
 | `charts` | map | | only `objects` is accepted |
 | `charts.objects` | `repository`, `chart`, `version` | see [charts](#charts) | `https://` or `oci://`, never `http://`; a pinned version |
-| `oidc.enabled` | boolean | `true` | |
-| `oidc.clientProvisioning` | `existing` or `dcr` | `existing` | |
-| `oidc.scope` | string | `openid profile email groups` | |
-| `oidc.issuerUri` | string | | |
-| `oidc.dcr.registrationUrl` | string | | required in dcr mode when a service declares a client |
-| `oidc.dcr.authMethod` | string | | required then too: `anonymous` or `initialAccessToken` |
-| `oidc.dcr.tokenSecret` | string | `okdp-dcr-token` when read | |
-| `oidc.dcr.image` | map | | `registry`, `repository`, `tag`, `digest`, `pullPolicy`, `pullSecrets`; a `tag` needs its `digest`; `pull_policy` and `pull_secrets` refused |
-| `oidc.dcr.caSecret` | string | `tls.caBundleSecret` | `""` means none |
-| `oidc.dcr.ttlSeconds` | integer ≥ 0 | `30` | |
-| `oidc.dcr.backoffLimit` | integer ≥ 0 | `6` | |
-| `oidc.dcr.waitTtlSeconds` | integer ≥ 0 | | absent: 600 |
 | `proxy.httpProxy`, `httpsProxy`, `noProxy` | string | | |
 | `provisioning.<contract>.default` | string | | a class of `classes`, set once at the lowest level that sets it |
 | `provisioning.<contract>.classes.<name>` | `provider` (required), `request` | | `<name>` is a DNS label; no other key is accepted |
@@ -637,14 +536,11 @@ a default.
 | `network.policy` | boolean | | |
 | `network.ingressNamespaces` | list | | |
 | `controlPlane.serviceAccount` | `namespace`, `name`, both required | | a DNS label, a DNS subdomain; no other key is accepted |
-| `policy` | map | | no other key than the six below |
+| `policy` | map | | no other key than the four below, and those a set added gives |
 | `policy.privileged` | list of strings | | |
 | `policy.reserved` | list of strings | | |
-| `policy.ingressHosts.<namespace>` | unique DNS subdomains | | exact hosts, no wildcard; `<namespace>` is a DNS label |
 | `policy.projectGlobals` | unique strings, not `okdp` | | |
 | `policy.projectApiGroups` | list of strings | | the API groups added to the Role a project's releases are installed with (Flux; see [the deployer's Role](#the-deployers-role)) |
-| `policy.upstream.deny` | list | | no other key than `deny` and `registries` |
-| `policy.upstream.registries` | list | | see [the upstream policy](https://github.com/OKDP/okdp-gitops/blob/main/docs/specs/05_rules.md#the-upstream-policy) |
 | `ruleSets[]` | `name` (required), `version` | | the rule sets the compile must be given; no other key is accepted |
 
 `ruleSets` lists the rule sets the platform requires, each by its
@@ -699,21 +595,17 @@ roles.
 | `platform.access.viewers` | the administrators and every group of the project |
 | `platform.access.editors` | the administrators and the project's `editor` and `admin` groups |
 | `platform.access.admins` | the administrators and the project's `admin` groups |
-| `platform.oidc` | `oidc` as given, plus `existing` (`enabled` and mode `existing`), and `dcr` as given plus `enabled` (`enabled` and mode `dcr`) and `caSecret` |
-| `platform.oidc.dcr.caSecret` | `oidc.dcr.caSecret` when the key is set, else `tls.caBundleSecret` |
-| `platform.oidcClientSecret` | `oidcClientSecret("")`, the main client's Secret |
-| `platform.ingressAnnotations` | `cert-manager.io/cluster-issuer` from `tls.clusterIssuer`, then `ingress.annotations` over it |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, each only when its setting is not empty |
 
 ## What a mapping writes
 
 `schemas/mapping.schema.json` checks a mapping's result and the arguments
 of the functions. The sections are the compiler's `output`, `instance`,
-`provides` and `objects`, and `oidcClients` from `rules.yaml` `sections`.
-`okdp.yaml` may hold the sections of the rule set it is read for
-(`compiler.LoadDefinitionWith`, `LoadRepositoryWith`, `Build` for
-`BuildOptions.Rules`), and no other key: `LoadDefinition` reads it for
-the mandatory set.
+`provides` and `objects`, and those of `rules.yaml` `sections` of a set
+added to the mandatory set, which gives none. `okdp.yaml` may hold the
+sections of the rule set it is read for (`compiler.LoadDefinitionWith`,
+`LoadRepositoryWith`, `Build` for `BuildOptions.Rules`), and no other
+key: `LoadDefinition` reads it for the mandatory set.
 
 | Section | Rule |
 |---|---|
@@ -723,124 +615,26 @@ the mandatory set.
 | `provides[].secretRef.name` | a DNS subdomain, 253 at most |
 | `provides[].secret` | `generate` (generated keys) and `stringData`; without `generate`, `stringData` holds strings only |
 | `objects[]` | `kind` and `metadata.name` required, non-empty |
-| `oidcClients[]` | see [OAuth clients](#oauth-clients) |
 
 ## Functions
 
-`rules.yaml` declares what mappings call. A fragment is a template
-evaluated on its arguments, which are checked against the mapping schema
-under the function's name. `result` names the value returned; without it,
-all values are.
+`rules.yaml` declares what mappings call, in `functions`; the mandatory
+set declares none, and a set added to it declares its own. A fragment is
+a template evaluated on its arguments, which are checked against the
+mapping schema under the function's name. A document function evaluates
+a document of `documents`. `result` names the value returned; without
+it, all values are. A package that calls a function of a set compiles
+only when given that set: otherwise the compile fails on an unknown
+function. The security set declares `okdpPodSpec`, `okdpJob`,
+`okdpSignInProxy`, `okdpWebWorkload` and `oidcClientSecret` ([its
+functions](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#functions)).
+
+The compiler's own function `okdpGeneratedSecret` renders a template of
+the mandatory set:
 
 | Function | File | Returns |
 |---|---|---|
-| `okdpPodSpec` | `fragments/fragment-pod.cel.yaml` | `spec`, a pod spec |
-| `okdpJob` | `fragments/fragment-job.cel.yaml` | `objects` |
-| `okdpSignInProxy` | `fragments/fragment-proxy.cel.yaml` | `container`, `volumes`, `objects` |
-| `okdpWebWorkload` | `fragments/fragment-web.cel.yaml` | `objects` |
-| `okdpGeneratedSecret` | `fragments/generated-secret.cel.yaml`, called by the compiler | `objects` |
-| `oidcClientSecret` | document `oidcSecret` | `secret` |
-
-### okdpPodSpec
-
-Required: `containers` (at least one). The schema refuses any other key,
-so a `securityContext`, a host namespace or a `hostPath` volume cannot be
-passed.
-
-Always set on the pod: `runAsNonRoot: true`, `seccompProfile:
-RuntimeDefault`. Always set on every container and init container:
-`allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`,
-`runAsNonRoot: true`, `seccompProfile: RuntimeDefault`.
-
-| Argument | Default | Effect |
-|---|---|---|
-| container `readOnlyRootFilesystem` | `true` | |
-| container `runAsUser`, `runAsGroup` | the image's | at least 1 |
-| `automountServiceAccountToken` | `false` | |
-| `serviceAccountName` | | set when not empty |
-| `runAsUser`, `runAsGroup`, `fsGroup` | | at least 1, on the pod |
-| `volumes` | | any but `hostPath` |
-| `restartPolicy`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `imagePullSecrets`, `priorityClassName`, `terminationGracePeriodSeconds` | | passed as written |
-
-### okdpJob
-
-Required: `name`, a DNS label, and `pod`, the arguments of `okdpPodSpec`.
-It returns one `batch/v1` Job, with OKDP's labels and the arguments' over
-them.
-
-| Argument | Default |
-|---|---|
-| pod `restartPolicy` | `Never` |
-| `backoffLimit` | `1` |
-| `ttlSecondsAfterFinished` | `300` |
-| `activeDeadlineSeconds` | none |
-| `component` | none |
-| `hook.helm`, `hook.weight` | none: `helm.sh/hook`, `helm.sh/hook-weight` |
-| `hook.deletePolicy` | `before-hook-creation`, with `hook.helm` |
-| `hook.argocd` | none: `PreSync`, `Sync`, `PostSync`, `SyncFail`, `PostDelete` or `Skip` |
-| `hook.argocdDeletePolicy` | `BeforeHookCreation`, with `hook.argocd` |
-
-### okdpSignInProxy
-
-oauth2-proxy, default image
-`quay.io/oauth2-proxy/oauth2-proxy:v7.15.4` by digest, in front of a
-service without a login. It signs users in with the platform's OIDC and
-lets in members of the allowed groups only. It reads the main OAuth
-client's Secret, `platform.oidcClientSecret`, so the package must declare
-that client.
-
-| Refused when | |
-|---|---|
-| `platform.oidc.enabled` is false | no identity provider |
-| `oidc.issuerUri` is empty | |
-| `host` is empty | the redirect URL needs it |
-| `upstream` is empty | |
-| the allowed groups are empty | it would let in every user of the realm |
-
-| Argument | Default |
-|---|---|
-| `name` | `okdpFullname('oauth2-proxy')`: the Secret of the cookie secret |
-| `cookieName` | `_<name>_oauth2` |
-| `port` | `4180` |
-| `allowedGroups` | `platform.access.editors` |
-| `groupsClaim` | `groups` |
-| `caBundleSecret` | `global.okdp.tls.caBundleSecret`, mounted at `/cacerts` |
-| `cookieExpire` | `8h` |
-| `upstreamTimeout` | the proxy's |
-| `resources` | requests `50m`, `64Mi`; limits `200m`, `128Mi` |
-
-Fixed flags: `--provider=oidc`, `--email-domain=*` (the groups decide),
-`--cookie-secure=true`, `--skip-provider-button=true`,
-`--reverse-proxy=true`, `--silence-ping-logging=true`,
-`--redirect-url=https://<host>/oauth2/callback`, and
-`--code-challenge-method=S256` unless `platform.oidc.usePKCE` is false.
-The cookie secret is an `okdpGeneratedSecret` of 32 characters.
-
-### okdpWebWorkload
-
-Required: `pod`, whose first container is the application, and `port`.
-It returns a Deployment and a Service, plus these when asked:
-
-| Object | When | Rule |
-|---|---|---|
-| PersistentVolumeClaim `<name>-<volume>` | `storage` | `ReadWriteOnce`; kept on uninstall unless `keep: false` |
-| Ingress | `ingress` | the platform's annotations with the arguments' over them; class from the arguments or `global.okdp.ingress.className`; `<name>-tls` unless given |
-| sign-in proxy as a sidecar | `signIn` | the Service then reaches the proxy only |
-| NetworkPolicy | `signIn`, unless `networkPolicy: false` | lets in the proxy's port alone |
-
-| Refused when | |
-|---|---|
-| `signIn` without `ingress` | no host to send users to |
-| `signIn` with a `port` that is not a number | the proxy reaches the application on the pod's loopback |
-| `signIn` and a container named `oauth2-proxy` | |
-
-Defaults: `name` is `okdpFullname(component)`, `servicePort` `80`,
-`replicas` `1`, `strategy` `Recreate` with storage and `RollingUpdate`
-otherwise, `storage.volumeName` `data`, `ingress.path` `/`.
-
-The NetworkPolicy does not isolate the application from its own
-namespace when `global.okdp.network.policy` is on: policies are a union,
-and the project's lets the namespace's pods reach every port.
+| `okdpGeneratedSecret` | `fragments/generated-secret.cel.yaml`, the template `generatedSecret` | `objects` |
 
 ### okdpGeneratedSecret
 
@@ -864,97 +658,6 @@ A generator is named `<name>-<key>`, lower-cased, with `_` and `.` as
 hex characters of the key's SHA-256 are added. Two keys that give one
 generator name are refused. `stringData` holds static keys, and a
 generated key replaces a static key of the same name.
-
-### oidcClientSecret
-
-For the client `arg`, `""` being the main client:
-
-| Mode | Secret |
-|---|---|
-| dcr | `<release>-<namespace>[-<arg>]-dcr` |
-| otherwise | `creds-<release>-oauth2[-<arg>]` |
-
-## OAuth clients
-
-`charts/oidc-clients.cel.yaml` reads a mapping's `oidcClients` section.
-
-Each client requires `grantTypes` (at least one). The schema refuses any
-key other than `name`, `grantTypes`, `redirectUris`, `scope`,
-`clientName`, `public`, `request`, `secret` and `caSecret`. `name` is a
-DNS label of 54 characters at most; empty means the service's main
-client.
-
-| Refused when | Mode |
-|---|---|
-| two clients have the same name, or both have none | any |
-| `secret` is given and is not `<release>-<name>`, or `<release>-oidc` for the main client | any |
-| `request` sets a URL the provider trusts (`redirect_uris`, `post_logout_redirect_uris`, `request_uris`, `sector_identifier_uri`, `jwks_uri`, `initiate_login_uri`, `backchannel_logout_uri`, `frontchannel_logout_uri`) | any |
-| a `redirectUris` entry, in a project that is not privileged, is not http or https, has no host or holds user information, or its host is not served by the project: `<label>.<namespace>.<suffix>` or listed in `policy.ingressHosts` | dcr |
-| `oidc.dcr.image` has a `tag` and no `digest` | dcr |
-| `oidc.dcr.authMethod` is neither `anonymous` nor `initialAccessToken`, and there is a client | dcr |
-| `oidc.dcr.registrationUrl` is missing or empty, and there is a client | dcr |
-| two clients write one Secret | dcr |
-
-There is no cap on the number of clients. In dcr mode each client adds
-objects to the instance's, from `charts/oidc-dcr.cel.yaml`, under the same
-policy as the mapping's objects. They are named `<release>-oidc-dcr`, or
-`<release>-<name>-oidc-dcr`, cut to 56 characters without a final `-`.
-
-| Object | Role | Hook |
-|---|---|---|
-| ServiceAccount, Role, RoleBinding, ConfigMap (the script), `<name>` | the registration | `pre-install,pre-upgrade`, `PreSync`; weight and sync wave -10 |
-| Service `<name>-headless` | reverse DNS of the Job's pod, for a provider with a trusted hosts policy | the same |
-| Job `<name>`, by `okdpJob` | registers the client and writes its Secret | the same; weight and sync wave -5 |
-| ServiceAccount, Role, RoleBinding, ConfigMap `<name>-delete` | the removal | `pre-delete`, `PostDelete`; -10 |
-| Job `<name>-delete`, by `okdpJob` | removes the client and its Secret | the same; -5 |
-
-The pods are those of `okdpJob`: non-root (UID 65534), no privilege
-escalation, every capability dropped, a read-only root filesystem, the
-image by digest, a memory limit. They mount their ServiceAccount's token,
-needed to write the Secret. The registration's Role has `create` on
-Secrets, which Kubernetes cannot limit by name, and `get`, `patch` on the
-client's Secret by name; the removal's has `get`, `delete` on it by name.
-
-| Job setting | Source |
-|---|---|
-| `DCR_REGISTRATION_URL` | `oidc.dcr.registrationUrl` |
-| the token volume, `REGISTRATION_TOKEN_FILE` | with `initialAccessToken`: `oidc.dcr.tokenSecret`, key `token` |
-| `REQUEST.client_name` | `clientName`, else `<release>-<namespace>[-<name>]` |
-| `REQUEST.application_type` | `web` |
-| `REQUEST.grant_types` | `grantTypes` |
-| `REQUEST.scope` | the client's scope, else `oidc.scope`, without `openid`, which Keycloak refuses as a client scope |
-| `REQUEST.redirect_uris` | `redirectUris`, when any |
-| `REQUEST.token_endpoint_auth_method` | `none` for a public client |
-| any other field of `REQUEST` | the client's `request`, which overrides the computed fields, never a URL the provider trusts |
-| the CA volume | the client's `caSecret`, else `platform.oidc.dcr.caSecret` |
-| `SECRET_NAME` | the client's Secret |
-| `PUBLIC` | whether the client is public: no `client_secret` key |
-| `ttlSecondsAfterFinished`, `backoffLimit` | `oidc.dcr.ttlSeconds`, `oidc.dcr.backoffLimit` |
-| `DISCOVERY_URL` | with an issuer: `<issuerUri>/.well-known/openid-configuration`, one trailing `/` dropped |
-| `WAIT_TTL_SECONDS` | `oidc.dcr.waitTtlSeconds`, 600 by default |
-| the image | `oidc.dcr.image` over `quay.io/adaltas/oidc-dcr-job:0.6.0` by digest |
-
-The Job keeps the client as the mapping asks. The Secret holds
-`client_id`, `client_secret` unless public, `registration_client_uri` and
-`registration_access_token`. At each sync the Job reads the registration
-with that token: a field that differs is sent by `PUT` on
-`registration_client_uri`, and the token the provider returns is written
-back. A client gone from the provider (`404`) is registered again.
-
-If the registration token was lost or is refused (`401`, `403`), or the
-Secret holds none, the Job registers a new client and overwrites the
-Secret; the old client stays at the provider, its `client_id` in the Job's
-log, for an administrator to remove. An unreachable provider fails the Job,
-which registers nothing.
-
-The removal, at uninstall, deletes the client with its token, then the
-Secret. It never fails, so it cannot stop an uninstall: with no Secret it
-does nothing, with a refused token it deletes the Secret and leaves the
-client, with an unreachable provider it keeps both. Argo CD runs it as a
-`PostDelete` hook, Helm as `pre-delete`.
-
-The Job's log holds no answer of the provider, no `client_secret` and no
-token: a failure says the HTTP status and the provider's `error` code.
 
 ## The secret store
 
@@ -1021,10 +724,15 @@ reaches the cluster](../03_okdp_objects.md#how-it-reaches-the-cluster)).
 Only the sandbox's local registry holds `okdp-objects`, and the sandbox
 overrides `charts.objects` to reach it.
 
-`ownObjects` ties the section `oidcClients` to the
-list document `oidcClients` and the template `oidcClient`. A list
-document reads the section's `items`, `release`, `platform`,
-`privileged` and `settings`; its first message refuses the instance.
+### ownObjects
+
+`ownObjects` of a set added to the mandatory set, which gives none, ties
+a section of `sections` to a list document and a template:
+`{section, list, objects}`. The list document reads the section's
+`items`, `release`, `platform`, `privileged` and `settings`, and gives
+an item per entry, `of` (where it is, for messages), `client` and
+`names`, which the template `objects` renders into objects of the
+instance. Its first message refuses the instance.
 
 ## What a platform can change
 
@@ -1036,20 +744,18 @@ the rules below. Of them, `platform.yaml` can only set these:
 
 | Setting | Effect on the rules |
 |---|---|
-| `policy.upstream.deny` | adds to `deniedUpstreamKeys` |
-| `policy.upstream.registries` | turns on okdp-gitops' image check |
 | `policy.reserved` | adds namespaces to `platformNamespace` |
 | `policy.privileged` | exempts namespaces, as in [the table above](#when-each-rule-applies) |
-| `policy.ingressHosts` | adds exact hosts to check `host` |
 | `policy.projectGlobals` | replaces `defaultProjectGlobals` |
 | `policy.projectApiGroups` | adds API groups to the Role of a project's releases, never an engine's nor `*` (the document `deployerRole`) |
-| `ingress.suffix` | sets the host pattern of check `host` |
-| `secrets.store`, `secrets.serviceAccount`, `oidc.dcr.tokenSecret` | add names to check `release` |
+| `secrets.store`, `secrets.serviceAccount` | add names to check `release` |
 | `charts.objects` | replaces the `objects` chart |
 | `ruleSets` | refuses every compile without the sets it requires |
 
-Only `deniedUpstreamKeys` is added to through `addFrom`. Nothing in
-`platform.yaml` removes a value from a table.
+No table of the mandatory set has `addFrom`; a set added to it may give
+one ([tables](#tables)). Nothing in `platform.yaml` removes a value from
+a table. What a platform sets of the security set's rules: [its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#what-a-platform-can-change).
 
 ## Changing a rule
 
@@ -1069,6 +775,5 @@ that requires the set (`global.okdp.ruleSets`) states the versions it
 accepts, and a compile given another is refused.
 
 A release of the compiler carries the change, and a host takes it by
-taking the release: okdp-gitops' fixtures (`testdata/cli`, the tests of
-`internal/policy`) compare the messages too. There is no copy to keep in
-sync.
+taking the release: okdp-gitops' fixtures (`testdata/cli`) compare the
+messages too. There is no copy to keep in sync.

@@ -21,7 +21,7 @@ func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 // two instances, one with its connections and values; other's, an
 // instance with its claimers.
 var whole = fstest.MapFS{
-	"platform.yaml":                              file("global: {okdp: {ingress: {suffix: example.org}}}\n"),
+	"platform.yaml":                              file("global: {okdp: {cluster: {domain: example.org}}}\n"),
 	"contracts/database.schema.json":             file(`{"properties": {"host": {"type": "string"}}}`),
 	"contracts/README.md":                        file("not a contract\n"),
 	"catalog/app/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
@@ -313,7 +313,7 @@ func TestLoadRoles(t *testing.T) {
 // among them; Load lists every problem, as before.
 func TestLoadProjects(t *testing.T) {
 	tree := fstest.MapFS{
-		"platform.yaml":                              file("global: {okdp: {ingress: {suffix: example.org}}}\n"),
+		"platform.yaml":                              file("global: {okdp: {cluster: {domain: example.org}}}\n"),
 		"catalog/app/1.0.0/Chart.yaml":               file("apiVersion: v2\nname: app\nversion: 1.0.0\n"),
 		"projects/good/instances/a/instance.yaml":    file("service: app\nversion: 1.0.0\n"),
 		"projects/stray/project.yaml":                file("global: {team: stray}\n"),

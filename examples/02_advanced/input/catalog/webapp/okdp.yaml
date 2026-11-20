@@ -1,36 +1,38 @@
 # OKDP's part of the webapp package: what the service is, the platform
 # values it needs, OKDP's defaults for its chart and the instance values it
 # accepts; then the mapping besides the chart's values (values.cel.yaml):
-# its bindings, its rules, its OAuth client and what OKDP shows of the
-# instance, from the instance's parameters (values), the platform values
+# its bindings, its rules, its objects and what OKDP shows of the instance,
+# from the instance's parameters (values), the platform values
 # (global.okdp, and platform, derived from them) and the release.
 # ${{ ... }} is a CEL expression.
 
 roles: [webapp]
-dependsOn: [database-server, ingress]
+dependsOn: [database-server]
 require:                               # platform values the service needs, under global.okdp
-  - ingress.suffix
-  - ingress.className
-  - tls.clusterIssuer
-  - oidc.issuerUri
+  - cluster.domain
 defaults:
   app: app.defaults.yaml               # OKDP's defaults, over the chart's own
 upstream:
   app:                                 # the instance may set any value, under upstream.app...
     # ...except these, set by the platform; and its env is appended to.
-    protect: [fullnameOverride, ingress.enabled, ingress.hosts, ingress.tls, 'ingress.annotations["cert-manager.io/*"]']
+    protect: [fullnameOverride, envFrom, 'podAnnotations["checksum/*"]']
     append: [env]
 
 vars:
-  # <label>.<namespace>.<suffix>, a host of a project: one DNS label,
-  # then its namespace (global.okdp.policy.ingressHosts lists exceptions).
-  host: ${{ service.name }}.${{ release.namespace }}.${{ global.okdp.ingress.suffix }}
+  # The service's host, from a value of the platform's settings.
+  host: ${{ service.name }}.${{ release.namespace }}.${{ global.okdp.cluster.domain }}
   # The database parameter: the resolved connection, or {} when not set.
   db: '${{ type(values.database) == map ? values.database : {} }}'
   dbSecret: ${{ db.?secretRef.name.orValue('') }}
   # The audit database, likewise.
   audit: '${{ type(values.audit) == map ? values.audit : {} }}'
   auditSecret: ${{ audit.?secretRef.name.orValue('') }}
+  # The application's settings, a ConfigMap, and the checksum of its files:
+  # exampleConfigFiles, a function of the example's rule set (rules/), which
+  # a compile is given besides the mandatory one (okdp-compile --rules).
+  settings: >-
+    ${{ exampleConfigFiles({'name': 'settings', 'files': {
+        'app.properties': 'url=https://' + host + '\nreplicas=' + string(values.replicas) + '\n'}}) }}
 
 # A message fails the compile when its condition holds. What a connection
 # must hold, its credentials here, is its reference's require
@@ -38,12 +40,6 @@ vars:
 errors:
   - $if: ${{ values.replicas > 1 && db.size() == 0 }}
     $value: "webapp: replicas > 1 needs a database, sessions are stored there"
-
-# The service's OAuth client: provisioned by the platform (the default), or
-# registered by a Job the compile adds (clientProvisioning: dcr).
-oidcClients:
-  - redirectUris: ['https://${{ host }}/oauth2/callback']
-    grantTypes: [authorization_code, refresh_token]
 
 instance:
   url: https://${{ host }}
@@ -55,3 +51,7 @@ provides:
     values:
       url: https://${{ host }}
       internalUrl: http://${{ release.name }}-app.${{ release.namespace }}.svc:8080
+
+# OKDP's own objects, whole manifests: the ConfigMap of the settings.
+objects:
+  - $spread: ${{ settings.objects }}

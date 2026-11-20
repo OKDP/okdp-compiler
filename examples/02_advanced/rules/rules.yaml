@@ -1,0 +1,17 @@
+# The example's rule set, added to the compiler's mandatory one
+# (okdp-compile --rules examples/02_advanced/rules, compiler.LoadRules): a
+# function mappings call, a fragment, and the schema of its argument. A
+# platform that requires the set names it in global.okdp.ruleSets.
+apiVersion: okdp-compiler/rules.v1
+name: example
+version: 1.0.0
+# The schema the set adds to the compiler's mapping schema: the argument of
+# its function, under the function's name.
+schemas:
+  mapping: mapping.schema.json
+# The functions mappings call: each a fragment, a template evaluated on its
+# arguments, checked against the mapping schema under the function's name,
+# and the instance's context; result names the value it returns, all of
+# them when left out.
+functions:
+  exampleConfigFiles: {fragment: fragments/config-files.cel.yaml}

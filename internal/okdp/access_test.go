@@ -55,7 +55,7 @@ func TestParseAccess(t *testing.T) {
 // the instance's values, is refused; no instance receives it, and a
 // project sets nothing of global.okdp.access.
 func TestAccessCompile(t *testing.T) {
-	platform := map[string]any{"global": M{"okdp": M{"access": M{"admins": []any{"platform_admin"}, "groupPrefix": "oidc:"}}}}
+	platform := map[string]any{"global": M{"okdp": M{"access": M{"admins": []any{"platform_admin"}, "groupPrefix": "k8s:"}}}}
 	in := inputs(platform)
 	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"access": M{"analysts": "viewer", "okdp-project-demo": "viewer"}}}, ContextLayer{Level: 1, Values: map[string]any{"access": M{"okdp-project-demo": "admin"}}})
 	res, err := Compile(context.Background(), def, in)

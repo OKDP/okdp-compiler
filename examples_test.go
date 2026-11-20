@@ -108,9 +108,24 @@ func exampleRepository(name string) fs.FS {
 	return tree
 }
 
-// TestExample: each example of examples/, compiled together: what Write
-// gives of each instance is, byte for byte, its output: output/ for one
-// package, output/<project>/<instance>/ otherwise.
+// exampleRules: the rule set of the example name, its rules/ over the
+// mandatory set, or the mandatory set alone when it has none.
+func exampleRules(name string) *compiler.RuleSet {
+	dir := filepath.Join("examples", name, "rules")
+	if _, err := os.Stat(dir); err != nil {
+		return testrules.Standard()
+	}
+	rules, err := compiler.LoadRules(os.DirFS(dir))
+	if err != nil {
+		panic(err)
+	}
+	return rules
+}
+
+// TestExample: each example of examples/, compiled together with its rule
+// set (exampleRules): what Write gives of each instance is, byte for
+// byte, its output: output/ for one package, output/<project>/<instance>/
+// otherwise.
 func TestExample(t *testing.T) {
 	dirs, err := os.ReadDir("examples")
 	if err != nil || len(dirs) == 0 {
@@ -123,7 +138,7 @@ func TestExample(t *testing.T) {
 				t.Fatal(err)
 			}
 			for i := range instances {
-				instances[i].Inputs.Rules = testrules.Standard()
+				instances[i].Inputs.Rules = exampleRules(e.Name())
 			}
 			_, statErr := os.Stat(filepath.Join("examples", e.Name(), "input", "catalog", "Chart.yaml"))
 			single := statErr == nil

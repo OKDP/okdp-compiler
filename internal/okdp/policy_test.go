@@ -141,20 +141,16 @@ func TestDuplicateObjectsNamespace(t *testing.T) {
 }
 
 // TestPolicySchema: global.okdp.policy, its keys only, a misspelt one
-// refused: it would leave the projects unconstrained; the registries
-// hosts, a port and a path optional, no scheme, no trailing "/".
+// refused: it would leave the projects unconstrained; each key checked.
 func TestPolicySchema(t *testing.T) {
 	for name, tc := range map[string]struct {
 		policy any
 		want   string // the violations, "" for none
 	}{
-		"every key": {M{"privileged": []any{"cert-manager"}, "upstream": M{"deny": []any{"rbac"}, "registries": []any{"registry.example.org", "mirror.example.org:5000/okdp/tools"}}}, ""},
-		"misspelt":  {M{"privilged": []any{"x"}, "upstream": M{"registry": []any{"x"}}}, "- at '/global/okdp/policy': additional properties 'privilged' not allowed\n- at '/global/okdp/policy/upstream': additional properties 'registry' not allowed"},
-		"registries": {M{"upstream": M{"deny": []any{""}, "registries": []any{"https://registry.example.org", "registry.example.org/", "docker.io/library/nginx:1"}}},
-			"- at '/global/okdp/policy/upstream/deny/0': minLength: got 0, want 1\n- at '/global/okdp/policy/upstream/registries': validation failed\n" +
-				`  - at '/global/okdp/policy/upstream/registries/0': 'https://registry.example.org' does not match pattern '^[^\\s/:@]+(:[0-9]+)?(/[^\\s/:@]+)*$'` + "\n" +
-				`  - at '/global/okdp/policy/upstream/registries/1': 'registry.example.org/' does not match pattern '^[^\\s/:@]+(:[0-9]+)?(/[^\\s/:@]+)*$'` + "\n" +
-				`  - at '/global/okdp/policy/upstream/registries/2': 'docker.io/library/nginx:1' does not match pattern '^[^\\s/:@]+(:[0-9]+)?(/[^\\s/:@]+)*$'`},
+		"every key": {M{"privileged": []any{"cert-manager"}, "reserved": []any{"vault"}, "projectApiGroups": []any{"example.org"}, "projectGlobals": []any{"project"}}, ""},
+		"misspelt":  {M{"privilged": []any{"x"}, "reserved": "vault"}, "- at '/global/okdp/policy': additional properties 'privilged' not allowed\n- at '/global/okdp/policy/reserved': got string, want array"},
+		"projectGlobals": {M{"projectGlobals": []any{"okdp", "", "project", "project"}},
+			"- at '/global/okdp/policy/projectGlobals': items at 2 and 3 are equal\n- at '/global/okdp/policy/projectGlobals/0': 'not' failed\n- at '/global/okdp/policy/projectGlobals/1': minLength: got 0, want 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"

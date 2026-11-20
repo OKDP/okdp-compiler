@@ -28,7 +28,7 @@ func mapCtx() M {
 }
 
 // testInstance: the instance whose mapping sees scope, as a test writes
-// it: its release, service and OAuth client mode read back from it.
+// it: its release and service read back from it.
 func testInstance(scope M) *instance {
 	return &instance{rules: testrules.Standard(),
 		release:   value.Str(value.Dig(scope, "release.name")),
@@ -161,7 +161,7 @@ x:
 
 // TestMappingNulls: a null section is empty; a null chart of output is
 // kept, which Compile leaves out, with the keys output writes; a null key of
-// a client is refused by its type.
+// an item of a rule set's section is refused by its type.
 func TestMappingNulls(t *testing.T) {
 	res, written, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("instance: ~\nprovides: '${{ null }}'\n", "{x: '${{ null }}', web: ~, z: {}}\n")...)
 	if err != nil {
@@ -176,39 +176,44 @@ func TestMappingNulls(t *testing.T) {
 	if res["instance"] != nil || res["provides"] != nil || res["objects"] != nil {
 		t.Errorf("sections: %#v", res)
 	}
-	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/oidcClients/0/scope': got null, want string"
-	if _, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("oidcClients: [{grantTypes: [a], scope: ~}]\n", "")...); err == nil || err.Error() != want {
+	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/notes/0/text': got null, want string"
+	if _, _, err := runMapping(context.Background(), functionRules(t), newSession(mapCtx()), mapCtx(), mapping("notes: [{text: ~}]\n", "")...); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
 
 // TestMappingErrors: OKDP's sections and functions, and where their errors
-// point; a section of the wrong shape (mapping.schema.json), or none of
-// OKDP's, is refused.
+// point; a section of the wrong shape (mapping.schema.json, with what the
+// rule set adds), or none of OKDP's nor of the rule set's, is refused.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ okdp, values, want string }{
-		"function error":         {"", "x: {v: '${{ okdpGeneratedSecret({}) }}'}\n", "values.cel.yaml: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
-		"section error":          {"provides: [{values: '${{ nope }}'}]\n", "", "okdp.yaml: provides[0]: values: ${{ nope }}:"},
-		"output not a map":       {"", "[x]\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/output': got array, want object"},
-		"chart a scalar":         {"", "{x: {}, web: 'on'}\n", "- at '/output/web': got string, want null or object"},
-		"instance not a map":     {"instance: [https://x]\n", "", "- at '/instance': got array, want object"},
-		"url not a string":       {"instance: {url: 8080, usage: ~}\n", "", "- at '/instance/url': got number, want string"},
-		"provides not a list":    {"provides: {contract: http}\n", "", "- at '/provides': got object, want array"},
-		"objects not a list":     {"objects: x\n", "", "- at '/objects': got string, want array"},
-		"oidcClients not a list": {"oidcClients: {a: 1}\n", "", "- at '/oidcClients': got object, want array"},
-		"no grant types":         {"oidcClients: [{grantTypes: []}, {scope: s}]\n", "", "- at '/oidcClients/0/grantTypes': minItems: got 0, want 1\n- at '/oidcClients/1': missing property 'grantTypes'"},
-		"client name":            {"oidcClients: [{grantTypes: [a], name: Console}]\n", "", "- at '/oidcClients/0/name': 'Console' does not match pattern"},
-		"client name length":     {"oidcClients: [{grantTypes: [a], name: " + strings.Repeat("a", 55) + "}]\n", "", "- at '/oidcClients/0/name': maxLength: got 55, want 54"},
-		"client key":             {"oidcClients: [{grantTypes: [a], redirectUri: x}]\n", "", "- at '/oidcClients/0': additional properties 'redirectUri' not allowed"},
-		"unknown section":        {"outptu: {x: {}}\n", "", "okdp.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, oidcClients)"},
-		"output in okdp.yaml":    {"output: {}\n", "{}\n", "values.cel.yaml: output: okdp.yaml gives it too"},
+		"function error":      {"", "x: {v: '${{ okdpGeneratedSecret({}) }}'}\n", "values.cel.yaml: x: v: ${{ okdpGeneratedSecret({}) }}: okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': missing property 'name'"},
+		"section error":       {"provides: [{values: '${{ nope }}'}]\n", "", "okdp.yaml: provides[0]: values: ${{ nope }}:"},
+		"output not a map":    {"", "[x]\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/output': got array, want object"},
+		"chart a scalar":      {"", "{x: {}, web: 'on'}\n", "- at '/output/web': got string, want null or object"},
+		"instance not a map":  {"instance: [https://x]\n", "", "- at '/instance': got array, want object"},
+		"url not a string":    {"instance: {url: 8080, usage: ~}\n", "", "- at '/instance/url': got number, want string"},
+		"provides not a list": {"provides: {contract: http}\n", "", "- at '/provides': got object, want array"},
+		"objects not a list":  {"objects: x\n", "", "- at '/objects': got string, want array"},
+		"notes not a list":    {"notes: {a: 1}\n", "", "- at '/notes': got object, want array"},
+		"no text":             {"notes: [{}, {name: a}]\n", "", "- at '/notes/0': missing property 'text'\n- at '/notes/1': missing property 'text'"},
+		"note name":           {"notes: [{text: t, name: Console}]\n", "", "- at '/notes/0/name': 'Console' does not match pattern"},
+		"note name length":    {"notes: [{text: t, name: " + strings.Repeat("a", 21) + "}]\n", "", "- at '/notes/0/name': maxLength: got 21, want 20"},
+		"note key":            {"notes: [{text: t, txt: x}]\n", "", "- at '/notes/0': additional properties 'txt' not allowed"},
+		"unknown section":     {"outptu: {x: {}}\n", "", "okdp.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, notes)"},
+		"output in okdp.yaml": {"output: {}\n", "{}\n", "values.cel.yaml: output: okdp.yaml gives it too"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
+			_, _, err := runMapping(context.Background(), functionRules(t), newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	// The mandatory set alone has no section of its own.
+	want := "okdp.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects)"
+	if _, _, err := runMapping(context.Background(), testrules.Standard(), newSession(mapCtx()), mapCtx(), mapping("outptu: {x: {}}\n", "")...); err == nil || err.Error() != want {
+		t.Errorf("the mandatory set: got %v, want %q", err, want)
 	}
 }
 

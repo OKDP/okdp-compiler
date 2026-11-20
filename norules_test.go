@@ -3,6 +3,7 @@ package compiler_test
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,7 +30,9 @@ func compileExample(t *testing.T, name string, rules *compiler.RuleSet) map[stri
 }
 
 // A compile that gives no rule set: the compiler's mandatory rules alone,
-// its functions, templates and checks applied.
+// its host functions, templates and checks applied. A call of a function
+// that only another rule set gives (okdpPodSpec) fails to load, and a tree
+// that requires a rule set the compile was not given is refused.
 func TestCompileWithoutRules(t *testing.T) {
 	t.Run("values", func(t *testing.T) {
 		o := compileExample(t, "00_passthrough", nil)["demo-echo"]
@@ -49,7 +52,7 @@ func TestCompileWithoutRules(t *testing.T) {
 		}
 	})
 	t.Run("claims bind", func(t *testing.T) {
-		o := compileExample(t, "03_full", nil)["demo-db"]
+		o := compileExample(t, "04_claims", nil)["data-postgresql"]
 		if o.Err != nil {
 			t.Fatal(o.Err)
 		}
@@ -57,14 +60,43 @@ func TestCompileWithoutRules(t *testing.T) {
 			t.Error("no claim was bound to the provider")
 		}
 	})
-	t.Run("the sections and functions of the mandatory set", func(t *testing.T) {
-		if o := compileExample(t, "03_full", nil)["demo-workspace"]; o.Err != nil {
-			t.Error(o.Err)
+	t.Run("the templates of the mandatory set", func(t *testing.T) {
+		o := compileExample(t, "04_claims", nil)["data-postgresql"]
+		if o.Err != nil {
+			t.Fatal(o.Err)
+		}
+		if !slices.ContainsFunc(o.Result.Objects, func(m map[string]any) bool { return m["kind"] == "Password" }) {
+			t.Error("no generated credentials (the template generatedSecret)")
 		}
 	})
 	t.Run("the secret store objects of a claim of another namespace", func(t *testing.T) {
 		if o := compileExample(t, "04_claims", nil)["data-postgresql"]; o.Err != nil {
 			t.Error(o.Err)
+		}
+	})
+	t.Run("a function of a rule set not given", func(t *testing.T) {
+		def, in := example()
+		in.Rules, in.Values = nil, nil
+		in.Context = []compiler.ContextLayer{{Values: map[string]any{"global": map[string]any{"okdp": map[string]any{"cluster": map[string]any{"domain": "example.org"}}}}}}
+		def.Okdp, def.Values = []byte("objects:\n  - $spread: \"${{ [okdpPodSpec({'containers': []})] }}\"\n"), []byte("app: {}\n")
+		if _, err := compiler.Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "undeclared reference to 'okdpPodSpec'") {
+			t.Errorf("okdpPodSpec without the set that gives it: %v", err)
+		}
+	})
+	t.Run("a tree that requires a rule set not given", func(t *testing.T) {
+		for set, rules := range map[string]*compiler.RuleSet{"example": nil, "security": exampleRules("02_advanced")} {
+			def, in := example()
+			in.Rules = rules
+			in.Context = append(slices.Clip(in.Context), compiler.ContextLayer{Values: map[string]any{
+				"global": map[string]any{"okdp": map[string]any{"ruleSets": []any{map[string]any{"name": set}}}},
+			}})
+			want := "global.okdp.ruleSets: the platform requires the rule set " + set + ", which the compile was not given: give it with okdp-compile --rules (compiler.LoadRules)"
+			if _, err := compiler.Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: got %v, want %q", set, err, want)
+			}
+			if _, err := compiler.PlatformOf(context.Background(), in); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: PlatformOf: got %v, want %q", set, err, want)
+			}
 		}
 	})
 	t.Run("the checks of the mandatory set", func(t *testing.T) {
@@ -78,27 +110,15 @@ func TestCompileWithoutRules(t *testing.T) {
 
 // TestCheckRendered: what a host checks of the manifests it renders, the
 // walks a compile runs on its own objects, through the module root: an
-// object without a namespace is the release's; a cluster-scoped kind, an
-// object of another namespace and a host the project may not serve are
+// object without a namespace is the release's; a cluster-scoped kind is
 // refused, named.
 func TestCheckRendered(t *testing.T) {
 	rules := testrules.Standard()
-	settings := map[string]any{"ingress": map[string]any{"suffix": "example.org"}}
 	if err := compiler.CheckObjects(context.Background(), rules, "web", "demo", nil, []map[string]any{{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": "a"}}}); err != nil {
 		t.Errorf("an object of the namespace: %v", err)
 	}
 	err := compiler.CheckObjects(context.Background(), rules, "web", "demo", nil, []map[string]any{{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": map[string]any{"name": "a"}}})
 	if err == nil || !strings.Contains(err.Error(), "web: objects: ClusterRole/a") {
 		t.Errorf("a cluster-scoped kind: %v", err)
-	}
-	ingress := func(host string) []map[string]any {
-		return []map[string]any{{"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": "i"}, "spec": map[string]any{"rules": []any{map[string]any{"host": host}}}}}
-	}
-	if err := compiler.CheckIngressHosts(context.Background(), rules, "web", "demo", settings, ingress("web.demo.example.org")); err != nil {
-		t.Errorf("the project's host: %v", err)
-	}
-	err = compiler.CheckIngressHosts(context.Background(), rules, "web", "demo", settings, ingress("sso.example.org"))
-	if err == nil || !strings.Contains(err.Error(), `web: objects: Ingress/i: spec.rules[0].host: host "sso.example.org"`) {
-		t.Errorf("a host: %v", err)
 	}
 }

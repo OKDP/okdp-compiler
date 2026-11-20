@@ -24,14 +24,14 @@ import (
 // (examples/02_advanced/input/catalog/webapp), and the inputs of
 // its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
 // and its database's claim, bound to demo-db, with what demo-db publishes
-// for it.
+// for it; the rule set the example's platform requires.
 func example() (*compiler.Definition, compiler.Inputs) {
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"))
 	if err != nil {
 		panic(err)
 	}
 	in := compiler.Inputs{
-		Rules:     testrules.Standard(),
+		Rules:     exampleRules("02_advanced"),
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/config/platform.yaml")}},
 		Values:    []map[string]any{values("examples/02_advanced/input/config/demo/webapp/config.yaml")},
@@ -63,20 +63,19 @@ func values(file string) map[string]any {
 }
 
 // TestConcurrentCompile: the concurrent use the documentation promises,
-// one Definition and the same values layers shared by goroutines, in the
-// dcr mode of the example's platform (the OAuth client chart added to a copy
-// of the Definition's charts) and the existing mode, a layer after it: each
-// compile gives what it gives alone, and the inputs are not changed.
-// Meaningful under go test -race.
+// one Definition and the same values layers shared by goroutines, with the
+// example's platform and with a layer after it (a proxy): each compile
+// gives what it gives alone, and the inputs are not changed. Meaningful
+// under go test -race.
 func TestConcurrentCompile(t *testing.T) {
-	def, dcr := example()
-	existing := dcr
-	existing.Context = append(slices.Clip(dcr.Context), compiler.ContextLayer{Values: map[string]any{
-		"global": map[string]any{"okdp": map[string]any{"oidc": map[string]any{"clientProvisioning": "existing"}}},
+	def, plain := example()
+	proxied := plain
+	proxied.Context = append(slices.Clip(plain.Context), compiler.ContextLayer{Values: map[string]any{
+		"global": map[string]any{"okdp": map[string]any{"proxy": map[string]any{"httpsProxy": "http://proxy.example.org:3128"}}},
 	}})
-	inputs := []compiler.Inputs{existing, dcr}
+	inputs := []compiler.Inputs{proxied, plain}
 	snapshot := func() string {
-		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), existing.Context, dcr.Values})
+		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), proxied.Context, plain.Values})
 		if err != nil {
 			t.Fatal(err)
 		}

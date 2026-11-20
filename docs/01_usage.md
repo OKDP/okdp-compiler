@@ -14,10 +14,13 @@ line](#command-line)), no writer for a deployer and no chart fetching: it
 reads no upstream chart. The `okdp-gitops` command and the `okdp-compile`
 with deployer targets, the chart cache and the checks of the final values
 against the upstream charts, the single-release umbrella, the Flux and
-Argo CD targets,
-the tree edits (`treeedit`) and the upstream and ingress policy are
-okdp-gitops': see its
-[usage](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md).
+Argo CD targets and the tree edits (`treeedit`) are okdp-gitops': see
+its [usage](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md).
+The rules of a platform's hosts, OAuth clients and hardened workloads,
+and the policy on an instance's upstream values, are the security rule
+set's, which a compile is given as any rule set: see
+okdp-compiler-security's
+[usage](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/01_usage.md).
 Helm is not needed to compile, only to install the result.
 
 ## Repository layout
@@ -226,10 +229,10 @@ helm install demo-webapp charts/catalog/webapp/1.0.0 -n demo \
 It reads its directories as okdp-gitops' `okdp-compile` does, no symbolic
 link followed and the files bounded, and the bindings of the claims, the
 refusals, the warnings and the dependencies are on stderr in the same
-lines. It compiles with Helm's merge alone: okdp-gitops' upstream and
-ingress policy, `Inputs.Finalize` and `Inputs.CheckGlobals`, does not run.
-Other targets, `--partial` and `--report` are okdp-gitops', and so is
-`--charts` (`$OKDP_CHARTS`), the checks of the final values against the
+lines. It compiles with Helm's merge alone: it sets no `Inputs.Finalize`
+and no `Inputs.CheckGlobals`, so no host's policy on the upstream values
+runs, whatever `--rules` gives. Other targets, `--partial` and
+`--report` are okdp-gitops', and so is `--charts` (`$OKDP_CHARTS`), the checks of the final values against the
 upstream charts from a chart cache
 ([okdp-compile --check](https://github.com/OKDP/okdp-gitops/blob/main/docs/01_usage.md#okdp-compile---check),
 [chart cache](specs/01_inputs_outputs.md#chart-cache)).
@@ -247,8 +250,9 @@ go mod tidy
 ```
 
 From a checkout, with `os.DirFS` (run from the repository root). The
-example gives no rule set: the compile applies the mandatory one, its
-checks among them ([rule sets](#rule-sets)):
+example gives the mandatory set with the example's own added, which its
+platform requires and whose function its package calls: the compile
+applies both, their checks among them ([rule sets](#rule-sets)):
 
 ```go
 package main
@@ -265,12 +269,18 @@ import (
 )
 
 func main() {
+	// The mandatory set with the example's added: the platform requires it
+	// (global.okdp.ruleSets), and the package calls its function.
+	rules, err := compiler.LoadRules(os.DirFS("examples/02_advanced/rules"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp")) // the package
 	if err != nil {
 		log.Fatal(err)
 	}
 	in := compiler.Inputs{
-		Rules:     nil, // the mandatory set; compiler.LoadRules adds a platform's own
+		Rules:     rules, // nil: the mandatory set alone
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
 		Release:   "demo-webapp",
 		Namespace: "demo",
@@ -428,25 +438,51 @@ template, nor a null, nor a large integer. `compiler.Info` is what
 ### Rule sets
 
 What a compile applies of a platform is data, in rule sets. The compiler
-embeds the mandatory one, which every compile applies: the functions,
-the `oidcClients` section, the schema of the platform's settings, what a
+embeds the mandatory one, `core`, which every compile applies: the
+functions it gives, the schema of the platform's settings, what a
 mapping sees as `platform`, the labels, the names, the roles, the
 documents of the secret store, the tables and CEL checks, the schema of
 the mapping and the platform's charts. `Inputs.Rules` and
 `BuildOptions.Rules` nil compile with it alone, which refuses what a
-platform refuses: a reserved namespace, an object, a host or a plain
-Secret its checks deny.
+platform refuses: a reserved namespace, an object or a plain Secret its
+checks deny.
 
 `compiler.LoadRules(fsys)` reads a platform's own set, `rules.yaml` at
 the root of `fsys`, and adds it to the mandatory one, in a
-`*compiler.RuleSet`: its documents, functions, templates, sections,
-the keys it adds to the schemas and its scope documents. Both apply. It
-fails on a set without a `name`, on a rule the mandatory set gives, a
-table, a check, a key of a schema, a chart or a document (a rule set
-replaces none), and on a table or a check that is unknown: never a rule
-turned off or replaced. A tree lists the sets it requires in
-`global.okdp.ruleSets`, and a compile not given one of them fails
-([the rule set](specs/05_rules.md#platform-settings)).
+`*compiler.RuleSet`: its tables, documents, hooks, functions,
+templates, sections, the keys it adds to the schemas and its scope
+documents. Both apply. It fails on a set without a `name`, on a rule the
+mandatory set gives, a table, a check, a key of a schema, a chart or a
+document (a rule set replaces none), and on a check that is unknown or
+values added to a table that is not extensible: never a rule turned off
+or replaced ([how the sets add
+up](specs/05_rules.md#how-the-sets-add-up)).
+
+The usual added set is the security set, okdp-compiler-security: the
+hosts a project serves, its OAuth clients, the hardened workloads and
+their functions. The command line takes its directory, Go its module,
+which reads the same files:
+
+```bash
+okdp-compile --rules ../okdp-compiler-security/rules --repository tree --catalog charts -o out
+```
+
+```go
+rules, err := security.Rules() // compiler.LoadRules(security.FS()), read once
+if err != nil {
+	log.Fatal(err)
+}
+in.Rules = rules
+def, err := compiler.LoadDefinitionWith(fsys, rules) // okdp.yaml may hold the set's sections
+```
+
+A tree lists the sets it requires in `global.okdp.ruleSets`, and a
+compile not given one of them fails
+([the rule set](specs/05_rules.md#platform-settings)): a platform that
+relies on the security set requires it, so that a compile without it
+does not pass what the set would refuse
+([okdp-compiler-security's
+usage](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/01_usage.md#requiring-the-set-in-a-tree)).
 
 The helpers that read rules take the set first, nil being the mandatory
 one: `compiler.Roles(rules)`, `EngineNamespaces(rules)`,
@@ -472,8 +508,8 @@ the compile of the instance, and an error of either refuses it:
   chart's default list. The host fetches the charts itself, checks the
   final values against them, may render each chart key with
   `FinalInput`'s `Release`, `Namespace` and `Specs[key].Source`, and
-  checks the manifests with `compiler.CheckObjects` and
-  `compiler.CheckIngressHosts`. It runs the rule set's `finalValues`
+  checks the manifests with `compiler.CheckObjects`, which runs check
+  `object` and the rule set's `objects` hook. It runs its `finalValues`
   hook with `FinalInput.CheckFinalValues`, on the values it returns, at
   the point of its own checks it chooses; when it does not, the compile
   runs it on what Finalize returns. `compiler.CheckFinalValues` runs the
@@ -488,11 +524,13 @@ the compiler does not. It changes nothing of the compile. okdp-gitops
 fetches the upstream charts of every `Chart.yaml` there, so that no fetch
 counts against `InstanceTimeout`.
 
-okdp-gitops sets them (`deploy.Build`): the upstream and ingress policy is
-its `internal/policy`, the checks against the upstream charts its
-`internal/chartcheck`: a chart it cannot fetch leaves its keys
-unchecked, reported, and a project that is not privileged giving it
-upstream values is refused when the build renders
+okdp-gitops sets them (`deploy.Build`): the policy on the upstream values
+is the security set's package `policy`
+([the upstream policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md)),
+the checks against the upstream charts its `internal/chartcheck`: a
+chart it cannot fetch leaves its keys unchecked, reported, and a project
+that is not privileged giving it upstream values is refused when the
+build renders
 ([checks of the final values](specs/01_inputs_outputs.md#checks-of-the-final-values)).
 
 ### The rest of the API
@@ -705,9 +743,8 @@ upstream values is refused when the build renders
   a dependency of `Chart.yaml` (its `repository`, `name`, `version`), an
   entry of `Result.Charts`. `compiler.ChartMetadata` is a `Chart.yaml`, the
   package's in `Result.Chart`.
-- A service's OAuth clients are `Result.Objects`, a Job and what it needs
-  per client
-  ([OAuth client objects](specs/01_inputs_outputs.md#oauth-client-objects)).
+- The objects a rule set's section adds (`ownObjects`) are
+  `Result.Objects`, with the mapping's own.
 - `Compile` keeps no state between calls and is safe for concurrent use: one
   `Definition` and the same values layers can be shared between goroutines;
   the inputs are not changed (`TestConcurrentCompile`, under `go test
@@ -718,7 +755,7 @@ upstream values is refused when the build renders
   `Inputs.CostLimit` bounds the total CEL cost (cel-go's runtime cost:
   about one unit per operation, list element and character compared) of
   the compile's expressions, the mapping's and the compiler's templates'
-  (OAuth clients, generated Secrets; 0: no limit): once
+  (a rule set's sections, generated Secrets; 0: no limit): once
   the total passes it, the compile fails with
   `the expressions of the compile exceed its CEL cost limit (n)`. The
   total is checked after each expression, which may itself cost up to the
@@ -762,16 +799,18 @@ upstream values is refused when the build renders
 
 `<field>` is the parameter path (`database`, `backends[1].database`, a key
 that holds a dot in brackets: `databases["eu.main"]`),
-`<key>` a chart key (of a `Chart.yaml` dependency, or an OAuth client
-chart), `<chart>-<version>` the upstream chart that renders it,
-`<service>` the `name` of `Chart.yaml`. `error: <namespace>/<release>: `
+`<key>` a chart key (of a `Chart.yaml` dependency), `<chart>-<version>`
+the upstream chart that renders it, `<service>` the `name` of
+`Chart.yaml`. `error: <namespace>/<release>: `
 starts a message as okdp-gitops' commands print it; the library's is what
-follows. The messages about reserved namespaces, objects, plain Secrets,
-the platform's schema and OAuth clients are the mandatory rule set's;
-those about upstream values okdp-gitops' policy's, those about the
-upstream charts (the chart cache, their schemas, their default lists)
-okdp-gitops' checks', from its `deploy.Build` or its `okdp-compile
---check --charts`: a compile without them gives none of them.
+follows. The messages about reserved namespaces, objects, plain Secrets
+and the platform's schema are the mandatory rule set's; those about
+hosts, OAuth clients and upstream values the security set's
+([its troubleshooting](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/01_usage.md#troubleshooting));
+those about the upstream charts (the chart cache, their schemas, their
+default lists) okdp-gitops' checks', from its `deploy.Build` or its
+`okdp-compile --check --charts`: a compile without them gives none of
+them.
 
 ### Inputs and instance values
 
@@ -801,10 +840,10 @@ okdp-gitops' checks', from its `deploy.Build` or its `okdp-compile
 | `database: the database contract cannot be read: database.schema.json: file does not exist` | a connection reference or a provided connection names a contract no repository's `contracts/` has | add it to a repository ([contracts](specs/01_inputs_outputs.md#location)) |
 | `database: the database contract cannot be read: database.schema.json: unexpected EOF` | the contract file is not JSON, not an object or not a valid JSON Schema; also `provides "<name>" (<contract>): the <contract> contract cannot be read: ...` | fix the contract ([contracts](specs/01_inputs_outputs.md#location)) |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
-| `global.okdp.ingress.className is required. It is a context value: the platform's or a project's (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | set the key in `platform.yaml` ([context values](specs/01_inputs_outputs.md#context-values)) |
-| `context layer 2 (level 1): global.okdp.ingress.suffix is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context file, the second (`Inputs.Context[1]`), `project.yaml` at level 1, sets a value a file of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the file: a level only adds keys and connections; change the value in the lower level's files ([levels](specs/01_inputs_outputs.md#levels)) |
+| `global.okdp.tls.clusterIssuer is required. It is a context value: the platform's or a project's (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | set the key in `platform.yaml` ([context values](specs/01_inputs_outputs.md#context-values)) |
+| `context layer 2 (level 1): global.okdp.tls.clusterIssuer is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context file, the second (`Inputs.Context[1]`), `project.yaml` at level 1, sets a value a file of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the file: a level only adds keys and connections; change the value in the lower level's files ([levels](specs/01_inputs_outputs.md#levels)) |
 | `context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp` | a context file above level 0, `project.yaml`, sets a key of `global.okdp` other than `provisioning`, one the compiler reads or not, one the platform sets or leaves unset (a key it sets fails before, `is set at level 0`), or `global.okdp` to a non-map | set it in `platform.yaml`, the platform's; a project's own settings, which the mappings read, go beside `okdp`: `global.project` ([levels](specs/01_inputs_outputs.md#levels)) |
-| `context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; ...` | a context file above level 0, `project.yaml`, sets a key of `global` beside `okdp` the platform does not list: every chart receives `global`, past its package's `protect` and the upstream policy; also `context layer 2 (level 1): global.project.hostNetwork: hostNetwork is denied ...` for a listed key that holds what the upstream policy denies | list the key in `global.okdp.policy.projectGlobals` of `platform.yaml` if it is harmless to every project (`[project, storageClass]` by default), else remove it; a project's own settings go under `global.project` |
+| `context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; ...` | a context file above level 0, `project.yaml`, sets a key of `global` beside `okdp` the platform does not list: every chart receives `global`, past its package's `protect` | list the key in `global.okdp.policy.projectGlobals` of `platform.yaml` if it is harmless to every project (`[project, storageClass]` by default), else remove it; a project's own settings go under `global.project` |
 | `values layer 1: global.okdp is set by the context (Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance file, the first, second... values layer (`Inputs.Values[0]`, `[1]`...), its `config.yaml` first, sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values in `platform.yaml`; a package lets instances set a key of `global` by declaring it in `config.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
 | `config.schema.json: global.okdp is the platform's settings: a package schema declares nothing under it`, `... a package schema gives it no default (properties.global.default)` | the package's parameter schema declares `properties.global.properties.okdp`, or its `properties.global.default` has the key `okdp`: a default of the platform's settings | remove it: the platform's settings are the context's, `platform.yaml` ([defaults](specs/01_inputs_outputs.md#defaults)) |
 | `values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level` | an instance's `config.yaml` sets `connections`, to any value | give the instance's own connections in its `connections.yaml`, a context file of its level; a connection of a lower level is not changed ([context values](specs/01_inputs_outputs.md#context-values)) |
@@ -837,12 +876,10 @@ okdp-gitops' checks', from its `deploy.Build` or its `okdp-compile
 | `database: x-okdp-connection-ref: require: field "major" is not part of the database contract`, `... require: "password" is a secret field, in the credentials Secret, never in the connection: require secretRef` | the package's requirement names a field the connection cannot have | fix the package's `config.schema.json`: require `secretRef` for credentials |
 | `config.schema.json: properties.database: x-okdp-connection-ref: require: a JSON Schema, an object, got true`, `... require: "file:///require.schema.json#" is not valid against metaschema: ...` | the package's requirement is no JSON Schema, whether the instance sets the reference or not | fix the package's `config.schema.json` |
 | several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, in parameter path order (keys sorted at each level), with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
-| `app: upstream.app.ingress.hosts: ingress.hosts is set by the platform and cannot be changed` | the instance's upstream values set a path `okdp.yaml` protects (`upstream.<key>.protect`, and always `global`) | remove the value; set it through the parameters when the package offers one |
-| `app: upstream.app.podSecurityContext: podSecurityContext is denied to the instance's upstream values (a pod's privileges, identity, containers or objects): the platform's projects set it (global.okdp.policy.privileged), demo is not one of them`; `... runAsUser 0, root, is denied ...`; `app: upstream.app.extraVolumes, read as YAML: [0].hostPath: ...` | the upstream values of an instance of a project that is not privileged set, at any depth, a key of a pod's privileges, identity, containers or objects, or one of `global.okdp.policy.upstream.deny` (`(global.okdp.policy.upstream.deny)`), whatever the package's `protect`; in a string that reads as YAML too | remove the value; set it through the parameters when the package offers one; for the platform's own projects, list the namespace in `global.okdp.policy.privileged` of `platform.yaml` ([upstream policy](specs/01_inputs_outputs.md#upstream-policy)) |
-| `app: upstream.app.image.repository: image docker.io/evil/app is not from a registry of global.okdp.policy.upstream.registries (registry.example.org): the platform's projects pull from any (global.okdp.policy.privileged), demo is not one of them` | with the platform's registries, an image of the upstream values (an `image` string, a `registry` and a `repository` with the computed ones, a `null`) comes from none of them | pull the image through one of them (the platform's mirror), or add the registry to `global.okdp.policy.upstream.registries` ([upstream policy](specs/01_inputs_outputs.md#upstream-policy)) |
+| `app: upstream.app.service.port: service.port is set by the platform and cannot be changed` | the instance's upstream values set a path `okdp.yaml` protects (`upstream.<key>.protect`, and always `global`) | remove the value; set it through the parameters when the package offers one |
 | `app: upstream.app.podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in upstream values the platform's values or the package's defaults give (in an instance's, its values file fails before: `values layer <n>: ...`) | remove it |
 | `app: upstream.app.env must be a list` | a path of `append` given as a non-list | give a list |
-| `context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:` then `- at '/global/okdp/oidc': got boolean, want object`, `- at '/global/okdp/oidc/clientProvisioning': value must be one of 'existing', 'dcr'` | a platform setting the compiler reads, or a map on the way to it, of another type (`oidc: false`, `proxy: <url>`, a list for a string), or not among its values; it would otherwise read as not set. Every violation is listed | fix the platform values against `platform.schema.json`; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
+| `context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:` then `- at '/global/okdp/proxy': got string, want object`, `- at '/global/okdp/secrets/refreshInterval': got integer, want string` | a platform setting the compiler reads, or a map on the way to it, of another type (`proxy: <url>`, a number or a list for a string), or not among its values; it would otherwise read as not set. Every violation is listed | fix the platform values against `platform.schema.json`; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
 | `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/certificateIssuers': false schema` | the platform values set the former `certificateIssuers` | rename `certificateIssuers.selfSigned.name` to `tls.clusterIssuer`, the ClusterIssuer of the services' certificates; set `tls.caBundleSecret` to the Secret of the platform's CA bundle, if it has one ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
 | `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/serviceCatalog': false schema` | the platform values hold the former console menu | move its `categories` to `catalogs.yaml`, beside `platform.yaml` ([repository layout](#repository-layout)) |
 | `failing loading "<url>": no URLLoader registered for "<url>"` | a `config.schema.json`, or an upstream chart's `values.schema.json`, references a file, a URL or a `urn:` | inline the referenced schema |
@@ -864,28 +901,7 @@ don't meet the specifications of mapping.schema.json:` then `- at
 '/okdpGeneratedSecret/keys/0': additional properties 'lenght' not
 allowed`); YAML errors (`values.cel.yaml: yaml: line <n>: ...`,
 `okdp.yaml: yaml: line <n>: ...`). The `provides` checks are in [the info
-file](specs/01_inputs_outputs.md#the-info-file), the OAuth client errors
-[below](#oauth-clients).
-
-### OAuth clients
-
-The messages of the `oidcClients` checks are listed with the mapping's
-([compile errors](specs/02_service_definition.md#compile-errors)),
-those of the platform's settings `global.okdp.oidc.dcr` in
-[OAuth client settings](specs/01_inputs_outputs.md#oauth-client-settings).
-The mapping schema names a client by its path, `/oidcClients/<i>`, and
-reports every violation at once; another message names it
-`oidcClients[<i>]`, its position in the evaluated list, then ` (<name>)`
-for a named client, the first failing check stopping the compile. Where
-the cause or the fix is not in the message:
-
-| Message | Cause | Fix |
-|---|---|---|
-| `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/oidc/dcr/ttlSeconds': got string, want integer` | a platform setting of the wrong type, here a quoted number; the types of the settings are checked in every mode, with or without a client | fix the platform values; `null` takes the default |
-| `- at '/oidcClients/0': additional properties 'redirectUri' not allowed` | a typo, or a registration field written as a client key | use a client key (`mapping.schema.json`); a registration field goes under `request` |
-| `global.okdp.oidc.dcr.authMethod "" is not supported: OKDP registers its OAuth clients anonymously` | `dcr` mode, at least one client, and `authMethod` unset (`""`, as when the platform sets no `dcr` settings) or not `anonymous` | `authMethod: anonymous` in the platform values |
-| `global.okdp.oidc.dcr.registrationUrl is required (clientProvisioning: dcr): the endpoint the registration Jobs register the OAuth clients at` | `dcr` mode, at least one client, and no `registrationUrl` | set it in the platform values |
-| `oidcClients[0] (console): secret "console-creds": the Secret the client is written to is the release's, "demo-webapp-console" (<release>-<client name>, <release>-oidc for the main client)` | a client's `secret` names a Secret of the namespace that is not the release's, exactly: its Job's Role would write another instance's Secret | name it after the release and the client, `${{ release.name }}-console`, or drop `secret` for the default, `oidcClientSecret(<name>)` |
+file](specs/01_inputs_outputs.md#the-info-file).
 
 ### Repositories and the graph
 

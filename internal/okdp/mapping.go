@@ -68,7 +68,7 @@ func (d *Definition) sources() []compile.Source {
 //	instance     url, usage
 //	provides     [{contract, name?, values, secretRef?, secret?}]
 //	objects      OKDP's own objects, whole manifests
-//	oidcClients  checked further by oidc.go
+//	<section>    a section of the rule set (RuleSet.Sections)
 //
 // written lists the keys that output writes at its top level, whether
 // they are kept or not.
@@ -85,9 +85,9 @@ func runMapping(ctx context.Context, rules *RuleSet, session *cel2yaml.Session, 
 // functions returns the host functions OKDP adds for the instance inst.
 // They run in the compile's session, read through *session once it is
 // open. They read only what every document of a compile sees alike (the
-// release, its namespace, the service, the OAuth client mode), so the
-// mapping and the compiler's templates share them. Each call counts in
-// the session's cost (cel2yaml.Costed).
+// release, its namespace, the service), so the mapping and the compiler's
+// templates share them. Each call counts in the session's cost
+// (cel2yaml.Costed).
 func functions(ctx context.Context, inst *instance, session **cel2yaml.Session) []cel.EnvOption {
 	release := inst.release
 	opts := []cel.EnvOption{

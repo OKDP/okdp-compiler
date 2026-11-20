@@ -2,7 +2,7 @@
 // by dots, a list item is [i], and a key with a dot is in brackets:
 //
 //	env[1].name
-//	annotations["nginx.ingress.kubernetes.io/auth-type"]
+//	annotations["example.org/auth-type"]
 //	["a.b"]
 //
 // The protect and append paths of okdp.yaml have the same form.

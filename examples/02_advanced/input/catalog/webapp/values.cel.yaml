@@ -5,23 +5,13 @@
 app:
   fullnameOverride: ${{ release.name }}-app
   replicaCount: ${{ values.replicas }}
-  ingress:
-    enabled: true
-    className: ${{ global.okdp.ingress.className }}
-    annotations: ${{ platform.ingressAnnotations }}
-    hosts:
-      - host: ${{ host }}
-        paths: [{path: /, pathType: Prefix}]
-    tls:
-      - hosts: ["${{ host }}"]
-        secretName: ${{ release.name }}-tls
+  # The settings' ConfigMap, and its checksum: the pods restart when it
+  # changes.
+  envFrom:
+    - configMapRef: {name: "${{ settings.objects[0].metadata.name }}"}
+  podAnnotations:
+    checksum/settings: ${{ settings.checksum }}
   env:
-    - name: OIDC_ISSUER
-      value: ${{ global.okdp.oidc.issuerUri }}
-    - name: OIDC_CLIENT_ID
-      valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_id}}
-    - name: OIDC_CLIENT_SECRET
-      valueFrom: {secretKeyRef: {name: "${{ platform.oidcClientSecret }}", key: client_secret}}
     - $if: ${{ db.size() > 0 }}
       name: DB_URL
       value: jdbc:${{ db.engine }}://${{ db.host }}:${{ str(db.port) }}/${{ db.dbName }}

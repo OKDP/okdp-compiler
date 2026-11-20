@@ -343,8 +343,8 @@ func (c *run) provides() error {
 // objects starts the Result and collects the instance's objects, in the
 // order Result.Objects documents. It then applies the platform's policy:
 // a project that is not privileged keeps its objects in its namespace and
-// serves only the hosts it may serve, no Secret holds credentials in
-// clear, and no two objects share a kind, namespace and name.
+// passes the rule set's objects hook on each, no Secret holds credentials
+// in clear, and no two objects share a kind, namespace and name.
 func (c *run) objects() error {
 	in, inst, rules := c.in, c.inst, c.in.rules()
 	store, err := secretStore(c.ctx, rules, inst.okdp)
@@ -381,9 +381,6 @@ func (c *run) objects() error {
 	}
 	if !out.Privileged {
 		if err := CheckObjects(c.ctx, rules, c.svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
-			return err
-		}
-		if err := CheckIngressHosts(c.ctx, rules, c.svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
 			return err
 		}
 	}

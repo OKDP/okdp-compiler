@@ -12,7 +12,7 @@ import (
 // TestRequireYAML: require in okdp.yaml, a list of keys; an entry of
 // another form fails with its line.
 func TestRequireYAML(t *testing.T) {
-	if p, err := decodePackage([]byte("require: [ingress.suffix, oidc.issuerUri]\n")); err != nil || !reflect.DeepEqual(p.Require, []string{"ingress.suffix", "oidc.issuerUri"}) {
+	if p, err := decodePackage([]byte("require: [cluster.domain, tls.clusterIssuer]\n")); err != nil || !reflect.DeepEqual(p.Require, []string{"cluster.domain", "tls.clusterIssuer"}) {
 		t.Errorf("got %#v (%v)", p.Require, err)
 	}
 	for src, want := range map[string]string{
@@ -31,10 +31,10 @@ func TestRequireYAML(t *testing.T) {
 // checks of Chart.yaml, okdp.yaml's defaults and upstream.
 func TestDefinitionService(t *testing.T) {
 	d := *def
-	d.Package.Roles, d.Package.DependsOn = []string{"web"}, []string{"ingress"}
+	d.Package.Roles, d.Package.DependsOn = []string{"web"}, []string{"database"}
 	d.Package.Upstream = chart.Upstream{All: true}
 	svc, err := d.service()
-	want := &Service{Name: "demo", Version: "1.2.3", Roles: []string{"web"}, DependsOn: []string{"ingress"}, Require: []string{"ingress.suffix"}, Charts: chart.Specs{
+	want := &Service{Name: "demo", Version: "1.2.3", Roles: []string{"web"}, DependsOn: []string{"database"}, Require: []string{"cluster.domain"}, Charts: chart.Specs{
 		"app": {Source: appSource, Defaults: "app.defaults.yaml", Upstream: true},
 	}}
 	if err != nil || !reflect.DeepEqual(svc, want) {
@@ -68,20 +68,20 @@ func TestDefinitionService(t *testing.T) {
 // errors first), before the platform charts and the mapping.
 func TestRequire(t *testing.T) {
 	d := *def
-	d.Package.Require = []string{"ingress.suffix", "oidc.issuerUri"}
-	missing := "global.okdp.oidc.issuerUri is required. It is a context value: the platform's or a project's (Inputs.Context)"
-	issuer := M{"global": M{"okdp": M{"oidc": M{"issuerUri": "https://sso.example.org"}}}}
+	d.Package.Require = []string{"cluster.domain", "tls.clusterIssuer"}
+	missing := "global.okdp.tls.clusterIssuer is required. It is a context value: the platform's or a project's (Inputs.Context)"
+	issuer := M{"global": M{"okdp": M{"tls": M{"clusterIssuer": "ca"}}}}
 	for name, tc := range map[string]struct {
 		layers []map[string]any
 		want   string // "": no error
 	}{
 		"missing":                {nil, missing},
 		"set":                    {[]map[string]any{issuer}, ""},
-		"empty":                  {[]map[string]any{{"global": M{"okdp": M{"oidc": M{"issuerUri": ""}}}}}, missing},
-		"in order":               {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}}}}}, "global.okdp.ingress.suffix is required"},
+		"empty":                  {[]map[string]any{{"global": M{"okdp": M{"tls": M{"clusterIssuer": ""}}}}}, missing},
+		"in order":               {[]map[string]any{{"global": M{"okdp": M{"cluster": M{"domain": ""}}}}}, "global.okdp.cluster.domain is required"},
 		"before the mapping":     {[]map[string]any{{"replicas": 11}}, missing},
 		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}}, missing},
-		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"ingress": M{"suffix": ""}, "oidc": M{"enabled": "yes"}}}}}, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/oidc/enabled': got string, want boolean"},
+		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"cluster": M{"domain": ""}, "proxy": M{"httpProxy": true}}}}}, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/proxy/httpProxy': got boolean, want string"},
 	} {
 		_, err := Compile(context.Background(), &d, inputs(tc.layers...))
 		switch {

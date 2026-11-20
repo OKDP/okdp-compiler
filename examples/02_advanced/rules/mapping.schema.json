@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "exampleConfigFiles": {
+      "type": "object",
+      "description": "Not a section: the argument of exampleConfigFiles, a ConfigMap of files and their checksum.",
+      "additionalProperties": false,
+      "required": ["name", "files"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 40, "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The ConfigMap's name, after the release's: <release>-<name>."},
+        "files": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The files, by name, their content as text."}
+      }
+    }
+  }
+}

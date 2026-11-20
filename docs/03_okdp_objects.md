@@ -39,14 +39,13 @@ objects: a YAML stream, one document per object, in this order:
   store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
   The platform's secret store does not keep the namespaces' keys apart by
   itself: what it must enforce is in [What the store must
-  enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce).
+  enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce);
+- the objects the sections of an added rule set add (`ownObjects`): with
+  the security set, in `dcr` mode, one Job per OAuth client and the
+  objects it needs ([its OAuth client
+  objects](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#oauth-client-objects)).
 
-In `dcr` mode the objects hold what registers the instance's OAuth clients:
-one Job per client and the objects it needs
-([OAuth client objects](specs/01_inputs_outputs.md#oauth-client-objects)),
-as many clients as the mapping declares.
-
-An instance with neither has no `okdp-objects.values.yaml`: the catalog's
+An instance with none of these has no `okdp-objects.values.yaml`: the catalog's
 chart alone is installed. Unless the project is one of the platform's own
 (`global.okdp.policy.privileged`), every object stays in the instance's
 namespace and none is of a cluster-scoped kind: the compile refuses them
@@ -61,12 +60,10 @@ name per ID, never the ID with its dots and dashes replaced by one
 character, which gives `a-b.c` and `a.b-c` one name
 ([functions](specs/04_functions.md#okdpsqlname-and-okdpobjectname)).
 
-A workload the package adds, a Job, a web service with its volume, its
-Ingress and its sign-in proxy, is written with the fragments the compiler
-provides (`okdpWebWorkload`, `okdpJob`, `okdpSignInProxy`,
-`okdpPodSpec`:
-[functions](specs/04_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload),
-`examples/05_fragments`), hardened once, not by hand in each package.
+A workload the package adds, a Job or a web service, is written with the
+fragments of a rule set rather than by hand in each package: the
+security set's are hardened once ([its
+functions](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/03_functions.md)).
 
 The `objects` section carries real weight: on 2026-10-12, 15 of the 24
 packages of the `okdp-compiler` branches of platform-charts and
@@ -124,8 +121,7 @@ helm install <release> <package> -n <namespace> -f values.yaml
   `app.kubernetes.io/managed-by: Helm`, holds.
 - **Reach.** Every deployer must reach the chart. A site that cannot
   reach the default repository sets `global.okdp.charts.objects`, to a
-  chart that renders its `manifests` value as written and holds the OAuth
-  clients' slots.
+  chart that renders its `manifests` value as written.
 - **Under Flux.** The objects travel with the values, in the ConfigMap
   `values-<release>` of the namespace `okdp-releases`, at most 1 MiB,
   which okdp-gitops' flux target enforces. With

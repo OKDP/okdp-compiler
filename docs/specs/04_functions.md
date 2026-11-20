@@ -6,8 +6,8 @@ version, and the host functions, the language's own (Helm's and sprig's
 `sha256sum`, `toJson`, `toYaml`, `quote`...) and OKDP's (`okdpFullname`,
 `okdpLabels`, `okdpGeneratedSecret`...).
 
-Every expression may call them: those of the mapping and of the
-compiler's templates, the OAuth client's and the generated Secret's
+Every expression may call them: those of the mapping and of the rule
+set's templates, the generated Secret's among them
 ([control flow](03_control_flow.md)). Nothing else is callable: no
 template of a chart (`include`, `tpl`), no Go template function that is not
 below.
@@ -17,15 +17,15 @@ below.
 The host functions are plain Go, and share these properties:
 
 - **Deterministic and hermetic.** A function reads its arguments and, for
-  OKDP's, the compile's release, service and OAuth client mode; no clock,
+  OKDP's, the compile's release and service; no clock,
   no randomness, no file, no network, no environment variable. The same
   inputs compile to the same outputs. There is no `now`, `randAlphaNum`,
   `uuidv4`, `lookup` or `env`: a random value is generated in the cluster
   ([`okdpGeneratedSecret`](#okdpgeneratedsecret)), a value of the cluster
   or of the platform is an input.
 - **Dynamic arguments.** Each takes its argument as `dyn`, of any type
-  (`okdpSqlName` and `okdpObjectName`: a string, and a whole number; the
-  fragments: a map); the
+  (`okdpSqlName` and `okdpObjectName`: a string, and a whole number;
+  `okdpGeneratedSecret` and a rule set's fragments: a map); the
   number of arguments is checked when the document is loaded. A call
   matching no overload fails the load, in any branch:
   `found no matching overload for '<function>' applied to '(<types>)'`.
@@ -40,8 +40,8 @@ The host functions are plain Go, and share these properties:
   expression, where Helm would often print `""`:
   `<where>${{ <expression> }}: <message>`
   ([compile errors](02_service_definition.md#compile-errors)).
-- **No bindings.** OKDP's functions read the compile's `release`, `service`
-  and OAuth client mode, not the expression's scope: a `vars` binding named
+- **No bindings.** OKDP's functions read the compile's `release` and
+  `service`, not the expression's scope: a `vars` binding named
   `release` does not change `okdpFullname`
   ([context](02_service_definition.md#context)).
 - **Helm's output.** A function reproducing a Helm or sprig one is compared
@@ -87,10 +87,11 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 
 ## Host functions
 
-`okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload` and
-`oidcClientSecret` are declared by the compiler's mandatory rule set,
-`okdpGeneratedSecret`'s template is its too
-([rule set](01_inputs_outputs.md#rule-set)): every compile has them.
+`okdpGeneratedSecret`'s template is the compiler's mandatory rule set's
+([rule set](01_inputs_outputs.md#rule-set)): every compile has the
+functions below. A rule set added to it declares functions of its own,
+which its compiles have besides these:
+[a rule set's functions](#a-rule-sets-functions).
 
 | Function | Returns | Helm equivalent |
 |---|---|---|
@@ -106,22 +107,15 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 | `okdpLabels(component)` | map | none |
 | `okdpSelectorLabels(component)` | map | none |
 | `okdpGeneratedSecret(args)` | list of objects | none |
-| `okdpPodSpec(args)` | map | none |
-| `okdpJob(args)` | list of objects | none |
-| `okdpSignInProxy(args)` | map | none |
-| `okdpWebWorkload(args)` | list of objects | none |
 | `okdpSqlName(id)`, `okdpSqlName(id, max)` | string | none |
 | `okdpObjectName(id)`, `okdpObjectName(id, max)` | string | none |
-| `oidcClientSecret(name)` | string | none |
 
 Each takes one argument (`okdpFullname`: zero or one; `okdpSqlName` and
-`okdpObjectName`: a string, and a whole number; the fragments: a map).
-`str`, `first`,
-`sha256`, `toJson`, `json.encode`, `toPrettyJson`, `toYaml` and `quote`
-belong to the
-language (github.com/okdp/cel2yaml); the `okdp` functions and `oidcClientSecret`
-to OKDP (the root package, `compiler`), which adds them to the compile's
-session.
+`okdpObjectName`: a string, and a whole number; `okdpGeneratedSecret`: a
+map). `str`, `first`, `sha256`, `toJson`, `json.encode`, `toPrettyJson`,
+`toYaml` and `quote` belong to the language (github.com/okdp/cel2yaml);
+the `okdp` functions to OKDP (the root package, `compiler`), which adds
+them to the compile's session.
 
 ### `str` and `first`
 
@@ -221,117 +215,6 @@ Two objects of one kind, namespace and name in an instance are refused
 that derived a name another way fails the compile of the instance, where
 it would have given two claimers one object.
 
-### Fragments: `okdpPodSpec`, `okdpJob`, `okdpSignInProxy`, `okdpWebWorkload`
-
-The workloads of a package, as functions that return the objects: a pod
-spec, a Job, a sign-in proxy, a web workload, hardened once instead of
-written in each package. A fragment is a template of the compiler in the
-mapping language (`internal/okdp/fragment-*.cel.yaml`, embedded), evaluated
-at each call on the arguments, which the mapping schema checks
-(`mapping.schema.json`, every violation at once, `additionalProperties:
-false`: a typo is an error), its cost counted in the compile's total. The
-objects a function returns are the package's own, in `objects` with
-`$spread`: the compile's policy applies to them as to any object (the
-namespace, no cluster-scoped kind, the hosts, no Secret in clear). They
-are CEL, in git with the compiler: nothing to publish, release or pin
-apart, and the compile sees them.
-
-**`okdpPodSpec(args)`** returns the `spec` of a pod, hardened. Every
-container, init containers included, gets
-`allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`,
-`runAsNonRoot: true`, `seccompProfile: RuntimeDefault` and
-`readOnlyRootFilesystem: true` unless the container says
-`readOnlyRootFilesystem: false`; the pod gets `runAsNonRoot` and the
-seccomp profile, and `automountServiceAccountToken: false` unless
-`automountServiceAccountToken: true`.
-
-| Key of `args` | Type | Meaning |
-|---|---|---|
-| `containers` | list, required | each: `name`, `image` (required; by digest in a reviewed package), `imagePullPolicy`, `command`, `args`, `env`, `envFrom`, `ports`, `resources`, `volumeMounts`, `livenessProbe`, `readinessProbe`, `startupProbe`, `lifecycle`, `workingDir`, `readOnlyRootFilesystem` (default `true`), `runAsUser`, `runAsGroup` (1 or more) |
-| `initContainers` | list | the same |
-| `volumes` | list | any volume but a `hostPath` |
-| `serviceAccountName`, `automountServiceAccountToken` | string, boolean | the account, and its token mounted (default `false`) |
-| `runAsUser`, `runAsGroup`, `fsGroup` | whole numbers, 1 or more | the pod's |
-| `restartPolicy`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `imagePullSecrets`, `priorityClassName`, `terminationGracePeriodSeconds` | as the pod spec's | passed as they are |
-
-There is no `securityContext`, `hostNetwork`, `hostPID`, `hostIPC` or
-`hostPath` in the arguments, nor `privileged`: a package that needs one
-writes its pod itself and is reviewed for it. The resources are the
-container's: a package passes its own values (`resources: ${{
-values.resources }}`).
-
-**`okdpJob(args)`** returns `[Job]`: `name` (required), `pod` (required,
-the arguments of `okdpPodSpec`; `restartPolicy: Never` unless it sets
-one), `component` (the component label), `backoffLimit` (1),
-`ttlSecondsAfterFinished` (300, the finished Job's logs),
-`activeDeadlineSeconds`,
-`labels`, `podLabels`, `annotations`, `podAnnotations`, and `hook`: `helm`
-(the events, `post-install,post-upgrade`: `helm.sh/hook`), `weight`,
-`deletePolicy` (`before-hook-creation`), `argocd` (`PreSync`, `Sync`,
-`PostSync`, `SyncFail`, `PostDelete`, `Skip`:
-`argocd.argoproj.io/hook`),
-`argocdDeletePolicy` (`BeforeHookCreation`). The labels are OKDP's
-([context](02_service_definition.md#context)), the arguments' over them.
-
-**`okdpSignInProxy(args)`** returns a map: `container` (oauth2-proxy by
-digest, the arguments of a container of `okdpPodSpec`), `volumes` (the CA
-bundle) and `objects` (its cookie secret, generated once in the cluster,
-`okdpGeneratedSecret`). It signs users in with the platform's OIDC, the
-instance's main OAuth client (`platform.oidcClientSecret`, declared in
-`oidcClients`), and lets in the members of `allowedGroups` of the groups
-claim: by default `platform.access.editors`, the project's editors and
-admins and the platform's administrators
-([context](02_service_definition.md#context)), never the realm's roles,
-which every project's people hold. It never skips the check of the email:
-a user whose email the provider has not verified is not let in (the
-realm's mapper, or the users' emails, must be verified).
-
-| Key of `args` | Type | Meaning |
-|---|---|---|
-| `host` | string, required | the host the users reach the service at: the OAuth client's redirect URL is `https://<host>/oauth2/callback` |
-| `upstream` | string, required | the URL of the service the proxy fronts |
-| `allowedGroups` | list | default `platform.access.editors`; empty fails: it would let in the realm |
-| `name` | DNS label | the Secret of the cookie secret, and the cookie's name unless `cookieName` is set; default `okdpFullname('oauth2-proxy')` |
-| `cookieName` | string | the cookie's name; default `_<name>_oauth2` |
-| `groupsClaim`, `caBundleSecret`, `image`, `port` (4180), `upstreamTimeout`, `cookieExpire` (`8h`), `resources` | | the claim (`groups`), the CA bundle Secret (default `global.okdp.tls.caBundleSecret`), the image (default by digest), the port, a duration for a service that holds a request open, the cookie's life, the proxy's resources (50m / 64Mi, 200m / 128Mi) |
-
-It fails when the platform's OIDC is disabled (`global.okdp.oidc.enabled`)
-or has no `issuerUri`, without `host` or `upstream`, or with no allowed
-group.
-
-**`okdpWebWorkload(args)`** returns the objects of a web workload: an
-optional `PersistentVolumeClaim`, the `Deployment` on the hardened pod, its
-`Service`, an `Ingress` and, with a sign-in proxy, a `NetworkPolicy` and the
-proxy's cookie secret. The first container of the pod is the application.
-
-| Key of `args` | Type | Meaning |
-|---|---|---|
-| `component` | DNS label | the component label, the selector's; the objects' name is `okdpFullname(component)` unless `name` is set; absent: no component label, the objects are the instance's own, named `okdpFullname()` |
-| `pod` | map, required | the arguments of `okdpPodSpec`; the proxy and the volume are added to it |
-| `port` | name or number, required | the application's port; a number with `signIn` |
-| `servicePort` | number | the Service's, 80 |
-| `replicas`, `strategy` | | 1; `Recreate` with a volume (ReadWriteOnce), else `RollingUpdate` |
-| `storage` | map | `size` (required), `volumeName` (`data`), `storageClassName`, `accessModes`, `keep` (true): the claim `<name>-<volumeName>` and the pod's volume of that name; the application mounts it |
-| `ingress` | map | `host` (required, the project's: [hosts](01_inputs_outputs.md#hosts)), `path`, `className`, `tlsSecretName`, `annotations` over `platform.ingressAnnotations` |
-| `signIn` | map | the arguments of `okdpSignInProxy` but `host` and `upstream`, which are the ingress's host and the application's port on the pod's loopback: the proxy is a sidecar, the Service reaches it alone (`targetPort: proxy`); needs `ingress` and a numeric `port` |
-| `networkPolicy` | boolean | with `signIn`, a NetworkPolicy that lets in the proxy's port alone (true): the application listens on the pod's address; where the platform opens the namespace's pods to each other (`global.okdp.network.policy`) they still reach it |
-| `labels`, `annotations`, `podAnnotations` | maps | over OKDP's labels; the Deployment's and the pod's annotations |
-
-```yaml
-# okdp.yaml (examples/05_fragments/input/catalog/okdp.yaml)
-objects:
-  - $spread: >-
-      ${{ okdpWebWorkload({'component': 'web', 'port': 8888,
-          'pod': {'containers': [{'name': 'notebook', 'image': image,
-                                   'ports': [{'name': 'http', 'containerPort': 8888}]}]},
-          'ingress': {'host': host}, 'signIn': {}}) }}
-  - $spread: ${{ okdpJob({'name': okdpFullname('seed'), 'pod': {...}, 'hook': {'helm': 'post-install'}}) }}
-```
-
-A fragment is for the workloads a package adds beside the upstream chart,
-or without one. The arguments are data, not templates: no `{{`, no
-function of the fragment in a string.
-
 ### `okdpGeneratedSecret`
 
 The objects of a Secret whose random values External Secrets Operator
@@ -395,26 +278,34 @@ okdpGeneratedSecret: the arguments don't meet the specifications of mapping.sche
 okdpGeneratedSecret: <name>: keys "<a>" and "<b>" give the same generator name "<n>"
 ```
 
-### `oidcClientSecret`
+### A rule set's functions
 
-`oidcClientSecret(name)`: the name of the Secret holding the OAuth client
-`name` of [`oidcClients`](02_service_definition.md#oidcclients), `''` (or
-null) for the main client; `name` is converted with `str`. In `dcr` mode
-(`platform.oidc.dcr.enabled`), the Secret its registration Job writes,
-`<release>-<namespace>[-<name>]-dcr`; otherwise, the Secret the platform
-provides, `creds-<release>-oauth2[-<name>]`
-([OAuth client objects](01_inputs_outputs.md#oauth-client-objects)).
-`oidcClientSecret('')` is `platform.oidcClientSecret`.
+A rule set declares the functions mappings call besides these, in
+`rules.yaml` `functions` ([functions](05_rules.md#functions)); a compile
+given the set has them, one without it fails at load on a call of one,
+in any branch: `undeclared reference to '<function>'`. Each takes one
+argument and is one of two kinds.
 
-```yaml
-env:
-  - name: CONSOLE_CLIENT_ID
-    valueFrom: {secretKeyRef: {name: "${{ oidcClientSecret('console') }}", key: client_id}}
-```
+- **A fragment** is a template of the set in the mapping language,
+  evaluated at each call on its argument, a map, which the mapping schema
+  checks under the function's name (every violation at once,
+  `<function>: the arguments don't meet the specifications of
+  mapping.schema.json:`). It sees `args`, `release`, `labels` (OKDP's,
+  without component), `platform` and `global`, and returns its values,
+  or the one `result` names. Its cost counts in the compile's total.
+- **A document** computes the result from the argument of the call,
+  `arg`, `release` and `platform`, and returns the value `result` names.
 
-It depends on the mode and the name only: it does not check that `name` is
-a client of `oidcClients`, and does not know a client's `secret`. It is
-available in every expression, `vars` and `errors` included.
+The objects a fragment returns are the package's own, in `objects` with
+`$spread`: the compile's checks apply to them as to any object (the
+namespace, no cluster-scoped kind, no Secret in clear, the set's own
+hooks). The arguments are data, not templates: no `{{`, no function of
+the fragment in a string. They are CEL, in git with the set: nothing to
+publish, release or pin apart, and the compile sees them.
+
+The security set's functions, the hardened pod and the workloads built
+on it, and the Secret of an OAuth client: [its
+functions](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/03_functions.md).
 
 ## From Helm
 

@@ -24,7 +24,7 @@ func TestCatalog(t *testing.T) {
 		{Name: "sandbox-dependencies", Role: RoleCatalog, FS: fstest.MapFS{
 			"catalog/keycloak/7.3.2-1.0.0/Chart.yaml": file("name: keycloak\n"),
 			"contracts/s3.schema.json":                file("{}"),
-			"contracts/oidc.schema.json":              file("{}"),
+			"contracts/http.schema.json":              file("{}"),
 		}},
 	})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestCatalog(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	if got := strings.Join(names, " "); got != "oidc.schema.json s3.schema.json" {
+	if got := strings.Join(names, " "); got != "http.schema.json s3.schema.json" {
 		t.Errorf("contracts: got %s", got)
 	}
 }

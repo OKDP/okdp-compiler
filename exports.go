@@ -45,18 +45,6 @@ const (
 	DefaultCatalogRef = repository.DefaultCatalogRef
 )
 
-// The tables and checks of the rule set that a host's policy reads.
-const (
-	TableDeniedUpstreamKeys  = ruleset.TableDeniedUpstreamKeys
-	TableImageKeySuffixes    = ruleset.TableImageKeySuffixes
-	TableHostAnnotations     = ruleset.TableHostAnnotations
-	TableIngressValueKeys    = ruleset.TableIngressValueKeys
-	TableIngressHostKeys     = ruleset.TableIngressHostKeys
-	TableIngressHostListKeys = ruleset.TableIngressHostListKeys
-	CheckUpstreamKey         = ruleset.CheckUpstreamKey
-	CheckHost                = ruleset.CheckHost
-)
-
 // FinalValues returns Helm's merge of the final values of in, as a
 // compile does without a Finalize; a Finalize calls it to add a policy and
 // the checks against the upstream charts, which the compiler does not
@@ -84,15 +72,6 @@ func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, se
 // final values it reads outside a compile.
 func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, values map[string]map[string]any) error {
 	return okdp.CheckFinalValues(ctx, rules, svc, namespace, settings, values)
-}
-
-// CheckIngressHosts returns nil when the objects of an instance of svc in
-// namespace serve only the hosts that a project that is not privileged
-// may serve. settings are the platform's (Result.Settings). It reads the
-// hosts of Ingresses, Certificates, Gateway API routes and listeners, and
-// of host annotations. It refuses an Ingress that serves every host.
-func CheckIngressHosts(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, objects []map[string]any) error {
-	return okdp.CheckIngressHosts(ctx, rules, svc, namespace, settings, objects)
 }
 
 // ParseInstance reads an instance.yaml.

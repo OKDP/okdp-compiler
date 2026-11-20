@@ -4,8 +4,8 @@
 // dot, and a bracketed key that ends with * (a glob) for every key with
 // that prefix:
 //
-//	ingress.hosts
-//	filer.ingresses.http.annotations["nginx.ingress.kubernetes.io/auth-*"]
+//	service.ports
+//	filer.servers.http.annotations["example.org/auth-*"]
 //	config["spark.ui.filters"]
 //	config["spark.history.*"]
 //

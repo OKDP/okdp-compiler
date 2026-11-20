@@ -1,0 +1,6 @@
+# exampleSettings: what a fragment sees of the instance, under the prefix
+# of the argument, app when not given. Input: args, release, labels,
+# platform, global.
+values:
+  name: ${{ args.?prefix.orValue("app") + "-" + release.name }}
+  viewers: ${{ platform.access.viewers }}

@@ -18,7 +18,7 @@ import (
 func TestLoadDefinition(t *testing.T) {
 	const chartYAML = "apiVersion: v2\nname: demo\nversion: 1.0.0\ndependencies: [{name: app, repository: https://x, version: 1.0.0}]\n"
 	okdpYAML := `roles: [web]
-dependsOn: [ingress]
+dependsOn: [database]
 require: [a, b]
 defaults: {app: app.defaults.yaml}
 upstream: {app: {protect: [p]}}
@@ -39,7 +39,7 @@ instance: {usage: '${{ n }}'}
 		t.Errorf("Chart: got %#v", d.Chart)
 	}
 	p := d.Package
-	if !reflect.DeepEqual([][]string{p.Roles, p.DependsOn, p.Require}, [][]string{{"web"}, {"ingress"}, {"a", "b"}}) || !reflect.DeepEqual(p.Defaults, map[string]string{"app": "app.defaults.yaml"}) ||
+	if !reflect.DeepEqual([][]string{p.Roles, p.DependsOn, p.Require}, [][]string{{"web"}, {"database"}, {"a", "b"}}) || !reflect.DeepEqual(p.Defaults, map[string]string{"app": "app.defaults.yaml"}) ||
 		!reflect.DeepEqual(p.Upstream, chart.Upstream{Keys: map[string]chart.UpstreamKey{"app": {Accept: true, Protect: []string{"p"}}}}) {
 		t.Errorf("Package: got %#v", p)
 	}
@@ -47,7 +47,7 @@ instance: {usage: '${{ n }}'}
 		t.Errorf("got %#v", d)
 	}
 	svc, err := d.service()
-	want := &Service{Name: "demo", Version: "1.0.0", Roles: []string{"web"}, DependsOn: []string{"ingress"}, Require: []string{"a", "b"}, Charts: chart.Specs{
+	want := &Service{Name: "demo", Version: "1.0.0", Roles: []string{"web"}, DependsOn: []string{"database"}, Require: []string{"a", "b"}, Charts: chart.Specs{
 		"app": {Source: app.Ref(), Defaults: "app.defaults.yaml", Upstream: true, Protect: []string{"p"}},
 	}}
 	if err != nil || !reflect.DeepEqual(svc, want) {

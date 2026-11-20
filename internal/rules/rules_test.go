@@ -49,7 +49,7 @@ func TestLoadRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Version() == "" || !r.Has(TableDeniedUpstreamKeys, "hostPath") || r.List(TableEngineNamespaces)[0] != "argocd" {
+	if r.Version() == "" || !r.Has(TableClusterScopedKinds, "/Namespace") || r.List(TableEngineNamespaces)[0] != "argocd" {
 		t.Errorf("the mandatory set under the set added: %+v", r)
 	}
 	same := func(s string) string { return s }
@@ -71,9 +71,9 @@ func TestLoadRules(t *testing.T) {
 		want string
 	}{
 		"missing table": {func(s string) string {
-			return strings.Replace(s, "  ingressValueKeys:\n    values: [ingress, ingresses]\n", "", 1)
-		}, "tables: missing ingressValueKeys"},
-		"unknown table": {func(s string) string { return strings.Replace(s, "  ingressValueKeys:\n", "  renamed:\n", 1) }, "tables: unknown renamed"},
+			return strings.Replace(s, "  defaultProjectGlobals:\n    values: [project, storageClass]\n", "", 1)
+		}, "tables: missing defaultProjectGlobals"},
+		"unknown table": {func(s string) string { return strings.Replace(s, "  defaultProjectGlobals:\n", "  renamed:\n", 1) }, "tables: unknown renamed"},
 		"no mapping schema": {func(s string) string {
 			return strings.Replace(s, "  mapping: schemas/mapping.schema.json\n", "", 1)
 		}, "schemas: mapping is required"},
@@ -81,7 +81,7 @@ func TestLoadRules(t *testing.T) {
 			return strings.Replace(s, "charts:\n  objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 0.1.0}\n", "", 1)
 		}, "charts: objects is required"},
 		"unknown check": {func(s string) string {
-			return strings.Replace(s, "  host: checks/host.cel.yaml\n", "  host: checks/host.cel.yaml\n  extra: checks/objects.cel.yaml\n", 1)
+			return strings.Replace(s, "  release: checks/release.cel.yaml\n", "  release: checks/release.cel.yaml\n  extra: checks/objects.cel.yaml\n", 1)
 		}, "checks: unknown extra"},
 		"missing check": {func(s string) string { return strings.Replace(s, "  release: checks/release.cel.yaml\n", "", 1) }, "checks: missing release"},
 		"no such file":  {func(s string) string { return strings.Replace(s, "checks/release.cel.yaml", "checks/none.cel.yaml", 1) }, "checks: release"},
@@ -102,22 +102,22 @@ func TestLoadRules(t *testing.T) {
 	}
 }
 
-// TestRulesTables: a rule set's table is what the walkers look for: a key
-// the table lists denied, one it no longer lists not.
+// TestRulesTables: a rule set's table is what the walkers look for: a
+// value the table lists refused, one it no longer lists not.
 func TestRulesTables(t *testing.T) {
-	r, err := loadEdited(t, func(s string) string { return strings.Replace(s, "      - hostPath\n", "      - custom\n", 1) })
+	r, err := loadEdited(t, func(s string) string {
+		return strings.Replace(s, "values: [argocd, flux-system, okdp-releases]", "values: [custom, flux-system, okdp-releases]", 1)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	added := r.Added(TableDeniedUpstreamKeys, M{"policy": M{"upstream": M{"deny": []any{"added"}}}})
-	for key, want := range map[string]string{
-		"custom":   "(a pod's privileges",
-		"added":    "(global.okdp.policy.upstream.deny)",
-		"hostPath": "",
+	for ns, want := range map[string]string{
+		"custom": "a deployer engine's",
+		"argocd": "",
 	} {
-		err := r.Refuse(context.Background(), CheckUpstreamKey, M{"key": key, "value": true, "at": key, "ns": "demo", "added": added})
+		err := r.Refuse(context.Background(), CheckNamespaceRule, M{"ns": ns})
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
-			t.Errorf("%s: got %v, want %q", key, err, want)
+			t.Errorf("%s: got %v, want %q", ns, err, want)
 		}
 	}
 }
@@ -150,7 +150,7 @@ func TestMandatory(t *testing.T) {
 	if _, err := r.Values(ctx, "deployerRole", M{}); err != nil && strings.Contains(err.Error(), "no document") {
 		t.Errorf("the document deployerRole: %v", err)
 	}
-	if !r.Has(TableEngineNamespaces, "argocd") || !r.Has(TableDeniedUpstreamKeys, "hostPath") {
+	if !r.Has(TableEngineNamespaces, "argocd") || !r.Has(TableClusterScopedKinds, "/Namespace") {
 		t.Error("the mandatory set lost the tables of the checks")
 	}
 	if !r.Whole([]string{"claims", "db"}) || !slices.Contains(r.List(TablePlatformKeysAbove), "provisioning") || len(r.List(TableProjectRoles)) != 3 {
@@ -162,8 +162,11 @@ func TestMandatory(t *testing.T) {
 	if got := r.Labels("svc", "rel", "", true); got["app.kubernetes.io/instance"] != "rel" {
 		t.Errorf("the labels: %v", got)
 	}
-	if len(r.Fragments()) != 4 || len(r.DocumentFuncs()) != 1 || r.GeneratedSecret().Data == nil || len(r.OwnObjects()) != 1 || r.PlatformSchema() == nil {
-		t.Errorf("the functions and templates: %+v", r)
+	if r.GeneratedSecret().Data == nil || r.PlatformSchema() == nil {
+		t.Errorf("the templates: %+v", r)
+	}
+	if len(r.Fragments()) != 0 || len(r.DocumentFuncs()) != 0 || len(r.OwnObjects()) != 0 || len(r.Sections()) != 0 {
+		t.Errorf("the mandatory set gives functions or sections, which only a set added to it gives: %+v", r)
 	}
 	if r.MappingSchema() == nil || r.Charts()["objects"].Chart != "okdp-objects" {
 		t.Error("the mandatory set lost the mapping schema or the objects chart")
@@ -181,7 +184,7 @@ func TestBothSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Fragments()) != 4 || r.PlatformSchema() == nil || len(r.List(TableProjectRoles)) != 3 {
+	if r.GeneratedSecret().Data == nil || r.PlatformSchema() == nil || len(r.List(TableProjectRoles)) != 3 {
 		t.Errorf("the mandatory set is not applied: %+v", r)
 	}
 	if err := r.Refuse(ctx, CheckNamespaceRule, M{"ns": "argocd"}); err == nil {
@@ -196,8 +199,13 @@ func TestBothSets(t *testing.T) {
 }
 
 // TestSetsDisjoint: a rule the mandatory set gives is refused in the set
-// given: neither replaces the other's, a check least of all.
+// given: neither replaces the other's, a check least of all. The mandatory
+// set read here also gives a function and a section, which the compiler's
+// own gives none of.
 func TestSetsDisjoint(t *testing.T) {
+	withFunctions := func(s string) string {
+		return s + "functions:\n  noted: {document: deployerRole}\nsections: [notes]\n"
+	}
 	for name, tc := range map[string]struct {
 		rest string
 		want string
@@ -207,15 +215,15 @@ func TestSetsDisjoint(t *testing.T) {
 		"document": {"documents:\n  scope: objects/deployer-role.cel.yaml\n", "documents: scope"},
 		"schema":   {"schemas:\n  platform: schemas/mapping.schema.json\n", "schemas: platform"},
 		"chart":    {"charts:\n  objects: {repository: oci://example.com/charts, chart: okdp-objects, version: 1.0.0}\n", "charts: objects"},
-		"function": {"functions: {okdpJob: {document: deployerRole}}\n", "functions: okdpJob"},
-		"template": {"templates: {oidcClient: objects/deployer-role.cel.yaml}\n", "templates: oidcClient"},
-		"section":  {"sections: [oidcClients]\n", "sections: oidcClients"},
+		"function": {"functions: {noted: {document: deployerRole}}\n", "functions: noted"},
+		"template": {"templates: {generatedSecret: objects/deployer-role.cel.yaml}\n", "templates: generatedSecret"},
+		"section":  {"sections: [notes]\n", "sections: notes"},
 		"names":    {"names: {credentialsSecret: a, connectionSecret: b, claimSecret: c, credentialsLabel: d}\n", "names:"},
 		"labels":   {"labels: {selector: {}, component: a, common: {}}\n", "labels:"},
 		"keepSync": {"keepSync: {annotation: a, value: b, syncOptions: c, options: []}\n", "keepSync:"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := LoadRules(addedSet(t, tc.rest))
+			_, err := loadOver(mandatoryCopy(t, withFunctions), addedSet(t, tc.rest))
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "replaces none") {
 				t.Errorf("got %v, want an error of %q", err, tc.want)
 			}

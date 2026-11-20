@@ -59,23 +59,23 @@ func TestUpstreamYAML(t *testing.T) {
 // not a dependency fails.
 func TestNewSpecs(t *testing.T) {
 	workspace := Ref{Repository: "https://x", Chart: "workspace", Version: "1.0.0"}
-	gateway := Ref{Repository: "oci://x/charts", Chart: "gateway", Version: "2.0.0"}
+	router := Ref{Repository: "oci://x/charts", Chart: "router", Version: "2.0.0"}
 	meta := Metadata{APIVersion: "v2", Name: "demo", Version: "1.0.0", Dependencies: []Dependency{
 		{Name: "workspace", Alias: "api", Repository: workspace.Repository, Version: workspace.Version},
 		{Name: "workspace", Alias: "scheduler", Repository: workspace.Repository, Version: workspace.Version},
-		{Name: "gateway", Repository: gateway.Repository, Version: gateway.Version},
+		{Name: "router", Repository: router.Repository, Version: router.Version},
 	}}
 	defaults := map[string]string{"api": "api.defaults.yaml"}
-	s, err := NewSpecs(meta, defaults, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true, Protect: []string{"mode"}, Append: []string{"env"}}, "gateway": {}}})
+	s, err := NewSpecs(meta, defaults, Upstream{Keys: map[string]UpstreamKey{"api": {Accept: true, Protect: []string{"mode"}, Append: []string{"env"}}, "router": {}}})
 	want := Specs{
 		"api":       {Source: workspace, Defaults: "api.defaults.yaml", Upstream: true, Protect: []string{"mode"}, Append: []string{"env"}},
 		"scheduler": {Source: workspace},
-		"gateway":   {Source: gateway},
+		"router":    {Source: router},
 	}
 	if err != nil || !reflect.DeepEqual(s, want) {
 		t.Errorf("got %#v (%v)", s, err)
 	}
-	if s, err := NewSpecs(meta, nil, Upstream{All: true}); err != nil || !s["api"].Upstream || !s["scheduler"].Upstream || !s["gateway"].Upstream || s["api"].Protect != nil {
+	if s, err := NewSpecs(meta, nil, Upstream{All: true}); err != nil || !s["api"].Upstream || !s["scheduler"].Upstream || !s["router"].Upstream || s["api"].Protect != nil {
 		t.Errorf("upstream: true: got %#v (%v)", s, err)
 	}
 	if s, err := NewSpecs(Metadata{}, nil, Upstream{All: true}); err != nil || len(s) != 0 {

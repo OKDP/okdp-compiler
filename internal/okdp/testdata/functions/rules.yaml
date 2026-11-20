@@ -1,0 +1,18 @@
+# A rule set added to the mandatory one, for the tests of what a set gives
+# mappings: two fragments, a function a document computes, and a section of
+# its own, each checked against the mapping schema the set adds.
+apiVersion: okdp-compiler/rules.v1
+name: functions
+version: 1.0.0
+schemas:
+  mapping: mapping.schema.json
+functions:
+  # A fragment whose value objects is the result.
+  exampleConfigMap: {fragment: config-map.cel.yaml, result: objects}
+  # A fragment without result: every value it gives.
+  exampleSettings: {fragment: settings.cel.yaml}
+  # A function a document computes, on the argument of the call.
+  exampleName: {document: name, result: name}
+documents:
+  name: name.cel.yaml
+sections: [notes]
