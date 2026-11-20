@@ -7,7 +7,7 @@ require (
 	github.com/okdp/cel2yaml v0.2.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	go.yaml.in/yaml/v3 v3.0.6
-	golang.org/x/text v0.43.0
+	golang.org/x/text v0.44.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
