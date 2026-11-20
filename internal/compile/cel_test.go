@@ -341,7 +341,8 @@ errors:
 }
 
 // TestRefusals: the messages of a document's errors, one error each,
-// joined: one a line, each an error.
+// joined: one a line, each an error; a map item's message is its
+// message key.
 func TestRefusals(t *testing.T) {
 	_, err := Eval(context.Background(), cel2yaml.NewSession(0), M{}, []string{"output"}, Source{Name: "m.yaml", Data: []byte("errors:\n  - first\n  - second\n")})
 	if err == nil || err.Error() != "first\nsecond" {
@@ -349,5 +350,15 @@ func TestRefusals(t *testing.T) {
 	}
 	if u, ok := err.(interface{ Unwrap() []error }); !ok || len(u.Unwrap()) != 2 || u.Unwrap()[0].Error() != "first" {
 		t.Errorf("one error a message: %v", err)
+	}
+	// A map item is read as a check's, {path, message}: its message.
+	_, err = Eval(context.Background(), cel2yaml.NewSession(0), M{}, []string{"output"}, Source{Name: "m.yaml", Data: []byte("errors:\n  - {path: replicas, message: no replicas}\n")})
+	if err == nil || err.Error() != "no replicas" {
+		t.Errorf("a map item: got %v", err)
+	}
+	// A map item without a message refuses with the item printed.
+	_, err = Eval(context.Background(), cel2yaml.NewSession(0), M{}, []string{"output"}, Source{Name: "m.yaml", Data: []byte("errors:\n  - {path: replicas}\n")})
+	if err == nil || err.Error() != "map[path:replicas]" {
+		t.Errorf("a map item without a message: got %v", err)
 	}
 }

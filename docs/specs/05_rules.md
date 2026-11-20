@@ -613,7 +613,8 @@ key; nil rules read it for the mandatory set.
 ## Functions
 
 `rules.yaml` declares what mappings call, in `functions`; the mandatory
-set declares none, and a set added to it declares its own. A fragment is
+set declares `okdpGeneratedSecret`, and a set added to it declares its
+own. A fragment is
 a template evaluated on its arguments, which are checked against the
 mapping schema under the function's name. A document function evaluates
 a document of `documents`. `result` names the value returned; without
@@ -623,12 +624,12 @@ function. The security set declares `okdpPodSpec`, `okdpJob`,
 `okdpSignInProxy`, `okdpWebWorkload` and `oidcClientSecret` ([its
 functions](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#functions)).
 
-The compiler's own function `okdpGeneratedSecret` renders a template of
-the mandatory set:
+The mandatory set declares one fragment, `okdpGeneratedSecret`, which
+the compiler also renders for a `provides` secret's `generate`:
 
 | Function | File | Returns |
 |---|---|---|
-| `okdpGeneratedSecret` | `fragments/generated-secret.cel.yaml`, the template `generatedSecret` | `objects` |
+| `okdpGeneratedSecret` | `fragments/generated-secret.cel.yaml` | `objects` |
 
 ### okdpGeneratedSecret
 

@@ -103,8 +103,14 @@ func (r *RuleSet) MappingSchema() *chart.Schema { return r.mappingSchema }
 // Fragments returns the functions of mappings that are a template each.
 func (r *RuleSet) Fragments() []Fragment { return r.fragments }
 
-// GeneratedSecret returns the template of a generated Secret's objects.
-func (r *RuleSet) GeneratedSecret() Template { return r.templates[templateGeneratedSecret] }
+// Fragment returns the fragment function name, if r has one.
+func (r *RuleSet) Fragment(name string) (Fragment, bool) {
+	i := slices.IndexFunc(r.fragments, func(f Fragment) bool { return f.Name == name })
+	if i < 0 {
+		return Fragment{}, false
+	}
+	return r.fragments[i], true
+}
 
 // Keep returns what Argo CD is told of the objects Helm keeps.
 func (r *RuleSet) Keep() KeepSync { return r.keep }
@@ -178,8 +184,6 @@ func readTemplate(fsys fs.FS, file string) (Template, error) {
 	}
 	return Template{Name: path.Base(file), Data: b}, nil
 }
-
-const templateGeneratedSecret = "generatedSecret"
 
 // loadNames reads names, keepSync and labels, which one set only may give,
 // and sections, which each set adds to.
@@ -278,8 +282,8 @@ func (r *RuleSet) loadFunctions(fsys fs.FS, doc M) error {
 }
 
 func (r *RuleSet) hasFunction(name string) bool {
-	return slices.ContainsFunc(r.fragments, func(f Fragment) bool { return f.Name == name }) ||
-		slices.ContainsFunc(r.documentFuncs, func(f DocumentFunc) bool { return f.Name == name })
+	_, ok := r.Fragment(name)
+	return ok || slices.ContainsFunc(r.documentFuncs, func(f DocumentFunc) bool { return f.Name == name })
 }
 
 // taken is the error of a rule that a set read before already gives: the

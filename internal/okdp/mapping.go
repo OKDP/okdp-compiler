@@ -11,7 +11,7 @@ package okdp
 import (
 	"cmp"
 	"context"
-	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -97,16 +97,6 @@ func functions(ctx context.Context, inst *instance, session **cel2yaml.Session) 
 				cel.FunctionBinding(func(...ref.Val) ref.Val { return types.String(fullname(release, "")) })),
 			cel.Overload("okdpFullname_dyn", []*cel.Type{cel.DynType}, cel.StringType,
 				cel2yaml.Unary(func(v any) (any, error) { return fullname(release, value.Str(v)), nil }))), "okdpFullname_void", "okdpFullname_dyn"),
-		unary("okdpGeneratedSecret", "okdpGeneratedSecret_map", func(v any) (any, error) {
-			if inst.rules.GeneratedSecret().Data == nil {
-				return nil, errors.New("okdpGeneratedSecret: the rule set of the compile has no such template")
-			}
-			args, err := ruleset.SchemaValues(inst.rules.MappingSchema(), "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json", M{"okdpGeneratedSecret": v})
-			if err != nil {
-				return nil, err
-			}
-			return generatedSecret(ctx, *session, inst, value.AsMap(args["okdpGeneratedSecret"]))
-		}),
 	}
 	opts = append(opts, labelFunctions(inst.rules, inst.svc.Name, release)...)
 	opts = append(opts, nameFunctions()...)
@@ -114,13 +104,22 @@ func functions(ctx context.Context, inst *instance, session **cel2yaml.Session) 
 	return append(opts, documentFunctions(ctx, inst)...)
 }
 
-// generatedSecret implements okdpGeneratedSecret, from the rule set's
-// template. args is already checked against mapping.schema.json.
+// generatedSecret returns the objects of a generated Secret for a
+// provides secret's generate: the template of okdpGeneratedSecret, a
+// fragment of the mandatory rule set, on args, which the compile builds.
 func generatedSecret(ctx context.Context, session *cel2yaml.Session, inst *instance, args M) ([]any, error) {
+	f, ok := inst.rules.Fragment(generatedSecretFunc)
+	if !ok {
+		return nil, fmt.Errorf("%s: the rule set of the compile has no such function", generatedSecretFunc)
+	}
 	scope := M{"args": args, "release": M{"name": inst.release, "namespace": inst.namespace}, "labels": inst.rules.Labels(inst.svc.Name, inst.release, "", false)}
-	v, err := evalTemplate(ctx, session, inst.rules.GeneratedSecret(), scope)
-	return value.AsList(v["objects"]), err
+	v, err := evalTemplate(ctx, session, f.Template, scope)
+	return value.AsList(v[f.Result]), err
 }
+
+// generatedSecretFunc is the fragment of the mandatory rule set that
+// renders a generated Secret.
+const generatedSecretFunc = "okdpGeneratedSecret"
 
 // documentFunctions returns the functions that the rule set computes
 // with a document. A document sees the argument of the call, the release

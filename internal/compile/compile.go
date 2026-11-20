@@ -66,37 +66,29 @@ type binding struct {
 
 // Eval evaluates the document that the sources srcs make together on the
 // context scope, in the session s. sections names the sections of the
-// document; Eval returns those it has. It first builds the whole document, so a wrong directive or expression
-// fails in every branch, even one that is not taken. It then evaluates
-// vars, the errors section, whose messages it collects before it fails,
-// and the sections. An error starts with the name of its source, then
-// its path (okdp.yaml: objects[1]: ...).
+// document; Eval returns those it has. It first builds the whole
+// document (Prepare), so a wrong directive or expression fails in every
+// branch, even one that is not taken. It then evaluates vars, the errors
+// section, whose messages it joins into one error, one each, and the
+// sections (Prepared.Eval). An error starts with the name of its source,
+// then its path (okdp.yaml: objects[1]: ...).
 func Eval(ctx context.Context, s *cel2yaml.Session, scope M, sections []string, srcs ...Source) (*Doc, error) {
-	var d *Doc
-	err := s.Document(func() error {
-		t, err := build(s, srcs, slices.Sorted(maps.Keys(scope)), sections)
-		if err != nil {
-			return err
-		}
-		if scope, err = t.bind(ctx, scope); err != nil {
-			return err
-		}
-		d = &Doc{Sections: M{}, Written: t.written}
-		for _, k := range sections {
-			if n, ok := t.sections[k]; ok {
-				v, _, err := n.Eval(ctx, scope)
-				if err != nil {
-					return t.at(k, err)
-				}
-				d.Sections[k] = v
-			}
-		}
-		return nil
-	})
+	p, err := Prepare(s, slices.Collect(maps.Keys(scope)), sections, srcs...)
 	if err != nil {
 		return nil, err
 	}
-	return d, nil
+	values, problems, err := p.Eval(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	if len(problems) > 0 {
+		refused := make([]error, len(problems))
+		for i, pr := range problems {
+			refused[i] = errors.New(pr.Message)
+		}
+		return nil, errors.Join(refused...)
+	}
+	return &Doc{Sections: values, Written: p.t.written}, nil
 }
 
 // Prepared is a document built once (Prepare) and evaluated on many
@@ -140,7 +132,13 @@ func (p *Prepared) Eval(ctx context.Context, scope M) (M, []Problem, error) {
 		}
 		for _, i := range value.AsList(items) {
 			if m, ok := i.(M); ok {
-				out = append(out, Problem{Path: value.Str(m["path"]), Message: value.Str(m["message"])})
+				// An item without a message still refuses, with the item
+				// as it is written.
+				msg := value.Str(m["message"])
+				if msg == "" {
+					msg = value.Str(m)
+				}
+				out = append(out, Problem{Path: value.Str(m["path"]), Message: msg})
 			} else if msg := value.Str(i); msg != "" {
 				out = append(out, Problem{Message: msg})
 			}
@@ -160,30 +158,6 @@ func (p *Prepared) Eval(ctx context.Context, scope M) (M, []Problem, error) {
 		return nil
 	})
 	return sections, out, err
-}
-
-// bind returns the scope of the sections of t: the context outer plus
-// the vars bindings. It then evaluates the errors section, and returns
-// its messages joined, an error each.
-func (t *document) bind(ctx context.Context, outer M) (M, error) {
-	scope, err := t.vars2scope(ctx, outer)
-	if err != nil {
-		return nil, err
-	}
-	rules, _, err := t.errors.Eval(ctx, scope)
-	if err != nil {
-		return nil, t.at("errors", err)
-	}
-	var refused []error
-	for _, r := range value.AsList(rules) {
-		if msg := value.Str(r); msg != "" {
-			refused = append(refused, errors.New(msg))
-		}
-	}
-	if len(refused) > 0 {
-		return nil, errors.Join(refused...)
-	}
-	return scope, nil
 }
 
 // vars2scope returns a copy of the context outer with the vars bindings

@@ -722,7 +722,8 @@ build renders
     declaration, as the compile of the tree checks every connection of
     a context: its contract, its fields, none secret, its required
     ones, its types, its `secretRef` against the store of the
-    platform's values; the compile's error, at `connections.<name>`.
+    platform's values and its provider; the compile's error, at
+    `connections.<name>`.
   - The names of the claims: `compiler.NamedClaimID(project, name)`,
     `<project>.<name>`, the output its provider publishes for it;
     `compiler.IsClaimID(name)`, a name of that form, DNS-1123 labels

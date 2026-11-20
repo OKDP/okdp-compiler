@@ -1061,7 +1061,9 @@ errors:
 ([control flow](03_control_flow.md)): a list, whose items `$if` leaves out
 and `$for` and `$spread` multiply, or one expression giving a list
 (`errors: ${{ ... }}`). Each item it gives that is not empty is a message,
-as text ([`str`](04_functions.md#str-and-first)). A message is the `$value`
+as text ([`str`](04_functions.md#str-and-first)); a map is read as a rule
+set's check reads one, `{path, message}`, its `message` the message, or
+the map printed as text when it has none. A message is the `$value`
 of an item with its condition, `$if`: it is evaluated only when the
 condition holds, and may read what exists only then (`db.okdp.ref` of a
 database connection). Every item is evaluated; when there is any message,
@@ -1080,8 +1082,7 @@ reference, which connection and which provider
 ([what a reference requires](01_inputs_outputs.md#what-a-reference-requires)).
 
 A value that is not a list (null included) gives no message, and an item
-of another form is printed as text: a map, `{$if: ..., message: ...}`,
-prints as `map[message:...]`. An item whose evaluation fails stops the
+of another form is printed as text. An item whose evaluation fails stops the
 compile with that error, prefixed with the file and the position of the
 item as written (`okdp.yaml: errors[1]: `).
 

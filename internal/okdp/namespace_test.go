@@ -1074,6 +1074,55 @@ func TestCompileAllSecretTargets(t *testing.T) {
 	}
 }
 
+// TestCompileAllSharedProviderSecret: a claimer of another namespace
+// whose provider is refused for an output it shares with another is
+// compiled again before the Secrets are compared: its claim gets no
+// output, so the copy of the credentials its first compile wrote does not
+// refuse an instance of its namespace that writes a Secret of that name.
+func TestCompileAllSharedProviderSecret(t *testing.T) {
+	contracts := fstest.MapFS{"server.schema.json": {Data: []byte(`{"properties": {"host": {"type": "string"}, "password": {"type": "string", "x-okdp-secret": true}}, "required": ["host"]}`)}}
+	d := *pgDef
+	d.Okdp = []byte(`
+provides:
+  - $for: c in claims
+    $each: {contract: server, name: '${{ c.id }}', values: {host: h}, secretRef: {name: '${{ c.id }}-credentials'}}
+  - {contract: server, name: x, values: {host: x}}
+`)
+	store := ContextLayer{Values: M{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}}}
+	with := func(inst Instance) Instance {
+		inst.Inputs.Contracts = contracts
+		inst.Inputs.Context = append(inst.Inputs.Context, store)
+		return inst
+	}
+	innocent := node("i", M{"writes": []any{M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": "demo-app-demo.demo-app.db-credentials"}, "type": "Opaque"}}})
+	innocent.Definition = writerDef
+	instances := []Instance{
+		with(claimInstance(&d, "data", "pg", M{})),
+		with(claimInstance(&d, "data", "pg2", M{})),
+		with(withDefault(claimInstance(appDef, "demo", "demo-app", M{"db": M{}}), "data/pg")),
+		innocent,
+	}
+	want := map[string]string{
+		"data/pg":       `error: provides "x" (server): pg2 publishes an output of that contract and name too, a reference to it would not know which`,
+		"data/pg2":      `error: provides "x" (server): pg publishes an output of that contract and name too, a reference to it would not know which`,
+		"demo/demo-app": `error: db: claim "demo.demo-app.db" (server): data/pg publishes no output for it (data/pg does not compile either: what it publishes is unknown)`,
+		"demo/demo-i":   "",
+	}
+	for _, order := range permutations(instances) {
+		got := map[string]string{}
+		for i, o := range CompileAll(context.Background(), order) {
+			in := order[i].Inputs
+			got[in.Namespace+"/"+in.Release] = ""
+			if o.Err != nil {
+				got[in.Namespace+"/"+in.Release] = "error: " + o.Err.Error()
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got  %q\nwant %q", got, want)
+		}
+	}
+}
+
 // TestCompileAllDeclaredConnections: every connection of an instance's
 // context is checked at its declaration, referenced or not, each that
 // fails at connections.<name>: the instance is refused, the others of

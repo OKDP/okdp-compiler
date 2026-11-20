@@ -4,11 +4,12 @@
 package rules
 
 import (
-	"cmp"
 	"fmt"
+	"regexp"
 	"slices"
-	"strconv"
 	"strings"
+
+	"github.com/okdp/okdp-compiler/chart"
 )
 
 // CoreSet is the name of the compiler's mandatory rule set.
@@ -22,7 +23,7 @@ type namedSet struct{ name, version string }
 // name no set read before has. Each version is MAJOR.MINOR.PATCH, with an
 // optional -prerelease, so that a tree can put a constraint on it.
 func (r *RuleSet) addSet(name, version string) error {
-	if _, err := parseVersion(version); err != nil {
+	if err := checkVersion(version); err != nil {
 		return fmt.Errorf("%s: version: %w", RulesFile, err)
 	}
 	switch {
@@ -75,104 +76,31 @@ func (r *RuleSet) Require(name, constraint string) error {
 	if !ok {
 		return fmt.Errorf("the platform requires the rule set %s, which the compile was not given: give it with okdp-compile --rules (compiler.LoadRules)", name)
 	}
-	v, err := parseVersion(version)
-	if err != nil || !match(v) {
+	if !match(version) {
 		return fmt.Errorf("the platform requires the rule set %s %s, the compile was given its version %s: give a matching one with okdp-compile --rules (compiler.LoadRules)", name, constraint, version)
 	}
 	return nil
 }
 
-// semver is a version MAJOR.MINOR.PATCH with an optional -prerelease, in
-// the precedence of Semantic Versioning 2.0.0.
-type semver struct {
-	major, minor, patch uint64
-	pre                 []string
-}
-
 const versionForm = "MAJOR.MINOR.PATCH, with an optional -prerelease"
 
-// parseVersion reads s, a version.
-func parseVersion(s string) (semver, error) {
-	core, pre, hasPre := strings.Cut(s, "-")
-	parts := strings.Split(core, ".")
-	var v semver
-	ok := len(parts) == 3
-	for i, p := range parts {
-		if !ok {
-			break
-		}
-		var n uint64
-		n, ok = number(p)
-		switch i {
-		case 0:
-			v.major = n
-		case 1:
-			v.minor = n
-		case 2:
-			v.patch = n
-		}
+// versionPattern matches a version of Semantic Versioning 2.0.0 without build
+// metadata: no number has a leading zero, so that two equal numbers are
+// the same string.
+var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$`)
+
+// checkVersion refuses s when it is no version.
+func checkVersion(s string) error {
+	if !versionPattern.MatchString(s) {
+		return fmt.Errorf("%q is no version %s", s, versionForm)
 	}
-	if ok && hasPre {
-		v.pre = strings.Split(pre, ".")
-		for _, id := range v.pre {
-			if id == "" || strings.Trim(id, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-") != "" {
-				ok = false
-			} else if _, numeric := number(id); !numeric && isDigits(id) {
-				ok = false // a numeric identifier with a leading zero
-			}
-		}
-	}
-	if !ok {
-		return semver{}, fmt.Errorf("%q is no version %s", s, versionForm)
-	}
-	return v, nil
+	return nil
 }
 
-// number reads s, digits without a leading zero.
-func number(s string) (uint64, bool) {
-	if !isDigits(s) || len(s) > 1 && s[0] == '0' {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(s, 10, 64)
-	return n, err == nil
-}
-
-func isDigits(s string) bool {
-	return s != "" && strings.Trim(s, "0123456789") == ""
-}
-
-// compareVersions returns -1, 0 or 1 as a precedes, equals or follows b.
-func compareVersions(a, b semver) int {
-	if c := cmp.Or(cmp.Compare(a.major, b.major), cmp.Compare(a.minor, b.minor), cmp.Compare(a.patch, b.patch)); c != 0 {
-		return c
-	}
-	switch {
-	case len(a.pre) == 0 && len(b.pre) == 0:
-		return 0
-	case len(a.pre) == 0:
-		return 1
-	case len(b.pre) == 0:
-		return -1
-	}
-	for i := range min(len(a.pre), len(b.pre)) {
-		x, xNum := number(a.pre[i])
-		y, yNum := number(b.pre[i])
-		var c int
-		switch {
-		case xNum && yNum:
-			c = cmp.Compare(x, y)
-		case xNum:
-			c = -1
-		case yNum:
-			c = 1
-		default:
-			c = strings.Compare(a.pre[i], b.pre[i])
-		}
-		if c != 0 {
-			return c
-		}
-	}
-	return cmp.Compare(len(a.pre), len(b.pre))
+// sameCore reports whether the versions a and b have the same first n
+// numbers of MAJOR.MINOR.PATCH.
+func sameCore(a, b string, n int) bool {
+	return slices.Equal(strings.SplitN(a, ".", 3)[:n], strings.SplitN(b, ".", 3)[:n])
 }
 
 // The operators of a comparator, the two-character ones first.
@@ -185,11 +113,11 @@ const constraintForm = "comparators separated by commas, each =, !=, >, >=, <, <
 // version. A version alone stands for =; ~ accepts the versions from its
 // own on, of the same major and minor; ^ those of the same major, or of the
 // same minor when the major is 0.
-func parseConstraint(s string) (func(semver) bool, error) {
+func parseConstraint(s string) (func(string) bool, error) {
 	if strings.TrimSpace(s) == "" {
-		return func(semver) bool { return true }, nil
+		return func(string) bool { return true }, nil
 	}
-	var all []func(semver) bool
+	var all []func(string) bool
 	for c := range strings.SplitSeq(s, ",") {
 		c = strings.TrimSpace(c)
 		op := "="
@@ -199,13 +127,12 @@ func parseConstraint(s string) (func(semver) bool, error) {
 				break
 			}
 		}
-		want, err := parseVersion(c)
-		if err != nil {
+		if err := checkVersion(c); err != nil {
 			return nil, fmt.Errorf("%w: a constraint is %s", err, constraintForm)
 		}
-		all = append(all, comparator(op, want))
+		all = append(all, comparator(op, c))
 	}
-	return func(v semver) bool {
+	return func(v string) bool {
 		for _, f := range all {
 			if !f(v) {
 				return false
@@ -216,9 +143,9 @@ func parseConstraint(s string) (func(semver) bool, error) {
 }
 
 // comparator returns the test of op against want.
-func comparator(op string, want semver) func(semver) bool {
-	return func(v semver) bool {
-		c := compareVersions(v, want)
+func comparator(op, want string) func(string) bool {
+	return func(v string) bool {
+		c := chart.CompareVersions(v, want)
 		switch op {
 		case "!=":
 			return c != 0
@@ -231,12 +158,12 @@ func comparator(op string, want semver) func(semver) bool {
 		case "<=":
 			return c <= 0
 		case "~":
-			return c >= 0 && v.major == want.major && v.minor == want.minor
+			return c >= 0 && sameCore(v, want, 2)
 		case "^":
-			if want.major == 0 {
-				return c >= 0 && v.major == 0 && v.minor == want.minor
+			if strings.HasPrefix(want, "0.") {
+				return c >= 0 && sameCore(v, want, 2)
 			}
-			return c >= 0 && v.major == want.major
+			return c >= 0 && sameCore(v, want, 1)
 		}
 		return c == 0
 	}

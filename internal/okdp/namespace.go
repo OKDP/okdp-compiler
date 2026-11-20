@@ -73,11 +73,12 @@ type Bound struct {
 //  3. Each instance is compiled after the instances it references and the
 //     providers of its claims, with what they publish (compileAll).
 //  4. Two instances of a namespace that publish the same output are both
-//     refused, with the instances that referenced it (refuseShared).
+//     refused (refuseShared).
 //  5. Instances whose objects write the same Secret of a namespace are
 //     refused (refuseSecretTargets).
-//  6. Instances that depend on an instance refused since they compiled
-//     are compiled again (refuseClaimers).
+//
+// After step 4 and after step 5, the instances that depend on an instance
+// refused since they compiled are compiled again (recompileDependents).
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	memo := newSetMemo()
 	t := &compilation{ctx: ctx, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}, declared: map[string]error{}}
@@ -114,16 +115,10 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 		t.byRelease[m.key()] = m
 	}
 	t.compileAll(ms)
-	byNamespace := map[string][]*member{}
-	for _, m := range ms {
-		ns := m.Inputs.Namespace
-		byNamespace[ns] = append(byNamespace[ns], m)
-	}
-	for _, ns := range slices.Sorted(maps.Keys(byNamespace)) {
-		t.refuseShared(byNamespace[ns])
-	}
+	t.refuseShared(ms)
+	t.recompileDependents(ms)
 	t.refuseSecretTargets(ms)
-	t.refuseClaimers(ms)
+	t.recompileDependents(ms)
 	t.notes(ms)
 	return t.out
 }
@@ -254,24 +249,28 @@ next:
 	return true
 }
 
-// recompile compiles again, once each, the compiled instances of ms that
-// have a dependency stale reports, until no more of them fails. failed, if
-// not nil, is called with the previous result of each one that fails.
-func (t *compilation) recompile(ms []*member, stale func(res *Result, d Dependency) bool, failed func(res *Result)) {
+// recompileDependents compiles again, once each, the compiled instances
+// of ms that depend on an instance refused since they compiled, of any
+// namespace, until no more of them fails. Each gets the error a compile
+// after every provider gives: an output two instances publish names
+// both, which stay published (refuseShared), and a refused provider gives
+// its claims no output (compile).
+func (t *compilation) recompileDependents(ms []*member) {
 	again := map[*member]bool{}
 	for more := true; more; {
 		more = false
 		for _, m := range ms {
 			res := m.outcome.Result
-			if res == nil || again[m] || !slices.ContainsFunc(res.Dependencies, func(d Dependency) bool { return stale(res, d) }) {
+			refused := func(d Dependency) bool {
+				p, ok := t.byRelease[instKey{cmp.Or(d.Namespace, res.Namespace), d.Instance}]
+				return ok && p.outcome.Result == nil
+			}
+			if res == nil || again[m] || !slices.ContainsFunc(res.Dependencies, refused) {
 				continue
 			}
 			again[m] = true
 			if t.compile(m) != nil {
 				more = true
-				if failed != nil {
-					failed(res)
-				}
 			}
 		}
 	}
@@ -691,10 +690,9 @@ func matched(n string, matches []*member) string {
 	return strings.Join(each[:last], ", ") + " and " + each[last]
 }
 
-// refuseShared is step 4, for the instances ms of one namespace. Both
-// publishers of an output are refused, but stay published. The instances
-// that resolved through it, or through an instance refused since, are
-// compiled again: each gets the error it would have got in any order.
+// refuseShared is step 4. Both publishers of an output of a namespace
+// are refused, but stay published: the instances that resolved through
+// it, compiled again, get the error they would have got in any order.
 func (t *compilation) refuseShared(ms []*member) {
 	providers := map[outputKey][]string{}
 	for _, m := range ms {
@@ -702,12 +700,11 @@ func (t *compilation) refuseShared(ms []*member) {
 			// A compile refuses two outputs of one contract and name, so each
 			// release counts once.
 			for _, o := range res.Info.Provides {
-				k := outputKey{contract: o.Contract, name: o.Name}
+				k := outputKey{namespace: res.Namespace, contract: o.Contract, name: o.Name}
 				providers[k] = append(providers[k], res.Release)
 			}
 		}
 	}
-	shared := map[outputKey]bool{}
 	for _, m := range ms {
 		res := m.outcome.Result
 		if res == nil {
@@ -715,11 +712,10 @@ func (t *compilation) refuseShared(ms []*member) {
 		}
 		var errs []error
 		for _, o := range res.Info.Provides {
-			k := outputKey{contract: o.Contract, name: o.Name}
+			k := outputKey{namespace: res.Namespace, contract: o.Contract, name: o.Name}
 			if len(providers[k]) < 2 {
 				continue
 			}
-			shared[k] = true
 			others := slices.DeleteFunc(slices.Clone(providers[k]), func(r string) bool { return r == res.Release })
 			slices.Sort(others)
 			verb := "publishes"
@@ -732,13 +728,6 @@ func (t *compilation) refuseShared(ms []*member) {
 			*m.outcome = Outcome{Err: errors.Join(errs...), Claims: m.outcome.Claims}
 		}
 	}
-	if len(shared) == 0 {
-		return
-	}
-	dropped := map[string]bool{}
-	t.recompile(ms, func(_ *Result, d Dependency) bool {
-		return d.Namespace == "" && (shared[outputKey{contract: d.Contract, name: d.Output}] || dropped[d.Instance])
-	}, func(res *Result) { dropped[res.Release] = true })
 }
 
 // secretTarget is something only one object of a namespace may write: a
@@ -833,14 +822,4 @@ func (t *compilation) refuseSecretTargets(ms []*member) {
 			delete(t.published[res.Namespace], res.Release)
 		}
 	}
-}
-
-// refuseClaimers is step 6. A provider refused by refuseShared stays
-// published, so a claimer of another namespace may have compiled with its
-// output. Compiled again, it gets no output for its claim and fails.
-func (t *compilation) refuseClaimers(ms []*member) {
-	t.recompile(ms, func(res *Result, d Dependency) bool {
-		p, ok := t.byRelease[instKey{cmp.Or(d.Namespace, res.Namespace), d.Instance}]
-		return ok && p.outcome.Result == nil
-	}, nil)
 }

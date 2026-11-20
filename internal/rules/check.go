@@ -252,14 +252,7 @@ func ruleFunctions(c *checker) []cel.EnvOption {
 		native("sensitive", func(k any) any { return value.Sensitive(value.Str(k)) }),
 		native("credentialReference", func(k any) any { return value.CredentialReference(value.Str(k)) }),
 		native("credentialLiteral", func(v any) any { return value.CredentialLiteral(v) }),
-		cel.Function("leaves", cel.Overload("leaves_dyn", []*cel.Type{cel.DynType}, cel.DynType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				x, err := cel2yaml.ToData(v)
-				if err != nil {
-					return types.WrapErr(err)
-				}
-				return types.DefaultTypeAdapter.NativeToValue(leaves(x))
-			}))),
+		cel2yaml.Func("leaves", cel.DynType, func(x any) (any, error) { return leaves(x), nil }),
 		binary("fields", func(s, seps ref.Val) (any, error) { return fields(value.Str(s.Value()), value.Str(seps.Value())), nil }),
 		native("urlParse", func(s any) any { return urlParse(value.Str(s)) }),
 	}

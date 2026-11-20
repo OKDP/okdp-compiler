@@ -222,7 +222,7 @@ func TestMappingErrors(t *testing.T) {
 func TestGeneratedSecretArgs(t *testing.T) {
 	s := newSession(mapCtx())
 	for name, tc := range map[string]struct{ args, want string }{
-		"not a map": {`'s'`, "okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:\n- at '/okdpGeneratedSecret': got string, want object"},
+		"not a map": {`'s'`, "okdpGeneratedSecret: the arguments are a map, got \"s\""},
 		"unknown":   {`{'name': 's', 'key': []}`, "- at '/okdpGeneratedSecret': additional properties 'key' not allowed"},
 		"key field": {`{'name': 's', 'keys': [{'key': 'k', 'lenght': 20}]}`, "- at '/okdpGeneratedSecret/keys/0': additional properties 'lenght' not allowed"},
 		"as text":   {`{'name': 's', 'keys': [{'key': 'k', 'length': '20'}]}`, "- at '/okdpGeneratedSecret/keys/0/length': got string, want integer"},

@@ -8,5 +8,5 @@ errors:
     $value: "${{ svc }}: objects: ${{ object.id }}: an object of the deployer's kinds (${{ object.apiVersion }}) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), ${{ ns }} is not one of them"
   - $if: ${{ object.ns != null && object.ns != "" && object.ns != ns }}
     $value: "${{ svc }}: objects: ${{ object.id }}: namespace ${{ str(object.ns) }}, not the instance's (${{ ns }}): the platform's projects write other namespaces (global.okdp.policy.privileged), ${{ ns }} is not one of them"
-  - $if: ${{ object.group == "" && object.kind == "Service" && "spec" in object.raw && object.raw.spec != null && "externalIPs" in object.raw.spec && object.raw.spec.externalIPs != null && size(object.raw.spec.externalIPs) > 0 }}
+  - $if: ${{ object.group == "" && object.kind == "Service" && truthy(dig(object.raw, "spec.externalIPs")) }}
     $value: "${{ svc }}: objects: ${{ object.id }}: spec.externalIPs claims addresses the cluster forwards to the Service (CVE-2020-8554, traffic interception): the platform's projects set it (global.okdp.policy.privileged), ${{ ns }} is not one of them"

@@ -414,14 +414,14 @@ Every connection of an instance's context is checked at its declaration
 when the instances compile together (`CompileAll`), referenced or not,
 as a reference to it would check it: its name a DNS-1123 label, an
 object of a `contract` the contracts hold, then its fields, its
-`secretRef`, its `required` fields after completion, its types, `{{`
-([Checks](#checks)). Each that fails refuses the instance, every one at
-once, at `connections.<name>`, before its claims bind: a typo in a
-connection no instance references yet is reported where it is written,
-a project's refusing its project's instances, the platform's every
-instance (`compiler.CheckConnection` checks one before it is written);
-of a project without instance, that project, which does not load
-([named claims](#claims)).
+`secretRef`, its `required` fields after completion, its types, `{{`,
+in its `secretRef` too ([Checks](#checks)). Each that fails refuses the
+instance, every one at once, at `connections.<name>`, before its claims
+bind: a typo in a connection no instance references yet is reported
+where it is written, a project's refusing its project's instances, the
+platform's every instance (`compiler.CheckConnection` checks one before
+it is written); of a project without instance, that project, which does
+not load ([named claims](#claims)).
 
 ```
 connections.pg (connection "pg"): field "dbName" is required by the database contract
@@ -537,8 +537,9 @@ connections:
   `{remoteKey: <key>}`, its credentials in the platform's secret store,
   the connection's `secretRef` then `{name}` of the Secret the compiler
   reads them into ([credentials in the platform's secret
-  store](#credentials-in-the-platforms-secret-store)). Without it, the
-  connection has no `secretRef`.
+  store](#credentials-in-the-platforms-secret-store)). Without it, or
+  `null`, the connection has no `secretRef`; anything else, `{}` or a
+  `name` that is not a non-empty string, is refused.
 - Any other key: a field of the contract, not an `x-okdp-secret` one.
 
 Output: `Inputs.Published`, what the other instances of the namespace
@@ -842,6 +843,7 @@ storage: "demo-pg" is not a connection, nor an output of an instance of the name
 | external or output, not a contract field | `<path>: connection "<name>": field "<key>" is not part of the <contract> contract` | `context/2/unknown-field.yaml` |
 | external or output, secret field | `<path>: connection "<name>": "<key>" is a secret field, put it in the credentials Secret` | `context/2/secret-in-connection.yaml` |
 | external, a `secretRef` with both `name` and `remoteKey` | `<path>: connection "<name>": secretRef: name or remoteKey, not both` | `context/2/remote-key-and-name.yaml` |
+| external, a `secretRef` that is not a map, or without `remoteKey` nor a `name` that is a non-empty string | `<path>: connection "<name>": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got <value>` | |
 | external, a `remoteKey` that is not a string, or empty | `<path>: connection "<name>": secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got <value>` | |
 | external, `{{` in a `remoteKey` (of level 0: above, the layer fails first) | `<path> (connection "<name>"): field "secretRef.remoteKey": the value contains "{{"` | |
 | external, a `remoteKey` without `global.okdp.secrets.store` | `<path>: connection "<name>": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set` | `context/2/remote-key-without-store.yaml` |
@@ -2309,8 +2311,9 @@ output it lacks. In the order of the instances:
    which. The
    instances whose references resolved through it, or through an output
    of an instance refused since, or whose claim's provider is refused, of
-   any namespace, are compiled again: each gets the error a compile after
-   every provider gives. A provider refused gives its claims no output.
+   any namespace, are compiled again before step 5: each gets the error a
+   compile after every provider gives. A provider refused gives its
+   claims no output.
 5. Two objects of a namespace that write one Secret, of one instance or
    of two, refuse the instances that hold them, each: a v1 `Secret`, an
    `ExternalSecret`'s `spec.target.name` (its own name when unset; none

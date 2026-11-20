@@ -87,7 +87,7 @@ CEL iterates a map in no fixed order: a list built from a map (`m.map(k, k)`,
 
 ## Host functions
 
-`okdpGeneratedSecret`'s template is the compiler's mandatory rule set's
+`okdpGeneratedSecret` is a fragment of the compiler's mandatory rule set
 ([rule set](01_inputs_outputs.md#rule-set)): every compile has the
 functions below. A rule set added to it declares functions of its own,
 which its compiles have besides these:
@@ -266,10 +266,11 @@ than 63 characters is cut to 54, without a trailing `-`, and suffixed with
 `stringData` keys, then each generated key; a generated key replaces a
 `stringData` key of the same name.
 
-Errors, the schema's, then the keys of one generator name, one line per
-name:
+Errors, an argument that is not a map, the schema's, then the keys of
+one generator name, one line per name:
 
 ```text
+okdpGeneratedSecret: the arguments are a map, got <value>
 okdpGeneratedSecret: the arguments don't meet the specifications of mapping.schema.json:
 - at '/okdpGeneratedSecret': missing property 'name'
 - at '/okdpGeneratedSecret/keys': validation failed

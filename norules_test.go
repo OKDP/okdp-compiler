@@ -59,13 +59,13 @@ func TestCompileWithoutRules(t *testing.T) {
 			t.Error("no claim was bound to the provider")
 		}
 	})
-	t.Run("the templates of the mandatory set", func(t *testing.T) {
+	t.Run("the fragment of the mandatory set", func(t *testing.T) {
 		o := compileExample(t, "04_claims", nil)["data-postgresql"]
 		if o.Err != nil {
 			t.Fatal(o.Err)
 		}
 		if !slices.ContainsFunc(o.Result.Objects, func(m map[string]any) bool { return m["kind"] == "Password" }) {
-			t.Error("no generated credentials (the template generatedSecret)")
+			t.Error("no generated credentials (the fragment okdpGeneratedSecret)")
 		}
 	})
 	t.Run("the secret store objects of a claim of another namespace", func(t *testing.T) {

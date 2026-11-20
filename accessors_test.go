@@ -112,7 +112,8 @@ func TestValuesAndNames(t *testing.T) {
 }
 
 // A connection is checked at its declaration as the compile of a tree
-// checks it, whatever references it.
+// checks it, whatever references it, the platform's store provider
+// included.
 func TestCheckConnection(t *testing.T) {
 	contracts := os.DirFS("examples/02_advanced/input/contracts")
 	c := compiler.Connection{Name: "pg", Contract: "database", Values: map[string]any{"host": "db", "dbName": "app"}, SecretRef: "pg"}
@@ -130,5 +131,11 @@ func TestCheckConnection(t *testing.T) {
 	}
 	if err := compiler.CheckConnection(compiler.Mandatory(), contracts, "", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err != nil {
 		t.Fatalf("the platform's: %v", err)
+	}
+	// With the store's provider, a SecretStore per namespace, no
+	// connection reads platform/, the platform's neither.
+	provider := map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s", "provider": map[string]any{"vault": map[string]any{"server": "https://bao"}}}}}}
+	if err := compiler.CheckConnection(compiler.Mandatory(), contracts, "", c, provider); err == nil || !strings.Contains(err.Error(), "no namespace reads platform/") {
+		t.Fatalf("the platform's, with a provider: %v", err)
 	}
 }

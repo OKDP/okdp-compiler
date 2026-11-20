@@ -378,4 +378,10 @@ func TestParseClaim(t *testing.T) {
 	if c, _ := ParseClaim("a", M{"class": "huge"}); c.Class != "huge" {
 		t.Errorf("a claim that fails keeps what it holds: got %+v", c)
 	}
+	// A key not of its type is printed (value.Str), a request that is not
+	// an object left out.
+	c, err = ParseClaim("a", M{"contract": "database", "class": 5.0, "request": "big"})
+	if want := (ClaimSpec{Name: "a", Contract: "database", Class: "5"}); err == nil || !reflect.DeepEqual(c, want) {
+		t.Errorf("not of their type: got %+v, %v, want %+v", c, err, want)
+	}
 }

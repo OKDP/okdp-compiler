@@ -136,6 +136,27 @@ func TestCheckFailsClosed(t *testing.T) {
 	}
 }
 
+// TestExternalIPs: check object refuses a core Service that sets
+// spec.externalIPs, and nothing else of its spec.
+func TestExternalIPs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		spec any
+		want string
+	}{
+		"set":       {M{"externalIPs": []any{"10.0.0.1"}}, "svc: objects: Service/s: spec.externalIPs claims addresses"},
+		"empty":     {M{"externalIPs": []any{}}, ""},
+		"null":      {M{"externalIPs": nil}, ""},
+		"none":      {M{"type": "ClusterIP"}, ""},
+		"not a map": {"x", ""},
+	} {
+		object := M{"id": "Service/s", "kind": "Service", "name": "s", "apiVersion": "v1", "group": "", "ns": nil, "raw": M{"spec": tc.spec}}
+		err := Mandatory().Refuse(context.Background(), CheckObjectRule, M{"svc": "svc", "ns": "demo", "object": object})
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.want)) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
+		}
+	}
+}
+
 // TestMandatory: the mandatory set alone holds what a compile needs to
 // write values and refuses what a platform refuses: its checks apply.
 func TestMandatory(t *testing.T) {
@@ -162,11 +183,11 @@ func TestMandatory(t *testing.T) {
 	if got := r.Labels("svc", "rel", "", true); got["app.kubernetes.io/instance"] != "rel" {
 		t.Errorf("the labels: %v", got)
 	}
-	if r.GeneratedSecret().Data == nil || r.PlatformSchema() == nil {
-		t.Errorf("the templates: %+v", r)
+	if f, ok := r.Fragment("okdpGeneratedSecret"); !ok || f.Template.Data == nil || f.Result != "objects" || r.PlatformSchema() == nil {
+		t.Errorf("the function okdpGeneratedSecret: %+v", r)
 	}
-	if len(r.Fragments()) != 0 || len(r.DocumentFuncs()) != 0 || len(r.OwnObjects()) != 0 || len(r.Sections()) != 0 {
-		t.Errorf("the mandatory set gives functions or sections, which only a set added to it gives: %+v", r)
+	if len(r.Fragments()) != 1 || len(r.DocumentFuncs()) != 0 || len(r.OwnObjects()) != 0 || len(r.Sections()) != 0 {
+		t.Errorf("the mandatory set gives functions besides okdpGeneratedSecret or sections, which only a set added to it gives: %+v", r)
 	}
 	if r.MappingSchema() == nil || r.Charts()["objects"].Chart != "okdp-objects" {
 		t.Error("the mandatory set lost the mapping schema or the objects chart")
@@ -184,7 +205,7 @@ func TestBothSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.GeneratedSecret().Data == nil || r.PlatformSchema() == nil || len(r.List(TableProjectRoles)) != 3 {
+	if _, ok := r.Fragment("okdpGeneratedSecret"); !ok || r.PlatformSchema() == nil || len(r.List(TableProjectRoles)) != 3 {
 		t.Errorf("the mandatory set is not applied: %+v", r)
 	}
 	if err := r.Refuse(ctx, CheckNamespaceRule, M{"ns": "argocd"}); err == nil {
@@ -204,7 +225,7 @@ func TestBothSets(t *testing.T) {
 // own gives none of.
 func TestSetsDisjoint(t *testing.T) {
 	withFunctions := func(s string) string {
-		return s + "functions:\n  noted: {document: deployerRole}\nsections: [notes]\n"
+		return strings.Replace(s, "functions:\n", "functions:\n  noted: {document: deployerRole}\n", 1) + "sections: [notes]\ntemplates: {own: objects/deployer-role.cel.yaml}\n"
 	}
 	for name, tc := range map[string]struct {
 		rest string
@@ -216,7 +237,7 @@ func TestSetsDisjoint(t *testing.T) {
 		"schema":   {"schemas:\n  platform: schemas/mapping.schema.json\n", "schemas: platform"},
 		"chart":    {"charts:\n  objects: {repository: oci://example.com/charts, chart: okdp-objects, version: 1.0.0}\n", "charts: objects"},
 		"function": {"functions: {noted: {document: deployerRole}}\n", "functions: noted"},
-		"template": {"templates: {generatedSecret: objects/deployer-role.cel.yaml}\n", "templates: generatedSecret"},
+		"template": {"templates: {own: objects/deployer-role.cel.yaml}\n", "templates: own"},
 		"section":  {"sections: [notes]\n", "sections: notes"},
 		"names":    {"names: {credentialsSecret: a, connectionSecret: b, claimSecret: c, credentialsLabel: d}\n", "names:"},
 		"labels":   {"labels: {selector: {}, component: a, common: {}}\n", "labels:"},

@@ -135,8 +135,9 @@ func namedClaims(values M) (map[string]ClaimSpec, error) {
 }
 
 // ParseClaim reads the named claim name from v, its entry as written in
-// claims. Even when it fails, the claim returned holds the keys of v that
-// are of their type, so that a caller can list it.
+// claims. Even when it fails, the claim returned holds what v gives, so
+// that a caller can list it: contract, class and provider printed as
+// strings (value.Str: class: 5 gives "5"), request when it is an object.
 func ParseClaim(name string, v any) (ClaimSpec, error) {
 	where := value.Key("claims", name)
 	decl, ok := v.(M)

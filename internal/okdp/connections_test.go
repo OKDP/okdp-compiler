@@ -142,13 +142,18 @@ func TestResolveErrors(t *testing.T) {
 		values M
 		want   string
 	}{
-		"required field": {ext(M{"host": ""}), `replicas[0] (connection "ext"): field "host" is required by the database contract`},
-		"wrong contract": {ext(M{"contract": "s3"}), `replicas[0]: connection "ext" has contract "s3", "database" is expected`},
-		"unknown field":  {ext(M{"port": 1}), `field "port" is not part of the database contract`},
-		"secret field":   {ext(M{"password": "p"}), `replicas[0]: connection "ext": "password" is a secret field, put it in the credentials Secret`},
-		"not a string":   {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
-		"not published":  {M{"replicas": []any{"demo-x"}}, `replicas[0]: "demo-x" is not a connection, nor an output of an instance of the namespace`},
-		"a template":     {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `values layer 1: replicas[0]: the value contains "{{"`},
+		"required field":          {ext(M{"host": ""}), `replicas[0] (connection "ext"): field "host" is required by the database contract`},
+		"wrong contract":          {ext(M{"contract": "s3"}), `replicas[0]: connection "ext" has contract "s3", "database" is expected`},
+		"unknown field":           {ext(M{"port": 1}), `field "port" is not part of the database contract`},
+		"secret field":            {ext(M{"password": "p"}), `replicas[0]: connection "ext": "password" is a secret field, put it in the credentials Secret`},
+		"not a string":            {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
+		"not published":           {M{"replicas": []any{"demo-x"}}, `replicas[0]: "demo-x" is not a connection, nor an output of an instance of the namespace`},
+		"a template":              {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `values layer 1: replicas[0]: the value contains "{{"`},
+		"secretRef not a map":     {ext(M{"secretRef": "ext-credentials"}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got "ext-credentials"`},
+		"secretRef empty":         {ext(M{"secretRef": M{}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
+		"secretRef no name":       {ext(M{"secretRef": M{"key": "k"}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
+		"secretRef.name empty":    {ext(M{"secretRef": M{"name": ""}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
+		"secretRef.name a number": {ext(M{"secretRef": M{"name": 5.0}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := resolveCtx(tc.values)
@@ -156,6 +161,14 @@ func TestResolveErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	// A secretRef null is not set: the connection resolves without one.
+	values, _, err := resolveCtx(ext(M{"secretRef": nil}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref, set := value.AsMap(value.AsList(values["replicas"])[0])["secretRef"]; set {
+		t.Errorf("secretRef null: got %v", ref)
 	}
 }
 
@@ -238,6 +251,17 @@ func TestResolveTemplate(t *testing.T) {
 	platform := ContextLayer{Values: map[string]any{"connections": M{"ext": M{"contract": "database", "host": "{{ .Values.host }}", "tls": true}}}}
 	want := `replicas[0] (connection "ext"): field "host": the value contains "{{"`
 	if _, _, err := resolveCtx(M{"replicas": []any{"ext"}}, platform); err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+}
+
+// TestDeclarationTemplate: a connection holds no "{{" at its
+// declaration, as a reference to it would, referenced or not: its
+// secretRef.name neither.
+func TestDeclarationTemplate(t *testing.T) {
+	conn := M{"contract": "database", "host": "h", "tls": true, "secretRef": M{"name": "{{ .Values.secret }}"}}
+	want := `connections.ext (connection "ext"): field "secretRef.name": the value contains "{{"`
+	if err := CheckConnection(nil, dbContract, "ext", conn, 0, "", "", false); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }

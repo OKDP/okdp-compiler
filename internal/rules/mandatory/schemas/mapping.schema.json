@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OKDP mapping sections",
-  "description": "The sections of a mapping (okdp.yaml, values.cel.yaml) the OKDP compiler reads, once evaluated: every compile checks them after the mapping and reports every violation at once. okdpGeneratedSecret is not a section: it is the argument of the host function, checked at each call. vars and errors are the mapping language's. A null section is not set, a null chart of output not rendered; elsewhere, as in a chart's values, a null deletes a default and is refused where there is none.",
+  "description": "The sections of a mapping (okdp.yaml, values.cel.yaml) the OKDP compiler reads, once evaluated: every compile checks them after the mapping and reports every violation at once. okdpGeneratedSecret is not a section: it is the argument of the function, checked at each call. vars and errors are the mapping language's. A null section is not set, a null chart of output not rendered; elsewhere, as in a chart's values, a null deletes a default and is refused where there is none.",
   "type": "object",
   "properties": {
     "output": {

@@ -208,8 +208,9 @@ func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[stri
 // CheckConnection checks one connection as CompileAll checks it at its
 // declaration. conn is its entry as written in connections, level the
 // level of the context it is declared at (0 the platform, 1 a project, 2
-// an instance) and store global.okdp.secrets.store.
-func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, level uint, namespace, store string) error {
+// an instance), store global.okdp.secrets.store, and provider whether
+// global.okdp.secrets.provider is set.
+func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, level uint, namespace, store string, provider bool) error {
 	v, err := value.Normalize(conn)
 	if err != nil {
 		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
@@ -220,6 +221,7 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, lev
 		conns:     M{name: v},
 		levels:    map[string]uint{name: level},
 		store:     store,
+		provider:  provider,
 		namespace: namespace,
 	}
 	return r.declared(nil)
@@ -259,7 +261,8 @@ func (r *resolver) declarationKey(name string) (key string, keyed bool) {
 }
 
 // declaration checks the connection name, declared at field, as a
-// reference to it would. The transfers it would need are not recorded.
+// reference to it would (resolve): r has no claims, so the name is the
+// external connection's.
 func (r *resolver) declaration(name, field string) error {
 	conn, ok := r.conns[name].(M)
 	switch {
@@ -270,20 +273,8 @@ func (r *resolver) declaration(name, field string) error {
 	case value.Str(conn["contract"]) == "":
 		return fmt.Errorf("%s: contract is required, the contract of the connection", field)
 	}
-	c, err := r.contracts.get(value.Str(conn["contract"]))
-	if err != nil {
-		return fmt.Errorf("%s: %w", field, err)
-	}
-	d := *r
-	d.transfers = nil
-	x, err := d.resolveExternal(c, name, field, conn)
-	if err != nil {
-		return err
-	}
-	if err := c.validate(x.values, x.where); err != nil {
-		return err
-	}
-	return chart.NoTemplate(x.values, func(p string) string { return fmt.Sprintf("%s: field %q", x.where, p) })
+	_, err := r.resolve(lookup{field: field, contract: value.Str(conn["contract"]), name: name})
+	return err
 }
 
 // lookup is one connection reference to resolve.
@@ -429,40 +420,46 @@ func (r *resolver) resolveClaim(c *contract, ref, field string, claim *ClaimSpec
 }
 
 // resolveExternal resolves a reference to the external connection ref,
-// whose entry is conn. Its secretRef is either {name}, a Secret of the
-// namespace, or {remoteKey}, credentials in the platform's secret store.
+// whose entry is conn. Its secretRef, when set, is either {name}, a
+// Secret of the namespace, or {remoteKey}, credentials in the platform's
+// secret store.
 func (r *resolver) resolveExternal(c *contract, ref, field string, conn M) (*resolved, error) {
 	x := &resolved{values: M{}, ref: ref, source: "external", where: fmt.Sprintf("%s (connection %q)", field, ref)}
 	if value.Str(conn["contract"]) != c.name {
 		return nil, fmt.Errorf("%s: connection %q has contract %q, %q is expected", field, ref, value.Str(conn["contract"]), c.name)
 	}
-	var secretRef M
+	var secretRef any
 	x.values, secretRef = connectionFields(conn)
 	if err := c.fields(x.values, fmt.Sprintf("%s: connection %q", field, ref)); err != nil {
 		return nil, err
 	}
-	switch _, fromStore := secretRef["remoteKey"]; {
+	sr, isMap := secretRef.(M)
+	_, fromStore := sr["remoteKey"]
+	switch name, named := sr["name"].(string); {
+	case secretRef == nil:
 	case fromStore:
-		name, err := r.storeSecret(c, ref, field, secretRef)
+		name, err := r.storeSecret(c, ref, field, sr)
 		if err != nil {
 			return nil, err
 		}
 		x.secretRef = M{"name": name}
-	case secretRef != nil:
-		x.secretRef = M{"name": secretRef["name"]}
+	case !isMap || !named || name == "":
+		return nil, fmt.Errorf("%s: connection %q: secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got %s", field, ref, value.ShortAt("secretRef", secretRef))
+	default:
+		x.secretRef = M{"name": name}
 	}
 	return x, nil
 }
 
 // connectionFields splits the entry of an external connection into its
-// contract fields and its secretRef, nil when it has none.
-func connectionFields(conn M) (fields, secretRef M) {
+// contract fields and its secretRef, as written; nil when it has none.
+func connectionFields(conn M) (fields M, secretRef any) {
 	fields = M{}
 	for k, v := range conn {
 		switch k {
 		case "contract", "description":
 		case "secretRef":
-			secretRef = value.AsMap(v)
+			secretRef = v
 		default:
 			fields[k] = v
 		}
@@ -493,8 +490,8 @@ func ParseConnection(name string, v any) Connection {
 		Contract:    value.Str(conn["contract"]),
 		Description: value.Str(conn["description"]),
 		Values:      fields,
-		SecretRef:   value.Str(secretRef["name"]),
-		RemoteKey:   value.Str(secretRef["remoteKey"]),
+		SecretRef:   value.Str(value.AsMap(secretRef)["name"]),
+		RemoteKey:   value.Str(value.AsMap(secretRef)["remoteKey"]),
 	}
 }
 

@@ -144,9 +144,10 @@ schemas:
 # global.okdp.charts.objects.
 charts:
   objects: {repository: oci://quay.io/okdp/charts, chart: okdp-objects, version: 0.1.0}
-# The compiler's own templates: the objects of a generated Secret.
-templates:
-  generatedSecret: fragments/generated-secret.cel.yaml
+# The functions of mappings: okdpGeneratedSecret, the objects of a generated
+# Secret, which the compiler also renders for a provides secret's generate.
+functions:
+  okdpGeneratedSecret: {fragment: fragments/generated-secret.cel.yaml, result: objects}
 # Documents the others call: rule(<name>, input) in a document, a function of
 # a set's functions, scope (what a mapping sees as platform); deployerRole,
 # which the targets call, the Role of a project's releases.

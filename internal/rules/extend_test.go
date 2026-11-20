@@ -325,12 +325,11 @@ func TestConstraints(t *testing.T) {
 			t.Errorf("%q: %v", tc.constraint, err)
 			continue
 		}
-		v, err := parseVersion(tc.version)
-		if err != nil {
+		if err := checkVersion(tc.version); err != nil {
 			t.Errorf("%q: %v", tc.version, err)
 			continue
 		}
-		if match(v) != tc.want {
+		if match(tc.version) != tc.want {
 			t.Errorf("%q of %s: %v, want %v", tc.constraint, tc.version, !tc.want, tc.want)
 		}
 	}

@@ -155,7 +155,8 @@ func CheckProvider(where, provider string) error { return okdp.CheckProvider(whe
 // referenced or not. project is "" for a connection of the platform. The
 // contract must be one of contracts, the fields must fit it and hold no
 // secret, and a remoteKey must belong to the store of platform, under
-// <project>/ for a project. The error is placed at connections.<name>.
+// <project>/ for a project, never under platform/ when the platform gives
+// the store's provider. The error is placed at connections.<name>.
 func CheckConnection(rules *RuleSet, contracts fs.FS, project string, c Connection, platform map[string]any) error {
 	v, err := value.Normalize(platform)
 	if err != nil {
@@ -165,5 +166,6 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, project string, c Connecti
 	if project != "" {
 		level = 1
 	}
-	return okdp.CheckConnection(rules, contracts, c.Name, c.Entry(), level, project, value.Str(value.Dig(value.AsMap(v), "global.okdp.secrets.store")))
+	secrets := value.AsMap(value.Dig(value.AsMap(v), "global.okdp.secrets"))
+	return okdp.CheckConnection(rules, contracts, c.Name, c.Entry(), level, project, value.Str(secrets["store"]), len(value.AsMap(secrets["provider"])) > 0)
 }
