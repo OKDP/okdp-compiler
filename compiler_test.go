@@ -20,12 +20,12 @@ import (
 )
 
 // example: the example package
-// (examples/02_advanced/input/catalog/webapp), and the inputs of
+// (examples/02_advanced/input/catalog/webapp/1.0.0), and the inputs of
 // its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
 // and its database's claim, bound to demo-db, with what demo-db publishes
 // for it; the rule set the example's platform requires.
 func example() (*compiler.Definition, compiler.Inputs) {
-	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp"), nil)
+	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp/1.0.0"), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -106,9 +106,9 @@ func TestConcurrentCompile(t *testing.T) {
 	}
 }
 
-// TestLayers: each stage of a tree's compile in its packages, knowing only
-// those before it: the compile no graph and no target, the graph no
-// target; under the compile, OKDP is not known.
+// TestLayers: each stage in its packages, knowing only those before it:
+// the compile neither the input documents nor the catalog, the catalog
+// not the compile; under the compile, OKDP is not known.
 func TestLayers(t *testing.T) {
 	const module = "github.com/okdp/okdp-compiler/"
 	imports := map[string][]string{} // a package of internal/, by directory: those of the module it imports
@@ -144,9 +144,8 @@ func TestLayers(t *testing.T) {
 		return seen
 	}
 	for pkg, unknown := range map[string][]string{
-		"internal/okdp":    {"internal/graph", "internal/target", "internal/tree"},
-		"internal/graph":   {"internal/target", "internal/tree"},
-		"internal/tree":    {"internal/target", "internal/repository"},
+		"internal/okdp":    {"internal/inputs", "internal/catalog"},
+		"internal/catalog": {"internal/okdp", "internal/inputs"},
 		"internal/compile": {"internal/okdp", "chart"},
 		"chart":            {"internal/okdp", "internal/compile"},
 	} {
@@ -163,37 +162,28 @@ func TestLayers(t *testing.T) {
 	}
 }
 
-// TestCompileTree: the tree of the claims example compiled: its graph,
-// the claims bound to its provider, each with its claimer and what the
-// provider granted it, and the namespaces it lets claim of it, its
-// instance.yaml's claimers.
-func TestCompileTree(t *testing.T) {
-	instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}}, nil)
+// TestCompileAllClaims: the instances of the claims example compiled
+// together: the claims bound to its provider, each with its claimer, and
+// what the provider granted it.
+func TestCompileAllClaims(t *testing.T) {
+	instances, err := exampleInstances("04_claims", compiler.Mandatory())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range instances {
 		instances[i].Inputs.Rules = compiler.Mandatory()
 	}
-	tree := compiler.CompileTree(t.Context(), instances)
-	if tree.Graph == nil || tree.Problems() != nil {
-		t.Fatalf("problems: %q", tree.Problems())
-	}
-	pg := tree.Instance("data", "postgresql")
-	if pg == nil || pg.Release() != "data-postgresql" || !slices.Contains(pg.Provisions(), "database-server") {
-		t.Fatalf("the provider: %+v", pg)
-	}
-	if got := pg.Claimers("database-server"); !slices.Equal(got, []string{"demo"}) {
-		t.Errorf("claimers: got %q, want demo", got)
-	}
 	var claims []string
-	for _, p := range pg.Provided {
-		if pg.Granted(p.ID) == nil {
-			t.Errorf("%s: granted nothing", p.ID)
+	for i, o := range compiler.CompileAll(t.Context(), instances) {
+		if o.Err != nil {
+			t.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err)
 		}
-		claims = append(claims, p.ID+" by "+p.Claimer.Namespace()+"/"+p.Claimer.Name)
+		for _, b := range o.Claims {
+			claims = append(claims, b.ID+" by "+instances[i].Inputs.Namespace+"/"+instances[i].Name+" of "+b.Namespace+"/"+b.Release)
+		}
 	}
-	if want := []string{"demo.analytics by demo/dashboards", "demo.analytics by demo/reports", "demo.app.database by demo/app", "demo.metrics.database by demo/metrics"}; !reflect.DeepEqual(claims, want) {
+	slices.Sort(claims)
+	if want := []string{"demo.analytics by demo/dashboards of data/data-postgresql", "demo.analytics by demo/reports of data/data-postgresql", "demo.app.database by demo/app of data/data-postgresql", "demo.metrics.database by demo/metrics of data/data-postgresql"}; !reflect.DeepEqual(claims, want) {
 		t.Errorf("claims: got %q, want %q", claims, want)
 	}
 }
@@ -262,58 +252,29 @@ func TestCheckProjectName(t *testing.T) {
 	}
 }
 
-// TestBuild: a tree loaded and compiled with the options on each
-// instance; one that does not load, a *LoadError of every problem, the
-// errors it is of unwrapped.
-func TestBuild(t *testing.T) {
-	repos := []compiler.Repository{{Name: "db", FS: exampleRepository("04_claims"), Role: compiler.RoleTree}}
-	tr, err := compiler.Build(t.Context(), repos, compiler.BuildOptions{Rules: compiler.Mandatory(), CostLimit: 1_000_000, AllowPlainSecrets: true})
+// TestLoadInputs: the input documents of an example read with its
+// catalog; a package no catalog has, and a document of no kind, refused
+// together.
+func TestLoadInputs(t *testing.T) {
+	instances, err := exampleInstances("04_claims", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if problems := tr.Problems(); problems != nil || tr.Graph == nil {
-		t.Fatalf("problems: %q", problems)
+	var got []string
+	for _, in := range instances {
+		got = append(got, in.Inputs.Namespace+"/"+in.Inputs.Release+" "+in.Definition.Chart.Name)
 	}
-	for _, ti := range tr.Instances {
-		if ti.Inputs.CostLimit != 1_000_000 || !ti.Inputs.AllowPlainSecrets {
-			t.Errorf("%s/%s: %+v", ti.Namespace(), ti.Name, ti.Inputs)
-		}
+	if want := []string{"data/data-postgresql postgresql", "demo/demo-app app", "demo/demo-dashboards app", "demo/demo-metrics app", "demo/demo-reports app"}; !slices.Equal(got, want) {
+		t.Errorf("instances: got %q, want %q", got, want)
 	}
-	_, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
-		"projects/demo/instances/a/instance.yaml": {Data: []byte("service: nope\nversion: 1.0.0\n")},
-		"platform.yaml": {Data: []byte("global: [\n")},
-	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: compiler.Mandatory()})
-	le, ok := errors.AsType[*compiler.LoadError](err)
-	if !ok || len(le.Problems) != 2 || !errors.Is(err, compiler.ErrNotInCatalog) {
-		t.Errorf("a tree that does not load: %#v", err)
+	cat, err := compiler.LoadCatalog([]compiler.CatalogFiles{{Name: "charts", FS: os.DirFS(filepath.Join("examples", "04_claims", "input"))}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A project that does not load is refused, not the tree: no instance
-	// of it, the others compiled, its problems LoadErrorOf's.
-	// Loaded is given the instances that compile, before they do.
-	var loaded []string
-	tr, err = compiler.Build(t.Context(), []compiler.Repository{{Name: "db", FS: fstest.MapFS{
-		"catalog/app/1.0.0/Chart.yaml":            {Data: []byte("apiVersion: v2\nname: app\nversion: 1.0.0\n")},
-		"projects/good/instances/a/instance.yaml": {Data: []byte("service: app\nversion: 1.0.0\n")},
-		"projects/bad/instances/a/instance.yaml":  {Data: []byte("service: nope\nversion: 1.0.0\n")},
-		"projects/bad/instances/b/instance.yaml":  {Data: []byte("service: app\nversion: 1.0.0\n")},
-	}, Role: compiler.RoleTree}}, compiler.BuildOptions{Rules: compiler.Mandatory(), Loaded: func(_ context.Context, instances []compiler.Instance) {
-		for _, in := range instances {
-			loaded = append(loaded, in.Inputs.Namespace+"/"+in.Name)
-		}
-	}})
-	if err != nil || len(tr.Instances) != 1 || tr.Instances[0].Namespace() != "good" || len(tr.Refused) != 1 || tr.Refused[0].Namespace != "bad" {
-		t.Fatalf("a project that does not load: %v %+v", err, tr)
-	}
-	if !slices.Equal(loaded, []string{"good/a"}) {
-		t.Errorf("Loaded: got %q, want the instances of the projects that load", loaded)
-	}
-	if tr.Refused[0].Inputs.Rules != compiler.Mandatory() {
-		t.Error("a project that does not load lost the rule set of the build")
-	}
-	if le := compiler.LoadErrorOf(tr); le == nil || len(le.Problems) != 1 || !errors.Is(le, compiler.ErrNotInCatalog) {
-		t.Errorf("LoadErrorOf: %v", le)
-	}
-	if compiler.LoadErrorOf(nil) != nil || compiler.LoadErrorOf(&compiler.Tree{}) != nil {
-		t.Error("LoadErrorOf a tree that loads")
+	_, err = compiler.LoadInputs(t.Context(), []compiler.InputFiles{{Name: "in", FS: fstest.MapFS{
+		"a.yaml": {Data: []byte("kind: Instance\nproject: demo\nname: a\nservice: nope\nversion: 1.0.0\n---\nreplicas: 2\n")},
+	}}}, cat, nil)
+	if err == nil || !errors.Is(err, compiler.ErrNotInCatalog) || !strings.Contains(err.Error(), "in/a.yaml: document 2 (line 7): no kind") {
+		t.Errorf("got %v", err)
 	}
 }

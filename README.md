@@ -6,9 +6,11 @@ A service is a package, a directory in git, not a chart: its upstream
 charts are rendered as published, with the values the compiler writes.
 
 It is a Go library (package `compiler`) that reads everything through
-`fs.FS`, and a thin command, `okdp-compile`. It compiles a whole tree:
-claims bound to their providers, connections, the deployment graph, the
-mandatory rules, and Helm's merge of the final values.
+`fs.FS`, and a thin command, `okdp-compile`. It compiles instances
+together, read from input documents laid out in any files: claims bound
+to their providers, connections, the mandatory rules, and Helm's merge of
+the final values. How a deployment's files are laid out, and the order
+its releases deploy in, are a host's.
 
 ## Library
 
@@ -16,27 +18,32 @@ mandatory rules, and Helm's merge of the final values.
 import compiler "github.com/okdp/okdp-compiler"
 
 rules, err := compiler.LoadRules(rulesFS) // added to the mandatory set
-tree, err := compiler.Build(ctx, []compiler.Repository{
-	{Name: "db", FS: treeFS, Role: compiler.RoleTree},
-}, compiler.BuildOptions{Rules: rules, CostLimit: compiler.DefaultCostLimit})
-if problems := tree.Problems(); problems != nil {
-	log.Fatal(strings.Join(problems, "\n"))
+cat, err := compiler.LoadCatalog([]compiler.CatalogFiles{{Name: "charts", FS: catalogFS}})
+instances, err := compiler.LoadInputs(ctx, []compiler.InputFiles{
+	{Name: "config", FS: configFS}, // every .yaml file: Settings, Project, Instance
+}, cat, rules)
+for i := range instances {
+	instances[i].Inputs.Rules = rules
+	instances[i].Inputs.CostLimit = compiler.DefaultCostLimit
 }
-for _, ti := range tree.Instances {
-	res := ti.Outcome.Result // Values, Charts, Objects, Info, Dependencies
+for _, out := range compiler.CompileAll(ctx, instances) {
+	if out.Err != nil {
+		log.Fatal(out.Err)
+	}
+	res := out.Result // Values, Charts, Objects, Info, Dependencies
 	files, err := compiler.Write(res)
 	// ...
 }
 ```
 
-- `Build` loads a tree and compiles it; a project that does not load is
-  refused alone (`Tree.Refused`).
+- `LoadCatalog` reads the packages and contracts of catalog directories,
+  `LoadInputs` the instances of input documents, each of a `kind`,
+  `Settings`, `Project` or `Instance`.
 - `CompileAll` compiles instances together, `Compile` a single one; both
   are stateless and safe for concurrent use.
-- `Inputs.Finalize` and `BuildOptions.Loaded` are where a host adds what
-  the compiler does not do: a host may fetch the upstream charts, check
-  the final values against them, and add the security set's policy on
-  upstream values.
+- `Inputs.Finalize` is where a host adds what the compiler does not do:
+  a host may fetch the upstream charts, check the final values against
+  them, and add the security set's policy on upstream values.
 - Accessors let a caller check before it compiles, without restating a
   rule: `FieldErrors`, `ConnectionRefs`, `CheckConnection`,
   `CheckProjectName`, `ReadContract`, `MergeValues`...
@@ -81,7 +88,7 @@ Two rule sets apply together, both data, the walkers in Go:
 The hosts a project serves, the OAuth clients, the hardened pod and the
 policy on upstream values are such a set,
 [okdp-compiler-security](https://github.com/OKDP/okdp-compiler-security),
-which a host gives to every compile. A tree that relies on a set
+which a host gives to every compile. A platform that relies on a set
 requires it (`global.okdp.ruleSets`), and a compile without it is
 refused.
 
@@ -103,11 +110,13 @@ YAML shaped like the upstream values, with `${{ CEL }}` expressions and
 
 ```bash
 make build
-bin/okdp-compile --repository <dir>... [--catalog <dir>]... [--rules <dir>] -o <dir>
-bin/okdp-compile --check --repository <dir>... [--catalog <dir>]... [--rules <dir>]
+bin/okdp-compile -f <file|dir>... --catalog <dir>... [--rules <dir>] -o <dir>
+bin/okdp-compile --check -f <file|dir>... --catalog <dir>... [--rules <dir>]
+bin/okdp-compile -f examples/04_claims/input/config --catalog examples/04_claims/input -o out
 ```
 
-It writes the files of [Output](#output) under
+It reads the input documents of each `-f`, the packages and contracts of
+each `--catalog`, and writes the files of [Output](#output) under
 `projects/<namespace>/instances/<release>/`. It writes no file for a
 deployer engine such as Flux or Argo CD and reads no upstream chart: a
 host does ([usage](docs/01_usage.md#command-line)).
@@ -120,11 +129,11 @@ host does ([usage](docs/01_usage.md#command-line)).
 | `internal/okdp/` | the compile: claims, connections, layers, stages, `CompileAll` |
 | `internal/rules/` | the rule engine and the mandatory set |
 | `internal/merge/` | Helm's merge of the final values |
-| `internal/repository/`, `internal/tree/`, `internal/graph/` | a tree read, compiled, and its deployment graph |
+| `internal/catalog/`, `internal/inputs/` | the catalog read, the input documents read as instances |
 | `internal/compile/` | the mapping language over cel2yaml |
 | `chart/`, `value/` | what the compiler reproduces of Helm; the values helpers |
 | `cmd/okdp-compile/` | the command line |
-| `examples/` | packages, `00_passthrough`, `01_minimal`, `02_advanced` and `04_claims`, each with its expected output, checked by `go test`; those of the security set are in okdp-compiler-security |
+| `examples/` | `00_passthrough`, `01_minimal`, `02_advanced` and `04_claims`, each its `input/` (`catalog/`, `contracts/`, `config/inputs.yaml`) and its expected output, checked by `go test`; those of the security set are in okdp-compiler-security |
 | `docs/` | the [documentation](docs/README.md) |
 
 ## Contributing, security, license

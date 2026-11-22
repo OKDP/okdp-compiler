@@ -54,7 +54,7 @@ type Inputs struct {
 	// another namespace: namespace names, or "*" for any. Nil falls back to
 	// the claimers of the package's provisions entry (Instance.Claimers).
 	// A class of the platform (level 0) needs no such consent.
-	// LoadRepository reads it from instance.yaml.
+	// LoadInputs reads it from an Instance document (claimers).
 	Claimers []string
 	// Bindings gives, by parameter path, the provider each claim of a
 	// reference is bound to. CompileAll sets them. Nil means no claim resolves.

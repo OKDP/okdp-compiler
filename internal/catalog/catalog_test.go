@@ -1,4 +1,4 @@
-package repository
+package catalog
 
 import (
 	"errors"
@@ -12,8 +12,8 @@ import (
 // TestCatalog: the services of two repositories, their versions highest
 // first, a package, the contracts of both.
 func TestCatalog(t *testing.T) {
-	c, err := LoadCatalog([]Repository{
-		{Name: "platform-charts", Role: RoleCatalog, FS: fstest.MapFS{
+	c, err := Load([]Files{
+		{Name: "platform-charts", FS: fstest.MapFS{
 			"catalog/trino/480.0.0-1.0.0/Chart.yaml":  file("name: trino\n"),
 			"catalog/trino/480.0.0-1.0.10/Chart.yaml": file("name: trino\n"),
 			"catalog/trino/479.0.0-1.0.0/Chart.yaml":  file("name: trino\n"),
@@ -21,7 +21,7 @@ func TestCatalog(t *testing.T) {
 			"catalog/hive/4.0.1-1.0.0/Chart.yaml":     file("name: hive\n"),
 			"contracts/s3.schema.json":                file("{}"),
 		}},
-		{Name: "sandbox-dependencies", Role: RoleCatalog, FS: fstest.MapFS{
+		{Name: "sandbox-dependencies", FS: fstest.MapFS{
 			"catalog/keycloak/7.3.2-1.0.0/Chart.yaml": file("name: keycloak\n"),
 			"contracts/s3.schema.json":                file("{}"),
 			"contracts/http.schema.json":              file("{}"),
@@ -75,9 +75,9 @@ func TestCatalog(t *testing.T) {
 // TestCatalogErrors: a service in two repositories, a contract that
 // differs, as Load refuses them.
 func TestCatalogErrors(t *testing.T) {
-	_, err := LoadCatalog([]Repository{
-		{Name: "a", Role: RoleCatalog, FS: fstest.MapFS{"catalog/trino/1.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file("{}")}},
-		{Name: "b", Role: RoleTree, FS: fstest.MapFS{"catalog/trino/2.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file(`{"title": "other"}`)}},
+	_, err := Load([]Files{
+		{Name: "a", FS: fstest.MapFS{"catalog/trino/1.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file("{}")}},
+		{Name: "b", FS: fstest.MapFS{"catalog/trino/2.0.0/Chart.yaml": file("x"), "contracts/s3.schema.json": file(`{"title": "other"}`)}},
 	})
 	for _, want := range []string{`service "trino" is in the repositories a and b`, "contract s3 differs between the repositories a and b"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -86,8 +86,7 @@ func TestCatalogErrors(t *testing.T) {
 	}
 }
 
-// refusingFS: an fs.FS that refuses to open name, as the CLI's refuses a
-// symbolic link.
+// refusingFS: an fs.FS that refuses to open name, permission denied.
 type refusingFS struct {
 	fs.FS
 	name string
@@ -95,21 +94,21 @@ type refusingFS struct {
 
 func (f refusingFS) Open(name string) (fs.File, error) {
 	if name == f.name {
-		return nil, &fs.PathError{Op: "open", Path: name, Err: errors.New("a symbolic link, not followed")}
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
 	}
 	return f.FS.Open(name)
 }
 
 // TestCatalogUnreadable: a version directory its repository's fs.FS
-// refuses (the CLI's, a symbolic link) gives that error, named, not
+// refuses (permission denied) gives that error, named, not
 // ErrNotInCatalog: the version is there.
 func TestCatalogUnreadable(t *testing.T) {
-	c, err := LoadCatalog([]Repository{{Name: "charts", Role: RoleCatalog, FS: refusingFS{fstest.MapFS{"catalog/web/1.0.0/Chart.yaml": file("name: web\n")}, "catalog/web/1.0.0"}}})
+	c, err := Load([]Files{{Name: "charts", FS: refusingFS{fstest.MapFS{"catalog/web/1.0.0/Chart.yaml": file("name: web\n")}, "catalog/web/1.0.0"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = c.Package("web", "1.0.0")
-	want := `version "1.0.0" of service "web": charts/catalog/web/1.0.0: a symbolic link, not followed`
+	want := `version "1.0.0" of service "web": charts/catalog/web/1.0.0: permission denied`
 	if err == nil || errors.Is(err, ErrNotInCatalog) || err.Error() != want {
 		t.Errorf("got %v, want %s", err, want)
 	}
@@ -123,3 +122,5 @@ func TestSortVersions(t *testing.T) {
 		t.Errorf("got %s, want %s", got, want)
 	}
 }
+
+func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }

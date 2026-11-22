@@ -200,8 +200,8 @@ would accept no upstream values, each reported, one per line, as yaml.v3
 reports it (`okdp.Package` the type of the top level). The unknown keys
 are reported first, before the type of any key is checked. The sections of
 the rule set the package is read for (`rules.yaml`'s `sections`;
-`compiler.LoadDefinition`, `Build` for `BuildOptions.Rules`) are keys
-of the file too; nil rules read it for the mandatory set:
+`compiler.LoadDefinition`, `LoadInputs`) are keys of the file too; nil
+rules read it for the mandatory set:
 
 ```text
 okdp.yaml: yaml: unmarshal errors:
@@ -363,7 +363,7 @@ An instance of the package serves the claims of its own namespace, and
 of the platform's classes, which route every namespace to it; a claim
 of another namespace that names it, or a class of its project's, only
 with its consent: its instance's `claimers`
-(`instance.yaml`, `Inputs.Claimers`), else the `claimers` of the entry
+(its `Instance` document, `Inputs.Claimers`), else the `claimers` of the entry
 of the claim's contract, the namespaces whose instances may claim of it,
 `*` for any, none by default
 ([providers](01_inputs_outputs.md#providers)). A package meant to serve
@@ -490,7 +490,7 @@ of them: both fail when it is loaded,
 ## Example
 
 The package of the `workspace` service of okdp-compiler-security's
-[`examples/03_full`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/catalog/workspace),
+[`examples/03_full`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/catalog/workspace/3.2.0-1.4.0),
 abridged to what this page describes: five dependencies, two of them
 renders of one chart; the hosts and the OAuth clients of the security
 set are left out.
@@ -821,9 +821,9 @@ Secrets](01_inputs_outputs.md#credentials-secrets).
 
 A rule set added to the mandatory one may add sections to the mapping
 (`rules.yaml` `sections`), which `okdp.yaml` then holds besides its own:
-`compiler.LoadDefinition`, `LoadRepository` and `Build` read
-`okdp.yaml` for the rule set they are given ([okdp.yaml](#okdpyaml)). A
-section is evaluated after `objects`, as any node is, and its shape is
+`compiler.LoadDefinition` and `LoadInputs` read `okdp.yaml` for the
+rule set they are given ([okdp.yaml](#okdpyaml)). A section is evaluated
+after `objects`, as any node is, and its shape is
 the mapping schema's, under the section's name
 ([evaluation order](#evaluation-order)). When the set ties the section to
 objects (`ownObjects`), its list document checks the section's items,
@@ -996,7 +996,7 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 | Variable | Value |
 |---|---|
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
-| `platform.access` | who may use the project's services: the groups of the project (its `project.yaml` `access`, `okdp-project-<namespace>` an editor when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A project file whose `access` is refused gives no project group (the compile fails anyway). |
+| `platform.access` | who may use the project's services: the groups of the project (its `access`, of its `Project` document, `okdp-project-<namespace>` an editor when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A project whose `access` is refused gives no project group (the compile fails anyway). |
 
 The settings these are derived from are checked against the platform
 schema first (`- at '/global/okdp/access': got boolean, want object`):

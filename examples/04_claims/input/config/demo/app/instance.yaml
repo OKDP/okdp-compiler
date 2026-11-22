@@ -1,3 +1,0 @@
-# No config.yaml: the default of database, {}, a database of its own.
-service: app
-version: 1.0.0

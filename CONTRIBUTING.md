@@ -13,6 +13,7 @@ Issues and pull requests are welcome.
 
 | Target | Does |
 |---|---|
+| `make build` | `bin/okdp-compile`, its `--version` that of `git describe` |
 | `make test` | `go test ./...` |
 | `make race` | the tests with the race detector |
 | `make cover` | the tests with a coverage profile |
@@ -20,7 +21,7 @@ Issues and pull requests are welcome.
 | `make fmt` | formats the sources (gofmt) |
 | `make tidy` | `go mod tidy`, for `go.mod` and `tools/go.mod` |
 | `make fuzz` | each fuzz test in turn, `FUZZTIME` (30s) each ([fuzz tests](docs/00_architecture.md#fuzz-tests)) |
-| `make check` | what CI runs on a pull request: the format check, `go vet`, lint, `go mod tidy -diff`, the race tests |
+| `make check` | what CI runs on a pull request: the format check, `go vet`, lint, `go mod tidy -diff`, the build, the race tests |
 | `make help` | lists the targets |
 
 Run `make check` before pushing. CI (`.github/workflows/ci.yml`) runs the
@@ -40,14 +41,16 @@ same checks on every pull request.
   mandatory one alone, is tested too (`TestCompileWithoutRules`).
 - A boundary of the [threat model](docs/04_threat_model.md), what an
   author may not do, has one case that must fail: a unit test here, or a
-  fixture of a host, where a whole tree compiles. A new check gets
+  fixture of a host, where a whole deployment compiles. A new check gets
   its case, its row in the threat model and in the [security
   boundaries](docs/00_architecture.md#security-boundaries), named in
   both.
 - What `Write` gives of each instance of `examples/` is compared byte for
-  byte with its `output/` (`TestExample`). A change that changes the
-  output runs `go test . -run TestExample -update` and commits the diff:
-  it is the change's effect, reviewed as such.
+  byte with its `output/` (`TestExample`), its `input/` read as
+  `okdp-compile` reads it (`exampleInstances`): the input documents of
+  `input/config/`, the packages and contracts of `input/`. A change that
+  changes the output runs `go test . -run TestExample -update` and
+  commits the diff: it is the change's effect, reviewed as such.
 
 ## Helm fixtures
 

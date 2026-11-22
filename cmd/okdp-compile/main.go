@@ -1,15 +1,19 @@
-// okdp-compile --repository <dir> [--repository <dir>]... [--catalog <dir>]... -o <dir>
+// okdp-compile -f <file|dir> [-f <file|dir>]... --catalog <dir> [--catalog <dir>]... -o <dir>
 //
 //	[--rules <dir>] [--cost-limit <n>] [--instance-timeout <duration>] [--timeout <duration>]
 //	[--force] [--allow-plain-secrets]
 //
-// The command compiles every instance of a tree together and writes the
-// files of each for helm install. With --check in place of -o, it checks
-// the compile and writes nothing. It reads no upstream chart and runs no
-// check of the final values against the charts: a host does those.
+// The command reads the input documents of every -f, a file or a
+// directory of them laid out in any way (compiler.LoadInputs), compiles
+// every instance together, each claim bound to its provider, and writes
+// the files of each for helm install. With --check in place of -o, it
+// checks the compile and writes nothing. It reads no upstream chart and
+// runs no check of the final values against the charts: a host does
+// those.
 //
-// It is a thin wrapper of compiler.Build and compiler.Write. It writes no
-// file for a deployer engine (Flux, Argo CD): a host does.
+// It is a thin wrapper of compiler.LoadCatalog, compiler.LoadInputs,
+// compiler.CompileAll and compiler.Write. It writes no file for a
+// deployer engine (Flux, Argo CD): a host does.
 
 package main
 
@@ -34,8 +38,8 @@ import (
 var version string
 
 type options struct {
-	repositories      []string      // --repository: the tree's parts (compiler.RoleTree)
-	catalogs          []string      // --catalog: catalog/ and contracts/ only (compiler.RoleCatalog)
+	files             []string      // -f, --file: input documents, a file or a directory
+	catalogs          []string      // --catalog: catalog/ and contracts/
 	rules             string        // --rules: the rule set added to the mandatory one; "" adds none
 	output            string        // --output, -o
 	check             bool          // --check
@@ -62,8 +66,10 @@ var errReported = errors.New("reported")
 func main() {
 	var o options
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Func("repository", "a repository of the tree, its directory, required, repeatable: any part of the tree (platform.yaml, contracts/, catalog/, projects/), each part in one repository", func(s string) error { o.repositories = append(o.repositories, s); return nil })
-	flag.Func("catalog", "a catalog of packages, its directory, repeatable: catalog/ and contracts/ only; one that holds platform.yaml or projects/ is refused", func(s string) error { o.catalogs = append(o.catalogs, s); return nil })
+	addFile := func(s string) error { o.files = append(o.files, s); return nil }
+	flag.Func("file", "input documents, required, repeatable: a YAML file, or a directory whose .yaml and .yml files are read, laid out in any way; each document is of kind Settings, Project or Instance, and the files they name in valuesFiles are values files", addFile)
+	flag.Func("f", "shorthand for --file", addFile)
+	flag.Func("catalog", "a catalog, its directory, required, repeatable: its catalog/<service>/<version>/ and contracts/, nothing else of it read", func(s string) error { o.catalogs = append(o.catalogs, s); return nil })
 	flag.StringVar(&o.rules, "rules", "", "a rule set's directory, rules.yaml at its root, added to the compiler's mandatory rules (the functions, the templates and the checks), which every compile applies; it adds rules and replaces none")
 	flag.BoolVar(&o.check, "check", false, "compile and check, write nothing: the errors and warnings, no --output")
 	flag.StringVar(&o.output, "output", "", "output directory, required but with --check: projects/<namespace>/instances/<release>/, values.yaml, the values of the catalog's chart (helm install <release> <package> -f values.yaml), okdp-objects.values.yaml, those of the "+compiler.ObjectsChart+" chart, when it has objects, installed first, okdp.info.yaml, what it publishes, when it publishes something; then the dependencies printed on stderr")
@@ -76,7 +82,7 @@ func main() {
 	flag.Parse()
 	switch {
 	case flag.NArg() > 0:
-		fmt.Fprintf(os.Stderr, "unexpected argument %q: every input is a flag (--repository before each directory)\n", flag.Arg(0))
+		fmt.Fprintf(os.Stderr, "unexpected argument %q: every input is a flag (-f before each file or directory)\n", flag.Arg(0))
 		flag.Usage()
 		os.Exit(2)
 	case *showVersion:
@@ -91,15 +97,15 @@ func main() {
 	}
 }
 
-// run compiles the tree and prints its bindings, refusals and warnings,
-// then the problems of its graph. Unless --check, it then writes the
+// run compiles the instances of the input documents and prints their
+// bindings, refusals and warnings. Unless --check, it then writes the
 // files of each instance and prints the dependencies. It checks every
 // option first, and writes nothing when anything fails.
 func run(o options) error {
 	if err := checkOptions(o); err != nil {
 		return err
 	}
-	if err := checkDirs(o); err != nil {
+	if err := checkPaths(o); err != nil {
 		return err
 	}
 	if !o.check {
@@ -111,46 +117,41 @@ func run(o options) error {
 	if err != nil {
 		return err
 	}
-	defer in.close()
-	t, err := buildTree(o, in)
+	instances, outcomes, err := compile(o, in)
 	if err != nil {
 		return err
 	}
-	if printOutcomes(t) {
-		return errReported
-	}
-	for _, ti := range t.Instances {
-		graphErrors(ti, ti.GraphErr)
-	}
-	if t.Graph == nil {
+	if printOutcomes(instances, outcomes) {
 		return errReported
 	}
 	if o.check {
 		return nil
 	}
 	files := map[string][]byte{outdir.MarkerFile: []byte(outdir.Marker)}
-	for _, ti := range t.Instances {
-		res := ti.Outcome.Result
+	for _, out := range outcomes {
+		res := out.Result
 		written, err := compiler.Write(res)
 		if err != nil {
 			return fmt.Errorf("%s/%s: %w", res.Namespace, res.Release, err)
 		}
 		for name, b := range written {
-			files[path.Join(compiler.ProjectsDir, res.Namespace, compiler.InstancesDir, res.Release, name)] = b
+			files[path.Join("projects", res.Namespace, "instances", res.Release, name)] = b
 		}
 	}
 	if err := outdir.Write(o.output, files); err != nil {
 		return err
 	}
-	printDependencies(t)
+	printDependencies(outcomes)
 	return nil
 }
 
 // checkOptions returns nil when the options go together.
 func checkOptions(o options) error {
 	switch {
-	case o.repositories == nil:
-		return errors.New("--repository is required")
+	case o.files == nil:
+		return errors.New("-f (--file) is required")
+	case o.catalogs == nil:
+		return errors.New("--catalog is required")
 	case o.check && o.output != "":
 		return errors.New("--check writes nothing: no --output (-o)")
 	case !o.check && o.output == "":
@@ -163,82 +164,86 @@ func checkOptions(o options) error {
 
 // inputs holds what the command reads, once open.
 type inputs struct {
-	repos   []compiler.Repository
+	files   []compiler.InputFiles
+	catalog *compiler.Catalog
 	rules   *compiler.RuleSet // nil without --rules: the mandatory set alone
-	closers []func()
 }
 
-func (in *inputs) close() {
-	for _, c := range in.closers {
-		c()
-	}
-}
-
-// openInputs opens the directories of --repository, --catalog and
-// --rules through dirfs, which bounds what is read and follows no
-// symbolic link. When one fails, it closes those already opened.
+// openInputs opens the directories of -f, --catalog and --rules through
+// dirfs, which bounds what is read, and reads the catalog and the rule
+// set. A file of -f is read in the directory that holds it.
 func openInputs(o options) (*inputs, error) {
 	in := &inputs{}
-	fail := func(err error) (*inputs, error) {
-		in.close()
-		return nil, err
-	}
-	for _, d := range inputDirs(o) {
-		fsys, err := dirfs.New(d.flag, d.dir)
+	var catalogs []compiler.CatalogFiles
+	for _, dir := range o.catalogs {
+		fsys, err := dirfs.New("--catalog", dir)
 		if err != nil {
-			return fail(err)
+			return nil, err
 		}
-		in.closers = append(in.closers, fsys.Close)
-		in.repos = append(in.repos, compiler.Repository{Name: d.dir, FS: fsys, Role: d.role})
+		catalogs = append(catalogs, compiler.CatalogFiles{Name: dir, FS: fsys})
+	}
+	for _, p := range o.files {
+		dir, file := p, ""
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			dir, file = filepath.Dir(p), filepath.Base(p)
+		}
+		fsys, err := dirfs.New("-f", dir)
+		if err != nil {
+			return nil, err
+		}
+		in.files = append(in.files, compiler.InputFiles{Name: filepath.ToSlash(dir), FS: fsys, Path: file})
 	}
 	if o.rules != "" {
 		fsys, err := dirfs.New("--rules", o.rules)
 		if err != nil {
-			return fail(err)
+			return nil, err
 		}
-		in.closers = append(in.closers, fsys.Close)
 		if in.rules, err = compiler.LoadRules(fsys); err != nil {
-			return fail(fmt.Errorf("--rules %s: %w", o.rules, err))
+			return nil, fmt.Errorf("--rules %s: %w", o.rules, err)
 		}
 	}
+	cat, err := compiler.LoadCatalog(catalogs)
+	if err != nil {
+		return nil, err
+	}
+	in.catalog = cat
 	return in, nil
 }
 
-// buildTree compiles the tree of the repositories within --timeout.
-func buildTree(o options, in *inputs) (*compiler.Tree, error) {
+// compile reads the instances of the input documents and compiles them
+// together within --timeout. The outcomes are in the instances' order.
+func compile(o options, in *inputs) ([]compiler.Instance, []compiler.Outcome, error) {
 	ctx := context.Background()
 	if o.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, o.timeout)
 		defer cancel()
 	}
-	t, err := compiler.Build(ctx, in.repos, compiler.BuildOptions{
-		CostLimit:         o.costLimit,
-		InstanceTimeout:   o.instanceTimeout,
-		AllowPlainSecrets: o.allowPlainSecrets,
-		Rules:             in.rules,
-	})
+	instances, err := compiler.LoadInputs(ctx, in.files, in.catalog, in.rules)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	if len(instances) == 0 {
+		return nil, nil, errors.New("no instance: -f holds no document of kind Instance")
+	}
+	for i := range instances {
+		instances[i].Inputs.CostLimit = o.costLimit
+		instances[i].Inputs.Timeout = o.instanceTimeout
+		instances[i].Inputs.AllowPlainSecrets = o.allowPlainSecrets
+		instances[i].Inputs.Rules = in.rules
+	}
+	outcomes := compiler.CompileAll(ctx, instances)
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("the compile takes longer than --timeout %s: nothing written", o.timeout)
+		return nil, nil, fmt.Errorf("the compile takes longer than --timeout %s: nothing written", o.timeout)
 	}
-	return t, nil
+	return instances, outcomes, nil
 }
 
-// printOutcomes prints the load problems, then each instance's bindings
-// and its refusal or warnings. It reports whether anything is refused.
-func printOutcomes(t *compiler.Tree) (refused bool) {
-	for _, r := range t.Refused {
-		for _, p := range r.Problems {
-			fmt.Fprintf(os.Stderr, "error: %s\n", p)
-		}
-		refused = true
-	}
-	for _, ti := range t.Instances {
-		out := ti.Outcome
-		node := ti.Namespace() + "/" + ti.Release()
+// printOutcomes prints each instance's bindings and its refusal or
+// warnings. It reports whether anything is refused.
+func printOutcomes(instances []compiler.Instance, outcomes []compiler.Outcome) (refused bool) {
+	for i, out := range outcomes {
+		node := instances[i].Inputs.Namespace + "/" + instances[i].Inputs.Release
 		for _, b := range out.Claims {
 			how := ""
 			switch {
@@ -262,29 +267,12 @@ func printOutcomes(t *compiler.Tree) (refused bool) {
 	return refused
 }
 
-// graphErrors prints each problem of err, the problems of the graph at
-// the release of ti, as error: <namespace>/<release>: <error>.
-func graphErrors(ti *compiler.TreeInstance, err error) {
-	if err == nil {
-		return
-	}
-	errs := []error{err}
-	var joined interface{ Unwrap() []error }
-	if errors.As(err, &joined) {
-		errs = joined.Unwrap()
-	}
-	for _, e := range errs {
-		fmt.Fprintln(os.Stderr, "error:", &compiler.GraphError{Node: compiler.GraphNode{Namespace: ti.Namespace(), Release: ti.Release()}, Err: e})
-	}
-}
-
-// printDependencies prints the dependencies of the instances of t on
-// stderr:
+// printDependencies prints the dependencies of the instances on stderr:
 //
 //	<namespace>/<release>: depends on <instance> (<contract> <output>, <field>)
-func printDependencies(t *compiler.Tree) {
-	for _, ti := range t.Instances {
-		res := ti.Outcome.Result
+func printDependencies(outcomes []compiler.Outcome) {
+	for _, out := range outcomes {
+		res := out.Result
 		for _, d := range res.Dependencies {
 			instance := d.Instance
 			if d.Namespace != "" {
@@ -295,49 +283,38 @@ func printDependencies(t *compiler.Tree) {
 	}
 }
 
-type inputDir struct {
-	flag, dir string
-	role      compiler.Role
-}
+type inputPath struct{ flag, path string }
 
-// inputDirs returns the directories of --repository, then of --catalog.
-func inputDirs(o options) []inputDir {
-	var out []inputDir
-	for _, dir := range o.repositories {
-		out = append(out, inputDir{"--repository", dir, compiler.RoleTree})
+// checkPaths returns nil when each --catalog is a directory, each -f a
+// file or a directory, and none is given twice. The output must be apart
+// from every input and from --rules: the command removes from its output
+// what it does not write.
+func checkPaths(o options) error {
+	var paths []inputPath
+	for _, f := range o.files {
+		paths = append(paths, inputPath{"-f", f})
 	}
-	for _, dir := range o.catalogs {
-		out = append(out, inputDir{"--catalog", dir, compiler.RoleCatalog})
+	for _, c := range o.catalogs {
+		paths = append(paths, inputPath{"--catalog", c})
 	}
-	return out
-}
-
-// checkDirs returns nil when each --repository and --catalog is a
-// directory, and none is given twice or is inside another. The output
-// must be apart from them and from --rules: the command removes from its
-// output what it does not write.
-func checkDirs(o options) error {
-	dirs := inputDirs(o)
-	abs := make([]string, 0, len(dirs)+1)
-	for i, d := range dirs {
-		if info, err := os.Stat(d.dir); err != nil {
-			return fmt.Errorf("%s: %w", d.flag, err)
-		} else if !info.IsDir() {
-			return fmt.Errorf("%s %s: not a directory", d.flag, d.dir)
+	if o.rules != "" {
+		paths = append(paths, inputPath{"--rules", o.rules})
+	}
+	abs := make([]string, len(paths))
+	for i, p := range paths {
+		info, err := os.Stat(p.path)
+		switch {
+		case err != nil:
+			return fmt.Errorf("%s: %w", p.flag, err)
+		case p.flag != "-f" && !info.IsDir():
+			return fmt.Errorf("%s %s: not a directory", p.flag, p.path)
 		}
-		a, err := filepath.Abs(d.dir)
-		if err != nil {
+		if abs[i], err = filepath.Abs(p.path); err != nil {
 			return err
 		}
-		abs = append(abs, a)
 		for j := range i {
-			switch {
-			case abs[i] == abs[j]:
-				return fmt.Errorf("%s %s is given twice", d.flag, d.dir)
-			case inside(abs[i], abs[j]):
-				return fmt.Errorf("%s %s is inside %s %s", d.flag, d.dir, dirs[j].flag, dirs[j].dir)
-			case inside(abs[j], abs[i]):
-				return fmt.Errorf("%s %s is inside %s %s", dirs[j].flag, dirs[j].dir, d.flag, d.dir)
+			if abs[i] == abs[j] && paths[j].flag == p.flag {
+				return fmt.Errorf("%s %s is given twice", p.flag, p.path)
 			}
 		}
 	}
@@ -348,17 +325,9 @@ func checkDirs(o options) error {
 	if err != nil {
 		return err
 	}
-	if o.rules != "" {
-		dirs = append(dirs, inputDir{flag: "--rules", dir: o.rules})
-		rules, err := filepath.Abs(o.rules)
-		if err != nil {
-			return err
-		}
-		abs = append(abs, rules)
-	}
-	for i, d := range dirs {
+	for i, p := range paths {
 		if inside(out, abs[i]) || inside(abs[i], out) {
-			return fmt.Errorf("--output (-o) %s and %s %s must not contain one another: the command removes what it does not write", o.output, d.flag, d.dir)
+			return fmt.Errorf("--output (-o) %s and %s %s must not contain one another: the command removes what it does not write", o.output, p.flag, p.path)
 		}
 	}
 	return nil

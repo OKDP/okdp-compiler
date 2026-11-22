@@ -1,5 +1,0 @@
-# The instance's package: catalog/. No config.yaml: the package
-# has no parameter to set. The release is demo-echo, <project>-<instance>,
-# in the namespace demo.
-service: echo
-version: 1.2.0

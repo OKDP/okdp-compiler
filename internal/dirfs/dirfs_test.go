@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -24,10 +25,11 @@ func write(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// TestDirFS: a directory without links reads as os.DirFS (fstest.TestFS);
-// a symbolic link is refused, opened, on the path of a file or listed,
-// whether it points inside the directory or out of it; a file that does
-// not exist is fs.ErrNotExist; the directory itself may be a link.
+// TestDirFS: a directory reads as os.DirFS (fstest.TestFS); a symbolic
+// link is followed, opened, on the path of a file or listed, whether it
+// points inside the directory or out of it, and a walk enters a linked
+// directory; a file that does not exist is fs.ErrNotExist; the directory
+// itself may be a link.
 func TestDirFS(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, map[string]string{"outside/secret.yaml": "c: 3\n"})
@@ -40,16 +42,19 @@ func TestDirFS(t *testing.T) {
 	if err := fstest.TestFS(d, "platform.yaml", "projects/demo/project.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	d.Close()
 	// Links: to a file out of the tree, to a directory in it, to a
 	// directory out of it.
-	for link, target := range map[string]string{
-		"projects/demo/config.yaml": filepath.Join(dir, "outside", "secret.yaml"),
-		"projects/data":             filepath.Join(tree, "projects", "demo"),
-		"projects/out":              filepath.Join(dir, "outside"),
+	for link, tc := range map[string]struct {
+		target string
+		file   string // a file read through the link
+		want   string
+	}{
+		"projects/demo/config.yaml": {filepath.Join(dir, "outside", "secret.yaml"), "projects/demo/config.yaml", "c: 3\n"},
+		"projects/data":             {filepath.Join(tree, "projects", "demo"), "projects/data/project.yaml", "b: 2\n"},
+		"projects/out":              {filepath.Join(dir, "outside"), "projects/out/secret.yaml", "c: 3\n"},
 	} {
 		t.Run(link, func(t *testing.T) {
-			if err := os.Symlink(target, filepath.Join(tree, filepath.FromSlash(link))); err != nil {
+			if err := os.Symlink(tc.target, filepath.Join(tree, filepath.FromSlash(link))); err != nil {
 				t.Fatal(err)
 			}
 			defer func() { _ = os.Remove(filepath.Join(tree, filepath.FromSlash(link))) }()
@@ -57,32 +62,34 @@ func TestDirFS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer d.Close()
-			if _, err := fs.ReadFile(d, link); !errors.Is(err, ErrSymlink) || err.Error() != "open "+link+": a symbolic link, not followed" {
-				t.Errorf("opened: %v", err)
+			if b, err := fs.ReadFile(d, tc.file); err != nil || string(b) != tc.want {
+				t.Errorf("read through it: %q, %v", b, err)
 			}
-			if _, err := fs.Stat(d, link); !errors.Is(err, ErrSymlink) {
-				t.Errorf("stat: %v", err)
-			}
-			parent := link[:strings.LastIndexByte(link, '/')]
-			if _, err := fs.ReadDir(d, parent); !errors.Is(err, ErrSymlink) || err.Error() != "readdir "+parent+": "+link+": a symbolic link, not followed" {
-				t.Errorf("listed: %v", err)
-			}
-			if !strings.HasSuffix(link, ".yaml") {
-				if _, err := fs.ReadFile(d, link+"/project.yaml"); !errors.Is(err, ErrSymlink) || err.Error() != "open "+link+"/project.yaml: "+link+": a symbolic link, not followed" {
-					t.Errorf("through it: %v", err)
+			var walked []string
+			err = fs.WalkDir(d, ".", func(p string, e fs.DirEntry, err error) error {
+				if err == nil && !e.IsDir() {
+					walked = append(walked, p)
 				}
-			}
-			if _, err := fs.ReadFile(d, "platform.yaml"); err != nil {
-				t.Errorf("a file beside it: %v", err)
+				return err
+			})
+			if err != nil || !slices.Contains(walked, tc.file) {
+				t.Errorf("walked: %v, %v", walked, err)
 			}
 		})
 	}
-	d, err = New("--repository", tree)
-	if err != nil {
+	// A link that points nowhere: listed, and fails when opened.
+	if err := os.Symlink(filepath.Join(dir, "nope"), filepath.Join(tree, "dangling.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
+	if _, err := fs.ReadDir(d, "."); err != nil {
+		t.Errorf("listed: %v", err)
+	}
+	if _, err := fs.ReadFile(d, "dangling.yaml"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a dangling link: %v", err)
+	}
+	if err := os.Remove(filepath.Join(tree, "dangling.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fs.ReadFile(d, "nope.yaml"); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("a missing file: %v", err)
 	}
@@ -100,12 +107,14 @@ func TestDirFS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer linked.Close()
 	if b, err := fs.ReadFile(linked, "platform.yaml"); err != nil || string(b) != "a: 1\n" {
 		t.Errorf("the directory a link: %q, %v", b, err)
 	}
 	if _, err := New("--repository", filepath.Join(dir, "nope")); err == nil || !strings.HasPrefix(err.Error(), "--repository: ") {
 		t.Errorf("a missing directory: %v", err)
+	}
+	if _, err := New("--repository", filepath.Join(tree, "platform.yaml")); err == nil || !strings.HasSuffix(err.Error(), "is not a directory") {
+		t.Errorf("a file: %v", err)
 	}
 }
 
@@ -119,7 +128,6 @@ func TestDirFSBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Close()
 	d.fileCap, d.dirCap = 10, 25
 	if _, err := fs.ReadFile(d, "big"); err == nil || err.Error() != "open big: 11 bytes, over the 10 bytes a file read may hold" {
 		t.Errorf("a file over the cap: %v", err)
@@ -140,7 +148,6 @@ func TestDirFSBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer g.Close()
 	g.fileCap = 10
 	f, err := g.Open("a")
 	if err != nil {

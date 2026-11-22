@@ -1,5 +1,5 @@
 // Package dirfs gives the files under a directory as an fs.FS that bounds
-// what is read and follows no symbolic link.
+// what is read.
 package dirfs
 
 import (
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"strings"
+	"path/filepath"
 	"sync"
 )
 
@@ -19,19 +19,13 @@ const (
 	MaxDirSize  = 64 << 20
 )
 
-// ErrSymlink is the error for a symbolic link under a directory read. A
-// link is never followed, wherever it points.
-var ErrSymlink = errors.New("a symbolic link, not followed")
-
-// FS gives the files under a directory as os.DirFS does, but refuses a
-// symbolic link (opened, listed in a directory or on the path of a
-// file), a file that is neither regular nor a directory, a regular file
-// over fileCap bytes, and a new file once the files opened pass dirCap
-// together. The directory itself may be a link, since the user names it.
-// A Stat goes through Open, so it counts its file. An FS is safe for
-// concurrent use.
+// FS gives the files under a directory as os.DirFS does, symbolic links
+// followed, but refuses a file that is neither regular nor a directory, a
+// regular file over fileCap bytes, and a new file once the files opened
+// pass dirCap together. A Stat goes through Open, so it counts its file.
+// An FS is safe for concurrent use.
 type FS struct {
-	root    *os.Root
+	dir     string
 	label   string // what messages name: --repository <dir>, --rules <dir>
 	fileCap int64
 	dirCap  int64
@@ -41,24 +35,23 @@ type FS struct {
 	total int64            // the sum of sizes
 }
 
-// New opens the FS of dir, bounded by MaxFileSize and MaxDirSize. label
-// names the directory in messages. The caller releases the FS with Close.
+// New returns the FS of dir, bounded by MaxFileSize and MaxDirSize, after
+// checking that dir is a directory. label names the directory in
+// messages.
 func New(label, dir string) (*FS, error) {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
+	info, err := os.Stat(dir)
+	switch {
+	case err != nil:
 		return nil, fmt.Errorf("%s: %w", label, err)
+	case !info.IsDir():
+		return nil, fmt.Errorf("%s: %s is not a directory", label, dir)
 	}
-	return &FS{root: root, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}}, nil
+	return &FS{dir: dir, label: label + " " + dir, fileCap: MaxFileSize, dirCap: MaxDirSize, sizes: map[string]int64{}}, nil
 }
 
-// Close releases the directory. The files already opened stay readable.
-// It drops the error: the directory was only read.
-func (d *FS) Close() { _ = d.root.Close() }
-
-// Open opens the file name. It checks each element of the path with
-// Lstat, opens the file through an os.Root, which cannot leave the
-// directory, then checks that the file opened is the one it checked. An
-// error is an *fs.PathError of name.
+// Open opens the file name. It checks the file with Stat before opening
+// it, so that a FIFO is never opened, then checks that the file opened is
+// the one it checked. An error is an *fs.PathError of name.
 func (d *FS) Open(name string) (fs.File, error) {
 	fail := func(err error) (fs.File, error) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
@@ -66,8 +59,12 @@ func (d *FS) Open(name string) (fs.File, error) {
 	if !fs.ValidPath(name) {
 		return fail(fs.ErrInvalid)
 	}
-	info, err := d.lstat(name)
+	p := filepath.Join(d.dir, filepath.FromSlash(name))
+	info, err := os.Stat(p)
 	if err != nil {
+		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
+			err = pe.Err
+		}
 		return fail(err)
 	}
 	switch {
@@ -79,48 +76,20 @@ func (d *FS) Open(name string) (fs.File, error) {
 	default:
 		return fail(errors.New("not a regular file nor a directory: not read"))
 	}
-	f, err := d.root.Open(name)
+	f, err := os.Open(p)
 	if err != nil {
-		return nil, err
+		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return fail(err)
 	}
-	// Check that the file opened is the one checked: no link was swapped
-	// in since.
+	// Check that the file opened is the one checked: none was swapped in
+	// since.
 	if opened, err := f.Stat(); err != nil || !os.SameFile(info, opened) {
 		_ = f.Close()
 		return fail(errors.New("changed while it was opened"))
 	}
 	return &file{f: f, name: name, fileCap: d.fileCap, left: d.fileCap}, nil
-}
-
-// lstat returns the information of name after checking that neither
-// name nor a directory on its path is a symbolic link.
-func (d *FS) lstat(name string) (fs.FileInfo, error) {
-	if name == "." {
-		return d.root.Lstat(".")
-	}
-	var info fs.FileInfo
-	for i := 0; i >= 0; {
-		elem := name
-		if j := strings.IndexByte(name[i:], '/'); j >= 0 {
-			elem, i = name[:i+j], i+j+1
-		} else {
-			i = -1
-		}
-		var err error
-		if info, err = d.root.Lstat(elem); err != nil {
-			if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
-				err = pe.Err
-			}
-			return nil, err
-		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			if elem != name {
-				return nil, fmt.Errorf("%s: %w", elem, ErrSymlink)
-			}
-			return nil, ErrSymlink
-		}
-	}
-	return info, nil
 }
 
 // count returns nil when the regular file name, of size bytes, is within
@@ -176,17 +145,18 @@ func (f *file) Read(b []byte) (int, error) {
 	return n, err
 }
 
-// ReadDir returns the entries of the directory. A symbolic link among
-// them fails the listing, rather than being skipped silently.
+// ReadDir returns the entries of the directory. Unlike os.DirFS, it gives
+// a symbolic link as the file it points to, so that a walk enters a
+// linked directory; a link that points nowhere is left as it is, and
+// fails when opened.
 func (f *file) ReadDir(n int) ([]fs.DirEntry, error) {
 	entries, err := f.f.ReadDir(n)
-	for _, e := range entries {
-		if e.Type()&fs.ModeSymlink != 0 {
-			p := e.Name()
-			if f.name != "." {
-				p = f.name + "/" + p
-			}
-			return nil, &fs.PathError{Op: "readdir", Path: f.name, Err: fmt.Errorf("%s: %w", p, ErrSymlink)}
+	for i, e := range entries {
+		if e.Type()&fs.ModeSymlink == 0 {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(f.f.Name(), e.Name())); err == nil {
+			entries[i] = fs.FileInfoToDirEntry(info)
 		}
 	}
 	return entries, err

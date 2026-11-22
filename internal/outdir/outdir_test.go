@@ -42,11 +42,10 @@ func write(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// TestWrite: the files written through the output directory, every
-// symbolic link under projects/ removed first, a file's or a directory's,
-// in the output or out of it, nothing written through one; a projects/
-// that is a link refused; what the command does not write under projects/
-// removed, a link itself, not what it points to.
+// TestWrite: the files written, symbolic links followed: a file's, a
+// directory's, projects/ itself; what the command does not write under
+// projects/ removed, a file's link itself, not what it points to, a
+// directory's link entered and kept.
 func TestWrite(t *testing.T) {
 	dir, outside := t.TempDir(), t.TempDir()
 	secret := filepath.Join(outside, "secret")
@@ -54,10 +53,8 @@ func TestWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, dir, map[string]string{"projects/demo/instances/a/x.yaml": "old\n"})
-	for link, target := range map[string]string{"projects/demo/instances/a/Chart.yaml": secret, "projects/demo/instances/a/stale": secret} {
-		if err := os.Symlink(target, filepath.Join(dir, filepath.FromSlash(link))); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.Symlink(secret, filepath.Join(dir, "projects/demo/instances/a/stale")); err != nil {
+		t.Fatal(err)
 	}
 	files := map[string][]byte{"projects/demo/instances/a/Chart.yaml": []byte("new\n"), MarkerFile: []byte(Marker)}
 	if err := Write(dir, files); err != nil {
@@ -67,63 +64,48 @@ func TestWrite(t *testing.T) {
 		t.Errorf("got %v", got)
 	}
 	if b, err := os.ReadFile(secret); err != nil || string(b) != "keep\n" {
-		t.Errorf("the file a link pointed to: %q, %v", b, err)
+		t.Errorf("the file a stale link pointed to: %q, %v", b, err)
 	}
-	// A directory link, out of the output or in it, at any depth under
-	// projects/: removed before anything is written, the files written
-	// in a directory of their own, nothing through the link.
-	elsewhere := filepath.Join(dir, "elsewhere")
-	if err := os.MkdirAll(filepath.Join(elsewhere, "instances"), 0o755); err != nil {
+	// A link to a file: written through. A link to a directory: entered,
+	// what is not written under it removed, the link kept.
+	if err := os.Symlink(secret, filepath.Join(dir, "projects/demo/instances/a/values.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	for link, target := range map[string]string{"projects/data": outside, "projects/demo": "../elsewhere", "projects/solo/instances": "../../elsewhere/instances"} {
-		p := filepath.Join(dir, filepath.FromSlash(link))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(p); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(target, p); err != nil {
-			t.Fatal(err)
-		}
+	data := filepath.Join(outside, "data")
+	write(t, data, map[string]string{"stale.yaml": "stale\n"})
+	if err := os.Symlink(data, filepath.Join(dir, "projects/data")); err != nil {
+		t.Fatal(err)
 	}
-	files = map[string][]byte{"projects/data/secret": []byte("overwritten\n"), "projects/demo/kustomization.yaml": []byte("demo\n"), "projects/solo/instances/a/Chart.yaml": []byte("solo\n"), MarkerFile: []byte(Marker)}
+	files = map[string][]byte{"projects/demo/instances/a/values.yaml": []byte("through\n"), "projects/data/kustomization.yaml": []byte("data\n"), MarkerFile: []byte(Marker)}
 	if err := Write(dir, files); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{}
-	for p, b := range files {
-		want[filepath.FromSlash(p)] = string(b)
+	if b, err := os.ReadFile(secret); err != nil || string(b) != "through\n" {
+		t.Errorf("written through a file's link: %q, %v", b, err)
 	}
-	if got := tree(t, dir); !maps.Equal(got, want) {
-		t.Errorf("got %v", got)
+	if got, want := tree(t, data), map[string]string{"kustomization.yaml": "data\n"}; !maps.Equal(got, want) {
+		t.Errorf("through a directory's link: %v", got)
 	}
-	for _, p := range []string{"projects/data", "projects/demo", "projects/solo/instances"} {
-		if info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(p))); err != nil || !info.IsDir() {
-			t.Errorf("%s: not a directory: %v, %v", p, info, err)
-		}
+	if info, err := os.Lstat(filepath.Join(dir, "projects/data")); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		t.Errorf("the directory's link: %v, %v", info, err)
 	}
-	if b, err := os.ReadFile(secret); err != nil || string(b) != "keep\n" {
-		t.Errorf("out of the output: %q, %v", b, err)
-	}
-	// A projects/ that is a link: refused, nothing written.
+	// A projects/ that is a link: written through.
 	linked := t.TempDir()
 	if err := os.Symlink(filepath.Join(dir, "projects"), filepath.Join(linked, "projects")); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(linked, map[string][]byte{"projects/demo/kustomization.yaml": []byte("linked\n")}); err == nil {
-		t.Error("written through projects/, a link")
+	if err := Write(linked, map[string][]byte{"projects/demo/kustomization.yaml": []byte("linked\n"), MarkerFile: []byte(Marker)}); err != nil {
+		t.Fatal(err)
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, "projects", "demo", "kustomization.yaml")); err != nil || string(b) != "demo\n" {
+	if b, err := os.ReadFile(filepath.Join(dir, "projects", "demo", "kustomization.yaml")); err != nil || string(b) != "linked\n" {
 		t.Errorf("through projects/: %q, %v", b, err)
 	}
 }
 
 // TestCheck: an output whose projects/ the command may write: none, an
-// empty one, one with its marker, or any with force; a projects/ that is
-// a symbolic link or not a directory refused, force or not; one that holds
-// files but not the marker refused.
+// empty one, one with its marker, or any with force, a symbolic link to
+// one too; a projects/ that is not a directory refused, force or not; one
+// that holds files but not the marker refused.
 func TestCheck(t *testing.T) {
 	for name, tc := range map[string]struct {
 		files map[string]string // written under the output
@@ -140,8 +122,7 @@ func TestCheck(t *testing.T) {
 		"not marked":            {files: map[string]string{"projects/a/x": "x\n"}, want: "was not written by okdp-compile (no " + MarkerFile + ")"},
 		"not marked, forced":    {files: map[string]string{"projects/a/x": "x\n"}, force: true},
 		"marker is a directory": {files: map[string]string{MarkerFile + "/x": "x\n"}, want: "was not written by okdp-compile"},
-		"a link":                {link: true, want: "is a symbolic link"},
-		"a link, forced":        {link: true, force: true, want: "is a symbolic link"},
+		"a link":                {link: true},
 		"a file":                {files: map[string]string{"projects": "x\n"}, force: true, want: "is not a directory"},
 	} {
 		t.Run(name, func(t *testing.T) {

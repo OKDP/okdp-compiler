@@ -12,8 +12,7 @@ import (
 )
 
 // The field errors of a compile: a violation of the parameter schema at
-// its place, a reference at its path, a tree that does not load a
-// problem each, of the whole.
+// its place, a reference at its path, any other problem of the whole.
 func TestFieldErrors(t *testing.T) {
 	def, in := example()
 	in.Values = append(in.Values, map[string]any{"replicas": "two"})
@@ -21,10 +20,6 @@ func TestFieldErrors(t *testing.T) {
 	fields := compiler.FieldErrors(fmt.Errorf("wrapped: %w", err))
 	if len(fields) != 1 || fields[0].Pointer != "/replicas" || fields[0].Path != "replicas" || fields[0].Message != "at '/replicas': got string, want integer" {
 		t.Fatalf("a schema violation: %+v (%v)", fields, err)
-	}
-	load := &compiler.LoadError{Problems: []string{"a", "b"}}
-	if fields := compiler.FieldErrors(load); len(fields) != 2 || fields[1].Message != "b" || fields[1].Path != "" {
-		t.Errorf("a LoadError: %+v", fields)
 	}
 	if fields := compiler.FieldErrors(errors.New("x")); len(fields) != 1 || fields[0].Message != "x" {
 		t.Errorf("an error of no field: %+v", fields)

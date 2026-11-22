@@ -1,19 +1,19 @@
 # Threat model
 
-Who writes what in an OKDP tree, what each author may reach, and what
-is refused of each, as it is enforced now. The [security
+Who writes what in an OKDP deployment, what each author may reach, and
+what is refused of each, as it is enforced now. The [security
 boundaries](00_architecture.md#security-boundaries) list the checks by
 mechanism; this document lists them by author. Each refusal names the
 code that enforces it, `<file>: <function>`, and the test of this module
 that proves it, a case that must fail; a rule proved only by compiling a
-whole tree is a host's to prove, its cell empty. [What cannot be
+whole deployment is a host's to prove, its cell empty. [What cannot be
 enforced](#what-cannot-be-enforced) closes it.
 
 These rules are data. The walkers of `internal/okdp` (`policy.go`,
 `release.go`) run the checks of the compiler's mandatory rule set, which
 every compile applies; a rule set a compile is given (`Inputs.Rules`)
-adds to it and replaces none of its rules. A tree that requires a set
-(`global.okdp.ruleSets`) is refused by every compile not given it, or
+adds to it and replaces none of its rules. A platform that requires a
+set (`global.okdp.ruleSets`) is refused by every compile not given it, or
 given a version its constraint refuses, so that the settings only that
 set reads are never left unchecked.
 
@@ -23,21 +23,23 @@ are rules of the security set, okdp-compiler-security, not of the
 mandatory set: [the security set](#the-security-set) says what it covers
 and what a compile without it does not check.
 
-This module's own `cmd/okdp-compile` reads the tree without following
-a symbolic link, bounded (`internal/dirfs`), and writes its output
-without writing through one (`internal/outdir`). It compiles with the
-mandatory rules and the sets of `--rules`, the mandatory rules alone
-without them, their checks and hooks among them, and with no policy on
-upstream values. It reads no upstream chart: it checks neither the
-final values against the upstream charts nor the manifests they render,
-and it writes no file of a deployer engine. A compile to deploy from
-goes through a host that adds them.
+This module's own `cmd/okdp-compile` reads its input documents and its
+catalogs bounded (`internal/dirfs`), and writes nothing out of its
+output's `projects/` that it did not write (`internal/outdir`); it follows
+symbolic links, which are the user's. It compiles with the mandatory rules
+and the sets of `--rules`, the mandatory rules alone without them, their
+checks and hooks among them, and with no policy on upstream values. It
+reads no upstream chart: it checks neither the final values against the
+upstream charts nor the manifests they render, and it writes no file of a
+deployer engine. A compile to deploy from goes through a host that adds
+them.
 
 A host, a program that embeds the compiler, holds part of what is named
 here: the files of the deployer engines and the manifests that confine
 each project, the chart cache and the checks against the upstream
-charts, the commits to the deployments repository and a control
-plane's edits of the tree, and the wiring of the security set and of
+charts, the layout of a deployment's files and who may write each, the
+commits to the deployments repository and a control plane's edits, and
+the wiring of the security set and of
 its package `policy` (through `Inputs.Rules`, `Inputs.Finalize` and
 `Inputs.CheckGlobals`). A rule enforced by a host names no code of this
 module: `okdp-compile` alone does not enforce it.
@@ -53,7 +55,7 @@ module: `okdp-compile` alone does not enforce it.
   ID>`.
 - The platform's settings, `global.okdp`: the objects' chart, the TLS
   settings, the proxy, the secret store, the privileged projects, the
-  rule sets the tree requires and the settings those sets read.
+  rule sets the platform requires and the settings those sets read.
 - The deployments repository: what is committed under its output,
   `compiled/`, the engines apply as it is.
 - The runner of a compile: what it reads, how long it runs, what it
@@ -61,23 +63,28 @@ module: `okdp-compile` alone does not enforce it.
 
 ## Authority comes from the file
 
-The compiler does not know who wrote a file: it trusts a file for its
-place in the tree ([repository layout](01_usage.md#repository-layout)) and
-for its repository's role: a repository of the tree holds any part of it,
-a catalog `catalog/` and `contracts/` only (`compiler.RoleCatalog`).
-`platform.yaml` is level 0, the platform's;
-`project.yaml`, level 1, a project's; an instance's `connections.yaml`,
-level 2, and its `config.yaml`, the instance values. Who writes each is
-decided by the hosting of the repositories: their write access and their
+The compiler does not know who wrote a file: it trusts a document for
+its kind ([input documents](01_usage.md#input-documents)), and a catalog
+for its packages and contracts. Of a catalog's directory
+(`compiler.LoadCatalog`, `--catalog`) it reads `catalog/` and
+`contracts/`, nothing else; of the input documents
+(`compiler.LoadInputs`, `-f`), the `Settings` document is level 0, the
+platform's; a `Project` document, level 1, a project's; an `Instance`
+document's `connections`, level 2, and its values, the instance values
+([what a compile
+receives](specs/01_inputs_outputs.md#what-a-compile-receives)). Which
+files hold which documents, and who may write each, is a host's: its
+layout and the hosting of its repositories, their write access and their
 reviews (a platform repository its administrators write, a project's its
-team, a catalog its maintainers). Through the library, the caller decides
+team, a catalog its maintainers), so that a catalog's maintainers add no
+project nor platform values. Through the library, the caller decides
 which layers are level 0 (`Inputs.Context`).
 
 | Author | Writes | Reviewed | The compiler takes it as |
 |---|---|---|---|
-| [The platform](#the-platform-author-level-0) | `platform.yaml`, level 0 | with the platform | the platform's: every value, template code included |
-| [A project](#a-project-author-level-1) | `projects/<project>/project.yaml`, level 1, and its instances' directories | by the project's owners | additions to the platform's, under rules |
-| [An instance](#an-instance-author-level-2-and-configyaml) | `config.yaml`, `connections.yaml` (level 2), `instance.yaml` | a console user or a pull request | input |
+| [The platform](#the-platform-author-level-0) | the `Settings` document, level 0 | with the platform | the platform's: every value, template code included |
+| [A project](#a-project-author-level-1) | its `Project` document, level 1, and its instances' | by the project's owners | additions to the platform's, under rules |
+| [An instance](#an-instance-author-level-2-and-its-values) | its `Instance` document: its package, its `claimers`, its `connections` (level 2), its values | a console user or a pull request | input |
 | [A catalog](#a-catalog-author) | `catalog/<service>/<version>/`, `contracts/` | in the catalog's repository | reviewed, but for the rules below |
 | [The engines](#the-engines) | apply `compiled/` | | the identity the targets give each project |
 | [The secret store](#the-secret-store) | keeps the keys | | the keys the compiler writes |
@@ -85,7 +92,8 @@ which layers are level 0 (`Inputs.Context`).
 
 ## The platform author (level 0)
 
-`platform.yaml` is the only layer the compiler takes as reviewed. It is
+The platform's values, the `Settings` document, are the only layer the
+compiler takes as reviewed. It is
 the only level whose values may hold template code (`{{`, which some
 charts pass to `tpl`), but in a connection and in upstream values, which
 are checked whatever their layer; the only one that sets `global.okdp` but
@@ -109,23 +117,23 @@ classes route every namespace to their providers, consenting for them.
 | may not | give a connection a key under `platform/` when the platform gives `secrets.provider`: no namespace reads it, the platform's credentials are copied under the keys of the namespaces that use them | `connections.go: storeSecret` | `TestResolveFromStoreErrors` |
 | may | route any namespace to a provider of any namespace (a class) | `namespace.go: consent` | `TestCompileAllClaims` |
 | may not | a platform chart (`charts`) over `http://`, or of a version range | `chart/ref.go: Ref.Check` | |
-| may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (the menu is `catalogs.yaml`'s), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
-| may not | a `catalogs.yaml` the compile does not read: an unknown key, at any level, a value of another type, a catalog or a category named twice, a service listed twice, of no catalog, or of a default version its catalog lacks | `repository/catalogs.go: ParseCatalogs`, `checkCatalogs`; a host, for its edits of the file | `TestParseCatalogs`, `TestLoadCatalogsFile` |
+| may not | a former setting of `global.okdp`, `certificateIssuers` or `serviceCatalog` (a console's menu is a host's), which no compile reads | `platform.schema.json` (`false`) | `TestPlatformSchema` |
 | may not | `{{` in a connection or in upstream values | `connections.go: resolver.resolve`, `merge.go: applyUpstream` (`chart.NoTemplate`) | `TestResolveTemplate` |
 
 ## A project author (level 1)
 
-A project owns its namespace: `project.yaml` adds to the platform's
-values for its instances, and its instances' directories are its own.
+A project owns its namespace: its `Project` document adds to the
+platform's values for its instances, and its instances' documents are its
+own, wherever a host keeps them.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
 | may | settings under `global` beside `okdp`: the keys the platform lists (`global.okdp.policy.projectGlobals`, `project` and `storageClass` by default), checked as upstream values where a host runs the security set's policy; parameters and upstream values for its instances, under an instance's rules | `layers.go: contextLayers` | `TestProjectGlobals` |
-| may | classes of its own, and the default class of a contract the platform leaves without one (`global.okdp.provisioning`) | `layers.go: platformOnly` | `examples/04_claims` (`project.yaml`) |
+| may | classes of its own, and the default class of a contract the platform leaves without one (`global.okdp.provisioning`) | `layers.go: platformOnly` | `examples/04_claims` (`demo/project.yaml`) |
 | may | connections and named claims of its own | `layers.go: contextLayers` | `examples/04_claims` |
-| may | consent to serve another project, a provider: `claimers` of its instance's `instance.yaml` | `namespace.go: consent` | `TestCompileAllConsent` |
+| may | consent to serve another project, a provider: `claimers` of its instance's `Instance` document | `namespace.go: consent`, `inputs.go: readInstance` | `TestCompileAllConsent` |
 | may | give the identity provider's groups a role within the project, `access` (`viewer`, `editor`, `admin`; `okdp-project-<namespace>` an editor by default): a project team gets exactly its roles, those of its AppProject and of its namespace, nothing of another project's | `access.go: ParseAccess`; a host writes the roles | `TestAccessCompile` |
-| may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three; nor set it from another level than its file's (the platform's, an instance's `connections.yaml` or `config.yaml`) | `access.go: ParseAccess`, `layers.go: contextLayers`, `valuesLayers` | `TestParseAccess`, `TestAccessCompile` |
+| may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three; nor set it from another level than its own, 1 (the platform's, an instance's `connections` or values) | `access.go: ParseAccess`, `layers.go: contextLayers`, `valuesLayers` | `TestParseAccess`, `TestAccessCompile` |
 | may not | the platform's administrators or the API server's group prefix (`global.okdp.access`) | `layers.go: platformOnly` | `TestAccessCompile` |
 | may not | any other key of `global.okdp`, known to the compiler or not, set by the platform or not: the objects' chart, TLS, the proxy, the store, the policy (making itself privileged), a setting of a rule set | `layers.go: platformOnly` | `TestContextLevels` |
 | may not | any other key of `global`: every chart receives it, past `protect` (`imageRegistry`, `security`...), privileged project or not; what a listed key holds goes through `Inputs.CheckGlobals`, the security set's policy where a host runs it | `layers.go: contextLayers` (`projectGlobals`), `upstreamGlobals` | `TestProjectGlobals` |
@@ -133,29 +141,28 @@ values for its instances, and its instances' directories are its own.
 | may not | template code | `layers.go: contextLayers` (`chart.NoTemplate`) | `TestContextLevels` |
 | may not | a connection of a store key outside `<project>/`: the platform's, another namespace's | `connections.go: storeSecret` | `TestResolveFromStoreErrors` |
 | may not | a provider of another project without its consent, through a class of its own or by naming it | `namespace.go: consent` | `TestCompileAllConsent` |
-| may not | keep a declaration unchecked by having no instance: its named claims (class, request, name) and its connections checked as an instance's compile checks them, the tree refused | `repository.Load`, `okdp.CheckDeclarations` | `TestDeclarationsGlobals`, `TestCompileAllDeclaredConnections` |
+| may not | keep a declaration unchecked by having no instance: its named claims (class, request, name) and its connections checked as an instance's compile checks them; of a project without instance, where a host checks it | `namespace.go: CompileAll`; `compiler.CheckDeclarations`, a host's call | `TestDeclarationsGlobals`, `TestCompileAllDeclaredConnections` |
 | may not | the name `platform`, the segment of the platform's keys | `policy.go: checkNamespace`, `pipeline.go: Compile`; before a project is created, `compiler.CheckProjectName` | `TestCompileErrors`, `TestCheckProjectName` |
 | may not | a reserved namespace: `kube-*`, Kubernetes' own; `flux-system`, `argocd`, `okdp-releases`, the engines' and those a host writes the engines' objects in (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); another namespace a host writes in (a Flux source's); those of `policy.reserved`, privileged or not | `policy.go: checkNamespace`, `checkPlatformNamespace` (the mandatory set's `engineNamespaces`, `compiler.EngineNamespaces`); a host, for another namespace it writes in; before a project is created, `compiler.CheckProjectName`, the compile's two | `TestCompileErrors`, `TestCheckProjectName` |
 
-## An instance author (level 2 and `config.yaml`)
+## An instance author (level 2 and its values)
 
 An instance is input: a console user's form, a pull request. Its
-`config.yaml` sets its parameters and upstream values, its
-`connections.yaml` its own connections and nothing else, its
-`instance.yaml` its package, `service` and `version`, of the catalog,
-and, a provider, its `claimers`.
+`Instance` document names its package, `service` and `version`, of the
+catalog, and, a provider, its `claimers`; its `connections`, its own
+connections, the context at level 2, and nothing else of the context; its
+values (`values`, `valuesFiles`), its parameters and upstream values.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may | any package of the catalog, `service` and `version` | `repository.go: parts.definition` | `examples/02_advanced` |
+| may | any package of the catalog, `service` and `version` | `inputs.go: definition` | `examples/02_advanced`, `TestLoadErrors` (`internal/inputs`) |
 | may | parameters the package's schema accepts, the keys of `global` it declares | `layers.go: valuesLayers`, `chart.Parameters` | `examples/02_advanced` |
 | may | upstream values of the keys its package opens (`upstream`) | `merge.go: applyUpstream` | `examples/02_advanced` |
 | may | connections of its own, their credentials under `<project>/` of the store | `connections.go: storeSecret` | `TestResolveFromStore` |
 | may | claims of a class, or of a provider of its namespace or with its consent; a request the contract's claim schema accepts | `namespace.go: compilation.provider`, `consent`, `claimRequest` | `TestCompileAllClaims`, `TestCompileAllConsent` |
 | may not | `global` but the keys the parameter schema declares, never `okdp` | `layers.go: valuesLayers` | `TestValuesLayers` |
-| may not | `connections` or `claims` in `config.yaml` | `layers.go: valuesLayers` | `TestValuesLayers` |
-| may not | anything but `connections` in `connections.yaml` | `repository.go: parts.instance` | `TestLoadErrors` |
-| may not | a file in its directory but `instance.yaml`, `config.yaml` and `connections.yaml` (a `values.yaml` no compile reads) | `repository.go: instanceFiles` | `TestInstanceFiles` (`instance_test.go`) |
+| may not | `connections` or `claims` in its values | `layers.go: valuesLayers` | `TestValuesLayers` |
+| may not | anything but `connections` at level 2, a key its `Instance` document does not hold, a values file out of its input files (an absolute path, `..`) | `inputs.go: readInstance`, `document.values` | `TestLoadErrors` (`internal/inputs`) |
 | may not | template code, in a key or a string | `layers.go: valuesLayers` (`chart.NoTemplate`) | `TestValuesLayers` |
 | may not | a parameter the schema refuses | `chart.Parameters` | `TestParameters` |
 | may not | `global` or a path its package protects in upstream values | `merge.go: applyUpstream` | `TestApplyUpstreamErrors` |
@@ -180,7 +187,8 @@ replaces.
 | may | its own values, template code included, not held to the upstream policy | not checked | |
 | may | objects of any namespaced kind in the instance's namespace, an ExternalSecret or a PushSecret of any key of the store among them | not checked: the store's policy | |
 | may | consent for its instances to serve other namespaces (`provisions[].claimers`), unless an instance lists its own | `namespace.go: Instance.Claimers` | `TestProvisions`, `TestInputsClaimers` |
-| may not | hold `platform.yaml` or `projects/` in its repository, a catalog's (`--catalog`, `RoleCatalog`): a project, privileged or in a reserved namespace, or the platform's values, added from a catalog; nor a repository given without a role | `repository.go: index` | `TestLoadRoles` |
+| may not | add a project, privileged or in a reserved namespace, or the platform's values, from a catalog: of a catalog's directory (`--catalog`) the compiler reads `catalog/` and `contracts/` only; that no input document comes from a catalog's files is a host's | `catalog.go: Load`; a host, for the files it gives as documents | `TestCatalog` (`internal/catalog`) |
+| may not | a package of one service in two catalogs, a contract that differs between two | `catalog.go: Load` | `TestCatalogErrors` |
 | may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the context's layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: contextLayers`, `context.go: parameters` | `TestPlatformFromContext` |
 | may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: CheckObjects` | `TestObjectsPolicy` |
 | may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: CheckObjects` | `TestObjectsPolicy` |
@@ -215,7 +223,7 @@ assumes:
 |---|---|---|
 | Namespace | Pod Security Admission `enforce: baseline`, `audit` and `warn: restricted` | `enforce: privileged` |
 | Flux | helm-controller impersonates `project-<namespace>` of `okdp-releases`, bound to a Role of every verb on every resource of the namespace only | helm-controller's own identity |
-| Argo CD | the AppProject `project-<namespace>`: the tree's repository, the namespace, no cluster-scoped resource | every namespace, every cluster-scoped resource |
+| Argo CD | the AppProject `project-<namespace>`: the deployments repository, the namespace, no cluster-scoped resource | every namespace, every cluster-scoped resource |
 | People | the roles of its groups (`access`): Argo CD roles of its AppProject, its Applications only, no `exec`; RoleBindings of its namespace to `view`, `edit`, `admin` | the same |
 | Control plane | when the platform names its identity (`controlPlane.serviceAccount`): the Role `okdp-control-plane` of the namespace, what the server does there, Secrets by name and never listed | the same |
 | Network | with `network.policy`: the NetworkPolicy `okdp-project`, ingress from the namespace, the platform's ingress namespaces and the namespaces of the claims it provides, egress open; written for a project kept too, of today's settings and claims | none: the platform's own |
@@ -265,7 +273,7 @@ refused. A connection of level 0 is visible to every project: its key is
 read by each project's instances as that project, so one that is not a
 `platform/` key serves the namespace whose segment it is under, and no
 other. Without a provider, the store is one ClusterSecretStore, one
-identity for every namespace it admits: the tree is one trust domain,
+identity for every namespace it admits: the platform is one trust domain,
 whatever the keys. The compiler keeps the connections it resolves under
 their namespace's segment, and refuses a project named `platform`; it
 sees no store policy.
@@ -274,7 +282,7 @@ sees no store policy.
 
 Everything in this section is a host's to enforce, not this module's,
 but where a row names this module's code: `okdp-compile` alone enforces
-none of the rest. A host compiles the tree with this library and
+none of the rest. A host compiles a deployment with this library and
 commits the files of a deployer engine to the output repository, which
 the engines reconcile. This model assumes that its CI job runs each
 compile in a new container, with nothing of the runner's (no file, no
@@ -282,8 +290,8 @@ credentials, no Docker socket) and one volume, the chart cache, on a
 runner registered for the repositories of the sources only; that the
 token that writes the deployments repository is the step's environment
 only, masked in the logs, and sent to the host of the deployments
-repositories only; and that the host reads the tree without following a
-symbolic link, bounded, and bounds each compile's CEL cost.
+repositories only; and that the host reads its sources without following
+a symbolic link, bounded, and bounds each compile's CEL cost.
 
 The chart cache a host fills, a control plane's too, is read for the
 checks of the final values against the upstream charts and of the
@@ -305,28 +313,29 @@ version, with no digest pinned nor expiry, on a volume the jobs share,
 whoever writes the volume chooses what the checks and the console read.
 
 A host's command, run in a CI job of its own, holds these lines against
-the tree it reads; this module's `okdp-compile` holds those whose row
+the files it reads; this module's `okdp-compile` holds those whose row
 names its code:
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may not | make it read a file out of a repository (a symbolic link), block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openInputs`, `internal/dirfs: FS.Open` | `TestDirFS`, `TestDirFSBounds` |
+| may not | block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openInputs`, `internal/dirfs: FS.Open` | `TestDirFS`, `TestDirFSBounds` |
 | may not | exhaust the chart cache's reads with the charts its packages name, refusing another project's instances: each chart's files bounded together, the cache unbounded but by its charts | a host's reader of the chart cache | |
-| may not | make it run without end, or hold the tree for long: the CEL cost of an instance's expressions is bounded (the default limit about ten times the dearest case of the catalogs), one expression may cost what is left of the limit, not the limit again, one instance's compile is bounded in time and refused alone past it, the whole compile too | `--cost-limit`, `--instance-timeout`, `--timeout` (`cel2yaml.Session`: `program`, `okdp.Compile`: `Inputs.Timeout`) | `TestSession` (cel2yaml), `TestCompileTimeout` |
-| may not | make it delete an output it did not write, or write through a symbolic link of the output, at any depth under `projects/`, in the output or out of it (every link there removed before a file is written) | `outdir.Check`, `outdir.Write`, `removeLinks` | `TestCheck`, `TestWrite` (`outdir`) |
+| may not | make it run without end, or hold the runner for long: the CEL cost of an instance's expressions is bounded (the default limit about ten times the dearest case of the catalogs), one expression may cost what is left of the limit, not the limit again, one instance's compile is bounded in time and refused alone past it, the whole compile too | `--cost-limit`, `--instance-timeout`, `--timeout` (`cel2yaml.Session`: `program`, `okdp.Compile`: `Inputs.Timeout`) | `TestSession` (cel2yaml), `TestCompileTimeout` |
+| may not | make it delete an output it did not write | `outdir.Check` | `TestCheck` (`outdir`) |
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Schema.Validate` | `TestRedact`, `TestValidateRedacts`, `TestResolveRedacted` |
-| may not | have one project's failure keep the others from deploying, where a host deploys the projects that compile and keeps the output of the others: a refused instance, a release name it shares with another project, a file of its own that does not load (a stray file, an unknown key, a `project.yaml` that does not parse), each refusing that project and keeping its output | `repository.go: LoadProjects`, `compiler.Partial` (`internal/tree/partial.go`); a host, for the files it keeps | `TestLoadProjects`, `TestPartial` |
+| may not | have one project's failure keep the others from deploying, where a host deploys the projects that compile and keeps the output of the others: a refused instance, a release name it shares with another project, a file of its own that does not load, each refusing that project and keeping its output | a host: `CompileAll` refuses instances one by one (`Outcome.Err`), what is written and kept of a project is the host's | |
 | may not | make such a host read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | a host's reader of its output | |
 | may not | keep a privilege revoked, a role taken back or a policy tightened by keeping one instance of a project refused: the kept project's Namespace, identity, AppProject, RoleBindings and Flux HelmReleases are of today's settings, its instances kept applied with them | a host, which derives a kept project's manifests again | |
-| may not | keep a project in a namespace reserved after it was written, by the platform (`policy.reserved`) or by the compiler (a release that reserves a name): a project kept whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor derived again, said so; the tree does not fail for it | `access.go: CheckProject` (one view with `Compile`); a host drops the project | `TestProjectOfNamespace` |
+| may not | keep a project in a namespace reserved after it was written, by the platform (`policy.reserved`) or by the compiler (a release that reserves a name): a project kept whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor derived again, said so; the compile does not fail for it | `access.go: CheckProject` (one view with `Compile`); a host drops the project | `TestProjectOfNamespace` |
 
-A control plane edits the tree through a host, which commits each edit:
+A control plane edits the inputs through a host, which commits each
+edit:
 whatever the API in front of it, an edit holds these lines.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may not | address a directory other than its own through a name, a dot segment joined into a path (an instance `..`, the project, removed with every instance) | a host's edits of the tree | |
-| may not | write a change after which an instance it writes, or one that compiled before, does not compile, nor remove what an instance uses | a host's edits, with `compiler.AddedProblems`, `compiler.Regressions` | `TestRegressions` |
+| may not | address a directory other than its own through a name, a dot segment joined into a path (an instance `..`, the project, removed with every instance) | a host's edits of its files | |
+| may not | write a change after which an instance it writes, or one that compiled before, does not compile, nor remove what an instance uses | a host's edits, comparing the outcomes of `CompileAll` before and after | |
 | may not | create an instance whose release another project's instance has, nor a project of a name the compile refuses | a host's edits, with `compiler.CheckProjectName` | `TestCheckProjectName` |
 
 ## The security set
@@ -353,7 +362,7 @@ calls the set's functions fails to compile (an unknown key of
 closed map `policy` (`ingressHosts`, `upstream`) are refused by the
 mandatory schema. The other settings the set reads, the suffix of the
 hosts and the identity provider's, are keys `global.okdp` does not
-describe, and pass unread. A tree that relies on the set therefore
+describe, and pass unread. A platform that relies on the set therefore
 requires it, and every compile not given it, or given a version its
 constraint refuses, is refused:
 
@@ -364,8 +373,8 @@ global:
       - {name: security, version: "^1.0.0"}
 ```
 
-The requirement is in the tree, in git, and holds with the compiler
-alone, without a control plane.
+The requirement is in the platform's values, in git, and holds with the
+compiler alone, without a control plane.
 
 ## What cannot be enforced
 
@@ -373,18 +382,19 @@ alone, without a control plane.
   hooks.** Every compile applies the mandatory rule set, its checks
   among them. A compile not given the security set checks no host, no
   OAuth client and no upstream value ([the security
-  set](#the-security-set)), unless the tree requires it. A caller that
+  set](#the-security-set)), unless the platform requires it. A caller that
   gives no `Inputs.Finalize` and no `Inputs.CheckGlobals` applies no
   policy on upstream values, and no check of what the keys of `global`
   a project sets hold, whatever its rule sets. It is a host's to give
   them; `okdp-compile` gives neither.
-- **Who writes a file.** The compiler trusts a file for its place in the
-  tree and its repository's role, which the caller gives: a catalog given
-  as a repository of the tree (`--repository`, `RoleTree`) adds projects
-  all the same. In one repository, whoever may write a project's directory
-  may write `platform.yaml` but for the repository's reviews; whoever
-  writes the output repository deploys anything, a privileged project's
-  objects included, and so does the token that writes it.
+- **Who writes a file.** The compiler trusts a document for its kind,
+  wherever it is, and reads a catalog's `catalog/` and `contracts/`
+  only: which files are given as documents (`-f`), and who writes them,
+  is the caller's. A catalog's files given as documents add projects all
+  the same; in one repository, whoever may write a project's documents
+  may write the `Settings` document but for the repository's reviews;
+  whoever writes the output repository deploys anything, a privileged
+  project's objects included, and so does the token that writes it.
 - **A kind the compiler does not know.** An object of a cluster-scoped
   kind of no known operator is taken as namespaced: the engine's
   identity refuses it.
@@ -413,22 +423,22 @@ alone, without a control plane.
 - **The store's policy.** The compiler writes the keys; it cannot check
   that the store scopes them. A ClusterSecretStore, without
   `secrets.provider`, is one trust domain. A Kubernetes namespace named
-  `platform` made outside the tree (by an administrator, by a privileged
-  project) writes `platform/*` under the templated policy, which reads
-  none: the compiler refuses only a project of that name. Likewise a
-  namespace of the platform's components that `policy.reserved` does not
-  list: the compiler knows Kubernetes', the engines' and the store's
-  only.
-- **Who changes a project's access.** `access` is in `project.yaml`:
-  whoever writes it gives the roles, its repository's writers (the
-  split topology, the project's administrators), every writer of a
-  shared repository. The compiler names the groups; the identity
-  provider decides who is in them, the API server's authentication
+  `platform` made outside the platform's projects (by an administrator,
+  by a privileged project) writes `platform/*` under the templated
+  policy, which reads none: the compiler refuses only a project of
+  that name. Likewise a namespace of the platform's components that
+  `policy.reserved` does not list: the compiler knows Kubernetes', the
+  engines' and the store's only.
+- **Who changes a project's access.** `access` is in the project's
+  values, its `Project` document: whoever writes it gives the roles, its
+  repository's writers (the split topology, the project's
+  administrators), every writer of a shared repository. The compiler
+  names the groups; the identity provider decides who is in them, the API server's authentication
   settings and Argo CD's how the groups claim reaches them, and the
   bootstrap binds the platform's administrators.
-- **Consent is in the provider's own file.** The `claimers` of a
-  provider's `instance.yaml` are written by whoever writes that
-  instance's directory, in a shared repository any of its writers.
+- **Consent is in the provider's own document.** The `claimers` of a
+  provider's `Instance` document are written by whoever writes that
+  document, in a shared repository any of its writers.
 - **The network.** Without `global.okdp.network.policy` (off by
   default: the compiler knows neither where traffic enters nor whether
   the network plugin enforces a policy) no NetworkPolicy is written, and

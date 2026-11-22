@@ -4,11 +4,13 @@ How to package an upstream application for OKDP: a directory of
 parameters, OKDP's defaults and a service definition, compiled by
 okdp-compiler (the `okdp-compile` of its
 [command line](01_usage.md#command-line), or a host that embeds it). The
-steps follow a `webapp` service, of which the example of this repository
-is a smaller version (`examples/02_advanced/input/catalog/webapp/`, which
-calls a function of the example's rule set, `examples/02_advanced/rules`;
-`examples/00_passthrough/input/catalog/` is the smallest package, a chart
-and its values, `examples/01_minimal/input/catalog/` the smallest with a
+steps follow a `webapp` service, of which the example of this
+repository is a smaller version
+(`examples/02_advanced/input/catalog/webapp/1.0.0/`, which calls a
+function of the example's rule set, `examples/02_advanced/rules`;
+`examples/00_passthrough/input/catalog/echo/1.2.0/` is the smallest
+package, a chart and its values,
+`examples/01_minimal/input/catalog/hello/1.0.0/` the smallest with a
 mapping, `examples/04_claims/input/catalog/` a provider and its claimers,
 each commented); the recipes and pitfalls come from the services packaged
 in `OKDP/platform-charts` and `OKDP/sandbox-charts`. A package that serves
@@ -52,15 +54,16 @@ the package is published as a chart.
 ├── values.cel.yaml         the computed values of each chart (values.yaml when none is computed)
 ├── config.schema.json      the parameters: types, defaults, rules, x-ui-* hints, x-okdp-connection-ref
 ├── <key>.defaults.yaml     OKDP's defaults of each chart: plain YAML
-├── ci/platform.yaml        the platform values of the test cases (global.okdp): a test tree's platform.yaml
-├── ci/<case>-values.yaml   test instances, without global: a test tree's config.yaml
+├── ci/platform.yaml        the platform values of the test cases (global.okdp): a case's Settings values
+├── ci/<case>-values.yaml   test instances, without global: a case's Instance values
 └── README.md               parameters, platform values read, charts, known gaps
 ```
 
 A package is a version directory of a catalog,
-`catalog/<service>/<version>/`, which its `Chart.yaml` names
-([repository layout](01_usage.md#repository-layout)); `okdp-compile
---repository` compiles the instances of a tree. The compiler reads no
+`catalog/<service>/<version>/`, which its `Chart.yaml` names ([the
+catalog](specs/01_inputs_outputs.md#the-catalog)); `okdp-compile
+--catalog` reads it, `-f` the input documents of the instances that use
+it ([input documents](01_usage.md#input-documents)). The compiler reads no
 upstream chart: checking the final values against the upstream charts'
 defaults and schemas, from a chart cache, is a host's
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
@@ -70,7 +73,7 @@ defaults and schemas, from a chart cache, is a host's
 Start from `Chart.yaml`, the chart as a dependency, and a plain
 `values.yaml`: the chart's values the platform sets, under the
 dependency's key, as a chart's `values.yaml` holds them
-(`examples/00_passthrough/input/catalog/`). Every
+(`examples/00_passthrough/input/catalog/echo/1.2.0/`). Every
 dependency is rendered, with its chart's defaults when the file does not
 write its key: `Chart.yaml` alone is a package
 ([rendered dependencies](specs/02_service_definition.md#rendered-dependencies)).
@@ -246,8 +249,8 @@ chart is reached through `upstream.<chart>`, without a parameter.
   {"default": {"okdp": ...}}`), is refused: the platform's settings come
   from the context alone.
 - `connections` is not a parameter: the context gives the connections, an
-  instance's own in a context file of its level, and the schema does not
-  declare it; a declaration has no effect
+  instance's own at a level of its own (`connections` of its Instance
+  document), and the schema does not declare it; a declaration has no effect
   ([reserved keys](specs/01_inputs_outputs.md#reserved-keys)).
 - A string pasted into a configuration file, a script or a template refuses
   `{{`, `}}` and line breaks (the `not` pattern above, as in trino, airflow,
@@ -440,7 +443,7 @@ names, labels and Secrets; a rule set adds its own.
 ### 6. Consume and provide connections
 
 A parameter carrying `x-okdp-connection-ref` names an entry of
-`connections` (external, from a context file: the platform's, the
+`connections` (external, from the context: the platform's, the
 project's, or the instance's own at a level of its own), or an output
 another instance of the namespace publishes, an instance's own named after
 its release by default. Before the mapping runs, the compiler replaces the
@@ -450,12 +453,13 @@ A reference left empty stays `""` (or `null`); a name that is not an entry
 of `connections` must be an output's name.
 
 ```yaml
-# the instance's config.yaml: an external database
-database: shared-db
-```
-
-```yaml
-# the instance's own connections, its connections.yaml, a context file of its level
+# the instance's Instance document: its own connections, the context at
+# level 2, and its values, an external database
+kind: Instance
+project: demo
+name: webapp
+service: webapp
+version: 1.0.0
 connections:
   shared-db:
     contract: database
@@ -464,6 +468,8 @@ connections:
     port: 3306
     dbName: webapp
     secretRef: {name: shared-db-credentials}   # never the password itself
+values:
+  database: shared-db
 ```
 
 A connection whose credentials are in the platform's secret store says
@@ -478,13 +484,13 @@ In the advanced example, `database: {}` instead claims a database of its
 own, which `demo-db`, the provider of the platform's default class of
 database connections, publishes under the claim's ID: host
 `demo-db-db.demo.svc`, Secret `demo.webapp.database-credentials`, and
-a dependency (`Result.Dependencies`), which the deployment graph orders
-the releases with (Flux `dependsOn`, Argo CD sync waves, in a host's
-files; claims below). The mapping reads both the same way, credentials
+a dependency (`Result.Dependencies`), which a host orders the releases
+with (Flux `dependsOn`, Argo CD sync waves, in its files; claims
+below). The mapping reads both the same way, credentials
 through a `secretKeyRef` on `secretRef.name`; the reference requires them,
 `"require": {"required": ["secretRef"]}`
-(`examples/02_advanced/input/catalog/webapp/config.schema.json`), and a
-connection without a Secret is refused before the mapping runs.
+(`examples/02_advanced/input/catalog/webapp/1.0.0/config.schema.json`),
+and a connection without a Secret is refused before the mapping runs.
 cnpg-postgresql publishes one `database-server` output per database: an
 instance of the namespace references it by that name (`database:
 pg-hive`), which resolves to the output's values and `secretRef`, and
@@ -492,18 +498,20 @@ depends on the cnpg-postgresql instance; an instance of another namespace
 claims it, or gets it as a connection, its credentials Secret being in the
 provider's namespace
 ([resolution](specs/01_inputs_outputs.md#resolution)). The compile is
-given what the other instances of its tree publish (`Inputs.Published`).
+given what the other instances of its namespace publish
+(`Inputs.Published`).
 See [contracts](specs/01_inputs_outputs.md#contracts).
 
 Provide a connection in `provides`. Its values are checked against the
 contract, its schema included (a `port` is a number, not a string built by
 an expression). An output is published under the instance's name, the
-default `name` (`db` for the instance `projects/demo/instances/db/`, not
-its release `demo-db`): other instances reach the instance by it. Its values are
-what the instance is reached at: build the hosts and Service names once,
-in `vars`, for the values and `provides` alike. A `name` is for several
-outputs of one contract (cnpg-postgresql's `database-server` outputs, one
-per database): the name the other instances of the namespace reference
+default `name` (`db` for the instance `name: db` of the project `demo`,
+not its release `demo-db`): other instances reach the instance by it. Its
+values are what the instance is reached at: build the hosts and Service
+names once, in `vars`, for the values and `provides` alike. A `name` is
+for several
+outputs of one contract (cnpg-postgresql's `database-server` outputs,
+one per database): the name the other instances of the namespace reference
 each by, unique per contract in the namespace, or their references fail.
 Then say where the credentials come from:
 
@@ -560,17 +568,18 @@ project adds, each a provider and what it fixes of the request; or
 instance, `<namespace>/<instance>` (or its release,
 `data/data-postgres2`); a name references an existing connection, or a
 named claim its project declares (`claims: {analytics: {contract:
-database-server}}` in `project.yaml`), one database for every instance
-that names it. Of a named claim, a package requires what it needs with
-`require`, as of a connection: the claim is its project's, and so is what
-it requests, its declaration's `request`, which the package's does not
-change. Without a default class, a claim that names neither a class nor a
-provider is refused. The mapping reads the claim's connection as any
-other, checked against what the reference requires (`require`): a provider
-that publishes what the service cannot use refuses the claimer, which
-names a class whose provider meets it; the compiler never picks one. A key
-a class fixes of the request is the class's: a package's `request` that
-sets it refuses the claims of that class.
+database-server}}` in its Project document's values), one database for
+every instance that names it. Of a named claim, a package requires what
+it needs with `require`, as of a connection: the claim is its project's,
+and so is what it requests, its declaration's `request`, which the
+package's does not change. Without a default class, a claim that names
+neither a class nor a provider is refused. The mapping reads the claim's
+connection as any other, checked against what the reference requires
+(`require`): a provider that publishes what the service cannot use
+refuses the claimer, which names a class whose provider meets it; the
+compiler never picks one. A key a class fixes of the request is the
+class's: a package's `request` that sets it refuses the claims of that
+class.
 
 A provider declares the contracts it provisions, `provisions`, and
 creates, for each claim bound to its instance (`claims`), what the
@@ -578,7 +587,7 @@ connection needs, as the claim requests it (`c.request`, the claim
 schema's defaults applied), publishing it under the claim's ID, with what
 it granted. Keep what it holds
 when the claim is gone: the claimer may come back, under the same ID
-(`examples/04_claims/input/catalog/postgresql/okdp.yaml`):
+(`examples/04_claims/input/catalog/postgresql/1.0.0/okdp.yaml`):
 
 ```yaml
 provisions: [database-server]
@@ -611,7 +620,7 @@ The compiler carries the credentials of a claim of another namespace
 through the platform's secret store ([credentials across
 namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)).
 An instance serves such a claim through a class of the platform's, or
-with its consent: the namespaces its `instance.yaml` lists
+with its consent: the namespaces its Instance document lists
 (`claimers`), else those of the package's entry, `{contract:
 database-server, claimers: ['*']}` for a server every project may claim
 of; none by default
@@ -621,27 +630,37 @@ of; none by default
 
 Each `ci/<case>-values.yaml` is an instance: its parameters, without
 `global` and `connections`, which an instance may not set. A case is
-compiled as a tree ([repository layout](01_usage.md#repository-layout)):
-the catalog's repository, its `catalog/` and `contracts/`, and a test tree
-of the case, outside it: `platform.yaml`, the platform values
-(`global.okdp`), `ci/platform.yaml` and, for a case that needs others, its
-own `ci/<case>-platform.yaml` over it; and the instance,
-`projects/demo/instances/<service>/`, the release `demo-<service>`, its
-`instance.yaml` naming the package, its `config.yaml` the case's values,
-its `connections.yaml` the case's own connections
-(`ci/<case>-connections.yaml`). `scripts/compile-charts.sh` builds one per
-case. Write one case per mode: internal and external connections, proxy
-set, each optional chart on, upstream values with appended lists, and
-each mode of the settings a rule set reads (the security set's:
+compiled from input documents ([input
+documents](01_usage.md#input-documents)), the catalog's directory given
+as `--catalog`, its `catalog/` and `contracts/`: a `Settings` document of
+the platform values (`global.okdp`), `ci/platform.yaml` and, for a case
+that needs others, its own `ci/<case>-platform.yaml` after it in
+`valuesFiles`; and an `Instance` document of the project `demo`, the
+release `demo-<service>`, naming the package (`service`, `version`), its
+`valuesFiles` the case's values, its `connections`, inline, the case's
+own connections.
+`scripts/compile-charts.sh` builds one per case. Write one case per
+mode: internal and external connections, proxy set, each optional chart
+on, upstream values with appended lists, and each mode of the settings a
+rule set reads (the security set's:
 [test cases](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/02_writing_package.md#test-cases)).
-A test tree whose platform requires a rule set (`global.okdp.ruleSets`)
-fails a compile not given it: `okdp-compile` takes it with `--rules`,
-and a host may give the security set to every compile.
+A case whose platform requires a rule set (`global.okdp.ruleSets`) fails
+a compile not given it: `okdp-compile` takes it with `--rules`, and a
+host may give the security set to every compile.
 
 ```bash
-# /tmp/polaris-case: platform.yaml, projects/demo/instances/polaris/{instance.yaml,config.yaml}
-okdp-compile --repository . --repository /tmp/polaris-case --check   # compile and check, write nothing
-okdp-compile --repository . --repository /tmp/polaris-case -o /tmp/out
+# /tmp/polaris-case/inputs.yaml, ci/platform.yaml and the case's values beside it:
+#   kind: Settings
+#   valuesFiles: [platform.yaml]
+#   ---
+#   kind: Instance
+#   project: demo
+#   name: polaris
+#   service: polaris
+#   version: <version>
+#   valuesFiles: [polaris-values.yaml]
+okdp-compile -f /tmp/polaris-case --catalog . --check   # compile and check, write nothing
+okdp-compile -f /tmp/polaris-case --catalog . -o /tmp/out
 i=/tmp/out/projects/demo/instances/demo-polaris
 chart=$(mktemp -d) && cp -R catalog/polaris/<version>/. "$chart" && helm dependency build "$chart"
 helm template demo-polaris-okdp ../okdp-objects-chart -n demo -f $i/okdp-objects.values.yaml
@@ -650,8 +669,8 @@ scripts/compile-charts.sh catalog/polaris/<version>   # every case, compiled and
 ```
 
 - Render with the release name and namespace of the compile,
-  `<project>-<instance>` and the project's directory, `demo-polaris` and
-  `demo`: the upstream charts derive their names from the release.
+  `<project>-<name>` and the project, `demo-polaris` and `demo`: the
+  upstream charts derive their names from the release.
 - `helm dependency build` fetches the upstream charts of the package's
   `Chart.yaml`, `polaris-admin-principals` the chart of `polaris-admin`
   under its own alias, in a copy of the package, so that the catalog's
@@ -700,9 +719,9 @@ app:
 A realm's roles are the platform's, every project's people hold them: a
 service that lets anyone with a role of the realm in runs the code of a
 project (a notebook, a flow, a UI that submits jobs) for the people of
-the others. The people of a project are its groups, the
-roles of its `project.yaml` `access` (`okdp-project-<namespace>`, an
-editor, without one), and the compiler gives them to the mapping:
+the others. The people of a project are its groups, the roles of the
+`access` of its values, level 1 (`okdp-project-<namespace>`, an editor,
+without one), and the compiler gives them to the mapping:
 
 | Variable | Value |
 |---|---|

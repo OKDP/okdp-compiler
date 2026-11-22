@@ -50,13 +50,15 @@ not fail the
 compile (a `values.yaml` that holds expressions)
 ([Outputs](specs/01_inputs_outputs.md#outputs)).
 
-`LoadRepository` reads a tree, in one or more repositories, each of its
-role (`Repository.Role`: the tree's, or a catalog's), as its
-instances. `CompileAll` compiles instances together, those of a namespace each
+`LoadCatalog` reads the packages and the contracts of one or more
+catalog directories, `LoadInputs` the instances of input documents,
+`Settings`, `Project` and `Instance`, laid out in any files
+([input documents](specs/01_inputs_outputs.md#input-documents)).
+`CompileAll` compiles instances together, those of a namespace each
 after the instances whose outputs it references, with what they publish
-as `Published`: the order of a tree's instances is the compiler's, not
-its caller's. `NewGraph` then checks the dependencies of the results and
-orders the releases.
+as `Published`: the order of the instances is the compiler's, not its
+caller's. How a deployment's files are laid out, and the graph that
+orders its releases from `Result.Dependencies`, are a host's.
 
 Callers: a Go program embeds the package at the module's root
 (`compiler`), compiles from a git tree, an embedded filesystem or memory,
@@ -65,7 +67,9 @@ and gets the files of a compile from one function (`Write`): `values.yaml`,
 takes with the catalog's chart and the `okdp-objects` chart. A host that
 deploys with Flux or Argo CD writes the single release each deploys, an
 umbrella over both charts; `okdp-compile` runs the same code from
-directories, in CI or scripts, and writes the files of `Write`.
+files, input documents and catalog directories, in CI or scripts
+([input documents](01_usage.md#input-documents)), and writes the files
+of `Write`.
 The library depends on neither Helm nor the Kubernetes client libraries:
 cel-go for expressions, `santhosh-tekuri/jsonschema/v6` for schemas,
 `sigs.k8s.io/yaml` for values, `go.yaml.in/yaml/v3` for the mapping, the
@@ -438,15 +442,16 @@ item `[i]`.
 ## Source map
 
 The module's root is the public package, `compiler`: it gives callers the
-types they name, as aliases, and wraps the functions of `okdp`, `graph`,
-`tree`, `merge`, `repository` and `chart`. Under `internal/`, the packages
-each import only those below them: `compiler` -> `repository` and `tree`
--> `graph` -> `okdp` -> `merge`, `rules` -> `compile` and `chart` ->
-`value`: the compile knows no tree and no graph, the graph no tree
-(`TestLayers`). A host holds the rest: the files of the deployer
-engines, a control plane's edits of the tree, the chart cache and the
-checks against the upstream charts; `cmd/okdp-compile` writes only the
-files of `Write`.
+types they name, as aliases, and wraps the functions of `okdp`,
+`inputs`, `catalog`, `merge` and `chart`. Under `internal/`, the
+packages each import only those below them: `compiler` -> `inputs` ->
+`catalog` and `okdp` -> `merge`, `rules` -> `compile` and `chart` ->
+`value`: the compile knows neither the input documents nor the catalog,
+the catalog not the compile (`TestLayers`). A host holds the rest: the
+layout of a deployment's files, the deployment graph, the files of the
+deployer engines, a control plane's edits, the chart cache and the
+checks against the upstream charts; `cmd/okdp-compile` reads `-f` and
+`--catalog` and writes only the files of `Write`.
 `compile` and `chart` do not import each other: the mapping language knows
 nothing of Helm charts, the Helm code nothing of the mapping language, and
 neither knows OKDP.
@@ -488,20 +493,18 @@ neither knows OKDP.
 | | `objects.go` | the objects the rule set's sections add (`ownObjects`, stage 6), the key of the objects' chart reserved in `Chart.yaml` and the values file (`checkObjectsChart`), stage 9; the platform's charts, each of the rule set's unless the platform sets it (`platformCharts`, stage 4); `ObjectsChart`, `ObjectsValue` | `chart.Ref`; `RuleSet.OwnObjects`, `RuleSet.Charts` |
 | | `claims.go` | `Claim`, a connection claimed of a provider's instance; `Binding`, the provider a reference's claim is bound to; a claim as written, a claim template or a named claim, its request among it (`ClaimSpec`, `parseClaim`), the named claims of the context (`namedClaims`), one of them as written, what it holds even when it fails (`ParseClaim`), those of an instance's parameters and context, a template's request merged over the package's (`claimsOf`), its ID (`claimID`); the provider a claim or a class names (`providerName`); the classes of the context, `global.okdp.provisioning`, read from the merged values of `claimsOf`, and the platform's, of level 0 (`instanceClaims`, `platformClasses`); `provisions` checked (`checkProvisions`), and the claimers of a provider (`CheckClaimers`, `consents`), the claims bound to an instance checked (`checkClaims`), their outputs found among the provided ones (`claimed`), what the mapping sees of them (`claimsScope`) | `service.go` (`Service.Provisions`), `pipeline.go` (before the context, after stage 7), `context.go` (`claims`) |
 | | `transfer.go` | the credentials of claims across namespaces, through the platform's secret store, and those of the connections kept in it (`secretRef.remoteKey`): the key of a claim's credentials (`storeKey`), the PushSecrets of the provider's namespace (`pushSecrets`), the ExternalSecrets of the claimer's and of a connection's referrer (`pullSecret`), the credentials a reference needs read (`transfer`) | `connections.go` (`resolveClaim`, `storeSecret`), `pipeline.go` |
-| | `namespace.go` | `Instance`, `Outcome`, `Bound`, `CompileAll`: each instance whose context's connections hold at their declaration (`declaredConnections`), each claim bound to its provider, the one it names or the provider of its class, the one it names or the default one of its context, the named claims of a namespace once, declared alike, each request, what its class fixes under it, checked against the contract's claim schema, its defaults applied (`compilation.bind`: one `binder` step each for the claims an instance reads, the named claims of a namespace, the references of an instance in parameter path order, the claims given to their providers and the outcomes, the errors in the order they come; `compilation.provider`, `choice`, `claimRequest`, each reading the claim's `claimSite`, its `claimRef` and its namespace; what `CompileAll` gathers for an instance in its `member`, its inputs read once), a provider of another namespace through a class of the platform's or with its consent (`consent`, `Instance.Claimers`), then the instances of the tree compiled together, each published to its namespace (`compilation.compileAll`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks, of its namespace or of its claims' providers), the outputs two instances of a namespace publish refused (`compilation.refuseShared`), two objects of a namespace that write one Secret refused (`compilation.refuseSecretTargets`, `secretTargets`, the items of a `List` walked as every rule on objects walks them, `eachObject`), after each, the instances that depend on an instance refused since, of any namespace, compiled again (`compilation.recompileDependents`); the instances that do not compile named in the refusals for an output (`compilation.notes`, `notCompiled`) | `Compile`, `missingOutputs` (`connections.go`), `claimsOf`, `claimID` (`claims.go`) |
+| | `namespace.go` | `Instance`, `Outcome`, `Bound`, `CompileAll`: each instance whose context's connections hold at their declaration (`declaredConnections`), each claim bound to its provider, the one it names or the provider of its class, the one it names or the default one of its context, the named claims of a namespace once, declared alike, each request, what its class fixes under it, checked against the contract's claim schema, its defaults applied (`compilation.bind`: one `binder` step each for the claims an instance reads, the named claims of a namespace, the references of an instance in parameter path order, the claims given to their providers and the outcomes, the errors in the order they come; `compilation.provider`, `choice`, `claimRequest`, each reading the claim's `claimSite`, its `claimRef` and its namespace; what `CompileAll` gathers for an instance in its `member`, its inputs read once), a provider of another namespace through a class of the platform's or with its consent (`consent`, `Instance.Claimers`), then the instances compiled together, each published to its namespace (`compilation.compileAll`: Kahn's algorithm, its edges discovered by compiling, an instance waiting for the outputs its compile says it lacks, of its namespace or of its claims' providers), the outputs two instances of a namespace publish refused (`compilation.refuseShared`), two objects of a namespace that write one Secret refused (`compilation.refuseSecretTargets`, `secretTargets`, the items of a `List` walked as every rule on objects walks them, `eachObject`), after each, the instances that depend on an instance refused since, of any namespace, compiled again (`compilation.recompileDependents`); the instances that do not compile named in the refusals for an output (`compilation.notes`, `notCompiled`) | `Compile`, `missingOutputs` (`connections.go`), `claimsOf`, `claimID` (`claims.go`) |
 | | `policy.go` | the walkers of the platform's policy, each running a check of the rule set: the namespaces no project has (`checkNamespace`, `checkPlatformNamespace`; `CheckNamespace` both, `compiler.CheckProjectName`'s), the platform's own projects (`Privileged`, `Result.Privileged`), the objects of the others' instances (`CheckObjects`, stage 8) and in every project no Secret with values in clear unless `Inputs.AllowPlainSecrets` (`checkPlainSecrets`, stage 8), two objects of one name (`checkDuplicateObjects`) | called by `pipeline.go`; `Inputs.Rules` |
 | | `rules.go` | `RuleSet` as this package reads it, `rulesOr`, the mandatory set for a compile that gives none | `rules` |
 | | `access.go` | who a project's people are: `Role` (`RoleViewer`, `RoleEditor`, `RoleAdmin`), `ParseAccess` (`AccessKey`, `DefaultGroup`, `IsGroup`), read from the context's level 1 alone (`projectAccess`); `CheckProject`, a `NamespaceError`; the platform's administrators (`PlatformAdmins`), `PlatformOf`, `ProjectGroups`, `SecretStoreOf` for a host that writes a project's manifests | `pipeline.go`, `layers.go` (`access` refused at another level, left out of the values) |
-| `repository` | `repository.go` | the tree of a deployment, in one or more repositories: `Repository`, its `Role` (`RoleTree`, `RoleCatalog`), `Load` and `LoadProjects`: the owner of each part, every conflict at once, a catalog's `platform.yaml` or `projects/` and a repository without a role refused (`index`), then each instance (`instance`): its directory, of its files only (`instanceFiles`), its `instance.yaml`, read strictly (`InstanceSpec`, `ParseInstance`, its `claimers` nil when absent, empty for none), its package, loaded once (`definition`), its context layers (`platform.yaml` without claims, its `connections.yaml`, connections only) and values; the names of the tree; per project (`LoadProjects`): a problem of a project's own refuses it as a whole (`Loaded.Refused`, `Refused`, its context in `Inputs`, its own layer in it when its `project.yaml` reads, `Own`), only the platform's parts and the packages (`packageError`) fail the tree | `okdp.LoadDefinition`, `chart.ParseValues` |
-| | `error.go` | `Error`, the problems of a tree that does not load, one per problem, the joined errors of `Load` listed one by one (`newError`, `JoinErrors`), the errors they are of unwrapped; `Added`, the problems one has that another has not | `Load` |
-| | `catalog.go` | the catalog of the repositories, as `Load` indexes it: `LoadCatalog`, `Catalog`, its services and their versions, highest first (`sortVersions`), a package (`packageDir`, shared with `definition`), the contracts; `ErrNotInCatalog` | `index`, `chart.CompareVersions` |
-| | `catalogs.go` | `CatalogsFile`, `catalogs.yaml` beside `platform.yaml`, read strictly (`ParseCatalogs`: `Catalogs`, `CatalogRepository`, its ref `DefaultCatalogRef` by default, `MenuCategory`, `MenuService`, every problem at once, `parser`), checked by `Load` when a repository of the tree holds it, its menu's services those of the catalogs (`checkCatalogs`, `menu`, `Catalog.CheckMenu`) | `index`, `packageDir` |
-| `graph` | `graph.go` | the deployment graph of compiled instances: `Node`, `Graph`, `Error`; `New`, every dependency checked against the release it points to (`provides`), the waves, Kahn's algorithm by levels (`levels`), each cycle named, a shortest one from its smallest release (`cycles`); `DependsOn`, `Wave` | `okdp.Result` |
-| `tree` | `tree.go` | a tree's instances compiled together and read as a caller asks of them: `Compile` (`okdp.CompileAll`, once, no upstream chart read; then `graph.New`), each problem of the graph at its instance (`Instance.GraphErr`, `atInstances`), the claims bound to each provider (`Provided`), what it granted each (`Granted`), why an instance does not deploy (`Err`, `Problems`), the projects that do not load (`Refused`) | `okdp.CompileAll`, `graph.New` |
-| | `partial.go` | the projects of a tree written and kept (`Partial`, `Kept`, `KeptInstance`): those that do not load (`Tree.Refused`, `Kept.Unloaded`), those of the refused instances and of the instances a caller keeps too (`also`), then, round after round, of an instance at which the graph of what is left has a problem of its own (its dependencies on kept projects left out), or that depends on a release of a kept project (`dependsOnKept`), until the graph of what is left has none; `Regressions`, the instances a change broke | `graph.New` |
-| `compiler` | `compiler.go`, `exports.go` | the public API: `LoadDefinition`, `Compile`, `LoadRepository`, `LoadCatalog`, `LoadRules`, `ParseConnection`, `ParseClaim`, `CompileAll`, `CompileTree`, `Build` (`BuildOptions`, its `Loaded` given the instances that load before they compile), `DefaultCostLimit`, `LoadErrorOf`, `Partial`, `Regressions`, `AddedProblems`, `CheckProjectName`, `NewGraph`, `FinalValues` (`FinalValuesOf`: `Values`, `Charts`, `Appended`), `ParseValues`; aliases of the types a caller names; the names of the tree (`PlatformFile`, `ContractsDir`, `CatalogDir`, `ProjectsDir`, `ProjectFile`, `InstancesDir`, `InstanceFile`, `ConnectionsFile`, `ConfigFile`), its release rule (`ReleaseName`) and its names (`IsName`); what a host reads of a rule set (`Roles`, `EngineNamespaces`, `PlatformObjectNames`, the `Table*` names) | wraps `okdp`, `repository`, `graph`, `tree`, `merge`, `chart` |
+| `catalog` | `catalog.go` | the catalog of one or more directories, each read for `catalog/<service>/<version>/` and `contracts/<contract>.schema.json` alone (`Files`, `Load`, `Catalog`): a service in one directory with every version of it, a contract in several of the same bytes, the order of the directories changing nothing, every conflict at once; its services and their versions, highest first (`Services`, `Service`, `sortVersions`), a package (`Package`, `packageDir`, `PackagePath`), the contracts (`Contracts`); `ErrNotInCatalog` | `chart.CompareVersions`, `chart.IsFileName`; read by `inputs` and `compiler.LoadCatalog` |
+| `inputs` | `inputs.go` | the input documents (`Files`, `Load`): the `.yaml` and `.yml` files of a directory, or one file, each YAML document of a kind, `Settings`, `Project` or `Instance` (`documents`), read strictly (`check`, `required`, `readProject`, `readInstance`), a file a document's `valuesFiles` names read as a values file, not as documents (`resolve`, `values`, `chart.ParseValues`); the instances, sorted by project then name, each package loaded once (`definition`, its `Chart.yaml` of its directory's name and version), their context layers by level (`Settings` 0, `Project` 1, the instance's `connections` 2), values, release, namespace and claimers; every problem at once, each at its document | `catalog.Catalog.Package`, `okdp.LoadDefinition`, `okdp.CheckClaimers` |
+| `compiler` | `compiler.go`, `exports.go` | the public API: `LoadDefinition`, `Compile`, `CompileAll`, `LoadCatalog` (`CatalogFiles`, `Catalog`, `CatalogService`, `ErrNotInCatalog`), `LoadInputs` (`InputFiles`, `KindSettings`, `KindProject`, `KindInstance`), `LoadRules`, `Mandatory`, `ParseConnection`, `ParseClaim`, `DefaultCostLimit`, `CheckProjectName`, `FinalValues` (`FinalValuesOf`: `Values`, `Charts`, `Appended`), `ParseValues`; aliases of the types a caller names; the directories of a catalog (`ContractsDir`, `CatalogDir`) and the names (`IsName`); what a host reads of a rule set and of a project (`Roles`, `EngineNamespaces`, `PlatformObjectNames`, `ParseAccess`, `PlatformAdmins`, `ProjectGroups`, `SecretStoreOf`, `CheckObjects`, `CheckFinalValues`) | wraps `okdp`, `inputs`, `catalog`, `merge`, `chart` |
 | | `write.go` | the files of a compile (`Write`: `ValuesFile`, `ObjectsValuesFile`, `InfoFile`), `ChartValues`, `ObjectsChartValues`, the objects Helm keeps given Argo CD's sync options (`keepSynced`, `RuleSet.Keep`) | `okdp.Result` |
-| | `accessors.go` | what the compile decides, for a caller that answers before it writes: `CheckConnection`, `FieldErrors`, a compile's error as the problems of its fields (`FieldError`: `Path`, `Pointer`, `Message`; `okdp.FieldError`, `chart.ValuesError`, a `LoadError` a problem each); `ConnectionRefs` (`ConnectionRef`); `ReadContract`, `ReadContracts` (`ContractDescriptor`, `ContractField`); `MergeValues`; `NamedClaimID`, `IsClaimID`, `CheckProvider` | `okdp`, `chart`, `value` |
+| | `accessors.go` | what the compile decides, for a caller that answers before it writes: `CheckConnection`, `FieldErrors`, a compile's error as the problems of its fields (`FieldError`: `Path`, `Pointer`, `Message`; `okdp.FieldError`, `chart.ValuesError`); `ConnectionRefs` (`ConnectionRef`); `ReadContract`, `ReadContracts` (`ContractDescriptor`, `ContractField`); `MergeValues`; `NamedClaimID`, `IsClaimID`, `CheckProvider` | `okdp`, `chart`, `value` |
+| `dirfs` | `dirfs.go` | the files under a directory as an `fs.FS`, symbolic links followed, what is read bounded (`MaxFileSize`, `MaxDirSize`) | `cmd/okdp-compile` |
+| `outdir` | `outdir.go` | the output of `okdp-compile`: its `projects/`, owned by the command, marked (`MarkerFile`), checked before a write (`Check`, `--force`), written whole, every other file removed (`Write`) | `cmd/okdp-compile` |
+| `cmd/okdp-compile` | `main.go` | the command: `-f` (each file read in the directory that holds it), `--catalog`, `--rules` through `dirfs`, then `LoadCatalog`, `LoadInputs`, `CompileAll` and `Write`, the files under `<output>/projects/<namespace>/instances/<release>/`; the bindings, refusals, warnings and dependencies on stderr; `--check` writes nothing | `compiler`, `dirfs`, `outdir` |
 
 Layers: `value`, `chart/values.go` and `chart/schema.go`
 reproduce Helm and know nothing of OKDP; github.com/okdp/cel2yaml
@@ -535,7 +538,7 @@ Three parts add up rather than stand beside each other. An added set's
 parsed once. Its `scopes`, documents evaluated after the mandatory
 set's `scope`, add keys to what a mapping sees as `platform`, a value
 two of them give refused. Each set has a `name`, `core` for the
-mandatory one: a tree requires sets by name and version
+mandatory one: a platform requires sets by name and version
 (`global.okdp.ruleSets`), and a compile not given one is refused.
 
 `LoadRules` fails closed: a table or a check that is unknown refuses the
@@ -547,7 +550,7 @@ code.
 |---|---|
 | `tables` | lists the checks and walkers read |
 | `checks` | documents of the mapping language with `vars` and `errors`, one per walker |
-| `name`, `version` | the set's name, `core` for the mandatory one, and its version, which a tree's `global.okdp.ruleSets` constrains |
+| `name`, `version` | the set's name, `core` for the mandatory one, and its version, which a platform's `global.okdp.ruleSets` constrains |
 | `schemas` | the platform's settings, a mapping's sections and the arguments of its functions; an added set's merged into them |
 | `scopes` | the documents that compute what a mapping sees as `platform`, every set's, merged |
 | `functions` | the fragments and functions a mapping calls |
@@ -773,36 +776,35 @@ publish, which is refused, with what resolved through it, and with the
 claimers of a refused provider, of any namespace, so that no outcome
 depends on the order of the instances.
 
-### One tree, several repositories
+### Documents, not a layout
 
-A platform, its catalogs and its projects are often apart: a team writes
-its project's repository, a catalog ships its packages and their
-contracts. `LoadRepository` reads one tree from any number of
-repositories, each of its role, and merges them part by part with no
-precedence: a part in two repositories is refused, not overridden, so
-that the order of the repositories never changes the tree, and a part's
-repository is the one to fix. A repository of the tree (`RoleTree`)
-holds any part of it; a catalog (`RoleCatalog`), `catalog/` and
-`contracts/` only: its maintainers are trusted for packages, not for
-the deployment, and a `platform.yaml` or a `projects/` there is refused,
-not read without it. The role is required, its zero value refused: a
-caller that forgets it does not let a catalog through. A contract may be in
-several, the same bytes in each, as catalogs that ship their contracts
-do.
-The compiler reads directories; fetching a repository at a revision is
-its caller's.
+The compiler reads documents, not a tree. A platform, its catalogs and
+its projects are often apart, a team writing its project's files, a
+catalog shipping its packages and their contracts, and each host lays
+them out its own way. `LoadInputs` reads YAML documents from any files,
+each saying what it is by its `kind` (`Settings`, `Project`,
+`Instance`), the values it gives in values files it names or inline,
+so that the compiler depends on no directory structure, no file name
+and no repository: a project, an instance given twice is refused, never
+overridden, and so is a second `Settings`. `LoadCatalog` reads
+`catalog/` and `contracts/` of each catalog directory, nothing else of
+it, with no precedence: a service in two directories is refused, a
+contract may be in several of the same bytes, so that their order never
+changes what is compiled. Who may write which document, a project's or
+the platform's, and fetching them at a revision, are a host's
+([input documents](specs/01_inputs_outputs.md#input-documents)).
 
 ### Claims and providers
 
 A consumer says what it needs, a connection of a contract; a provider's
 package says what it provisions. `CompileAll` binds the two, so that a
 database is written once, in its claimer's values, not in the provider's
-values, a connection file and the reference. A claim is known from the
+values, a connection and the reference. A claim is known from the
 claimer's parameters and context alone (the parameter stage, `claimsOf`),
 so binding precedes any compile, and a provider depends on its claims, not
-on its claimers' compiles: no cycle, and the worklist, over the whole
-tree, compiles each claimer after its provider. A claim names a class, not
-a provider, or takes the default class of its context: the common case
+on its claimers' compiles: no cycle, and the worklist, over every
+instance, compiles each claimer after its provider. A claim names a class,
+not a provider, or takes the default class of its context: the common case
 stays free of names, and a binding moves only when a claim, a class or the
 default changes, never because an instance was added, as binding to the
 only provider would (a second one would refuse every such claim). Classes
@@ -813,14 +815,14 @@ that a claimer that wants another provider names a class of its project,
 and the platform moves a class to another provider without touching a
 claim. A provider of another namespace serves a claim with its consent
 (`consent`): the platform gives it for its classes, which route every
-namespace to their providers; a claim that names a provider, or a class
-of its project's, binds one of another project only when the provider
-lists the claimer's namespace among its claimers (`instance.yaml`,
-`Inputs.Claimers`, else its package's `provisions`). A project reaches
-no other project's database, nor its credentials, by naming its
-provider: the provider's owner decides who claims of it. The binding is
-printed, the compiled output's diff showing any move. Claims and their
-bindings are computed, never stored: the tree stays the only source.
+namespace to their providers; a claim that names a provider, or a class of
+its project's, binds one of another project only when the provider lists
+the claimer's namespace among its claimers (its `Instance` document's,
+`Inputs.Claimers`, else its package's `provisions`). A project reaches no
+other project's database, nor its credentials, by naming its provider: the
+provider's owner decides who claims of it. The binding is printed, the
+compiled output's diff showing any move. Claims and their bindings are
+computed, never stored: the inputs stay the only source.
 
 The model is Kubernetes' claims of storage: `{}` is a claim template, as
 a StatefulSet's `volumeClaimTemplates`, a claim of the reference's own; a
@@ -835,7 +837,7 @@ publishes, its `properties`, as a volume's `capacity`. The request is
 checked when the claim binds, its defaults applied, so that the provider
 reads a request it can serve and a refusal names the claimer's field,
 not the provider's mapping. Two divergences are kept on
-purpose, both because the tree is the only source: no selection by
+purpose, both because the inputs are the only source: no selection by
 matching, a claim never bound to a provider for what it publishes (what a
 reference requires checks, it never selects), and no persisted binding,
 a binding being a pure function of what is written, so that a reviewer
@@ -859,30 +861,21 @@ settled before it ships.
 ### A graph for deployment only
 
 The compile needs no graph: its edges are discovered as it goes. A
-deployer does: Flux orders releases by their direct dependencies
-(`dependsOn`), Argo CD by layers (a sync wave, the longest path to a
-release without dependencies). `graph.New` builds the graph once, from
-the results, and returns it only when every edge reaches a release that
-provides what is referenced and there is no cycle: what reads it never
-meets a cycle nor an edge to nothing. A cycle is refused rather than
-broken somewhere: Flux would wait forever, and where to break it is the
-user's choice, a connection in place of one of the references. Its nodes
-are releases, its edges `Result.Dependencies` deduplicated; the details
-(contract, field) stay in the results. The graph imports `okdp` and
-nothing imports it but the public package: the compile knows no graph.
+deployer does, Flux by direct dependencies (`dependsOn`), Argo CD by
+sync waves: a host builds it from `Result.Dependencies` and refuses a
+cycle or an edge to nothing; the compiler orders no release.
 
 ### Writing apart from compiling
 
 A compile gives values and objects; how a deployer gets them is the
-host's. The compile (`okdp`) reads its inputs, the graph (`graph`) the
-results; `compiler.Write` gives the files of one result, for `helm
-install`, and a host writes the results and the graph for a deployer
-engine such as Flux or Argo CD: one umbrella per instance, each
-project's own manifests, its Namespace and the identity its releases are
-confined to it with. Such a writer never sees a package, an input or an
-expression, and a new deployer is a new writer, the compile unchanged. A
-host needs nothing internal for it: the root package and `chart`,
-`value` are public.
+host's. The compile (`okdp`) reads its inputs; `compiler.Write` gives the
+files of one result, for `helm install`, and a host writes the results and
+their graph for a deployer engine such as Flux or Argo CD: one umbrella
+per instance, each project's own manifests, its Namespace and the identity
+its releases are confined to it with. Such a writer never sees a package,
+an input or an expression, and a new deployer is a new writer, the compile
+unchanged. A host needs nothing internal for it: the root package and
+`chart`, `value` are public.
 
 ### Everything through fs.FS
 
@@ -900,8 +893,8 @@ read once. It reads no upstream chart.
   inside the cache (a repository whose host and path are an
   `fs.ValidPath` without `\`, a chart name without `/`, `.` or `..`, a
   pinned version); the cache is a host's.
-- What `okdp-compile` reads of a directory, symbolic links refused,
-  bounded, is `internal/dirfs`'s, a host's reader its own.
+- What `okdp-compile` reads of a directory, bounded, symbolic links
+  followed, is `internal/dirfs`'s, a host's reader its own.
 - A schema `$ref` to a file, a URL or a `urn:` fails the compile instead of
   being fetched (a `jsonschema.SchemeURLLoader` of no scheme).
 
@@ -917,8 +910,8 @@ compiler, nor by `okdp-compile` alone. The [threat
 model](04_threat_model.md) takes these boundaries by author, with what
 the compiler cannot enforce. Rules named after the rule set are the
 mandatory set's, which every compile applies. The tests named are this
-module's; a boundary proved only by compiling a whole tree is a host's
-to prove. The boundaries of the security set, the hosts, the OAuth
+module's; a boundary proved only by compiling a whole deployment is a
+host's to prove. The boundaries of the security set, the hosts, the OAuth
 clients, the hardened pod and the policy on upstream values, are in [its
 architecture](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/00_architecture.md#security-boundaries).
 The compiler enforces:
@@ -939,14 +932,13 @@ The compiler enforces:
 | Declared charts only | `checkObjectsChart`, `merge.FinalValues` | the values file cannot give values to a chart that `Chart.yaml` does not declare, nor take the key of the objects' chart | `TestObjects` |
 | Credentials across namespaces | `pushSecrets`, `pullSecret`, `storeKey` | the compiler writes the keys of the platform's secret store, `<provider namespace>/<id>`, the ID starting with the claimers' namespace, and the platform's under `platform/`, a namespace no project may have, and cannot enforce who reads them: the layout lets a path-based store (OpenBao, Vault, a cloud secret manager) scope each namespace's identity, the SecretStore of its namespace with `secrets.provider`, with one policy: write its own segment, read `+/<namespace>.*` and `platform/*`. Without a provider, a ClusterSecretStore is one identity for every namespace, one trust domain; a backend without paths (External Secrets' Kubernetes provider) cannot hold the keys of the claims across namespaces. A key goes with its claim (`deletionPolicy: Delete`). A package's `objects` may reference the store too, reviewed with the package ([What the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) | `examples/04_claims` (its PushSecrets and ExternalSecrets) |
 | One writer per Secret | `compilation.refuseSecretTargets`, `isSecretName`, `mapping.schema.json` | two of OKDP's objects of a namespace, of one instance or of two, that write one Secret (a v1 Secret, an ExternalSecret's target) or one key of the store (a PushSecret's) refuse the instances that hold them: they would overwrite each other's credentials, and a provider's `secretRef.name`, a DNS-1123 subdomain, names its claimers' copies, `<release>-<name>`, which could otherwise be another instance's connection Secret, `<release>.<connection>-credentials` | `TestCompileAllSecretTargets` |
-| Repository roles | `repository.go: index`, `Repository.Role` | a catalog (`RoleCatalog`) contributes `catalog/` and `contracts/` only: its `platform.yaml` or `projects/` is refused, each path named, so that its maintainers add no project (one the platform lists as privileged, a reserved namespace) nor the platform's values, nor make the tree fail with a part it shares; the role is required, the zero value refused | `TestLoadRoles` |
 | Reserved namespaces | `Compile` (`checkNamespace`, `checkPlatformNamespace`), a host for the namespaces it writes in; `compiler.CheckProjectName`, the compile's rule for a program that creates projects | the namespace `platform` is no project's: `platform/` holds the platform's keys of the store, which a path-based store lets every namespace read and its own namespace write ([what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)); nor `kube-*`, Kubernetes' own, nor the deployer engines' namespaces and those a host writes their objects in (`flux-system`, `argocd`, `okdp-releases`; a Flux source's), where a project's releases, with every verb of their namespace, would rewrite the engine's objects (its sources, Applications, HelmReleases, the other projects' identities); nor those of `global.okdp.policy.reserved`, level 0's, a reservation winning over `policy.privileged`; `default` is not reserved. A host names its objects there after the releases and the projects, DNS labels: the platform's own objects there take a name with a dot (`okdp.instances`), which no release can take | `TestCompileErrors`, `TestCheckProjectName` |
-| Claims across namespaces | `consent`, `Instance.Claimers` | a claim's ID starts with its claimers' namespace and its credentials cross through the store, but a claim that names its provider, or a class of its project's, would otherwise reach any provider of any project: the provider of another namespace serves it only when it lists the claimer's namespace among its claimers (its `instance.yaml`, `Inputs.Claimers`, else its package's `provisions`), or `*`; the platform's classes (level 0, reviewed, which no level above changes) route every namespace to their providers, the platform consenting for them ([providers](specs/01_inputs_outputs.md#providers)) | `TestCompileAllConsent`, `TestCompileAllClaims` |
-| Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a `connections.yaml` cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) | `TestResolveFromStoreErrors` |
+| Claims across namespaces | `consent`, `Instance.Claimers` | a claim's ID starts with its claimers' namespace and its credentials cross through the store, but a claim that names its provider, or a class of its project's, would otherwise reach any provider of any project: the provider of another namespace serves it only when it lists the claimer's namespace among its claimers (`claimers` of its `Instance` document, `Inputs.Claimers`, else its package's `provisions`), or `*`; the platform's classes (level 0, reviewed, which no level above changes) route every namespace to their providers, the platform consenting for them ([providers](specs/01_inputs_outputs.md#providers)) | `TestCompileAllConsent`, `TestCompileAllClaims` |
+| Store keys of connections | `storeSecret`, `connectionLevels` | a connection of a project or an instance (level 1 or above) names the key its instances read (`secretRef.remoteKey`), a path of the store: the compiler keeps it under the namespace's own segment, `<namespace>/`, the one its PushSecrets write and an administrator fills, so that a project's or an instance's connection cannot read another namespace's claim (`data/demo.app.db`) nor the platform's keys, which the platform's connections (level 0, reviewed) give; the store's policy is the second wall ([Credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) | `TestResolveFromStoreErrors` |
 | Objects in the namespace | `CheckObjects`, stage 8 | an instance of a project that is not privileged (`global.okdp.policy.privileged`) installs no cluster-scoped object (`clusterScoped`: Kubernetes' own kinds and the operators', by API group and kind), no object of the deployer engines' API groups (the table `deployerApiGroups`: Flux's toolkit, the Flux Operator's, Flux's source extensions, Argo CD's) and writes no other namespace, whatever the source of the object (the objects section, a generated Secret's `namespace`, the credentials Secrets, the transfers), the items of a `List` included: a package's `objects` reach the cluster as written, and a project's instance could otherwise grant itself a ClusterRole or write a Secret of another project. A kind the compiler does not know is assumed namespaced: the engine's identity, confined to the namespace, is the second line | `TestObjectsPolicy` |
 | Privileged projects | `Privileged`, `Result.Privileged`, `platformOnly` | the platform's own projects (`global.okdp.policy.privileged`: cert-manager, an operator) install cluster-scoped objects, write other namespaces, set any upstream value and run with the engine's own identity, Pod Security `privileged`: only level 0 names them, a project's `policy` refused, so that no project makes itself one | `TestContextLevels`, `TestPrivileged` |
 | Redacted messages | `value.Short`, `value.ShortAt`, `chart.Schema.Validate` (`redactCauses`) | an error is printed to whoever runs the compile, logged by CI and by a server, copied into an issue: a schema violation of a sensitive value (`value.Sensitive`: its key, or the list's it is in, `password`, `passwd`, `secret`, `token`, `apikey`, `api_key`, `accesskey`, `secretkey`, `credential`, `privatekey`, `clientsecret`, case-insensitive, a plural's `s` left out, or a key ending with `Password`, `Secret`, `Token` or `Key`) prints `<redacted>` in place of the value, as does a value a message prints (`value.Short`) for those of its keys; a message that names a sensitive key's value by itself prints it with `value.ShortAt` (a connection reference, a named claim or a claim's key that is not of its type: `reference`, `parseClaim`, `ParseClaim`), but a store key, `remoteKey`, which names credentials and holds none. A key that does not say what it holds is not recognized: the parameter schema's names are the package's | `TestRedact`, `TestValidateRedacts`, `TestResolveRedacted` |
-| Project access | `okdp.ParseAccess`; a host writes the roles | who sees, operates and administers a project is the platform's and the project's, without a control plane: `project.yaml`'s `access` maps the identity provider's groups to `viewer`, `editor` or `admin` (`okdp-project-<namespace>` an editor by default), read from level 1 alone, no instance receiving it, and a host writes it as the roles of the project's AppProject (no `exec`) and the RoleBindings of its namespace to Kubernetes' `view`, `edit` and `admin`; the platform's administrators (`global.okdp.access.admins`) are the bootstrap's to bind. A control plane mirrors it (`compiler.ProjectGroups`, `compiler.PlatformAdmins`) ([access](specs/01_inputs_outputs.md#access)) | `TestAccessCompile` |
+| Project access | `okdp.ParseAccess`; a host writes the roles | who sees, operates and administers a project is the platform's and the project's, without a control plane: the `access` of a project's values (level 1) maps the identity provider's groups to `viewer`, `editor` or `admin` (`okdp-project-<namespace>` an editor by default), read from level 1 alone, no instance receiving it, and a host writes it as the roles of the project's AppProject (no `exec`) and the RoleBindings of its namespace to Kubernetes' `view`, `edit` and `admin`; the platform's administrators (`global.okdp.access.admins`) are the bootstrap's to bind. A control plane mirrors it (`compiler.ProjectGroups`, `compiler.PlatformAdmins`) ([access](specs/01_inputs_outputs.md#access)) | `TestAccessCompile` |
 | Objects Helm keeps | `keepSynced`, `Write` | an object annotated `helm.sh/resource-policy: keep` (a claim's database) gets Argo CD's sync options `Prune=false,Delete=false`: Argo CD reads no Helm annotation, and would delete it, its data with it, when the render drops it or its Application goes | `TestKeepSynced` |
 | Bounded compile | `cel2yaml.Session`, `Inputs.CostLimit`, `Inputs.Timeout` | a package's expressions, and the instance values that make them iterate, run within a total CEL cost per instance, what a host function reads and builds counted, and a context the compile checks between stages and inside comprehensions (below) | `TestCompileBudget`, `TestCompileTimeout` |
 
@@ -969,20 +961,22 @@ for one instance's compile (`Inputs.Timeout`), past which that instance
 is refused and the others compiled.
 
 Not decided by the compiler: which layers are the platform's. What the
-caller gives at level 0 of `Inputs.Context` (`platform.yaml`) is trusted
-as the platform values, and comes from the platform's repository, never
-from a project's owners or the instance's author, whose layers are the
-higher levels (`project.yaml`, `connections.yaml`) and `Inputs.Values`
-(`config.yaml`); the keys of
+caller gives at level 0 of `Inputs.Context` (the `Settings` document's
+values) is trusted as the platform values, and comes from the platform,
+never from a project's owners or the instance's author, whose layers are
+the higher levels (a `Project` document's values, an instance's
+`connections`) and `Inputs.Values` (an `Instance` document's values):
+who may write which document, and where, is a host's; the keys of
 `global` an instance may set are the parameter schema's decision, reviewed
 with the package
-([Context values](specs/01_inputs_outputs.md#context-values)).
+([Context values](specs/01_inputs_outputs.md#context-values),
+[input documents](specs/01_inputs_outputs.md#input-documents)).
 
 ## Testing
 
 `go test ./...` runs everything offline. The tests compile with the
-mandatory set (`Mandatory`), given through `Inputs.Rules` or
-`BuildOptions.Rules`, or by leaving them nil.
+mandatory set (`Mandatory`), given through `Inputs.Rules`, or by leaving
+it nil.
 
 ### Helm fixtures
 
@@ -996,27 +990,30 @@ functions copied from Helm, the umbrella as each deployer renders it.
 Most source files have their `_test.go`, in memory (`fstest.MapFS`, as a
 server passes its inputs). github.com/okdp/cel2yaml covers the language in
 its own tests. At the root: `TestLayers`, the packages each import only
-those below them; `TestConcurrentCompile`, a compile raced; `TestBuild`
-(`BuildOptions.Loaded` among it) and `TestCompileTree`, a tree compiled;
-`TestCompileWithoutRules`, the
-mandatory set alone, its functions and checks applied;
-`TestCheckProjectName`, the compile's rule; `TestWrite`, `TestKeepSynced`,
-the files of a compile. `internal/rules` tests the loader failing closed,
+those below them; `TestConcurrentCompile`, a compile raced;
+`TestLoadInputs`, the input documents of an example read with its catalog;
+`TestCompileWithoutRules`, the mandatory set alone, its functions and
+checks applied; `TestCheckProjectName`, the compile's rule; `TestWrite`,
+`TestKeepSynced`, the files of a compile. `internal/inputs` tests the
+documents, their kinds, keys and values files (`TestLoad`,
+`TestLoadErrors`), `internal/catalog` the directories of a catalog
+(`TestCatalog`, `TestCatalogErrors`, `TestSortVersions`),
+`cmd/okdp-compile` the command (`TestRun`, `TestCheck`,
+`TestRefusedOptions`). `internal/rules` tests the loader failing closed,
 the mandatory set and the two sets together (`TestLoadRules`,
 `TestMandatory`, `TestBothSets`, `TestSetsDisjoint`), what an added set
 adds to (`TestSchemasAdd`, `TestSchemasCollide`, `TestScopes`,
 `TestSetNames`, `TestRequire`, `TestConstraints`, with the set of
-`testdata/extra`), `internal/merge` the
-merge and the lists appended to (`TestFinalValues`); the checks against
-the upstream charts are a host's, and tested there;
-`internal/okdp` the stages, the claims and their binding
+`testdata/extra`), `internal/merge` the merge and the lists appended to
+(`TestFinalValues`); the checks against the upstream charts are a host's,
+and tested there; `internal/okdp` the stages, the claims and their binding
 (`TestCompileAll`, `TestCompileAllClaims`, `TestCompileAllConsent`...),
 the layers, the walkers driven by the rule set (`TestObjectsPolicy`,
 `TestPlainSecrets`), the hooks, sections and `ownObjects` of an added set
 (`TestHookObjects`, `TestHookFinalValues`, `TestOwnObjectsList`,
-`TestOkdpSections`, with the set of `testdata/hooks`), and a compile
-with the mandatory set alone (`norules_test.go`). `BenchmarkCompileAll`
-measures a compile of a tree.
+`TestOkdpSections`, with the set of `testdata/hooks`), and a compile with
+the mandatory set alone (`norules_test.go`). `BenchmarkCompileAll`
+measures a compile of a namespace's instances together.
 
 ### Fuzz tests
 
@@ -1033,7 +1030,6 @@ github.com/okdp/cel2yaml:
 | `okdp`: `FuzzClaimID` | a claim's ID is stable, 63 characters at most, of lowercase letters, digits, `-` and `.`, the normalised parts joined by dots when they fit |
 | `okdp`: `FuzzContextLayers` | the same answer twice, the layers unchanged and not shared with the result; accepted, a layer above level 0 sets nothing of `global.okdp` but `provisioning` and holds no template code |
 | `okdp`: `FuzzValuesLayers` | accepted, an instance's layers hold no `connections`, `claims` or `access`, no template code and of `global` the declared keys only |
-| `repository`: `FuzzLoad` | `Load` and `LoadProjects` agree: a tree `Load` accepts refuses no project, one it refuses is an `*Error`, a refused project has no instance |
 
 One at a time, a package at a time:
 `go test -run='^$' -fuzz=FuzzParsePath -fuzztime=60s ./chart`;
@@ -1045,21 +1041,22 @@ removed.
 
 ### Examples
 
-Each example of `examples/` is its sources under `input/`, `catalog/` the
-package or its services, `contracts/`, and `config/` the platform's
-`platform.yaml`, a project's `project.yaml` and an instance's files, and
-under `output/` what `Write` gives of each instance. A single package has
-`input/config/{instance.yaml,config.yaml,...}` and its output at
-`output/`; a tree has `input/config/<project>/<instance>/` and
-`output/<project>/<instance>/`. `exampleRepository` builds the tree
-`LoadRepository` reads from them, in memory, its single package in the
-project `demo`. `TestExample` compiles the instances of each example
-together, with the mandatory set and no `Inputs.Finalize`, and compares
-`Write`'s files byte for byte (`go test . -run TestExample -update`
-rewrites them; the diff is the change's effect, reviewed as such).
-The examples of a host's command line, a tree on disk with the files of
-each deployer engine, and the values that must fail on an example are
-the host's.
+Each example of `examples/` is its sources under `input/`, a catalog,
+`catalog/<service>/<version>/` its packages and `contracts/`, and
+`config/` its input documents, `inputs.yaml`, with the values files they
+name (`platform.yaml`, `demo/project.yaml`, `demo/webapp/config.yaml`),
+and under `output/` what `Write` gives of each instance: `output/` for a
+single instance, `output/<project>/<instance>/` otherwise.
+`exampleInstances` (`examples_test.go`) reads them as `okdp-compile -f
+input/config --catalog input` does, `LoadCatalog` of `input/`, then
+`LoadInputs` of `input/config/`, and `exampleRules` gives the example's
+rule set, its `rules/` over the mandatory one. `TestExample` compiles the
+instances of each example together, with no `Inputs.Finalize`, and
+compares `Write`'s files byte for byte (`go test . -run TestExample
+-update` rewrites them; the diff is the change's effect, reviewed as
+such). The examples of a host's command line, a deployment's files laid
+out with those of each deployer engine, and the values that must fail on
+an example are the host's.
 
 ### Continuous integration
 

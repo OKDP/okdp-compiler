@@ -103,19 +103,20 @@ and <second>`. A document is listed once. With the mandatory set alone,
 added to it gives a `name`, a DNS label, that no other set has.
 `RuleSet.Names` lists them in the order they are read,
 `RuleSet.SetVersion` gives the version of each and `RuleSet.Version`
-that of the last set read. A tree states the sets it requires in
+that of the last set read. A platform states the sets it requires in
 `global.okdp.ruleSets` ([platform settings](#platform-settings)).
 
 ## Who applies it
 
-Every compile: `Inputs.Rules` and `BuildOptions.Rules` nil stand for the
-mandatory set, and a set of `LoadRules` holds it. A host gives its
-compiles a set through `BuildOptions.Rules`, or nil. `okdp-compile`
-gives the mandatory set, with the sets of `--rules` added. A host may
+Every compile: `Inputs.Rules` nil stands for the mandatory set, and a
+set of `LoadRules` holds it. A host gives its compiles a set through
+`Inputs.Rules`, or nil, and reads the packages for it
+(`compiler.LoadDefinition`, `LoadInputs`). `okdp-compile` gives the
+mandatory set, with the sets of `--rules` added. A host may
 give the mandatory set with the security set added, or the set its
 caller gives.
 
-A program that calls `compiler.Build` or `compiler.Compile` itself, this
+A program that calls `compiler.CompileAll` or `compiler.Compile` itself, this
 module's `okdp-compile` among them, applies the sets it gives, their
 checks and hooks among them, but not what a host adds through
 `Inputs.Finalize` and `Inputs.CheckGlobals` ([what a host
@@ -170,7 +171,7 @@ applies only where that host compiles ([what a host
 adds](#what-a-host-adds)).
 
 `namespace` and `platformNamespace` also run when a project is created
-(`compiler.CheckProjectName`, for a host that edits the tree), with
+(`compiler.CheckProjectName`, for a host that creates projects), with
 `project` in place of `Inputs.Namespace` in the message.
 
 ## Tables
@@ -319,8 +320,8 @@ read as part of the platform's settings: the classes a project adds.
 
 `viewer`, `editor`, `admin`, least first.
 
-The roles a group may hold in `project.yaml` `access`. Each role with
-groups becomes:
+The roles a group may hold in a project's `access` (its `Project`
+document, level 1). Each role with groups becomes:
 
 | Role | RoleBinding | ClusterRole | Argo CD |
 |---|---|---|---|
@@ -541,8 +542,8 @@ version on, of the same major and minor) or `^` (from the version on, of
 the same major, or of the same minor when the major is 0) followed by a
 version, or a version alone, which stands for `=`. Versions compare as
 Semantic Versioning 2.0.0 orders them, a `-prerelease` before its
-release. Every compile, `PlatformOf` and `CheckProject` refuse a tree
-that requires a set the compile was not given, or one of a version its
+release. Every compile, `PlatformOf` and `CheckProject` refuse a
+platform that requires a set the compile was not given, or one of a version its
 constraint refuses:
 
 ```text
@@ -552,7 +553,8 @@ global.okdp.ruleSets: the platform requires the rule set <name> <constraint>, th
 
 `global.okdp` takes keys its schema does not describe, so the settings
 an added set reads would otherwise pass unread in a compile without it:
-the requirement lives in the tree, and holds with the compiler alone.
+the requirement lives in the platform's values, and holds with the
+compiler alone.
 
 ## The deployer's Role
 
@@ -594,8 +596,8 @@ of the functions. The sections are the compiler's `output`, `instance`,
 `provides` and `objects`, and those of `rules.yaml` `sections` of a set
 added to the mandatory set, which gives none. `okdp.yaml` may hold the
 sections of the rule set it is read for (`compiler.LoadDefinition`,
-`LoadRepository`, `Build` for `BuildOptions.Rules`), and no other
-key; nil rules read it for the mandatory set.
+`LoadInputs`), and no other key; nil rules read it for the mandatory
+set.
 
 | Section | Rule |
 |---|---|
@@ -727,11 +729,12 @@ instance. Its first message refuses the instance.
 
 ## What a platform can change
 
-`platform.yaml` cannot add a check, a function or a schema. A
+The platform's values (a `Settings` document) cannot add a check, a
+function or a schema. A
 platform's rule set (`LoadRules`) adds its own tables, documents, hooks,
 functions, templates, sections, `ownObjects`, scope documents and keys
 of the schemas, and values to the extensible tables, and changes none of
-the rules below. Of them, `platform.yaml` can only set these:
+the rules below. Of them, the platform's values can only set these:
 
 | Setting | Effect on the rules |
 |---|---|
@@ -743,7 +746,7 @@ the rules below. Of them, `platform.yaml` can only set these:
 | `charts.objects` | replaces the `objects` chart |
 | `ruleSets` | refuses every compile without the sets it requires |
 
-Nothing in `platform.yaml` changes a table. What a platform sets of
+Nothing in the platform's values changes a table. What a platform sets of
 the security set's rules: [its reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#what-a-platform-can-change).
 
 ## Changing a rule
@@ -756,11 +759,11 @@ new table or check name of the mandatory set also needs a change in
 it does not know there. A set added to it needs none for its tables,
 documents and hooks.
 
-A platform's own set changes the same way, in its own tree: a key of a
+A platform's own set changes the same way, in its own files: a key of a
 schema comes in its `schemas`, merged, and a value a mapping sees as
 `platform` in a document of its `scopes`. Raise its `version` with each
-change, the major one when a change breaks what a tree relies on: a tree
-that requires the set (`global.okdp.ruleSets`) states the versions it
+change, the major one when a change breaks what a platform relies on: a
+platform that requires the set (`global.okdp.ruleSets`) states the versions it
 accepts, and a compile given another is refused.
 
 A release of the compiler carries the change, and a host takes it by

@@ -11,100 +11,22 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	compiler "github.com/okdp/okdp-compiler"
 )
 
 var update = flag.Bool("update", false, "rewrite the examples' outputs from the current compiler")
 
-// exampleProject: the project of the single instance of a simple example.
-const exampleProject = "demo"
-
-// exampleRepository: the example name, its input/ laid out as a repository:
-//
-//	catalog/            one package, or one directory per service
-//	contracts/          the contracts, if any
-//	config/             platform.yaml, then for one package project.yaml and
-//	                    the files of its instance; else <project>/project.yaml
-//	                    and <project>/<instance>/, the files of each instance
-//
-// The instance of one package is named after it, in the project demo.
-func exampleRepository(name string) fs.FS {
+// exampleInstances: the instances of the example name, its input/ read
+// as okdp-compile reads it: the input documents of input/config/ (-f), the
+// packages and contracts of input/ (--catalog), for its rule set.
+func exampleInstances(name string, rules *compiler.RuleSet) ([]compiler.Instance, error) {
 	input := filepath.Join("examples", name, "input")
-	tree := fstest.MapFS{}
-	read := func(p string) []byte {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			panic(err)
-		}
-		return b
-	}
-	add := func(from, to string) {
-		_ = filepath.WalkDir(from, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			rel, _ := filepath.Rel(from, p)
-			tree[path.Join(to, filepath.ToSlash(rel))] = &fstest.MapFile{Data: read(p)}
-			return nil
-		})
-	}
-	pkg := func(dir string) string {
-		c, err := compiler.ParseValues(read(filepath.Join(dir, "Chart.yaml")))
-		if err != nil {
-			panic(err)
-		}
-		add(dir, path.Join("catalog", c["name"].(string), c["version"].(string)))
-		return c["name"].(string)
-	}
-	add(filepath.Join(input, "contracts"), "contracts")
-	config := filepath.Join(input, "config")
-	if b, err := os.ReadFile(filepath.Join(config, "platform.yaml")); err == nil {
-		tree["platform.yaml"] = &fstest.MapFile{Data: b}
-	}
-	entries, err := os.ReadDir(config)
+	cat, err := compiler.LoadCatalog([]compiler.CatalogFiles{{Name: name, FS: os.DirFS(input)}})
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	if _, err := os.Stat(filepath.Join(input, "catalog", "Chart.yaml")); err == nil {
-		service := pkg(filepath.Join(input, "catalog"))
-		for _, e := range entries {
-			switch e.Name() {
-			case "platform.yaml":
-			case "project.yaml":
-				tree[path.Join("projects", exampleProject, e.Name())] = &fstest.MapFile{Data: read(filepath.Join(config, e.Name()))}
-			default:
-				tree[path.Join("projects", exampleProject, "instances", service, e.Name())] = &fstest.MapFile{Data: read(filepath.Join(config, e.Name()))}
-			}
-		}
-		return tree
-	}
-	services, err := os.ReadDir(filepath.Join(input, "catalog"))
-	if err != nil {
-		panic(err)
-	}
-	for _, s := range services {
-		pkg(filepath.Join(input, "catalog", s.Name()))
-	}
-	for _, p := range entries {
-		if !p.IsDir() {
-			continue
-		}
-		dir := filepath.Join(config, p.Name())
-		inside, err := os.ReadDir(dir)
-		if err != nil {
-			panic(err)
-		}
-		for _, e := range inside {
-			if e.IsDir() {
-				add(filepath.Join(dir, e.Name()), path.Join("projects", p.Name(), "instances", e.Name()))
-			} else {
-				tree[path.Join("projects", p.Name(), e.Name())] = &fstest.MapFile{Data: read(filepath.Join(dir, e.Name()))}
-			}
-		}
-	}
-	return tree
+	return compiler.LoadInputs(context.Background(), []compiler.InputFiles{{Name: name + "/config", FS: os.DirFS(filepath.Join(input, "config"))}}, cat, rules)
 }
 
 // exampleRules: the rule set of the example name, its rules/ over the
@@ -123,7 +45,7 @@ func exampleRules(name string) *compiler.RuleSet {
 
 // TestExample: each example of examples/, compiled together with its rule
 // set (exampleRules): what Write gives of each instance is, byte for
-// byte, its output: output/ for one package, output/<project>/<instance>/
+// byte, its output: output/ for one instance, output/<project>/<instance>/
 // otherwise.
 func TestExample(t *testing.T) {
 	dirs, err := os.ReadDir("examples")
@@ -132,15 +54,15 @@ func TestExample(t *testing.T) {
 	}
 	for _, e := range dirs {
 		t.Run(e.Name(), func(t *testing.T) {
-			instances, err := compiler.LoadRepository(context.Background(), []compiler.Repository{{Name: e.Name(), FS: exampleRepository(e.Name()), Role: compiler.RoleTree}}, nil)
+			rules := exampleRules(e.Name())
+			instances, err := exampleInstances(e.Name(), rules)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for i := range instances {
-				instances[i].Inputs.Rules = exampleRules(e.Name())
+				instances[i].Inputs.Rules = rules
 			}
-			_, statErr := os.Stat(filepath.Join("examples", e.Name(), "input", "catalog", "Chart.yaml"))
-			single := statErr == nil
+			single := len(instances) == 1
 			got := map[string][]byte{}
 			for i, o := range compiler.CompileAll(context.Background(), instances) {
 				if o.Err != nil {

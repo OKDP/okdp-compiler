@@ -13,12 +13,12 @@ and of what it produces. The library's calls are in
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
 | Context values layers | `Inputs.Context` (`[]ContextLayer`) | no | [Parameters](#parameters), [Context values](#context-values), [Values files](#values-files) |
 | Instance values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Instance values](#instance-values), [Values files](#values-files) |
-| Release name | `Inputs.Release` | yes | `release.name`, object names; a tree's instance's, `<project>-<instance>` ([repository layout](../01_usage.md#repository-layout)) |
+| Release name | `Inputs.Release` | yes | `release.name`, object names; an `Instance` document's, `<project>-<name>` ([input documents](#input-documents)) |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
-| Instance name | `Inputs.Name` | no: the release; `CompileAll` sets it (`Instance.Name`) | the name of the outputs that name none ([provides](02_service_definition.md#provides)), of the instance's claims' IDs ([claims](#claims)); a tree's instance's, its directory's |
+| Instance name | `Inputs.Name` | no: the release; `CompileAll` sets it (`Instance.Name`) | the name of the outputs that name none ([provides](02_service_definition.md#provides)), of the instance's claims' IDs ([claims](#claims)); an `Instance` document's, its `name` |
 | What the other instances of the namespace publish | `Inputs.Published` (`map[string]Info`, by release) | no: connections and claims only; `CompileAll` sets it | [Resolution](#resolution), [Compiling instances together](#compiling-instances-together) |
 | The claims bound to the instance, a provider | `Inputs.Claims` (`[]Claim`) | no; `CompileAll` sets them | [Claims](#claims) |
-| The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; a tree's instance's, its `instance.yaml`'s `claimers` | [Providers](#providers) |
+| The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; an `Instance` document's, its `claimers` | [Providers](#providers) |
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
 | The rule set | `Inputs.Rules` (`*RuleSet`) | no: the mandatory set alone | [Rule set](#rule-set) |
 | The final values, and what a project sets of `global` | `Inputs.Finalize`, `Inputs.CheckGlobals` | no: Helm's merge, no policy, no check against the upstream charts | [Rule set](#rule-set), [Chart cache](#chart-cache) |
@@ -152,8 +152,9 @@ app: open app.defaults.yaml: no such file or directory
 ### Values files
 
 Every values file is read as Helm 3 reads one: the defaults files, the
-values layers read by `compiler.ParseValues` (a tree's context files and
-`config.yaml`), and the upstream charts' `values.yaml` a host's check
+values layers read by `compiler.ParseValues` (the `valuesFiles` and the
+`values` of the input documents), and the upstream charts' `values.yaml`
+a host's check
 reads with `chart.ParseValues` ([chart cache](#chart-cache)).
 
 - Documents: the first YAML document of the file only. Helm 4 merges the
@@ -203,9 +204,10 @@ JSON files (`config.schema.json` of the package, the contracts, and the
 The compiler reads no upstream chart: a compile's final values are the
 same whatever the charts hold, and nothing of them is checked. The
 [checks of the final values](#checks-of-the-final-values) against the
-upstream charts are a host's: it may fetch the charts of the tree's
-`Chart.yaml` files once per build, before the compile
-(`BuildOptions.Loaded`), and check each key with them in its Finalize.
+upstream charts are a host's: it may fetch the charts of the
+instances' `Chart.yaml` files once, before `CompileAll`
+(`Definition.Chart` of each instance `LoadInputs` gives), and check each
+key with them in its Finalize.
 This section describes a chart cache such a host may read them from,
 filled by hand or by the host, a layout the compiler keeps possible: it
 refuses a repository that cannot be laid out so. Each chart is unpacked
@@ -378,7 +380,7 @@ Three top-level keys are not parameters of the service:
 `global` and `upstream` are checked with the parameters: a schema with
 `additionalProperties: false` declares them, `{"type": "object"}` at least
 (okdp-compiler-security's
-[`examples/03_full/input/catalog/workspace/config.schema.json`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/catalog/workspace/config.schema.json)).
+[`examples/03_full/input/catalog/workspace/3.2.0-1.4.0/config.schema.json`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/catalog/workspace/3.2.0-1.4.0/config.schema.json)).
 `connections` is not: a schema does not declare it, and a declaration of
 `connections` has no effect, its `default` included. A connection is
 checked against its contract when a reference resolves to it
@@ -422,8 +424,8 @@ connections.ext: contract is required, the contract of the connection
 ```
 
 ```yaml
-# okdp-compiler-security: examples/03_full/input/config/demo/workspace/connections.yaml,
-# level 2: the instance's own
+# okdp-compiler-security: examples/03_full/input/config/inputs.yaml, the
+# Instance document demo/workspace, level 2: the instance's own
 connections:
   scratch:
     contract: s3
@@ -657,8 +659,8 @@ the release and the connection's name, DNS-1123 labels, joined by a dot,
 which neither holds, so that no other connection's Secret takes the name,
 nor a claim's (`<release>-<secret>` across namespaces; within one, the
 provider's `<id>-<contract>-credentials`, the ID `<namespace>.<...>`, and
-a tree's release, `<namespace>-<instance>`, is never its namespace). The
-ExternalSecret and, through its target's template, the Secret carry the
+an instance's release, `<namespace>-<name>`, is never its namespace).
+The ExternalSecret and, through its target's template, the Secret carry the
 labels and `okdp.io/credentials-<contract>: "true"`. The connection
 resolves with `secretRef: {name: <that Secret>}`, which the mapping reads
 as any other's, and which meets a requirement of credentials (`"require":
@@ -693,9 +695,10 @@ a connection of level 0 is every project's, each of its instances reading
 the key as its own namespace; with `secrets.provider`, a key under
 `platform/` is refused, no namespace reading it ([what the store must
 enforce](#what-the-store-must-enforce)). A connection above
-level 0, a project's (`project.yaml`) or an instance's own
-(`connections.yaml`), names a key under its namespace, `<namespace>/`,
-and no other: the namespace's own segment, where its PushSecrets push
+level 0, a project's (its `Project` document) or an instance's own
+(its `Instance` document's `connections`), names a key under its
+namespace, `<namespace>/`, and no other: the namespace's own segment,
+where its PushSecrets push
 the credentials of the claims it provides, and where an administrator of
 the store puts what it may read, the platform's credentials copied for it
 among them; another namespace's keys never, whatever the store's policy
@@ -703,7 +706,7 @@ allows ([what the store must
 enforce](#what-the-store-must-enforce)):
 
 ```yaml
-# projects/demo/instances/app/connections.yaml, level 2, the namespace demo
+# the connections of the Instance document demo/app, level 2, the namespace demo
 connections:
   own:
     contract: s3
@@ -865,9 +868,9 @@ consume it.
 ### Location
 
 `Inputs.Contracts`: a file system with `<contract>.schema.json` at its root;
-the name of the contract is the name of the file. A tree's are the
-`contracts/` of its repositories ([repository
-layout](../01_usage.md#repository-layout)). A contract is read by each
+the name of the contract is the name of the file. `LoadInputs` gives
+the `contracts/` of the catalog's directories ([the
+catalog](#the-catalog)). A contract is read by each
 reference and each `provides` item that names it: a compile that reads
 none needs no contracts, an empty file system; a compile of the
 instances together (`CompileAll`) reads the contract of every connection
@@ -875,7 +878,7 @@ of their contexts besides ([Connections](#connections)). A file that is
 missing, cannot be read, is not JSON, not an object or not a valid JSON
 Schema, or whose claim schema is not:
 `the <contract> contract cannot be read: <contract>.schema.json: <cause>`,
-`<cause>` `file does not exist` for a contract no repository has,
+`<cause>` `file does not exist` for a contract no catalog has,
 `x-okdp-claim: <cause>` for its claim schema.
 
 ### Format
@@ -998,20 +1001,22 @@ path in the values, sorted by path, as those of the parameters:
 ## Context values
 
 `Inputs.Context`: the context's values layers, each a `ContextLayer`, its
-`Values` at its `Level`; a tree's `platform.yaml` at level 0, its
-project's `project.yaml` at 1, its own `connections.yaml` at 2. Among them
+`Values` at its `Level`; of the input documents, the `Settings`
+document's at level 0, its project's `Project` document's at 1, its own
+`connections` at 2 ([what a compile
+receives](#what-a-compile-receives)). Among them
 `global`, `global.okdp`, the settings of the platform (certificate
 issuers, proxy, the secret store, the platform's charts...),
 `connections`, which only the context gives, an instance's own included,
 and `claims`, the named claims of a project, which only the context above
 level 0 gives ([claims](#claims)). Level 0 is the platform's:
-`examples/02_advanced/input/config/platform.yaml`,
-`platform/platform-values.yaml` in a platform repository; level 1,
-typically a project's, and each level above adds to the lower ones
-([Levels](#levels)). The context's layers are merged by level over the
-package's [defaults](#defaults), before the instance's, `Inputs.Values`
-([parameters](#parameters)); a later layer of a level may change or delete
-(`null`) a value of the previous ones of that level.
+`examples/02_advanced/input/config/platform.yaml`, the values file of
+the example's `Settings` document; level 1, typically a project's, and
+each level above adds to the lower ones ([Levels](#levels)). The
+context's layers are merged by level over the package's
+[defaults](#defaults), before the instance's, `Inputs.Values`
+([parameters](#parameters)); a later layer of a level may change or
+delete (`null`) a value of the previous ones of that level.
 
 ```yaml
 global:
@@ -1032,8 +1037,8 @@ project adds its classes to it, `global.okdp.provisioning`, and nothing
 else ([Levels](#levels)); its own settings go beside `okdp`,
 `global.project`. An instance layer that sets `global`
 fails before the parameter schema is checked, naming the layer by its
-position in `Inputs.Values`, from 1 (a tree's `config.yaml` the first),
-and the first key of `global` it may not set, in key order; `global` set
+position in `Inputs.Values`, from 1 (an instance's first values file the
+first), and the first key of `global` it may not set, in key order; `global` set
 to a non-map, `null` included, fails as a whole:
 
 ```
@@ -1069,7 +1074,7 @@ connections:
 
 The example's instance claims a database, `database: {}`, and references
 the platform's connection, `audit: platform-db`. Parameters and `upstream`
-values are the package's: a context file every service shares keeps to
+values are the package's: a context layer every service shares keeps to
 `global` and `connections`.
 
 `connections` is the context's only: an instance's own connections are a
@@ -1105,8 +1110,10 @@ project's and the platform's, and changes none of theirs.
 The layers are merged by level, lowest first, whatever their order in
 `Inputs.Context`; a level's layers in their order (`helm -f`), a later
 one changing or deleting (`null`) a value of an earlier one of the same
-level. A tree gives one layer per level: `platform.yaml`, the project's
-`project.yaml`, the instance's `connections.yaml`.
+level. The input documents give a layer per values file and one for the
+inline values of the `Settings` and `Project` documents, and one for an
+instance's `connections` ([what a compile
+receives](#what-a-compile-receives)).
 
 A level adds values, it changes none of a lower level's. A layer fails,
 before the parameter schema is checked, at the first lower level (lowest
@@ -1178,8 +1185,9 @@ those its parameter schema declares, over the context's values, no
 `connections` and no `claims` ([Context values](#context-values)).
 
 ```yaml
-# okdp-compiler-security: examples/03_full/input/config/demo/project.yaml, level 1,
-# after platform.yaml at level 0
+# okdp-compiler-security: examples/03_full/input/config/demo/project.yaml,
+# the values file of the Project document demo, level 1, after the
+# platform's (platform.yaml), level 0
 global:
   storageClass: fast-ssd
   project: {name: demo, costCenter: cc-4217, nodePool: analytics}
@@ -1193,12 +1201,13 @@ connections:
     secretRef: {name: demo-warehouse-credentials}
 ```
 
-Over it, the instance's own connections, its `connections.yaml` in
-[`examples/03_full/input/config/demo/workspace/`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/config/demo/workspace)
+Over it, the instance's own connections, the `connections` of its
+`Instance` document in
+[`examples/03_full/input/config/inputs.yaml`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full/input/config/inputs.yaml)
 of okdp-compiler-security, at
-level 2 ([Connections](#connections)), add `scratch`. Given after
-`platform.yaml` and `project.yaml`, a file of level 2 that gives
-`demo-warehouse` again, even a field of it, fails:
+level 2 ([Connections](#connections)), add `scratch`. Given after the
+platform's and the project's values, connections of level 2 that give
+`demo-warehouse` again, even a field of it, fail:
 
 ```
 context layer 3 (level 2): connections.demo-warehouse is set at level 1 (Inputs.Context): a level adds values, it does not change a lower level's
@@ -1246,8 +1255,8 @@ reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/0
 | `secrets.provider`, `secrets.serviceAccount` | set, the store is a SecretStore in each project's namespace, `provider` its spec verbatim (External Secrets' `spec.provider`), authenticating with the ServiceAccount `serviceAccount` of the namespace, which the [targets](#targets) write (`Result.SecretStore`), and which the PushSecrets and ExternalSecrets reference (`kind: SecretStore`); unset, a ClusterSecretStore of the platform's, one identity for every namespace |
 | `secrets.refreshInterval` | `1h` by default: how often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it |
 | `policy.privileged` | the namespaces of the platform's own projects (cert-manager, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to a host's policy ([rule set](#rule-set)); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
-| `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
-| `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's `project.yaml`, an instance's `connections.yaml`), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to a host's policy, as the upstream values are |
+| `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not its projects (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
+| `policy.projectGlobals` | the keys of `global` the layers above level 0 set (a project's values, an instance's connections), beside `okdp`; `[project, storageClass]` when unset, `[]` none; any other key is refused, for every project, privileged or not ([levels](#levels)); what the keys hold is held to a host's policy, as the upstream values are |
 | `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them; the compiler writes nothing of them, the platform's bootstrap binds them once, a program that mirrors the platform's authority reads them (`compiler.PlatformAdmins`) ([access](#access)) |
 | `access.groupPrefix` | `""` by default: the prefix the Kubernetes API server gives the groups of its OIDC users (`--oidc-groups-prefix`), which the RoleBindings of the projects' groups name them with ([access](#access)) |
 | `network.policy` | `false` by default: `true`, a host's [targets](#targets) write a NetworkPolicy in each project's namespace but the platform's own (`policy.privileged`), its ingress denied but from the namespace itself, `network.ingressNamespaces` and the namespaces whose claims its instances provide, its egress open (`Result.Network`); off by default, as the compiler knows neither the cluster's ingress controller nor whether its network plugin enforces a policy: on, without the ingress controller's namespace, the services lose their ingress |
@@ -1262,9 +1271,8 @@ that is not a map, rather than read as not set: `proxy: <url>` would give
 no proxy environment. A former setting is
 refused, renamed: `certificateIssuers`, whose `selfSigned.name` is
 `tls.clusterIssuer` (`- at '/global/okdp/certificateIssuers': false
-schema`); `serviceCatalog`, the console's menu, now `catalogs.yaml`
-beside `platform.yaml` ([repository
-layout](../01_usage.md#repository-layout)). A `null` is read as in a
+schema`); `serviceCatalog`, the console's menu, a host's now, no value
+of the platform's. A `null` is read as in a
 chart's values ([Layers and nulls](#layers-and-nulls)): over a default,
 it deletes the setting (`secrets.refreshInterval: null`); where there is
 no default, it is refused (`proxy: null`). An empty string is a value
@@ -1322,8 +1330,8 @@ their own ([Levels](#levels)).
 ### Layers
 
 `Inputs.Values`: the instance's layers in order, the last one winning
-(Helm's `-f` order), after the whole context's; a tree's, the instance's
-`config.yaml`.
+(Helm's `-f` order), after the whole context's; of an `Instance`
+document, its `valuesFiles`, then its `values`.
 
 An instance layer sets no `global` but the keys the parameter schema
 declares under it, and no `connections` ([Context values](#context-values)).
@@ -1438,7 +1446,7 @@ values](#checks-of-the-final-values)).
 
 With the example (`append: [env]`), the computed `DB_*` and `AUDIT_DB_*` items
 come first, then `TZ` and `LOG_LEVEL`, of `upstream.app` in the instance's
-`config.yaml` (`app` of the example's `values.yaml`,
+values file, `config.yaml` (`app` of the example's `values.yaml`,
 [Example](#example)).
 
 ### Upstream errors
@@ -2026,7 +2034,7 @@ type Dependency struct {
 ```
 
 A dependency holds when its `instance` publishes an output named `output`
-of `contract`, as resolution found it; the [deployment
+of `contract`, as resolution found it; a host's [deployment
 graph](#the-deployment-graph) checks it again, and orders the releases
 with the list, read from `Result.Dependencies`: each release waits for the
 instances it depends on, Flux `dependsOn` and Argo CD sync waves in a
@@ -2098,12 +2106,14 @@ for `hasKey`, `toYaml` and `range`.
 ### Example
 
 `examples/02_advanced/output/demo/webapp/`, what `Write` gives for the
-example: release `demo-webapp`, namespace `demo`, the instance's
-`config.yaml` (`replicas: 2`, `database: {}`, a claim, `audit:
-platform-db`, a memory limit and two `env` entries in `upstream.app`),
-over the context `examples/02_advanced/input/config/platform.yaml`,
-level 0 (`platform-db`, the connection the instance's `audit`
-references; `ruleSets`, which requires the example's rule set). The
+example: release `demo-webapp`, namespace `demo`, the instance's values
+file, `demo/webapp/config.yaml` (`replicas: 2`, `database: {}`, a
+claim, `audit: platform-db`, a memory limit and two `env` entries in
+`upstream.app`), over the context
+`examples/02_advanced/input/config/platform.yaml`, the values file of
+the `Settings` document, level 0 (`platform-db`, the connection the
+instance's `audit` references; `ruleSets`, which requires the example's
+rule set). The
 compile is given the mandatory set with the example's set added,
 [`examples/02_advanced/rules`](../../examples/02_advanced/rules)
 (`okdp-compile --rules`), whose function `exampleConfigFiles` writes the
@@ -2205,13 +2215,14 @@ depends on demo-db (database demo.webapp.database, database)
 okdp-compiler-security's
 [`examples/03_full/`](https://github.com/OKDP/okdp-compiler-security/blob/main/examples/03_full)
 compiles the workspace service, a package written to use every part of
-the mapping language, with four values layers:
-`platform.yaml` (level 0: `global.okdp`, the objects chart from a
-mirror, a proxy, two connections), `project.yaml` (level 1:
-the project's settings under `global`, two connections of its own, a
-named claim),
-`connections.yaml` (level 2: the instance's own connection) and
-`config.yaml` (the instance's values: two claims, a claim template and
+the mapping language, with four values layers, of the documents of its
+`input/config/inputs.yaml`:
+`platform.yaml` (level 0, the `Settings` document's: `global.okdp`, the
+objects chart from a mirror, a proxy, two connections), `project.yaml`
+(level 1, the `Project` document's: the project's settings under
+`global`, two connections of its own, a named claim), the `Instance`
+document's `connections` (level 2: the instance's own connection) and
+`config.yaml` (its values: two claims, a claim template and
 the project's named claim, an
 output of the namespace and connections of the platform, the project
 and the instance itself, in a list of catalogs and under a nested key;
@@ -2225,6 +2236,198 @@ upstream values). Release
 `okdp.info.yaml` lists three outputs, one with its credentials, whose
 Secret is generated: its objects hold the `Password` generators and the
 `ExternalSecret`, then the `objects` section.
+
+## Input documents
+
+`compiler.LoadInputs(ctx, files, cat, rules)` reads the instances of a
+compile from input documents, as `okdp-compile -f` does: YAML documents,
+any number per file, separated by `---`, in files laid out in any way.
+Each document says what it is by its `kind`: `Settings`, the values every
+instance receives first, the platform's; `Project`, a namespace and the
+values of its instances; `Instance`, an instance, its package and its
+values (`compiler.KindSettings`, `KindProject`, `KindInstance`). It
+returns the instances, each with its `Definition` and its `Inputs`,
+sorted by project, then by name, ready for `CompileAll` ([compiling
+instances together](#compiling-instances-together)): the caller adds the
+bounds, the rule set and the hooks (`Inputs.CostLimit`, `Timeout`,
+`Rules`, `Finalize`, `CheckGlobals`, `AllowPlainSecrets`). Where the
+documents are kept, how many files, which directory holds a project's, is
+the caller's: the compiler reads no layout, only the documents' kinds.
+
+```yaml
+# examples/04_claims/input/config/inputs.yaml, trimmed
+kind: Settings                    # level 0, every instance
+valuesFiles: [platform.yaml]
+---
+kind: Instance                    # the release data-postgresql of the namespace data
+project: data
+name: postgresql
+service: postgresql               # the package catalog/postgresql/1.0.0/
+version: 1.0.0
+claimers: [demo]                  # demo's instances may claim of it
+---
+kind: Project                     # the namespace demo, level 1
+name: demo
+valuesFiles: [demo/project.yaml]
+---
+kind: Instance                    # the release demo-dashboards of the namespace demo
+project: demo
+name: dashboards
+service: app
+version: 1.0.0
+valuesFiles: [demo/dashboards/config.yaml]
+```
+
+An instance's own connections, the context at level 2, and inline
+values:
+
+```yaml
+kind: Instance
+project: demo
+name: app
+service: app
+version: 1.0.0
+connections:                      # level 2: the instance's own
+  legacy-db: {contract: database-server, host: db.example.org, dbName: app, secretRef: {name: legacy-db}}
+values: {database: legacy-db}     # after its valuesFiles
+```
+
+### Input files
+
+Each of `files` is a `compiler.InputFiles{Name, FS, Path}`: `Path` empty
+or `.`, every `.yaml` and `.yml` file under `FS`, at any depth, sorted by
+path; else the one file `Path` of `FS`, its values files read in `FS`
+too. `Name` names it in messages, `<Name>/<path>`. `okdp-compile -f
+<dir>` gives a directory; `-f <file>`, the file, `FS` the directory that
+holds it. The documents of every `files` make one set: one `Settings` in
+all, a project or an instance given once in all.
+
+A file that the `valuesFiles` of a document names is a values file: its
+documents are not read as input documents, wherever it is. In every other
+file, each document is of one of the three kinds; an empty one (`---`
+alone, comments) is skipped. A document holds the keys of its kind, and
+no other. Every problem is reported at once, each naming the document,
+`<Name>/<path>: document <n> (line <l>, <kind>)`, `<n>` its position in
+the file, from 1, `<l>` the line it starts at.
+
+### Settings
+
+`kind`, `values`, `valuesFiles`: the platform's values, the context at
+level 0 of every instance (`global.okdp`, the classes of the claims, the
+platform's secret store, the connections every instance may reference:
+[context values](#context-values)). One `Settings` document at most, in
+all the files: a second one is refused. None, the instances have no layer
+of level 0.
+
+### Project
+
+`kind`, `name`, `values`, `valuesFiles`. `name`, required, a DNS label,
+is the project's, the namespace of its instances: its values are the
+context at level 1 of every instance whose `project` it is (its settings
+under `global`, its classes, its connections, its named claims, `claims:`,
+its `access`: [levels](#levels), [claims](#claims), [access](#access)).
+A project needs no `Project` document: an instance of a project without
+one has no layer of level 1. A name given twice is refused. A `Project`
+document no instance names is read and checked for its keys, its values
+compiled by no instance: a host checks its declarations with
+`compiler.CheckDeclarations` ([claims](#claims)).
+
+### Instance
+
+| Key | Required | What |
+|---|---|---|
+| `project` | yes | a DNS label: the project, `Inputs.Namespace` |
+| `name` | yes | a DNS label: the instance's name, `Instance.Name`; the release is `<project>-<name>`, `Inputs.Release` |
+| `service`, `version` | yes | strings: the package `catalog/<service>/<version>/` of the catalog, whose `Chart.yaml` has that `name` and `version` |
+| `claimers` | no | a list: the namespaces that may claim of the instance from another namespace, namespace names or `"*"`, each once, `Inputs.Claimers`; absent, its package's (`provisions`); `[]`, none ([providers](#providers)) |
+| `connections` | no | a map: the instance's own connections, the context at level 2, `{connections: ...}` ([connections](#connections)) |
+| `valuesFiles`, `values` | no | the instance's values, `Inputs.Values` ([instance values](#instance-values)) |
+
+The package is read once per service and version, by
+`compiler.LoadDefinition` for `rules` (nil: the mandatory set). An
+instance, its project and name, given twice is refused, naming the first.
+A connection is written at level 2 as at the lower levels, and nothing
+else is given there: `global` is the platform's or the project's.
+
+### valuesFiles
+
+`valuesFiles` is a list of paths, each relative to the document's file and
+inside the same `InputFiles` (no absolute path, none out of it by `..`),
+each read as Helm reads a values file ([values files](#values-files):
+`compiler.ParseValues`, the first document, YAML 1.1, every number a
+float64), in order; then `values`, inline, last, read alike. Each is a
+layer of its own, of the document's level or of `Inputs.Values`. A
+values file may be named by several documents, and kept anywhere among
+the input files: a `.yaml` file under a directory of `-f` is read as
+documents unless a document names it so.
+
+### What a compile receives
+
+| `Inputs` | From |
+|---|---|
+| `Definition` | the package `catalog/<service>/<version>/` of the catalog (`Catalog.Package`) |
+| `Contracts` | every contract of the catalog (`Catalog.Contracts()`) |
+| `Context` | the `Settings` document's layers, level 0, its `valuesFiles` then its `values`; its project's `Project` document's, level 1, alike; the instance's `connections`, level 2 |
+| `Values` | the instance's `valuesFiles`, then its `values` |
+| `Release`, `Namespace` | `<project>-<name>`, `<project>` |
+| `Claimers` | `claimers`; nil when absent |
+
+The context layers are numbered in that order in messages, `context layer
+<n> (level <l>)`: `platform.yaml` of the example the first, the
+project's file the second. The rules of the levels hold whatever gives
+them ([levels](#levels)): a level adds values and changes none of a lower
+level's, only level 0 gives template code, `global.okdp` is level 0's but
+for `provisioning`, the named claims are a project's.
+
+### The catalog
+
+`compiler.LoadCatalog(dirs)` reads the packages and the contracts of one
+or more directories, each a `compiler.CatalogFiles{Name, FS}`, and
+nothing else of them:
+
+```text
+<dir>/
+  catalog/<service>/<version>/        a package (compiler.CatalogDir)
+  contracts/<contract>.schema.json    a contract (compiler.ContractsDir)
+```
+
+A service is in one directory, with every version of it; a contract may
+be in several, of the same bytes in each: a catalog ships the contracts of
+its packages. The order of `dirs` changes nothing. `Catalog.Services()`
+lists the services, each a `compiler.CatalogService` (`Name`,
+`Repository`, the directory's name, `Versions`, the directories of
+`catalog/<service>/`, highest first, the SemVer ones by precedence);
+`Service(name)`, `Package(service, version)`, the files of the package,
+and `PackagePath(service, version)`, where it is, for messages;
+`Contracts()`, every contract, as `Inputs.Contracts`. A service or a
+version no directory has is an error that wraps
+`compiler.ErrNotInCatalog`. `okdp-compile --catalog <dir>` gives a
+directory.
+
+### Input errors
+
+| Case | Error, after `<Name>/<path>: document <n> (line <l>, <kind>): ` |
+|---|---|
+| a document of no kind, in a file no `valuesFiles` names | `<Name>/<path>: document <n> (line <l>): no kind: Settings, Project or Instance, or a values file that a document names (valuesFiles)`, alone |
+| a kind that is not one of the three | `<Name>/<path>: document <n> (line <l>): kind "Deployment": Settings, Project or Instance`, alone |
+| a key the kind does not hold | `line <l>: replicas: not a key of the document, which holds kind, project, name, service, version, claimers, connections, values, valuesFiles` |
+| a key given twice | `line <l>: <key> is given twice, first at line <l>` |
+| a required key unset | `<key> is required` |
+| a name that is no DNS label | `line <l>: project: a DNS label expected (lowercase letters, digits and -, 63 characters at most)` |
+| `service`, `version` not a string; `values`, `connections` not a map; `valuesFiles`, `claimers` not a list of strings | `line <l>: <key>: a string expected`, `... a mapping expected`, `... a list of strings expected` |
+| a claimer that is not a namespace name nor `*`, or listed twice | `claimers[0]: "Demo" is not a namespace name, nor "*"`, `claimers: demo is listed twice` |
+| a values file out of the input files, or that cannot be read | `valuesFiles: "../x.yaml": a path relative to the document's file, inside <Name>`, `valuesFiles: <Name>/<path>: no such file or directory`, its YAML error |
+| a second `Settings` document | `a second Settings document, after <where>: give the values of every instance once` |
+| a project, an instance given twice | `project "demo" is given twice, first in <where>`, `instance demo/app is given twice, first in <where>` |
+| a package the catalog does not have | `service "nope" is in the catalog of no repository`, `version "2.0.0" of service "app" is not in <dir>/catalog/app` |
+| a package whose `Chart.yaml` is not of its directory, or that does not load | `the package <dir>/catalog/app/1.0.1: its Chart.yaml is app 1.0.0`, `the package <dir>/catalog/app/9.9.9: open Chart.yaml: no such file or directory`, the error of `LoadDefinition` |
+
+Of the catalog, with no document named:
+
+| Case | Error |
+|---|---|
+| a service in several directories | `service "app" is in the repositories a, b and c` |
+| a contract of different bytes in two directories | `contract database-server differs between the repositories a and b` |
 
 ## Compiling instances together
 
@@ -2292,7 +2495,7 @@ same whatever the order. A refusal for an output nobody publishes names
 the instances of the namespace that are refused, and the refused
 providers of its claims of another namespace, one of them maybe its
 provider. Whether the instances deploy together, each reference to an
-instance that exists and provides it, is the
+instance that exists and provides it, is a host's
 [deployment graph](#the-deployment-graph)'s to check.
 
 | Case | Error |
@@ -2305,46 +2508,26 @@ instance that exists and provides it, is the
 
 ## The deployment graph
 
-`NewGraph(results)` builds the deployment graph of compiled instances,
-the `Result` of every instance of their namespaces, a refused one
-missing: a release (`GraphNode`, its namespace and release) waits for
-the releases its references point to, of its namespace, or of another for
-a claim bound across namespaces ([Dependencies](#dependencies)), each
-once. It returns the graph only
-when every dependency holds and no release waits for itself; else every
-problem at once, each a `*GraphError` at its release, by namespace then
-release:
-
-| Case | Error, after `<namespace>/<release>: ` |
-|---|---|
-| a release given twice in a namespace | `release "<release>" is given twice in namespace "<namespace>"` |
-| a dependency on a release no result of the namespace has, or on itself | `<field>: it references "<instance>", which is not another instance of namespace "<namespace>"`; of another namespace, `"<namespace>/<instance>", which is not an instance of namespace "<namespace>"` |
-| a reference to an output its release does not publish | `<field>: it references the <contract> output "<output>" of "<instance>", which "<instance>" does not publish` |
-| releases that wait for each other: from each release, a shortest cycle through it, when it is the cycle's smallest | `dependency cycle: <release> -> <release> -> <release>: the releases would wait for each other` |
-
-A cycle of references never compiles
-([Compiling instances together](#compiling-instances-together)): the
-graph refuses one in results compiled otherwise. A release that waits for
-a cycle is not reported: the cycle is.
-
-The graph gives:
-
-- `DependsOn(node)`: the releases it waits for, by namespace then
-  release: Flux's `dependsOn`;
-- `Wave(node)`: 0 for a release that waits for none, else one more than
-  the highest wave of those it waits for: an Argo CD sync wave. The
-  releases of a wave deploy together, after those of the lower waves.
+The compiler builds no deployment graph: each `Result.Dependencies`
+([dependencies](#dependencies)) is what a host orders the releases with.
+A host that deploys the instances together checks that each dependency
+holds, the release exists in its namespace, or another for a claim bound
+across namespaces, and publishes the output referenced; refuses a
+release that waits for itself, through a cycle; and turns the order into
+Flux's `dependsOn` or Argo CD's sync waves, a release of a wave after
+those of the lower waves. A cycle of references never compiles
+([compiling instances together](#compiling-instances-together)): a host
+finds one only in results compiled otherwise.
 
 ## Targets
 
 What a deployer needs is compiled here and written by a host: its
 targets (Helm releases, an umbrella, Flux, Argo CD) write the files of
-compiled instances under `projects/<namespace>/`, from
-`Result.Namespace`, `Result.Release`, the [deployment
-graph](#the-deployment-graph) and the fields `Result` holds for them. A
-project's directory of the tree is the namespace: every target installs
-there. The engine's identity, confined to the namespace, and Pod Security
-Admission are the second line behind the compile's policy.
+compiled instances, from `Result.Namespace`, `Result.Release`, its
+[deployment graph](#the-deployment-graph) and the fields `Result` holds
+for them. A project is a namespace: every target installs there. The
+engine's identity, confined to the namespace, and Pod Security Admission
+are the second line behind the compile's policy.
 
 ### Access
 
@@ -2359,23 +2542,23 @@ boundary only it enforces. The roles are the mandatory rule set's
 code, and no other set changes them.
 
 ```yaml
-# platform.yaml, level 0
+# the platform's values (Settings), level 0
 global:
   okdp:
     access:
       admins: [platform_admin]   # the platform's administrators
       groupPrefix: "oidc:"       # the API server's --oidc-groups-prefix
-# projects/demo/project.yaml, level 1
+# the values of the project demo (Project), level 1
 access:
   okdp-project-demo: editor
   demo-leads: admin
   analysts: viewer
 ```
 
-A project's file gives `access`, a map of group names to a role,
-`viewer`, `editor` or `admin`, read from the project's file alone (the
-context at level 1, `Result.Groups`): absent or `null`, the default,
-`okdp-project-<namespace>: editor` (`compiler.DefaultProjectGroup`);
+A project's values, its file in the messages, give `access`, a map of
+group names to a role, `viewer`, `editor` or `admin`, read from the
+project's alone (the context at level 1, `Result.Groups`): absent or
+`null`, the default, `okdp-project-<namespace>: editor` (`compiler.DefaultProjectGroup`);
 `{}`, no group has a role, the platform's administrators alone reach
 the project. No instance receives it: it is no value of the context. A
 group's name is the one the identity provider's tokens give in their
@@ -2423,9 +2606,9 @@ roles, which every project's people hold (`TestPlatformAccess`).
 | `access` that is not a map | `the project's file (level 1): access: the roles of the project's groups, a map of group names to viewer, editor or admin, got ...`, every instance of the project refused |
 | a group's name that is not one | `access.<group>: a group name, a letter or a digit then letters, digits, ".", "_", "@", ":" or "-", 255 characters at most (no "/": the group's name, not its path)` |
 | a role that is not one | `access.<group>: a role, viewer, editor or admin, got "<value>"` |
-| `access` in `platform.yaml` or `connections.yaml` | `context layer <n> (level <l>): access: the roles of a project's groups, its file's, of level 1 only` |
-| `access` in `config.yaml` | `values layer <n>: access is the project's, its file's (the context at level 1)` |
-| `global.okdp.access` in `project.yaml` | `global.okdp.access: a platform setting, level 0 only` |
+| `access` in the platform's values or an instance's connections | `context layer <n> (level <l>): access: the roles of a project's groups, its file's, of level 1 only` |
+| `access` in an instance's values | `values layer <n>: access is the project's, its file's (the context at level 1)` |
+| `global.okdp.access` in a project's values | `global.okdp.access: a platform setting, level 0 only` |
 
 ## Claims
 
@@ -2481,7 +2664,7 @@ Two divergences, on purpose. No selection by matching: a claim is bound to
 the provider of its class or to the one it names, never to one chosen for
 what it publishes (a `selector`); what a reference requires checks the
 connection, it never selects one. No persisted binding: the binding is
-computed from the tree at each compile, never stored, so a changed
+computed from the inputs at each compile, never stored, so a changed
 default class, or a class's provider, moves every claim of it, each to a
 new, empty connection, the data left at the former one: the binding lines
 `okdp-compile` prints show the move before it is deployed.
@@ -2504,7 +2687,7 @@ nothing; a name is a connection's, a named claim's or an output's,
 resolved in that order ([resolution](#resolution)).
 
 A named claim is declared once, in its project's context
-(`project.yaml`, level 1, or a level above, never level 0, the
+(its `Project` document, level 1, or a level above, never level 0, the
 platform's, nor an instance's values: [levels](#levels)), each a name of
 the namespace, a DNS-1123 label, and no connection's:
 
@@ -2520,13 +2703,13 @@ claims:
 It is bound and given to its provider whether a reference names it or not,
 as a namespace holds a PersistentVolumeClaim no pod mounts; each reference
 to it is a [dependency](#dependencies). A project without instance binds
-none, nor does its provider provision it, but the tree checks its
-declarations all the same (`okdp.CheckDeclarations`), as an instance's
-compile would: each named claim's form and name, no connection's, its
-class, the one it names or the default one, a class of the context, its
-request, no key its class fixes, against the contract's claim schema;
-and each connection at its declaration. A problem refuses the project, which
-does not load, at `projects/<project>/project.yaml: claims.<name>`. A
+none, nor does its provider provision it, and no compile reads its
+`Project` document: a host checks its declarations all the same with
+`compiler.CheckDeclarations`, as an instance's compile would: each named
+claim's form and name, no connection's, its class, the one it names or
+the default one, a class of the context, its request, no key its class
+fixes, against the contract's claim schema; and each connection at its
+declaration, a problem at `claims.<name>` or `connections.<name>`. A
 level adds named claims, it changes none of a lower level's
 (`claims.<name>`, taken whole). Through
 the library, the context of each instance of the namespace declares its
@@ -2653,7 +2836,7 @@ context holds it, every problem at once, in name order:
 | a `provider` not of the form | `claims.<name>: claim: provider "<provider>": <instance>, <release>, <namespace>/<instance> or <namespace>/<release>` |
 | a connection's name | `claims.<name>: a connection of that name too (connections.<name>)` |
 | in an instance's values | `values layer <n>: claims are declared by the context (Inputs.Context): a project's, of level 1 or above` |
-| at level 0 | `context layer <n> (level 0): claims: a project's, of level 1 or above`; a tree's `platform.yaml`: `<repository>/platform.yaml: claims: a project's (project.yaml)` |
+| at level 0 | `context layer <n> (level 0): claims: a project's, of level 1 or above`, the platform's values, its `Settings` document |
 
 ### Providers
 
@@ -2661,9 +2844,9 @@ A provider, a claim's (`provider`), a named claim's or a class's, names
 an instance: `<namespace>/<name>`, or `<name>` alone, of the claimer's
 namespace, a class's too, whichever level defines the class. The name is
 the instance's name or its release, a DNS-1123 label of 53 characters at
-most. In a tree (`LoadRepository`), the instance's name is its
-directory's, `projects/<project>/instances/<instance>/`, and its release
-`<project>-<instance>`: `data/postgresql` and `data/data-postgresql`
+most. Of an `Instance` document (`LoadInputs`), the instance's name is
+its `name`, and its release `<project>-<name>`: `data/postgresql` and
+`data/data-postgresql`
 both name the instance `postgresql` of the project `data`. Through the
 library, the name is `Instance.Name`, the release when it is empty: a
 caller that sets the release only names its instances by their release.
@@ -2683,16 +2866,19 @@ its release, whatever named it.
 
 A provider serves the claims of its own namespace, and those of another
 namespace with its consent. The platform's classes
-(`global.okdp.provisioning` of level 0, `platform.yaml`, which no level
-above changes) route every namespace to their providers, the platform
+(`global.okdp.provisioning` of level 0, the platform's values, which no
+level above changes) route every namespace to their providers, the platform
 consenting for them. A claim that names its provider, or a class of a
 level above 0 (a project's), binds a provider of another namespace only
 when the provider lists the claimer's namespace among its claimers, or
 `*`, any namespace; it is refused otherwise ([the errors](#claims)):
 
 ```yaml
-# projects/data/instances/postgresql/instance.yaml: demo's instances
-# may claim of it, by naming it or through a class of demo's
+# the Instance document data/postgresql: demo's instances may claim
+# of it, by naming it or through a class of demo's
+kind: Instance
+project: data
+name: postgresql
 service: postgresql
 version: 1.0.0
 claimers: [demo]
@@ -2704,8 +2890,8 @@ provisions:
 ```
 
 The claimers are the instance's, `Inputs.Claimers`: through the library,
-the caller's; in a tree (`LoadRepository`), the `claimers` of its
-`instance.yaml`. Absent (nil), they are its package's, the `claimers` of
+the caller's; of an `Instance` document (`LoadInputs`), its `claimers`.
+Absent (nil), they are its package's, the `claimers` of
 its `provisions` entry of the claim's contract
 ([provisions](02_service_definition.md#provisions)), none by default: an
 instance's list replaces its package's, an empty one (`claimers: []`)
@@ -2718,8 +2904,8 @@ once:
 
 | Case | Error |
 |---|---|
-| an entry that is neither a namespace name nor `*` | `Inputs.Claimers[<i>]: "<claimer>" is not a namespace name, nor "*"`; a tree's: `<repository>/projects/<project>/instances/<instance>/instance.yaml: claimers[<i>]: ...` |
-| an entry listed twice | `Inputs.Claimers: <claimer> is listed twice`; a tree's: `<repository>/.../instance.yaml: claimers: <claimer> is listed twice` |
+| an entry that is neither a namespace name nor `*` | `Inputs.Claimers[<i>]: "<claimer>" is not a namespace name, nor "*"`; an `Instance` document's: `<where>: claimers[<i>]: ...` ([input errors](#input-errors)) |
+| an entry listed twice | `Inputs.Claimers: <claimer> is listed twice`; an `Instance` document's: `<where>: claimers: <claimer> is listed twice` |
 
 ### Classes
 
@@ -2731,7 +2917,7 @@ its claims and, optionally, what it fixes of their request
 ([requests](#requests)):
 
 ```yaml
-# platform.yaml (level 0): the platform's classes, and the default
+# the platform's values (level 0): the platform's classes, and the default
 global:
   okdp:
     provisioning:
@@ -2741,7 +2927,7 @@ global:
           standard: {provider: data/postgresql}
           fast: {provider: data/pg-nvme}
 
-# projects/demo/project.yaml (level 1): a project adds classes of its
+# the values of the project demo (level 1): a project adds classes of its
 # own, of a provider of another namespace with its consent (data/postgresql
 # lists demo among its claimers, providers)
 global:
@@ -2797,7 +2983,7 @@ The provider's mapping reads it, `claims[i].request`, and answers in what
 it publishes:
 
 ```yaml
-# examples/04_claims/input/catalog/postgresql/okdp.yaml, trimmed
+# examples/04_claims/input/catalog/postgresql/1.0.0/okdp.yaml, trimmed
 provides:
   - $for: c in claims
     $each:
@@ -2947,7 +3133,7 @@ identity of each namespace:
   label, without dot);
 
 No namespace reads `platform/` with `secrets.provider`: a policy that
-gave it would let a namespace made outside the tree read what the
+gave it would let a namespace made outside the platform read what the
 platform keeps for the others, so the platform's credentials are copied
 under the keys of the namespaces that use them (`<namespace>/<key>`, which
 a connection of the project, level 1, names), and a connection naming a
@@ -2998,11 +3184,11 @@ identities alike, on the path of the key (AWS: a resource policy on
 
 Without `secrets.provider`, the store is a ClusterSecretStore, one
 identity for every namespace (its `conditions` admit the namespaces of
-the tree, and no other): the store cannot tell a namespace from another,
-every namespace it admits reads every key, and the tree is one trust
-domain, its namespaces trusting one another with the credentials of the
-claims that cross; the compiler still keeps a project's connections
-under its own segment. A backend without paths, External Secrets'
+the platform, and no other): the store cannot tell a namespace from
+another, every namespace it admits reads every key, and the platform is
+one trust domain, its namespaces trusting one another with the
+credentials of the claims that cross; the compiler still keeps a
+project's connections under its own segment. A backend without paths, External Secrets'
 Kubernetes provider among them
 (a key is a Secret's name, which holds no `/`), cannot hold the keys of
 the claims across namespaces: it is not supported for them, only for the

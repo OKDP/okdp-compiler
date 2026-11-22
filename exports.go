@@ -6,7 +6,6 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/merge"
 	"github.com/okdp/okdp-compiler/internal/okdp"
-	"github.com/okdp/okdp-compiler/internal/repository"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 )
 
@@ -22,26 +21,10 @@ type (
 	FinalValuesOf = merge.Final
 	// KeepSync tells Argo CD's sync options for the objects Helm keeps.
 	KeepSync = ruleset.KeepSync
-	// InstanceSpec is an instance.yaml, as ParseInstance reads it.
-	InstanceSpec = repository.InstanceSpec
-	// CatalogRepository is a repository of catalogs.yaml.
-	CatalogRepository = repository.CatalogRepository
-	// Catalogs is catalogs.yaml, as ParseCatalogs reads it.
-	Catalogs = repository.Catalogs
-	// MenuCategory is a category of the console's menu.
-	MenuCategory = repository.MenuCategory
-	// MenuService is a service of the console's menu.
-	MenuService = repository.MenuService
 	// SecretStore is the platform's secret store in a namespace.
 	SecretStore = okdp.SecretStore
 	// NamespaceError reports a namespace that no project may have.
 	NamespaceError = okdp.NamespaceError
-)
-
-// The file of a tree's catalogs, and the ref of a catalog that names none.
-const (
-	CatalogsFile      = repository.CatalogsFile
-	DefaultCatalogRef = repository.DefaultCatalogRef
 )
 
 // FinalValues returns Helm's merge of the final values of in, as a
@@ -72,12 +55,6 @@ func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, se
 func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string, settings map[string]any, values map[string]map[string]any) error {
 	return okdp.CheckFinalValues(ctx, rules, svc, namespace, settings, values)
 }
-
-// ParseInstance reads an instance.yaml.
-func ParseInstance(raw []byte) (InstanceSpec, error) { return repository.ParseInstance(raw) }
-
-// ParseCatalogs reads catalogs.yaml from its decoded document.
-func ParseCatalogs(doc map[string]any) (*Catalogs, error) { return repository.ParseCatalogs(doc) }
 
 // Roles returns the roles of a project's groups, least first.
 func Roles(rules *RuleSet) []AccessRole { return okdp.Roles(rules) }

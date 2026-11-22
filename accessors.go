@@ -8,7 +8,6 @@ import (
 
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/okdp"
-	"github.com/okdp/okdp-compiler/internal/repository"
 	"github.com/okdp/okdp-compiler/value"
 )
 
@@ -29,7 +28,7 @@ type FieldError struct {
 }
 
 // FieldErrors splits err, the error of a compile (Outcome.Err,
-// TreeInstance.Err, or what wraps it), into the problems of its fields,
+// or what wraps it), into the problems of its fields,
 // in the order of the error. A violation of the parameter schema, a
 // reference or a claim that does not resolve, and a named claim of the
 // context are placed at their field. Any other problem is at the
@@ -55,13 +54,6 @@ func fieldErrors(err error, out *[]FieldError) {
 			*out = append(*out, FieldError{Path: value.Join(v.Location), Pointer: value.Pointer(v.Location), Message: v.Message})
 		}
 		return
-	case *repository.Error:
-		if len(e.Unwrap()) == 0 {
-			for _, p := range e.Problems {
-				*out = append(*out, FieldError{Message: p})
-			}
-			return
-		}
 	}
 	switch u := err.(type) {
 	case interface{ Unwrap() []error }:
@@ -172,7 +164,7 @@ func CheckDeclarations(ctx context.Context, in Inputs) error { return okdp.Check
 func CheckConnection(rules *RuleSet, contracts fs.FS, project string, c Connection, platform map[string]any) error {
 	v, err := value.Normalize(platform)
 	if err != nil {
-		return fmt.Errorf("the platform's values (%s): %w", PlatformFile, err)
+		return fmt.Errorf("the platform's values: %w", err)
 	}
 	level := uint(0)
 	if project != "" {

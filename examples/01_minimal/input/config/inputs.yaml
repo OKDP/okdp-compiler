@@ -1,0 +1,12 @@
+# The input documents of the example (compiler.LoadInputs, okdp-compile -f):
+# its values files beside this file, its packages and contracts in ../
+# (--catalog).
+kind: Instance
+project: demo
+name: hello
+# The instance's package: catalog/hello/1.0.0/. The release is
+# demo-hello, <project>-<instance>, the project the namespace,
+# demo.
+service: hello
+version: 1.0.0
+valuesFiles: [config.yaml]

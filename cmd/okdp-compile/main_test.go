@@ -45,48 +45,41 @@ func write(t *testing.T, dir string, want map[string]string) {
 	}
 }
 
-// example: a tree of the example of one package, its input/ laid out as a
-// repository, and what it compiles to, under its instance's directory; the
-// instance named after the package, in the project demo.
-func example(t *testing.T, name, service, version string) (repo string, want map[string]string) {
+// example: the example of one package copied into a temporary directory,
+// its input documents (config/) and its catalog (the directory itself),
+// and what it compiles to, under its instance's directory; the instance
+// named after the package, in the project demo.
+func example(t *testing.T, name, service string) (input string, want map[string]string) {
 	t.Helper()
-	input := filepath.Join("..", "..", "examples", name, "input")
-	tree := map[string]string{}
-	for p, c := range files(t, filepath.Join(input, "catalog")) {
-		tree["catalog/"+service+"/"+version+"/"+p] = c
-	}
-	for p, c := range files(t, filepath.Join(input, "config")) {
-		switch p {
-		case "platform.yaml":
-			tree[p] = c
-		case "project.yaml":
-			tree["projects/demo/"+p] = c
-		default:
-			tree["projects/demo/instances/"+service+"/"+p] = c
-		}
-	}
-	repo = t.TempDir()
-	write(t, repo, tree)
+	input = t.TempDir()
+	write(t, input, files(t, filepath.Join("..", "..", "examples", name, "input")))
 	want = map[string]string{}
 	for p, c := range files(t, filepath.Join("..", "..", "examples", name, "output")) {
 		want["projects/demo/instances/demo-"+service+"/"+p] = c
 	}
-	return repo, want
+	return input, want
 }
 
-// TestRun: the tree of an example compiled into a directory the command
+// opts: the options of a compile of the example copied in input.
+func opts(input string) options {
+	return options{files: []string{filepath.Join(input, "config")}, catalogs: []string{input}}
+}
+
+// TestRun: the inputs of an example compiled into a directory the command
 // wrote before, holding a stale instance: it holds the example's output
 // and the marker, the stale instance removed.
 func TestRun(t *testing.T) {
-	for _, tc := range []struct{ example, service, version string }{
-		{"00_passthrough", "echo", "1.2.0"},
-		{"01_minimal", "hello", "1.0.0"},
+	for _, tc := range []struct{ example, service string }{
+		{"00_passthrough", "echo"},
+		{"01_minimal", "hello"},
 	} {
 		t.Run(tc.example, func(t *testing.T) {
-			repo, want := example(t, tc.example, tc.service, tc.version)
+			input, want := example(t, tc.example, tc.service)
 			out := t.TempDir()
 			write(t, out, map[string]string{outdir.MarkerFile: outdir.Marker, "projects/demo/instances/demo-gone/values.yaml": "{}\n"})
-			if err := run(options{repositories: []string{repo}, output: out, costLimit: defaultCostLimit}); err != nil {
+			o := opts(input)
+			o.output, o.costLimit = out, defaultCostLimit
+			if err := run(o); err != nil {
 				t.Fatal(err)
 			}
 			want[outdir.MarkerFile] = outdir.Marker
@@ -100,18 +93,22 @@ func TestRun(t *testing.T) {
 // TestRunWithRules: --rules adds a set to the compiler's mandatory one; a
 // set that gives a rule the mandatory one gives is refused.
 func TestRunWithRules(t *testing.T) {
-	repo, _ := example(t, "00_passthrough", "echo", "1.2.0")
+	input, _ := example(t, "00_passthrough", "echo")
 	added := t.TempDir()
 	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\n"})
 	out := t.TempDir()
-	if err := run(options{repositories: []string{repo}, rules: added, output: out}); err != nil {
+	o := opts(input)
+	o.rules, o.output = added, out
+	if err := run(o); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := files(t, out)["projects/demo/instances/demo-echo/values.yaml"]; !ok {
 		t.Errorf("no values.yaml: %v", files(t, out))
 	}
 	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\ntables:\n  engineNamespaces: {values: []}\n"})
-	if err := run(options{repositories: []string{repo}, rules: added, check: true}); err == nil || !strings.Contains(err.Error(), "replaces none") {
+	o = opts(input)
+	o.rules, o.check = added, true
+	if err := run(o); err == nil || !strings.Contains(err.Error(), "replaces none") {
 		t.Errorf("a set that replaces a mandatory table: %v", err)
 	}
 }
@@ -119,53 +116,66 @@ func TestRunWithRules(t *testing.T) {
 // TestRunRefused: an instance refused, the command fails and writes
 // nothing; --check reports the same.
 func TestRunRefused(t *testing.T) {
-	repo, _ := example(t, "01_minimal", "hello", "1.0.0")
-	write(t, repo, map[string]string{"projects/demo/instances/hello/config.yaml": "replicas: many\n"})
+	input, _ := example(t, "01_minimal", "hello")
+	write(t, input, map[string]string{"config/config.yaml": "replicas: many\n"})
 	out := filepath.Join(t.TempDir(), "out")
-	if err := run(options{repositories: []string{repo}, output: out}); !errors.Is(err, errReported) {
+	o := opts(input)
+	o.output = out
+	if err := run(o); !errors.Is(err, errReported) {
 		t.Errorf("run: %v", err)
 	}
 	if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("output written: %v", err)
 	}
-	if err := run(options{repositories: []string{repo}, check: true}); !errors.Is(err, errReported) {
+	o = opts(input)
+	o.check = true
+	if err := run(o); !errors.Is(err, errReported) {
 		t.Errorf("run --check: %v", err)
 	}
 }
 
 // TestCheck: --check compiles and writes nothing.
 func TestCheck(t *testing.T) {
-	repo, _ := example(t, "01_minimal", "hello", "1.0.0")
-	before := files(t, repo)
-	if err := run(options{repositories: []string{repo}, check: true}); err != nil {
+	input, _ := example(t, "01_minimal", "hello")
+	before := files(t, input)
+	o := opts(input)
+	o.check = true
+	if err := run(o); err != nil {
 		t.Fatal(err)
 	}
-	if got := files(t, repo); !maps.Equal(got, before) {
-		t.Errorf("--check changed the tree: %v", got)
+	if got := files(t, input); !maps.Equal(got, before) {
+		t.Errorf("--check changed the inputs: %v", got)
 	}
 }
 
-// TestRefusedOptions: what the command refuses before it reads a tree.
+// TestRefusedOptions: what the command refuses before it reads its
+// inputs.
 func TestRefusedOptions(t *testing.T) {
 	dir := t.TempDir()
-	repo := filepath.Join(dir, "repo")
-	write(t, repo, map[string]string{"platform.yaml": "{}\n"})
+	in := filepath.Join(dir, "in")
+	write(t, in, map[string]string{"inputs.yaml": "kind: Settings\n"})
+	cat := filepath.Join(dir, "charts")
+	write(t, cat, map[string]string{"catalog/.keep": ""})
 	notMarked := filepath.Join(dir, "other")
 	write(t, notMarked, map[string]string{"projects/keep.yaml": "{}\n"})
+	f, c := []string{in}, []string{cat}
 	for _, tc := range []struct {
 		name string
 		o    options
 		want string
 	}{
-		{"no repository", options{output: dir}, "--repository is required"},
-		{"no output", options{repositories: []string{repo}}, "--output (-o) is required"},
-		{"check with output", options{repositories: []string{repo}, check: true, output: dir}, "--check writes nothing"},
-		{"check with force", options{repositories: []string{repo}, check: true, force: true}, "--check writes nothing"},
-		{"repository twice", options{repositories: []string{repo, repo}, check: true}, "is given twice"},
-		{"output in repository", options{repositories: []string{repo}, output: filepath.Join(repo, "out")}, "must not contain one another"},
-		{"output in rules", options{repositories: []string{repo}, rules: dir, output: filepath.Join(dir, "out")}, "must not contain one another"},
-		{"output not ours", options{repositories: []string{repo}, output: notMarked}, "was not written by okdp-compile"},
-		{"rules missing", options{repositories: []string{repo}, rules: filepath.Join(dir, "none"), check: true}, "--rules"},
+		{"no file", options{catalogs: c, output: dir}, "-f (--file) is required"},
+		{"no catalog", options{files: f, output: dir}, "--catalog is required"},
+		{"no output", options{files: f, catalogs: c}, "--output (-o) is required"},
+		{"check with output", options{files: f, catalogs: c, check: true, output: dir}, "--check writes nothing"},
+		{"check with force", options{files: f, catalogs: c, check: true, force: true}, "--check writes nothing"},
+		{"file twice", options{files: []string{in, in}, catalogs: c, check: true}, "is given twice"},
+		{"catalog a file", options{files: f, catalogs: []string{filepath.Join(in, "inputs.yaml")}, check: true}, "not a directory"},
+		{"output in inputs", options{files: f, catalogs: c, output: filepath.Join(in, "out")}, "must not contain one another"},
+		{"output in rules", options{files: f, catalogs: c, rules: dir, output: filepath.Join(dir, "out")}, "must not contain one another"},
+		{"output not ours", options{files: f, catalogs: c, output: notMarked}, "was not written by okdp-compile"},
+		{"rules missing", options{files: f, catalogs: c, rules: filepath.Join(dir, "none"), check: true}, "--rules"},
+		{"no instance", options{files: f, catalogs: c, check: true}, "no instance"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := run(tc.o)

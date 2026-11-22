@@ -1,0 +1,54 @@
+# The input documents of the example (compiler.LoadInputs, okdp-compile -f):
+# its values files beside this file, its packages and contracts in ../
+# (--catalog).
+kind: Settings
+valuesFiles: [platform.yaml]
+---
+kind: Instance
+project: data
+name: postgresql
+# The database server of the platform's projects, the release
+# data-postgresql in the namespace data: the provider of the platform's
+# default class of database-server connections (platform.yaml), and of
+# the project demo's large class (project.yaml): the one the claims bind
+# to.
+service: postgresql
+version: 1.0.0
+# The namespaces whose instances may claim of it from another namespace
+# by naming it, or through a class of their project's (large): its
+# consent, over its package's (provisions), which lists none. A class of
+# the platform's (standard) needs none: the platform routes every
+# namespace to its provider.
+claimers: [demo]
+---
+kind: Project
+name: demo
+valuesFiles: [demo/project.yaml]
+---
+kind: Instance
+project: demo
+name: app
+# No config.yaml: the default of database, {}, a database of its own.
+service: app
+version: 1.0.0
+---
+kind: Instance
+project: demo
+name: dashboards
+service: app
+version: 1.0.0
+valuesFiles: [demo/dashboards/config.yaml]
+---
+kind: Instance
+project: demo
+name: metrics
+service: app
+version: 1.0.0
+valuesFiles: [demo/metrics/config.yaml]
+---
+kind: Instance
+project: demo
+name: reports
+service: app
+version: 1.0.0
+valuesFiles: [demo/reports/config.yaml]

@@ -1,0 +1,24 @@
+# The input documents of the example (compiler.LoadInputs, okdp-compile -f):
+# its values files beside this file, its packages and contracts in ../
+# (--catalog).
+kind: Settings
+valuesFiles: [platform.yaml]
+---
+kind: Instance
+project: demo
+name: db
+# The database server demo-webapp's claim binds to (database: {}), the
+# provider of the platform's default class of database connections,
+# standard (platform.yaml): the package catalog/db/1.0.0/.
+service: db
+version: 1.0.0
+---
+kind: Instance
+project: demo
+name: webapp
+# The instance's package: catalog/webapp/1.0.0/. The release is
+# demo-webapp, <project>-<instance>, the project the
+# namespace, demo.
+service: webapp
+version: 1.0.0
+valuesFiles: [demo/webapp/config.yaml]
