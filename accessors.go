@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -149,6 +150,17 @@ func IsClaimID(name string) bool { return okdp.IsClaimID(name) }
 // claim or of a class: an instance or a release, with or without its
 // namespace (<namespace>/<instance>). where places the error.
 func CheckProvider(where, provider string) error { return okdp.CheckProvider(where, provider) }
+
+// CheckClaimers returns nil when claimers, the namespaces that may claim
+// of a provider from another namespace, are each a namespace name or "*",
+// listed once. name is what the error calls the list.
+func CheckClaimers(name string, claimers []string) error { return okdp.CheckClaimers(name, claimers) }
+
+// CheckDeclarations checks the declarations of a context that has no
+// instance, a project's (in.Namespace, in.Contracts, in.Context), as
+// CompileAll checks those of an instance's context: the layers, the
+// platform's settings, every connection and every named claim.
+func CheckDeclarations(ctx context.Context, in Inputs) error { return okdp.CheckDeclarations(ctx, in) }
 
 // CheckConnection returns nil when the connection c of project holds at
 // its declaration, as the compile checks every connection of a context,
