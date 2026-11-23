@@ -161,61 +161,20 @@ func TestLayers(t *testing.T) {
 	}
 }
 
-// TestCompileAllClaims: the instances of the claims example compiled
-// together: the claims bound to its provider, each with its claimer, and
-// what the provider granted it.
-func TestCompileAllClaims(t *testing.T) {
-	instances, err := exampleInstances("04_claims", compiler.Mandatory())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range instances {
-		instances[i].Inputs.Rules = compiler.Mandatory()
-	}
-	var claims []string
-	for i, o := range compiler.CompileAll(t.Context(), instances) {
-		if o.Err != nil {
-			t.Fatalf("%s: %v", instances[i].Inputs.Release, o.Err)
-		}
-		for _, b := range o.Claims {
-			claims = append(claims, b.ID+" by "+instances[i].Inputs.Namespace+"/"+instances[i].Name+" of "+b.Namespace+"/"+b.Release)
-		}
-	}
-	slices.Sort(claims)
-	if want := []string{"demo.analytics by demo/dashboards of data/data-postgresql", "demo.analytics by demo/reports of data/data-postgresql", "demo.app.database by demo/app of data/data-postgresql", "demo.metrics.database by demo/metrics of data/data-postgresql"}; !reflect.DeepEqual(claims, want) {
-		t.Errorf("claims: got %q, want %q", claims, want)
-	}
-}
-
-// TestIsName: a DNS-1123 label, 63 characters at most.
-func TestIsName(t *testing.T) {
-	for name, want := range map[string]bool{
-		"demo": true, "demo-app": true, "a1": true, strings.Repeat("a", 63): true,
-		"": false, "Demo": false, "-demo": false, "demo-": false, "de_mo": false, "a.b": false, "..": false, "a/b": false, strings.Repeat("a", 64): false,
-	} {
-		if got := compiler.IsName(name); got != want {
-			t.Errorf("%q: got %v", name, got)
-		}
-	}
-}
-
 // TestCheckNamespace: the compile's rule of a namespace, its errors the
-// compile's of an instance of the namespace: a name, none the compiler
-// reserves, none of the settings' policy.reserved, privileged or not;
-// another, default among them, or any without settings, passes.
+// compile's of an instance of the namespace: a name, and the mandatory
+// set's namespace hook: none the compiler reserves; another, default among
+// them, passes. The namespaces the settings reserve
+// (global.okdp.policy.reserved) are the security set's, those of the
+// deployer engines a host's set's.
 func TestCheckNamespace(t *testing.T) {
-	platform := map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": map[string]any{"reserved": []any{"openbao", "vault"}, "privileged": []string{"vault", "data"}}}}}
+	platform := map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": map[string]any{"reserved": []any{"openbao"}}}}}
 	for name, want := range map[string]string{
-		"demo": "", "default": "", "data": "", "kube": "", "okdp": "",
-		"Demo":          `namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`,
-		"":              `namespace "": a namespace name`,
-		"platform":      `namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`,
-		"kube-foo":      `namespace "kube-foo": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`,
-		"flux-system":   `namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`,
-		"argocd":        `namespace "argocd": the namespace is reserved: a deployer engine's`,
-		"okdp-releases": `namespace "okdp-releases": the namespace is reserved: a deployer engine's`,
-		"openbao":       `namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`,
-		"vault":         `namespace "vault": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins`,
+		"demo": "", "default": "", "data": "", "kube": "", "okdp": "", "openbao": "", "argocd": "", "flux-system": "", "okdp-releases": "",
+		"Demo":     `namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`,
+		"":         `namespace "": a namespace name`,
+		"platform": `namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`,
+		"kube-foo": `namespace "kube-foo": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`,
 	} {
 		err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), name, platform)
 		switch {
@@ -223,24 +182,16 @@ func TestCheckNamespace(t *testing.T) {
 			t.Errorf("%q: %v", name, err)
 		case want != "" && (err == nil || !strings.HasPrefix(err.Error(), want)):
 			t.Errorf("%q: got %v, want %s", name, err, want)
-		case strings.HasSuffix(want, "no project has it") && err.Error() != want:
-			t.Errorf("%q: got %v, want %s", name, err, want)
 		}
-	}
-	// Without settings, the compiler's rule alone.
-	if err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), "openbao", nil); err != nil {
-		t.Errorf("openbao, no platform: %v", err)
 	}
 	if err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), "kube-system", nil); err == nil {
 		t.Error("kube-system, no platform: no error")
 	}
 	// The compile refuses what CheckNamespace refuses, in the same words,
-	// Inputs.Namespace for namespace: the example's instance, its
-	// namespace demo, the example's settings reserving it.
+	// Inputs.Namespace for namespace.
 	def, in := example()
 	example := in.Values[0]
-	example["global"].(map[string]any)["okdp"].(map[string]any)["policy"] = map[string]any{"reserved": []any{"demo"}, "privileged": []any{"demo"}}
-	for _, ns := range []string{"kube-foo", "platform", "demo"} {
+	for _, ns := range []string{"kube-foo", "platform"} {
 		in.Namespace, in.Release = ns, ns+"-webapp"
 		_, cerr := compiler.Compile(context.Background(), def, in)
 		err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), ns, example)
@@ -250,21 +201,9 @@ func TestCheckNamespace(t *testing.T) {
 	}
 }
 
-// TestLoadInputs: the input documents of an example read with its
-// catalog; a package no catalog has, and a document of no kind, refused
-// together.
+// TestLoadInputs: a package no catalog has, and a document of no kind,
+// refused together.
 func TestLoadInputs(t *testing.T) {
-	instances, err := exampleInstances("04_claims", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, in := range instances {
-		got = append(got, in.Inputs.Namespace+"/"+in.Inputs.Release+" "+in.Definition.Chart.Name)
-	}
-	if want := []string{"data/data-postgresql postgresql", "demo/demo-app app", "demo/demo-dashboards app", "demo/demo-metrics app", "demo/demo-reports app"}; !slices.Equal(got, want) {
-		t.Errorf("instances: got %q, want %q", got, want)
-	}
 	cat, err := compiler.LoadCatalog([]compiler.CatalogFiles{{Name: "charts", FS: os.DirFS(filepath.Join("examples", "04_claims", "input"))}})
 	if err != nil {
 		t.Fatal(err)

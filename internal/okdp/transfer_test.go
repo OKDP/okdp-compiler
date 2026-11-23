@@ -4,51 +4,26 @@ import (
 	"context"
 	"reflect"
 	"testing"
-
-	"github.com/okdp/okdp-compiler/value"
 )
 
-// TestSecretStore: Result.SecretStore of global.okdp.secrets: a store with
-// a provider, the ServiceAccount defaulted, none without a provider.
+// TestSecretStore: the store of the rule set's account of
+// global.okdp.secrets, which a host writes in each project's namespace: a
+// store with a provider, the ServiceAccount defaulted, none without a
+// provider.
 func TestSecretStore(t *testing.T) {
 	provider := M{"vault": M{"server": "http://openbao.openbao.svc:8200", "path": "okdp", "version": "v2", "auth": M{"kubernetes": M{"mountPath": "kubernetes", "role": "okdp", "serviceAccountRef": M{"name": "okdp-secrets"}}}}}
-	res, err := Compile(context.Background(), def, inputs(map[string]any{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets", "provider": provider}}}}))
+	v, err := storeOf(context.Background(), Mandatory(), M{"secrets": M{"store": "okdp-secrets", "provider": provider}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SecretStore == nil || res.SecretStore.Name != "okdp-secrets" || res.SecretStore.ServiceAccount != "okdp-secrets" || !reflect.DeepEqual(res.SecretStore.Provider, provider) {
-		t.Errorf("SecretStore = %+v", res.SecretStore)
+	if want := (M{"name": "okdp-secrets", "serviceAccount": "okdp-secrets", "provider": provider}); !reflect.DeepEqual(v["store"], want) {
+		t.Errorf("store = %v", v["store"])
 	}
-	res, err = Compile(context.Background(), def, inputs(map[string]any{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}}))
+	v, err = storeOf(context.Background(), Mandatory(), M{"secrets": M{"store": "okdp-secrets"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.SecretStore != nil {
-		t.Errorf("SecretStore = %+v, want nil without a provider", res.SecretStore)
-	}
-}
-
-// TestStoreRef: how the PushSecrets and the ExternalSecrets reference the
-// store: the SecretStore of the namespace with a provider, else the
-// ClusterSecretStore; the refresh interval, 1h unless set; a claim's key,
-// the provider's namespace then the claim's ID.
-func TestStoreRef(t *testing.T) {
-	of := func(okdp M) (M, string) {
-		v, err := storeOf(context.Background(), Mandatory(), okdp)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return value.AsMap(v["ref"]), value.Str(v["refreshInterval"])
-	}
-	store := M{"secrets": M{"store": "okdp-secrets"}}
-	if got, every := of(store); !reflect.DeepEqual(got, M{"name": "okdp-secrets", "kind": "ClusterSecretStore"}) || every != "1h" {
-		t.Errorf("without a provider: %v, %s", got, every)
-	}
-	store = M{"secrets": M{"store": "okdp-secrets", "refreshInterval": "15m", "provider": M{"vault": M{"server": "http://openbao.openbao.svc:8200"}}}}
-	if got, every := of(store); !reflect.DeepEqual(got, M{"name": "okdp-secrets", "kind": "SecretStore"}) || every != "15m" {
-		t.Errorf("with a provider: %v, %s", got, every)
-	}
-	if got := storeKey("data", "demo.app.db"); got != "data/demo.app.db" {
-		t.Errorf("storeKey: %s", got)
+	if s, ok := v["store"]; ok {
+		t.Errorf("store = %v, want none without a provider", s)
 	}
 }

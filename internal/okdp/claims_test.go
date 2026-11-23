@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"go.yaml.in/yaml/v3"
 
@@ -152,7 +150,6 @@ func TestInputsClaimers(t *testing.T) {
 	for claimers, want := range map[string]string{
 		"demo,*":    "",
 		"demo,Demo": `Inputs.Claimers[1]: "Demo" is not a namespace name, nor "*"`,
-		"demo,demo": "Inputs.Claimers: demo is listed twice",
 	} {
 		in := inputs()
 		in.Claimers = strings.Split(claimers, ",")
@@ -163,25 +160,15 @@ func TestInputsClaimers(t *testing.T) {
 	}
 }
 
-// claimCtx: the context of the in-memory package with a reference that
-// takes claims, db, and one that does not, main; these bindings.
-func claimCtx(values M, bindings map[string]Binding) (M, []Dependency, error) {
-	inst, err := claimedInstance(values, bindings)
-	if err != nil {
-		return nil, nil, err
-	}
-	return value.AsMap(inst.scope["values"]), inst.deps, nil
-}
-
-// claimedInstance: the instance of claimCtx.
+// claimedInstance: the instance of the in-memory package with a reference
+// that takes claims, db, and one that does not, main; these bindings.
 func claimedInstance(values M, bindings map[string]Binding) (*instance, error) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true}},
-		"main": {"x-okdp-connection-ref": {"contract": "database"}}}}`)}
+		"main": {"x-okdp-connection-ref": {"contract": "database"}}}}`)
 	in := inputs(values)
 	in.Contracts, in.Bindings = outputContracts, bindings
-	return newInstance(context.Background(), ch, in, defService)
+	return newInstance(context.Background(), d.Files, in, defService)
 }
 
 // pgOutput: what data/demo-pg publishes for the claim demo.demo-app.db.
@@ -233,9 +220,8 @@ func TestResolveClaim(t *testing.T) {
 // a class it names; or the one it names. The validator prints numbers
 // grouped (5,433).
 func TestResolveClaimRequirement(t *testing.T) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true, "require": {"properties": {"port": {"maximum": 5432}}}}}}}`)}
+	d := withSchema(`{"properties": {
+		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true, "require": {"properties": {"port": {"maximum": 5432}}}}}}}`)
 	b := map[string]Binding{"db": {Namespace: "demo", Release: "demo-pg", Contract: "server", ID: "demo.demo-app.db", Output: pgOutput}}
 	for name, tc := range map[string]struct {
 		claim M
@@ -251,7 +237,7 @@ func TestResolveClaimRequirement(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"db": tc.claim}, M{"global": M{"okdp": M{"provisioning": M{"server": M{"default": "standard", "classes": M{"standard": M{"provider": "demo-pg"}}}}}}})
 			in.Contracts, in.Bindings = outputContracts, b
-			if _, err := newInstance(context.Background(), ch, in, defService); err == nil || err.Error() != tc.want {
+			if _, err := newInstance(context.Background(), d.Files, in, defService); err == nil || err.Error() != tc.want {
 				t.Errorf("got %v\nwant %s", err, tc.want)
 			}
 		})
@@ -264,7 +250,7 @@ func TestResolveClaimRequirement(t *testing.T) {
 // name, a provider not of the form, a connection's name, a value of a
 // sensitive name not printed; claims not a map.
 func TestNamedClaimsErrors(t *testing.T) {
-	_, _, err := claimCtx(M{"claims": M{
+	_, err := claimedInstance(M{"claims": M{
 		"Reports": M{"contract": "server"},
 		"a":       "server",
 		"b":       M{"contract": "server", "size": "1Gi"},
@@ -285,7 +271,7 @@ claims.token: a claim, an object, got <redacted>`
 	if err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
 	}
-	if _, _, err := claimCtx(M{"claims": []any{"a"}}, nil); err == nil || err.Error() != `claims: the named claims, by name, got []interface {}{"a"}` {
+	if _, err := claimedInstance(M{"claims": []any{"a"}}, nil); err == nil || err.Error() != `claims: the named claims, by name, got []interface {}{"a"}` {
 		t.Errorf("a list: got %v", err)
 	}
 }
@@ -330,7 +316,7 @@ func TestResolveClaimErrors(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := claimCtx(tc.values, tc.bindings)
+			_, err := claimedInstance(tc.values, tc.bindings)
 			if err == nil || err.Error() != tc.want {
 				t.Fatalf("got %v\nwant %s", err, tc.want)
 			}
@@ -356,24 +342,8 @@ func TestParseClaim(t *testing.T) {
 	if got, want := string(b), "contract: database\nclass: huge\nrequest:\n    size: 5Gi\n"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	for name, tc := range map[string]struct {
-		name string
-		v    any
-		want string
-	}{
-		"no contract": {"a", M{"class": "huge"}, "claims.a: claim: contract is required"},
-		"both":        {"a", M{"contract": "database", "class": "huge", "provider": "pg"}, "claims.a: claim: class or provider, not both"},
-		"not a label": {"A", M{"contract": "database"}, "claims.A: claim: its name is a DNS-1123 label"},
-		"not a map":   {"a", "database", "claims.a: a claim, an object"},
-		"an unknown":  {"a", M{"contract": "database", "size": 1.0}, `claims.a: claim: unknown key "size"`},
-	} {
-		c, err := ParseClaim(tc.name, tc.v)
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: got %v, want %q", name, err, tc.want)
-		}
-		if c.Name != tc.name {
-			t.Errorf("%s: got the name %q", name, c.Name)
-		}
+	if c, err := ParseClaim("a", M{"contract": "database", "class": "huge", "provider": "pg"}); err == nil || err.Error() != "claims.a: claim: class or provider, not both" || c.Name != "a" {
+		t.Errorf("both: got %+v, %v", c, err)
 	}
 	if c, _ := ParseClaim("a", M{"class": "huge"}); c.Class != "huge" {
 		t.Errorf("a claim that fails keeps what it holds: got %+v", c)

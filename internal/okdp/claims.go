@@ -275,12 +275,12 @@ type instanceClaims struct {
 // and its classes, which come from its settings (global.okdp.provisioning). A claim template carries the instance's request merged over what
 // the package fixes. It returns nothing when the parameters, the platform
 // values or a claim fail: the compile says why.
-func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
+func claimsOf(def *Definition, in Inputs) instanceClaims {
 	svc, err := def.service()
 	if err != nil {
 		return instanceClaims{}
 	}
-	schema, values, settings, err := in.memo.paramsOf().get(ctx, def.Files, in, svc)
+	schema, values, settings, err := in.memo.paramsOf().get(def.Files, in, svc)
 	if err != nil {
 		return instanceClaims{}
 	}
@@ -357,24 +357,24 @@ func claimID(namespace string, parts ...string) string {
 }
 
 // CheckDeclarations checks the declarations of values that no instance
-// compiles (in.Namespace, in.Contracts, in.Values), as CompileAll checks
-// those of an instance: the layers, the settings, every connection and
-// every named claim. The provider of a claim is not looked up: such a
+// compiles (in.Namespace, in.Contracts, in.Values, in.Settings), as
+// CompileAll checks those of an instance: the layers, the settings, every
+// connection and every named claim. The provider of a claim is not looked up: such a
 // claim is bound to no provider until an instance's values declare it.
 func CheckDeclarations(ctx context.Context, in Inputs) error {
-	ls, err := valuesLayers(in)
+	l, err := valuesLayers(in)
 	if err != nil {
 		return err
 	}
-	settings, err := platformSettings(in.rules(), ls.platform)
+	settings, err := platformSettings(in.rules(), l.platform)
 	if err != nil {
 		return err
 	}
-	if err := checkDeclared(in, ls.layers, ls.platform, nil); err != nil {
+	if err := checkDeclared(in, l); err != nil {
 		return err
 	}
 	merged := M{}
-	for _, l := range ls.layers {
+	for _, l := range l.layers {
 		merged = value.Merge(merged, value.AsMap(value.Copy(l)))
 	}
 	// The claims that fail are reported first, one error each.

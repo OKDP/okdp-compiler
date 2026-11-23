@@ -226,11 +226,11 @@ generates in the cluster, for
 |---|---|---|---|
 | `name` | string | required | name of the Secret, and of the ExternalSecret writing it |
 | `keys` | list | `[]` | the generated keys, below |
-| `stringData` | map of strings, numbers or booleans | `{}` | static keys, as text (`str`), not credentials: a literal at a sensitive key (`password`, `token`, `...Key`) is refused unless `Inputs.AllowPlainSecrets` ([objects section](01_inputs_outputs.md#objects-section)); a value containing `{{` is written as a template string literal |
+| `stringData` | map of strings, numbers or booleans | `{}` | static keys, as text (`str`), not credentials: a literal at a sensitive key (`password`, `token`, `...Key`) is refused, with the security set, unless `Inputs.AllowPlainSecrets` ([objects section](01_inputs_outputs.md#objects-section)); a value containing `{{` is written as a template string literal |
 | `labels` | map of strings | `{}` | extra labels of the ExternalSecret and of the Secret, over [`labels`](02_service_definition.md#context) |
 | `annotations` | map of strings | `{}` | annotations of every object |
 | `type` | string | none | type of the Secret |
-| `namespace` | string | `release.namespace` | namespace of every object; another than the release's, a privileged project's only (`global.okdp.policy.privileged`, [objects section](01_inputs_outputs.md#objects-section)) |
+| `namespace` | string | `release.namespace` | namespace of every object; another than the release's, with the security set, a privileged project's only (`global.okdp.policy.privileged`, [objects section](01_inputs_outputs.md#objects-section)) |
 | `refreshInterval` | string | `"0"` | refresh interval of the ExternalSecret, a duration (`1h`): `"0"` generates once |
 | `apiVersion` | string | `external-secrets.io/v1` | apiVersion of the ExternalSecret |
 
@@ -297,11 +297,12 @@ argument and is one of two kinds.
   `arg`, `release` and `platform`, and returns the value `result` names.
 
 The objects a fragment returns are the package's own, in `objects` with
-`$spread`: the compile's checks apply to them as to any object (the
-namespace, no cluster-scoped kind, no Secret in clear, the set's own
-hooks). The arguments are data, not templates: no `{{`, no function of
-the fragment in a string. They are CEL, in git with the set: nothing to
-publish, release or pin apart, and the compile sees them.
+`$spread`: the compile's checks and the rule sets' `objects` hook apply to
+them as to any object (with the security set: the namespace, no
+cluster-scoped kind, no Secret in clear). The arguments are data, not
+templates: no `{{`, no function of the fragment in a string. They are CEL,
+in git with the set: nothing to publish, release or pin apart, and the
+compile sees them.
 
 The security set's functions, the hardened pod and the workloads built
 on it, and the Secret of an OAuth client: [its

@@ -18,11 +18,11 @@ import (
 func (r *RuleSet) loadScopes(doc M) error {
 	for _, v := range value.AsList(doc["scopes"]) {
 		name := value.Str(v)
-		if _, ok := r.sources[name]; !ok || slices.Contains(ruleChecks, name) {
+		if _, ok := r.sources[name]; !ok {
 			return fmt.Errorf("%s: scopes: %s is none of documents", RulesFile, name)
 		}
 		if slices.Contains(r.scopes, name) {
-			return taken("scopes", name)
+			return r.taken("scopes", name)
 		}
 		r.scopes = append(r.scopes, name)
 	}

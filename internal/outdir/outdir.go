@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 )
 
 // MarkerFile marks an output whose projects/ the command wrote, and from
@@ -21,20 +22,24 @@ const Marker = "okdp-compile writes projects/ and removes from it every file it 
 
 // Check returns nil when the command may write output/projects/: the
 // directory does not exist, is empty, holds MarkerFile, or force is set.
+// A projects/ that is a symbolic link or not a directory is refused, even
+// with force.
 func Check(output string, force bool) error {
 	projects := filepath.Join(output, "projects")
-	info, err := os.Stat(projects)
+	info, err := os.Lstat(projects)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil
 	case err != nil:
 		return err
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symbolic link: the command writes no file through one", projects)
 	case !info.IsDir():
 		return fmt.Errorf("%s is not a directory", projects)
 	case force:
 		return nil
 	}
-	if info, err := os.Stat(filepath.Join(output, filepath.FromSlash(MarkerFile))); err == nil && info.Mode().IsRegular() {
+	if info, err := os.Lstat(filepath.Join(output, filepath.FromSlash(MarkerFile))); err == nil && info.Mode().IsRegular() {
 		return nil
 	}
 	if entries, err := os.ReadDir(projects); err == nil && len(entries) == 0 {
@@ -44,60 +49,92 @@ func Check(output string, force bool) error {
 }
 
 // Write writes files, whose keys are slash-separated paths relative to
-// dir, and creates dir if needed. Symbolic links are followed.
+// dir, and creates dir if needed. It writes through an os.Root of dir, so
+// that no symbolic link leads a file out of it. dir itself may be a link,
+// since the user names it, but a projects/ that is one is refused.
 //
-// After writing, Write removes every file under dir/projects/ that is
-// not one of files, then the directories left empty. A link to a
-// directory is entered, and kept; any other link not in files is
-// removed, not what it points to.
+// Before writing, Write removes every symbolic link under dir/projects/,
+// at any depth: the link itself, not what it points to, so that no file
+// lands through one, even inside dir. After writing, it removes every
+// file under dir/projects/ that is not one of files, then the directories
+// left empty.
 func Write(dir string, files map[string][]byte) error {
-	for name, b := range files {
-		p := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(p, b, 0o644); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
 	}
-	err := prune(dir, "projects", files)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-// prune removes every file under dir/rel that is not one of files, then
-// the directories under it left empty.
-func prune(dir, rel string, files map[string][]byte) error {
-	entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(rel)))
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	for _, e := range entries {
-		p := path.Join(rel, e.Name())
-		full := filepath.Join(dir, filepath.FromSlash(p))
-		isDir, link := e.IsDir(), e.Type()&fs.ModeSymlink != 0
-		if link {
-			info, err := os.Stat(full)
-			isDir = err == nil && info.IsDir()
-		}
-		if !isDir {
-			if _, ok := files[p]; !ok {
-				if err := os.Remove(full); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-		if err := prune(dir, p, files); err != nil {
+	defer func() { _ = root.Close() }()
+	if err := removeLinks(root, "projects"); err != nil {
+		return err
+	}
+	for name, b := range files {
+		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
 			return err
 		}
-		if left, err := os.ReadDir(full); err == nil && len(left) == 0 && !link {
-			if err := os.Remove(full); err != nil {
+		// A file in the way that is not regular, a FIFO say, is replaced
+		// rather than written into.
+		if info, err := root.Lstat(name); err == nil && !info.Mode().IsRegular() {
+			if err := root.Remove(name); err != nil {
+				return err
+			}
+		}
+		if err := root.WriteFile(name, b, 0o644); err != nil {
+			return err
+		}
+	}
+	var dirs []string
+	err = fs.WalkDir(root.FS(), "projects", func(p string, e fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case e.IsDir():
+			dirs = append(dirs, p)
+			return nil
+		}
+		if _, ok := files[p]; !ok {
+			return root.Remove(p)
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	// The deepest directories first, each after those under it.
+	for _, d := range slices.Backward(dirs) {
+		if entries, err := fs.ReadDir(root.FS(), d); err == nil && len(entries) == 0 {
+			if err := root.Remove(d); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// removeLinks removes every symbolic link under dir of root, at any
+// depth, the link and not what it points to. It does nothing when dir
+// does not exist, and fails when dir itself is a link or not a directory.
+func removeLinks(root *os.Root, dir string) error {
+	info, err := root.Lstat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a symbolic link: the command writes no file through one", dir)
+	case !info.IsDir():
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	return fs.WalkDir(root.FS(), dir, func(p string, e fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case e.Type()&fs.ModeSymlink != 0:
+			return root.Remove(p)
+		}
+		return nil
+	})
 }

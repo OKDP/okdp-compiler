@@ -1,11 +1,10 @@
-// Policy: the platform's policy, global.okdp.policy. It says which
-// namespaces no project may have (reserved) and which projects are the
-// platform's own (privileged). The instances of the other projects keep
-// their objects in their namespace and install no cluster-scoped kind
-// (CheckObjects). What they give upstream charts is for a host to check
-// (Inputs.Finalize). And no project, privileged or
-// not, writes a Secret of credentials in clear unless the caller allows
-// it (checkPlainSecrets).
+// Policy: the hooks of the rule sets, which the compiler calls for every
+// project, on its namespace and release (CheckNamespace, checkRelease),
+// on each object of an instance (CheckObjects) and on the final values of
+// each chart (CheckFinalValues). What they refuse is the sets' to say:
+// the compiler knows no privileged project, and the mandatory set alone
+// refuses no object. What the instances give upstream charts is for a
+// host to check besides (Inputs.Finalize).
 
 package okdp
 
@@ -21,58 +20,57 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// Privileged reports whether namespace is one of the platform's own
-// projects, global.okdp.policy.privileged.
-func Privileged(okdp M, namespace string) bool {
-	return slices.ContainsFunc(value.AsList(value.Dig(okdp, "policy.privileged")), func(v any) bool { return value.Str(v) == namespace })
-}
-
-// EngineNamespaces lists the namespaces no project may have, because the
-// deployer engines and the objects the targets write for them live
-// there: flux-system, okdp-releases and argocd.
-//
-// A project's releases are installed with every verb of its namespace.
-// In one of these namespaces they would rewrite the engine's sources,
-// its Applications or HelmReleases, and the identities of the other
-// projects.
-func EngineNamespaces(rules *RuleSet) []string {
-	return rulesOr(rules).List(ruleset.TableEngineNamespaces)
-}
-
-// The rule on a project's namespace has two parts: the compiler's own,
-// then the platform's. field names the namespace in the errors.
-
-// checkNamespace returns nil when namespace may be a project's on any
-// platform: it is a DNS label that the compiler does not reserve. A
-// check that cannot be evaluated reserves the namespace, and its error
-// says so.
-func checkNamespace(ctx context.Context, rules *RuleSet, field, namespace string) error {
+// checkNamespaceName returns nil when namespace may name a namespace: a
+// DNS label. field names it in the error.
+func checkNamespaceName(field, namespace string) error {
 	if !chart.IsDNSLabel(namespace) {
 		return fmt.Errorf("%s %q: a namespace name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, 63 characters at most", field, namespace)
-	}
-	if err := rules.Refuse(ctx, ruleset.CheckNamespaceRule, M{"ns": namespace}); err != nil {
-		return fmt.Errorf("%s %q: the namespace is reserved: %w", field, namespace, err)
 	}
 	return nil
 }
 
-// checkPlatformNamespace returns nil when the platform does not reserve
-// namespace (global.okdp.policy.reserved). A reservation wins over a
-// privilege.
-func checkPlatformNamespace(ctx context.Context, rules *RuleSet, field, namespace string, okdp M) error {
-	return rules.Refuse(ctx, ruleset.CheckPlatformNSRule, M{"field": field, "ns": namespace, "settings": okdp})
-}
-
-// CheckNamespace applies both parts, for a program that creates
-// projects. okdp is the platform's settings (global.okdp). A namespace
-// that a target writes in because of its options is for the target to
-// refuse (target.OwnNamespaces).
-func CheckNamespace(ctx context.Context, rules *RuleSet, field, namespace string, okdp M) error {
-	rules = rulesOr(rules)
-	if err := checkNamespace(ctx, rules, field, namespace); err != nil {
+// CheckNamespace returns nil when namespace may be a project's: a name
+// (checkNamespaceName) that the rule sets' namespace hook passes on with
+// settings, the platform's (global.okdp). A compile checks the namespace
+// of its instance the same way, once it has read the settings. A
+// namespace that a target writes in because of its options is for the
+// target to refuse.
+func CheckNamespace(ctx context.Context, rules *RuleSet, field, namespace string, settings M) error {
+	if err := checkNamespaceName(field, namespace); err != nil {
 		return err
 	}
-	return checkPlatformNamespace(ctx, rules, field, namespace, okdp)
+	return rulesOr(rules).RunHook(ctx, ruleset.HookNamespace, M{"field": field, "ns": namespace, "settings": settingsOr(settings)})
+}
+
+// NamespaceError says that a namespace cannot be a project's: it is no
+// name, or the rule sets' namespace hook refuses it. An output drops a
+// project that holds such a namespace.
+type NamespaceError struct{ Err error }
+
+func (e *NamespaceError) Error() string { return e.Err.Error() }
+func (e *NamespaceError) Unwrap() error { return e.Err }
+
+// SettingsOf returns the settings (global.okdp) of in, those of its
+// values layers with its host's (Inputs.Settings), validated and with
+// their defaults applied, as a compile reads them. It returns a
+// *NamespaceError when the namespace of in is refused, and any other
+// error when the settings are invalid.
+func SettingsOf(ctx context.Context, in Inputs) (M, error) {
+	if err := checkNamespaceName("Inputs.Namespace", in.Namespace); err != nil {
+		return nil, &NamespaceError{err}
+	}
+	l, err := valuesLayers(in)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := platformSettings(in.rules(), l.platform)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace, settings); err != nil {
+		return nil, &NamespaceError{err}
+	}
+	return settings, nil
 }
 
 // apiGroup returns the group of an apiVersion, "" for the core group.
@@ -84,28 +82,26 @@ func apiGroup(apiVersion string) string {
 	return group
 }
 
-// CheckObjects checks the objects of an instance of svc that is not
-// privileged. objects is Result.Objects, from every source. Each must
-// be in the instance's namespace when it sets metadata.namespace, and of
-// no cluster-scoped kind: only the platform's projects install
-// cluster-scoped objects and write in other namespaces. The items of a
-// List are checked too, because Helm installs them one by one. An object
-// that passes then goes through the rule set's objects hook, which reads
-// settings, the platform's.
-func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, settings M, objects []M) error {
+// CheckObjects runs the rule sets' objects hook on each object of an
+// instance of svc in namespace, of any project. objects is
+// Result.Objects, from every source; the items of a List are checked too,
+// because Helm installs them one by one. settings are the platform's,
+// allowPlainSecrets Inputs.AllowPlainSecrets: the hook's documents read
+// both. The first message refuses, as the document writes it.
+func CheckObjects(ctx context.Context, rules *RuleSet, svc, namespace string, settings M, allowPlainSecrets bool, objects []M) error {
+	if !rules.Loaded() {
+		return fmt.Errorf("the rule set: %w", ruleset.ErrNotLoaded)
+	}
+	settings = settingsOr(settings)
 	return eachObject(objects, func(o M) error {
-		in := objectInput(o)
-		if err := rules.Refuse(ctx, ruleset.CheckObjectRule, M{"svc": svc, "ns": namespace, "object": in}); err != nil {
-			return err
-		}
-		return rules.RunHook(ctx, ruleset.HookObjects, M{"svc": svc, "ns": namespace, "object": in, "settings": settingsOr(settings)})
+		return rules.RunHook(ctx, ruleset.HookObjects, M{"svc": svc, "ns": namespace, "object": objectInput(o), "settings": settings, "allowPlainSecrets": allowPlainSecrets})
 	})
 }
 
-// CheckFinalValues runs the rule set's finalValues hook on the final
-// values of each chart key of an instance of svc that is not privileged,
-// keys in order. settings are the platform's. The first message refuses,
-// as the hook's document writes it.
+// CheckFinalValues runs the rule sets' finalValues hook on the final
+// values of each chart key of an instance of svc in namespace, of any
+// project, keys in order. settings are the platform's. The first message
+// refuses, as the hook's document writes it.
 func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string, settings M, values map[string]map[string]any) error {
 	if !rules.Loaded() {
 		return fmt.Errorf("the rule set: %w", ruleset.ErrNotLoaded)
@@ -195,21 +191,4 @@ func eachObject(objects []M, f func(o M) error) error {
 		}
 	}
 	return nil
-}
-
-// checkPlainSecrets checks that the objects of an instance hold no
-// credential in clear, unless Inputs.AllowPlainSecrets is set. It
-// refuses a Secret that holds values, an ExternalSecret whose template
-// holds a literal at a sensitive key, and a Fake generator that holds
-// values. A template ({{ }}) and a literal at another key (a region, a
-// URL) pass, and so does a Secret with only metadata and type.
-//
-// The reason is that the objects file is written to the deployments
-// repository. Credentials are generated in the cluster or read from the
-// platform's secret store, never written in clear. The error never
-// prints the value.
-func checkPlainSecrets(ctx context.Context, rules *RuleSet, svc string, objects []M) error {
-	return eachObject(objects, func(o M) error {
-		return rules.Refuse(ctx, ruleset.CheckPlainSecret, M{"svc": svc, "object": objectInput(o)})
-	})
 }

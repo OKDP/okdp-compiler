@@ -18,13 +18,6 @@ app:
       secrets:
         provider:
           vault:
-            auth:
-              kubernetes:
-                mountPath: kubernetes
-                role: okdp
-                serviceAccountRef:
-                  name: okdp-secrets
             path: okdp
             server: http://openbao.openbao.svc:8200
-            version: v2
         store: okdp-secrets

@@ -1,9 +1,11 @@
-# Hook finalValues: no count above settings.maxCount (5) at any depth. Input:
-# svc, ns, key, value, settings.
+# Hook finalValues: no count above settings.maxCount (5) at any depth, but
+# in a namespace settings.trusted lists. Input: svc, ns, key, value,
+# settings.
 vars:
+  trusted: ${{ ns in asList(settings.?trusted.orValue([])) }}
   most: ${{ double(settings.?maxCount.orValue(5)) }}
   over: >-
     ${{ leaves(value).filter(l, size(l.path) > 0 && l.path[size(l.path) - 1] == "count" && type(l.value) in [int, double] && double(l.value) > most) }}
 errors:
-  - $if: ${{ size(over) > 0 }}
+  - $if: ${{ !trusted && size(over) > 0 }}
     $value: "${{ key }}: ${{ over[0].path.map(p, string(p)).join(\".\") }}: above the most (${{ svc }} in ${{ ns }})"

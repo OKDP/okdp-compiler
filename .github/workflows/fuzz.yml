@@ -1,6 +1,6 @@
 # Fuzz: every night, and on demand, the fuzz tests of the Makefile
-# (make fuzz: the paths, the values parser, the access, claim ID, upstream,
-# layers and load rules; those of the language, the scanner of ${{ }}, the
+# (make fuzz: the paths, the access, claim ID, upstream, layers and load
+# rules; those of the language, the scanner of ${{ }}, the
 # reader and the host functions' cost, are github.com/okdp/cel2yaml's), each
 # for FUZZTIME. A failing input is written under the
 # package's testdata/fuzz/, uploaded as an artifact to be reproduced

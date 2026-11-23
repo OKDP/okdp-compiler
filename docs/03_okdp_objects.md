@@ -46,13 +46,16 @@ objects: a YAML stream, one document per object, in this order:
   objects](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#oauth-client-objects)).
 
 An instance with none of these has no `okdp-objects.values.yaml`: the catalog's
-chart alone is installed. Unless the project is one of the platform's own
+chart alone is installed. Every object goes through the rule sets'
+`objects` hook ([objects
+section](specs/01_inputs_outputs.md#objects-section)): with the security
+set, unless the project is one of the platform's own
 (`global.okdp.policy.privileged`), every object stays in the instance's
-namespace and none is of a cluster-scoped kind: the compile refuses them
-([objects section](specs/01_inputs_outputs.md#objects-section)). And no
-Secret holds values in clear, unless the caller allows it
+namespace and none is of a cluster-scoped kind; and no Secret holds
+values in clear, unless the caller allows it
 (`Inputs.AllowPlainSecrets`): the objects are in the deployments
-repository. Nor do two objects of one kind, namespace and name coexist
+repository. A compile without the security set refuses none of them.
+Nor do two objects of one kind, namespace and name coexist
 in an instance, whatever the project: the second would replace the first.
 A name derived from a claim's ID, the database or the role of a claim,
 the object of a topic, is `okdpSqlName(id)` or `okdpObjectName(id)`, one
@@ -106,7 +109,7 @@ helm install <release> <package> -n <namespace> -f values.yaml
   them. An object the next compile no longer writes, or the whole instance
   removed, is deleted with the release, but one Helm keeps
   (`helm.sh/resource-policy: keep`), which Flux's helm-controller leaves
-  as Helm does, and Argo CD through the sync options `Write` adds to it,
+  as Helm does, and Argo CD through the sync options a host adds to it,
   `Prune=false` and `Delete=false` ([the objects
   chart](specs/01_inputs_outputs.md#the-objects-chart)). The chart gets
   no `global`, and a check does not read it.
@@ -122,8 +125,8 @@ helm install <release> <package> -n <namespace> -f values.yaml
   reach the default repository sets `global.okdp.charts.objects`, to a
   chart that renders its `manifests` value as written.
 - **Under Flux.** The objects travel with the values, in the ConfigMap
-  `values-<release>` of the namespace `okdp-releases`, at most 1 MiB,
-  which a host that writes Flux's files enforces. With
+  `values-<release>` of the namespace a host writes the HelmReleases
+  in, at most 1 MiB, which a host that writes Flux's files enforces. With
   `Inputs.AllowPlainSecrets`, the data of a plain Secret is in that
   ConfigMap too.
 - **Plain manifests.** The value is the objects as applied: a deployer
@@ -167,13 +170,13 @@ with a Kustomization, Argo CD with a directory source.
 
 ## The project's network policy
 
-The NetworkPolicy of a project's namespace (`global.okdp.network.policy`)
-is no object of an instance: it is the platform's decision, as the
-Namespace and the roles are, and a host writes it with the project's
-manifests, for a project kept too. An instance's own NetworkPolicy, of
-its `objects` section, adds to it (the
-policies of a namespace are a union): it may open its pods further, to
-another namespace, never close what the platform's lets in. Its ingress
+The NetworkPolicy of a project's namespace, which a setting of a host's
+rule set turns on, is no object of an instance: it is the platform's
+decision, as the Namespace and the roles are, and a host writes it with
+the project's manifests, for a project kept too. An instance's own
+NetworkPolicy, of its `objects` section, adds to it (the policies of a
+namespace are a union): it may open its pods further, to another
+namespace, never close what the platform's lets in. Its ingress
 is the namespace's, the platform's ingress namespaces' and the
 namespaces of the claims its instances provide, which the compile binds:
 a provider stays reachable by its claimers without a rule of its

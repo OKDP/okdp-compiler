@@ -1,6 +1,7 @@
 // Rules say what the compiler refuses and what it knows of a platform's
-// names. They are given as data (RuleSet); the walkers that apply them stay
-// in Go.
+// names. They are given as data (RuleSet), the mandatory set and the sets
+// added to it, in order; the compiler calls their hooks where it walks
+// what they refuse.
 
 package rules
 
@@ -23,31 +24,6 @@ import (
 // RulesFile is the file of a rule set, at the root of its file system.
 const RulesFile = "rules.yaml"
 
-// The tables of the mandatory rule set. LoadRules requires every one of
-// them: a table left out would silently turn its rule off. A set added to
-// it gives tables of other names besides.
-const (
-	TableEngineNamespaces       = "engineNamespaces"
-	TableClusterScopedKinds     = "clusterScopedKinds"
-	TableDeployerAPIGroups      = "deployerApiGroups"
-	TablePlatformObjectNames    = "platformObjectNames"
-	TablePlatformObjectSettings = "platformObjectSettings"
-)
-
-// The roles of a group (global.okdp.access.groups). The scope documents
-// read them: what each may do is the host's to write.
-const (
-	RoleViewer = "viewer"
-	RoleEditor = "editor"
-	RoleAdmin  = "admin"
-)
-
-// ruleTables lists the names of the tables of the mandatory set, sorted.
-var ruleTables = []string{
-	TableClusterScopedKinds, TableDeployerAPIGroups, TableEngineNamespaces,
-	TablePlatformObjectNames, TablePlatformObjectSettings,
-}
-
 // ruleTable is a table of a rule set.
 type ruleTable struct {
 	values []string // in order
@@ -56,24 +32,24 @@ type ruleTable struct {
 }
 
 // RuleSet is the rules a compile applies: the mandatory set alone
-// (Mandatory), its checks among them, or with a set added to it
-// (LoadRules). It does not change once read, so it is safe for concurrent
-// use. The checks of the zero value fail (ErrNotLoaded): they never count as
-// a rule passed.
+// (Mandatory), or with sets added to it, in order (LoadRules). It does
+// not change once read, so it is safe for concurrent use. The hooks and
+// documents of the zero value fail (ErrNotLoaded): they never count as a
+// rule passed.
 type RuleSet struct {
 	loaded  bool
 	named   []namedSet // the sets read, in order
 	tables  map[string]*ruleTable
-	sets    M // each table as a set, as the checks read it (ready)
-	lists   M // each table as a list, as the checks read it (ready)
+	sets    M // each table as a set, as the documents read it (ready)
+	lists   M // each table as a list, as the documents read it (ready)
 	sources map[string]compile.Source
+	inputs  []string // what the documents may read (ruleInputs and the sets' inputs), sorted
 	free    chan *checker
 
 	platformSchema, mappingSchema *chart.Schema        // what SchemaValues reads; nil, none
 	fragments                     []Fragment           // the functions, by name
 	templates                     map[string]Template  // the templates, by name
 	names                         map[string]string    // the names the compiler gives credentials
-	keep                          KeepSync             // what Argo CD is told of the objects Helm keeps
 	documentFuncs                 []DocumentFunc       // the functions a document computes, by name
 	sections                      []string             // the sections of a mapping
 	charts                        map[string]chart.Ref // the defaults of global.okdp.charts, by name
@@ -106,9 +82,6 @@ func (r *RuleSet) Fragment(name string) (Fragment, bool) {
 	}
 	return r.fragments[i], true
 }
-
-// Keep returns what Argo CD is told of the objects Helm keeps.
-func (r *RuleSet) Keep() KeepSync { return r.keep }
 
 // DocumentFuncs returns the functions of mappings that a document computes.
 func (r *RuleSet) DocumentFuncs() []DocumentFunc { return r.documentFuncs }
@@ -148,14 +121,6 @@ type Fragment struct {
 	Result   string
 }
 
-// KeepSync says how to tell Argo CD of the objects Helm keeps. Annotation
-// and Value say Helm keeps an object. SyncOptions is the annotation of Argo
-// CD's sync options, and Options are those to add.
-type KeepSync struct {
-	Annotation, Value, SyncOptions string
-	Options                        []string
-}
-
 func readTemplate(fsys fs.FS, file string) (Template, error) {
 	b, err := fs.ReadFile(fsys, path.Clean(file))
 	if err != nil {
@@ -164,35 +129,25 @@ func readTemplate(fsys fs.FS, file string) (Template, error) {
 	return Template{Name: path.Base(file), Data: b}, nil
 }
 
-// loadNames reads names, keepSync and labels, which one set only may give,
+// loadNames reads names and labels, which one set only may give,
 // and sections, which each set adds to.
 func (r *RuleSet) loadNames(doc M) error {
 	if names, ok := doc["names"]; ok {
 		if r.names != nil {
-			return taken("names", "")
+			return r.taken("names", "")
 		}
 		r.names = stringMap(names)
 	}
-	if k, ok := doc["keepSync"]; ok {
-		if r.keep.Annotation != "" {
-			return taken("keepSync", "")
-		}
-		m := value.AsMap(k)
-		r.keep = KeepSync{Annotation: value.Str(m["annotation"]), Value: value.Str(m["value"]), SyncOptions: value.Str(m["syncOptions"])}
-		for _, o := range value.AsList(m["options"]) {
-			r.keep.Options = append(r.keep.Options, value.Str(o))
-		}
-	}
 	if l, ok := doc["labels"]; ok {
 		if r.componentLabel != "" {
-			return taken("labels", "")
+			return r.taken("labels", "")
 		}
 		labels := value.AsMap(l)
 		r.componentLabel, r.selectorLabels, r.commonLabels = value.Str(labels["component"]), stringMap(labels["selector"]), stringMap(labels["common"])
 	}
 	for _, v := range value.AsList(doc["sections"]) {
 		if slices.Contains(r.sections, value.Str(v)) {
-			return taken("sections", value.Str(v))
+			return r.taken("sections", value.Str(v))
 		}
 		r.sections = append(r.sections, value.Str(v))
 	}
@@ -203,7 +158,7 @@ func (r *RuleSet) loadCharts(doc M) error {
 	charts := value.AsMap(doc["charts"])
 	for _, name := range slices.Sorted(maps.Keys(charts)) {
 		if _, ok := r.charts[name]; ok {
-			return taken("charts", name)
+			return r.taken("charts", name)
 		}
 		m := value.AsMap(charts[name])
 		ref := chart.Ref{Repository: value.Str(m["repository"]), Chart: value.Str(m["chart"]), Version: value.Str(m["version"])}
@@ -221,7 +176,7 @@ func (r *RuleSet) loadOwnObjects(doc M) error {
 		m := value.AsMap(v)
 		spec := OwnObjectsSpec{Section: value.Str(m["section"]), List: value.Str(m["list"])}
 		if slices.ContainsFunc(r.ownObjects, func(o OwnObjectsSpec) bool { return o.Section == spec.Section }) {
-			return taken("ownObjects", spec.Section)
+			return r.taken("ownObjects", spec.Section)
 		}
 		t, ok := r.templates[value.Str(m["objects"])]
 		if !ok {
@@ -241,7 +196,7 @@ func (r *RuleSet) loadFunctions(fsys fs.FS, doc M) error {
 	functions := value.AsMap(doc["functions"])
 	for _, name := range slices.Sorted(maps.Keys(functions)) {
 		if r.hasFunction(name) {
-			return taken("functions", name)
+			return r.taken("functions", name)
 		}
 		spec := value.AsMap(functions[name])
 		if d := value.Str(spec["document"]); d != "" {
@@ -265,22 +220,23 @@ func (r *RuleSet) hasFunction(name string) bool {
 	return ok || slices.ContainsFunc(r.documentFuncs, func(f DocumentFunc) bool { return f.Name == name })
 }
 
-// taken is the error of a rule that a set read before already gives: the
-// rule name of section, or the whole section when name is empty.
-func taken(section, name string) error {
+// taken is the error of a rule that a set read before the one being read,
+// the last of r.named, already gives: the rule name of section, or the
+// whole section when name is empty.
+func (r *RuleSet) taken(section, name string) error {
+	return takenBy(section, name, r.Names()[:max(len(r.named)-1, 0)])
+}
+
+// takenBy is the error of a rule that one of the sets before already
+// gives, or the set being read gives twice when there is none before.
+func takenBy(section, name string, before []string) error {
 	if name != "" {
 		section += ": " + name
 	}
-	return fmt.Errorf("%s: %s: given by another rule set, the compiler's mandatory one: a rule set adds rules, it replaces none", RulesFile, section)
-}
-
-// Version returns the version the last set read gives itself: the
-// mandatory set's alone, the added set's with one (SetVersion for each).
-func (r *RuleSet) Version() string {
-	if r == nil || len(r.named) == 0 {
-		return ""
+	if len(before) == 0 {
+		return fmt.Errorf("%s: %s: given twice", RulesFile, section)
 	}
-	return r.named[len(r.named)-1].version
+	return fmt.Errorf("%s: %s: given by a rule set read before (%s): a rule set adds rules, it replaces none", RulesFile, section, strings.Join(before, ", "))
 }
 
 // table returns the named table, an empty one when r does not hold it.
@@ -292,9 +248,6 @@ func (r *RuleSet) table(name string) *ruleTable {
 	}
 	return &ruleTable{}
 }
-
-// Has reports whether v is in the table.
-func (r *RuleSet) Has(table, v string) bool { return slices.Contains(r.List(table), v) }
 
 // List returns the values of the table, in order, not to be changed.
 func (r *RuleSet) List(table string) []string { return r.table(table).values }
@@ -321,36 +274,47 @@ func mandatoryFS() fs.FS {
 }
 
 // Mandatory returns the compiler's mandatory rule set alone, read once:
-// every table, every check and the schemas, what every compile applies.
+// its tables, hooks, documents and schemas, what every compile applies.
 func Mandatory() *RuleSet { return mandatorySet() }
 
 // mandatorySet panics on an error: the tests check what it embeds.
 var mandatorySet = sync.OnceValue(func() *RuleSet {
-	r, err := loadOver(mandatoryFS(), nil)
+	r, err := loadOver(mandatoryFS())
 	if err != nil {
 		panic(err)
 	}
 	return r
 })
 
-// LoadRules reads the rule set of fsys, with RulesFile at its root, and
-// adds it to the mandatory one. It fails closed: a rule the mandatory set
-// already gives, its checks and tables among them, a check that is
-// unknown, and values added to a table that is not extensible, are errors,
-// never a rule turned off or replaced. An empty table is written
-// values: [].
-func LoadRules(fsys fs.FS) (*RuleSet, error) { return loadOver(mandatoryFS(), fsys) }
+// LoadRules reads the rule sets of sets, each with RulesFile at its root,
+// and adds them to the mandatory one, in order. Each names itself, a name
+// no other has. It fails closed: a rule a set read before already gives,
+// its tables, documents and hooks among them, and values added to a table
+// that is not extensible, are errors, never a rule turned off or
+// replaced. A set adds to what the sets before it give where they allow it
+// (an extensible table, a schema's properties, a hook's documents, the
+// scopes). An empty table is written values: [].
+func LoadRules(sets ...fs.FS) (*RuleSet, error) { return loadOver(mandatoryFS(), sets...) }
 
-// loadOver reads the mandatory set of base, then the set of fsys added to
-// it, if any.
-func loadOver(base, fsys fs.FS) (*RuleSet, error) {
+// loadOver reads the mandatory set of base, then each set of sets added to
+// it, in order; a nil one adds nothing. The error of an added set names
+// it, or gives its place among the added sets when its name is not read
+// yet.
+func loadOver(base fs.FS, sets ...fs.FS) (*RuleSet, error) {
 	r := newRuleSet()
-	if err := r.add(base, true); err != nil {
+	if err := r.add(base); err != nil {
 		return nil, fmt.Errorf("the mandatory rule set: %w", err)
 	}
-	if fsys != nil {
-		if err := r.add(fsys, false); err != nil {
-			return nil, err
+	for i, fsys := range sets {
+		if fsys == nil {
+			continue
+		}
+		read := len(r.named)
+		if err := r.add(fsys); err != nil {
+			if len(r.named) > read {
+				return nil, fmt.Errorf("the rule set %s: %w", r.named[read].name, err)
+			}
+			return nil, fmt.Errorf("the added rule set %d: %w", i+1, err)
 		}
 	}
 	if err := r.parseSchemas(); err != nil {
@@ -368,10 +332,10 @@ func loadOver(base, fsys fs.FS) (*RuleSet, error) {
 // add adds the set of fsys to r. It refuses a rule that a set read before
 // already gives: the sets are disjoint, so that all of them apply. The
 // mandatory set is the first read.
-func (r *RuleSet) add(fsys fs.FS, mandatory bool) error {
+func (r *RuleSet) add(fsys fs.FS) error {
 	b, err := fs.ReadFile(fsys, RulesFile)
 	if err != nil {
-		return fmt.Errorf("the rule set: %w", err)
+		return err
 	}
 	user, err := chart.ParseValues(b)
 	if err != nil {
@@ -385,17 +349,18 @@ func (r *RuleSet) add(fsys fs.FS, mandatory bool) error {
 	if err != nil {
 		return err
 	}
-	checks := value.AsMap(doc["checks"])
-	if err := knownKeys("checks", checks, ruleChecks); err != nil {
-		return err
-	}
 	if err := r.addSet(value.Str(doc["name"]), value.Str(doc["version"])); err != nil {
 		return err
 	}
-	if err := r.loadTables(value.AsMap(doc["tables"]), mandatory); err != nil {
+	for _, v := range stringList(doc["inputs"]) {
+		if !slices.Contains(r.inputs, v) {
+			r.inputs = append(r.inputs, v)
+		}
+	}
+	if err := r.loadTables(value.AsMap(doc["tables"])); err != nil {
 		return err
 	}
-	if err := r.loadChecks(fsys, checks, value.AsMap(doc["documents"])); err != nil {
+	if err := r.loadDocuments(fsys, value.AsMap(doc["documents"])); err != nil {
 		return err
 	}
 	if err := r.loadHooks(value.AsMap(doc["hooks"])); err != nil {
@@ -414,7 +379,7 @@ func (r *RuleSet) add(fsys fs.FS, mandatory bool) error {
 	templates := value.AsMap(doc["templates"])
 	for _, name := range slices.Sorted(maps.Keys(templates)) {
 		if _, ok := r.templates[name]; ok {
-			return taken("templates", name)
+			return r.taken("templates", name)
 		}
 		t, err := readTemplate(fsys, value.Str(templates[name]))
 		if err != nil {
@@ -434,16 +399,11 @@ func (r *RuleSet) add(fsys fs.FS, mandatory bool) error {
 	return r.loadFunctions(fsys, doc)
 }
 
-// loadTables reads the tables of a set. The mandatory set gives those of
-// ruleTables, no other. A set added to it gives tables of any name that no
-// set read before gives, and adds values to a table marked extensible
-// (add): it never removes one.
-func (r *RuleSet) loadTables(tables M, mandatory bool) error {
-	if mandatory {
-		if err := knownKeys("tables", tables, ruleTables); err != nil {
-			return err
-		}
-	}
+// loadTables reads the tables of a set: tables of any name that no set
+// read before gives, and values added to a table a set read before marks
+// extensible (add): a set never removes one. A table no set gives is no
+// rule turned off: a document that reads it fails to evaluate.
+func (r *RuleSet) loadTables(tables M) error {
 	for _, name := range slices.Sorted(maps.Keys(tables)) {
 		t := value.AsMap(tables[name])
 		before, given := r.tables[name]
@@ -462,7 +422,7 @@ func (r *RuleSet) loadTables(tables M, mandatory bool) error {
 			continue
 		}
 		if given {
-			return taken("tables", name)
+			return r.taken("tables", name)
 		}
 		r.tables[name] = &ruleTable{values: stringList(t["values"]), extensible: value.Truthy(t["extensible"])}
 	}
@@ -478,26 +438,10 @@ func stringList(v any) []string {
 	return out
 }
 
-// complete checks that the sets read give, together, every table, every
-// check, the mapping schema and the objects chart.
+// complete checks that the sets read give, together, what the compiler
+// itself reads: the mapping schema and the objects chart. What it refuses
+// is the documents' to say, through the hooks.
 func (r *RuleSet) complete() error {
-	var missing []string
-	for _, name := range ruleTables {
-		if _, ok := r.tables[name]; !ok {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%s: tables: missing %s", RulesFile, strings.Join(missing, ", "))
-	}
-	for _, name := range ruleChecks {
-		if _, ok := r.sources[name]; !ok {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%s: checks: missing %s", RulesFile, strings.Join(missing, ", "))
-	}
 	if r.mappingSchema == nil {
 		return fmt.Errorf("%s: schemas: mapping is required", RulesFile)
 	}
@@ -508,9 +452,8 @@ func (r *RuleSet) complete() error {
 }
 
 // ready finishes the rule set once every set is read: the tables as the
-// checks read them. It prepares the checks and the
-// documents together, so that each can call any other, and keeps that
-// session for the first compile.
+// documents read them. It prepares the documents together, so that each
+// can call any other, and keeps that session for the first compile.
 func (r *RuleSet) ready() error {
 	r.sets, r.lists = make(M, len(r.tables)), make(M, len(r.tables))
 	for name, t := range r.tables {
@@ -520,9 +463,10 @@ func (r *RuleSet) ready() error {
 		}
 		r.sets[name], r.lists[name] = set, list
 	}
-	first, err := prepare(r.sources)
+	slices.Sort(r.inputs)
+	first, err := prepare(r.sources, r.inputs)
 	if err != nil {
-		return fmt.Errorf("%s: checks: %w", RulesFile, err)
+		return fmt.Errorf("%s: documents: %w", RulesFile, err)
 	}
 	r.free = make(chan *checker, runtime.GOMAXPROCS(0))
 	r.free <- first
@@ -575,23 +519,9 @@ func (r *RuleSet) Labels(name, release, component string, selector bool) M {
 	return out
 }
 
-// knownKeys refuses a key outside want: a rule no walker would apply.
-func knownKeys(what string, m M, want []string) error {
-	var unknown []string
-	for _, name := range slices.Sorted(maps.Keys(m)) {
-		if !slices.Contains(want, name) {
-			unknown = append(unknown, name)
-		}
-	}
-	if len(unknown) > 0 {
-		return fmt.Errorf("%s: %s: unknown %s", RulesFile, what, strings.Join(unknown, ", "))
-	}
-	return nil
-}
-
 func newRuleSet() *RuleSet {
 	return &RuleSet{
-		loaded: true, tables: map[string]*ruleTable{}, sources: map[string]compile.Source{}, templates: map[string]Template{},
+		loaded: true, tables: map[string]*ruleTable{}, sources: map[string]compile.Source{}, inputs: slices.Clone(ruleInputs), templates: map[string]Template{},
 		charts: map[string]chart.Ref{}, schemaFiles: map[string]*schemaFile{}, hooks: map[string][]string{},
 	}
 }
@@ -612,10 +542,4 @@ func SchemaValues(schema *chart.Schema, heading string, user M) (M, error) {
 		return nil, fmt.Errorf("%s:\n%s", heading, v)
 	}
 	return values, nil
-}
-
-// Kept reports whether annotations say Helm keeps the object. It reads the
-// annotation as Helm does: trimmed, in any case.
-func (k KeepSync) Kept(annotations M) bool {
-	return k.Annotation != "" && strings.EqualFold(strings.TrimSpace(value.Str(annotations[k.Annotation])), k.Value)
 }

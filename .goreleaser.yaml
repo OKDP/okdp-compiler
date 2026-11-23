@@ -56,7 +56,7 @@ sboms:
 # signature and the certificate in the bundle only, no longer apart
 # (--output-signature, --output-certificate). The checksums cover the
 # archives and the SBOMs: verifying the bundle, then the checksums,
-# verifies them (README.md, install).
+# verifies them (docs/01_usage.md, install).
 signs:
   - id: checksums
     cmd: cosign

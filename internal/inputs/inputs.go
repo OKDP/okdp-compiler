@@ -28,6 +28,7 @@ import (
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/internal/catalog"
 	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // The kinds of the input documents.
@@ -72,7 +73,6 @@ func (d *document) where() string {
 type project struct {
 	doc    *document
 	values []map[string]any
-	groups map[string]okdp.Role // access
 }
 
 // instance is an Instance document read.
@@ -92,8 +92,8 @@ type instance struct {
 //
 // The instance name of project p is the release p-name of the namespace
 // p. Its values layers are the Settings document's, its project's, its
-// own connections and its own values, in this order; its groups are its
-// project's access. The error lists every problem at once.
+// own connections and its own values, in this order. The error lists
+// every problem at once.
 func Load(ctx context.Context, sources []Files, cat *catalog.Catalog, rules *okdp.RuleSet) ([]okdp.Instance, error) {
 	var errs []error
 	var files []*file
@@ -167,9 +167,8 @@ func Load(ctx context.Context, sources []Files, cat *catalog.Catalog, rules *okd
 			continue
 		}
 		layers := slices.Clone(settings)
-		var groups map[string]any
 		if p, ok := projects[in.project]; ok {
-			layers, groups = append(layers, p.values...), groupsSettings(p.groups)
+			layers = append(layers, p.values...)
 		}
 		if in.connections != nil {
 			layers = append(layers, map[string]any{"connections": in.connections})
@@ -180,27 +179,12 @@ func Load(ctx context.Context, sources []Files, cat *catalog.Catalog, rules *okd
 			Release:   in.project + "-" + in.name,
 			Namespace: in.project,
 			Claimers:  in.claimers,
-			Settings:  groups,
 		}})
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
 	return out, nil
-}
-
-// groupsSettings returns the settings that give an instance the groups
-// of its project (Inputs.Settings): {access: {groups: ...}}, which the
-// compile reads as global.okdp.access.groups; nil for nil groups.
-func groupsSettings(groups map[string]okdp.Role) map[string]any {
-	if groups == nil {
-		return nil
-	}
-	m := map[string]any{}
-	for g, r := range groups {
-		m[g] = string(r)
-	}
-	return map[string]any{"access": map[string]any{"groups": m}}
 }
 
 // read returns the YAML files of src, sorted by path.
@@ -227,7 +211,7 @@ func read(src *Files) ([]*file, error) {
 	for _, p := range paths {
 		b, err := fs.ReadFile(src.FS, p)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", path.Join(src.Name, p), unwrapPath(err)))
+			errs = append(errs, fmt.Errorf("%s: %w", path.Join(src.Name, p), value.UnwrapPath(err)))
 			continue
 		}
 		f := &file{src: src, path: p}
@@ -447,7 +431,7 @@ func (d *document) values(allowed ...string) ([]map[string]any, error) {
 		}
 		b, err := fs.ReadFile(d.file.src.FS, p)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: valuesFiles: %s: %w", d.where(), path.Join(d.file.src.Name, p), unwrapPath(err)))
+			errs = append(errs, fmt.Errorf("%s: valuesFiles: %s: %w", d.where(), path.Join(d.file.src.Name, p), value.UnwrapPath(err)))
 			continue
 		}
 		v, err := chart.ParseValues(b)
@@ -477,21 +461,12 @@ func (d *document) values(allowed ...string) ([]map[string]any, error) {
 // readProject reads a Project document.
 func readProject(d *document) (*project, error) {
 	errs := []error{d.name("name"), d.required("name")}
-	v, err := d.values("kind", "name", "access")
+	v, err := d.values("kind", "name")
 	errs = append(errs, err)
-	access, err := d.mapping("access")
-	errs = append(errs, err)
-	var groups map[string]okdp.Role
-	if access != nil {
-		groups, err = okdp.ParseAccess("access", access)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", d.where(), err))
-		}
-	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
-	return &project{doc: d, values: v, groups: groups}, nil
+	return &project{doc: d, values: v}, nil
 }
 
 // readInstance reads an Instance document.
@@ -540,13 +515,4 @@ func definition(cat *catalog.Catalog, service, version string, rules *okdp.RuleS
 		return nil, fmt.Errorf("the package %s: %w", cat.PackagePath(service, version), err)
 	}
 	return def, nil
-}
-
-// unwrapPath strips the path of an fs.PathError from err. Messages name the
-// path themselves.
-func unwrapPath(err error) error {
-	if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
-		return pe.Err
-	}
-	return err
 }

@@ -1,10 +1,14 @@
 # A rule set added to the mandatory one, for the tests of the hooks and of a
-# section of its own: notes, whose items add a ConfigMap each.
+# section of its own: notes, whose items add a ConfigMap each. Its
+# documents read settings of their own: trusted, the namespaces they
+# exempt, reserved, the namespaces it refuses, taken, the releases.
 apiVersion: okdp-compiler/rules.v1
 name: hooks
 version: 1.0.0
 hooks:
-  objects: [labelled]
+  namespace: [reserved]
+  release: [taken]
+  objects: [labelled, secretData]
   finalValues: [bounded]
 sections: [notes]
 templates:
@@ -13,5 +17,8 @@ ownObjects:
   - {section: notes, list: noteList, objects: note}
 documents:
   labelled: labelled.cel.yaml
+  secretData: secret-data.cel.yaml
+  reserved: reserved.cel.yaml
+  taken: release.cel.yaml
   bounded: bounded.cel.yaml
   noteList: note-list.cel.yaml

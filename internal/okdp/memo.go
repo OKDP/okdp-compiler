@@ -3,10 +3,8 @@
 package okdp
 
 import (
-	"context"
 	"io/fs"
 	"reflect"
-	"sync"
 
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
@@ -14,10 +12,10 @@ import (
 
 // setMemo holds what the compiles of the instances of one CompileAll
 // read once: the parameters of each instance, and the contracts that
-// several instances read from the same file system. It is safe for
-// concurrent use.
+// several instances read from the same file system. CompileAll compiles
+// its instances one after the other, and no Inputs that a caller sees
+// holds a memo, so nothing reads it concurrently.
 type setMemo struct {
-	mu        sync.Mutex
 	params    map[int]*paramsMemo
 	contracts []*contractCache
 }
@@ -33,8 +31,6 @@ type instanceMemo struct {
 
 // forInstance returns the memo for the compile of instance i of the set.
 func (m *setMemo) forInstance(i int, in Inputs) *instanceMemo {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	p := m.params[i]
 	if p == nil {
 		p = &paramsMemo{}
@@ -76,25 +72,24 @@ func sameFS(a, b fs.FS) bool {
 // Inputs.Settings), which no compile of the set changes. The first
 // compile that asks computes them.
 type paramsMemo struct {
-	once             sync.Once
+	done             bool
 	schema           *chart.Schema
 	values, settings M
 	err              error
 }
 
-// get returns parameters(ctx, files, in, svc), computed once. The schema
-// is shared and its readers never change it; the values and the settings
+// get returns parameters(files, in, svc), computed once. The schema is
+// shared and its readers never change it; the values and the settings
 // are copies, because the compile changes them. A nil p computes them at
-// each call. The computation ignores the cancellation of the compile
-// that happens to ask first, so that another compile of the instance
-// reads the same result.
-func (p *paramsMemo) get(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
+// each call.
+func (p *paramsMemo) get(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	if p == nil {
-		return parameters(ctx, files, in, svc)
+		return parameters(files, in, svc)
 	}
-	p.once.Do(func() {
-		p.schema, p.values, p.settings, p.err = parameters(context.WithoutCancel(ctx), files, in, svc)
-	})
+	if !p.done {
+		p.schema, p.values, p.settings, p.err = parameters(files, in, svc)
+		p.done = true
+	}
 	if p.err != nil {
 		return nil, nil, nil, p.err
 	}
@@ -102,10 +97,10 @@ func (p *paramsMemo) get(ctx context.Context, files fs.FS, in Inputs, svc *Servi
 }
 
 // contractCache reads each contract of a file system once. The contract
-// is shared and its readers never change it. Safe for concurrent use.
+// is shared and its readers never change it. A cache is of one compile,
+// or of the instances of one CompileAll (setMemo).
 type contractCache struct {
 	fsys fs.FS
-	mu   sync.Mutex
 	read map[string]contractRead
 }
 
@@ -119,8 +114,6 @@ func newContractCache(fsys fs.FS) *contractCache {
 }
 
 func (s *contractCache) get(name string) (*contract, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	r, ok := s.read[name]
 	if !ok {
 		r.c, r.err = readContract(s.fsys, name)

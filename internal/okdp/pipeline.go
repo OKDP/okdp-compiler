@@ -38,8 +38,7 @@ type Inputs struct {
 	// read, but never the values: global as the mapping sees it, the
 	// values, the final values of the charts. A path that both a layer and
 	// Settings give is an error: neither overrides the other. They follow
-	// the type rules of a values layer. LoadInputs reads the groups of a
-	// Project document (access) into them.
+	// the type rules of a values layer.
 	Settings map[string]any
 	Release  string // the Helm release, a DNS-1123 label of at most 53 characters
 	// Name is the instance's name, a DNS-1123 label. It names the outputs the
@@ -68,9 +67,11 @@ type Inputs struct {
 	// past it. The limit is shared: an expression may spend what is left.
 	CostLimit uint64
 	Timeout   time.Duration // bounds this compile, on top of ctx's deadline; 0 means no limit
-	// AllowPlainSecrets accepts credentials written in clear: a provides
-	// secret without generate, and a Secret object with data or stringData.
-	// By default they fail: no credential goes to the deployments repository.
+	// AllowPlainSecrets accepts credentials written in clear: the compile
+	// refuses a provides secret without generate, and gives the flag to the
+	// rule sets' objects hook, where the security set refuses a Secret
+	// object with data or stringData. By default they fail: no credential
+	// goes to the deployments repository.
 	AllowPlainSecrets bool
 	Rules             *RuleSet // nil applies the mandatory rules alone
 	// Finalize makes the final values of the charts from what the compile
@@ -93,7 +94,6 @@ type FinalInput struct {
 	Settings          M           // the platform's settings, global.okdp
 	Release           string      // the Helm release name the charts render with
 	Namespace         string
-	Privileged        bool // the project is one of the platform's own
 	AllowPlainSecrets bool // Inputs.AllowPlainSecrets
 }
 
@@ -111,17 +111,15 @@ type Result struct {
 	Values map[string]map[string]any
 	// Charts maps each chart key to the upstream chart that renders its
 	// values: helm template <Charts[key]> -f <Values[key]>.
-	Charts   map[string]chart.Ref
-	Computed M // what the mapping computed for each chart key, before Finalize
+	Charts map[string]chart.Ref
 	// Objects are OKDP's own objects, which the umbrella renders as written,
 	// in this order: the credentials Secrets of the provided connections, the
 	// objects section of the mapping, the PushSecrets and ExternalSecrets of
 	// claims across namespaces, the ExternalSecrets of the connections whose
 	// credentials are in the platform's secret store. Nil when there is none.
 	Objects       []map[string]any
-	KeepSync      ruleset.KeepSync // what the writer tells Argo CD about the objects Helm keeps
-	ObjectsSource chart.Ref        // the chart that renders Objects (global.okdp.charts.objects)
-	Info          Info             // what the instance publishes (okdp.info.yaml)
+	ObjectsSource chart.Ref // the chart that renders Objects (global.okdp.charts.objects)
+	Info          Info      // what the instance publishes (okdp.info.yaml)
 	// Dependencies are the instances the connection references point to,
 	// through an output or a claim, in parameter path order. External
 	// connections are not listed.
@@ -129,19 +127,9 @@ type Result struct {
 	Release, Namespace string         // Inputs.Release and Inputs.Namespace
 	Service, Version   string         // the name and version of Chart.yaml
 	Chart              chart.Metadata // the package's Chart.yaml, with its dependencies in order
-	Cost               uint64         // the CEL cost of the expressions; 0 without Inputs.CostLimit
 	Warnings           []string       // what the compile reports without failing
-	// SecretStore is the platform's secret store as the targets write it in
-	// each project's namespace, when global.okdp.secrets gives a provider.
-	// Nil when the platform names a ClusterSecretStore or no store.
-	SecretStore *SecretStore
-	// Privileged says the namespace is one of the platform's own projects
-	// (global.okdp.policy.privileged). Its instances may install
-	// cluster-scoped objects, write to other namespaces and set any upstream
-	// value, all of which the compile refuses to other projects.
-	Privileged bool
-	Settings   M       // global.okdp, validated and with defaults applied
-	Claims     []Claim // Inputs.Claims
+	Settings           M              // global.okdp, validated and with defaults applied
+	Claims             []Claim        // Inputs.Claims
 }
 
 // run is the state of one compile. Each stage is a method that reads what
@@ -184,10 +172,10 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 	c := &run{ctx: ctx, def: def, in: in}
 	stages := []func() error{
 		c.checkInputs,      // before anything is read
-		c.platformInstance, // 1-4: parameters, platform context, connections, platform requirements
+		c.platformInstance, // 1-4: parameters, settings, the namespace and release hooks, connections, platform requirements
 		c.mapping,          // 5-6: the mapping, and the objects the rule set adds
 		c.provides,         // 7: the outputs and their credentials
-		c.objects,          // 8: the objects and the platform's policy over them
+		c.objects,          // 8: the objects, and the objects hook on each
 		c.finalValues,      // 9-10: the final values, checked against the upstream charts
 	}
 	for _, stage := range stages {
@@ -195,7 +183,6 @@ func Compile(ctx context.Context, def *Definition, in Inputs) (result *Result, e
 			return nil, err
 		}
 	}
-	c.out.Cost = c.session.Used()
 	return c.out, nil
 }
 
@@ -209,7 +196,7 @@ func (c *run) checkInputs() error {
 	case !chart.IsRelease(in.Release):
 		return fmt.Errorf("Inputs.Release %q: a release name, lowercase letters, digits and \"-\", starting and ending with a letter or a digit, %d characters at most (Helm's limit)", in.Release, chart.ReleaseMax)
 	}
-	if err := checkNamespace(c.ctx, in.rules(), "Inputs.Namespace", in.Namespace); err != nil {
+	if err := checkNamespaceName("Inputs.Namespace", in.Namespace); err != nil {
 		return err
 	}
 	if in.Name != "" && !chart.IsDNSLabel(in.Name) {
@@ -233,22 +220,12 @@ func (c *run) checkInputs() error {
 	return nil
 }
 
-// platformInstance builds the instance (newInstance), then applies what
-// the platform asks of it.
+// platformInstance builds the instance (newInstance), the rule sets'
+// namespace and release hooks among its stages, then applies what the
+// package requires of the platform.
 func (c *run) platformInstance() error {
-	in, rules := c.in, c.in.rules()
-	inst, err := newInstance(c.ctx, c.def.Files, in, c.svc)
+	inst, err := newInstance(c.ctx, c.def.Files, c.in, c.svc)
 	if err != nil {
-		return err
-	}
-	// The platform's reserved namespaces come from its settings. A
-	// reservation wins over a privilege.
-	if err := checkPlatformNamespace(c.ctx, rules, "Inputs.Namespace", in.Namespace, inst.okdp); err != nil {
-		return err
-	}
-	// A release must not be named like an object the platform writes in
-	// the namespace.
-	if err := checkRelease(c.ctx, rules, "Inputs.Release", in.Release, inst.okdp); err != nil {
 		return err
 	}
 	// 4. Platform requirements. Null, false, "", 0, [] and {} count as not
@@ -263,7 +240,7 @@ func (c *run) platformInstance() error {
 }
 
 // mapping runs the package's mapping. The objects the rule set adds join
-// the mapping's own, so that the policy over the objects reads them too.
+// the mapping's own, so that the objects hook reads them too.
 func (c *run) mapping() error {
 	// One CEL session serves the whole compile. The mapping, the compiler's
 	// templates and okdpGeneratedSecret's template are all evaluated in it,
@@ -305,14 +282,14 @@ func (c *run) provides() error {
 }
 
 // objects starts the Result and collects the instance's objects, in the
-// order Result.Objects documents. It then applies the platform's policy:
-// a project that is not privileged keeps its objects in its namespace and
-// passes the rule set's objects hook on each, no Secret holds credentials
-// in clear, and no two objects share a kind, namespace and name.
+// order Result.Objects documents. It then runs the rule sets' objects hook
+// on each, and checks that no two objects share a kind, namespace and
+// name.
 func (c *run) objects() error {
 	in, inst, rules := c.in, c.inst, c.in.rules()
-	store, err := inst.account(c.ctx)
-	if err != nil {
+	// The rule set's account of the secret store is read here, whether or
+	// not a transfer needs it: settings it refuses fail every compile.
+	if _, err := inst.account(c.ctx); err != nil {
 		return err
 	}
 	out := &Result{
@@ -326,8 +303,6 @@ func (c *run) objects() error {
 		Version:       c.svc.Version,
 		Chart:         c.def.Chart,
 		Warnings:      slices.Clone(c.def.Warnings),
-		Privileged:    Privileged(inst.okdp, in.Namespace),
-		SecretStore:   secretStore(store),
 		Settings:      inst.okdp,
 		Claims:        in.Claims,
 	}
@@ -342,20 +317,12 @@ func (c *run) objects() error {
 		}
 		out.Objects = append(out.Objects, o)
 	}
-	if !out.Privileged {
-		if err := CheckObjects(c.ctx, rules, c.svc.Name, in.Namespace, inst.okdp, out.Objects); err != nil {
-			return err
-		}
-	}
-	if !in.AllowPlainSecrets {
-		if err := checkPlainSecrets(c.ctx, rules, c.svc.Name, out.Objects); err != nil {
-			return err
-		}
+	if err := CheckObjects(c.ctx, rules, c.svc.Name, in.Namespace, inst.okdp, in.AllowPlainSecrets, out.Objects); err != nil {
+		return err
 	}
 	if err := checkDuplicateObjects(c.svc.Name, in.Namespace, out.Objects); err != nil {
 		return err
 	}
-	out.KeepSync = rules.Keep()
 	c.out = out
 	return nil
 }
@@ -374,7 +341,6 @@ func (c *run) finalValues() error {
 	if err := c.ctx.Err(); err != nil {
 		return err
 	}
-	out.Computed = value.AsMap(value.Copy(output))
 	var warnings []string
 	var err error
 	if in.Finalize != nil {
@@ -388,7 +354,6 @@ func (c *run) finalValues() error {
 			Settings:          c.inst.okdp,
 			Release:           in.Release,
 			Namespace:         in.Namespace,
-			Privileged:        out.Privileged,
 			AllowPlainSecrets: in.AllowPlainSecrets,
 		})
 	} else {
@@ -399,11 +364,9 @@ func (c *run) finalValues() error {
 	if err != nil {
 		return err
 	}
-	// The rule set's finalValues hook, on the final values.
-	if !out.Privileged {
-		if err := CheckFinalValues(c.ctx, in.rules(), c.svc.Name, in.Namespace, c.inst.okdp, out.Values); err != nil {
-			return err
-		}
+	// The rule sets' finalValues hook, on the final values.
+	if err := CheckFinalValues(c.ctx, in.rules(), c.svc.Name, in.Namespace, c.inst.okdp, out.Values); err != nil {
+		return err
 	}
 	out.Warnings = append(out.Warnings, warnings...)
 	return nil

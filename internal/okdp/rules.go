@@ -11,9 +11,9 @@ import (
 // a platform's names (internal/rules).
 type RuleSet = ruleset.RuleSet
 
-// LoadRules loads the rule set of a file system and adds it to the
-// mandatory one.
-func LoadRules(fsys fs.FS) (*RuleSet, error) { return ruleset.LoadRules(fsys) }
+// LoadRules loads the rule sets of file systems and adds them to the
+// mandatory one, in order.
+func LoadRules(sets ...fs.FS) (*RuleSet, error) { return ruleset.LoadRules(sets...) }
 
 // Mandatory returns the mandatory rule set alone.
 func Mandatory() *RuleSet { return ruleset.Mandatory() }
@@ -28,7 +28,7 @@ func rulesOr(r *RuleSet) *RuleSet {
 	return Mandatory()
 }
 
-// objectInput returns an object as the checks read it: its fields as
+// objectInput returns an object as the objects hook reads it: its fields as
 // text, whatever a mapping wrote in them, and the object itself (raw).
 func objectInput(o M) M {
 	meta := value.AsMap(o["metadata"])

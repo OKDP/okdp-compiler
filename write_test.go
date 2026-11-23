@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -12,50 +11,6 @@ import (
 
 // M: a values map.
 type M = map[string]any
-
-// keepRules: the mandatory set's.
-var keepRules = KeepSync{Annotation: "helm.sh/resource-policy", Value: "keep", SyncOptions: "argocd.argoproj.io/sync-options", Options: []string{"Prune=false", "Delete=false"}}
-
-func TestKeepSynced(t *testing.T) {
-	shared := M{keepRules.Annotation: "keep"}
-	objects := []map[string]any{
-		{"kind": "Database", "metadata": M{"name": "a", "annotations": M{keepRules.Annotation: "keep"}}},
-		{"kind": "Secret", "metadata": M{"name": "b", "annotations": M{keepRules.Annotation: " Keep ", keepRules.SyncOptions: "ServerSideApply=true"}}},
-		{"kind": "Secret", "metadata": M{"name": "c", "annotations": M{keepRules.Annotation: "keep", keepRules.SyncOptions: "Prune=false, Replace=true"}}},
-		{"kind": "Secret", "metadata": M{"name": "d", "annotations": M{keepRules.Annotation: "keep", keepRules.SyncOptions: "Prune=confirm,Delete=false"}}},
-		{"kind": "Secret", "metadata": M{"name": "e", "annotations": shared}},
-		{"kind": "Secret", "metadata": M{"name": "f", "annotations": shared}},
-		{"kind": "Secret", "metadata": M{"name": "g", "annotations": M{keepRules.Annotation: "delete"}}},
-		{"kind": "Secret", "metadata": M{"name": "h"}},
-		{"kind": "Secret"},
-		{"kind": "List", "items": []any{M{"kind": "Database", "metadata": M{"name": "i", "annotations": M{keepRules.Annotation: "keep"}}}}},
-	}
-	keepSynced(keepRules, objects)
-	want := map[string]any{
-		"a": "Prune=false,Delete=false",
-		"b": "ServerSideApply=true,Prune=false,Delete=false",
-		"c": "Prune=false, Replace=true,Delete=false",
-		"d": "Prune=confirm,Delete=false",
-		"e": "Prune=false,Delete=false",
-		"f": "Prune=false,Delete=false",
-		"g": nil,
-		"h": nil,
-	}
-	if got := objects[9]["items"].([]any)[0].(M)["metadata"].(M)["annotations"].(M)[keepRules.SyncOptions]; got != "Prune=false,Delete=false" {
-		t.Errorf("an item of a List: got %v", got)
-	}
-	for _, o := range objects {
-		meta, _ := o["metadata"].(M)
-		name, _ := meta["name"].(string)
-		annotations, _ := meta["annotations"].(M)
-		if got := annotations[keepRules.SyncOptions]; name != "" && got != want[name] {
-			t.Errorf("%s: got %v, want %v", name, got, want[name])
-		}
-	}
-	if !reflect.DeepEqual(objects[8], map[string]any{"kind": "Secret"}) {
-		t.Errorf("an object without metadata: %v", objects[8])
-	}
-}
 
 // TestWrite: a plain helm install: no chart, the package's values, a
 // dependency the mapping leaves out switched off, the okdp-objects chart's

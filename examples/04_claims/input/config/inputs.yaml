@@ -25,13 +25,6 @@ valuesFiles: [demo/project.yaml]
 ---
 kind: Instance
 project: demo
-name: app
-# No config.yaml: the default of database, {}, a database of its own.
-service: app
-version: 1.0.0
----
-kind: Instance
-project: demo
 name: dashboards
 service: app
 version: 1.0.0

@@ -16,9 +16,9 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/chart"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 // The directories of a catalog.
@@ -47,7 +47,7 @@ type Files struct {
 // Load builds it.
 type Catalog struct {
 	services  map[string]*Files // the owner of catalog/<service>/, by service
-	contracts fstest.MapFS      // every contract file; Load writes it, then it is only read
+	contracts memFS             // every contract file; Load writes it, then it is only read
 }
 
 // Service is a service of a Catalog: catalog/<service>/ in the directory
@@ -64,7 +64,7 @@ type Service struct {
 // error lists every problem at once, the conflicts last, sorted.
 func Load(dirs []Files) (*Catalog, error) {
 	dirs = slices.SortedFunc(slices.Values(dirs), func(a, b Files) int { return strings.Compare(a.Name, b.Name) })
-	c := &Catalog{services: map[string]*Files{}, contracts: fstest.MapFS{}}
+	c := &Catalog{services: map[string]*Files{}, contracts: memFS{}}
 	var errs []error
 	owners := map[string][]string{} // a service: the directories that have it
 	from := map[string]string{}     // a contract file: the first directory that has it
@@ -78,7 +78,7 @@ func Load(dirs []Files) (*Catalog, error) {
 		}
 		entries, err := fs.ReadDir(d.FS, ContractsDir)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			errs = append(errs, fmt.Errorf("%s: %w", where(*d, ContractsDir), unwrapPath(err)))
+			errs = append(errs, fmt.Errorf("%s: %w", where(*d, ContractsDir), value.UnwrapPath(err)))
 		}
 		for _, e := range entries {
 			name, ok := strings.CutSuffix(e.Name(), ".schema.json")
@@ -89,11 +89,11 @@ func Load(dirs []Files) (*Catalog, error) {
 			b, err := fs.ReadFile(d.FS, file)
 			switch prev, seen := c.contracts[e.Name()]; {
 			case err != nil:
-				errs = append(errs, fmt.Errorf("%s: %w", where(*d, file), unwrapPath(err)))
+				errs = append(errs, fmt.Errorf("%s: %w", where(*d, file), value.UnwrapPath(err)))
 			case !seen:
-				c.contracts[e.Name()] = &fstest.MapFile{Data: b}
+				c.contracts[e.Name()] = b
 				from[e.Name()] = d.Name
-			case !bytes.Equal(prev.Data, b):
+			case !bytes.Equal(prev, b):
 				errs = append(errs, fmt.Errorf("contract %s differs between the repositories %s and %s", name, from[e.Name()], d.Name))
 			}
 		}
@@ -185,7 +185,7 @@ func (c *Catalog) packageDir(service, version string) (*Files, string, error) {
 	case !chart.IsFileName(version) || errors.Is(err, fs.ErrNotExist) || err == nil && !info.IsDir():
 		return nil, "", &notInCatalog{fmt.Sprintf("version %q of service %q is not in %s", version, service, where(*d, path.Join(CatalogDir, service)))}
 	case err != nil:
-		return nil, "", fmt.Errorf("version %q of service %q: %s: %w", version, service, where(*d, dir), unwrapPath(err))
+		return nil, "", fmt.Errorf("version %q of service %q: %s: %w", version, service, where(*d, dir), value.UnwrapPath(err))
 	}
 	return d, dir, nil
 }
@@ -217,7 +217,7 @@ func subdirs(d Files, dir string) ([]string, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", where(d, dir), unwrapPath(err))
+		return nil, fmt.Errorf("%s: %w", where(d, dir), value.UnwrapPath(err))
 	}
 	var names []string
 	for _, e := range entries {
@@ -229,12 +229,3 @@ func subdirs(d Files, dir string) ([]string, error) {
 }
 
 func where(d Files, p string) string { return path.Join(d.Name, p) }
-
-// unwrapPath strips the path of an fs.PathError from err. Messages name the
-// path themselves, with its directory.
-func unwrapPath(err error) error {
-	if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
-		return pe.Err
-	}
-	return err
-}

@@ -14,24 +14,21 @@ import (
 // the Secret, never in the values); api, the same fields, its outputs
 // named; a contract that cannot be read, and one with a naming convention,
 // removed.
-var httpContract = fstest.MapFS{"http.schema.json": {Data: []byte(`{
-	"x-okdp-contract": "http",
+var httpContract = func() fstest.MapFS {
+	fields := `
 	"properties": {
 		"url": {"type": "string"},
 		"port": {"type": "integer", "default": 443},
 		"token": {"type": "string", "x-okdp-secret": true}
 	},
-	"required": ["url", "token"]}`)},
-	"api.schema.json": {Data: []byte(`{
-	"x-okdp-contract": "api",
-	"properties": {
-		"url": {"type": "string"},
-		"port": {"type": "integer", "default": 443},
-		"token": {"type": "string", "x-okdp-secret": true}
-	},
-	"required": ["url", "token"]}`)},
-	"broken.schema.json": {Data: []byte(`{`)},
-	"conv.schema.json":   {Data: []byte(`{"x-okdp-internal": {"url": "https://${ref}"}, "properties": {"url": {"type": "string"}}}`)}}
+	"required": ["url", "token"]}`
+	return fstest.MapFS{
+		"http.schema.json":   {Data: []byte(`{"x-okdp-contract": "http",` + fields)},
+		"api.schema.json":    {Data: []byte(`{"x-okdp-contract": "api",` + fields)},
+		"broken.schema.json": {Data: []byte(`{`)},
+		"conv.schema.json":   {Data: []byte(`{"x-okdp-internal": {"url": "https://${ref}"}, "properties": {"url": {"type": "string"}}}`)},
+	}
+}()
 
 // provideCompile: compiles the in-memory chart with this provides section.
 func provideCompile(provides string) (*Result, error) {
@@ -93,7 +90,11 @@ func TestProvidesNone(t *testing.T) {
 }
 
 // TestProvidesErrors: every output is checked, its shape
-// (mapping.schema.json), then against its contract.
+// (mapping.schema.json), then against its contract; an error of an output
+// that names it is the whole message: the first error of the outputs, in
+// the order of provides, the fields of each in key order, every type
+// violation at once, sorted by field, the same from one compile to the
+// next.
 func TestProvidesErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ provides, want string }{
 		"missing contract": {"  - {contract: ftp, values: {}}\n", `provides "demo-app" (ftp): the ftp contract cannot be read: ftp.schema.json: file does not exist`},
@@ -106,59 +107,33 @@ func TestProvidesErrors(t *testing.T) {
 		"plain secret":     {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: t}}}\n", `demo: output "other": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it`},
 		"two outputs":      {"  - {contract: http, values: {url: https://demo-app.example.org}}\n  - {contract: http, name: demo-app, values: {url: https://demo-app.example.org}}\n", `two http outputs are named "demo-app"`},
 		"two names twice":  {"  - {contract: api, name: b, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u}}\n", "two api outputs are named \"a\"\ntwo api outputs are named \"b\""},
+		"the first error": {
+			"  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u, zone: z, path: /}}\n  - {contract: ftp}\n",
+			`provides "b" (api): field "path" is not part of the api contract`,
+		},
+		"every type violation": {
+			"  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: 1, port: '443'}}\n  - {contract: api, name: c, values: {url: 2}}\n",
+			"provides \"b\" (api): the fields violate the api contract:\n- at '/port': got string, want integer\n- at '/url': got number, want string",
+		},
 		"a naming convention": {
 			"  - {contract: conv, values: {url: u}}\n",
 			`provides "demo-app" (conv): the conv contract cannot be read: conv.schema.json: x-okdp-internal: naming conventions are gone, a provider publishes its connections (provides)`,
 		},
-		"not a map":             {"  - {contract: api, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
-		"values not a map":      {"  - {contract: http, values: [url]}\n", "- at '/provides/0/values': got array, want object"},
-		"secretRef not a map":   {"  - {contract: api, name: other, values: {url: u}, secretRef: creds}\n", "- at '/provides/0/secretRef': got string, want object"},
-		"secret not a map":      {"  - {contract: api, name: other, values: {url: u}, secret: [token]}\n", "- at '/provides/0/secret': got array, want object"},
-		"a null secret":         {"  - {contract: api, name: other, values: {url: u}, secret: ~}\n", "- at '/provides/0/secret': got null, want object"},
-		"generate not a list":   {"  - {contract: api, name: other, values: {url: u}, secret: {generate: {token: 20}}}\n", "- at '/provides/0/secret/generate': got object, want array"},
-		"generated key":         {"  - {contract: api, name: other, values: {url: u}, secret: {generate: [{key: token, length: long}]}}\n", "- at '/provides/0/secret/generate/0/length': got string, want integer"},
-		"stringData not a map":  {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: [token]}}\n", "- at '/provides/0/secret/stringData': got array, want object"},
-		"stringData a number":   {"  - {contract: api, name: other, values: {url: u}, secret: {stringData: {token: 5}}}\n", "- at '/provides/0/secret/stringData/token': got number, want string"},
-		"secretRef no name":     {"  - {contract: api, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", "- at '/provides/0/secretRef': missing property 'name'"},
-		"secretRef name":        {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: 1}}\n", "- at '/provides/0/secretRef/name': got number, want string"},
-		"secretRef name a path": {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: other/creds}}\n", "- at '/provides/0/secretRef/name': 'other/creds' does not match pattern"},
-		"secretRef name upper":  {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: Creds}}\n", "- at '/provides/0/secretRef/name': 'Creds' does not match pattern"},
-		"secretRef name long":   {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: " + strings.Repeat("a", 254) + "}}\n", "- at '/provides/0/secretRef/name': maxLength: got 254, want 253"},
-		"default Secret name":   {"  - {contract: api, name: Other_DB, values: {url: u}, secret: {generate: [{key: token}]}}\n", `provides "Other_DB" (api): secretRef.name "Other_DB-api-credentials": not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most`},
+		"not a map":           {"  - {contract: api, name: other, values: {url: u}}\n  - ~\n", "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/provides/1': got null, want object"},
+		"secretRef not a map": {"  - {contract: api, name: other, values: {url: u}, secretRef: creds}\n", "- at '/provides/0/secretRef': got string, want object"},
+		"secretRef no name":   {"  - {contract: api, name: other, values: {url: u}, secretRef: {key: token}, secret: {stringData: {token: t}}}\n", "- at '/provides/0/secretRef': missing property 'name'"},
+		"secretRef name long": {"  - {contract: api, name: other, values: {url: u}, secretRef: {name: " + strings.Repeat("a", 254) + "}}\n", "- at '/provides/0/secretRef/name': maxLength: got 254, want 253"},
+		"default Secret name": {"  - {contract: api, name: Other_DB, values: {url: u}, secret: {generate: [{key: token}]}}\n", `provides "Other_DB" (api): secretRef.name "Other_DB-api-credentials": not a Secret's name, DNS-1123 labels joined by dots, 253 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := provideCompile(tc.provides)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			whole := strings.HasPrefix(tc.want, "provides ")
+			for range 20 {
+				_, err := provideCompile(tc.provides)
+				if err == nil || whole && err.Error() != tc.want || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("got %v, want %q", err, tc.want)
+				}
 			}
 		})
-	}
-}
-
-// TestProvidesReport: the first error of the outputs, in the order of
-// provides, the fields of each in key order: the same from one compile to
-// the next.
-func TestProvidesReport(t *testing.T) {
-	provides := "  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: u, zone: z, path: /}}\n  - {contract: ftp}\n"
-	want := `provides "b" (api): field "path" is not part of the api contract`
-	for range 20 {
-		if _, err := provideCompile(provides); err == nil || err.Error() != want {
-			t.Fatalf("got %v, want %q", err, want)
-		}
-	}
-}
-
-// TestProvidesTypes: the values of the first output that fails, completed,
-// against the contract's types: every violation at once, sorted by field.
-func TestProvidesTypes(t *testing.T) {
-	provides := "  - {contract: api, name: a, values: {url: u}}\n  - {contract: api, name: b, values: {url: 1, port: '443'}}\n  - {contract: api, name: c, values: {url: 2}}\n"
-	want := `provides "b" (api): the fields violate the api contract:
-- at '/port': got string, want integer
-- at '/url': got number, want string`
-	for range 20 {
-		if _, err := provideCompile(provides); err == nil || err.Error() != want {
-			t.Fatalf("got %v\nwant %s", err, want)
-		}
 	}
 }
 

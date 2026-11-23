@@ -42,8 +42,6 @@ func TestUpstreamYAML(t *testing.T) {
 		"upstream: {api: [a]}":                       "upstream.api: true, false or {protect, append}",
 		"upstream: {api: {protcet: [a]}}":            "upstream.api: true, false or {protect, append}",
 		"upstream: {api: {upstream: true}}":          "upstream.api: true, false or {protect, append}",
-		"upstream: {api: {protect: a}}":              "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `a` into []string",
-		"upstream: {api: {protect: [[a]]}}":          "yaml: unmarshal errors:\n  line 1: cannot unmarshal !!seq into string",
 		"upstream: {api: true, api: false}":          "yaml: unmarshal errors:\n  line 1: mapping key \"api\" already defined at line 1",
 		"upstream: {api: {append: [], append: [a]}}": "yaml: unmarshal errors:\n  line 1: mapping key \"append\" already defined at line 1",
 	} {

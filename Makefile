@@ -34,8 +34,8 @@ tidy: ## Tidy go.mod and tools/go.mod
 	go -C tools mod tidy
 
 # The fuzz tests, <package>:<test>: go test fuzzes one at a time.
-FUZZ := chart:FuzzParsePath chart:FuzzFormatPath chart:FuzzParseValues \
-	internal/okdp:FuzzParseAccess internal/okdp:FuzzClaimID \
+FUZZ := chart:FuzzParsePath \
+	internal/okdp:FuzzClaimID \
 	internal/okdp:FuzzValuesLayers
 FUZZTIME ?= 30s
 

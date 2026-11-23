@@ -1,9 +1,9 @@
 # What the set adds to what a mapping sees as platform: a key of its own,
-# and one beside those the mandatory scope gives under access.
+# and one beside those the mandatory scope gives under proxyEnv.
 values:
   platform:
     extra:
       level: ${{ dig(settings, "extra.level") }}
       release: ${{ release.name }}
-    access:
-      extraGroups: ${{ keys(items) }}
+    proxyEnv:
+      EXTRA_LEVEL: ${{ str(dig(settings, "extra.level")) }}

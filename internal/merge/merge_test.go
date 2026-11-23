@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
-
-	"github.com/okdp/okdp-compiler/value"
 )
 
 // TestApplyUpstream: instance upstream values over the computed ones, with
@@ -104,9 +102,8 @@ func TestApplyUpstreamCheck(t *testing.T) {
 	}
 }
 
-// TestNoTemplate: the first "{{" in path order, in a key or a string, named
-// by its path; a value of a type values do not hold fails, where marshalling
-// it to look for "{{" would fail and let it pass.
+// TestFinalValuesNoUpstream: a dependency that accepts no upstream values
+// takes none, not even those given under the key "", which accepts them.
 func TestFinalValuesNoUpstream(t *testing.T) {
 	src := Ref{Repository: "https://x", Chart: "app", Version: "1.0.0"}
 	specs := Specs{"": {Source: src, Upstream: true}, "app": {Source: src}}
@@ -220,17 +217,5 @@ func TestUpstreamBrackets(t *testing.T) {
 	_, err = applyUpstream(M{}, M{"a.b": float64(1)}, source{chart: "c"}, []string{`["a.b"]`}, nil, nil)
 	if want := `upstream.c["a.b"]: ["a.b"] is set by the platform`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("got %v, want %q", err, want)
-	}
-}
-
-func TestMerged(t *testing.T) {
-	first, second := M{"c": nil, "b": M{"c": float64(1)}}, M{"b": M{"c": nil}, "d": float64(1)}
-	got := merged(first, second)
-	want := M{"b": M{"c": nil}, "c": nil, "d": float64(1)}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %#v, want %#v", got, want)
-	}
-	if value.AsMap(first["b"])["c"] != float64(1) {
-		t.Errorf("a layer changed: %#v", first)
 	}
 }

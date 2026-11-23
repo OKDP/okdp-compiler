@@ -10,25 +10,36 @@ whole deployment is a host's to prove, its cell empty. [What cannot be
 enforced](#what-cannot-be-enforced) closes it.
 
 These rules are data. The walkers of `internal/okdp` (`policy.go`,
-`release.go`) run the checks of the compiler's mandatory rule set, which
-every compile applies; a rule set a compile is given (`Inputs.Rules`)
-adds to it and replaces none of its rules. A platform that requires a
-set (`global.okdp.ruleSets`) is refused by every compile not given it, or
-given a version its constraint refuses, so that the settings only that
-set reads are never left unchecked.
+`release.go`) call the hooks of the rule sets, for every project: the
+compiler's mandatory set, which every compile applies, and the sets a
+compile is given (`Inputs.Rules`), which add to it and replace none of
+its rules. A platform that requires a set (`global.okdp.ruleSets`) is
+refused by every compile not given it, or given a version its constraint
+refuses, so that the settings only that set reads are never left
+unchecked.
 
-The hosts a project serves, the OAuth clients it registers, the hardened
-pod of the packages and the policy on the upstream values of an instance
-are rules of the security set, okdp-compiler-security, not of the
-mandatory set: [the security set](#the-security-set) says what it covers
-and what a compile without it does not check.
+The platform's policy is the security set's, okdp-compiler-security, not
+the mandatory set's: what the objects of a project that is not
+privileged may be (no cluster-scoped kind, no engine's kind, no other
+namespace), no credential in clear, the namespaces the platform
+reserves, the privileged projects themselves, the groups of each role,
+the hosts a project serves, the OAuth clients it registers, the hardened
+pod of the packages and the policy on the upstream values of an
+instance. [The security set](#the-security-set) says what it covers and
+what a compile without it does not check. The rows below that name it
+hold only where a compile is given it. A host's own rule set, added
+after it, keeps the namespaces of the host's deployer engines and the
+names of the objects it writes in every namespace from the projects,
+and holds the settings its targets read: the rows that name a host's
+set hold only where the host gives it.
 
 This module's own `cmd/okdp-compile` reads its input documents and its
 catalogs bounded (`internal/dirfs`), and writes nothing out of its
 output's `projects/` that it did not write (`internal/outdir`); it follows
-symbolic links, which are the user's. It compiles with the mandatory rules
-and the sets of `--rules`, the mandatory rules alone without them, their
-checks and hooks among them, and with no policy on upstream values. It
+no symbolic link under the directories it reads or writes, but a path
+given on its command line may be one. It compiles with the mandatory rules
+and the set of `--rules`, the mandatory rules alone without it, their
+hooks among them, and with no policy on upstream values. It
 reads no upstream chart: it checks neither the final values against the
 upstream charts nor the manifests they render, and it writes no file of a
 deployer engine. A compile to deploy from goes through a host that adds
@@ -74,10 +85,9 @@ settings), `connections` and `claims`. Of a catalog's directory
 `contracts/`, nothing else; of the input documents
 (`compiler.LoadInputs`, `-f`), the layers of an instance are the
 `Settings` document's values, its `Project` document's, its `Instance`
-document's `connections` and its values, in this order, and its groups
-the `access` of its `Project` document (`access.groups` of
-`Inputs.Settings`, the host's settings, which no layer may set too)
-([what a compile
+document's `connections` and its values, in this order; a `Project`
+document's values may give its groups, `global.okdp.access.groups`, a
+setting of the security set ([what a compile
 receives](specs/01_inputs_outputs.md#what-a-compile-receives)). Which
 files hold which documents, and who may write each, is a host's: its
 layout and the hosting of its repositories, their write access and their
@@ -86,12 +96,15 @@ team, a catalog its maintainers), so that a catalog's maintainers add no
 project nor platform values. What each of them may set is a host's too
 ([what a host checks of the
 layers](#what-a-host-checks-of-the-layers)): `okdp-compile` checks none
-of it. Through the library, the caller gives the layers and the groups.
+of it. Through the library, the caller gives the layers, and its own
+settings beside them (`Inputs.Settings`), the groups among them: those
+reach no chart, and no layer may give a path they give ([host
+settings](specs/01_inputs_outputs.md#host-settings)).
 
 | Author | Writes | Reviewed | The compiler takes it as |
 |---|---|---|---|
 | [The platform](#the-platform-author) | the `Settings` document | with the platform | a values layer |
-| [A project](#a-project-author) | its `Project` document, its `access`, and its instances' | by the project's owners | a values layer, and the groups |
+| [A project](#a-project-author) | its `Project` document, its groups, and its instances' | by the project's owners | a values layer, its groups among it |
 | [An instance](#an-instance-author) | its `Instance` document: its package, its `claimers`, its `connections`, its values | a console user or a pull request | values layers |
 | [A catalog](#a-catalog-author) | `catalog/<service>/<version>/`, `contracts/` | in the catalog's repository | reviewed, but for the rules below |
 | [The engines](#the-engines) | apply `compiled/` | | the identity the targets give each project |
@@ -105,18 +118,18 @@ it. A host that gives layers of several origins, the platform's
 reviewed, a project's or an instance's not, decides what each may set,
 before the compile, as its layout and its reviews decide who writes
 each file. The model assumes these rows of such a host. `okdp-compile`
-holds none of them: a `Project` document that sets
-`global.okdp.policy.privileged` makes its project privileged.
+holds none of them: with the security set, a `Project` document that
+sets `global.okdp.policy.privileged` makes its project privileged.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
 | may not | a project's or an instance's layer: change a value, a connection, a class or a default class the platform's layers set | a host | |
 | may not | a project's or an instance's layer: template code (`{{`, which some charts pass to `tpl`) in parameters; the platform's layers and the package's defaults are reviewed | a host | |
-| may not | a project's or an instance's layer: a key of `global.okdp` but `provisioning`, the classes a project adds: the objects' chart, TLS, the proxy, the store, the policy (making itself privileged), the platform's administrators (`access`), a setting of a rule set | a host | |
+| may not | a project's or an instance's layer: a key of `global.okdp` but `provisioning`, the classes a project adds, and `access.groups`, a project's groups, in the project's own layer: the objects' chart, TLS, the proxy, the store, the policy (making itself privileged), the platform's administrators (`access.admins`), a setting of a rule set | a host | |
 | may not | a project's or an instance's layer: a key of `global` beside `okdp` the platform does not list (`global.okdp.policy.projectGlobals`, which the compiler does not read): every chart receives `global`, past `protect`; what a listed key holds checked as upstream values, the security set's `policy.CheckGlobals` | a host | |
 | may not | an instance's values: `connections` (its own are a layer of their own), `claims` (its project's), a key of `global` its package's schema does not declare | a host | |
 | may not | a project's or an instance's connection: a store key outside `<namespace>/`, the platform's, another namespace's | a host | |
-| may not | groups (`global.okdp.access.groups`) given by another than the project's owners: a host gives them in `Inputs.Settings`, which a layer that gives them too fails | a host; `layers.go: hostSettings` | `TestHostSettings` |
+| may not | groups (`global.okdp.access.groups`) given by another than the project's owners, or in an instance's layer; a host that gives them in its settings (`Inputs.Settings`) has the compile refuse a layer that gives them too | a host | |
 
 ## The platform author
 
@@ -135,12 +148,13 @@ when that provider consents.
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
 | may | set any key of `global.okdp`, template code in its values | not checked | |
-| may | reserve namespaces no project may have, its own components' (`policy.reserved`), a reservation winning over `policy.privileged` | `policy.go: checkPlatformNamespace`, `pipeline.go: Compile`; before a namespace is created, `compiler.CheckNamespace` | `TestCompileErrors`, `TestCheckNamespace` |
-| may | name the platform's own projects, `policy.privileged` | `policy.go: privileged` | `TestPrivileged` |
-| may | require rule sets (`ruleSets`): every compile not given one, or given a version its constraint refuses, is refused | `context.go: requiredRuleSets`, `RuleSet.Require` | `TestRequiredRuleSets` |
-| may | name its administrators' groups and the API server's group prefix (`access`): a mapping reads the administrators in `platform.access`; the bootstrap binds them, the compiler writes nothing of them | `platform.schema.json`, `scope.cel.yaml` | `TestPlatformAccess` |
-| may | name the control plane's identity (`controlPlane.serviceAccount`), bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | a host, with the project's manifests | |
-| may | isolate the projects' namespaces (`network.policy`): ingress to a project's pods from its namespace, the platform's ingress namespaces (`network.ingressNamespaces`) and its claimers' only; off by default, egress open | a host, with the project's manifests | |
+| may | with the security set, reserve namespaces no project may have, its own components' (`policy.reserved`), a reservation winning over `policy.privileged` | the security set's hook `namespace`, called by `policy.go: CheckNamespace` (a compile, `SettingsOf`; before a namespace is created, `compiler.CheckNamespace`) | `TestHookNamespaceRelease`; `TestReservedNamespaces` (okdp-compiler-security) |
+| may | with the security set, name the platform's own projects, `policy.privileged`, which each of its documents exempts itself | the security set's documents; a host, `policy.Privileged` | `TestObjectsPolicy`, `TestPrivileged` (okdp-compiler-security) |
+| may | require rule sets (`ruleSets`): every compile not given one, or given a version its constraint refuses, is refused, before its settings are checked | `context.go: requiredRuleSets`, `RuleSet.Require` | `TestRequiredRuleSets` |
+| may | with the security set, name its administrators' groups (`access.admins`): a mapping reads them in `platform.access`; the bootstrap binds them, the compiler writes nothing of them | the security set's schema and scope | `TestPlatformAccess` (okdp-compiler-security) |
+| may | with a host's set, name the prefix the API server gives the groups, which the RoleBindings of a project's groups name them with | a host's set's schema; a host, with the project's manifests | |
+| may | with a host's set, name the control plane's identity, bound in each project's namespace to what it does there, its cluster-wide role reduced to `namespaces: get, create` | a host's set's schema; a host, with the project's manifests | |
+| may | with a host's set, isolate the projects' namespaces: ingress to a project's pods from its namespace, the platform's ingress namespaces and its claimers' only; off by default, egress open | a host's set's schema; a host, with the project's manifests | |
 | may | give a connection of any key of the store, `platform/<key>` of a ClusterSecretStore; with `secrets.provider`, a key a namespace reads, `<namespace>/<key>`, read through the project's connection | `connections.go: storeSecret` | `TestResolveFromStore` |
 | may not | give a connection a key under `platform/` when the platform gives `secrets.provider`: no namespace reads it, the platform's credentials are copied under the keys of the namespaces that use them | `connections.go: storeSecret` | `TestResolveFromStoreErrors` |
 | may | route any namespace to a provider (a class), of another namespace when the provider's claimers list it: a class consents for no provider | `namespace.go: consent` | `TestCompileAllClaims`, `TestCompileAllConsent` |
@@ -151,7 +165,8 @@ when that provider consents.
 ## A project author
 
 A project owns its namespace: its `Project` document adds a layer to
-the platform's for its instances and gives its groups (`access`), and
+the platform's for its instances, its groups among it
+(`global.okdp.access.groups`, a setting of the security set), and
 its instances' documents are its own, wherever a host keeps them. What
 its layer may set is a host's to check ([what a host checks of the
 layers](#what-a-host-checks-of-the-layers)).
@@ -160,12 +175,12 @@ layers](#what-a-host-checks-of-the-layers)).
 |---|---|---|---|
 | may | parameters, upstream values, connections, named claims and classes for its instances, under an instance's rules | `chart.Parameters`, `merge.go: applyUpstream`, `connections.go: declaredConnections` | `examples/04_claims` (`demo/project.yaml`) |
 | may | consent to serve another project, a provider: `claimers` of its instance's `Instance` document | `namespace.go: consent`, `inputs.go: readInstance` | `TestCompileAllConsent` |
-| may | give the identity provider's groups a role within the project, `access` (`viewer`, `editor`, `admin`; no group by default): a project team gets exactly its roles, those of its AppProject and of its namespace, nothing of another project's | `access.go: ParseAccess`, `platform.schema.json` (`access.groups`); a host writes the roles | `TestLoad` (`internal/inputs`), `TestPlatformAccess` |
-| may not | an `access` of another form: a group's path (`/`), a space, a role that is none of the three | `access.go: ParseAccess`, `platform.schema.json` (`access.groups`) | `TestParseAccess`, `TestLoadErrors` (`internal/inputs`) |
+| may | with the security set, give the identity provider's groups a role within the project, `global.okdp.access.groups` of its layer (`viewer`, `editor`, `admin`; no group by default): a project team gets exactly its roles, those of its AppProject and of its namespace, nothing of another project's | the security set's schema and scope, its package `access`; a host writes the roles | `TestLoad` (`internal/inputs`); `TestPlatformAccess` (okdp-compiler-security) |
+| may not | with the security set, groups of another form: a group's path (`/`), a space, a role that is none of the three | the security set's platform schema, `access.Parse` | `TestPlatformAccess`, `TestParse` (okdp-compiler-security) |
 | may not | a provider of another project without its consent, through any class, the platform's too, or by naming it | `namespace.go: consent` | `TestCompileAllConsent` |
 | may not | keep a declaration unchecked by having no instance: its named claims (class, request, name) and its connections checked as an instance's compile checks them; of a project without instance, where a host checks it | `namespace.go: CompileAll`; `compiler.CheckDeclarations`, a host's call | `TestCompileAllDeclaredConnections` |
-| may not | the name `platform`, the segment of the platform's keys | `policy.go: checkNamespace`, `pipeline.go: Compile`; before a namespace is created, `compiler.CheckNamespace` | `TestCompileErrors`, `TestCheckNamespace` |
-| may not | a reserved namespace: `kube-*`, Kubernetes' own; `flux-system`, `argocd`, `okdp-releases`, the engines' and those a host writes the engines' objects in (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); another namespace a host writes in (a Flux source's); those of `policy.reserved`, privileged or not | `policy.go: checkNamespace`, `checkPlatformNamespace` (the mandatory set's `engineNamespaces`, `compiler.EngineNamespaces`); a host, for another namespace it writes in; before a namespace is created, `compiler.CheckNamespace`, the compile's two | `TestCompileErrors`, `TestCheckNamespace` |
+| may not | the name `platform`, the segment of the platform's keys | the mandatory set's hook `namespace`, called by `policy.go: CheckNamespace` (a compile; before a namespace is created, `compiler.CheckNamespace`) | `TestCompileErrors`, `TestCheckNamespace` |
+| may not | a reserved namespace: `kube-*`, Kubernetes' own; with a host's set, the engines' namespaces and those the host writes the engines' objects in, a Flux source's among them (its releases, with every verb of the namespace, would rewrite the engine's sources and the other projects' identities); with the security set, those of `policy.reserved`, privileged or not | the hook `namespace`: the mandatory set's, the security set's and a host's set's, called by `policy.go: CheckNamespace`; before a namespace is created, `compiler.CheckNamespace` | `TestCompileErrors`, `TestCheckNamespace`; `TestReservedNamespaces` (okdp-compiler-security) |
 
 ## An instance author
 
@@ -211,17 +226,17 @@ replaces.
 | may not | add a project, privileged or in a reserved namespace, or the platform's values, from a catalog: of a catalog's directory (`--catalog`) the compiler reads `catalog/` and `contracts/` only; that no input document comes from a catalog's files is a host's | `catalog.go: Load`; a host, for the files it gives as documents | `TestCatalog` (`internal/catalog`) |
 | may not | a package of one service in two catalogs, a contract that differs between two | `catalog.go: Load` | `TestCatalogErrors` |
 | may not | declare `global.okdp` in its `config.schema.json` or give it a default (`properties.global.default`): its defaults would set the platform's settings (the privileged projects, the store, the charts); the compiler reads them of the values layers alone, whatever the parameters hold | `chart/parameters.go: ReadParameterSchema`, `layers.go: valuesLayers`, `context.go: parameters` | `TestPlatformFromValues` |
-| may not | an object of another namespace, for a project that is not privileged, whatever its source | `policy.go: CheckObjects` | `TestObjectsPolicy` |
-| may not | an object of a cluster-scoped kind, for a project that is not privileged | `policy.go: CheckObjects` | `TestObjectsPolicy` |
-| may not | an object of the deployer engines' API groups (Flux's toolkit, the Flux Operator's `fluxcd.controlplane.io`, `source.extensions.fluxcd.io`, Argo CD's `argoproj.io`), for a project that is not privileged: it would drive the engine with the engine's identity | `policy.go: CheckObjects`, the table `deployerApiGroups` | `TestObjectsPolicy` |
+| may not | with the security set, an object of another namespace, for a project that is not privileged, whatever its source | its hook `objects`, called by `policy.go: CheckObjects` | `TestHookObjects`; `TestObjectsPolicy` (okdp-compiler-security) |
+| may not | with the security set, an object of a cluster-scoped kind, for a project that is not privileged | its hook `objects`, its table `clusterScopedKinds` | `TestObjectsPolicy` (okdp-compiler-security) |
+| may not | with the security set, an object of the deployer engines' API groups (Flux's toolkit, the Flux Operator's `fluxcd.controlplane.io`, `source.extensions.fluxcd.io`, Argo CD's `argoproj.io`), for a project that is not privileged: it would drive the engine with the engine's identity | its hook `objects`, its table `deployerApiGroups` | `TestObjectsPolicy` (okdp-compiler-security) |
 | may not | a dependency of key `global`, its values Helm's global values, which every chart of the umbrella reads | `chart/metadata.go: Metadata.Check` | `TestMetadataCheck` |
 | may not | two objects of one API group, kind, namespace and name in an instance's objects, the second would replace the first: two claimers' objects whose name a provider derived from the claim's ID by a lossy mapping (`a-b.c`, `a.b-c`); the names are `okdpSqlName(id)`, `okdpObjectName(id)`, injective over the IDs | `policy.go: checkDuplicateObjects`, `names.go: sqlName`, `objectName` | `TestDuplicateObjects`, `TestNamesInjective` |
-| may not | a Secret of the objects with `data` or `stringData`, unless the caller allows it | `policy.go: checkPlainSecrets` | `TestPlainSecrets` |
-| may not | an ExternalSecret (or ClusterExternalSecret) whose `target.template.data` holds a literal at a sensitive key, an `okdpGeneratedSecret` `stringData`'s included, nor a Fake generator (or ClusterGenerator of kind Fake) with values, unless the caller allows it | `policy.go: checkPlainSecrets`, `credentialLiteral`, `credentialReference` | `TestPlainSecrets` |
+| may not | with the security set, a Secret of the objects with `data` or `stringData`, in any project, unless the caller allows it | its hook `objects`, which the compiler gives `allowPlainSecrets` | `TestPlainSecrets` (okdp-compiler-security) |
+| may not | with the security set, an ExternalSecret (or ClusterExternalSecret) whose `target.template.data` holds a literal at a sensitive key, an `okdpGeneratedSecret` `stringData`'s included, nor a Fake generator (or ClusterGenerator of kind Fake) with values, unless the caller allows it | its hook `objects`, the rule functions `credentialLiteral`, `credentialReference` (`internal/rules`) | `TestPlainSecrets` (okdp-compiler-security) |
 | may not | a `provides` secret without `generate`, unless the caller allows it | `provides.go: credentialsSecret` | `TestProvidesErrors` |
 | may not | a dependency over `http://`, a version range | `chart/ref.go: Ref.Check` | `TestMetadataCheck` |
 | may not | values for a chart `Chart.yaml` does not declare, the key of the objects' chart | `objects.go: checkObjectsChart`, `merge.FinalValues` | `TestObjects` |
-| may not | a release named like an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-*`, the secret store, its ServiceAccount, the names a rule set adds), or the beginning of one up to a `-`: the project `okdp`'s instance `project` would write the Role `okdp-project` that confines every release of the namespace | `release.go: checkRelease`, `PlatformObjectNames` | `TestReleaseNamedLikeAPlatformObject` |
+| may not | with a host's set, a release named like an object the host writes in every namespace (the Role that confines every release of the namespace, the RoleBindings of the groups, the secret store, its ServiceAccount, the names its set lists), or the beginning of one up to a `-`: the release would write that object in its place | a host's set's hook `release`, called by `release.go: checkRelease` | `TestHookNamespaceRelease` (the hook) |
 | may not | a file outside the package, a schema `$ref` fetched | `fs.FS`, `chart/schema.go: compileSchema` | `TestCompileSchemas` |
 | may not | a connection reference out of the compile's reach (under `allOf`, `$defs`, `additionalProperties`...), which a reader of the schema, a console, would take for one the compile resolves and checks | `connections.go: requirements` (`schemaRefs`) | `TestRequirementsOutOfReach` |
 | may not | a Secret's name for its credentials (`provides[].secretRef.name`) that is not a DNS-1123 subdomain | `mapping.schema.json`, `provides.go: provided` | `TestProvidesErrors` |
@@ -235,20 +250,20 @@ The engine renders each instance's chart, with every object it holds,
 the upstream charts' included, which the compiler does not read. A host
 that writes the files of Flux or Argo CD confines each project to its
 namespace with manifests of the project's own, which the compiler does
-not write: it gives what they are made of (the groups,
-`access.groups` of `Inputs.Settings`, the privileged projects, the
-network settings, the names of the platform's objects,
-`compiler.PlatformObjectNames`). The confinement this model assumes:
+not write: it gives what they are made of (the settings: the groups,
+the privileged projects of the security set, the settings of the host's
+own set, which also keeps the names of its objects from the releases).
+The confinement this model assumes:
 
 | | A project | A privileged project (`policy.privileged`) |
 |---|---|---|
 | Namespace | Pod Security Admission `enforce: baseline`, `audit` and `warn: restricted` | `enforce: privileged` |
-| Flux | helm-controller impersonates `project-<namespace>` of `okdp-releases`, bound to a Role of every verb on every resource of the namespace only | helm-controller's own identity |
+| Flux | helm-controller impersonates `project-<namespace>` of the namespace the host writes the HelmReleases in, bound to a Role of every verb on every resource of the namespace only | helm-controller's own identity |
 | Argo CD | the AppProject `project-<namespace>`: the deployments repository, the namespace, no cluster-scoped resource | every namespace, every cluster-scoped resource |
-| People | the roles of its groups (`access`): Argo CD roles of its AppProject, its Applications only, no `exec`; RoleBindings of its namespace to `view`, `edit`, `admin` | the same |
-| Control plane | when the platform names its identity (`controlPlane.serviceAccount`): the Role `okdp-control-plane` of the namespace, what the server does there, Secrets by name and never listed | the same |
-| Network | with `network.policy`: the NetworkPolicy `okdp-project`, ingress from the namespace, the platform's ingress namespaces and the namespaces of the claims it provides, egress open; written for a project kept too, of today's settings and claims | none: the platform's own |
-| Kept | the Namespace when the project goes (Flux's prune label, Argo CD's `Delete=false`); the objects Helm keeps, Argo CD's `Prune=false,Delete=false` (`write.go: keepSynced`) | the same |
+| People | the roles of its groups (`access.groups`): Argo CD roles of its AppProject, its Applications only, no `exec`; RoleBindings of its namespace to `view`, `edit`, `admin` | the same |
+| Control plane | when the platform names its identity (a setting of the host's set): a Role of the namespace, what the server does there, Secrets by name and never listed | the same |
+| Network | with the host's network policy on (a setting of its set): a NetworkPolicy of the namespace, ingress from the namespace, the platform's ingress namespaces and the namespaces of the claims it provides, egress open; written for a project kept too, of today's settings and claims | none: the platform's own |
+| Kept | the Namespace when the project goes (Flux's prune label, Argo CD's `Delete=false`); the objects Helm keeps, Argo CD's `Prune=false,Delete=false`, a host's | the same |
 
 A chart that writes another namespace or a ClusterRole is refused by
 the API server (Flux) or by Argo CD, not by the compiler; Pod Security
@@ -268,7 +283,7 @@ platform's manifests, which the compiler does not see.
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may not | a project of a namespace a host writes in (`okdp-releases`, `argocd`, a Flux source's): the engine's objects there, rewritten with the project's every verb | `policy.go: checkNamespace` (`compiler.EngineNamespaces`); a host, for another namespace it writes in | `TestCompileErrors` |
+| may not | with a host's set, a project of a namespace the host writes in (its engines', a Flux source's): the engine's objects there, rewritten with the project's every verb | a host's set's hook `namespace` | |
 | may not | an object of the platform's of the same name as a release's in the engines' namespaces, when the platform names its own with a dot | the platform's naming rule, not the compiler | |
 
 ## The secret store
@@ -341,15 +356,15 @@ names its code:
 
 | | Rule | Enforced by | Fixture |
 |---|---|---|---|
-| may not | block it (a FIFO) or exhaust it (a file over 4 MiB, a directory's files over 64 MiB) | `cmd/okdp-compile/main.go: openInputs`, `internal/dirfs: FS.Open` | `TestDirFS`, `TestDirFSBounds` |
+| may not | block it (a FIFO), exhaust it (a file over 4 MiB, a directory's files over 64 MiB) or lead it out of a directory it reads (a symbolic link, refused) | `cmd/okdp-compile/main.go: openInputs`, `internal/dirfs: FS.Open` | `TestDirFS`, `TestDirFSBounds` |
 | may not | exhaust the chart cache's reads with the charts its packages name, refusing another project's instances: each chart's files bounded together, the cache unbounded but by its charts | a host's reader of the chart cache | |
 | may not | make it run without end, or hold the runner for long: the CEL cost of an instance's expressions is bounded (the default limit about ten times the dearest case of the catalogs), one expression may cost what is left of the limit, not the limit again, one instance's compile is bounded in time and refused alone past it, the whole compile too | `--cost-limit`, `--instance-timeout`, `--timeout` (`cel2yaml.Session`: `program`, `okdp.Compile`: `Inputs.Timeout`) | `TestSession` (cel2yaml), `TestCompileTimeout` |
-| may not | make it delete an output it did not write | `outdir.Check` | `TestCheck` (`outdir`) |
+| may not | make it delete an output it did not write, or write or delete a file through a symbolic link | `outdir.Check`, `outdir.Write` | `TestCheck`, `TestWrite` (`outdir`) |
 | may not | have a credential printed in a message, under a key that names one | `value.Short`, `value.ShortAt`, `chart.Schema.Validate` | `TestRedact`, `TestValidateRedacts`, `TestResolveRedacted` |
 | may not | have one project's failure keep the others from deploying, where a host deploys the projects that compile and keeps the output of the others: a refused instance, a release name it shares with another project, a file of its own that does not load, each refusing that project and keeping its output | a host: `CompileAll` refuses instances one by one (`Outcome.Err`), what is written and kept of a project is the host's | |
 | may not | make such a host read a file out of the output through a project kept (a symbolic link), or write a release a kept project's output holds in another namespace | a host's reader of its output | |
 | may not | keep a privilege revoked, a role taken back or a policy tightened by keeping one instance of a project refused: the kept project's Namespace, identity, AppProject, RoleBindings and Flux HelmReleases are of today's settings, its instances kept applied with them | a host, which derives a kept project's manifests again | |
-| may not | keep a project in a namespace reserved after it was written, by the platform (`policy.reserved`) or by the compiler (a release that reserves a name): a project kept whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor derived again, said so; the compile does not fail for it | `access.go: SettingsOf` (one view with `Compile`); a host drops the project | `TestSettingsOf` |
+| may not | keep a project in a namespace reserved after it was written, by the platform (the security set's `policy.reserved`) or by the compiler (a release that reserves a name): a project kept whose namespace is none a project may have today is dropped from the output, nothing of its Role, Namespace, access or releases kept nor derived again, said so; the compile does not fail for it | `policy.go: SettingsOf` (one view with `Compile`, a `NamespaceError`); a host drops the project | `TestSettingsOf`, `TestHookNamespaceRelease` |
 
 A control plane edits the inputs through a host, which commits each
 edit:
@@ -363,7 +378,30 @@ whatever the API in front of it, an edit holds these lines.
 
 ## The security set
 
-The security set,
+The security set, okdp-compiler-security, is a rule set a host gives
+every compile after the mandatory one (`compiler.LoadRules`,
+`security.Rules`). Through the compiler's hooks, for every project, it
+refuses: an object of a project that is not privileged of a
+cluster-scoped kind, of an engine's API group, of another namespace, or
+a Service's `externalIPs`; a Secret, an ExternalSecret template or a
+Fake generator holding credentials in clear, in any project, unless
+`Inputs.AllowPlainSecrets`; a namespace the platform reserves
+(`policy.reserved`); a host a project that is not privileged may not
+serve. It gives a mapping `platform.access`, the groups of each role,
+of `access.admins` and `access.groups`, and holds the settings
+`policy.privileged`, `policy.reserved`, `policy.projectGlobals`,
+`access.admins` and `access.groups`, in the maps `policy` and `access`
+it defines and closes. Its package `policy` adds the policy on upstream
+values, which a host wires in its `Finalize`, and `Privileged`, which
+tells a host the platform's own projects ([its
+reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md)).
+
+A compile without it refuses none of that: the objects of every project
+are taken as written, credentials in clear among them, and a namespace
+is refused only by the mandatory set's hook and a host's set's. A
+platform that relies on it requires it (`global.okdp.ruleSets`): its
+settings, which the mandatory schema does not describe, pass unread in
+a compile without it.
 [okdp-compiler-security](https://github.com/OKDP/okdp-compiler-security),
 is a rule set added to the mandatory set (`okdp-compile --rules`,
 `security.Rules()`), and a host gives it to every compile. Its
@@ -381,13 +419,12 @@ lists its rules by author, as this page does. It covers:
 A compile given the mandatory set alone checks none of this. It reads
 no host and no redirect URI; a package that declares OAuth clients or
 calls the set's functions fails to compile (an unknown key of
-`okdp.yaml`, an unknown function), and the keys the set adds to the
-closed map `policy` (`ingressHosts`, `upstream`) are refused by the
-mandatory schema. The other settings the set reads, the suffix of the
-hosts and the identity provider's, are keys `global.okdp` does not
-describe, and pass unread. A platform that relies on the set therefore
-requires it, and every compile not given it, or given a version its
-constraint refuses, is refused:
+`okdp.yaml`, an unknown function). The settings the set reads, its
+`policy` and `access`, the suffix of the hosts and the identity
+provider's, are keys `global.okdp` does not describe, and pass unread.
+A platform that relies on the set therefore requires it, and every
+compile not given it, or given a version its constraint refuses, is
+refused:
 
 ```yaml
 global:
@@ -402,9 +439,10 @@ compiler alone, without a control plane.
 ## What cannot be enforced
 
 - **A compile without the security set, or without the host's
-  hooks.** Every compile applies the mandatory rule set, its checks
-  among them. A compile not given the security set checks no host, no
-  OAuth client and no upstream value ([the security
+  hooks.** Every compile applies the mandatory rule set, its hooks
+  among them. A compile not given the security set checks no object's
+  kind nor namespace, no credential in clear, no reserved namespace, no
+  host, no OAuth client and no upstream value ([the security
   set](#the-security-set)), unless the platform requires it. A caller that
   gives no `Inputs.Finalize` applies no policy on upstream values, and
   one that calls no `policy.CheckGlobals` no check of what the keys of
@@ -435,9 +473,10 @@ compiler alone, without a control plane.
 - **The package's own values and objects**, reviewed with it, are not
   held to the upstream policy; its ExternalSecrets and PushSecrets name
   any key of the store, which only the store's policy limits.
-- **A privileged project** escapes every check: the objects policy, the
-  upstream policy, the confined identity, the baseline. Any layer that
-  sets `policy.privileged` names one: a host lets the platform's only.
+- **A privileged project** escapes every check of the security set's
+  that exempts it: the objects policy, the hosts, the upstream policy,
+  the confined identity, the baseline. Any layer that sets
+  `policy.privileged` names one: a host lets the platform's only.
 - **The namespace is the boundary, not the instance.** The instances of
   a project share its namespace and its identity: a release reads the
   Secrets of the others; a provider's namespace holds the credentials of
@@ -448,58 +487,59 @@ compiler alone, without a control plane.
   project share the prefix of `<namespace>-a-b-...`, and the first may
   name an object of the second's; a separator no release holds would
   rename every package's objects. What the compiler decides is limited
-  to what it writes itself: a release is none of the platform's objects'
-  names.
+  to what it writes itself; a host's set keeps the names of the objects
+  the host writes in every namespace from the releases.
 - **The store's policy.** The compiler writes the keys; it cannot check
   that the store scopes them. A ClusterSecretStore, without
   `secrets.provider`, is one trust domain. A Kubernetes namespace named
   `platform` made outside the platform's projects (by an administrator,
   by a privileged project) writes `platform/*` under the templated
   policy, which reads none: the compiler refuses only a project of
-  that name. Likewise a namespace of the platform's components that
-  `policy.reserved` does not list: the compiler knows Kubernetes', the
-  engines' and the store's only.
-- **Who changes a project's access.** `access` is in the project's
-  `Project` document (`access.groups` of `Inputs.Settings`): whoever
-  writes it gives the roles, its repository's writers (the split
+  that name. Likewise a namespace of the platform's components that the
+  security set's `policy.reserved` does not list: the compiler knows
+  Kubernetes', the engines' and the store's only.
+- **Who changes a project's access.** The groups are in the project's
+  `Project` document (`global.okdp.access.groups` of its values):
+  whoever writes it gives the roles, its repository's writers (the split
   topology, the project's administrators), every writer of a shared
-  repository. The compiler
-  names the groups; the identity provider decides who is in them, the
+  repository. The compiler passes the groups on, the security set gives
+  them to a mapping; the identity provider decides who is in them, the
   API server's authentication settings and Argo CD's how the groups
   claim reaches them, and the bootstrap binds the platform's
   administrators.
 - **Consent is in the provider's own document.** The `claimers` of a
   provider's `Instance` document are written by whoever writes that
   document, in a shared repository any of its writers.
-- **The network.** Without `global.okdp.network.policy` (off by
-  default: the compiler knows neither where traffic enters nor whether
-  the network plugin enforces a policy) no NetworkPolicy is written, and
-  every pod reaches every project's. With it, a project's ingress is
-  its namespace's, the platform's ingress namespaces' and its claimers';
-  its egress, and the platform's own namespaces (`policy.privileged`),
-  stay open: the namespace reached guards itself, and a project's
-  services reach the API server, the identity provider and networks the
-  compiler does not know. A network plugin that does not enforce
-  policies (kind's default) leaves them inert.
+- **The network.** Without a host's network policy, a setting of its
+  set (off by default: the compiler knows neither where traffic enters
+  nor whether the network plugin enforces a policy), no NetworkPolicy is
+  written, and every pod reaches every project's. With it, a project's
+  ingress is its namespace's, the platform's ingress namespaces' and its
+  claimers'; its egress, and the platform's own namespaces (the security
+  set's `policy.privileged`), stay open: the namespace reached guards
+  itself, and a project's services reach the API server, the identity
+  provider and networks the compiler does not know. A network plugin
+  that does not enforce policies (kind's default) leaves them inert.
 - **Credentials under a name that does not say so.** A message redacts
   the values of keys named as credentials (`password`, `token`,
   `...Key`); another key's value, and a store key, are printed.
 - **Credentials in clear allowed.** `Inputs.AllowPlainSecrets`
   (okdp-compile's `--allow-plain-secrets`) accepts them, for a caller
-  that knows its deployments repository private.
-- **The scope of the plain-secrets rule.** Refused: a `v1` Secret's `data`
-  or `stringData`; an ExternalSecret's (a ClusterExternalSecret's)
-  `target.template.data` literal (a non-empty string without `{{` nor
-  `${`, a number) at a key `value.Sensitive` names, a reference to a
-  credential (`existing...`, `...Ref`, `passwordKey`) excepted; a Fake
-  generator's values. Warned of, not refused: such a literal at a
-  sensitive key of an instance's upstream values, where a host runs the
-  security set's `policy.PlainUpstream`. Not seen: a credential under
-  another key name, in a template's literal or a template of a constant,
-  in a ConfigMap, an annotation, an environment variable's `value`, any
-  other kind or field, or in OKDP's defaults and the values file of a
-  package; the key names are a guess, the review of a package and of the
-  values its instances give is the rest.
+  that knows its deployments repository private; so does a compile
+  without the security set, but for a `provides` secret.
+- **The scope of the plain-secrets rule**, the security set's. Refused: a
+  `v1` Secret's `data` or `stringData`; an ExternalSecret's (a
+  ClusterExternalSecret's) `target.template.data` literal (a non-empty
+  string without `{{` nor `${`, a number) at a key `value.Sensitive`
+  names, a reference to a credential (`existing...`, `...Ref`,
+  `passwordKey`) excepted; a Fake generator's values. Warned of, not
+  refused: such a literal at a sensitive key of an instance's upstream
+  values, where a host runs the security set's `policy.PlainUpstream`. Not
+  seen: a credential under another key name, in a template's literal or a
+  template of a constant, in a ConfigMap, an annotation, an environment
+  variable's `value`, any other kind or field, or in OKDP's defaults and
+  the values file of a package; the key names are a guess, the review of a
+  package and of the values its instances give is the rest.
 - **Bounds the caller sets.** The CEL cost is bounded when the caller
   passes a limit (`Inputs.CostLimit`: `okdp-compile` does), one
   instance's time when it passes `Inputs.Timeout` (`okdp-compile` does);

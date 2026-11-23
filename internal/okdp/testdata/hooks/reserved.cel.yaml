@@ -1,0 +1,5 @@
+# Hook namespace: the namespaces settings.reserved lists. Input: field, ns,
+# settings.
+errors:
+  - $if: ${{ ns in asList(settings.?reserved.orValue([])) }}
+    $value: "${{ field }} ${{ quote(ns) }}: reserved by settings.reserved"

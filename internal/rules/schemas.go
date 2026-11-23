@@ -60,10 +60,10 @@ func (r *RuleSet) loadSchema(fsys fs.FS, schemas M, key string) error {
 	}
 	add, isMap := doc.(map[string]any)
 	if f.doc == nil || !isMap {
-		return taken("schemas", key+": #")
+		return r.taken("schemas", key+": #")
 	}
 	if at := mergeSchema(f.doc, add, "#"); at != "" {
-		return taken("schemas", key+": "+at)
+		return r.taken("schemas", key+": "+at)
 	}
 	f.added = true
 	return nil

@@ -2,13 +2,12 @@ package inputs
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/internal/catalog"
-	"github.com/okdp/okdp-compiler/internal/okdp"
+	"github.com/okdp/okdp-compiler/value"
 )
 
 func mapFile(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
@@ -26,12 +25,13 @@ func testCatalog(t *testing.T) *catalog.Catalog {
 }
 
 // TestLoad: documents in several files of any layout, a values file
-// beside them, the layers and groups each instance gets, the claimers
-// absent or empty.
+// beside them, the layers each instance gets, a project's own (the roles
+// of its groups among them, settings like any other), the claimers absent
+// or empty.
 func TestLoad(t *testing.T) {
 	src := Files{Name: "in", FS: fstest.MapFS{
 		"settings.yaml":           mapFile("kind: Settings\nvalues: {global: {region: eu}}\n"),
-		"teams/demo.yaml":         mapFile("kind: Project\nname: demo\naccess: {devs: editor, leads: admin}\nvaluesFiles: [demo/project.yaml]\n---\nkind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\nclaimers: []\nconnections: {db: {contract: database}}\nvaluesFiles: [demo/web.yaml]\nvalues: {replicas: 3}\n"),
+		"teams/demo.yaml":         mapFile("kind: Project\nname: demo\nvaluesFiles: [demo/project.yaml]\nvalues: {global: {okdp: {access: {groups: {devs: editor, leads: admin}}}}}\n---\nkind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\nclaimers: []\nconnections: {db: {contract: database}}\nvaluesFiles: [demo/web.yaml]\nvalues: {replicas: 3}\n"),
 		"teams/demo/project.yaml": mapFile("global: {team: demo}\n"),
 		"teams/demo/web.yaml":     mapFile("replicas: 2\nkind: not a document\n"),
 		"lab/api.yml":             mapFile("kind: Instance\nproject: lab\nname: api\nservice: app\nversion: 1.0.0\n"),
@@ -50,17 +50,15 @@ func TestLoad(t *testing.T) {
 	if api.Inputs.Claimers != nil {
 		t.Errorf("api: claimers %v, want nil: absent", api.Inputs.Claimers)
 	}
-	// the Settings', the project's values file, the connections, the
-	// instance's values file and values.
-	if len(web.Inputs.Values) != 5 || web.Inputs.Values[0]["global"] == nil || web.Inputs.Values[1]["global"] == nil ||
-		web.Inputs.Values[2]["connections"] == nil || web.Inputs.Values[3]["replicas"] != float64(2) || web.Inputs.Values[4]["replicas"] != float64(3) {
+	// the Settings', the project's values file and values, the
+	// connections, the instance's values file and values.
+	if len(web.Inputs.Values) != 6 || web.Inputs.Values[0]["global"] == nil || web.Inputs.Values[1]["global"] == nil ||
+		value.Dig(web.Inputs.Values[2], "global.okdp.access.groups.devs") != "editor" ||
+		web.Inputs.Values[3]["connections"] == nil || web.Inputs.Values[4]["replicas"] != float64(2) || web.Inputs.Values[5]["replicas"] != float64(3) {
 		t.Errorf("web's values: %v", web.Inputs.Values)
 	}
-	if want := (map[string]any{"access": map[string]any{"groups": map[string]any{"devs": string(okdp.RoleEditor), "leads": string(okdp.RoleAdmin)}}}); !reflect.DeepEqual(web.Inputs.Settings, want) {
-		t.Errorf("web's groups: %v", web.Inputs.Settings)
-	}
-	if len(api.Inputs.Values) != 1 || api.Inputs.Settings != nil {
-		t.Errorf("api: %v, %v: the Settings' values alone, no group", api.Inputs.Values, api.Inputs.Settings)
+	if len(api.Inputs.Values) != 1 {
+		t.Errorf("api: %v: the Settings' values alone", api.Inputs.Values)
 	}
 }
 
@@ -85,8 +83,7 @@ func TestLoadErrors(t *testing.T) {
 		"in/b.yaml: document 2 (line 7, Instance): line 8: project: a DNS label expected",
 		`valuesFiles: "../outside.yaml": a path relative to the document's file, inside in`,
 		"claimers: a is listed twice",
-		"in/a.yaml: document 5 (line 11, Project): access.a/b: a group name",
-		`access.devs: a role, viewer, editor or admin, got "owner"`,
+		"in/a.yaml: document 5 (line 11, Project): line 13: access: not a key of the document, which holds kind, name, values, valuesFiles",
 		"in/c.yaml: document 1 (line 1): no kind",
 		`in/d.yaml: document 1 (line 1): kind "Deployment"`,
 	} {

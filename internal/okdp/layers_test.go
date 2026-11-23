@@ -2,12 +2,10 @@ package okdp
 
 import (
 	"context"
-	"maps"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/value"
 )
@@ -16,15 +14,14 @@ import (
 // connection and a claim included, and changes what an earlier layer
 // sets; the settings are global.okdp of the layers, merged in order.
 func TestValuesLayers(t *testing.T) {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
-		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)}
+	d := withSchema(`{"properties": {"replicas": {"type": "integer", "default": 1},
+		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)
 	in := inputs(
 		map[string]any{"global": M{"imageRegistry": "platform.example.org", "okdp": M{"proxy": M{"noProxy": ".svc"}}}, "replicas": 3},
 		map[string]any{"global": M{"imageRegistry": "instance.example.org", "okdp": M{"proxy": M{"noProxy": ".local"}}}, "connections": M{"ext": M{"contract": "database", "host": "db.example.org"}}, "db": "ext", "replicas": 2},
 	)
 	in.Contracts = dbContract
-	inst, err := newInstance(context.Background(), files, in, defService)
+	inst, err := newInstance(context.Background(), d.Files, in, defService)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,15 +100,10 @@ func TestHostSettings(t *testing.T) {
 	if s, err := SettingsOf(ctx, in); err != nil || value.Dig(s, "cluster.domain") != "example.org" {
 		t.Errorf("SettingsOf: %v %#v", err, s)
 	}
-	r := hookRules(t)
-	hd, err := LoadDefinition(hookPackage(hookOkdp), r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hooked := inputs(M{"objects": []any{labelled("a", "team")}})
-	hooked.Rules, hooked.Settings = r, map[string]any{"label": "owner"}
-	if _, err := Compile(ctx, hd, hooked); err == nil || err.Error() != "demo: objects: ConfigMap/a: metadata.labels: no label owner in demo" {
-		t.Errorf("the objects hook: %v", err)
+	hooked := inputs()
+	hooked.Settings = map[string]any{"taken": []any{"demo-app"}}
+	if _, err := hookCompileInputs(t, hooked); err == nil || err.Error() != `Inputs.Release "demo-app": taken by settings.taken` {
+		t.Errorf("the release hook: %v", err)
 	}
 	for name, tc := range map[string]struct {
 		layer    any

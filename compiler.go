@@ -24,14 +24,20 @@
 // instances from input documents laid out in any files, and LoadCatalog
 // the packages and contracts they name. How the files of a deployment are
 // laid out, and writing them for a deployer engine (Flux, Argo CD), belong
-// to the host. Every compile applies the compiler's mandatory rule set,
-// its checks among them; Inputs.Rules adds a platform's own set to it.
+// to the host. Every compile applies the compiler's mandatory rule set;
+// Inputs.Rules adds a platform's own sets to it (LoadRules), the policy
+// among them: the compiler calls their hooks, and refuses what they
+// refuse.
 //
 // Everything is read through fs.FS and in-memory values, so a caller can
 // compile from a checkout, an embedded filesystem or a git tree without
 // touching the disk.
 //
 // This package is the public API; the implementation is under internal/.
+// A host gives settings of its own beside the values layers
+// (Inputs.Settings): the compile reads them with global.okdp of the
+// layers, and no chart receives them.
+//
 // Two packages are public beside it: chart, which is what the compiler
 // reproduces of Helm, and value, the values they all share.
 package compiler
@@ -145,48 +151,18 @@ func IsName(name string) bool { return chart.IsDNSLabel(name) }
 // compile makes the same check, and refuses every instance of a namespace
 // that fails it.
 //
-// values is a values layer whose global.okdp gives the settings, or nil
-// for none. The name must be a name (IsName), and none that the compiler
-// reserves (platform, kube-*, the namespaces of the deployer engines) or
-// that the settings reserve (global.okdp.policy.reserved).
+// values is a values layer whose global.okdp gives the settings, as
+// written, or nil for none. The name must be a name (IsName) that the
+// rule sets' namespace hook passes on with the settings: the mandatory set
+// refuses platform and kube-*, the security set those the settings
+// reserve (global.okdp.policy.reserved), a host's set the namespaces of
+// its deployer engines.
 func CheckNamespace(ctx context.Context, rules *RuleSet, name string, values map[string]any) error {
 	v, err := value.Normalize(values)
 	if err != nil {
 		return fmt.Errorf("the values: %w", err)
 	}
 	return okdp.CheckNamespace(ctx, rules, "namespace", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
-}
-
-// AccessRole is the role of a group in a namespace
-// (global.okdp.access.groups).
-type AccessRole = okdp.Role
-
-// The roles of a namespace's groups. Each may do what the one before it
-// may, and more. A mapping reads the groups of each in platform.access;
-// what each may do in the cluster is the host's to write.
-const (
-	// AccessViewer sees the namespace's instances and their objects,
-	// except Secrets.
-	AccessViewer = okdp.RoleViewer
-	// AccessEditor is a viewer who also operates the instances and edits
-	// the objects of the namespace.
-	AccessEditor = okdp.RoleEditor
-	// AccessAdmin is an editor who also administers the namespace.
-	AccessAdmin = okdp.RoleAdmin
-)
-
-// IsGroupName reports whether name may name a group, as the identity
-// provider's tokens give it: a letter or a digit, then letters, digits,
-// ".", "_", "@", ":" and "-", 255 characters at most. It allows no "/":
-// the name is that of a Keycloak group, not its path.
-func IsGroupName(name string) bool { return okdp.IsGroup(name) }
-
-// ParseAccess reads v, a map of group names to roles, as
-// global.okdp.access.groups, which a host gives in Inputs.Settings.
-// field names v in the messages. A nil v gives no group. It reports every
-// problem at once.
-func ParseAccess(field string, v any) (map[string]AccessRole, error) {
-	return okdp.ParseAccess(field, v)
 }
 
 // LoadDefinition reads and checks the package at the root of fsys for
@@ -208,23 +184,25 @@ func LoadDefinition(fsys fs.FS, rules *RuleSet) (*Definition, error) {
 // Whatever the package says, it enforces these rules
 // (docs/04_threat_model.md):
 //   - names: the release, the namespace and the instance name are labels,
-//     and none is reserved by the settings or the compiler;
-//   - settings: global.okdp of the values, with the host's settings
-//     (Inputs.Settings), which no values layer may set too, meets the
-//     schema of the rule set: the groups are names with a role;
+//     and the rule sets' namespace and release hooks pass on them;
+//   - settings: global.okdp of the values, with Inputs.Settings, meets
+//     the schema of the rule sets, which requires the sets it names
+//     (global.okdp.ruleSets);
 //   - upstream values: they respect the package's protect and append
-//     paths; for a namespace that is not privileged, the rule set's
-//     finalValues hook passes on the final values of each chart, and a
-//     host's Finalize adds its own policy;
+//     paths; the rule sets' finalValues hook passes on the final values of
+//     each chart, and a host's Finalize adds its own policy;
 //   - connections: each is of its contract, and the claims are those
 //     CompileAll bound;
-//   - objects, for a namespace that is not privileged: each is in the
-//     instance's namespace, none is cluster-scoped or of an engine's API
-//     group, and the rule set's objects hook passes on each;
-//   - objects, for any namespace: no two are the same, and none holds a
-//     credential in clear unless Inputs.AllowPlainSecrets;
+//   - objects: no two are the same, no provides secret is written in clear
+//     unless Inputs.AllowPlainSecrets, and the rule sets' objects hook
+//     passes on each;
 //   - cost: the CEL cost of the expressions (Inputs.CostLimit) and the
 //     time of the compile (Inputs.Timeout, ctx).
+//
+// What a platform's policy refuses besides (an object of a cluster-scoped
+// kind or of another namespace, a Secret in clear, a namespace the
+// platform reserves, but in its privileged projects) is the security
+// set's, through the hooks: a compile without it accepts all of that.
 func Compile(ctx context.Context, def *Definition, in Inputs) (*Result, error) {
 	return okdp.Compile(ctx, def, in)
 }
@@ -254,16 +232,17 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 // about ten times the cost of the dearest case of the catalogs.
 const DefaultCostLimit = 1_000_000
 
-// LoadRules reads the rule set of fsys, rules.yaml at its root, and adds
-// it to the compiler's mandatory one: a compile applies both. The file
-// never turns a rule off: it is an error for it to give a rule the
-// mandatory set gives, or to name a check that is unknown.
-func LoadRules(fsys fs.FS) (*RuleSet, error) { return okdp.LoadRules(fsys) }
+// LoadRules reads the rule sets of sets, each rules.yaml at its root, and
+// adds them to the compiler's mandatory one, in order: a compile applies
+// all of them. A set never turns a rule off: it is an error for it to
+// give a rule a set read before gives, or to bear the name of another. It
+// adds to what those before it give where they allow it: an extensible
+// table, a schema's properties, a hook's documents, the scopes.
+func LoadRules(sets ...fs.FS) (*RuleSet, error) { return okdp.LoadRules(sets...) }
 
 // Mandatory returns the compiler's mandatory rule set, read once: what a
-// nil Inputs.Rules or BuildOptions.Rules stands for, and what every set
-// LoadRules gives holds. Its checks refuse what OKDP refuses of a
-// platform.
+// nil Inputs.Rules stands for, and what every set LoadRules gives holds.
+// Its hooks refuse the names OKDP keeps on every platform.
 func Mandatory() *RuleSet { return okdp.Mandatory() }
 
 // ParseConnection reads v, the entry name of connections, as an external

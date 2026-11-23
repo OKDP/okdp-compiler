@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"maps"
-	"strings"
 
 	"go.yaml.in/yaml/v3"
-
-	"github.com/okdp/okdp-compiler/value"
 )
 
 // The files of a compile (Write). The package's chart is not among them.
@@ -81,16 +78,10 @@ func ObjectsChartValues(res *Result) (map[string]any, error) {
 	if len(res.Objects) == 0 {
 		return nil, nil
 	}
-	// Work on copies: the Result must stay as Compile returned it.
-	kept := make([]map[string]any, len(res.Objects))
-	for i, o := range res.Objects {
-		kept[i] = value.AsMap(value.Copy(o))
-	}
-	keepSynced(res.KeepSync, kept)
 	var stream bytes.Buffer
 	enc := yaml.NewEncoder(&stream)
 	enc.SetIndent(2)
-	for _, o := range kept {
+	for _, o := range res.Objects {
 		if err := enc.Encode(o); err != nil {
 			return nil, err
 		}
@@ -106,41 +97,4 @@ func encode(v any) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-// keepSynced adds Argo CD's sync options of k to the sync-options
-// annotation of each object that Helm keeps, and of the items of a List,
-// in place: the caller gives copies. It leaves an option the object
-// already sets, whatever its value.
-func keepSynced(k KeepSync, objects []map[string]any) {
-	if k.Annotation == "" {
-		return
-	}
-	for _, o := range objects {
-		meta, _ := o["metadata"].(map[string]any)
-		if annotations, ok := meta["annotations"].(map[string]any); ok && k.Kept(annotations) {
-			var options []string
-			if s, ok := annotations[k.SyncOptions].(string); ok && strings.TrimSpace(s) != "" {
-				options = strings.Split(s, ",")
-			}
-			set := map[string]bool{}
-			for _, opt := range options {
-				name, _, _ := strings.Cut(strings.TrimSpace(opt), "=")
-				set[name] = true
-			}
-			for _, opt := range k.Options {
-				if name, _, _ := strings.Cut(opt, "="); !set[name] {
-					options = append(options, opt)
-				}
-			}
-			annotations[k.SyncOptions] = strings.Join(options, ",")
-		}
-		var items []map[string]any
-		for _, i := range value.AsList(o["items"]) {
-			if m, ok := i.(map[string]any); ok {
-				items = append(items, m)
-			}
-		}
-		keepSynced(k, items)
-	}
 }

@@ -1,0 +1,9 @@
+# Hook release: a release named like a name of objectNames or of the
+# settings objectSettings lists, or its beginning up to a "-". Input:
+# field, release, settings.
+vars:
+  given: ${{ tables.objectSettings.map(p, str(dig(settings, p))).filter(n, n != "") }}
+  taken: ${{ (tables.objectNames + given).sort().distinct().filter(n, n == release || n.startsWith(release + "-")) }}
+errors:
+  - $if: ${{ size(taken) > 0 }}
+    $value: "${{ field }} ${{ quote(release) }}: the name of an object the platform writes in every namespace (${{ taken[0] }})"

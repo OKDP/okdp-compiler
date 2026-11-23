@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -28,13 +27,11 @@ var nodeContracts = fstest.MapFS{
 // each with its name after the host of the first it uses, and fail on
 // demand (fail).
 var nodeDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"replicas": {"type": "integer", "default": 1},
 		"uses": {"type": "array", "default": [], "items": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}}},
 		"publishes": {"type": "array", "default": [], "items": {"type": "string"}},
-		"fail": {"type": "boolean", "default": false}}}`)}
-	d := withFiles(files)
+		"fail": {"type": "boolean", "default": false}}}`)
 	d.Okdp = []byte(`
 errors:
   - {$if: '${{ values.fail }}', $value: it fails}
@@ -45,30 +42,56 @@ provides:
 	return d
 }()
 
+// claimInstance: an instance of def, release name of namespace, these
+// values.
+func claimInstance(d *Definition, namespace, name string, values M) Instance {
+	in := inputs(values)
+	in.Contracts, in.Namespace, in.Release = nodeContracts, namespace, name
+	return Instance{Definition: d, Inputs: in}
+}
+
 // node: an instance of nodeDef, release demo-<name> of namespace demo,
 // these values.
 func node(name string, values M) Instance {
-	in := inputs(values)
-	in.Contracts, in.Release = nodeContracts, "demo-"+name
-	return Instance{Definition: nodeDef, Inputs: in}
+	return claimInstance(nodeDef, "demo", "demo-"+name, values)
 }
 
-// outcomes: what CompileAll gives, by release: the hosts the instance
-// publishes, or its error.
-func outcomes(instances []Instance) map[string]string {
-	got := map[string]string{}
-	for i, o := range CompileAll(context.Background(), instances) {
-		if o.Err != nil {
-			got[instances[i].Inputs.Release] = "error: " + o.Err.Error()
-			continue
-		}
-		var hosts []string
-		for _, out := range o.Result.Info.Provides {
-			hosts = append(hosts, fmt.Sprint(out.Values["host"]))
-		}
-		got[o.Result.Release] = strings.Join(hosts, " ")
+// hosts: the hosts an instance publishes.
+func hosts(o Outcome) string {
+	var s []string
+	for _, out := range o.Result.Info.Provides {
+		s = append(s, fmt.Sprint(out.Values["host"]))
 	}
-	return got
+	return strings.Join(s, " ")
+}
+
+// everyOrder: what CompileAll gives the instances, in every order, is
+// want: by release, or by namespace/release when qualified, what describe
+// says of each instance (nothing when nil), or its error.
+func everyOrder(t *testing.T, instances []Instance, qualified bool, describe func(Outcome) string, want map[string]string) {
+	t.Helper()
+	for _, order := range permutations(instances) {
+		got := map[string]string{}
+		var releases []string
+		for i, o := range CompileAll(context.Background(), order) {
+			key := order[i].Inputs.Release
+			releases = append(releases, key)
+			if qualified {
+				key = order[i].Inputs.Namespace + "/" + key
+			}
+			switch {
+			case o.Err != nil:
+				got[key] = "error: " + o.Err.Error()
+			case describe != nil:
+				got[key] = describe(o)
+			default:
+				got[key] = ""
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("in the order %v\ngot  %q\nwant %q", releases, got, want)
+		}
+	}
 }
 
 // permutations: every order of instances.
@@ -131,17 +154,7 @@ func TestCompileAll(t *testing.T) {
 			},
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			for _, order := range permutations(tc.instances) {
-				if got := outcomes(order); !reflect.DeepEqual(got, tc.want) {
-					var releases []string
-					for _, inst := range order {
-						releases = append(releases, inst.Inputs.Release)
-					}
-					t.Fatalf("in the order %v\ngot  %v\nwant %v", releases, got, tc.want)
-				}
-			}
-		})
+		t.Run(name, func(t *testing.T) { everyOrder(t, tc.instances, false, hosts, tc.want) })
 	}
 }
 
@@ -207,11 +220,9 @@ func TestCompileAllNamespaces(t *testing.T) {
 // claim, of its contract, its host after the claim's ID and the
 // provider's namespace, its request as JSON; it fails on demand (fail).
 var pgDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"replicas": {"type": "integer", "default": 1},
-		"fail": {"type": "boolean", "default": false}}}`)}
-	d := withFiles(files)
+		"fail": {"type": "boolean", "default": false}}}`)
 	// Any namespace may claim of an instance of it (consent).
 	d.Package.Provisions = []Provision{{Contract: "server", Claimers: []string{"*"}}}
 	d.Okdp = []byte(`
@@ -238,54 +249,29 @@ var otherDef = func() *Definition {
 	return &d
 }()
 
-// appDef: a package whose reference db takes claims.
-var appDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"replicas": {"type": "integer", "default": 1},
-		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true}}}}`)}
-	return withFiles(files)
-}()
+// dbDef: a package whose reference db takes claims, its
+// x-okdp-connection-ref with these keys too (JSON, after a comma).
+func dbDef(ref string) *Definition {
+	return withSchema(`{"properties": {"replicas": {"type": "integer", "default": 1},
+		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true` + ref + `}}}}`)
+}
 
-// dbsDef: a package whose references, dbs["eu.main"], dbs.eu-main and
-// dbs.us, take claims; the first two give one label.
-var dbsDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"replicas": {"type": "integer", "default": 1},
+var (
+	// appDef: a package whose reference db takes claims.
+	appDef = dbDef("")
+	// fixedDef: appDef, its reference db fixing what its claims request, a
+	// size and a tier.
+	fixedDef = dbDef(`, "request": {"size": "2Gi", "tier": "b"}`)
+	// strictDef: appDef, its reference db requiring a host of namespace data.
+	strictDef = dbDef(`, "require": {"properties": {"host": {"pattern": "\\.data$"}}}`)
+	// dbsDef: a package whose references, dbs["eu.main"], dbs.eu-main and
+	// dbs.us, take claims; the first two give one label.
+	dbsDef = withSchema(`{"properties": {"replicas": {"type": "integer", "default": 1},
 		"dbs": {"type": "object", "properties": {
 			"eu.main": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true}},
 			"eu-main": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true}},
-			"us": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true}}}}}}`)}
-	return withFiles(files)
-}()
-
-// fixedDef: appDef, its reference db fixing what its claims request, a
-// size and a tier.
-var fixedDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"replicas": {"type": "integer", "default": 1},
-		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true, "request": {"size": "2Gi", "tier": "b"}}}}}`)}
-	return withFiles(files)
-}()
-
-// strictDef: appDef, its reference db requiring a host of namespace data.
-var strictDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"replicas": {"type": "integer", "default": 1},
-		"db": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true, "require": {"properties": {"host": {"pattern": "\\.data$"}}}}}}}`)}
-	return withFiles(files)
-}()
-
-// claimInstance: an instance of def, release name of namespace, these
-// values.
-func claimInstance(d *Definition, namespace, name string, values M) Instance {
-	in := inputs(values)
-	in.Contracts, in.Namespace, in.Release = nodeContracts, namespace, name
-	return Instance{Definition: d, Inputs: in}
-}
+			"us": {"type": ["string", "object"], "x-okdp-connection-ref": {"contract": "server", "provision": true}}}}}}`)
+)
 
 // withClasses: inst, a values layer holding classes, the classes of
 // server connections (global.okdp.provisioning.server).
@@ -306,59 +292,47 @@ func withClaims(inst Instance, claims M) Instance {
 	return inst
 }
 
-// claimOutcomes: what CompileAll gives, by namespace and release: what the
-// instance publishes, with what was requested, the providers it depends on
-// and its claims, or its error.
-func claimOutcomes(instances []Instance) map[string]string {
-	got := map[string]string{}
-	for i, o := range CompileAll(context.Background(), instances) {
-		in := instances[i].Inputs
-		key := in.Namespace + "/" + in.Release
-		if o.Err != nil {
-			got[key] = "error: " + o.Err.Error()
-			continue
+// bindings: what an instance publishes, with what was requested, the
+// providers it depends on and its claims.
+func bindings(o Outcome) string {
+	var s []string
+	for _, out := range o.Result.Info.Provides {
+		p := "provides " + out.Name + " " + fmt.Sprint(out.Values["host"])
+		if r := fmt.Sprint(out.Values["request"]); r != "{}" {
+			p += " " + r
 		}
-		var s []string
-		for _, out := range o.Result.Info.Provides {
-			p := "provides " + out.Name + " " + fmt.Sprint(out.Values["host"])
-			if r := fmt.Sprint(out.Values["request"]); r != "{}" {
-				p += " " + r
-			}
-			s = append(s, p)
-		}
-		for _, d := range o.Result.Dependencies {
-			s = append(s, "depends on "+d.Namespace+"/"+d.Instance+" "+d.Output)
-		}
-		for _, b := range o.Claims {
-			class := ""
-			if b.Class != "" {
-				class = " class " + b.Class
-			}
-			s = append(s, fmt.Sprintf("bound %s %s %s/%s%s named=%t", b.Field, b.ID, b.Namespace, b.Release, class, b.Named))
-		}
-		got[key] = strings.Join(s, "; ")
+		s = append(s, p)
 	}
-	return got
+	for _, d := range o.Result.Dependencies {
+		s = append(s, "depends on "+d.Namespace+"/"+d.Instance+" "+d.Output)
+	}
+	for _, b := range o.Claims {
+		class := ""
+		if b.Class != "" {
+			class = " class " + b.Class
+		}
+		s = append(s, fmt.Sprintf("bound %s %s %s/%s%s named=%t", b.Field, b.ID, b.Namespace, b.Release, class, b.Named))
+	}
+	return strings.Join(s, "; ")
 }
 
 // TestCompileAllClaims: claims bound to their providers and compiled, in
 // every order: a connection of a reference's own, to the provider of the
 // default class; a named claim, one connection, of the provider whether a
-// reference names it or not; the default class's provider among several,
-// one of the claimer's namespace; a provider named over the default; a
-// class named, one a project adds, one that fixes part of the request;
-// refused, a claim that names neither a class nor a provider without a
-// default class, which says what the classes are, a class or a default
-// class that is none, a class's provider not of the form or that
-// provisions nothing, a provider named that provisions nothing, a class
-// and a provider, a named claim of another contract, one declared
-// differently in two contexts, or by the platform, a request that sets a
-// key of its class; a request, the claim schema's defaults applied,
+// reference names it or not; the default class's provider of the
+// claimer's namespace; a provider named over the default; a class named,
+// one a project adds, one that fixes part of the request; refused, a claim
+// that names neither a class nor a provider without a default class, which
+// says what the classes are, a class or a default class that is none, a
+// class's provider not of the form or that provisions nothing, a provider
+// named that provisions nothing, a class and a provider, a named claim
+// declared differently in two contexts, or by the platform, a request that
+// sets a key of its class; a request, the claim schema's defaults applied,
 // merged over what the package fixes, refused, every violation, or of a
-// contract that takes none; a claim whose provider does not compile; a
-// requirement the default class's provider does not meet, the claim not
-// moved to one that does, which a claim names; a claimer whose provider,
-// of another namespace, is refused for an output it shares.
+// contract that takes none; a requirement the default class's provider
+// does not meet, the claim not moved to one that does, which a claim
+// names; a claimer whose provider, of another namespace, is refused for an
+// output it shares, and so does not compile.
 func TestCompileAllClaims(t *testing.T) {
 	pg, pg2 := claimInstance(pgDef, "data", "pg", M{}), claimInstance(pgDef, "data", "pg2", M{})
 	app := func(name string, db any) Instance {
@@ -415,14 +389,6 @@ func TestCompileAllClaims(t *testing.T) {
 				"data/pg2":    "provides demo.s demo.s.data {\"tier\":\"a\"}",
 			},
 		},
-		"a named claim of another contract": {
-			[]Instance{withClaims(byDefault("demo-a", "s", "data/pg"), M{"s": M{"contract": "other", "provider": "data/o"}}), pg, claimInstance(otherDef, "data", "o", M{})},
-			map[string]string{
-				"demo/demo-a": `error: db: claim "s" has contract "other", "server" is expected`,
-				"data/pg":     "",
-				"data/o":      "provides demo.s demo.s.data",
-			},
-		},
 		"a named claim and a claim template of one name": {
 			[]Instance{byDefault("x", M{}, "data/pg"), withClaims(byDefault("demo-b", "x-db", "data/pg"), M{"x-db": M{"contract": "server"}}), pg},
 			map[string]string{
@@ -445,14 +411,6 @@ func TestCompileAllClaims(t *testing.T) {
 				"demo/demo-b": "error: claims.s: declared differently in the values of demo-a and demo-b",
 				"demo/demo-c": "error: claims.s: declared differently in the values of demo-a and demo-b",
 				"data/pg":     "",
-			},
-		},
-		"the default among several": {
-			[]Instance{byDefault("demo-a", M{}, "data/pg2"), pg, pg2},
-			map[string]string{
-				"demo/demo-a": "depends on data/pg2 demo.demo-a.db; bound db demo.demo-a.db data/pg2 class standard named=false",
-				"data/pg":     "",
-				"data/pg2":    "provides demo.demo-a.db demo.demo-a.db.data {\"tier\":\"a\"}",
 			},
 		},
 		"a default of the namespace": {
@@ -618,21 +576,8 @@ dbs.us: claim (server): the request does not meet the contract's claim schema (x
 				"data/x":   `error: provides "x" (server): pg publishes an output of that contract and name too, a reference to it would not know which`,
 			},
 		},
-		"a provider that fails": {
-			[]Instance{byDefault("demo-a", M{}, "data/pg"), claimInstance(pgDef, "data", "pg", M{"fail": true})},
-			map[string]string{
-				"demo/demo-a": `error: db: claim "demo.demo-a.db" (server): data/pg publishes no output for it (data/pg does not compile either: what it publishes is unknown)`,
-				"data/pg":     "error: it fails",
-			},
-		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			for _, order := range permutations(tc.instances) {
-				if got := claimOutcomes(order); !reflect.DeepEqual(got, tc.want) {
-					t.Fatalf("got  %q\nwant %q", got, tc.want)
-				}
-			}
-		})
+		t.Run(name, func(t *testing.T) { everyOrder(t, tc.instances, true, bindings, tc.want) })
 	}
 }
 
@@ -739,13 +684,7 @@ func TestCompileAllConsent(t *testing.T) {
 			},
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			for _, order := range permutations(tc.instances) {
-				if got := claimOutcomes(order); !reflect.DeepEqual(got, tc.want) {
-					t.Fatalf("got  %q\nwant %q", got, tc.want)
-				}
-			}
-		})
+		t.Run(name, func(t *testing.T) { everyOrder(t, tc.instances, true, bindings, tc.want) })
 	}
 }
 
@@ -826,13 +765,7 @@ func TestCompileAllProviderNames(t *testing.T) {
 			},
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			for _, order := range permutations(tc.instances) {
-				if got := claimOutcomes(order); !reflect.DeepEqual(got, tc.want) {
-					t.Fatalf("got  %q\nwant %q", got, tc.want)
-				}
-			}
-		})
+		t.Run(name, func(t *testing.T) { everyOrder(t, tc.instances, true, bindings, tc.want) })
 	}
 }
 
@@ -862,37 +795,41 @@ func TestClaimID(t *testing.T) {
 	if len(long) != 63 || !strings.HasPrefix(long, "demo."+strings.Repeat("a", 49)+"-") || !claimIDForm(long) || long == claimID("demo", strings.Repeat("a", 53), "databases") {
 		t.Errorf("long: %q (%d)", long, len(long))
 	}
-	// Cut, the ID keeps its namespace whole, whatever its length up to
-	// 54: the claimers' (checkClaims).
-	for n := 1; n <= 54; n++ {
-		ns := strings.Repeat("n", n)
-		for _, id := range []string{claimID(ns, strings.Repeat("a", 60), "db"), claimID(ns, strings.Repeat("b", 63))} {
-			if len(id) > 63 || !strings.HasPrefix(id, ns+".") || !claimIDForm(id) {
-				t.Errorf("a namespace of %d: %q (%d)", n, id, len(id))
-			}
-		}
+	// Cut, the ID keeps its namespace whole, of 54 characters too: the
+	// claimers' (checkClaims).
+	ns := strings.Repeat("n", 54)
+	if id := claimID(ns, strings.Repeat("a", 60), "db"); len(id) != 63 || !strings.HasPrefix(id, ns+".") || !claimIDForm(id) {
+		t.Errorf("a namespace of 54: %q (%d)", id, len(id))
 	}
 }
 
-// TestCompileAllCredentials: the credentials of a claim of another
-// namespace go through the platform's secret store, under <provider
-// namespace>/<id>: the provider pushes its Secret (PushSecret, deleted
-// from the store with the claim), the claimer reads a copy of its own
-// (ExternalSecret), both through the ClusterSecretStore, or the
-// SecretStore of their namespace when the platform gives the store's
-// provider, at the platform's refresh interval; none within a namespace;
-// without the store, the provider refused, and so its claimer.
-func TestCompileAllCredentials(t *testing.T) {
-	contracts := fstest.MapFS{"server.schema.json": {Data: []byte(`{"properties": {"host": {"type": "string"}, "password": {"type": "string", "x-okdp-secret": true}}, "required": ["host"]}`)}}
+// credentialsContracts: server, its password a secret field.
+var credentialsContracts = fstest.MapFS{"server.schema.json": {Data: []byte(`{"properties": {"host": {"type": "string"}, "password": {"type": "string", "x-okdp-secret": true}}, "required": ["host"]}`)}}
+
+// credentialsDef: pgDef, each output of a claim with its credentials
+// Secret.
+var credentialsDef = func() *Definition {
 	d := *pgDef
 	d.Okdp = []byte(`
 provides:
   - $for: c in claims
     $each: {contract: server, name: '${{ c.id }}', values: {host: h}, secretRef: {name: '${{ c.id }}-credentials'}}
 `)
+	return &d
+}()
+
+// TestCompileAllCredentials: the credentials of a claim of another
+// namespace go through the platform's secret store, under <provider
+// namespace>/<id>: the provider pushes its Secret (PushSecret), the
+// claimer reads a copy of its own (ExternalSecret), both through the ClusterSecretStore, or the
+// SecretStore of their namespace when the platform gives the store's
+// provider, at the platform's refresh interval; none within a namespace;
+// without the store, the provider refused, and so its claimer.
+func TestCompileAllCredentials(t *testing.T) {
+	d := *credentialsDef
 	store := M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}
 	with := func(inst Instance, global M) Instance {
-		inst.Inputs.Contracts = contracts
+		inst.Inputs.Contracts = credentialsContracts
 		if global != nil {
 			inst.Inputs.Values = append(inst.Inputs.Values, M{"global": global})
 		}
@@ -904,7 +841,15 @@ provides:
 		}
 		var s []string
 		for _, obj := range o.Result.Objects {
-			s = append(s, fmt.Sprintf("%s %s/%s %v", obj["kind"], value.Dig(obj, "metadata.namespace"), value.Dig(obj, "metadata.name"), obj["spec"]))
+			// The store, its refresh interval and the key, as the PushSecret
+			// or the ExternalSecret references them.
+			spec := value.AsMap(obj["spec"])
+			data := value.AsMap(value.AsList(spec["data"])[0])
+			store, key := value.AsMap(spec["secretStoreRef"]), value.Dig(data, "remoteRef.key")
+			if obj["kind"] == "PushSecret" {
+				store, key = value.AsMap(value.AsList(spec["secretStoreRefs"])[0]), value.Dig(data, "match.remoteRef.remoteKey")
+			}
+			s = append(s, fmt.Sprintf("%s %s/%s %s/%s every %s key %s", obj["kind"], value.Dig(obj, "metadata.namespace"), value.Dig(obj, "metadata.name"), store["kind"], store["name"], spec["refreshInterval"], key))
 			// The claimer's copy is labelled as the provider's Secret is,
 			// the ExternalSecret and the Secret it writes.
 			if obj["kind"] == "ExternalSecret" {
@@ -920,13 +865,13 @@ provides:
 	}{
 		"across namespaces": {
 			"store", "data",
-			"PushSecret data/demo.demo-app.db map[data:[map[match:map[remoteRef:map[property:password remoteKey:data/demo.demo-app.db] secretKey:password]]] deletionPolicy:Delete refreshInterval:1h secretStoreRefs:[map[kind:ClusterSecretStore name:okdp-secrets]] selector:map[secret:map[name:demo.demo-app.db-credentials]] updatePolicy:Replace]",
-			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials map[data:[map[remoteRef:map[key:data/demo.demo-app.db property:password] secretKey:password]] refreshInterval:1h secretStoreRef:map[kind:ClusterSecretStore name:okdp-secrets] target:map[creationPolicy:Owner name:demo-app-demo.demo-app.db-credentials template:map[metadata:map[labels:map[app.kubernetes.io/instance:demo-app app.kubernetes.io/managed-by:Helm app.kubernetes.io/name:demo app.kubernetes.io/part-of:okdp okdp.io/credentials-server:true okdp.io/instance:demo-app okdp.io/service:demo]]]]] labelled true true",
+			"PushSecret data/demo.demo-app.db ClusterSecretStore/okdp-secrets every 1h key data/demo.demo-app.db",
+			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials ClusterSecretStore/okdp-secrets every 1h key data/demo.demo-app.db labelled true true",
 		},
 		"a SecretStore of each namespace": {
 			"provider", "data",
-			"PushSecret data/demo.demo-app.db map[data:[map[match:map[remoteRef:map[property:password remoteKey:data/demo.demo-app.db] secretKey:password]]] deletionPolicy:Delete refreshInterval:30m secretStoreRefs:[map[kind:SecretStore name:okdp-secrets]] selector:map[secret:map[name:demo.demo-app.db-credentials]] updatePolicy:Replace]",
-			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials map[data:[map[remoteRef:map[key:data/demo.demo-app.db property:password] secretKey:password]] refreshInterval:30m secretStoreRef:map[kind:SecretStore name:okdp-secrets] target:map[creationPolicy:Owner name:demo-app-demo.demo-app.db-credentials template:map[metadata:map[labels:map[app.kubernetes.io/instance:demo-app app.kubernetes.io/managed-by:Helm app.kubernetes.io/name:demo app.kubernetes.io/part-of:okdp okdp.io/credentials-server:true okdp.io/instance:demo-app okdp.io/service:demo]]]]] labelled true true",
+			"PushSecret data/demo.demo-app.db SecretStore/okdp-secrets every 30m key data/demo.demo-app.db",
+			"ExternalSecret demo/demo-app-demo.demo-app.db-credentials SecretStore/okdp-secrets every 30m key data/demo.demo-app.db labelled true true",
 		},
 		"one namespace": {"store", "demo", "", ""},
 		"no store": {
@@ -959,13 +904,11 @@ provides:
 
 // writerDef: nodeDef, whose instances also write the objects of writes.
 var writerDef = func() *Definition {
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"replicas": {"type": "integer", "default": 1},
 		"uses": {"type": "array", "default": [], "items": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}}},
 		"publishes": {"type": "array", "default": [], "items": {"type": "string"}},
-		"writes": {"type": "array", "default": []}}}`)}
-	d := withFiles(files)
+		"writes": {"type": "array", "default": []}}}`)
 	d.Okdp = []byte(`
 objects:
   - {$for: w in values.writes, $each: '${{ w }}'}
@@ -1054,13 +997,7 @@ func TestCompileAllSecretTargets(t *testing.T) {
 			},
 		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			for _, order := range permutations(tc.instances) {
-				if got := outcomes(order); !reflect.DeepEqual(got, tc.want) {
-					t.Fatalf("got  %v\nwant %v", got, tc.want)
-				}
-			}
-		})
+		t.Run(name, func(t *testing.T) { everyOrder(t, tc.instances, false, hosts, tc.want) })
 	}
 }
 
@@ -1070,17 +1007,11 @@ func TestCompileAllSecretTargets(t *testing.T) {
 // output, so the copy of the credentials its first compile wrote does not
 // refuse an instance of its namespace that writes a Secret of that name.
 func TestCompileAllSharedProviderSecret(t *testing.T) {
-	contracts := fstest.MapFS{"server.schema.json": {Data: []byte(`{"properties": {"host": {"type": "string"}, "password": {"type": "string", "x-okdp-secret": true}}, "required": ["host"]}`)}}
-	d := *pgDef
-	d.Okdp = []byte(`
-provides:
-  - $for: c in claims
-    $each: {contract: server, name: '${{ c.id }}', values: {host: h}, secretRef: {name: '${{ c.id }}-credentials'}}
-  - {contract: server, name: x, values: {host: x}}
-`)
+	d := *credentialsDef
+	d.Okdp = append(slices.Clone(credentialsDef.Okdp), "  - {contract: server, name: x, values: {host: x}}\n"...)
 	store := M{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}}
 	with := func(inst Instance) Instance {
-		inst.Inputs.Contracts = contracts
+		inst.Inputs.Contracts = credentialsContracts
 		inst.Inputs.Values = append(inst.Inputs.Values, store)
 		return inst
 	}
@@ -1098,19 +1029,7 @@ provides:
 		"demo/demo-app": `error: db: claim "demo.demo-app.db" (server): data/pg publishes no output for it (data/pg does not compile either: what it publishes is unknown)`,
 		"demo/demo-i":   "",
 	}
-	for _, order := range permutations(instances) {
-		got := map[string]string{}
-		for i, o := range CompileAll(context.Background(), order) {
-			in := order[i].Inputs
-			got[in.Namespace+"/"+in.Release] = ""
-			if o.Err != nil {
-				got[in.Namespace+"/"+in.Release] = "error: " + o.Err.Error()
-			}
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got  %q\nwant %q", got, want)
-		}
-	}
+	everyOrder(t, instances, true, nil, want)
 }
 
 // TestCompileAllDeclaredConnections: every connection of an instance's

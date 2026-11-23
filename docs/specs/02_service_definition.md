@@ -354,8 +354,8 @@ The data of a claim's connection outlives the claim: once no instance
 claims it (a claim template's reference gone, a named claim no longer
 declared), its output and the objects the mapping writes
 for it are gone from the compile, and the package keeps what they held (a
-database's reclaim policy, `helm.sh/resource-policy: keep`, which the
-compiler gives Argo CD's equivalents, `argocd.argoproj.io/sync-options:
+database's reclaim policy, `helm.sh/resource-policy: keep`, which a
+host gives Argo CD's equivalents, `argocd.argoproj.io/sync-options:
 Prune=false,Delete=false`, [the objects
 chart](01_inputs_outputs.md#the-objects-chart)): an operator removes it.
 
@@ -701,16 +701,18 @@ must be a map with a non-empty `kind` and `metadata.name`
 list fails; absent or null, there are none. They follow the credentials
 Secrets in `Result.Objects`, written to the values of the chart that
 renders them as written:
-[the objects chart](01_inputs_outputs.md#the-objects-chart). The platform's
-policy then applies to them: unless the project is one of the platform's
-own (`global.okdp.policy.privileged`), every object stays in the
-instance's namespace (`namespace` unset, or `release.namespace`) and none
-is of a cluster-scoped kind (a ClusterRole, a Namespace, a
+[the objects chart](01_inputs_outputs.md#the-objects-chart). The rule
+sets' `objects` hook then runs on each, where the security set holds the
+platform's policy: unless the project is one of the platform's own
+(`global.okdp.policy.privileged`), every object stays in the instance's
+namespace (`namespace` unset, or `release.namespace`) and none is of a
+cluster-scoped kind (a ClusterRole, a Namespace, a
 CustomResourceDefinition...), `okdpGeneratedSecret`'s included; and, in
 every project, no Secret holds values in clear (`data`, `stringData`)
 unless the caller sets `Inputs.AllowPlainSecrets`: an
 `okdpGeneratedSecret`, or an ExternalSecret of the platform's secret
-store ([objects section](01_inputs_outputs.md#objects-section)).
+store ([objects section](01_inputs_outputs.md#objects-section)). A
+compile without the security set refuses none of these.
 
 ### instance
 
@@ -977,7 +979,7 @@ The variables of every expression:
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
 | `claims` | The claims bound to the instance (`Inputs.Claims`), in order, each `{id, contract, namespace, name, request}`: the connection to provision and publish, an output of `contract` named `id`; the namespace of the instances that claim it; the named claim's name, `""` for a claim template's; what it requests, as the contract's claim schema allows (`x-okdp-claim`), its defaults applied, `{}` when it has none ([provisions](#provisions)). `[]` when none. |
 | `values` | The parameters: the defaults of `config.schema.json` and the values layers (`Inputs.Values`), merged in order and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in a connection. Without `global`, `connections` and `claims`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
-| `global` | `global` of the same merged values, as written: `okdp`, the settings ([values layers](01_inputs_outputs.md#values-layers)), and the other keys (`imageRegistry`, a project's own `global.project`), which every chart receives too. |
+| `global` | `global` of the same merged values, as written: `okdp`, the settings of the layers ([values layers](01_inputs_outputs.md#values-layers)), and the other keys (`imageRegistry`, a project's own `global.project`), which every chart receives too. Never the host's settings ([host settings](01_inputs_outputs.md#host-settings)), which `platform` derives from with the layers'. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `Chart.yaml`, as written ([Chart.yaml](#chartyaml)). |
 | `labels` | the labels of OKDP's objects, below, without component. |
@@ -995,7 +997,7 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 | Variable | Value |
 |---|---|
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
-| `platform.access` | who may use the namespace's services: the groups of the namespace (`global.okdp.access.groups`, which a host gives in `Inputs.Settings`, the `access` of its `Project` document for `okdp-compile`, none when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A group refused (a name the platform schema refuses, a role of none of these) refuses the instance. |
+| `platform.access` | with the security set only, whose scope gives it: who may use the namespace's services: the groups of the namespace (`global.okdp.access.groups`, which a host gives in its settings, `Inputs.Settings`, or in a layer of the namespace's, the values of its `Project` document for `okdp-compile`, none when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A group refused by the set's platform schema (a name with a `/` or a space, a role of none of these) refuses the instance. |
 
 The settings these are derived from are checked against the platform
 schema first (`- at '/global/okdp/access': got boolean, want object`):

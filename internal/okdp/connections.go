@@ -169,23 +169,21 @@ func (r *resolver) requirement(ref M) (*requirement, error) {
 
 // declaredConnections checks every connection of in at its declaration,
 // whether a reference names it or not. It returns nil when the values
-// layers fail: the instance's compile reports them. seen is as
-// checkDeclared's.
-func declaredConnections(in Inputs, seen map[string]error) error {
-	ls, err := valuesLayers(in)
+// layers fail: the instance's compile reports them.
+func declaredConnections(in Inputs) error {
+	l, err := valuesLayers(in)
 	if err != nil {
 		return nil //nolint:nilerr // the instance's compile reports it
 	}
-	return checkDeclared(in, ls.layers, ls.platform, seen)
+	return checkDeclared(in, l)
 }
 
 // checkDeclared is declaredConnections once the values layers are read
-// (valuesLayers). seen, when not nil, holds the outcome of each connection
-// checked so far, by what its check reads (declarationKey): the instances
-// of a namespace that share a connection check it once.
-func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[string]error) error {
+// (valuesLayers).
+func checkDeclared(in Inputs, ls layered) error {
+	platform := ls.platform
 	conns := M{}
-	for _, l := range layers {
+	for _, l := range ls.layers {
 		if c, ok := l["connections"].(M); ok {
 			conns = value.Merge(conns, c)
 		}
@@ -199,7 +197,7 @@ func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[stri
 		release:   in.Release,
 		namespace: in.Namespace,
 	}
-	return r.declared(seen)
+	return r.declared()
 }
 
 // CheckConnection checks one connection as CompileAll checks it at its
@@ -219,40 +217,18 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, nam
 		provider:  provider,
 		namespace: namespace,
 	}
-	return r.declared(nil)
+	return r.declared()
 }
 
 // declared checks every connection of the values, in name order, and
-// reports every one that fails, each at connections.<name>. seen, when not
-// nil, holds the outcome of the connections checked before, by
-// declarationKey, and receives those it checks.
-func (r *resolver) declared(seen map[string]error) error {
+// reports every one that fails, each at connections.<name>.
+func (r *resolver) declared() error {
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(r.conns)) {
-		key, keyed := r.declarationKey(name)
-		err, done := seen[key]
-		if !keyed || !done {
-			field := value.Key("connections", name)
-			err = atField(field, r.declaration(name, field))
-		}
-		if keyed && seen != nil {
-			seen[key] = err
-		}
-		errs = append(errs, err)
+		field := value.Key("connections", name)
+		errs = append(errs, atField(field, r.declaration(name, field)))
 	}
 	return errors.Join(errs...)
-}
-
-// declarationKey identifies what the check of the connection name at its
-// declaration reads: its entry, the namespace, the secret
-// store and its provider, and the contracts. keyed is false when the entry
-// cannot be encoded.
-func (r *resolver) declarationKey(name string) (key string, keyed bool) {
-	b, err := json.Marshal(r.conns[name])
-	if err != nil {
-		return "", false
-	}
-	return fmt.Sprintf("%p %q %q %t %q %s", r.contracts, r.namespace, r.store, r.provider, name, b), true
 }
 
 // declaration checks the connection name, declared at field, as a
@@ -490,10 +466,16 @@ func ParseConnection(name string, v any) Connection {
 	}
 }
 
-// Entry returns the connection as written at connections.<name>. A key of
-// Values named contract, description or secretRef is left out.
-func (c Connection) Entry() map[string]any {
-	out := c.fields()
+// ConnectionEntry returns c as written at connections.<name>, what the
+// checks of a connection read. A key of Values named contract, description
+// or secretRef is left out.
+func ConnectionEntry(c Connection) map[string]any {
+	out := M{}
+	for k, v := range c.Values {
+		if k != "contract" && k != "description" && k != "secretRef" {
+			out[k] = v
+		}
+	}
 	out["contract"] = c.Contract
 	if c.Description != "" {
 		out["description"] = c.Description
@@ -507,38 +489,6 @@ func (c Connection) Entry() map[string]any {
 			ref["remoteKey"] = c.RemoteKey
 		}
 		out["secretRef"] = ref
-	}
-	return out
-}
-
-// MarshalYAML encodes the connection as written (yaml.v3): its own keys
-// first, then the contract's fields, sorted.
-func (c Connection) MarshalYAML() (any, error) {
-	type ref struct {
-		Name      string `yaml:"name,omitempty"`
-		RemoteKey string `yaml:"remoteKey,omitempty"`
-	}
-	entry := struct {
-		Contract    string `yaml:"contract"`
-		Description string `yaml:"description,omitempty"`
-		SecretRef   *ref   `yaml:"secretRef,omitempty"`
-		Fields      M      `yaml:",inline"`
-	}{Contract: c.Contract, Description: c.Description}
-	if c.SecretRef != "" || c.RemoteKey != "" {
-		entry.SecretRef = &ref{Name: c.SecretRef, RemoteKey: c.RemoteKey}
-	}
-	entry.Fields = c.fields()
-	return entry, nil
-}
-
-// fields returns Values without the keys the connection's own fields
-// give: contract, description and secretRef.
-func (c Connection) fields() M {
-	out := M{}
-	for k, v := range c.Values {
-		if k != "contract" && k != "description" && k != "secretRef" {
-			out[k] = v
-		}
 	}
 	return out
 }
@@ -714,11 +664,7 @@ func readContract(fsys fs.FS, name string) (*contract, error) {
 		return fmt.Errorf("the %s contract cannot be read: %s: %v", name, file, cause)
 	}
 	if err != nil {
-		// The PathError is unwrapped: fail already names the file.
-		if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
-			err = pe.Err
-		}
-		return nil, fail(err)
+		return nil, fail(value.UnwrapPath(err))
 	}
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(b))
 	if err != nil {

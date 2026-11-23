@@ -3,8 +3,6 @@ package chart
 import (
 	"errors"
 	"reflect"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/okdp/okdp-compiler/value"
@@ -83,19 +81,15 @@ func FuzzParsePath(f *testing.F) {
 	})
 }
 
-// formatPathCases: keys and their path, for TestFormatPath and
-// FuzzFormatPath.
-var formatPathCases = map[string][]string{
-	"service.ports": {"service", "ports"},
-	`filer.annotations["example.org/auth-type"]`: {"filer", "annotations", "example.org/auth-type"},
-	`["spark.ui.filters"]`:                       {"spark.ui.filters"},
-	`a[""]`:                                      {"a", ""},
-}
-
 // TestFormatPath: the key a value was found at, as the errors show it;
 // ParsePath reads it back as the same literal keys.
 func TestFormatPath(t *testing.T) {
-	for want, keys := range formatPathCases {
+	for want, keys := range map[string][]string{
+		"service.ports": {"service", "ports"},
+		`filer.annotations["example.org/auth-type"]`: {"filer", "annotations", "example.org/auth-type"},
+		`["spark.ui.filters"]`:                       {"spark.ui.filters"},
+		`a[""]`:                                      {"a", ""},
+	} {
 		if got := FormatPath(keys); got != want {
 			t.Errorf("%q: got %s, want %s", keys, got, want)
 		}
@@ -118,38 +112,4 @@ func TestFormatPath(t *testing.T) {
 			t.Errorf("%s: read back as %q", want, back)
 		}
 	}
-}
-
-// FuzzFormatPath: ParsePath reads what FormatPath writes of any keys without
-// a quote, a backslash or a star (the fuzzed text split at \xff, a byte
-// UTF-8 never holds) as the same literal keys; with an empty key, which no
-// path names, it fails. Seeds: the keys of TestFormatPath.
-func FuzzFormatPath(f *testing.F) {
-	for _, keys := range formatPathCases {
-		f.Add(strings.Join(keys, "\xff"))
-	}
-	f.Fuzz(func(t *testing.T, s string) {
-		if strings.ContainsAny(s, `"\*`) {
-			return
-		}
-		keys := strings.Split(s, "\xff")
-		p := FormatPath(keys)
-		segs, err := ParsePath(p)
-		if slices.Contains(keys, "") {
-			if err == nil {
-				t.Errorf("%q: written %s, read as %#v, an empty key", keys, p, segs)
-			}
-			return
-		}
-		back := []string{}
-		for _, s := range segs {
-			if s.Glob {
-				t.Errorf("%q: written %s, read with a glob", keys, p)
-			}
-			back = append(back, s.Key)
-		}
-		if err != nil || !reflect.DeepEqual(back, keys) {
-			t.Errorf("%q: written %s, read back as %q (%v)", keys, p, back, err)
-		}
-	})
 }

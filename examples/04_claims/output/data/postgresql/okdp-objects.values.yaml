@@ -72,68 +72,6 @@ manifests: |
       app.kubernetes.io/part-of: okdp
       okdp.io/instance: data-postgresql
       okdp.io/service: postgresql
-    name: demo.app.database-credentials-password
-    namespace: data
-  spec:
-    allowRepeat: true
-    digits: 6
-    length: 32
-    noUpper: false
-    symbols: 0
-  ---
-  apiVersion: external-secrets.io/v1
-  kind: ExternalSecret
-  metadata:
-    labels:
-      app.kubernetes.io/instance: data-postgresql
-      app.kubernetes.io/managed-by: Helm
-      app.kubernetes.io/name: postgresql
-      app.kubernetes.io/part-of: okdp
-      okdp.io/credentials-database-server: "true"
-      okdp.io/instance: data-postgresql
-      okdp.io/service: postgresql
-    name: demo.app.database-credentials
-    namespace: data
-  spec:
-    dataFrom:
-      - rewrite:
-          - regexp:
-              source: ^password$
-              target: password
-        sourceRef:
-          generatorRef:
-            apiVersion: generators.external-secrets.io/v1alpha1
-            kind: Password
-            name: demo.app.database-credentials-password
-    refreshInterval: "0"
-    target:
-      creationPolicy: Owner
-      name: demo.app.database-credentials
-      template:
-        data:
-          password: '{{ index . "password" }}'
-          username: demo.app.database
-        engineVersion: v2
-        metadata:
-          labels:
-            app.kubernetes.io/instance: data-postgresql
-            app.kubernetes.io/managed-by: Helm
-            app.kubernetes.io/name: postgresql
-            app.kubernetes.io/part-of: okdp
-            okdp.io/credentials-database-server: "true"
-            okdp.io/instance: data-postgresql
-            okdp.io/service: postgresql
-  ---
-  apiVersion: generators.external-secrets.io/v1alpha1
-  kind: Password
-  metadata:
-    labels:
-      app.kubernetes.io/instance: data-postgresql
-      app.kubernetes.io/managed-by: Helm
-      app.kubernetes.io/name: postgresql
-      app.kubernetes.io/part-of: okdp
-      okdp.io/instance: data-postgresql
-      okdp.io/service: postgresql
     name: demo.metrics.database-credentials-password
     namespace: data
   spec:
@@ -190,7 +128,6 @@ manifests: |
   kind: Database
   metadata:
     annotations:
-      argocd.argoproj.io/sync-options: Prune=false,Delete=false
       helm.sh/resource-policy: keep
     labels:
       app.kubernetes.io/instance: data-postgresql
@@ -213,30 +150,6 @@ manifests: |
   kind: Database
   metadata:
     annotations:
-      argocd.argoproj.io/sync-options: Prune=false,Delete=false
-      helm.sh/resource-policy: keep
-    labels:
-      app.kubernetes.io/instance: data-postgresql
-      app.kubernetes.io/managed-by: Helm
-      app.kubernetes.io/name: postgresql
-      app.kubernetes.io/part-of: okdp
-      okdp.io/instance: data-postgresql
-      okdp.io/service: postgresql
-    name: demo.app.database
-  spec:
-    cluster:
-      name: data-postgresql
-    databaseReclaimPolicy: retain
-    extensions:
-      - name: pgvector
-    name: demo_app_database
-    owner: demo.app.database
-  ---
-  apiVersion: postgresql.cnpg.io/v1
-  kind: Database
-  metadata:
-    annotations:
-      argocd.argoproj.io/sync-options: Prune=false,Delete=false
       helm.sh/resource-policy: keep
     labels:
       app.kubernetes.io/instance: data-postgresql
@@ -288,40 +201,6 @@ manifests: |
     selector:
       secret:
         name: demo.analytics-credentials
-    updatePolicy: Replace
-  ---
-  apiVersion: external-secrets.io/v1alpha1
-  kind: PushSecret
-  metadata:
-    labels:
-      app.kubernetes.io/instance: data-postgresql
-      app.kubernetes.io/managed-by: Helm
-      app.kubernetes.io/name: postgresql
-      app.kubernetes.io/part-of: okdp
-      okdp.io/instance: data-postgresql
-      okdp.io/service: postgresql
-    name: demo.app.database
-    namespace: data
-  spec:
-    data:
-      - match:
-          remoteRef:
-            property: password
-            remoteKey: data/demo.app.database
-          secretKey: password
-      - match:
-          remoteRef:
-            property: username
-            remoteKey: data/demo.app.database
-          secretKey: username
-    deletionPolicy: Delete
-    refreshInterval: 1h
-    secretStoreRefs:
-      - kind: SecretStore
-        name: okdp-secrets
-    selector:
-      secret:
-        name: demo.app.database-credentials
     updatePolicy: Replace
   ---
   apiVersion: external-secrets.io/v1alpha1

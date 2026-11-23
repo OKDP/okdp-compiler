@@ -12,6 +12,7 @@ and of what it produces. The library's calls are in
 | Package files | `Definition.Files` (`fs.FS`) | yes | [Package files](#package-files) |
 | Contracts | `Inputs.Contracts` (`fs.FS`) | yes | [Contracts](#contracts) |
 | Values layers | `Inputs.Values` (`[]map[string]any`) | no | [Parameters](#parameters), [Values layers](#values-layers), [Instance values](#instance-values), [Values files](#values-files) |
+| Host settings | `Inputs.Settings` (`map[string]any`, the content of `global.okdp`) | no | [Host settings](#host-settings) |
 | Release name | `Inputs.Release` | yes | `release.name`, object names; an `Instance` document's, `<project>-<name>` ([input documents](#input-documents)) |
 | Namespace | `Inputs.Namespace` | yes | `release.namespace`, object namespaces, `${namespace}` of contracts |
 | Instance name | `Inputs.Name` | no: the release; `CompileAll` sets it (`Instance.Name`) | the name of the outputs that name none ([provides](02_service_definition.md#provides)), of the instance's claims' IDs ([claims](#claims)); an `Instance` document's, its `name` |
@@ -19,10 +20,9 @@ and of what it produces. The library's calls are in
 | The claims bound to the instance, a provider | `Inputs.Claims` (`[]Claim`) | no; `CompileAll` sets them | [Claims](#claims) |
 | The namespaces that may claim of the instance, a provider, from another namespace | `Inputs.Claimers` (`[]string`) | no: its package's (`provisions`), none by default; an `Instance` document's, its `claimers` | [Providers](#providers) |
 | The providers the instance's claims are bound to | `Inputs.Bindings` (`map[string]Binding`, by parameter path) | no: a claim then fails; `CompileAll` sets them | [Claims](#claims) |
-| Host settings, the groups of the namespace and their roles among them | `Inputs.Settings` (`map[string]any`, the content of `global.okdp`) | no: none; an `Instance` document's, its project's `access`, as `access.groups` | [Host settings](#host-settings), [Access](#access) |
-| The rule set | `Inputs.Rules` (`*RuleSet`) | no: the mandatory set alone | [Rule set](#rule-set) |
+| The rule sets | `Inputs.Rules` (`*RuleSet`) | no: the mandatory set alone | [Rule set](#rule-set) |
 | The final values | `Inputs.Finalize` | no: Helm's merge, no policy, no check against the upstream charts | [Rule set](#rule-set), [Chart cache](#chart-cache) |
-| Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret, of a `provides` `secret` or of the objects, fails | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
+| Credentials in clear accepted | `Inputs.AllowPlainSecrets` (`bool`) | no: a plain Secret of a `provides` `secret` fails, and, with the security set, one of the objects | [Credentials Secrets](#credentials-secrets), [Objects section](#objects-section) |
 
 A nil `*Definition`, `context.Context` or file system panics: the caller
 gives them. The names are checked before anything is read: the release is
@@ -34,61 +34,74 @@ each end); an empty one fails as another:
 | Case | Error |
 |---|---|
 | a release that is not a DNS-1123 label, or longer than 53 characters (Helm's limit) | `Inputs.Release "<name>": a release name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 53 characters at most (Helm's limit)` |
-| a release that is the name of an object the platform writes in every namespace (`okdp-project`, `okdp-control-plane`, `okdp-access-viewer`, `-editor`, `-admin`, `okdp-secrets`, the names `global.okdp.secrets` gives, and those an added rule set lists), or its beginning up to a `-` (`okdp`, `okdp-access`): the objects of a release are named `<release>` and `<release>-<x>`, and would take its place | `Inputs.Release "okdp-project": the name of an object the platform writes in every namespace (okdp-project), or its beginning up to a "-": ...` |
+| with a host's set, a release that is the name of an object the host writes in every namespace (a Role, the secret store's ServiceAccount...), or its beginning up to a `-`: the objects of a release are named `<release>` and `<release>-<x>`, and would take its place | the host's set's, at the hook `release` |
 | a namespace that is not a DNS-1123 label, or longer than 63 characters | `Inputs.Namespace "<name>": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 | the namespace `platform`, reserved: the platform's keys of the secret store are under `platform/` ([what the store must enforce](#what-the-store-must-enforce)) | `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` |
 | a namespace `kube-*`, Kubernetes' own (`kube-system`, `kube-public`, `kube-node-lease`) | `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)` |
-| a namespace of the deployer engines or of the objects the targets write there, `flux-system`, `argocd`, `okdp-releases`: a project's releases, with every verb of their namespace, would rewrite the engine's sources, Applications, HelmReleases or the other projects' identities ([targets](#targets)) | `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine` |
-| a namespace the platform reserves, `global.okdp.policy.reserved` ([fields the compiler reads](#fields-the-compiler-reads)), checked once the platform's settings are read; one `policy.privileged` lists too is reserved all the same | `Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`, then `, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins` |
+| with a host's set, a namespace of the deployer engines or of the objects the host's targets write there: a project's releases, with every verb of their namespace, would rewrite the engine's sources, Applications, HelmReleases or the other projects' identities ([targets](#targets)) | the host's set's, at the hook `namespace` |
+| with the security set, a namespace the platform reserves, `global.okdp.policy.reserved` ([its settings](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#platform-settings)); one `policy.privileged` lists too is reserved all the same | `Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`, then `, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins` |
 | an instance name that is set and not a DNS-1123 label | `Inputs.Name "<name>": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most` |
 
-Those of the namespaces and the platform's object names are the mandatory
-rule set's ([rule set](#rule-set)).
+The release and the namespace are DNS labels before anything is read.
+The other rows are the rule sets' hooks `namespace` and `release`, run
+once the platform's settings are read, before the connections: the
+mandatory set's, then those of the sets added, the security set's and a
+host's ([rule set](#rule-set)). A
+namespace an added set refuses is so refused after the errors of the
+parameters and the settings.
 
 Paths in an `fs.FS` are relative to its root.
 
 ## Rule set
 
 A compile applies its rules as data. The mandatory set, embedded
-(`internal/rules/mandatory`), applied to every compile, is what a compile
-needs to write values a chart installs and what it refuses of a
-platform: the schema of `global.okdp` (`platform.schema.json`), with its
-defaults; the values the mapping sees as `platform`; the functions; the
-labels of OKDP's objects; the names of the Secrets that carry
-credentials; the documents of the secret store's objects; the tables and
-the CEL checks; the schema of the mapping's sections
-(`mapping.schema.json`); the platform's charts.
+(`internal/rules/mandatory`), applied to every compile, is what a
+compile needs to write values a chart installs and the namespaces it
+keeps on every platform: the schema of `global.okdp`
+(`platform.schema.json`), with its defaults; the values the mapping
+sees as `platform`; the functions; the labels of OKDP's objects; the
+names of the Secrets that carry credentials; the documents of the
+secret store's objects; the document of its hook `namespace`; the
+schema of the mapping's sections (`mapping.schema.json`); the
+platform's charts.
 
-`Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules`), adds a
-platform's own rules to it; nil, the mandatory set alone applies.
-`LoadRules` refuses a set that gives a rule of the mandatory one (`a rule
-set adds rules, it replaces none`). Every rule this document gives as
-OKDP's is the mandatory set's ([the rule set](05_rules.md)). An added set
-brings its own settings, sections, functions and checks: the hosts a
-project serves, its OAuth clients, the hardened pod and the policy on
-upstream values are those of the security set, whose inputs and outputs
-are in [its
+`Inputs.Rules`, a `*compiler.RuleSet` (`compiler.LoadRules(sets...)`),
+adds a platform's own sets to it, in order; nil, the mandatory set alone
+applies. `LoadRules` refuses a set that gives a rule of a set read
+before (`a rule set adds rules, it replaces none`). Every rule this
+document gives as OKDP's is the mandatory set's ([the rule
+set](05_rules.md)). An added set brings its own settings, sections,
+functions and the documents of the compiler's hooks, which it calls for
+every project: the platform's policy (an object of a cluster-scoped
+kind, of an engine's kind or of another namespace, a Secret in clear,
+the namespaces the platform reserves, but in its privileged projects),
+the groups of each role, the hosts a project serves, its OAuth clients,
+the hardened pod and the policy on upstream values are those of the
+security set, whose inputs and outputs are in [its
 reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md).
+A compile without it refuses none of them. The namespaces of a host's
+engines, the names of the objects it writes in every namespace and the
+settings its targets read are the host's own set's.
 
 The policy over the upstream values is no rule of the compile: it is the
-host's, through a hook. `Inputs.Finalize` makes the final values from
-what the compile computed, Helm's merge when nil, with no policy. What
-the values layers may set of `global`, which every chart receives, is
-the host's too, checked before it compiles ([layers of several
+host's, through a hook. `Inputs.Finalize` makes the final values from what
+the compile computed, Helm's merge when nil, with no policy. What the
+values layers may set of `global`, which every chart receives, is the
+host's too, checked before it compiles ([layers of several
 origins](#layers-of-several-origins)). `FinalInput` gives a `Finalize`
 what it renders one chart key with: the chart (`Specs[key].Source`), the
 `Release` and the `Namespace`, and the final values it returns; the
 compiler reads no upstream chart, so a host that checks or renders one
 fetches it itself. `compiler.FinalValues` is Helm's merge, for a
 `Finalize` to add to; its `FinalValuesOf.Appended` gives the lists the
-instance appended to ([append](#append)). The compile runs the rule
-set's `finalValues` hook on the values a `Finalize` returns ([checks of
-the final values](#checks-of-the-final-values)).
-`compiler.CheckObjects` checks the manifests a host renders with the
-rule set of the compile, as a compile checks its own objects: check
-`object`, then the `objects` hook. A host may use its `Finalize` and
-`CheckObjects` to check the final values against the upstream charts
-([chart cache](#chart-cache)) and to render them.
+instance appended to ([append](#append)). The compile runs the rule set's
+`finalValues` hook on the values a `Finalize` returns ([checks of the
+final values](#checks-of-the-final-values)). `compiler.CheckObjects`
+checks the manifests a host renders with the rule sets of the compile, as
+a compile checks its own objects: the `objects` hook, with the settings
+and `allowPlainSecrets`. A host may use its `Finalize` and `CheckObjects`
+to check the final values against the upstream charts ([chart
+cache](#chart-cache)) and to render them.
 
 ## Package files
 
@@ -1096,10 +1109,11 @@ compiler, `LoadInputs` and `okdp-compile` check none of it
 - which keys of `global` beside `okdp`: every chart of an instance
   receives `global`, past its package's `protect` and the upstream
   policy, so `global.imageRegistry` or `global.podLabels` reaches the
-  charts that read them past both. The platform schema still accepts
-  `global.okdp.policy.projectGlobals`, a list of such keys, which the
-  compiler reads nowhere; okdp-compiler-security's `policy.CheckGlobals`
-  checks what they hold as the upstream values are;
+  charts that read them past both. The security set's platform schema
+  accepts `global.okdp.policy.projectGlobals`, a list of such keys,
+  which the compiler reads nowhere; okdp-compiler-security's
+  `policy.CheckGlobals` checks what they hold as the upstream values
+  are;
 - template code, `{{`, in the layers it does not review, which the
   compiler refuses in the upstream values and the connections only;
 - which keys of the secret store a namespace's connections read
@@ -1107,10 +1121,10 @@ compiler, `LoadInputs` and `okdp-compile` check none of it
   store](#credentials-in-the-platforms-secret-store));
 - who declares the named claims and the classes, whose providers serve
   another namespace with its consent only ([providers](#providers));
-- who gives the groups of a namespace and their roles,
-  `global.okdp.access.groups`: a host that gives them in its settings
-  (`Inputs.Settings`), which no layer may set too, keeps every layer
-  from giving them ([host settings](#host-settings), [access](#access)).
+- who gives the groups of a namespace and their roles
+  (`global.okdp.access.groups`, a setting of the security set, which a
+  host gives in its settings, [host settings](#host-settings), or in
+  the namespace's own layer, [access](#access)).
 
 ```yaml
 # okdp-compiler-security: examples/03_full/input/config/demo/project.yaml,
@@ -1169,9 +1183,9 @@ global.okdp.access.groups: set both by the values (Inputs.Values) and by the hos
 
 They are normalized as a layer is ([values files](#values-files)): what
 a values file cannot hold fails, `Inputs.Settings: ` before the error.
-`LoadInputs` gives each instance the groups of its project's `Project`
-document there, `{access: {groups: ...}}` ([project](#project)).
-`CompileAll` compiles each instance with its own.
+The input documents give none: `okdp-compile` gives every setting in the
+values ([what a compile receives](#what-a-compile-receives)). `CompileAll`
+compiles each instance with its own.
 
 ### Requirements
 
@@ -1212,17 +1226,10 @@ reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/0
 | `proxy.httpProxy`, `proxy.httpsProxy`, `proxy.noProxy` | `platform.proxyEnv` |
 | `provisioning.<contract>` | the classes of the claims of the contract, each a provider and what it fixes of the request, and the default class, of the claims that name neither a class nor a provider ([classes](#classes)): a provider of another namespace serves a class's claims with its consent only ([providers](#providers)) |
 | `secrets.store` | the name of the secret store the credentials of claims across namespaces go through, under `<provider namespace>/<id>` ([credentials across namespaces](#credentials-across-namespaces)), and where a connection may keep its own, the platform's under `platform/` ([credentials in the platform's secret store](#credentials-in-the-platforms-secret-store)) |
-| `secrets.provider`, `secrets.serviceAccount` | set, the store is a SecretStore in each project's namespace, `provider` its spec verbatim (External Secrets' `spec.provider`), authenticating with the ServiceAccount `serviceAccount` of the namespace, which the [targets](#targets) write (`Result.SecretStore`), and which the PushSecrets and ExternalSecrets reference (`kind: SecretStore`); unset, a ClusterSecretStore of the platform's, one identity for every namespace |
+| `secrets.provider`, `secrets.serviceAccount` | set, the store is a SecretStore in each project's namespace, `provider` its spec verbatim (External Secrets' `spec.provider`), authenticating with the ServiceAccount `serviceAccount` of the namespace, which the [targets](#targets) write (the `store` of the rule set's document `secretStore`), and which the PushSecrets and ExternalSecrets reference (`kind: SecretStore`); unset, a ClusterSecretStore of the platform's, one identity for every namespace |
 | `secrets.refreshInterval` | `1h` by default: how often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it |
-| `policy.privileged` | the namespaces of the platform's own projects (cert-manager, an operator...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value; the other projects' objects stay in their namespace, none cluster-scoped ([Objects section](#objects-section)), and their upstream values are held to a host's policy ([rule set](#rule-set)); `Result.Privileged`, which the [targets](#targets) read to give their releases the engine's own identity, the other projects' one confined to their namespace |
-| `policy.reserved` | namespaces no project may have, beside those the compiler reserves (`platform`, `kube-*`, `flux-system`, `argocd`, `okdp-releases`, [Inputs](#inputs-and-outputs)): the platform's own components that are not its projects (the secret store's, the identity provider's, the git server's); every instance of such a project refused, privileged or not. `default` is not reserved: a project may be named so |
-| `policy.projectGlobals` | checked against the schema and read by no compile: a host's list of the keys of `global` beside `okdp` the layers it does not review set ([layers of several origins](#layers-of-several-origins)) |
-| `access.admins` | the groups of the platform's administrators, as the identity provider's tokens give them, which the mapping sees in each list of `platform.access` beside the namespace's groups (`access.groups`); the compiler writes nothing of them ([access](#access)) |
-| `access.groups` | the groups of the namespace, each its role, `viewer`, `editor` or `admin`, which the mapping sees in `platform.access`; a host gives them per namespace in its settings (`Inputs.Settings`), which no chart receives; none by default ([access](#access)) |
-| `access.groupPrefix` | `""` by default: the prefix the Kubernetes API server gives the groups of its OIDC users (`--oidc-groups-prefix`), which the RoleBindings of the projects' groups name them with ([access](#access)) |
-| `network.policy` | `false` by default: `true`, a host's [targets](#targets) write a NetworkPolicy in each project's namespace but the platform's own (`policy.privileged`), its ingress denied but from the namespace itself, `network.ingressNamespaces` and the namespaces whose claims its instances provide, its egress open (`Result.Network`); off by default, as the compiler knows neither the cluster's ingress controller nor whether its network plugin enforces a policy: on, without the ingress controller's namespace, the services lose their ingress |
-| `network.ingressNamespaces` | none by default: the namespaces whose pods reach every project's pods with `network.policy`: the ingress controller's, a monitoring's; DNS labels, once each |
-| `controlPlane.serviceAccount` | no default: the identity of the optional control plane, `{namespace, name}`, a DNS label and a DNS subdomain, both required; a host's [targets](#targets) bind it in each project's namespace to what it needs there (`Result.ControlPlane`); absent, the platform has no control plane, and nothing is written |
+| `policy.privileged`, `policy.reserved`, `policy.projectGlobals`, `access.admins`, `access.groups` | settings of the security set, which defines `policy` and `access` and closes them ([its settings](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#platform-settings)), taken unread by a compile without it: the platform's own projects, which its documents exempt and a host gives the engine's own identity ([targets](#targets)); the namespaces no project may have beside those the mandatory set keeps; a host's list of the keys of `global` a project's layers may set; the platform's administrators and a namespace's groups, which a mapping sees in `platform.access` ([access](#access)) |
+| what a host's [targets](#targets) read and the compiler does not | settings of the host's own set, its keys of `access` and `policy` among them: a network policy, a control plane's identity, the prefix of the groups in RoleBindings ([access](#access)), the API groups of a project's Role ([the deployer's Role](05_rules.md#the-deployers-role)) |
 
 Every compile checks `global` against the schema, in every mode, before
 the [connections](#connections) and the [requirements](#requirements), and
@@ -1253,6 +1260,8 @@ the values (Inputs.Values) don't meet the specifications of the schema of global
 The mapping sees `global.okdp` as written and `platform` as derived, with
 the defaults ([Context](02_service_definition.md#context)). `global`
 also reaches every upstream chart ([Merge precedence](#merge-precedence)).
+The [host settings](#host-settings) are checked with the layers' and
+reach `platform`, never `global`.
 
 ### Platform charts
 
@@ -1406,7 +1415,7 @@ values layers', [Values layers](#values-layers)), under the `global` of
 layer 2, and left out when empty: Helm gives every chart one. The
 `global` of OKDP's defaults is not kept; layer 3 may not set it
 (protected). Every chart thus gets the layers' `global`, the settings
-among it.
+among it, never the [host settings](#host-settings).
 
 The layers are merged as Helm merges `-f` files: maps merge key by key,
 lists and scalars replace (except at [append](#append) paths), a `null`
@@ -1467,11 +1476,11 @@ and the chart of each key, and the lists the instance appended to
 (`compiler.FinalValues`, `FinalValuesOf`). What a host does of a chart it
 could not fetch is its own.
 
-The compiler itself runs one check of the final values: the rule set's
-`finalValues` hook, on the values of each key, for a project that is not
-privileged ([hooks](05_rules.md#hooks)). The compile runs it on what
-Finalize returns, after the host's own checks, or right after Helm's
-merge.
+The compiler itself runs one check of the final values: the rule sets'
+`finalValues` hook, on the values of each key, for every project, its
+documents exempting whom they will ([hooks](05_rules.md#hooks)). The
+compile runs it on what Finalize returns, after the host's own checks, or
+right after Helm's merge.
 
 Each compiled chart whose source has a `values.schema.json` in the
 chart cache is checked on its final values coalesced over
@@ -1526,8 +1535,7 @@ upstream.app.env: appended to the package's list, not to the default list of app
 | `Service`, `Version` | `string` | the `name` and `version` of `Chart.yaml` |
 | `Chart` | `compiler.ChartMetadata` | the package's `Chart.yaml`, as read, its dependencies as written |
 | `ObjectsSource` | `compiler.ChartRef` | the chart of the objects, `global.okdp.charts.objects` or the rule set's default ([Platform charts](#platform-charts)) |
-| `Computed` | `map[string]any` | chart key -> what the mapping computed for it, before `Finalize` made `Values` of it |
-| `Privileged`, `SecretStore`, `Settings`, `KeepSync`, `Claims` | | what a host's writers read: whether it is one of the platform's own, the platform's store and settings, the host's among them (the project's groups, `access.groups`), what Argo CD is told of the objects Helm keeps, the claims bound to the instance |
+| `Settings`, `Claims` | | what a host's writers read: the platform's settings (`global.okdp`, checked, its defaults applied), of which the rule set's document `secretStore` gives the store a host writes in the namespace, and, with the security set, the project's groups (`access.groups`) and whether it is one of the platform's own (`policy.privileged`, its `policy.Privileged`); the claims bound to the instance |
 | `Warnings` | `[]string` | what the compile warns of without failing, the package's (`Definition.Warnings`): a `values.yaml` that holds expressions ([values.yaml](02_service_definition.md#valuesyaml)); a list appended to that drops a chart's defaults ([append](#append)); a literal of the upstream values at a sensitive key ([objects section](#objects-section)); nil when none. The binary prints each on stderr, `warning: <message>` |
 
 `Values` and `Charts` have one entry per compiled chart: every dependency
@@ -1682,8 +1690,9 @@ in the release's manifests. They are generated in the cluster
 (`generate`), or the output points at a Secret another object writes
 (`secretRef`: an operator's, an upstream chart's, an ExternalSecret
 reading the platform's secret store). `Inputs.AllowPlainSecrets` accepts
-a plain Secret, for a caller that knows its repository private, and the
-[objects section](#objects-section)'s alike.
+a plain Secret, for a caller that knows its repository private, and,
+where the security set refuses them, the [objects
+section](#objects-section)'s alike.
 
 A generated Secret is what `okdpGeneratedSecret` renders
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret): key
@@ -1751,15 +1760,26 @@ computed, then those the sections of an added rule set add
 namespace, label or name. Each is a whole manifest, with a `kind` and a
 `metadata.name` ([objects](02_service_definition.md#objects)).
 
-The platform's policy over `Objects` whole, every source (the credentials
-Secrets, the objects section, the generated Secrets, the PushSecrets and
-ExternalSecrets), once assembled: an instance of a project that is not
-privileged (`global.okdp.policy.privileged`, [fields the compiler
-reads](#fields-the-compiler-reads)) installs no cluster-scoped object and
+Each object of `Objects` whole, every source (the credentials Secrets,
+the objects section, the generated Secrets, the PushSecrets and
+ExternalSecrets), once assembled, the items of a `List` too, goes
+through the documents of the rule sets' `objects` hook, in every project
+([hooks](05_rules.md#hooks)), with the settings and
+`Inputs.AllowPlainSecrets`. The mandatory set lists none: a compile
+without another set refuses no object but two of one name (below). The
+platform's policy is the security set's, its documents exempting the
+platform's own projects themselves, and its messages its own
+([its objects
+policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#hooks));
+what follows is what a compile with it refuses.
+
+An instance of a project that is not privileged
+(`global.okdp.policy.privileged`) installs no cluster-scoped object and
 writes no other namespace than its own. An object whose
 `metadata.namespace` is set (not `null`, not `""`) to another namespace
 than `Inputs.Namespace` is refused, and so is one of a cluster-scoped
-kind, by its API group and kind: Kubernetes' own (`Namespace`, `Node`,
+kind, by its API group and kind (the set's table `clusterScopedKinds`):
+Kubernetes' own (`Namespace`, `Node`,
 `PersistentVolume`, `StorageClass`, `CSIDriver`, `CSINode`,
 `VolumeAttachment`, `VolumeAttributesClass`, `ClusterRole`,
 `ClusterRoleBinding`, `CustomResourceDefinition`,
@@ -1799,21 +1819,18 @@ its namespace or not: Flux's (`helm.toolkit.fluxcd.io`,
 Operator's (`fluxcd.controlplane.io`), Flux's source extensions
 (`source.extensions.fluxcd.io`) and Argo CD's (`argoproj.io`): a
 HelmRelease, a GitRepository, a ResourceSet or an Application would
-drive the engine with its own identity, past the project's
-(`engineGroups`; the engines' lockdown flags are the second line):
+drive the engine with its own identity, past the project's (the set's
+table `deployerApiGroups`; the engines' lockdown flags are the second
+line):
 
 ```
 web: objects: HelmRelease/demo-web-override: an object of the deployer's kinds (helm.toolkit.fluxcd.io/v2) lets a project drive the platform's engine: the platform's projects set it (global.okdp.policy.privileged), demo is not one of them
 ```
 
-Each object that passed these rules, the items of a `List` too, then
-goes through the documents of the rule set's `objects` hook, for a
-project that is not privileged ([hooks](05_rules.md#hooks)); the
-mandatory set lists none, and an added set refuses with its own
-messages: the security set's checks the hosts an object names ([its
+The security set's hook then checks the hosts an object names ([its
 hosts](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/01_inputs_outputs.md#hosts)).
 
-Whatever the project, privileged or not, no two objects of `Objects`, the
+Whatever the rule sets, whatever the project, no two objects of `Objects`, the
 items of a `List` among them, are of one API group (the version does not
 count), kind, namespace (unset, `null` or `""` the instance's) and name:
 the second would replace the first in the cluster. A provider that
@@ -1831,8 +1848,9 @@ a name (the mapping schema requires it)
 web: objects: ConfigMap/demo-web-a-b-c: two objects of one kind (core), namespace (demo) and name: object 1 and object 2; the second would replace the first. A name derived from a claim's ID must be one per ID (okdpSqlName, okdpObjectName)
 ```
 
-Whatever the project, no Secret (`v1`) of `Objects`, nor of the items of
-a `List`, holds values in clear, a non-empty `data` or `stringData`,
+With the security set, whatever the project, no Secret (`v1`) of
+`Objects`, nor of the items of a `List`, holds values in clear, a
+non-empty `data` or `stringData`,
 unless the caller allows it (`Inputs.AllowPlainSecrets`): credentials are
 generated in the cluster
 ([`okdpGeneratedSecret`](04_functions.md#okdpgeneratedsecret), whose
@@ -1917,9 +1935,11 @@ in any case, as Helm reads it), outlives its release: Helm leaves it
 when the release no longer renders it or is uninstalled, and so does
 Flux's helm-controller. Argo CD renders the chart with `helm template`
 and reads no Helm annotation: it would prune the object, and delete it
-with its Application. Whatever wrote it (the mapping's `objects`, a
-generated Secret's, the compiler's), each such object of `Objects`, an
-item of a `List` among them, carries Argo CD's equivalents, in its annotation
+with its Application. The compiler leaves such an object as written, in
+`Objects` and in `Write`'s files. A host that writes the values of this
+chart gives each, whatever wrote it (the mapping's `objects`, a
+generated Secret's, the compiler's), an item of a `List` among them,
+Argo CD's equivalents, in its annotation
 `argocd.argoproj.io/sync-options`, after the options it holds,
 comma-separated: `Prune=false`, not pruned when it leaves the
 Application's manifests, and `Delete=false`, not deleted with the
@@ -1927,7 +1947,7 @@ Application; each unless the object sets an option of its name already
 (`Prune=confirm` stays):
 
 ```yaml
-# a claim's database, as the provider's mapping writes it, and in Objects
+# a claim's database, as a host writes it in the chart's values
 metadata:
   annotations:
     helm.sh/resource-policy: keep
@@ -2172,8 +2192,8 @@ compile from input documents, as `okdp-compile -f` does: YAML documents,
 any number per file, separated by `---`, in files laid out in any way.
 Each document says what it is by its `kind`: `Settings`, the values every
 instance receives first, the platform's; `Project`, a namespace, the
-values of its instances and its groups; `Instance`, an instance, its
-package and its values (`compiler.KindSettings`, `KindProject`,
+values of its instances, its groups among them; `Instance`, an instance,
+its package and its values (`compiler.KindSettings`, `KindProject`,
 `KindInstance`). It returns the instances, each with its `Definition` and
 its `Inputs`, sorted by project, then by name, ready for `CompileAll`
 ([compiling instances together](#compiling-instances-together)): the
@@ -2251,18 +2271,17 @@ such layer.
 
 ### Project
 
-`kind`, `name`, `access`, `values`, `valuesFiles`. `name`, required, a
+`kind`, `name`, `values`, `valuesFiles`. `name`, required, a
 DNS label, is the project's, the namespace of its instances: its values
 are layers of every instance whose `project` it is, after the
 `Settings` document's (its settings under `global`, its classes, its
 connections, its named claims, `claims:`: [values
-layers](#values-layers), [claims](#claims)). `access`, a map of group
-names to roles, gives the groups of each of them, `access.groups` of
-`Inputs.Settings` ([access](#access)); absent or `null`, none. A
-project needs no `Project` document: an instance of a project without
-one has neither its layers nor groups. A name given twice is refused. A
-`Project` document no instance names is read and checked for its keys,
-its values compiled by no instance: a host checks its declarations with
+layers](#values-layers), [claims](#claims)), and, with the security
+set, its groups, `global.okdp.access.groups` ([access](#access)); none
+absent. A project needs no `Project` document: an instance of a project
+without one has none of its layers. A name given twice is refused. A `Project`
+document no instance names is read and checked for its keys, its values
+compiled by no instance: a host checks its declarations with
 `compiler.CheckDeclarations` ([claims](#claims)).
 
 ### Instance
@@ -2303,7 +2322,7 @@ documents unless a document names it so.
 | `Values` | the `Settings` document's layers, its `valuesFiles` then its `values`; its project's `Project` document's, alike; the instance's `connections`, `{connections: ...}`; the instance's `valuesFiles`, then its `values` |
 | `Release`, `Namespace` | `<project>-<name>`, `<project>` |
 | `Claimers` | `claimers`; nil when absent |
-| `Settings` | `{access: {groups: <its project's access>}}`; nil when absent |
+| `Settings` | none: every setting of the documents is in their values ([host settings](#host-settings)) |
 
 The layers are numbered in that order in messages, `values layer <n>`:
 `platform.yaml` of the example the first, the project's file the second.
@@ -2346,8 +2365,7 @@ directory.
 | a key given twice | `line <l>: <key> is given twice, first at line <l>` |
 | a required key unset | `<key> is required` |
 | a name that is no DNS label | `line <l>: project: a DNS label expected (lowercase letters, digits and -, 63 characters at most)` |
-| `service`, `version` not a string; `values`, `connections`, `access` not a map; `valuesFiles`, `claimers` not a list of strings | `line <l>: <key>: a string expected`, `... a mapping expected`, `... a list of strings expected` |
-| a group of `access` that is no group name, or a role that is none ([access](#access)) | `access.<group>: a group name, ...`, `access.<group>: a role, viewer, editor or admin, got <value>` |
+| `service`, `version` not a string; `values`, `connections` not a map; `valuesFiles`, `claimers` not a list of strings | `line <l>: <key>: a string expected`, `... a mapping expected`, `... a list of strings expected` |
 | a claimer that is not a namespace name nor `*`, or listed twice | `claimers[0]: "Demo" is not a namespace name, nor "*"`, `claimers: demo is listed twice` |
 | a values file out of the input files, or that cannot be read | `valuesFiles: "../x.yaml": a path relative to the document's file, inside <Name>`, `valuesFiles: <Name>/<path>: no such file or directory`, its YAML error |
 | a second `Settings` document | `a second Settings document, after <where>: give the values of every instance once` |
@@ -2466,50 +2484,59 @@ are the second line behind the compile's policy.
 
 Who sees, operates and administers the instances of a namespace is a
 host's to decide, without a control plane: the identity provider's
-groups hold the people, `global.okdp.access.groups` gives each group
-of the namespace its role, and a host's targets write the roles into each
-namespace's manifests, which Argo CD and the API server enforce. A
+groups hold the people, a setting of the security set gives each group
+of the namespace its role, and a host's targets write the roles into
+each namespace's manifests, which Argo CD and the API server enforce. A
 control plane, optional, mirrors the same authority, never adds a
-boundary only it enforces. The roles are `viewer`, `editor` and `admin`
-(`compiler.AccessViewer`, `AccessEditor`, `AccessAdmin`), each doing
-what the one before it does, and more: they are code, and no rule set
-changes them.
+boundary only it enforces. The roles are `viewer`, `editor` and `admin`,
+each doing what the one before it does, and more. The compiler knows
+none of them: the groups are settings, which the security set checks
+and gives a mapping ([its
+access](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#platform-settings)).
 
 ```yaml
 # the platform's values (Settings)
 global:
   okdp:
     access:
-      admins: [platform_admin]   # the platform's administrators
-      groupPrefix: "oidc:"       # the API server's --oidc-groups-prefix
+      admins: [platform_admin]   # the administrators (the security set)
 ---
-# the Project document demo: access.groups of Inputs.Settings of each of
-# its instances
+# the Project document demo: a layer of each of its instances
 kind: Project
 name: demo
-access:
-  demo-devs: editor
-  demo-leads: admin
-  analysts: viewer
+values:
+  global:
+    okdp:
+      access:
+        groups:                  # the security set's setting
+          demo-devs: editor
+          demo-leads: admin
+          analysts: viewer
 ```
 
-`access.groups`, a map of group names to a role, is a setting the
-host gives in its settings (`Inputs.Settings`, [host
-settings](#host-settings)), which no chart receives and no values layer
-may give too: absent or empty, no group has a role, the platform's
-administrators alone reach the namespace. The compiler gives no group
-by default: who sets the groups of a namespace, and which, is a host's
-([layers of several origins](#layers-of-several-origins)).
-`LoadInputs` reads them from the `access` of the instance's `Project`
-document, absent or `null` none ([project](#project));
-`compiler.ParseAccess(field, v)` reads such a map, every problem at
-once. A group's name is the one the identity provider's tokens give in
-their `groups` claim (`compiler.IsGroupName`): a letter or a digit, then
-letters, digits, `.`, `_`, `@`, `:` and `-`, 255 characters at most. No
-`/`: a Keycloak group by its name, its groups mapper's *Full group path*
-off, so that a name means one group; no space nor comma, which an Argo
-CD policy line would read otherwise. Every compile checks them with the
-settings, against the platform schema.
+`global.okdp.access.groups`, a map of group names to a role, is a
+setting like any other. A host gives it in its settings
+(`Inputs.Settings`, [host settings](#host-settings)), so that no chart
+receives the groups and a change of them changes no instance's values;
+`okdp-compile` takes it from the values of the namespace's `Project`
+document, a layer of the namespace's own, which every chart of its
+instances receives in `global`. Absent or empty, no group has a role,
+the platform's administrators alone reach the namespace. The compiler
+gives no group by default: who sets the groups of a namespace, and
+which, is a host's, and that no layer of another sets them ([layers of
+several origins](#layers-of-several-origins)).
+The security set's platform schema checks them: a group's name is the
+one the identity provider's tokens give in their `groups` claim, a
+letter or a digit, then letters, digits, `.`, `_`, `@`, `:` and `-`,
+255 characters at most. No `/`: a Keycloak group by its name, its
+groups mapper's *Full group path* off, so that a name means one group;
+no space nor comma, which an Argo CD policy line would read otherwise.
+Its package `access` reads such a map for a host, every problem at once
+(`access.Parse`), gives the host's settings (`access.Settings`) or a
+layer (`access.Layer`), and reads the groups back from a compile's
+settings (`access.Of`). A compile without the
+security set takes the setting unread: the mandatory schema does not
+describe `access`.
 
 What each role may do is a host's to write: its targets, for instance,
 as the roles of an Argo CD AppProject and RoleBindings of the namespace:
@@ -2524,32 +2551,27 @@ The AppProject's `roles`, one per role that has groups, least first,
 named after the role, each policy `p, proj:project-<namespace>:<role>,
 <resource>, <action>, project-<namespace>/*, allow`, its `groups` those
 of the role as the tokens give them; the RoleBindings, their subjects
-the same groups, each named `global.okdp.access.groupPrefix` and the
-group's name, as the API server names the groups of its OIDC users
-(`oidc:analysts` for `oidc:`). Kubernetes' `edit` lets a pod be
-exec'ed into and the namespace's Secrets be read, Argo CD's editor not:
-the cluster's roles are the built-in ones.
+the same groups, each named as the API server names the groups of its
+OIDC users, a prefix and the group's name (`oidc:analysts` for
+`oidc:`), the prefix a setting of the host's own rule set. Kubernetes'
+`edit` lets a pod be exec'ed into and the namespace's Secrets be read,
+Argo CD's editor not: the cluster's roles are the built-in ones.
 
 The platform's administrators, `global.okdp.access.admins`, are a
-setting: the compiler checks them against the platform's schema and
+setting of the security set: its schema checks them, the compiler
 writes nothing of them, a host binds them (Argo CD's `role:admin`, the
 cluster's administration).
 
 A package restricts who signs in to its services by the same groups: the
-mapping sees them as `platform.access.viewers`, `.editors` and `.admins`,
-each role's list holding the higher roles' groups and the platform's
-administrators, and `platform.access.platformAdmins`
-([context](02_service_definition.md#context),
-[the sign-in
+security set's scope gives a mapping them as `platform.access.viewers`,
+`.editors` and `.admins`, each role's list holding the higher roles'
+groups and the platform's administrators, and
+`platform.access.platformAdmins`
+([context](02_service_definition.md#context), [the sign-in
 proxy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/03_functions.md#fragments-okdppodspec-okdpjob-okdpsigninproxy-okdpwebworkload)):
-a service defaults its allowed groups to them, never to the realm's
-roles, which every project's people hold (`TestPlatformAccess`).
-
-| Case | Error |
-|---|---|
-| a group's name that is not one | the platform schema's, `invalid propertyName '<group>'`, `'<group>' does not match pattern '^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$'`; `access.<group>: a group name, a letter or a digit then letters, digits, ".", "_", "@", ":" or "-", 255 characters at most (no "/": the group's name, not its path)` of a `Project` document |
-| a role that is not one | the platform schema's, `- at '/global/okdp/access/groups/<group>': value must be one of 'viewer', 'editor', 'admin'`; `access.<group>: a role, viewer, editor or admin, got "<value>"` of a `Project` document |
-| a value of `ParseAccess` that is not a map | `<field>: the roles of groups, a map of group names to viewer, editor or admin, got <value>`; of a `Project` document, `line <l>: access: a mapping expected` ([input errors](#input-errors)) |
+a service defaults its allowed groups to them, never to the realm's roles,
+which every project's people hold (`TestPlatformAccess` of the security
+set).
 
 ## Claims
 
@@ -2957,10 +2979,10 @@ enforce](#what-the-store-must-enforce)); the platform's keys are under
 `platform/`, a namespace no project may have. The store is External
 Secrets': the SecretStore named `secrets.store` of each project's
 namespace, when the platform gives its provider (`secrets.provider`,
-[fields the compiler reads](#fields-the-compiler-reads): `Result.SecretStore`,
-which the [targets](#targets) write), else the ClusterSecretStore of that
-name. The compiler writes both ends, in each instance's objects, after
-the mapping's:
+[fields the compiler reads](#fields-the-compiler-reads): a host writes
+it, the `store` of the rule set's document `secretStore`), else the
+ClusterSecretStore of that name. The compiler writes both ends, in each
+instance's objects, after the mapping's:
 
 - the provider: a `PushSecret` named after the claim's ID, in its
   namespace, that pushes the Secret of the output, each secret field of
@@ -3081,8 +3103,9 @@ namespace, authenticating with the ServiceAccount `secrets.serviceAccount`
 one templated policy scopes all of them. With OpenBao (or Vault), a KV v2
 mount `okdp` (`secrets.provider`: `vault: {server, path: okdp, version:
 v2, auth: {kubernetes: {mountPath: kubernetes, role: okdp,
-serviceAccountRef: {name: okdp-secrets}}}}`,
-`examples/04_claims/input/config/platform.yaml`), one Kubernetes auth role
+serviceAccountRef: {name: okdp-secrets}}}}`;
+`examples/04_claims/input/config/platform.yaml` keeps the server and the
+mount alone), one Kubernetes auth role
 `okdp` bound to the ServiceAccount `okdp-secrets` of any namespace
 (`bound_service_account_names=okdp-secrets`,
 `bound_service_account_namespaces=*`, `token_policies=okdp`), and the

@@ -1,6 +1,19 @@
 package value
 
-import "strings"
+import (
+	"errors"
+	"io/fs"
+	"strings"
+)
+
+// UnwrapPath strips the path of an fs.PathError from err, for a message
+// that names the file itself.
+func UnwrapPath(err error) error {
+	if pe := (*fs.PathError)(nil); errors.As(err, &pe) {
+		return pe.Err
+	}
+	return err
+}
 
 // FieldError tags an error of a compile with the field of the instance's
 // values it is about, as messages name it (Key, Index):

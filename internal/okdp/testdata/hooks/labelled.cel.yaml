@@ -1,8 +1,10 @@
-# Hook objects: an object carries the label settings.label names (team).
-# Input: svc, ns, object, settings.
+# Hook objects: an object carries the label settings.label names (team),
+# but in a namespace settings.trusted lists. Input: svc, ns, object,
+# settings.
 vars:
   label: ${{ str(settings.?label.orValue("team")) }}
   labels: ${{ asMap(asMap(object.raw.?metadata.orValue({})).?labels.orValue({})) }}
+  trusted: ${{ ns in asList(settings.?trusted.orValue([])) }}
 errors:
-  - $if: ${{ !(label in labels) }}
+  - $if: ${{ !trusted && !(label in labels) }}
     $value: "${{ svc }}: objects: ${{ object.id }}: metadata.labels: no label ${{ label }} in ${{ ns }}"

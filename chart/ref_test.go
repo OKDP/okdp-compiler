@@ -2,8 +2,21 @@ package chart
 
 import (
 	"cmp"
+	"strings"
 	"testing"
 )
+
+// TestIsDNSLabel: a DNS-1123 label, 63 characters at most.
+func TestIsDNSLabel(t *testing.T) {
+	for s, want := range map[string]bool{
+		"demo": true, "demo-app": true, "a1": true, "0": true, strings.Repeat("a", 63): true,
+		"": false, "Demo": false, "-demo": false, "demo-": false, "de_mo": false, "a.b": false, "..": false, "a/b": false, "../escaped": false, strings.Repeat("a", 64): false,
+	} {
+		if got := IsDNSLabel(s); got != want {
+			t.Errorf("%q: got %v", s, got)
+		}
+	}
+}
 
 // TestIsFileName: one element of a path, not . or .., without a / or a \.
 func TestIsFileName(t *testing.T) {

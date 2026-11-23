@@ -45,16 +45,15 @@ func platformCharts(rules *RuleSet, okdp M) (map[string]chart.Ref, error) {
 
 // ownObjects returns the objects that the sections of the mapping's
 // result res add (the rule set's ownObjects). The list document reads the
-// section's items, the release, platform, privileged and settings; its
-// first message refuses.
+// section's items, the release, platform and settings; its first message
+// refuses.
 func ownObjects(ctx context.Context, session *cel2yaml.Session, inst *instance, res M) ([]any, error) {
 	var objects []any
 	for _, spec := range inst.rules.OwnObjects() {
 		items := []any{}
 		items = append(items, value.AsList(res[spec.Section])...)
 		listed, err := inst.rules.Values(ctx, spec.List, M{
-			"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"],
-			"privileged": Privileged(inst.okdp, inst.namespace), "settings": settingsOr(inst.okdp),
+			"items": items, "release": inst.scope["release"], "platform": inst.scope["platform"], "settings": settingsOr(inst.okdp),
 		})
 		if err != nil {
 			return nil, err

@@ -139,7 +139,7 @@ func Parameters(schema *Schema, name string, layers []map[string]any) (M, error)
 		return nil, err
 	}
 	if v != "" {
-		return nil, &ValuesError{msg: SchemaError("values", map[string]string{name: v}).Error(), Violations: leaves}
+		return nil, &ValuesError{msg: schemaError("values", map[string]string{name: v}).Error(), Violations: leaves}
 	}
 	delete(values, "connections")
 	delete(values, "claims")

@@ -3,4 +3,4 @@
 # platform, global.
 values:
   name: ${{ args.?prefix.orValue("app") + "-" + release.name }}
-  viewers: ${{ platform.access.viewers }}
+  proxyEnv: ${{ platform.proxyEnv }}

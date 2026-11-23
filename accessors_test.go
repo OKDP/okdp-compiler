@@ -62,10 +62,11 @@ func TestConnectionRefs(t *testing.T) {
 // file, the secret ones apart.
 func TestReadContract(t *testing.T) {
 	contracts := os.DirFS("examples/02_advanced/input/contracts")
-	d, err := compiler.ReadContract(contracts, "database")
-	if err != nil {
-		t.Fatal(err)
+	all, err := compiler.ReadContracts(contracts)
+	if err != nil || len(all) != 2 || all[1].Name != "http" {
+		t.Fatalf("contracts: %d %v", len(all), err)
 	}
+	d := &all[0]
 	var names []string
 	for _, f := range d.Fields {
 		names = append(names, f.Name)
@@ -81,28 +82,6 @@ func TestReadContract(t *testing.T) {
 	}
 	if d.Claim == nil || d.Field("nothing") != nil {
 		t.Error("claim schema, unknown field")
-	}
-	all, err := compiler.ReadContracts(contracts)
-	if err != nil || len(all) != 2 || all[1].Name != "http" {
-		t.Fatalf("contracts: %d %v", len(all), err)
-	}
-	if _, err := compiler.ReadContract(contracts, "nothing"); err == nil || !strings.Contains(err.Error(), "the nothing contract cannot be read") {
-		t.Fatalf("a missing contract: %v", err)
-	}
-}
-
-// The values layering and the names are the compile's.
-func TestValuesAndNames(t *testing.T) {
-	a := map[string]any{"x": map[string]any{"a": 1.0, "b": 2.0}, "l": []any{1.0}}
-	merged := compiler.MergeValues(a, map[string]any{"x": map[string]any{"b": nil}, "l": []any{2.0}})
-	if x := merged["x"].(map[string]any); x["a"] != 1.0 || x["b"] != nil || len(merged["l"].([]any)) != 1 || a["x"].(map[string]any)["b"] != 2.0 {
-		t.Errorf("merged = %v (a %v)", merged, a)
-	}
-	if compiler.NamedClaimID("demo", "analytics") != "demo.analytics" || !compiler.IsClaimID("demo.app.db") || compiler.IsClaimID("web") || compiler.IsClaimID("Demo.x") {
-		t.Error("claim IDs")
-	}
-	if compiler.CheckProvider("p", "data/postgresql") != nil || compiler.CheckProvider("p", "a/b/c") == nil {
-		t.Error("providers")
 	}
 }
 

@@ -171,11 +171,11 @@ type ValuesError struct {
 
 func (e *ValuesError) Error() string { return e.msg }
 
-// SchemaError builds the error Helm reports when values violate the
+// schemaError builds the error Helm reports when values violate the
 // schemas of their charts, nil when none does. violations maps each chart
 // to its violations ("" when it has none). what names the values checked
-// ("values", "compiled values").
-func SchemaError(what string, violations map[string]string) error {
+// ("values").
+func schemaError(what string, violations map[string]string) error {
 	charts := make([]string, 0, len(violations))
 	for c, v := range violations {
 		if v != "" {

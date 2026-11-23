@@ -1,13 +1,14 @@
-# The notes of a mapping: a shared note is a privileged project's only, and
-# its text names no word of settings.banned. Input: items, release, platform,
-# privileged, settings.
+# The notes of a mapping: a shared note is only for a namespace
+# settings.trusted lists, and its text names no word of settings.banned.
+# Input: items, release, platform, settings.
 vars:
+  trusted: ${{ release.namespace in asList(settings.?trusted.orValue([])) }}
   banned: ${{ asList(settings.?banned.orValue([])) }}
 errors:
   - $for: i in lists.range(size(items))
     $each:
-      $if: ${{ !privileged && truthy(items[i].?shared.orValue(false)) }}
-      $value: "notes[${{ string(i) }}]: a shared note is the platform's projects' (global.okdp.policy.privileged)"
+      $if: ${{ !trusted && truthy(items[i].?shared.orValue(false)) }}
+      $value: "notes[${{ string(i) }}]: a shared note is a trusted namespace's (global.okdp.trusted)"
   - $for: i in lists.range(size(items))
     $vars:
       words: ${{ fields(str(items[i].?text.orValue("")), " ,") }}

@@ -46,9 +46,9 @@ func SensitivePath(path []string) bool {
 	return false
 }
 
-// Redact returns a copy of v for a message. At any depth, the value of a
+// redact returns a copy of v for a message. At any depth, the value of a
 // Sensitive key of a map becomes Redacted, whatever it is.
-func Redact(v any) any {
+func redact(v any) any {
 	switch v := v.(type) {
 	case M:
 		out := make(M, len(v))
@@ -56,14 +56,14 @@ func Redact(v any) any {
 			if Sensitive(k) {
 				out[k] = Redacted
 			} else {
-				out[k] = Redact(x)
+				out[k] = redact(x)
 			}
 		}
 		return out
 	case []any:
 		out := make([]any, len(v))
 		for i, x := range v {
-			out[i] = Redact(x)
+			out[i] = redact(x)
 		}
 		return out
 	}

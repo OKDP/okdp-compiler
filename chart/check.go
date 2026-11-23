@@ -1,5 +1,4 @@
-// Checks the compile applies to values itself: no template code, and no
-// layer that changes a value a lower layer sets.
+// Checks the compile applies to values itself: no template code.
 
 package chart
 
@@ -56,31 +55,4 @@ func noTemplate(v any, p string, at func(string) string) error {
 		return fmt.Errorf("%s: cannot be checked for \"{{\": %T is not a values type", at(p), v)
 	}
 	return nil
-}
-
-// Overlap returns the first path, in path order, where layer sets a value
-// that base already sets, or "" when there is none. A key overlaps when
-// its two values are not both maps, or when whole reports that the map at
-// this path counts as one value. The path is formatted with FormatPath.
-func Overlap(base, layer M, whole func(keys []string) bool) string {
-	return overlap(base, layer, nil, whole)
-}
-
-func overlap(base, layer M, at []string, whole func([]string) bool) string {
-	for _, k := range slices.Sorted(maps.Keys(layer)) {
-		b, ok := base[k]
-		if !ok {
-			continue
-		}
-		p := append(slices.Clip(at), k)
-		bm, bok := b.(M)
-		lm, lok := layer[k].(M)
-		if !bok || !lok || whole(p) {
-			return FormatPath(p)
-		}
-		if s := overlap(bm, lm, p, whole); s != "" {
-			return s
-		}
-	}
-	return ""
 }

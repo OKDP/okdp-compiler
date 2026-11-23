@@ -21,32 +21,13 @@ func hookedSet(t *testing.T) *RuleSet {
 	return r
 }
 
-// hookedCopy: the files of testdata/hooked, rules.yaml edited by edit.
-func hookedCopy(t *testing.T, edit func(string) string) fstest.MapFS {
-	t.Helper()
-	out := fstest.MapFS{}
-	entries, err := os.ReadDir("testdata/hooked")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		b, err := os.ReadFile("testdata/hooked/" + e.Name())
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[e.Name()] = &fstest.MapFile{Data: b}
-	}
-	out[RulesFile] = &fstest.MapFile{Data: []byte(edit(string(out[RulesFile].Data)))}
-	return out
-}
-
 // TestAddedTables: a set added gives tables of its own, which Go and the
-// documents read, and adds values to the extensible tables of the
-// mandatory set, which its checks then apply.
+// documents read, its hooks among them; the mandatory set gives none, and
+// refuses no release.
 func TestAddedTables(t *testing.T) {
 	r := hookedSet(t)
 	ctx := context.Background()
-	if !r.Has("colours", "green") || !slices.Equal(r.List("shapes"), []string{"circle"}) {
+	if !slices.Contains(r.List("colours"), "green") || !slices.Equal(r.List("shapes"), []string{"circle"}) {
 		t.Errorf("the tables of the set added: %v %v", r.List("colours"), r.List("shapes"))
 	}
 	if err := r.Refuse(ctx, "colour", M{"value": "circle"}); err != nil {
@@ -56,24 +37,23 @@ func TestAddedTables(t *testing.T) {
 	if want := "blue: neither red, green nor circle"; err == nil || err.Error() != want || !errors.Is(err, ErrRefused) {
 		t.Errorf("a document of the set added, called by name: got %v, want %q", err, want)
 	}
-	names := r.List(TablePlatformObjectNames)
-	if names[len(names)-1] != "extra-object" || !r.Has(TablePlatformObjectNames, "okdp-project") || len(Mandatory().List(TablePlatformObjectNames))+1 != len(names) {
-		t.Errorf("the values added to an extensible table: %v", names)
+	if names := r.List("objectNames"); !slices.Equal(names, []string{"extra-object"}) {
+		t.Errorf("the table of the release hook: %v", names)
 	}
-	if slices.Contains(Mandatory().List(TablePlatformObjectNames), "extra-object") {
-		t.Error("the mandatory set changed")
+	if Mandatory().List("objectNames") != nil || len(Mandatory().Hooks(HookRelease)) != 0 {
+		t.Error("the mandatory set gives the table, or a release hook")
 	}
 	for release, want := range map[string]string{
 		"extra":  `Inputs.Release "extra": the name of an object the platform writes in every namespace (extra-object)`,
 		"chosen": `Inputs.Release "chosen": the name of an object the platform writes in every namespace (chosen)`,
 		"other":  "",
 	} {
-		err := r.Refuse(ctx, CheckReleaseRule, M{"field": "Inputs.Release", "release": release, "settings": M{"extra": M{"objectName": "chosen"}}})
+		err := r.RunHook(ctx, HookRelease, M{"field": "Inputs.Release", "release": release, "settings": M{"extra": M{"objectName": "chosen"}}})
 		if want == "" && err != nil || want != "" && (err == nil || !strings.HasPrefix(err.Error(), want)) {
 			t.Errorf("release %s: got %v, want %q", release, err, want)
 		}
 	}
-	if err := Mandatory().Refuse(ctx, CheckReleaseRule, M{"field": "f", "release": "chosen", "settings": M{"extra": M{"objectName": "chosen"}}}); err != nil {
+	if err := Mandatory().RunHook(ctx, HookRelease, M{"field": "f", "release": "chosen", "settings": M{"extra": M{"objectName": "chosen"}}}); err != nil {
 		t.Errorf("the mandatory set reads a setting of the set added: %v", err)
 	}
 	// A nested refusal is the caller's message, as written.
@@ -95,11 +75,8 @@ func TestAddedTablesRefused(t *testing.T) {
 		"unknown table": {func(s string) string {
 			return strings.Replace(s, "  colours:\n", "  sizes:\n    add: [small]\n  colours:\n", 1)
 		}, "rules.yaml: tables: sizes: add: no rule set read before gives the table"},
-		"values on an extensible table": {func(s string) string {
-			return strings.Replace(s, "  colours:\n", "  engineNamespaces:\n    values: [other]\n  colours:\n", 1)
-		}, "tables: engineNamespaces: given by another rule set"},
 		"add and values": {func(s string) string {
-			return strings.Replace(s, "    add: [extra-object]\n", "    add: [extra-object]\n    values: [a]\n", 1)
+			return strings.Replace(s, "    values: [red, green]\n", "    values: [red, green]\n    add: [a]\n", 1)
 		}, "doesn't meet the specifications of rules.schema.json"},
 		"unknown hook": {func(s string) string {
 			return strings.Replace(s, "hooks:\n", "hooks:\n  other: [colour]\n", 1)
@@ -107,23 +84,25 @@ func TestAddedTablesRefused(t *testing.T) {
 		"hook of no document": {func(s string) string {
 			return strings.Replace(s, "[labelled]", "[labelled, missing]", 1)
 		}, "rules.yaml: hooks: objects: missing is none of documents"},
-		"hook of a check": {func(s string) string {
-			return strings.Replace(s, "[labelled]", "[labelled, object]", 1)
-		}, "rules.yaml: hooks: objects: object is none of documents"},
-		"check of a set added": {func(s string) string {
+		"a document listed twice": {func(s string) string {
+			return strings.Replace(s, "[reserved]", "[reserved, namespace]", 1)
+		}, "the rule set hooked: rules.yaml: hooks: namespace: namespace: given by a rule set read before (core): a rule set adds rules, it replaces none"},
+		"a checks section": {func(s string) string {
 			return s + "checks:\n  colour: colour.cel.yaml\n"
-		}, "rules.yaml: checks: unknown colour"},
+		}, "doesn't meet the specifications of rules.schema.json"},
+		"an input not declared": {func(s string) string {
+			return strings.Replace(s, "inputs: [raw]\n", "", 1)
+		}, "helpers.cel.yaml"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := LoadRules(hookedCopy(t, tc.edit))
+			_, err := LoadRules(copyFS(t, os.DirFS("testdata/hooked"), tc.edit))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
 	}
-	// The mandatory set marks a table extensible for the sets after it; a
-	// set added marks its own.
-	fsys := hookedCopy(t, func(s string) string {
+	// A set added marks its own table extensible for the sets after it.
+	fsys := copyFS(t, os.DirFS("testdata/hooked"), func(s string) string {
 		return strings.Replace(s, "  shapes:\n", "  shapes:\n    extensible: true\n", 1)
 	})
 	if r, err := LoadRules(fsys); err != nil || !slices.Equal(r.List("shapes"), []string{"circle"}) {
@@ -131,16 +110,29 @@ func TestAddedTablesRefused(t *testing.T) {
 	}
 }
 
-// TestHooks: the documents of each hook, in order, the first message
-// refusing as the document writes it.
+// TestHooks: the documents of each hook, those of the sets in the order
+// they are read, the first message refusing as the document writes it.
 func TestHooks(t *testing.T) {
 	r := hookedSet(t)
 	ctx := context.Background()
-	if !slices.Equal(r.Hooks(HookObjects), []string{"labelled"}) || !slices.Equal(r.Hooks(HookFinalValues), []string{"bounded"}) {
-		t.Errorf("the hooks: %v %v", r.Hooks(HookObjects), r.Hooks(HookFinalValues))
+	if !slices.Equal(r.hooks[HookObjects], []string{"labelled"}) || !slices.Equal(r.hooks[HookFinalValues], []string{"bounded"}) {
+		t.Errorf("the hooks: %v %v", r.hooks[HookObjects], r.hooks[HookFinalValues])
 	}
-	if len(Mandatory().Hooks(HookObjects)) != 0 || len(Mandatory().Hooks(HookFinalValues)) != 0 {
-		t.Error("the mandatory set has hooks")
+	if !slices.Equal(r.Hooks(HookNamespace), []string{"namespace", "reserved"}) || !slices.Equal(Mandatory().Hooks(HookNamespace), []string{"namespace"}) {
+		t.Errorf("the namespace hook: %v, the mandatory set's %v", r.Hooks(HookNamespace), Mandatory().Hooks(HookNamespace))
+	}
+	if len(Mandatory().hooks[HookObjects]) != 0 || len(Mandatory().hooks[HookFinalValues]) != 0 {
+		t.Error("the mandatory set has objects or finalValues hooks")
+	}
+	for ns, want := range map[string]string{
+		"kube-system": `f "kube-system": the namespace is reserved: kube-* is Kubernetes' own`,
+		"team":        `f "team": reserved by the settings`,
+		"demo":        "",
+	} {
+		err := r.RunHook(ctx, HookNamespace, M{"field": "f", "ns": ns, "settings": M{"reserved": []any{"team", "kube-system"}}})
+		if want == "" && err != nil || want != "" && (err == nil || !strings.HasPrefix(err.Error(), want)) {
+			t.Errorf("namespace %s: got %v, want %q", ns, err, want)
+		}
 	}
 	object := func(labels M) M {
 		return M{"id": "ConfigMap/a", "kind": "ConfigMap", "name": "a", "raw": M{"metadata": M{"name": "a", "labels": labels}}}
@@ -166,7 +158,7 @@ func TestHooks(t *testing.T) {
 	if err := (&RuleSet{}).RunHook(ctx, HookObjects, M{}); !errors.Is(err, ErrNotLoaded) {
 		t.Errorf("the zero RuleSet: got %v", err)
 	}
-	broken := hookedCopy(t, func(s string) string { return s })
+	broken := copyFS(t, os.DirFS("testdata/hooked"), nil)
 	broken["labelled.cel.yaml"] = &fstest.MapFile{Data: []byte("errors:\n  - ${{ object.missing.deep }}\n")}
 	b, err := LoadRules(broken)
 	if err != nil {

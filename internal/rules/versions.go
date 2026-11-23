@@ -32,7 +32,7 @@ func (r *RuleSet) addSet(name, version string) error {
 	case name == "":
 		return fmt.Errorf("%s: name: required: a rule set added to the mandatory one names itself", RulesFile)
 	case slices.ContainsFunc(r.named, func(s namedSet) bool { return s.name == name }):
-		return taken("name", name)
+		return takenBy("name", name, r.Names())
 	}
 	r.named = append(r.named, namedSet{name, version})
 	return nil

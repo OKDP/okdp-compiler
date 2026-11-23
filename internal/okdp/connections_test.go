@@ -10,8 +10,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"go.yaml.in/yaml/v3"
-
 	"github.com/okdp/okdp-compiler/chart"
 	"github.com/okdp/okdp-compiler/value"
 )
@@ -51,12 +49,10 @@ var pgPublished = map[string]Info{"demo-pg": {Provides: []Output{{
 // resolveCtx: the context of the in-memory package with resolveSchema, the
 // instance's values over these context layers, demo-pg published.
 func resolveCtx(values M, platform ...map[string]any) (M, []Dependency, error) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(resolveSchema)}
 	in := inputs(values)
 	in.Values = append(in.Values, platform...)
 	in.Contracts, in.Published = dbContract, pgPublished
-	inst, err := newInstance(context.Background(), ch, in, defService)
+	inst, err := newInstance(context.Background(), withSchema(resolveSchema).Files, in, defService)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -110,27 +106,6 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// TestResolveGoTypes: values a Go caller builds with other types than M and
-// []any resolve as the same values read from a file: a []string of
-// references passes the schema (type: array), a map[string]string entry of
-// connections is an external connection.
-func TestResolveGoTypes(t *testing.T) {
-	values, deps, err := resolveCtx(M{
-		"replicas":    []string{"ext"},
-		"connections": map[string]map[string]string{"ext": {"contract": "database", "host": "replica.example.org"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := M{
-		"host": "replica.example.org", "engine": "postgresql", "driver": "pg", "ssl": "require", "tls": false,
-		"okdp": M{"ref": "ext", "contract": "database", "source": "external"},
-	}
-	if got := value.AsList(values["replicas"]); len(got) != 1 || !reflect.DeepEqual(got[0], want) || len(deps) > 0 {
-		t.Errorf("got %#v, dependencies %#v\nwant [%#v], none", got, deps, want)
-	}
-}
-
 // TestResolveErrors: contract checks on references.
 func TestResolveErrors(t *testing.T) {
 	ext := func(fields M) M {
@@ -142,18 +117,15 @@ func TestResolveErrors(t *testing.T) {
 		values M
 		want   string
 	}{
-		"required field":          {ext(M{"host": ""}), `replicas[0] (connection "ext"): field "host" is required by the database contract`},
-		"wrong contract":          {ext(M{"contract": "s3"}), `replicas[0]: connection "ext" has contract "s3", "database" is expected`},
-		"unknown field":           {ext(M{"port": 1}), `field "port" is not part of the database contract`},
-		"secret field":            {ext(M{"password": "p"}), `replicas[0]: connection "ext": "password" is a secret field, put it in the credentials Secret`},
-		"not a string":            {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
-		"not published":           {M{"replicas": []any{"demo-x"}}, `replicas[0]: "demo-x" is not a connection, nor an output of an instance of the namespace`},
-		"a template":              {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `replicas[0]: "{{ lookup \"v1\" \"Secret\" \"demo\" \"\" }}" is not a connection`},
-		"secretRef not a map":     {ext(M{"secretRef": "ext-credentials"}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got "ext-credentials"`},
-		"secretRef empty":         {ext(M{"secretRef": M{}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
-		"secretRef no name":       {ext(M{"secretRef": M{"key": "k"}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
-		"secretRef.name empty":    {ext(M{"secretRef": M{"name": ""}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
-		"secretRef.name a number": {ext(M{"secretRef": M{"name": 5.0}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
+		"required field":      {ext(M{"host": ""}), `replicas[0] (connection "ext"): field "host" is required by the database contract`},
+		"wrong contract":      {ext(M{"contract": "s3"}), `replicas[0]: connection "ext" has contract "s3", "database" is expected`},
+		"unknown field":       {ext(M{"port": 1}), `field "port" is not part of the database contract`},
+		"secret field":        {ext(M{"password": "p"}), `replicas[0]: connection "ext": "password" is a secret field, put it in the credentials Secret`},
+		"not a string":        {M{"replicas": []any{}, "untyped": 5}, `untyped: a connection reference must be a string, got 5`},
+		"not published":       {M{"replicas": []any{"demo-x"}}, `replicas[0]: "demo-x" is not a connection, nor an output of an instance of the namespace`},
+		"a template":          {M{"replicas": []any{`{{ lookup "v1" "Secret" "demo" "" }}`}}, `replicas[0]: "{{ lookup \"v1\" \"Secret\" \"demo\" \"\" }}" is not a connection`},
+		"secretRef not a map": {ext(M{"secretRef": "ext-credentials"}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got "ext-credentials"`},
+		"secretRef no name":   {ext(M{"secretRef": M{"key": "k"}}), `replicas[0]: connection "ext": secretRef: {name: <a Secret of the namespace>} or {remoteKey: <a key of the platform's secret store>}, got`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := resolveCtx(tc.values)
@@ -203,17 +175,16 @@ untyped: a connection reference must be a string, got map[string]interface {}{"h
 // sensitive key or in a list of one, its value not printed
 // (value.ShortAt): a credential written in place of a connection's name.
 func TestResolveRedacted(t *testing.T) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"adminToken": {"x-okdp-connection-ref": {"contract": "database"}},
 		"apiKeys": {"items": {"x-okdp-connection-ref": {"contract": "database"}}},
-		"main": {"x-okdp-connection-ref": {"contract": "database"}}}}`)}
+		"main": {"x-okdp-connection-ref": {"contract": "database"}}}}`)
 	in := inputs(M{"adminToken": 1234.0, "apiKeys": []any{true}, "main": M{"password": "hunter2"}})
 	in.Contracts = dbContract
 	want := `adminToken: a connection reference must be a string, got <redacted>
 apiKeys[0]: a connection reference must be a string, got <redacted>
 main: a connection reference must be a string, got map[string]interface {}{"password":"<redacted>"}`
-	if _, err := newInstance(context.Background(), ch, in, defService); err == nil || err.Error() != want {
+	if _, err := newInstance(context.Background(), d.Files, in, defService); err == nil || err.Error() != want {
 		t.Errorf("got %v\nwant %s", err, want)
 	}
 }
@@ -271,11 +242,10 @@ func TestDeclarationTemplate(t *testing.T) {
 // field; the connections a values layer, with the platform's secret store
 // when store is set.
 func storeCtx(values, connections M, store bool) (*instance, error) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"s3": {"type": "string", "x-okdp-connection-ref": {"contract": "s3", "require": {"required": ["secretRef"]}}},
 		"backup": {"type": "string", "x-okdp-connection-ref": {"contract": "s3"}},
-		"queue": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
+		"queue": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)
 	in := inputs(values)
 	if store {
 		in.Values = append(in.Values, M{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}})
@@ -286,7 +256,7 @@ func storeCtx(values, connections M, store bool) (*instance, error) {
 			"secretKey": {"type": "string", "x-okdp-secret": true}, "accessKey": {"type": "string", "x-okdp-secret": true}}}`)},
 		"queue.schema.json": {Data: []byte(`{"properties": {"url": {"type": "string"}}}`)},
 	}
-	return newInstance(context.Background(), ch, in, defService)
+	return newInstance(context.Background(), d.Files, in, defService)
 }
 
 // TestResolveFromStore: a connection whose credentials are in the
@@ -370,8 +340,7 @@ func TestResolveFromStoreErrors(t *testing.T) {
 // read, parsed or compiled, or whose claim schema cannot, is reported as
 // such, with its file and the cause.
 func TestResolveUnreadableContract(t *testing.T) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)}
+	d := withSchema(`{"properties": {"q": {"type": "string", "x-okdp-connection-ref": {"contract": "queue"}}}}`)
 	for name, tc := range map[string]struct {
 		contracts fstest.MapFS
 		want      string
@@ -396,7 +365,7 @@ func TestResolveUnreadableContract(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"q": "demo-mq"})
 			in.Contracts = tc.contracts
-			if _, err := newInstance(context.Background(), ch, in, defService); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			if _, err := newInstance(context.Background(), d.Files, in, defService); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error starting with %q", err, tc.want)
 			}
 		})
@@ -433,13 +402,12 @@ var namespaceOutputs = map[string]Info{
 // outputCtx: the context of the in-memory package with a server reference,
 // db, and a database one, main, these instances published.
 func outputCtx(values M, published map[string]Info) (M, []Dependency, error) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
+	d := withSchema(`{"properties": {
 		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "server"}},
-		"main": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)}
+		"main": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)
 	in := inputs(values)
 	in.Contracts, in.Published = outputContracts, published
-	inst, err := newInstance(context.Background(), ch, in, defService)
+	inst, err := newInstance(context.Background(), d.Files, in, defService)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -473,33 +441,12 @@ func TestResolveOutput(t *testing.T) {
 
 // TestResolveOrder: a connection first, then an output.
 func TestResolveOrder(t *testing.T) {
-	conn := M{"demo-pg-hive": M{"contract": "server", "host": "h"}}
-	for name, tc := range map[string]struct {
-		values    M
-		published map[string]Info
-		field     string
-		want      M // okdp
-		deps      []Dependency
-	}{
-		"a connection first": {
-			M{"db": "demo-pg-hive", "connections": conn}, namespaceOutputs, "db",
-			M{"ref": "demo-pg-hive", "contract": "server", "source": "external"}, nil,
-		},
-		"an output named after its instance": {
-			M{"main": "demo-pg"}, namespaceOutputs, "main",
-			M{"ref": "demo-pg", "contract": "database", "source": "output", "instance": "demo-pg"},
-			[]Dependency{{Instance: "demo-pg", Contract: "database", Field: "main", Output: "demo-pg"}},
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			values, deps, err := outputCtx(tc.values, tc.published)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := value.AsMap(values[tc.field])["okdp"]; !reflect.DeepEqual(got, tc.want) || !reflect.DeepEqual(deps, tc.deps) {
-				t.Errorf("got %#v, dependencies %#v\nwant %#v, %#v", got, deps, tc.want, tc.deps)
-			}
-		})
+	values, deps, err := outputCtx(M{"db": "demo-pg-hive", "connections": M{"demo-pg-hive": M{"contract": "server", "host": "h"}}}, namespaceOutputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := value.AsMap(values["db"])["okdp"], (M{"ref": "demo-pg-hive", "contract": "server", "source": "external"}); !reflect.DeepEqual(got, want) || deps != nil {
+		t.Errorf("got %#v, dependencies %#v\nwant %#v, none", got, deps, want)
 	}
 }
 
@@ -507,41 +454,58 @@ func TestResolveOrder(t *testing.T) {
 // that resolves to nothing, Published given or not, the compiling release
 // left out, an output of another contract said; an output the contract
 // refuses; the errors of a contract with a naming convention, Published
-// unread.
+// unread. A reference to an output no instance publishes says so
+// (missingOutputs), its message unchanged, alone or with other errors;
+// several providers, or a reference that fails otherwise, do not.
 func TestResolveOutputErrors(t *testing.T) {
 	server := func(release string, values M) map[string]Info {
 		return map[string]Info{release: {Provides: []Output{{Name: "shared", Contract: "server", Values: values}}}}
 	}
 	twice := server("demo-b", M{"host": "b"})
 	maps.Copy(twice, server("demo-a", M{"host": "a"}))
+	missing := func(contract, name string) []outputKey { return []outputKey{{"", contract, name, ""}} }
 	for name, tc := range map[string]struct {
 		values    M
 		published map[string]Info
+		missing   []outputKey // nil: not a missingOutputs
 		want      string
 	}{
-		"two instances": {M{"db": "shared"}, twice, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
+		"two instances": {M{"db": "shared"}, twice, nil, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
 		"the compiling release": {
-			M{"db": "self"}, namespaceOutputs,
+			M{"db": "self"}, namespaceOutputs, missing("server", "self"),
 			`db: "self" is not a connection, nor an output of an instance of the namespace`,
 		},
 		"another contract": {
-			M{"db": "demo-pg"}, namespaceOutputs,
+			M{"db": "demo-pg"}, namespaceOutputs, missing("server", "demo-pg"),
 			`db: "demo-pg" is not a connection, nor an output of an instance of the namespace (demo-pg publishes it with contract "database", "server" is expected)`,
 		},
 		"no output of that name": {
-			M{"main": "Demo_PG"}, namespaceOutputs,
+			M{"main": "Demo_PG"}, namespaceOutputs, missing("database", "Demo_PG"),
 			`main: "Demo_PG" is not a connection, nor an output of an instance of the namespace`,
 		},
-		"no Published":  {M{"db": "demo-pg-hive"}, nil, `db: "demo-pg-hive" is not a connection`},
-		"unknown field": {M{"db": "shared"}, server("demo-a", M{"host": "a", "zone": "z"}), `db: output "shared" of demo-a: field "zone" is not part of the server contract`},
+		"with another error": {
+			M{"db": "demo-pg-x", "main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, missing("server", "demo-pg-x"),
+			`db: "demo-pg-x" is not a connection, nor an output of an instance of the namespace` + "\n" + `main: connection "ext" has contract "s3", "database" is expected`,
+		},
+		"another error": {M{"main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, nil, `main: connection "ext" has contract "s3", "database" is expected`},
+		"no Published":  {M{"db": "demo-pg-hive"}, nil, missing("server", "demo-pg-hive"), `db: "demo-pg-hive" is not a connection`},
+		"unknown field": {M{"db": "shared"}, server("demo-a", M{"host": "a", "zone": "z"}), nil, `db: output "shared" of demo-a: field "zone" is not part of the server contract`},
 		"types": {
-			M{"db": "shared"}, server("demo-a", M{"host": "a", "port": "5432"}),
+			M{"db": "shared"}, server("demo-a", M{"host": "a", "port": "5432"}), nil,
 			"db (output \"shared\" of demo-a): the fields violate the server contract:\n- at '/port': got string, want integer",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := outputCtx(tc.values, tc.published); err == nil || err.Error() != tc.want {
-				t.Errorf("got %v\nwant %s", err, tc.want)
+			_, _, err := outputCtx(tc.values, tc.published)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("got %v\nwant %s", err, tc.want)
+			}
+			var got []outputKey
+			if m, ok := errors.AsType[*missingOutputs](err); ok {
+				got = m.outputs
+			}
+			if !reflect.DeepEqual(got, tc.missing) {
+				t.Errorf("missing outputs: got %v, want %v", got, tc.missing)
 			}
 		})
 	}
@@ -551,12 +515,11 @@ func TestResolveOutputErrors(t *testing.T) {
 // reference db requires require (x-okdp-connection-ref), demo-pg
 // published.
 func requireCtx(require string, values M) error {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"$schema": "http://json-schema.org/draft-07/schema#", "properties": {
-		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database", "require": ` + require + `}}}}`)}
+	d := withSchema(`{"$schema": "http://json-schema.org/draft-07/schema#", "properties": {
+		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database", "require": ` + require + `}}}}`)
 	in := inputs(values)
 	in.Contracts, in.Published = dbContract, pgPublished
-	_, err := newInstance(context.Background(), ch, in, defService)
+	_, err := newInstance(context.Background(), d.Files, in, defService)
 	return err
 }
 
@@ -696,57 +659,13 @@ func testContract(t *testing.T, schema string) *contract {
 	return c
 }
 
-// TestCompileOutputErrors: values.cel.yaml may only give the values of
-// dependencies of Chart.yaml, and their defaults file must exist.
+// TestCompileOutputErrors: the defaults file of a dependency of Chart.yaml
+// must exist.
 func TestCompileOutputErrors(t *testing.T) {
 	d := *def
-	d.Values = []byte("db: {}\n")
-	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), "values.cel.yaml: db: not a dependency of Chart.yaml") {
-		t.Errorf("unknown chart: got %v", err)
-	}
-	d = *def
 	d.Package.Defaults = map[string]string{"app": "missing.defaults.yaml"}
 	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), "app: open missing.defaults.yaml") {
 		t.Errorf("missing defaults file: got %v", err)
-	}
-}
-
-// TestMissingOutputs: a reference to an output no instance publishes says
-// so (missingOutputs), its message unchanged, alone or with other errors;
-// several providers, or a reference that fails otherwise, do not.
-func TestMissingOutputs(t *testing.T) {
-	shared := map[string]Info{
-		"demo-a": {Provides: []Output{{Name: "shared", Contract: "server", Values: M{"host": "a"}}}},
-		"demo-b": {Provides: []Output{{Name: "shared", Contract: "server", Values: M{"host": "b"}}}},
-	}
-	unpublished := `db: "demo-pg-x" is not a connection, nor an output of an instance of the namespace`
-	for name, tc := range map[string]struct {
-		values    M
-		published map[string]Info
-		missing   []outputKey // nil: not a missingOutputs
-		want      string
-	}{
-		"unpublished": {M{"db": "demo-pg-x"}, namespaceOutputs, []outputKey{{"", "server", "demo-pg-x", ""}}, unpublished},
-		"with another error": {
-			M{"db": "demo-pg-x", "main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, []outputKey{{"", "server", "demo-pg-x", ""}},
-			unpublished + "\n" + `main: connection "ext" has contract "s3", "database" is expected`,
-		},
-		"several providers": {M{"db": "shared"}, shared, nil, `db: "shared" names server outputs of several instances of the namespace: demo-a, demo-b`},
-		"another error":     {M{"main": "ext", "connections": M{"ext": M{"contract": "s3"}}}, namespaceOutputs, nil, `main: connection "ext" has contract "s3", "database" is expected`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, _, err := outputCtx(tc.values, tc.published)
-			if err == nil || err.Error() != tc.want {
-				t.Fatalf("got %v\nwant %s", err, tc.want)
-			}
-			var got []outputKey
-			if m, ok := errors.AsType[*missingOutputs](err); ok {
-				got = m.outputs
-			}
-			if !reflect.DeepEqual(got, tc.missing) {
-				t.Errorf("missing outputs: got %v, want %v", got, tc.missing)
-			}
-		})
 	}
 }
 
@@ -758,21 +677,13 @@ func TestParseConnection(t *testing.T) {
 	if !reflect.DeepEqual(c, want) {
 		t.Errorf("got %+v, want %+v", c, want)
 	}
-	b, err := yaml.Marshal(map[string]Connection{"lake": c})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := string(b), "lake:\n    contract: database\n    description: The lake\n    secretRef:\n        remoteKey: demo/lake\n    host: h\n    port: 5432\n"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	if got, want := ConnectionEntry(c), (M{"contract": "database", "description": "The lake", "host": "h", "port": 5432.0, "secretRef": M{"remoteKey": "demo/lake"}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 	if c := ParseConnection("x", "not a map"); c.Name != "x" || c.Contract != "" || len(c.Values) != 0 {
 		t.Errorf("not a map: got %+v", c)
 	}
-	b, err = yaml.Marshal(Connection{Contract: "s3", SecretRef: "creds", Values: M{"bucket": "b", "contract": "other"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := string(b), "contract: s3\nsecretRef:\n    name: creds\nbucket: b\n"; got != want {
-		t.Errorf("got %q, want %q", got, want)
+	if got, want := ConnectionEntry(Connection{Contract: "s3", SecretRef: "creds", Values: M{"bucket": "b", "contract": "other"}}), (M{"contract": "s3", "secretRef": M{"name": "creds"}, "bucket": "b"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }

@@ -1,0 +1,5 @@
+# Hook release: the releases settings.taken lists. Input: field, release,
+# settings.
+errors:
+  - $if: ${{ release in asList(settings.?taken.orValue([])) }}
+    $value: "${{ field }} ${{ quote(release) }}: taken by settings.taken"

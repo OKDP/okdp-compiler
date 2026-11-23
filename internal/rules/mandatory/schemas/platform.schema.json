@@ -100,63 +100,6 @@
                 "refreshInterval": {"type": "string", "default": "1h", "description": "How often the PushSecrets push the credentials of the claims across namespaces to the store, and the ExternalSecrets read them, and those of the connections kept in it (refreshInterval, a duration): rotated credentials reach their claimers within it."}
               }
             },
-            "access": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "Who administers the platform, the roles of a namespace's groups, which a host gives and may write as Argo CD roles and RoleBindings, and how the Kubernetes API server names the identity provider's groups. Another key is refused.",
-              "properties": {
-                "admins": {
-                  "type": "array",
-                  "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$"},
-                  "description": "The groups of the platform's administrators, as the identity provider's tokens give them (groups claim): bound once, by the platform's bootstrap, to Argo CD's role:admin and to the cluster's administration; the compiler writes nothing of them, and a mapping reads them in platform.access. Absent: none."
-                },
-                "groups": {
-                  "type": "object",
-                  "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$"},
-                  "additionalProperties": {"enum": ["viewer", "editor", "admin"]},
-                  "description": "The groups of the identity provider that work in the namespace, each its role: viewer sees the namespace's instances and their objects, except Secrets; editor also operates the instances and edits the objects; admin also administers the namespace. A host gives them per namespace, in its settings (Inputs.Settings), which no chart receives; a mapping reads them in platform.access, with the administrators, and a host may write them as Argo CD roles and RoleBindings. A group name as the tokens give it, no \"/\" (the group's name, not its path). Absent: none."
-                },
-                "groupPrefix": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9._@:#/-]*$",
-                  "description": "The prefix the Kubernetes API server gives the groups of the users its tokens authenticate (the groups prefix of its token authenticator: its command-line flag, or the claimMappings of its structured authentication configuration): the RoleBindings of a project's groups name each group with it, k8s:okdp-project-demo for k8s:. Argo CD reads the groups claim as it is, without it. Absent: \"\", the groups as the tokens give them."
-                }
-              }
-            },
-            "network": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "The network policy of the projects' namespaces. Another key is refused: a misspelt one would leave the namespaces open.",
-              "properties": {
-                "policy": {
-                  "type": "boolean",
-                  "description": "true: the targets write, in each project's namespace but the platform's own (policy.privileged), a NetworkPolicy that denies every ingress to its pods but from the namespace itself, from ingressNamespaces and from the namespaces whose claims its instances provide; egress left open. false or absent: none, the namespaces open (the compiler does not know the cluster's ingress controller, nor whether its network plugin enforces policies)."
-                },
-                "ingressNamespaces": {
-                  "type": "array",
-                  "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"},
-                  "uniqueItems": true,
-                  "description": "With policy: the namespaces whose pods reach every project's pods: the ingress controller's, a monitoring's. Absent: none, a project's services reached by its own namespace and its claimers only."
-                }
-              }
-            },
-            "controlPlane": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "The optional control plane (okdp-control-plane-server). Absent: the platform has none, and the targets bind no identity of it. Another key is refused.",
-              "properties": {
-                "serviceAccount": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["namespace", "name"],
-                  "description": "The control plane's identity, its ServiceAccount: the targets bind it, in each project's namespace, privileged or not, to the Role okdp-control-plane, what it needs there and nothing more (docs/specs/01_inputs_outputs.md, the control plane's role); its ClusterRole keeps namespaces get and create.",
-                  "properties": {
-                    "namespace": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", "description": "Its namespace, a DNS label."},
-                    "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", "maxLength": 253, "description": "Its name, a DNS subdomain."}
-                  }
-                }
-              }
-            },
             "ruleSets": {
               "type": "array",
               "description": "The rule sets the platform requires: each by its name, core for the compiler's mandatory set, and optionally a constraint on its version (comparators separated by commas, each =, !=, >, >=, <, <=, ~ or ^ followed by a version MAJOR.MINOR.PATCH, or a version alone). A compile that was not given a set listed, or of a version its constraint refuses, is refused: the settings a set reads would be read by none.",
@@ -167,34 +110,6 @@
                 "properties": {
                   "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The set's name, its rules.yaml's."},
                   "version": {"type": "string", "minLength": 1, "description": "A constraint on the set's version; absent, any version."}
-                }
-              }
-            },
-            "policy": {
-              "type": "object",
-              "additionalProperties": false,
-              "description": "The platform's policy: what the projects may deploy, and which projects are the platform's own. Another key is refused: a misspelt one would leave the projects unconstrained.",
-              "properties": {
-                "privileged": {
-                  "type": "array",
-                  "items": {"type": "string"},
-                  "description": "The namespaces of the platform's own projects (cert-manager, an operator, a service mesh...), whose instances install cluster-scoped objects, write other namespaces and set any upstream value, as the other projects may not: the compile refuses their objects of a cluster-scoped kind or of another namespace; the targets give their releases the engine's own identity, the other projects' one confined to their namespace (Result.Privileged)."
-                },
-                "reserved": {
-                  "type": "array",
-                  "items": {"type": "string"},
-                  "description": "Namespaces no project may have, beside those of the rule set's namespace check: the namespaces of the platform's own components that are not projects of the tree (the secret store's, the identity provider's, the git server's, a CI runner's...). Every instance of such a project is refused, privileged or not: a namespace both lists is reserved."
-                },
-                "projectApiGroups": {
-                  "type": "array",
-                  "items": {"type": "string"},
-                  "description": "API groups added to the Role a project's releases are installed with in its namespace (Flux, the rule set's document deployerRole): the groups of the custom resources a project's charts deploy beside those the standard set lists. RBAC has no negation: the Role lists its groups, and the groups of the deployer engines, or *, are never added, whatever this list says. A chart's Role of a group that is not added is refused by the API server (escalation)."
-                },
-                "projectGlobals": {
-                  "type": "array",
-                  "items": {"type": "string", "minLength": 1, "not": {"const": "okdp"}},
-                  "uniqueItems": true,
-                  "description": "The keys of global a project's values may set, beside okdp, which is the platform's: every chart of the instances receives global, past its package's protect. The compiler reads it nowhere: a host that gives a project's values apart from the platform's refuses the other keys, and checks what the listed ones hold. Absent: the host's default; []: none."
                 }
               }
             }

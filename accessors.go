@@ -104,12 +104,6 @@ type ContractDescriptor = okdp.ContractDescriptor
 // property as written.
 type ContractField = okdp.ContractField
 
-// ReadContract reads and checks the contract name of contracts
-// (Inputs.Contracts), as a compile does.
-func ReadContract(contracts fs.FS, name string) (*ContractDescriptor, error) {
-	return okdp.ReadContract(contracts, name)
-}
-
 // ReadContracts returns every contract of contracts, by name. Its error
 // covers every contract that cannot be read.
 func ReadContracts(contracts fs.FS) ([]ContractDescriptor, error) {
@@ -149,9 +143,9 @@ func CheckProvider(where, provider string) error { return okdp.CheckProvider(whe
 func CheckClaimers(name string, claimers []string) error { return okdp.CheckClaimers(name, claimers) }
 
 // CheckDeclarations checks the declarations of values that no instance
-// compiles (in.Namespace, in.Contracts, in.Values), as CompileAll checks
-// those of an instance: the layers, the settings, every connection and
-// every named claim.
+// compiles (in.Namespace, in.Contracts, in.Values, in.Settings), as
+// CompileAll checks those of an instance: the layers, the settings, every
+// connection and every named claim.
 func CheckDeclarations(ctx context.Context, in Inputs) error { return okdp.CheckDeclarations(ctx, in) }
 
 // CheckConnection returns nil when the connection c of namespace holds
@@ -167,5 +161,5 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, namespace string, c Connec
 		return fmt.Errorf("the values: %w", err)
 	}
 	secrets := value.AsMap(value.Dig(value.AsMap(v), "global.okdp.secrets"))
-	return okdp.CheckConnection(rules, contracts, c.Name, c.Entry(), namespace, value.Str(secrets["store"]), len(value.AsMap(secrets["provider"])) > 0)
+	return okdp.CheckConnection(rules, contracts, c.Name, okdp.ConnectionEntry(c), namespace, value.Str(secrets["store"]), len(value.AsMap(secrets["provider"])) > 0)
 }

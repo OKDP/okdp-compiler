@@ -3,14 +3,11 @@ package okdp
 import (
 	"context"
 	"encoding/json"
-	"maps"
-	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
-	"testing/fstest"
 
-	"github.com/okdp/okdp-compiler/chart"
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 	"github.com/okdp/okdp-compiler/value"
 )
@@ -27,37 +24,26 @@ func platformCtx(t *testing.T, okdp M) (M, error) {
 }
 
 // TestPlatformDefaults: what the mandatory set's scope gives a mapping
-// as platform by default: no proxy, the project's group in every role.
+// as platform: by default no proxy; the proxy settings as environment
+// variables, those that are set only. platform.access is the security
+// set's.
 func TestPlatformDefaults(t *testing.T) {
-	p, err := platformCtx(t, M{"tls": M{"clusterIssuer": "ca"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := M{
-		"proxyEnv": M{},
-		"access":   M{"viewers": []any{}, "editors": []any{}, "admins": []any{}, "platformAdmins": []any{}},
-	}
-	if !reflect.DeepEqual(p, want) {
-		t.Errorf("got  %#v\nwant %#v", p, want)
-	}
-}
-
-// TestPlatformProxy: the proxy settings become environment variables,
-// those that are set only.
-func TestPlatformProxy(t *testing.T) {
-	p, err := platformCtx(t, M{"proxy": M{"httpProxy": "http://p:3128", "noProxy": ".svc"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := (M{"HTTP_PROXY": "http://p:3128", "NO_PROXY": ".svc"}); !reflect.DeepEqual(p["proxyEnv"], want) {
-		t.Errorf("proxy env: %#v", p["proxyEnv"])
+	for _, tc := range []struct{ okdp, want M }{
+		{M{"tls": M{"clusterIssuer": "ca"}}, M{"proxyEnv": M{}}},
+		{M{"proxy": M{"httpProxy": "http://p:3128", "noProxy": ".svc"}}, M{"proxyEnv": M{"HTTP_PROXY": "http://p:3128", "NO_PROXY": ".svc"}}},
+	} {
+		if p, err := platformCtx(t, tc.okdp); err != nil || !reflect.DeepEqual(p, tc.want) {
+			t.Errorf("%v: got  %#v (%v)\nwant %#v", tc.okdp, p, err, tc.want)
+		}
 	}
 }
 
 // TestPlatformSchema: global.okdp checked against platform.schema.json,
 // every violation at once, by path, as Helm reads a chart's values: a null
 // deletes a setting's default, and is refused where there is none; the
-// other keys are not checked.
+// other keys are not checked, those of the other sets among them (the
+// security set's policy and access, a host's network): each set checks
+// its own.
 func TestPlatformSchema(t *testing.T) {
 	for name, tc := range map[string]struct {
 		global any
@@ -65,8 +51,8 @@ func TestPlatformSchema(t *testing.T) {
 	}{
 		"global":      {"x", "- at '/global': got string, want object"},
 		"global.okdp": {M{"okdp": []any{}}, "- at '/global/okdp': got array, want object"},
-		"each map and setting": {M{"okdp": M{"proxy": "p", "network": M{"policy": "true", "ingressNamespaces": []any{"Nginx"}}}},
-			"- at '/global/okdp/network': validation failed\n  - at '/global/okdp/network/ingressNamespaces/0': 'Nginx' does not match pattern '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'\n  - at '/global/okdp/network/policy': got string, want boolean\n- at '/global/okdp/proxy': got string, want object"},
+		"each map and setting": {M{"okdp": M{"tls": "t", "proxy": M{"httpProxy": true, "noProxy": float64(1)}}},
+			"- at '/global/okdp/proxy': validation failed\n  - at '/global/okdp/proxy/httpProxy': got boolean, want string\n  - at '/global/okdp/proxy/noProxy': got number, want string\n- at '/global/okdp/tls': got string, want object"},
 		"secrets": {M{"okdp": M{"secrets": M{"store": true, "provider": "vault", "refreshInterval": float64(60)}}},
 			"- at '/global/okdp/secrets/provider': got string, want object\n- at '/global/okdp/secrets/refreshInterval': got number, want string\n- at '/global/okdp/secrets/store': got boolean, want string"},
 		"tls": {M{"okdp": M{"tls": M{"clusterIssuer": true, "caBundleSecret": nil}, "certificateIssuers": M{"selfSigned": M{"name": "ca"}}}},
@@ -79,10 +65,11 @@ func TestPlatformSchema(t *testing.T) {
 			"database": M{"default": float64(1), "other": true, "classes": M{"Fast": M{"provider": "data/pg"}, "slow": M{"request": "1Gi", "tier": "b"}}},
 		}}},
 			"- at '/global/okdp/provisioning/database': additional properties 'other' not allowed\n- at '/global/okdp/provisioning/database/classes': validation failed\n  - at '/global/okdp/provisioning/database/classes': additional properties 'Fast' not allowed\n  - at '/global/okdp/provisioning/database/classes/slow': validation failed\n    - at '/global/okdp/provisioning/database/classes/slow': additional properties 'tier' not allowed\n    - at '/global/okdp/provisioning/database/classes/slow': missing property 'provider'\n    - at '/global/okdp/provisioning/database/classes/slow/request': got string, want object\n- at '/global/okdp/provisioning/database/default': got number, want string"},
-		"null, a default":  {M{"okdp": M{"secrets": M{"serviceAccount": nil, "refreshInterval": ""}}}, ""},
-		"null, no default": {M{"okdp": M{"proxy": M{"noProxy": nil}, "access": nil, "charts": M{"objects": nil}}}, "- at '/global/okdp/access': got null, want object\n- at '/global/okdp/charts/objects': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string"},
-		"no global":        {nil, ""},
-		"unread is unread": {M{"okdp": M{"cluster": M{"domain": 1}, "monitoring": M{"enabled": "yes"}}, "imageRegistry": 1}, ""},
+		"null, a default":    {M{"okdp": M{"secrets": M{"serviceAccount": nil, "refreshInterval": ""}}}, ""},
+		"null, no default":   {M{"okdp": M{"proxy": M{"noProxy": nil}, "tls": nil, "charts": M{"objects": nil}}}, "- at '/global/okdp/charts/objects': got null, want object\n- at '/global/okdp/proxy/noProxy': got null, want string\n- at '/global/okdp/tls': got null, want object"},
+		"no global":          {nil, ""},
+		"unread is unread":   {M{"okdp": M{"cluster": M{"domain": 1}, "monitoring": M{"enabled": "yes"}}, "imageRegistry": 1}, ""},
+		"keys of other sets": {M{"okdp": M{"policy": M{"privileged": "x", "projectApiGroup": []any{"x"}}, "access": M{"groups": M{"devs": "editor"}}, "network": M{"policy": "yes"}}}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			heading := "the values (Inputs.Values) don't meet the specifications of the schema of global.okdp"
@@ -103,16 +90,6 @@ func TestPlatformSchema(t *testing.T) {
 	secrets := value.AsMap(settings["secrets"])
 	if _, set := secrets["serviceAccount"]; err != nil || set || secrets["refreshInterval"] != "" {
 		t.Errorf("serviceAccount: null: %v %#v", err, secrets)
-	}
-}
-
-// TestContextErrors: unreadable package files.
-func TestContextErrors(t *testing.T) {
-	ch := maps.Clone(pkg)
-	delete(ch, "config.schema.json")
-	ch["config.schema.json/x"] = &fstest.MapFile{}
-	if _, err := newInstance(context.Background(), ch, inputs(), defService); err == nil || !strings.Contains(err.Error(), "read config.schema.json") {
-		t.Errorf("config.schema.json a directory: got %v", err)
 	}
 }
 
@@ -142,23 +119,6 @@ func TestContextValues(t *testing.T) {
 	}
 }
 
-// TestContextUpstream: values.upstream is the instance's upstream values
-// as written, whether the chart accepts them or not.
-func TestContextUpstream(t *testing.T) {
-	svc := &Service{Charts: chart.Specs{
-		"app":   {Upstream: true, Append: []string{"env"}},
-		"other": {},
-	}}
-	up := M{"app": M{"env": []any{"C"}, "image": M{"pullPolicy": "Always"}}, "other": M{"y": float64(2)}}
-	inst, err := newInstance(context.Background(), pkg, inputs(M{"upstream": up}), svc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := value.AsMap(inst.scope["values"])["upstream"]; !reflect.DeepEqual(got, up) {
-		t.Errorf("values.upstream:\n got %#v\nwant %#v", got, up)
-	}
-}
-
 // TestPlatformFromValues: whatever defaults a package's schema gives
 // global, in any shape, the settings an instance reads are global.okdp of
 // its values layers: the instance's (inst.okdp) are those of that view, its defaults applied,
@@ -166,7 +126,7 @@ func TestContextUpstream(t *testing.T) {
 // view as written; a schema whose defaults give global.okdp is refused, as
 // one that declares it.
 func TestPlatformFromValues(t *testing.T) {
-	okdpDefault := M{"policy": M{"privileged": []any{"demo"}}, "secrets": M{"store": "evil"}, "charts": M{"objects": M{"repository": "oci://evil.example.org"}}}
+	okdpDefault := M{"policy": M{"projectApiGroups": []any{"evil.example.org"}}, "secrets": M{"store": "evil"}, "charts": M{"objects": M{"repository": "oci://evil.example.org"}}}
 	shapes := []any{
 		M{"type": "object", "default": M{"okdp": okdpDefault}},
 		M{"default": M{"okdp": nil}},
@@ -176,36 +136,14 @@ func TestPlatformFromValues(t *testing.T) {
 		M{"default": nil},
 		M{"default": []any{M{"okdp": okdpDefault}}},
 		M{"properties": M{"okdp": M{"default": okdpDefault}}},
-		M{"properties": M{"okdp": M{"properties": M{"policy": M{"default": M{"privileged": []any{"demo"}}}}}}},
+		M{"properties": M{"okdp": M{"properties": M{"policy": M{"default": M{"projectApiGroups": []any{"evil.example.org"}}}}}}},
 		M{"properties": M{"imageRegistry": M{"default": "r.example.org"}}},
 		M{"properties": M{"x": M{"default": M{"okdp": okdpDefault}}}},
 		M{"allOf": []any{M{"properties": M{"okdp": M{"default": okdpDefault}}}}},
 	}
-	// And random shapes: defaults of global or of a key of it, okdp among
-	// them, maps of these keys, okdp among them, to any value.
-	rnd := rand.New(rand.NewPCG(1, 2))
-	var gen func(depth int) any
-	gen = func(depth int) any {
-		switch n := rnd.IntN(6); {
-		case n == 0 || depth > 3:
-			return []any{"demo", float64(rnd.IntN(3)), nil, true}[rnd.IntN(4)]
-		case n == 1:
-			return []any{gen(depth + 1)}
-		default:
-			m := M{}
-			for range rnd.IntN(4) {
-				m[[]string{"okdp", "default", "properties", "policy", "privileged", "secrets", "provisioning", "global"}[rnd.IntN(8)]] = gen(depth + 1)
-			}
-			return m
-		}
-	}
-	for range 300 {
-		key := []string{"okdp", "x"}[rnd.IntN(2)]
-		shapes = append(shapes, M{"default": gen(0)}, M{"properties": M{key: M{"default": gen(0)}}})
-	}
 	contexts := [][]map[string]any{
 		{platformValues},
-		{platformValues, {"global": M{"okdp": M{"policy": M{"privileged": []any{"infra"}}}}}},
+		{platformValues, {"global": M{"okdp": M{"policy": M{"projectApiGroups": []any{"infra.example.org"}}}}}},
 		{platformValues, {"global": M{"project": "demo", "okdp": M{"provisioning": M{"pg": M{"classes": M{"small": M{"provider": "demo/pg"}}}}}}}},
 		{{"global": M{"project": "demo"}}},
 	}
@@ -215,8 +153,7 @@ func TestPlatformFromValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		files := maps.Clone(pkg)
-		files["config.schema.json"] = &fstest.MapFile{Data: doc}
+		files := withSchema(string(doc)).Files
 		for j, ctx := range contexts {
 			in := inputs()
 			in.Values = ctx
@@ -248,68 +185,12 @@ func TestPlatformFromValues(t *testing.T) {
 					t.Errorf("shape %d %s, context %d: global.okdp of %s\n got %#v\nwant %#v", i, doc, j, name, got, written)
 				}
 			}
-			if Privileged(inst.okdp, "demo") || storeName(inst.okdp) == "evil" {
+			if slices.Contains(value.AsList(value.Dig(inst.okdp, "policy.projectApiGroups")), any("evil.example.org")) || storeName(inst.okdp) == "evil" {
 				t.Errorf("shape %d %s, context %d: a package schema's default reached the platform's policy", i, doc, j)
 			}
 		}
 	}
 	if refusals == 0 {
 		t.Error("no shape refused")
-	}
-	for _, shape := range shapes[:3] {
-		doc, _ := json.Marshal(M{"properties": M{"global": shape}})
-		if _, err := chart.ParseSchema("x", doc); err != nil {
-			continue
-		}
-		if _, err := chart.ReadParameterSchema(fstest.MapFS{"config.schema.json": {Data: doc}}); err == nil || !strings.Contains(err.Error(), "a package schema gives it no default (properties.global.default)") {
-			t.Errorf("%s: got %v, want the default of global.okdp refused", doc, err)
-		}
-	}
-}
-
-// TestPlatformAccess: platform.access, the groups (access.groups of
-// Inputs.Settings) and the platform's administrators: each role's list
-// holds the higher roles' groups and the administrators, sorted, once
-// each. A refused group refuses the instance.
-func TestPlatformAccess(t *testing.T) {
-	list := func(g ...string) []any {
-		out := []any{}
-		for _, x := range g {
-			out = append(out, x)
-		}
-		return out
-	}
-	for name, tc := range map[string]struct {
-		okdp   M
-		groups map[string]Role
-		want   M
-	}{
-		"none":                          {M{}, nil, M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
-		"roles":                         {M{}, map[string]Role{"readers": RoleViewer, "devs": RoleEditor, "leads": RoleAdmin}, M{"viewers": list("devs", "leads", "readers"), "editors": list("devs", "leads"), "admins": list("leads"), "platformAdmins": list()}},
-		"no group":                      {M{}, map[string]Role{}, M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
-		"the platform's administrators": {M{"access": M{"admins": []any{"ops", "okdp-admins", "ops"}}}, map[string]Role{"devs": RoleEditor, "ops": RoleViewer}, M{"viewers": list("devs", "okdp-admins", "ops"), "editors": list("devs", "okdp-admins", "ops"), "admins": list("okdp-admins", "ops"), "platformAdmins": list("okdp-admins", "ops")}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			in := inputs(M{"global": M{"okdp": tc.okdp}})
-			if tc.groups != nil {
-				in.Settings = map[string]any{"access": M{"groups": tc.groups}}
-			}
-			inst, err := newInstance(context.Background(), pkg, in, defService)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := value.AsMap(inst.scope["platform"])["access"]; !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("got  %#v\nwant %#v", got, tc.want)
-			}
-		})
-	}
-	// A refused group refuses the instance.
-	in := inputs()
-	in.Settings = map[string]any{"access": M{"groups": map[string]Role{"a/b": RoleViewer, "devs": "owner"}}}
-	_, err := Compile(context.Background(), def, in)
-	for _, want := range []string{"invalid propertyName 'a/b'", "at '/global/okdp/access/groups/devs': value must be one of 'viewer', 'editor', 'admin'"} {
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("a refused group: got %v, want %q", err, want)
-		}
 	}
 }

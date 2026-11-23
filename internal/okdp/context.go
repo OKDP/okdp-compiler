@@ -28,8 +28,8 @@ type instance struct {
 	// connections and the upstream values.
 	values M
 	// okdp holds the settings: global.okdp of the values layers with the
-	// host's settings (Inputs.Settings), checked against
-	// platform.schema.json, with its defaults applied.
+	// host's (Inputs.Settings), checked against platform.schema.json, with
+	// its defaults applied.
 	okdp  M
 	deps  []Dependency // the instances the references point to, in parameter path order
 	scope M            // what the mapping sees
@@ -54,8 +54,9 @@ type instance struct {
 //     checked against it (parameters).
 //  2. Settings. The settings are global.okdp of the values layers alone,
 //     never of the parameters, which the defaults of a package schema
-//     reach, with the host's settings (Inputs.Settings), which no value
-//     holds.
+//     reach, with the host's settings (Inputs.Settings), which the values
+//     never hold. The rule sets' namespace and release hooks run on the
+//     namespace and the release with them.
 //  3. Connections. The connection references of the parameters are
 //     resolved in a copy; the merged values stay as the user wrote them.
 //     The references that do not resolve are reported together.
@@ -64,8 +65,14 @@ type instance struct {
 // parameters), global as written, platform (what the compiler derives from
 // global.okdp), service, labels, selectorLabels and claims.
 func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*instance, error) {
-	schema, values, settings, err := in.memo.paramsOf().get(ctx, files, in, svc)
+	schema, values, settings, err := in.memo.paramsOf().get(files, in, svc)
 	if err != nil {
+		return nil, err
+	}
+	if err := CheckNamespace(ctx, in.rules(), "Inputs.Namespace", in.Namespace, settings); err != nil {
+		return nil, err
+	}
+	if err := checkRelease(ctx, in.rules(), "Inputs.Release", in.Release, settings); err != nil {
 		return nil, err
 	}
 	inst := &instance{
@@ -137,7 +144,7 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 // whatever the package's schema gives: the mapping and the charts read the
 // settings of the inputs, never a package's, and never the host's
 // settings (Inputs.Settings), which the compile reads apart.
-func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
+func parameters(files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	schema, err := chart.ReadParameterSchema(files)
 	if err != nil {
 		return nil, nil, nil, err
@@ -170,30 +177,37 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 }
 
 // platformSettings returns global.okdp of platform, the values layers'
-// with the host's settings (valuesLayers), checked against the platform
-// schema with its defaults applied. A value of another type is refused
-// rather than read as not set: proxy: false would read as no proxy. A platform that requires a rule set the
-// compile was not given is refused (requiredRuleSets).
+// with the host's settings (valuesLayers), checked against the platform schema with its defaults applied. A value
+// of another type is refused rather than read as not set: proxy: false
+// would read as no proxy. A platform that requires a rule set the
+// compile was not given is refused (requiredRuleSets), before the schema
+// refuses the settings that only that set reads.
 func platformSettings(rules *RuleSet, platform M) (M, error) {
+	if err := requiredRuleSets(rules, value.AsMap(value.Dig(platform, "global.okdp"))); err != nil {
+		return nil, err
+	}
 	settings, err := ruleset.SchemaValues(rules.PlatformSchema(), "the values (Inputs.Values) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}
-	okdp := value.AsMap(value.Dig(settings, "global.okdp"))
-	if err := requiredRuleSets(rules, okdp); err != nil {
-		return nil, err
-	}
-	return okdp, nil
+	return value.AsMap(value.Dig(settings, "global.okdp")), nil
 }
 
 // requiredRuleSets checks that rules holds every set that
-// global.okdp.ruleSets of okdp, the platform's settings, requires, of a
-// version its constraint accepts. Without it, a tree whose settings a set
-// reads would compile without that set's rules.
+// global.okdp.ruleSets of okdp, the platform's settings as written,
+// requires, of a version its constraint accepts. Without it, a platform
+// whose settings a set reads would compile without that set's rules. An
+// entry without a name is the schema's to refuse.
 func requiredRuleSets(rules *RuleSet, okdp M) error {
-	for _, v := range value.AsList(okdp["ruleSets"]) {
-		m := value.AsMap(v)
-		if err := rules.Require(value.Str(m["name"]), value.Str(m["version"])); err != nil {
+	list, _ := okdp["ruleSets"].([]any)
+	for _, v := range list {
+		m, _ := v.(M)
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		version, _ := m["version"].(string)
+		if err := rules.Require(name, version); err != nil {
 			return fmt.Errorf("global.okdp.ruleSets: %w", err)
 		}
 	}

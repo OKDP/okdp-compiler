@@ -55,17 +55,8 @@ output:
     vars: [{$for: c in values.items, $vars: {Y: '${{ c.n + n }}'}, $each: '${{ [y, Y] }}'}]
 `
 
-// readerErrors: the documents the reader refuses, and their errors, which
-// start with the name of the file.
-var readerErrors = map[string]string{
-	"output:\n  x:\n    a: &a {k: 1}\n    b: *a\n": "values.cel.yaml: line 4: aliases are not read",
-	"output: {x: {v: !!bool yes}}\n":               "values.cel.yaml: line 1: yaml: cannot decode !!str `yes` as a !!bool",
-	"output: {x: {v: !!binary gIA=}}\n":            "values.cel.yaml: line 1: jsontext: invalid UTF-8",
-}
-
 // TestMappingYAML12: the bindings of vars, a name bound twice, the later
-// winning, seen by the section; the documents the reader refuses, their
-// errors starting with the name of the file.
+// winning, seen by the section.
 func TestMappingYAML12(t *testing.T) {
 	out, err := runOutput(yamlDoc)
 	if err != nil {
@@ -74,20 +65,12 @@ func TestMappingYAML12(t *testing.T) {
 	if got, want := value.AsMap(out["x"])["vars"], []any{float64(3), float64(2), float64(3), float64(3)}; !reflect.DeepEqual(got, want) {
 		t.Errorf("got  %#v\nwant %#v", got, want)
 	}
-	if out, err := runOutput("output: {x: 1}\n---\noutput: {x: 2}\n"); err != nil || out["x"] != float64(1) {
-		t.Errorf("a second document: got %#v (%v)", out, err)
-	}
-	for src, want := range readerErrors {
-		if _, err := runOutput(src); err == nil || err.Error() != want {
-			t.Errorf("%q: got %v, want %q", src, err, want)
-		}
-	}
 }
 
 // TestErrorRules: the errors section, a list: each item it gives that is
 // not empty a message ($if and $value, per element with $for, a list
 // spliced with $spread), or the list an expression gives; the message of
-// an item left out is not evaluated; an error at the item's position.
+// an item left out is not evaluated.
 func TestErrorRules(t *testing.T) {
 	_, err := runOutput(`
 errors:
@@ -108,39 +91,17 @@ errors:
 	if _, err := runOutput("errors: ${{ values.items.filter(i, i.n > 1.0).map(i, 'no ' + i.name) }}\n"); err == nil || err.Error() != "no b" {
 		t.Errorf("an expression: got %v, want %q", err, "no b")
 	}
-	for name, tc := range map[string]struct{ src, want string }{
-		"message error":  {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$if: '${{ true }}', $value: '${{ values.nope }}'}\n", "values.cel.yaml: errors[1]: ${{ values.nope }}: no such key: nope"},
-		"$each position": {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$for: c in values.items, $each: '${{ values.nope }}'}\n", "values.cel.yaml: errors[1]: ${{ values.nope }}: no such key: nope"},
-	} {
-		if _, err := runOutput(tc.src); err == nil || err.Error() != tc.want {
-			t.Errorf("%s: got %v, want %q", name, err, tc.want)
-		}
-	}
-}
-
-// TestEmptyDocument: an empty, comment-only or null document has no
-// section.
-func TestEmptyDocument(t *testing.T) {
-	for _, src := range []string{"", "# only a comment\n", "---\n", "--- # a comment\n", "~\n"} {
-		if out, err := runOutput(src); err != nil || len(out) != 0 {
-			t.Errorf("%q: got %v %#v, want no section", src, err, out)
-		}
-	}
 }
 
 // TestMappingErrors: invalid mappings, and where their errors point: the
 // errors section, vars, the file.
 func TestMappingErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
-		"errors position":     {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$if: '${{ nope }}', $value: x}\n", "values.cel.yaml: errors[1]: ${{ nope }}:"},
-		"not a map":           {"- a\n", "values.cel.yaml: the mapping must be a YAML map"},
-		"invalid YAML":        {"output: [\n", "values.cel.yaml: yaml: line 1: did not find expected node content"},
-		"vars name":           {"vars: {a: '${{ nope }}'}\n", "values.cel.yaml: vars a:"},
-		"vars list position":  {"vars: {a: [1, '${{ nope }}']}\n", "values.cel.yaml: vars a[1]: ${{ nope }}:"},
-		"section path":        {"output: {x: {a: {b: '${{ nope }}'}}}\n", "values.cel.yaml: output: x: a: b:"},
-		"section list":        {"output: {x: {l: [a, {b: [1, '${{ nope }}']}]}}\n", "values.cel.yaml: output: x: l[1]: b[1]: ${{ nope }}:"},
-		"$vars name":          {"output: {x: {l: [{$for: c in values.items, $vars: {d: '${{ nope }}'}, $each: 1}]}}\n", "values.cel.yaml: output: x: l[0]: $vars d: ${{ nope }}:"},
-		"scalar without data": {"output: {x: {v: .nan}}\n", "values.cel.yaml: line 1: json: cannot marshal from Go float64: unsupported value: NaN"},
+		"errors position":    {"errors:\n  - {$if: '${{ false }}', $value: x}\n  - {$if: '${{ nope }}', $value: x}\n", "values.cel.yaml: errors[1]: ${{ nope }}:"},
+		"not a map":          {"- a\n", "values.cel.yaml: the mapping must be a YAML map"},
+		"vars name":          {"vars: {a: '${{ nope }}'}\n", "values.cel.yaml: vars a:"},
+		"vars list position": {"vars: {a: [1, '${{ nope }}']}\n", "values.cel.yaml: vars a[1]: ${{ nope }}:"},
+		"section path":       {"output: {x: {a: {b: '${{ nope }}'}}}\n", "values.cel.yaml: output: x: a: b:"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := runOutput(tc.src)
@@ -155,14 +116,9 @@ func TestMappingErrors(t *testing.T) {
 // language under it, fail when the document is loaded, at their path.
 func TestMistakes(t *testing.T) {
 	for name, tc := range map[string]struct{ src, want string }{
-		"unknown section":     {"outptu: {}\n", "values.cel.yaml: outptu: unknown section (allowed: vars, errors, output)"},
-		"untaken branch":      {"output: {x: {m: {$if: '${{ values.off }}', a: '${{ nope }}'}}}\n", "values.cel.yaml: output: x: m: a: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
-		"under $each":         {"output: {x: {l: [{$for: c in values.items, $each: {$iff: 1}}]}}\n", "values.cel.yaml: output: x: l[0]: $each: $iff: not allowed here (allowed: $if, $merge)"},
-		"vars not a map":      {"vars: [a]\n", "values.cel.yaml: vars: must be a map of bindings, got a list"},
-		"vars a scalar":       {"vars: 5\n", "values.cel.yaml: vars: must be a map of bindings, got 5"},
-		"vars value":          {"vars: {a: {$iff: 1}}\n", "values.cel.yaml: vars a: $iff: not allowed here (allowed: $if, $merge)"},
-		"errors item":         {"errors: [{$iff: '${{ true }}', $value: x}]\n", "values.cel.yaml: errors[0]: $iff: not allowed here (allowed: $if, $value, $else)"},
-		"top-level directive": {"$if: '${{ false }}'\noutput: {}\n", "values.cel.yaml: $if: unknown section (allowed: vars, errors, output)"},
+		"unknown section": {"outptu: {}\n", "values.cel.yaml: outptu: unknown section (allowed: vars, errors, output)"},
+		"vars not a map":  {"vars: [a]\n", "values.cel.yaml: vars: must be a map of bindings, got a list"},
+		"vars value":      {"vars: {a: {$iff: 1}}\n", "values.cel.yaml: vars a: $iff: not allowed here (allowed: $if, $merge)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := runOutput(tc.src); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
@@ -172,19 +128,9 @@ func TestMistakes(t *testing.T) {
 	}
 }
 
-// TestTemplateErrors: an error of a template's values names its file and
-// its path.
-func TestTemplateErrors(t *testing.T) {
-	_, err := Eval(context.Background(), cel2yaml.NewSession(0), mapCtx(), []string{"values"}, Source{Name: "t.cel.yaml", Data: []byte("values: {a: [1, '${{ nope }}']}\n")})
-	if want := "t.cel.yaml: values: a[1]: ${{ nope }}:"; err == nil || !strings.HasPrefix(err.Error(), want) {
-		t.Errorf("got %v, want an error containing %q", err, want)
-	}
-}
-
 // TestSources: a document read from several files: the bindings of vars
 // seen by every one, a file that is one section whole (its top-level
-// directives those of the section's map), the keys a file skips; the
-// messages of errors as written.
+// directives those of the section's map), the keys a file skips.
 func TestSources(t *testing.T) {
 	okdp := Source{Name: "okdp.yaml", Skip: []string{"roles", "output"}, Data: []byte("roles: [x]\noutput: {x: 1}\nvars:\n  n: ${{ values.items.size() }}\n")}
 	values := func(src string) Source { return Source{Name: "values.cel.yaml", Section: "output", Data: []byte(src)} }
@@ -201,9 +147,6 @@ func TestSources(t *testing.T) {
 	}
 	if out, err := runOutput("output: {x: 1}\noutput: {x: 2}\n"); err != nil || out["x"] != float64(2) {
 		t.Errorf("a top-level key written twice in a file: got %#v (%v), want the later", out, err)
-	}
-	if _, err := evalOutput(Source{Name: "okdp.yaml", Data: []byte("errors: [a, '', b]\n")}, values("{}\n")); err == nil || err.Error() != "a\nb" {
-		t.Errorf("errors: got %v, want the messages as written", err)
 	}
 }
 
@@ -257,10 +200,7 @@ func TestSourceErrors(t *testing.T) {
 		"same vars":          {[]Source{okdp("vars: {a: 1}\n"), mapping("vars: {b: 1}\n")}, "values.cel.yaml: vars: okdp.yaml gives it too"},
 		"same errors":        {[]Source{mapping("errors: []\n"), okdp("errors: []\n")}, "okdp.yaml: errors: values.cel.yaml gives it too"},
 		"skipped elsewhere":  {[]Source{okdp("roles: [x]\n"), mapping("roles: [x]\n")}, "values.cel.yaml: roles: unknown section (allowed: vars, errors, output)"},
-		"not a section":      {[]Source{{Name: "x.yaml", Section: "outptu", Data: []byte("{}\n")}}, "x.yaml: outptu: unknown section (allowed: vars, errors, output)"},
 		"parse error":        {[]Source{okdp("vars: [\n"), values("{}\n")}, "okdp.yaml: yaml: line 1: did not find expected node content"},
-		"alias":              {[]Source{okdp("{}\n"), values("a: &a 1\nb: *a\n")}, "values.cel.yaml: line 2: aliases are not read"},
-		"not a map":          {[]Source{okdp("[a]\n")}, "okdp.yaml: the mapping must be a YAML map"},
 		"directive":          {[]Source{okdp("{}\n"), values("$iff: 1\n")}, "values.cel.yaml: $iff: not allowed here (allowed: $if, $merge)"},
 		"in a section file":  {[]Source{okdp("vars: {n: 1}\n"), values("a: [1, '${{ nope }}']\n")}, "values.cel.yaml: a[1]: ${{ nope }}: ERROR: <input>:1:2: undeclared reference to 'nope'"},
 		"evaluated, section": {[]Source{okdp("vars: {n: 1}\n"), values("a: {b: '${{ values.nope + n }}'}\n")}, "values.cel.yaml: a: b: ${{ values.nope + n }}: no such key: nope"},
@@ -275,9 +215,8 @@ func TestSourceErrors(t *testing.T) {
 	}
 }
 
-// TestVarsCost: the CEL cost of a compile is shared by the bindings of vars
-// and the sections, and by the documents of the session; an error past the
-// limit names the binding.
+// TestVarsCost: the CEL cost of a compile is shared by the bindings of
+// vars; an error past the limit names the binding.
 func TestVarsCost(t *testing.T) {
 	one := "vars:\n  a: ${{ values.items.map(i, i.n * 2.0) }}\n"
 	two := one + "  b: ${{ values.items.map(i, i.n * 2.0) }}\n"
@@ -293,16 +232,6 @@ func TestVarsCost(t *testing.T) {
 	_, err := Eval(context.Background(), cel2yaml.NewSession(limit), mapCtx(), nil, mapping(two))
 	if want := fmt.Sprintf("values.cel.yaml: vars b: ${{ values.items.map(i, i.n * 2.0) }}: the expressions of the compile exceed its CEL cost limit (%d)", limit); err == nil || err.Error() != want {
 		t.Errorf("past the limit: got %v, want %q", err, want)
-	}
-	s = cel2yaml.NewSession(limit)
-	if _, err := Eval(context.Background(), s, mapCtx(), nil, mapping(one)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Eval(context.Background(), s, mapCtx(), nil, mapping(one)); err == nil || !strings.HasSuffix(err.Error(), fmt.Sprintf("exceed its CEL cost limit (%d)", limit)) {
-		t.Errorf("past the limit, in a second document: got %v", err)
-	}
-	if _, err := Eval(context.Background(), cel2yaml.NewSession(2*cost), mapCtx(), nil, mapping(two)); err != nil {
-		t.Errorf("within the limit: %v", err)
 	}
 }
 

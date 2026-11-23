@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,14 +14,12 @@ import (
 	ruleset "github.com/okdp/okdp-compiler/internal/rules"
 )
 
-// hookRules: testdata/hooks over the mandatory set: an objects hook that
-// wants a label on every object, a finalValues hook that bounds every
-// count, and a section of its own, notes, whose items add objects.
-func hookRules(t *testing.T) *RuleSet {
-	t.Helper()
-	r, err := LoadRules(os.DirFS("testdata/hooks"))
+// testRules: the rule set of testdata/<dir> over the mandatory set.
+func testRules(tb testing.TB, dir string) *RuleSet {
+	tb.Helper()
+	r, err := LoadRules(os.DirFS(filepath.Join("testdata", dir)))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return r
 }
@@ -36,7 +35,37 @@ func hookPackage(okdp string) fstest.MapFS {
 	}
 }
 
-const hookOkdp = "objects: ${{ values.objects }}\nnotes: ${{ values.notes }}\n"
+// hookCompile: an instance of hookPackage, its okdp.yaml writing the
+// objects and notes of its parameters, compiled with the rule set of
+// testdata/hooks: objects hooks that want a label on every object and no
+// Secret's data, a finalValues hook that bounds every count, namespace and
+// release hooks that refuse what the settings list, and a section of its
+// own, notes, whose items add objects; f its Finalize, these values
+// layers.
+func hookCompile(t *testing.T, f Finalize, layers ...map[string]any) (*Result, error) {
+	t.Helper()
+	in := inputs(layers...)
+	in.Finalize = f
+	return hookCompileInputs(t, in)
+}
+
+// hookCompileInputs compiles hookPackage with in, its rule set testdata/hooks.
+func hookCompileInputs(t *testing.T, in Inputs) (*Result, error) {
+	t.Helper()
+	r := testRules(t, "hooks")
+	d, err := LoadDefinition(hookPackage("objects: ${{ values.objects }}\nnotes: ${{ values.notes }}\n"), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Rules = r
+	return Compile(context.Background(), d, in)
+}
+
+// trusted: a values layer whose settings list demo among the namespaces
+// the documents of testdata/hooks exempt (global.okdp.trusted): the
+// compiler calls every hook for every project, and each document decides
+// whom it exempts.
+var trusted = M{"global": M{"okdp": M{"trusted": []any{"demo"}}}}
 
 // labelled: a ConfigMap named name, with the label team when team is set.
 func labelled(name, team string) M {
@@ -48,20 +77,10 @@ func labelled(name, team string) M {
 }
 
 // TestHookObjects: the objects hook on each object of an instance, items
-// of a List too, after check object; its message as the document writes
-// it; skipped for a privileged project.
+// of a List too, its documents in order; its message as the document
+// writes it; called for every project, the document exempting whom it
+// will. The compiler refuses no kind of its own.
 func TestHookObjects(t *testing.T) {
-	r := hookRules(t)
-	d, err := LoadDefinition(hookPackage(hookOkdp), r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	compileWith := func(layers ...map[string]any) (*Result, error) {
-		in := inputs(layers...)
-		in.Rules = r
-		return Compile(context.Background(), d, in)
-	}
-	privileged := M{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}}
 	for name, tc := range map[string]struct {
 		layers []map[string]any
 		want   string
@@ -73,12 +92,15 @@ func TestHookObjects(t *testing.T) {
 			"demo: objects: ConfigMap/inner: metadata.labels: no label team in demo"},
 		"the label of the settings": {[]map[string]any{{"objects": []any{labelled("a", "x")}, "global": M{"okdp": M{"label": "owner"}}}},
 			"demo: objects: ConfigMap/a: metadata.labels: no label owner in demo"},
-		"check object first": {[]map[string]any{{"objects": []any{M{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": M{"name": "c"}}}}},
-			"demo: objects: ClusterRole/c: a cluster-scoped kind"},
-		"privileged": {[]map[string]any{{"objects": []any{labelled("b", "")}}, privileged}, ""},
+		"a cluster-scoped kind":  {[]map[string]any{{"objects": []any{M{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": M{"name": "c", "labels": M{"team": "x"}}}}}}, ""},
+		"exempt by the document": {[]map[string]any{{"objects": []any{labelled("b", "")}}, trusted}, ""},
+		"the documents in order": {[]map[string]any{{"objects": []any{M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": "s"}, "data": M{"k": "dg=="}}}}},
+			"demo: objects: Secret/s: metadata.labels: no label team in demo"},
+		"the second document": {[]map[string]any{{"objects": []any{M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": "s", "labels": M{"team": "x"}}, "data": M{"k": "dg=="}}}}},
+			"demo: objects: Secret/s: data"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := compileWith(tc.layers...)
+			_, err := hookCompile(t, nil, tc.layers...)
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.want)) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
@@ -87,38 +109,83 @@ func TestHookObjects(t *testing.T) {
 			}
 		})
 	}
+	// Inputs.AllowPlainSecrets reaches the documents.
+	in := inputs(M{"objects": []any{M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": "s", "labels": M{"team": "x"}}, "data": M{"k": "dg=="}}}})
+	in.AllowPlainSecrets = true
+	if _, err := hookCompileInputs(t, in); err != nil {
+		t.Errorf("allowPlainSecrets: %v", err)
+	}
 	// A host's objects, through CheckObjects, with the platform's settings.
-	ctx := context.Background()
-	if err := CheckObjects(ctx, r, "web", "demo", nil, []M{labelled("a", "")}); err == nil || err.Error() != "web: objects: ConfigMap/a: metadata.labels: no label team in demo" {
+	ctx, r := context.Background(), testRules(t, "hooks")
+	if err := CheckObjects(ctx, r, "web", "demo", nil, false, []M{labelled("a", "")}); err == nil || err.Error() != "web: objects: ConfigMap/a: metadata.labels: no label team in demo" {
 		t.Errorf("CheckObjects: got %v", err)
 	}
-	if err := CheckObjects(ctx, r, "web", "demo", M{"label": "owner"}, []M{labelled("a", "x")}); err == nil || err.Error() != "web: objects: ConfigMap/a: metadata.labels: no label owner in demo" {
+	if err := CheckObjects(ctx, r, "web", "demo", M{"label": "owner"}, false, []M{labelled("a", "x")}); err == nil || err.Error() != "web: objects: ConfigMap/a: metadata.labels: no label owner in demo" {
 		t.Errorf("CheckObjects with settings: got %v", err)
 	}
-	if err := CheckObjects(ctx, r, "web", "demo", M{}, []M{labelled("a", "x")}); err != nil {
+	if err := CheckObjects(ctx, r, "web", "demo", M{}, false, []M{labelled("a", "x")}); err != nil {
 		t.Errorf("CheckObjects of a labelled object: %v", err)
 	}
-	if err := CheckObjects(ctx, Mandatory(), "web", "demo", nil, []M{labelled("a", "")}); err != nil {
+	secret := M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": "s", "labels": M{"team": "x"}}, "data": M{"k": "dg=="}}
+	if err := CheckObjects(ctx, r, "web", "demo", M{}, false, []M{secret}); err == nil || err.Error() != "web: objects: Secret/s: data" {
+		t.Errorf("CheckObjects of a Secret: got %v", err)
+	}
+	if err := CheckObjects(ctx, r, "web", "demo", M{}, true, []M{secret}); err != nil {
+		t.Errorf("CheckObjects of a Secret, allowPlainSecrets: %v", err)
+	}
+	if err := CheckObjects(ctx, Mandatory(), "web", "demo", nil, false, []M{labelled("a", ""), secret}); err != nil {
 		t.Errorf("CheckObjects without hooks: %v", err)
+	}
+	if err := CheckObjects(ctx, nil, "web", "demo", nil, false, nil); !errors.Is(err, ruleset.ErrNotLoaded) {
+		t.Errorf("CheckObjects without a rule set: got %v", err)
+	}
+}
+
+// TestHookNamespaceRelease: the namespace and release hooks of every set,
+// the mandatory set's first, with the settings, in a compile as in
+// SettingsOf and CheckNamespace, the same message for each; a namespace
+// refused is a *NamespaceError of SettingsOf.
+func TestHookNamespaceRelease(t *testing.T) {
+	ctx, r := context.Background(), testRules(t, "hooks")
+	layer := M{"global": M{"okdp": M{"reserved": []any{"demo", "kube-system"}}}}
+	_, err := hookCompile(t, nil, layer)
+	if want := `Inputs.Namespace "demo": reserved by settings.reserved`; err == nil || err.Error() != want {
+		t.Errorf("Compile: got %v, want %q", err, want)
+	}
+	in := inputs(layer)
+	in.Rules = r
+	_, serr := SettingsOf(ctx, in)
+	if _, ok := errors.AsType[*NamespaceError](serr); !ok || serr.Error() != err.Error() {
+		t.Errorf("SettingsOf: %v", serr)
+	}
+	if err := CheckNamespace(ctx, r, "namespace", "demo", M{"reserved": []any{"demo"}}); err == nil || err.Error() != `namespace "demo": reserved by settings.reserved` {
+		t.Errorf("CheckNamespace: %v", err)
+	}
+	in.Namespace = "kube-system"
+	if _, err := SettingsOf(ctx, in); err == nil || err.Error() != `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)` {
+		t.Errorf("the mandatory set's document first: %v", err)
+	}
+	if _, err := SettingsOf(ctx, inputs(layer)); err != nil {
+		t.Errorf("the mandatory set alone: %v", err)
+	}
+	_, err = hookCompile(t, nil, M{"global": M{"okdp": M{"taken": []any{"demo-app"}}}})
+	if want := `Inputs.Release "demo-app": taken by settings.taken`; err == nil || err.Error() != want {
+		t.Errorf("the release: got %v, want %q", err, want)
+	}
+	if _, err := hookCompile(t, nil, M{"global": M{"okdp": M{"taken": []any{"other"}}}}); err != nil {
+		t.Errorf("a release not taken: %v", err)
 	}
 }
 
 // TestHookFinalValues: the finalValues hook on the final values of each
 // key, made by Helm's merge or by a Finalize, once, where the Finalize
-// calls it or after it; skipped for a privileged project.
+// calls it or after it; called for every project, the document exempting
+// whom it will.
 func TestHookFinalValues(t *testing.T) {
-	r := hookRules(t)
-	d, err := LoadDefinition(hookPackage(hookOkdp), r)
-	if err != nil {
-		t.Fatal(err)
-	}
 	compileWith := func(f Finalize, layers ...map[string]any) error {
-		in := inputs(layers...)
-		in.Rules, in.Finalize = r, f
-		_, err := Compile(context.Background(), d, in)
+		_, err := hookCompile(t, f, layers...)
 		return err
 	}
-	privileged := M{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}}
 	refused := "app: count: above the most (demo in demo)"
 	// Helm's merge.
 	if err := compileWith(nil); err != nil {
@@ -130,8 +197,8 @@ func TestHookFinalValues(t *testing.T) {
 	if err := compileWith(nil, M{"count": 9, "global": M{"okdp": M{"maxCount": 10}}}); err != nil {
 		t.Errorf("Helm's merge, the most of the settings: %v", err)
 	}
-	if err := compileWith(nil, M{"count": 9}, privileged); err != nil {
-		t.Errorf("Helm's merge, a privileged project: %v", err)
+	if err := compileWith(nil, M{"count": 9}, trusted); err != nil {
+		t.Errorf("Helm's merge, a project the document exempts: %v", err)
 	}
 	// A Finalize: the hook runs on what it returns.
 	nested := map[string]map[string]any{"app": {"nested": []any{M{"count": 7}}}}
@@ -146,11 +213,11 @@ func TestHookFinalValues(t *testing.T) {
 	if err := compileWith(returns(nested, errors.New("refused by the host"))); err == nil || err.Error() != "refused by the host" {
 		t.Errorf("after a Finalize that fails: got %v", err)
 	}
-	if err := compileWith(returns(nested, nil), privileged); err != nil {
-		t.Errorf("after Finalize, a privileged project: %v", err)
+	if err := compileWith(returns(nested, nil), trusted); err != nil {
+		t.Errorf("after Finalize, a project the document exempts: %v", err)
 	}
 	// Outside a compile: keys in order, the first message refusing.
-	ctx := context.Background()
+	ctx, r := context.Background(), testRules(t, "hooks")
 	values := map[string]map[string]any{"b": {"count": 9}, "a": {"x": M{"count": 8}}, "c": nil}
 	if err := CheckFinalValues(ctx, r, "web", "demo", nil, values); err == nil || err.Error() != "a: x.count: above the most (web in demo)" {
 		t.Errorf("CheckFinalValues: got %v", err)
@@ -167,23 +234,12 @@ func TestHookFinalValues(t *testing.T) {
 }
 
 // TestOwnObjectsList: the list document of a section of the rule set
-// reads privileged and settings, and its first message refuses.
+// reads the release and the settings, and its first message refuses.
 func TestOwnObjectsList(t *testing.T) {
-	r := hookRules(t)
-	d, err := LoadDefinition(hookPackage(hookOkdp), r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	compileWith := func(layers ...map[string]any) (*Result, error) {
-		in := inputs(layers...)
-		in.Rules = r
-		return Compile(context.Background(), d, in)
-	}
 	note := func(shared bool, text string) M {
 		return M{"name": "n", "text": text, "shared": shared, "labels": M{"team": "x"}}
 	}
-	privileged := M{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}}
-	res, err := compileWith(M{"notes": []any{note(false, "hello")}})
+	res, err := hookCompile(t, nil, M{"notes": []any{note(false, "hello")}})
 	if err != nil || len(res.Objects) != 1 || res.Objects[0]["metadata"].(M)["name"] != "demo-app-n" {
 		t.Fatalf("a note: %v %v", err, res)
 	}
@@ -192,13 +248,13 @@ func TestOwnObjectsList(t *testing.T) {
 		want   string
 	}{
 		"shared": {[]map[string]any{{"notes": []any{note(false, "a"), note(true, "b")}}},
-			"notes[1]: a shared note is the platform's projects' (global.okdp.policy.privileged)"},
-		"shared, privileged": {[]map[string]any{{"notes": []any{note(true, "b")}}, privileged}, ""},
+			"notes[1]: a shared note is a trusted namespace's (global.okdp.trusted)"},
+		"shared, trusted": {[]map[string]any{{"notes": []any{note(true, "b")}}, trusted}, ""},
 		"a word the settings ban": {[]map[string]any{{"notes": []any{note(false, "one,two three")}, "global": M{"okdp": M{"banned": []any{"three"}}}}},
 			"notes[0]: a word of global.okdp.banned"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := compileWith(tc.layers...)
+			_, err := hookCompile(t, nil, tc.layers...)
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || err.Error() != tc.want) {
 				t.Errorf("got %v, want %q", err, tc.want)
 			}
@@ -210,7 +266,7 @@ func TestOwnObjectsList(t *testing.T) {
 // read for, and no other key: the mandatory set alone refuses them, with
 // the message of any unknown key.
 func TestOkdpSections(t *testing.T) {
-	r := hookRules(t)
+	r := testRules(t, "hooks")
 	files := hookPackage("vars: {}\nnotes: []\n")
 	if _, err := LoadDefinition(files, r); err != nil {
 		t.Errorf("a section of the rule set: %v", err)

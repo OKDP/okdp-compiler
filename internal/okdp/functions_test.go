@@ -2,7 +2,6 @@ package okdp
 
 import (
 	"context"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,21 +9,11 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// functionRules: testdata/functions over the mandatory set: the fragments
-// exampleConfigMap (result objects) and exampleSettings (no result), the
-// function exampleName a document computes, and the section notes, each
-// checked against the mapping schema the set adds.
-func functionRules(t *testing.T) *RuleSet {
-	t.Helper()
-	r, err := LoadRules(os.DirFS("testdata/functions"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return r
-}
-
 // functionCompile: def with this okdp.yaml and values file, compiled with
-// rules.
+// rules: testRules(t, "functions") gives the fragments exampleConfigMap
+// (result objects) and exampleSettings (no result), the function
+// exampleName a document computes, and the section notes, each checked
+// against the mapping schema the set adds.
 func functionCompile(rules *RuleSet, okdp, values string) (*Result, error) {
 	d := *def
 	d.Okdp, d.Values = []byte(okdp), []byte(values)
@@ -40,7 +29,7 @@ func functionCompile(rules *RuleSet, okdp, values string) (*Result, error) {
 // it returns, every value without it. A function a document computes
 // returns the document's value of that name.
 func TestFragmentFunctions(t *testing.T) {
-	res, err := functionCompile(functionRules(t), `
+	res, err := functionCompile(testRules(t, "functions"), `
 objects:
   - $spread: "${{ exampleConfigMap({'name': 'settings', 'data': {'a': 'b'}}) }}"
 instance: {url: "https://${{ exampleName('web') }}", usage: demo}
@@ -58,7 +47,7 @@ instance: {url: "https://${{ exampleName('web') }}", usage: demo}
 	if want := (M{"a": "b", "replicas": "1", "domain": "example.org"}); !reflect.DeepEqual(o["data"], want) {
 		t.Errorf("the ConfigMap's data: got %#v, want %#v", o["data"], want)
 	}
-	if want := (M{"name": "app-demo-app", "viewers": []any{}}); !reflect.DeepEqual(res.Values["app"]["settings"], want) {
+	if want := (M{"name": "app-demo-app", "proxyEnv": M{}}); !reflect.DeepEqual(res.Values["app"]["settings"], want) {
 		t.Errorf("a fragment without result: got %#v, want %#v", res.Values["app"]["settings"], want)
 	}
 	if res.Info.URL != "https://demo-app-web" {
@@ -72,13 +61,12 @@ instance: {url: "https://${{ exampleName('web') }}", usage: demo}
 // the set that gives the function fails when it loads the mapping, the
 // call in any branch.
 func TestFragmentErrors(t *testing.T) {
-	rules := functionRules(t)
+	rules := testRules(t, "functions")
 	for name, tc := range map[string]struct{ args, want string }{
-		"not a map":     {`'settings'`, "exampleConfigMap: the arguments are a map, got"},
-		"no name":       {`{}`, "exampleConfigMap: the arguments don't meet the specifications of mapping.schema.json:\n- at '/exampleConfigMap': missing property 'name'"},
-		"a minimum":     {`{'name': 'a', 'replicas': 0}`, "- at '/exampleConfigMap/replicas': minimum: got 0, want 1"},
-		"unknown":       {`{'name': 'a', 'nmae': 'b'}`, "- at '/exampleConfigMap': additional properties 'nmae' not allowed"},
-		"another space": {`{'name': 'a', 'namespace': 'other'}`, "demo: objects: ConfigMap/demo-app-a:"},
+		"not a map": {`'settings'`, "exampleConfigMap: the arguments are a map, got"},
+		"no name":   {`{}`, "exampleConfigMap: the arguments don't meet the specifications of mapping.schema.json:\n- at '/exampleConfigMap': missing property 'name'"},
+		"a minimum": {`{'name': 'a', 'replicas': 0}`, "- at '/exampleConfigMap/replicas': minimum: got 0, want 1"},
+		"unknown":   {`{'name': 'a', 'nmae': 'b'}`, "- at '/exampleConfigMap': additional properties 'nmae' not allowed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := functionCompile(rules, "objects:\n  - $spread: \"${{ exampleConfigMap("+tc.args+") }}\"\n", "app: {}\n")
@@ -86,6 +74,10 @@ func TestFragmentErrors(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+	twice := "objects:\n  - $spread: \"${{ exampleConfigMap({'name': 'a'}) }}\"\n  - $spread: \"${{ exampleConfigMap({'name': 'a'}) }}\"\n"
+	if _, err := functionCompile(rules, twice, "app: {}\n"); err == nil || !strings.Contains(err.Error(), "demo: objects: ConfigMap/demo-app-a: two objects of one kind") {
+		t.Errorf("the compile's checks on a fragment's objects: got %v", err)
 	}
 	_, err := functionCompile(Mandatory(), "vars:\n  m: \"${{ values.replicas > 5 ? exampleConfigMap({'name': 'a'}) : [] }}\"\n", "app: {}\n")
 	if err == nil || !strings.Contains(err.Error(), "okdp.yaml: vars m: ${{ values.replicas > 5 ? exampleConfigMap({'name': 'a'}) : [] }}: ERROR: <input>:1:40: undeclared reference to 'exampleConfigMap'") {

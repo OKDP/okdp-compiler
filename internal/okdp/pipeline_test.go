@@ -78,6 +78,14 @@ func withFiles(files fstest.MapFS) *Definition {
 	return &d
 }
 
+// withSchema: def, its package files the in-memory ones with this
+// parameter schema (config.schema.json).
+func withSchema(schema string) *Definition {
+	files := maps.Clone(pkg)
+	files["config.schema.json"] = &fstest.MapFile{Data: []byte(schema)}
+	return withFiles(files)
+}
+
 // TestCompile: final values and what the instance publishes, a compile
 // from memory.
 func TestCompile(t *testing.T) {
@@ -141,25 +149,6 @@ func TestValuesYAML(t *testing.T) {
 	}
 }
 
-// TestCompileBudget: a compile cancelled, bounded by a cost limit.
-func TestCompileBudget(t *testing.T) {
-	v := M{"replicas": float64(3)}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := Compile(ctx, def, inputs(v)); !errors.Is(err, context.Canceled) {
-		t.Errorf("cancelled: got %v, want context.Canceled", err)
-	}
-	in := inputs(v)
-	in.CostLimit = 2
-	if _, err := Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "exceed its CEL cost limit (2)") {
-		t.Errorf("past the cost limit: got %v", err)
-	}
-	in.CostLimit = 1000
-	if _, err := Compile(context.Background(), def, in); err != nil {
-		t.Errorf("within the cost limit: %v", err)
-	}
-}
-
 // TestCompileErrors: mapping errors, platform values and the names.
 func TestCompileErrors(t *testing.T) {
 	for name, tc := range map[string]struct {
@@ -176,10 +165,6 @@ func TestCompileErrors(t *testing.T) {
 		"long namespace":  {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: strings.Repeat("a", 64)}, `Inputs.Namespace "aaaa`},
 		"platform":        {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "platform"}, `Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`},
 		"kube-system":     {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "kube-system"}, `Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`},
-		"kube-node-lease": {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "kube-node-lease"}, `Inputs.Namespace "kube-node-lease": the namespace is reserved: kube-* is Kubernetes' own`},
-		"flux-system":     {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "flux-system"}, `Inputs.Namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`},
-		"argocd":          {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "argocd"}, `Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's`},
-		"okdp-releases":   {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "okdp-releases"}, `Inputs.Namespace "okdp-releases": the namespace is reserved: a deployer engine's`},
 		"name":            {Inputs{Rules: Mandatory(), Contracts: contracts, Release: "demo-app", Namespace: "demo", Name: "App"}, `Inputs.Name "App": an instance name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -189,25 +174,6 @@ func TestCompileErrors(t *testing.T) {
 			}
 		})
 	}
-	// The platform's reserved namespaces (policy.reserved):
-	// a reservation wins over a privilege; another namespace, default
-	// among them, compiles.
-	for _, privileged := range []bool{false, true} {
-		policy := M{"reserved": []any{"openbao", "demo"}}
-		want := `Inputs.Namespace "demo": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`
-		if privileged {
-			policy["privileged"] = []any{"demo"}
-			want += ", privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins"
-		}
-		in := inputs(M{"global": M{"okdp": M{"policy": policy}}})
-		if _, err := Compile(context.Background(), def, in); err == nil || err.Error() != want {
-			t.Errorf("reserved, privileged %v: got %v, want %s", privileged, err, want)
-		}
-		in.Namespace = "default"
-		if _, err := Compile(context.Background(), def, in); err != nil {
-			t.Errorf("default: %v", err)
-		}
-	}
 	// The longest release and namespace.
 	in := inputs()
 	in.Release, in.Namespace = strings.Repeat("a", 53), strings.Repeat("a", 63)
@@ -216,62 +182,9 @@ func TestCompileErrors(t *testing.T) {
 	}
 }
 
-// TestServicePaths: Compile refuses a malformed protect path of a
-// definition built in memory; a bracketed path protects the instance's
-// upstream values.
-func TestServicePaths(t *testing.T) {
-	d := *def
-	d.Values = []byte("app: {}\n")
-	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{"labels.*"}})
-	if _, err := Compile(context.Background(), &d, inputs()); err == nil || !strings.Contains(err.Error(), `okdp.yaml: upstream.app.protect[0] "labels.*"`) {
-		t.Errorf("in memory: got %v", err)
-	}
-	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{`labels["okdp.io/*"]`}})
-	in := inputs(M{"upstream": M{"app": M{"labels": M{"okdp.io/instance": "other"}}}})
-	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), `app: upstream.app.labels["okdp.io/instance"]: labels["okdp.io/*"] is set by the platform and cannot be changed`) {
-		t.Errorf("a protected key: got %v", err)
-	}
-	in = inputs(M{"upstream": M{"app": M{"labels": M{"team": "a"}}}})
-	res, err := Compile(context.Background(), &d, in)
-	if err != nil || value.Dig(res.Values["app"], "labels.team") != "a" {
-		t.Errorf("a key the glob does not name: %v %#v", err, res)
-	}
-}
-
-// TestDependencies: references to an instance only, with their parameter
-// path, the output named after the instance by the naming convention.
-func TestDependencies(t *testing.T) {
-	ch := maps.Clone(pkg)
-	ch["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {
-		"replicas": {"type": "integer", "default": 1},
-		"backends": {"type": "array", "items": {"properties": {
-			"database": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}}}}`)}
-	in := inputs(map[string]any{
-		"backends": []any{
-			map[string]any{"database": "ext"},     // an external connection: not a dependency
-			map[string]any{"database": "demo-db"}, // an output of an instance
-			map[string]any{"database": ""},        // not set
-		},
-		"connections": map[string]any{"ext": map[string]any{"contract": "database", "host": "db.example.org"}},
-	})
-	in.Contracts = fstest.MapFS{"database.schema.json": {Data: []byte(`{
-		"x-okdp-contract": "database",
-		"properties": {"host": {"type": "string"}},
-		"required": ["host"]}`)}}
-	in.Published = map[string]Info{"demo-db": {Provides: []Output{{Name: "demo-db", Contract: "database", Values: M{"host": "demo-db.demo.svc"}}}}}
-	res, err := Compile(context.Background(), withFiles(ch), in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []Dependency{{Instance: "demo-db", Contract: "database", Field: "backends[1].database", Output: "demo-db"}}
-	if !reflect.DeepEqual(res.Dependencies, want) {
-		t.Errorf("got %#v, want %#v", res.Dependencies, want)
-	}
-}
-
 // TestUpstreamValues: the instance's upstream values of a chart that
-// accepts them, over its computed values, checked against protect and
-// append; none for a chart that does not.
+// accepts them, over its computed values, checked against protect, a
+// bracketed glob too, and append; none for a chart that does not.
 func TestUpstreamValues(t *testing.T) {
 	inline := map[string]any{"upstream": map[string]any{"app": map[string]any{"image": map[string]any{"tag": "inline"}, "env": []any{"C"}}}}
 	for name, tc := range map[string]struct {
@@ -299,6 +212,10 @@ func TestUpstreamValues(t *testing.T) {
 	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{"labels"}})
 	if _, err := Compile(context.Background(), &d, inputs(M{"upstream": M{"app": M{"labels": M{"x": "y"}}}})); err == nil || !strings.Contains(err.Error(), "app: upstream.app.labels: labels is set by the platform") {
 		t.Errorf("a protected path: got %v", err)
+	}
+	d.Package.Upstream = upstreamOf("app", chart.UpstreamKey{Accept: true, Protect: []string{`labels["okdp.io/*"]`}})
+	if _, err := Compile(context.Background(), &d, inputs(M{"upstream": M{"app": M{"labels": M{"okdp.io/instance": "other"}}}})); err == nil || !strings.Contains(err.Error(), `app: upstream.app.labels["okdp.io/instance"]: labels["okdp.io/*"] is set by the platform and cannot be changed`) {
+		t.Errorf("a bracketed glob: got %v", err)
 	}
 }
 
@@ -363,6 +280,8 @@ func TestCompileSchemas(t *testing.T) {
 // computed values when the values file does not write its key, but one
 // whose key it writes that is left out ($if, a section left out whole) or
 // null; a key of a top-level $merge or $for is written when it gives it.
+// Result.Charts maps every chart rendered to its source, one upstream
+// chart for an aliased dependency too.
 func TestRendered(t *testing.T) {
 	d := *def
 	d.Chart.Dependencies = []chart.Dependency{appDep, {Name: "app", Alias: "canary", Repository: appSource.Repository, Version: appSource.Version}}
@@ -394,6 +313,13 @@ func TestRendered(t *testing.T) {
 			if got := slices.Sorted(maps.Keys(res.Values)); !slices.Equal(got, tc.want) {
 				t.Errorf("rendered: got %v, want %v", got, tc.want)
 			}
+			charts := map[string]chart.Ref{}
+			for _, k := range tc.want {
+				charts[k] = appSource
+			}
+			if !reflect.DeepEqual(res.Charts, charts) {
+				t.Errorf("charts: got %#v, want %#v", res.Charts, charts)
+			}
 			if app, ok := res.Values["app"]; ok && (app["replicaCount"] != nil || value.Dig(app, "image.tag") != "4.5" || value.Dig(app, "labels.team") != "a") {
 				t.Errorf("app: OKDP's defaults and its upstream values, not its chart's: %#v", app)
 			}
@@ -404,35 +330,6 @@ func TestRendered(t *testing.T) {
 		d.Values = []byte(src)
 		if _, err := Compile(context.Background(), &d, in); err == nil || err.Error() != "values.cel.yaml: x: not a dependency of Chart.yaml" {
 			t.Errorf("%q: got %v", src, err)
-		}
-	}
-}
-
-// TestChartAlone: a package that is Chart.yaml alone compiles, every
-// dependency rendered with the instance's global alone: Helm gives it its
-// chart's defaults.
-func TestChartAlone(t *testing.T) {
-	d, err := LoadDefinition(fstest.MapFS{"Chart.yaml": {Data: []byte(`
-apiVersion: v2
-name: demo
-version: 1.0.0
-dependencies:
-  - {name: app, repository: https://charts.example.org, version: 1.0.0}
-  - {name: app, alias: canary, repository: https://charts.example.org, version: 1.0.0}
-`)}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := Compile(context.Background(), d, inputs())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := slices.Sorted(maps.Keys(res.Values)); !slices.Equal(got, []string{"app", "canary"}) {
-		t.Errorf("rendered: got %v", got)
-	}
-	for _, k := range []string{"app", "canary"} {
-		if v := res.Values[k]; !reflect.DeepEqual(v, map[string]any{"global": platformValues["global"]}) {
-			t.Errorf("%s: the global alone: %#v", k, v)
 		}
 	}
 }
@@ -525,7 +422,7 @@ objects:
 		}
 		return finalized, map[string]chart.Ref{"app": appSource}, []string{"finalized"}, nil
 	}
-	if res, err = Compile(context.Background(), &d, with); err != nil || res.Values["app"]["final"] != true || !slices.Contains(res.Warnings, "finalized") || value.AsMap(res.Computed["app"])["replicaCount"] != float64(2) {
+	if res, err = Compile(context.Background(), &d, with); err != nil || res.Values["app"]["final"] != true || !slices.Contains(res.Warnings, "finalized") {
 		t.Errorf("Finalize: %v %+v", err, res)
 	}
 	with.Finalize = func(context.Context, FinalInput) (map[string]map[string]any, map[string]chart.Ref, []string, error) {
@@ -566,33 +463,11 @@ objects:
 	}
 }
 
-// TestSharedSource: two dependencies of Chart.yaml, one aliased, rendered by
-// one upstream chart, each with its own values; its schema, read once from
-// the chart cache, checks both; Result.Charts maps every chart to its
-// source.
-func TestSharedSource(t *testing.T) {
-	d := *def
-	d.Chart.Dependencies = []chart.Dependency{appDep, {Name: "app", Alias: "canary", Repository: "https://charts.example.org", Version: "1.0.0"}}
-	d.Package.Defaults = map[string]string{"canary": "app.defaults.yaml"}
-	d.Okdp, d.Values = nil, []byte("app: {}\ncanary: {replicaCount: '${{ values.replicas }}'}\n")
-	res, err := Compile(context.Background(), &d, inputs(M{"replicas": 2}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := (map[string]chart.Ref{"app": appSource, "canary": appSource}); !reflect.DeepEqual(res.Charts, want) {
-		t.Errorf("charts: got %#v, want %#v", res.Charts, want)
-	}
-	canary := res.Values["canary"]
-	if canary["replicaCount"] != float64(2) || value.Dig(canary, "image.tag") != "4.5" || canary["labels"] != nil {
-		t.Errorf("canary: OKDP's defaults, then the computed ones: %#v", canary)
-	}
-}
-
 // TestCompileTimeout: Inputs.Timeout bounds one compile, beside the
 // context's deadline: past it the instance is refused with its own message,
 // not the context's; the caller's context cancelled is still its error; a
 // tree compiled together refuses the instance alone; the cost of a compile
-// is the result's (Result.Cost), counted under a limit.
+// is counted under a limit, refused past it.
 func TestCompileTimeout(t *testing.T) {
 	in := inputs()
 	in.Timeout = time.Nanosecond
@@ -612,12 +487,13 @@ func TestCompileTimeout(t *testing.T) {
 		t.Errorf("the caller's deadline: %v", err)
 	}
 	in.Timeout = 0
-	if res, err := Compile(context.Background(), def, in); err != nil || res.Cost != 0 {
-		t.Errorf("no limit: %v, cost %v", err, res)
-	}
 	in.CostLimit = 1_000_000
-	if res, err := Compile(context.Background(), def, in); err != nil || res.Cost == 0 || res.Cost > in.CostLimit {
-		t.Errorf("under a limit: %v, cost %v", err, res)
+	if _, err := Compile(context.Background(), def, in); err != nil {
+		t.Errorf("under a limit: %v", err)
+	}
+	in.CostLimit = 2
+	if _, err := Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "exceed its CEL cost limit (2)") {
+		t.Errorf("past the cost limit: got %v", err)
 	}
 	slow, fast := Instance{Definition: def, Inputs: inputs(), Name: "slow"}, Instance{Definition: def, Inputs: inputs(), Name: "fast"}
 	slow.Inputs.Release, fast.Inputs.Release = "demo-slow", "demo-fast"

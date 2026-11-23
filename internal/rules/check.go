@@ -1,5 +1,5 @@
-// The checks of a rule set are documents of the mapping language. Each is
-// prepared once, in a session that belongs to the rule set. A compile
+// The documents of a rule set are documents of the mapping language. Each
+// is prepared once, in a session that belongs to the rule set. A compile
 // therefore does not pay for building them, nor count them in its cost.
 
 package rules
@@ -22,22 +22,14 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// The names of the checks a rule set holds, every one of them.
-const (
-	CheckNamespaceRule  = "namespace"
-	CheckPlatformNSRule = "platformNamespace"
-	CheckReleaseRule    = "release"
-	CheckObjectRule     = "object"
-	CheckPlainSecret    = "plainSecret"
-)
+// ruleInputs lists what the documents may read: what the compiler gives
+// them (the hooks', the scopes', the functions' and the sections' inputs),
+// and the sets and tables of the rule set. A set declares the names of the
+// inputs its documents give one another through rule (inputs in
+// rules.yaml): every document may read them.
+var ruleInputs = []string{"allowPlainSecrets", "arg", "field", "items", "key", "ns", "object", "platform", "release", "sets", "settings", "svc", "tables", "value"}
 
-// ruleChecks lists the names of the checks of a rule set, sorted.
-var ruleChecks = []string{CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule}
-
-// ruleInputs lists what the checks may read, besides their sets and tables.
-var ruleInputs = []string{"added", "arg", "at", "field", "host", "items", "key", "listed", "name", "ns", "object", "platform", "privileged", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}
-
-// checker holds the checks prepared in one session. A session is not safe
+// checker holds the documents prepared in one session. A session is not safe
 // for concurrent use, so a rule set keeps the checkers that are free. ctx
 // is the context of the evaluation that holds the checker, nil while it is
 // free: the rule function needs it, because a CEL binding takes no context.
@@ -46,11 +38,11 @@ type checker struct {
 	ctx  context.Context
 }
 
-func prepare(sources map[string]compile.Source) (*checker, error) {
+func prepare(sources map[string]compile.Source, inputs []string) (*checker, error) {
 	c := &checker{docs: map[string]*compile.Prepared{}}
 	s := cel2yaml.NewSession(0, ruleFunctions(c)...)
 	for _, name := range slices.Sorted(maps.Keys(sources)) {
-		p, err := compile.Prepare(s, ruleInputs, []string{"values"}, sources[name])
+		p, err := compile.Prepare(s, inputs, []string{"values"}, sources[name])
 		if err != nil {
 			return nil, err
 		}
@@ -59,31 +51,19 @@ func prepare(sources map[string]compile.Source) (*checker, error) {
 	return c, nil
 }
 
-// loadChecks reads the checks and documents of a set. ready prepares them.
-func (r *RuleSet) loadChecks(fsys fs.FS, files, documents M) error {
-	read := func(what, name string, file any) error {
-		if _, ok := r.sources[name]; ok {
-			return taken(what, name)
-		}
-		b, err := fs.ReadFile(fsys, path.Clean(value.Str(file)))
-		if err != nil {
-			return fmt.Errorf("%s: %s: %s: %w", RulesFile, what, name, err)
-		}
-		r.sources[name] = compile.Source{Name: path.Clean(value.Str(file)), Data: b}
-		return nil
-	}
-	for _, name := range slices.Sorted(maps.Keys(files)) {
-		if err := read("checks", name, files[name]); err != nil {
-			return err
-		}
-	}
+// loadDocuments reads the documents of a set, of names no set read before
+// gives. ready prepares them.
+func (r *RuleSet) loadDocuments(fsys fs.FS, documents M) error {
 	for _, name := range slices.Sorted(maps.Keys(documents)) {
-		if slices.Contains(ruleChecks, name) {
-			return fmt.Errorf("%s: documents: %s: the name of a check", RulesFile, name)
+		if _, ok := r.sources[name]; ok {
+			return r.taken("documents", name)
 		}
-		if err := read("documents", name, documents[name]); err != nil {
-			return err
+		file := path.Clean(value.Str(documents[name]))
+		b, err := fs.ReadFile(fsys, file)
+		if err != nil {
+			return fmt.Errorf("%s: documents: %s: %w", RulesFile, name, err)
 		}
+		r.sources[name] = compile.Source{Name: file, Data: b}
 	}
 	return nil
 }
@@ -96,7 +76,7 @@ func (r *RuleSet) get() (*checker, error) {
 		return c, nil
 	default:
 	}
-	return prepare(r.sources)
+	return prepare(r.sources, r.inputs)
 }
 
 // put frees c, or drops it when the rule set keeps as many as it can use.
@@ -140,20 +120,21 @@ func (r *RuleSet) Values(ctx context.Context, document string, input M) (M, erro
 	return value.AsMap(sections["values"]), nil
 }
 
-// Refuse runs the check on input: one of ruleChecks, or a document of any
-// set, by name. It returns nil when the check passes, and its first message
-// as a *Failure. A check that fails to evaluate gives another error: it
+// Refuse evaluates the document of any set, by name, on input, as a
+// check. It returns nil when the document passes, and its first message
+// as a *Failure. A document that fails to evaluate gives another error: it
 // never counts as a rule passed.
-func (r *RuleSet) Refuse(ctx context.Context, check string, input M) error {
-	_, err := r.Values(ctx, check, input)
+func (r *RuleSet) Refuse(ctx context.Context, document string, input M) error {
+	_, err := r.Values(ctx, document, input)
 	return err
 }
 
 // ErrRefused is what a *Failure matches (errors.Is): a rule of the rule set
-// refused, as opposed to a check that could not run.
+// refused, as opposed to a document that could not run.
 var ErrRefused = errors.New("refused by the rule set")
 
-// ErrNotLoaded is the error of a check on the zero value of RuleSet.
+// ErrNotLoaded is the error of a document or a hook run on the zero value
+// of RuleSet.
 var ErrNotLoaded = errors.New("no rule set was loaded (LoadRules)")
 
 // Failure is a rule that refused. Path is the field the message is about,

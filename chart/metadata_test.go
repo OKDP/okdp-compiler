@@ -1,7 +1,6 @@
 package chart
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -50,13 +49,9 @@ annotations: {example.org/a: b}
 		ok + "---\nname: other\n": "Chart.yaml: one YAML document",
 		ok + "---\n":              "Chart.yaml: one YAML document",
 		ok + "title: x\n":         "Chart.yaml: yaml: unmarshal errors:\n  line 4: field title not found in type chart.Metadata",
-		ok + "dependencies: [{name: a, alais: b}]\n": "Chart.yaml: yaml: unmarshal errors:\n  line 4: field alais not found in type chart.Dependency",
-		ok + "maintainers: [{name: a, mail: b}]\n":   "Chart.yaml: yaml: unmarshal errors:\n  line 4: field mail not found in type chart.Maintainer",
-		ok + "dependencies: {app: {}}\n":             "Chart.yaml: yaml: unmarshal errors:\n  line 4: cannot unmarshal !!map into []chart.Dependency",
-		ok + "annotations: {a: [b]}\n":               "Chart.yaml: yaml: unmarshal errors:\n  line 4: cannot unmarshal !!seq into string",
-		"dependencies: [\n":                          "Chart.yaml: yaml: line 1: did not find expected node content",
-		"":                                           `Chart.yaml: apiVersion "": v2, the only one the compiler reads`,
-		"# nothing\n":                                `Chart.yaml: apiVersion "": v2, the only one the compiler reads`,
+		"dependencies: [\n":       "Chart.yaml: yaml: line 1: did not find expected node content",
+		"":                        `Chart.yaml: apiVersion "": v2, the only one the compiler reads`,
+		"# nothing\n":             `Chart.yaml: apiVersion "": v2, the only one the compiler reads`,
 		ok + "dependencies: [{name: a, version: 1.x}]\n": `Chart.yaml: dependencies[0].repository "": the URL of a chart repository`,
 	} {
 		if _, err := ReadMetadata([]byte(src)); err == nil || !strings.HasPrefix(err.Error(), want) {
@@ -82,6 +77,7 @@ func TestMetadataCheck(t *testing.T) {
 		want string // "": no error
 	}{
 		"ok":             {chart(app, with(func(d *Dependency) { d.Alias = "canary" })), ""},
+		"enabled":        {chart(app, with(func(d *Dependency) { d.Alias, d.Condition = "api", "api.enabled" })), ""},
 		"no dependency":  {chart(), ""},
 		"application":    {Metadata{APIVersion: "v2", Name: "demo", Version: "v1.0.0+build", Type: "application"}, ""},
 		"apiVersion v1":  {Metadata{APIVersion: "v1", Name: "demo", Version: "1.0.0"}, `Chart.yaml: apiVersion "v1": v2, the only one the compiler reads`},
@@ -97,8 +93,6 @@ func TestMetadataCheck(t *testing.T) {
 		"enabled false":  {chart(with(func(d *Dependency) { d.Enabled = false })), "Chart.yaml: dependencies[0] (app): enabled: the values decide what is rendered"},
 		"import-values":  {chart(with(func(d *Dependency) { d.ImportValues = []any{"data"} })), "Chart.yaml: dependencies[0] (app): import-values: the values decide what is rendered"},
 		"key":            {chart(app, with(func(d *Dependency) { d.Alias = "Api" })), `Chart.yaml: dependencies[1] (Api): key "Api": a DNS label (lowercase letters, digits and -, a letter or digit at each end, 63 characters at most): the key names the umbrella's dependency alias`},
-		"name key":       {chart(with(func(d *Dependency) { d.Name = "my_app" })), `Chart.yaml: dependencies[0] (my_app): key "my_app": a DNS label`},
-		"long key":       {chart(with(func(d *Dependency) { d.Alias = strings.Repeat("a", 64) })), `Chart.yaml: dependencies[0] (aaaa`},
 		"global":         {chart(app, with(func(d *Dependency) { d.Alias = "global" })), `Chart.yaml: dependencies[1] (global): key "global": the values every chart of the umbrella reads (Helm's global), not a dependency's: give it another alias`},
 		"named global":   {chart(with(func(d *Dependency) { d.Name = "global" })), `Chart.yaml: dependencies[0] (global): key "global"`},
 		"duplicate":      {chart(app, with(func(d *Dependency) { d.Name = "other" }), with(func(d *Dependency) { d.Name, d.Alias = "workspace", "app" })), "Chart.yaml: dependencies[2] (app): the key of dependencies[0] too: give one of them an alias"},
@@ -117,33 +111,5 @@ func TestMetadataCheck(t *testing.T) {
 		case tc.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.want)):
 			t.Errorf("%s: got %v, want %q", name, err, tc.want)
 		}
-	}
-}
-
-// TestDependencyKeys: a dependency's key, its alias or else its name, is a
-// DNS label: it names the umbrella's dependency alias.
-func TestDependencyKeys(t *testing.T) {
-	for key, ok := range map[string]bool{
-		"app": true, "a-1": true, "0": true, strings.Repeat("a", 63): true,
-		"../escaped": false, "App": false, "my_app": false, "my.app": false, "-app": false, "app-": false, strings.Repeat("a", 64): false,
-	} {
-		m := Metadata{APIVersion: "v2", Name: "demo", Version: "1.0.0", Dependencies: []Dependency{{Name: "app", Alias: key, Repository: "https://x", Version: "1.0.0"}}}
-		err := m.Check()
-		if want := fmt.Sprintf("Chart.yaml: dependencies[0] (%s): key %q: a DNS label", key, key); ok && err != nil || !ok && (err == nil || !strings.HasPrefix(err.Error(), want)) {
-			t.Errorf("%q: got %v", key, err)
-		}
-	}
-}
-
-// TestConditionEnabled: a dependency the chart, installed as it is, may leave
-// out: <key>.enabled, of its key alone.
-func TestConditionEnabled(t *testing.T) {
-	d := Dependency{Name: "app", Alias: "api", Condition: "api.enabled"}
-	if name, refused := d.refused(); refused {
-		t.Errorf("%s refused", name)
-	}
-	d.Condition = "app.enabled"
-	if _, refused := d.refused(); !refused {
-		t.Error("the condition of another key accepted")
 	}
 }

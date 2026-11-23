@@ -535,8 +535,8 @@ provides:
 secret): the compiler renders the credentials Secret, generated in the
 cluster (rustfs); a `stringData` alone, credentials in clear in the
 deployments repository, fails unless the caller sets
-`Inputs.AllowPlainSecrets`, and so does a Secret of `objects` with
-`data` or `stringData` ([credentials
+`Inputs.AllowPlainSecrets`, and so does, with the security set, a
+Secret of `objects` with `data` or `stringData` ([credentials
 Secrets](specs/01_inputs_outputs.md#credentials-secrets)). `secretRef`
 alone: an operator or an upstream chart creates it (cnpg-postgresql).
 Neither: consumers bring their own identity (seaweedfs). An output never
@@ -723,11 +723,11 @@ app:
 A realm's roles are the platform's, every project's people hold them: a
 service that lets anyone with a role of the realm in runs the code of a
 project (a notebook, a flow, a UI that submits jobs) for the people of
-the others. The people of a project are its groups, each with a role,
-which a host gives the compile in its settings
-(`global.okdp.access.groups` of `Inputs.Settings`; `okdp-compile` reads
-the `access` of the `Project` document, no group without one), and the
-compiler gives them to the mapping:
+the others. The people of a project are its groups, each with a role, a
+setting of the security set a host gives the project's instances
+(`global.okdp.access.groups`, in its settings, which no chart receives,
+or in the values of the `Project` document for `okdp-compile`, no group
+without one), and the security set gives them to the mapping:
 
 | Variable | Value |
 |---|---|
@@ -737,7 +737,9 @@ compiler gives them to the mapping:
 | `platform.access.platformAdmins` | the platform's administrators alone (`global.okdp.access.admins`) |
 
 Each list is sorted, once each name, the names the identity provider's
-tokens give the groups (no prefix). A package that restricts who signs in
+tokens give the groups (no prefix). A compile without the security set
+gives no `platform.access`: a package that reads it compiles only with
+the set. A package that restricts who signs in
 defaults its allowed groups to them, a parameter replacing the default
 only to narrow or to widen on purpose:
 
@@ -822,8 +824,8 @@ objects:
           'keys': [{'key': 'password', 'length': 24}]}) : [] }}
 ```
 
-Helm and Flux keep what `helm.sh/resource-policy: keep` marks; the
-compiler adds Argo CD's equivalents, `argocd.argoproj.io/sync-options:
+Helm and Flux keep what `helm.sh/resource-policy: keep` marks; a host
+adds Argo CD's equivalents, `argocd.argoproj.io/sync-options:
 Prune=false,Delete=false`, to each such object it writes ([the objects
 chart](specs/01_inputs_outputs.md#the-objects-chart)).
 

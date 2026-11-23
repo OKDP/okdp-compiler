@@ -50,7 +50,7 @@
     },
     "objects": {
       "type": "array",
-      "description": "OKDP's own objects, whole manifests, passed as written. Those of an instance of a project that is not privileged (global.okdp.policy.privileged) stay in its namespace (metadata.namespace unset, or the release's), and none is of a cluster-scoped kind: the compile refuses them. In every project, no Secret holds values in clear (data, stringData) unless Inputs.AllowPlainSecrets: okdpGeneratedSecret, or an ExternalSecret of the platform's secret store.",
+      "description": "OKDP's own objects, whole manifests, passed as written. Each goes through the rule sets' objects hook: with the security set, those of an instance of a project that is not privileged (global.okdp.policy.privileged) stay in its namespace (metadata.namespace unset, or the release's), and none is of a cluster-scoped kind; in every project, no Secret holds values in clear (data, stringData) unless Inputs.AllowPlainSecrets: okdpGeneratedSecret, or an ExternalSecret of the platform's secret store.",
       "items": {
         "type": "object",
         "required": ["kind", "metadata"],
@@ -76,7 +76,7 @@
         "labels": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Extra labels of the ExternalSecret and the Secret."},
         "annotations": {"type": "object", "additionalProperties": {"type": "string"}, "description": "The annotations of every object."},
         "type": {"type": "string", "description": "The type of the Secret."},
-        "namespace": {"type": "string", "description": "The namespace of every object; \"\" or absent: the release's. Another namespace: the platform's projects only (global.okdp.policy.privileged), the compile refuses it otherwise."},
+        "namespace": {"type": "string", "description": "The namespace of every object; \"\" or absent: the release's. Another namespace: with the security set, the platform's projects only (global.okdp.policy.privileged), its objects hook refuses it otherwise."},
         "refreshInterval": {"type": "string", "description": "The ExternalSecret's refresh interval; \"\" or absent: \"0\", generated once."},
         "apiVersion": {"type": "string", "description": "The ExternalSecret's apiVersion; \"\" or absent: external-secrets.io/v1."}
       }

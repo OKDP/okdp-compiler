@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -25,71 +24,62 @@ func write(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
-// TestDirFS: a directory reads as os.DirFS (fstest.TestFS); a symbolic
-// link is followed, opened, on the path of a file or listed, whether it
-// points inside the directory or out of it, and a walk enters a linked
-// directory; a file that does not exist is fs.ErrNotExist; the directory
-// itself may be a link.
+// TestDirFS: a directory without links reads as os.DirFS (fstest.TestFS);
+// a symbolic link is refused, opened, on the path of a file or listed,
+// whether it points inside the directory or out of it; a file that does
+// not exist is fs.ErrNotExist; the directory itself may be a link.
 func TestDirFS(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, map[string]string{"outside/secret.yaml": "c: 3\n"})
 	tree := filepath.Join(dir, "tree")
 	write(t, tree, map[string]string{"platform.yaml": "a: 1\n", "projects/demo/project.yaml": "b: 2\n"})
-	d, err := New("--repository", tree)
+	d, err := New("-f", tree)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := fstest.TestFS(d, "platform.yaml", "projects/demo/project.yaml"); err != nil {
 		t.Fatal(err)
 	}
+	d.Close()
 	// Links: to a file out of the tree, to a directory in it, to a
 	// directory out of it.
-	for link, tc := range map[string]struct {
-		target string
-		file   string // a file read through the link
-		want   string
-	}{
-		"projects/demo/config.yaml": {filepath.Join(dir, "outside", "secret.yaml"), "projects/demo/config.yaml", "c: 3\n"},
-		"projects/data":             {filepath.Join(tree, "projects", "demo"), "projects/data/project.yaml", "b: 2\n"},
-		"projects/out":              {filepath.Join(dir, "outside"), "projects/out/secret.yaml", "c: 3\n"},
+	for link, target := range map[string]string{
+		"projects/demo/config.yaml": filepath.Join(dir, "outside", "secret.yaml"),
+		"projects/data":             filepath.Join(tree, "projects", "demo"),
+		"projects/out":              filepath.Join(dir, "outside"),
 	} {
 		t.Run(link, func(t *testing.T) {
-			if err := os.Symlink(tc.target, filepath.Join(tree, filepath.FromSlash(link))); err != nil {
+			if err := os.Symlink(target, filepath.Join(tree, filepath.FromSlash(link))); err != nil {
 				t.Fatal(err)
 			}
 			defer func() { _ = os.Remove(filepath.Join(tree, filepath.FromSlash(link))) }()
-			d, err := New("--repository", tree)
+			d, err := New("-f", tree)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if b, err := fs.ReadFile(d, tc.file); err != nil || string(b) != tc.want {
-				t.Errorf("read through it: %q, %v", b, err)
+			defer d.Close()
+			if _, err := fs.ReadFile(d, link); !errors.Is(err, ErrSymlink) || err.Error() != "open "+link+": a symbolic link, not followed" {
+				t.Errorf("opened: %v", err)
 			}
-			var walked []string
-			err = fs.WalkDir(d, ".", func(p string, e fs.DirEntry, err error) error {
-				if err == nil && !e.IsDir() {
-					walked = append(walked, p)
+			parent := link[:strings.LastIndexByte(link, '/')]
+			if _, err := fs.ReadDir(d, parent); !errors.Is(err, ErrSymlink) || err.Error() != "readdir "+parent+": "+link+": a symbolic link, not followed" {
+				t.Errorf("listed: %v", err)
+			}
+			if !strings.HasSuffix(link, ".yaml") {
+				if _, err := fs.ReadFile(d, link+"/project.yaml"); !errors.Is(err, ErrSymlink) || err.Error() != "open "+link+"/project.yaml: "+link+": a symbolic link, not followed" {
+					t.Errorf("through it: %v", err)
 				}
-				return err
-			})
-			if err != nil || !slices.Contains(walked, tc.file) {
-				t.Errorf("walked: %v, %v", walked, err)
+			}
+			if _, err := fs.ReadFile(d, "platform.yaml"); err != nil {
+				t.Errorf("a file beside it: %v", err)
 			}
 		})
 	}
-	// A link that points nowhere: listed, and fails when opened.
-	if err := os.Symlink(filepath.Join(dir, "nope"), filepath.Join(tree, "dangling.yaml")); err != nil {
+	d, err = New("-f", tree)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fs.ReadDir(d, "."); err != nil {
-		t.Errorf("listed: %v", err)
-	}
-	if _, err := fs.ReadFile(d, "dangling.yaml"); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("a dangling link: %v", err)
-	}
-	if err := os.Remove(filepath.Join(tree, "dangling.yaml")); err != nil {
-		t.Fatal(err)
-	}
+	defer d.Close()
 	if _, err := fs.ReadFile(d, "nope.yaml"); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("a missing file: %v", err)
 	}
@@ -103,17 +93,18 @@ func TestDirFS(t *testing.T) {
 	if err := os.Symlink(tree, link); err != nil {
 		t.Fatal(err)
 	}
-	linked, err := New("--repository", link)
+	linked, err := New("-f", link)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer linked.Close()
 	if b, err := fs.ReadFile(linked, "platform.yaml"); err != nil || string(b) != "a: 1\n" {
 		t.Errorf("the directory a link: %q, %v", b, err)
 	}
-	if _, err := New("--repository", filepath.Join(dir, "nope")); err == nil || !strings.HasPrefix(err.Error(), "--repository: ") {
+	if _, err := New("-f", filepath.Join(dir, "nope")); err == nil || !strings.HasPrefix(err.Error(), "-f: ") {
 		t.Errorf("a missing directory: %v", err)
 	}
-	if _, err := New("--repository", filepath.Join(tree, "platform.yaml")); err == nil || !strings.HasSuffix(err.Error(), "is not a directory") {
+	if _, err := New("-f", filepath.Join(tree, "platform.yaml")); err == nil || !strings.HasSuffix(err.Error(), "not a directory") {
 		t.Errorf("a file: %v", err)
 	}
 }
@@ -124,10 +115,11 @@ func TestDirFS(t *testing.T) {
 func TestDirFSBounds(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, map[string]string{"a": strings.Repeat("a", 10), "b": strings.Repeat("b", 10), "c": strings.Repeat("c", 10), "big": strings.Repeat("x", 11)})
-	d, err := New("--repository", dir)
+	d, err := New("--catalog", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer d.Close()
 	d.fileCap, d.dirCap = 10, 25
 	if _, err := fs.ReadFile(d, "big"); err == nil || err.Error() != "open big: 11 bytes, over the 10 bytes a file read may hold" {
 		t.Errorf("a file over the cap: %v", err)
@@ -137,17 +129,18 @@ func TestDirFSBounds(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if _, err := fs.ReadFile(d, "c"); err == nil || err.Error() != "open c: the files read of --repository "+dir+" pass 25 bytes together" {
+	if _, err := fs.ReadFile(d, "c"); err == nil || err.Error() != "open c: the files read of --catalog "+dir+" pass 25 bytes together" {
 		t.Errorf("past the directory's cap: %v", err)
 	}
 	if _, err := fs.ReadDir(d, "."); err != nil {
 		t.Errorf("a directory past the cap: %v", err)
 	}
 	// Grown once opened: the read fails at the cap.
-	g, err := New("--repository", dir)
+	g, err := New("--catalog", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer g.Close()
 	g.fileCap = 10
 	f, err := g.Open("a")
 	if err != nil {

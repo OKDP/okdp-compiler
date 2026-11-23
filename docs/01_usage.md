@@ -62,7 +62,7 @@ valuesFiles: [demo/dashboards/config.yaml]
 | Kind | Keys | What a compile receives |
 |---|---|---|
 | `Settings` | `values`, `valuesFiles` | the first values layers of every instance; one document at most |
-| `Project` | `name`, `access`, `values`, `valuesFiles` | the values layers of the instances of the project `name`, a namespace, after the `Settings` document's, and their groups (`access`); optional |
+| `Project` | `name`, `values`, `valuesFiles` | the values layers of the instances of the project `name`, a namespace, after the `Settings` document's, its groups among them (`global.okdp.access.groups`); optional |
 | `Instance` | `project`, `name`, `service`, `version`, `claimers`, `connections`, `values`, `valuesFiles` | the release `<project>-<name>` of the namespace `<project>`, of the package `catalog/<service>/<version>/`; `connections`, a layer `{connections: ...}` after its project's; `values` and `valuesFiles`, its own layers, last |
 
 - `valuesFiles` lists values files, each a path relative to the
@@ -100,17 +100,17 @@ valuesFiles: [demo/dashboards/config.yaml]
   through a class, whichever class routes them (`claimers: [demo]`,
   `["*"]` for any; absent, its package's, `provisions`, none by default)
   ([providers](specs/01_inputs_outputs.md#providers)).
-- A `Project` document's `access`, `{<group>: viewer|editor|admin}`,
-  gives the identity provider's groups their roles in the namespace,
-  `access.groups` of the settings `Inputs.Settings` of each of its
-  instances: absent, no group; the compiler gives no default group. No
-  values layer holds it, and no chart receives it: the mapping reads
-  the groups of each role in `platform.access`, with the platform's
-  administrators (`global.okdp.access.admins`). A host that
-  writes Flux or Argo CD files writes them as the Argo CD roles of the
-  project's AppProject and the RoleBindings of its namespace to
-  Kubernetes' `view`, `edit` and `admin`, with the prefix the API server
-  gives the groups (`global.okdp.access.groupPrefix`)
+- A `Project` document's values may give the identity provider's groups
+  their roles in the namespace, `global.okdp.access.groups`,
+  `{<group>: viewer|editor|admin}`, a setting of the security set,
+  which checks it and gives a mapping the groups of each role in
+  `platform.access`, with the platform's administrators
+  (`global.okdp.access.admins`): absent, no group; the compiler gives no
+  default group, and a compile without the security set takes the
+  setting unread. A host that writes Flux or Argo CD files writes them
+  as the Argo CD roles of the project's AppProject and the RoleBindings
+  of its namespace to Kubernetes' `view`, `edit` and `admin`, with the
+  prefix the API server gives the groups, a setting of its own rule set
   ([access](specs/01_inputs_outputs.md#access)). Who may set it is a
   host's to decide; to `okdp-compile`, whoever writes the documents.
 - The instance values are its parameters and upstream values; like any
@@ -169,10 +169,10 @@ The examples of this module, `examples/<name>/`, are laid out so:
 `exampleInstances` (`examples_test.go`) reads them as `okdp-compile`
 does, `LoadCatalog` then `LoadInputs`; `TestExample` compiles them
 (`CompileAll`) and compares what `Write` gives with its `output/`. The
-example instances of the project `demo`, `hello`, `webapp`, `db`, `app`,
+example instances of the project `demo`, `hello`, `webapp`, `db`,
 `dashboards`..., are the releases `demo-hello`, `demo-webapp`,
-`demo-db`, `demo-app`; the claims example's provider, `postgresql` of
-the project `data`, is `data-postgresql`.
+`demo-db`, `demo-dashboards`; the claims example's provider,
+`postgresql` of the project `data`, is `data-postgresql`.
 
 ## Installing an instance
 
@@ -206,8 +206,8 @@ host that writes the files of a deployer engine may write that.
 
 ## Command line
 
-`make build` gives `bin/okdp-compile`, which compiles the input documents
-of local files against local catalogs, `compiler.LoadCatalog`,
+`okdp-compile`, from a release ([install](#install)), compiles the input
+documents of local files against local catalogs, `compiler.LoadCatalog`,
 `LoadInputs`, `CompileAll` then `Write`, and writes the files above under
 `<output>/projects/<namespace>/instances/<release>/`:
 
@@ -225,23 +225,26 @@ helm install demo-webapp examples/02_advanced/input/catalog/webapp/1.0.0 -n demo
 
 | Flag | What |
 |---|---|
-| `-f`, `--file <file\|dir>` | input documents, repeatable, one required: a YAML file, read in the directory that holds it, or a directory whose `.yaml` and `.yml` files are read, at any depth ([input documents](#input-documents)) |
+| `-f`, `--file <file\|dir>` | input documents, repeatable, one required: a YAML file, read in the directory that holds it (the one it points to, a symbolic link), or a directory whose `.yaml` and `.yml` files are read, at any depth ([input documents](#input-documents)) |
 | `--catalog <dir>` | a catalog, `catalog/` and `contracts/` only, repeatable, one required |
-| `--rules <dir>` | a platform's rule set, `rules.yaml` at its root, with a `name`, added to the mandatory one, of which it replaces no rule; none, and the mandatory rules alone apply, their checks among them; a platform whose `global.okdp.ruleSets` requires a set not given is refused |
+| `--rules <dir>` | a platform's rule set, `rules.yaml` at its root, with a `name`, added to the mandatory one, of which it replaces no rule; none, and the mandatory rules alone apply, their hooks among them; a platform whose `global.okdp.ruleSets` requires a set not given is refused |
 | `--output`, `-o <dir>` | where to write; the command owns its `projects/` |
 | `--check` | compile and check, write nothing, no `-o`; no upstream chart read |
 | `--cost-limit`, `--instance-timeout`, `--timeout` | the bounds of a compile: 1000000 (`compiler.DefaultCostLimit`), `1m` and `10m` by default |
-| `--force` | write into a `projects/` the command did not write (no `projects/.okdp-compile`), removing what it does not write |
+| `--force` | write into a `projects/` the command did not write (no `projects/.okdp-compile`), removing what it does not write; never into a `projects/` that is a symbolic link |
 | `--allow-plain-secrets` | `Inputs.AllowPlainSecrets` of every instance |
 | `--version` | the version |
 
-It reads its directories with the files bounded, the output apart from
-every input, and prints on stderr the bindings of the claims, the refusals
-and the warnings, then, once the files are written, the dependencies,
-`<namespace>/<release>: depends on <instance> (<contract> <output>,
-<field>)`. It writes nothing when an instance is refused, nor when `-f`
-holds no `Instance` document (`no instance: -f holds no document of kind
-Instance`). It compiles with Helm's merge alone: it sets no
+It reads its directories with the files bounded and no symbolic link
+under them followed (a path given on the command line may be one), the
+output apart from every input; it writes no file through a link, and
+removes those under `projects/`. It prints on stderr the bindings of the
+claims, the refusals and the warnings, then, once the files are written,
+the dependencies, `<namespace>/<release>: depends on <instance>
+(<contract> <output>, <field>)`. It writes nothing when an instance is
+refused, nor when `-f` holds no `Instance` document (`no instance: -f
+holds no document of kind Instance`). It compiles with Helm's merge
+alone: it sets no
 `Inputs.Finalize` and checks no layer's `global`, so no host's policy on
 the upstream values runs, whatever `--rules` gives, and it decides nothing
 of what a layer may set. It orders no release: the dependencies are
@@ -252,6 +255,43 @@ CD, a single release per instance) and their order, the writing of the
 projects that compile when others do not, a report of the compile, and the
 checks of the final values against the upstream charts from a chart cache
 ([chart cache](specs/01_inputs_outputs.md#chart-cache)).
+
+### Install
+
+A [release](https://github.com/OKDP/okdp-compiler/releases), built by
+goreleaser from its tag, attaches for `linux`, `darwin` and `windows`,
+`amd64` and `arm64`:
+
+| File | What |
+|---|---|
+| `okdp-compile_<version>_<os>_<arch>.tar.gz`, `.zip` for Windows | `okdp-compile`, `LICENSE` and `README.md` |
+| `<archive>.sbom.json` | the SPDX SBOM of the archive, by syft |
+| `okdp-compile_<version>_checksums.txt` | the SHA-256 sums of the archives and the SBOMs |
+| `okdp-compile_<version>_checksums.txt.sigstore.json` | the Sigstore bundle of the sums, signed keyless with cosign by the release workflow: the signature, the certificate of the workflow's identity, the transparency log entry |
+
+The build provenance of each archive is attested too (GitHub's
+attestations). The latest release, downloaded, verified and installed:
+
+```bash
+v=$(gh release view -R OKDP/okdp-compiler --json tagName -q .tagName) os=linux arch=amd64
+a=okdp-compile_${v#v}_${os}_${arch}.tar.gz s=okdp-compile_${v#v}_checksums.txt
+gh release download $v -R OKDP/okdp-compiler -p $a -p "$s*"
+cosign verify-blob $s --bundle $s.sigstore.json \
+  --certificate-identity https://github.com/OKDP/okdp-compiler/.github/workflows/release-please.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum -c --ignore-missing $s
+gh attestation verify $a --repo OKDP/okdp-compiler
+tar xzf $a okdp-compile && install okdp-compile ~/.local/bin/
+```
+
+`cosign` checks that the release workflow signed the sums, `sha256sum`
+the archive against them; `gh attestation verify` checks the archive's
+provenance on its own, without `cosign`.
+
+`go install github.com/okdp/okdp-compiler/cmd/okdp-compile@<tag>`, or
+`@latest`, builds a release from the Go module proxy; its `--version`
+prints `dev`, as no `-X main.version` is set. From a checkout, `make
+build` gives `bin/okdp-compile`, its version that of `git describe`.
 
 ## Go library
 
@@ -331,15 +371,14 @@ func main() {
 ```
 
 ```text
-demo-app: claim demo.app.database bound to data/data-postgresql
 demo-dashboards: claim demo.analytics bound to data/data-postgresql
 demo-metrics: claim demo.metrics.database bound to data/data-postgresql
 demo-reports: claim demo.analytics bound to data/data-postgresql
 data/data-postgresql/okdp-objects.values.yaml
 data/data-postgresql/okdp.info.yaml
 data/data-postgresql/values.yaml
-demo/demo-app/okdp-objects.values.yaml
-demo/demo-app/values.yaml
+demo/demo-dashboards/okdp-objects.values.yaml
+demo/demo-dashboards/values.yaml
 ...
 ```
 
@@ -347,7 +386,7 @@ One instance, its inputs given in Go, with `LoadDefinition` and
 `Compile`: the claim bound by hand, as `CompileAll` binds it. The example
 gives the mandatory set with the example's own added, which its platform
 requires and whose function its package calls: the compile applies both,
-their checks among them ([rule sets](#rule-sets)):
+their hooks among them ([rule sets](#rule-sets)):
 
 ```go
 package main
@@ -508,10 +547,12 @@ receives](specs/01_inputs_outputs.md#what-a-compile-receives)):
 `Contracts` (those of the catalog's `contracts/`; it may be empty when
 nothing references a contract), `Values` (its values layers, parsed,
 the `Settings` document's, its project's, its `connections`, then its
-own), `Release`, `Namespace`, `Claimers`, `Settings` (its project's
-`access`, as `{access: {groups: ...}}`), and `Published` (what the
-other instances of the namespace publish, by release, each a
-`compiler.Info`;
+own), `Release`, `Namespace`, `Claimers`; `Settings`, which the
+documents never give: a host's own settings, the content of
+`global.okdp`, which join the layers' settings and reach no chart ([host
+settings](specs/01_inputs_outputs.md#host-settings)); and `Published` (what the
+other instances of the namespace
+publish, by release, each a `compiler.Info`;
 nil, none is known; `CompileAll` sets it), `Claims` (the claims bound to
 the instance of a provider, `compiler.Claim`), `Bindings` (the providers
 the instance's claims are bound to, by parameter path,
@@ -543,34 +584,41 @@ What a compile applies of a platform is data, in rule sets. The compiler
 embeds the mandatory one, `core`, which every compile applies: the
 functions it gives, the schema of the platform's settings, what a
 mapping sees as `platform`, the labels, the names, the documents of
-the secret store, the tables and CEL checks, the schema of the mapping
-and the platform's charts. `Inputs.Rules` nil compiles with
-it alone, which refuses what a
-platform refuses: a reserved namespace, an object or a plain Secret its
-checks deny.
+the secret store, the document of its hook `namespace`, the schema of
+the mapping and the platform's charts. `Inputs.Rules` nil compiles with
+it alone, which refuses only the namespaces OKDP keeps (`platform`,
+`kube-*`): no object, no Secret in clear, no namespace a platform
+reserves, which are the security set's to refuse, nor a host's engines'
+namespace or a release named like an object a host writes, which are
+the host's own set's.
 
-`compiler.LoadRules(fsys)` reads a platform's own set, `rules.yaml` at
-the root of `fsys`, and adds it to the mandatory one, in a
-`*compiler.RuleSet`: its tables, documents, hooks, functions,
-templates, sections, the keys it adds to the schemas and its scope
-documents. Both apply. It fails on a set without a `name`, on a rule the
-mandatory set gives, a table, a check, a key of a schema, a chart or a
-document (a rule set replaces none), and on a check that is unknown or
-values added to a table that is not extensible: never a rule turned off
-or replaced ([how the sets add
-up](specs/05_rules.md#how-the-sets-add-up)).
+`compiler.LoadRules(sets...)` reads a platform's own sets, each
+`rules.yaml` at the root of its `fs.FS`, and adds them to the mandatory
+one, in order, in a `*compiler.RuleSet`: their tables, documents, hooks
+and their inputs, functions, templates, sections, the keys they add to
+the schemas and their scope documents. All apply, a set adding to those
+before it. It fails on a set without a `name` or of a name another has,
+on a rule a set read before gives, a table, a key of a schema, a chart,
+a document or a document listed again at a hook (a rule set replaces
+none), and on values added to a table that is not extensible: never a
+rule turned off or replaced, the error naming the set ([how the sets
+add up](specs/05_rules.md#how-the-sets-add-up)). `okdp-compile --rules`
+gives one set.
 
 The usual added set is the security set, okdp-compiler-security: the
-hosts a project serves, its OAuth clients, the hardened workloads and
-their functions. The command line takes its directory, Go its module,
-which reads the same files:
+platform's policy (the objects of the projects that are not privileged,
+credentials in clear, the namespaces the platform reserves), the groups
+of each role, the hosts a project serves, its OAuth clients, the
+hardened workloads and their functions. The command line takes its
+directory, Go its module, which reads the same files:
 
 ```bash
 okdp-compile --rules ../okdp-compiler-security/rules -f config --catalog charts -o out
 ```
 
 ```go
-rules, err := security.Rules() // compiler.LoadRules(security.FS()), read once
+// compiler.LoadRules(security.FS()), read once; LoadRules(security.FS(), own) adds a set after it
+rules, err := security.Rules()
 if err != nil {
 	log.Fatal(err)
 }
@@ -587,8 +635,7 @@ does not pass what the set would refuse
 usage](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/01_usage.md#requiring-the-set-in-a-tree)).
 
 The helpers that read rules take the set first, nil being the mandatory
-one: `compiler.EngineNamespaces(rules)`, `PlatformObjectNames(rules)`,
-`CheckNamespace(ctx, rules, name, values)` and
+one: `compiler.CheckNamespace(ctx, rules, name, values)` and
 `CheckConnection(rules, contracts, namespace, c, values)`.
 
 ### Hosts
@@ -608,8 +655,11 @@ compile of the instance, its error refusing it:
   chart's default list. The host fetches the charts itself, checks the
   final values against them, may render each chart key with
   `FinalInput`'s `Release`, `Namespace` and `Specs[key].Source`, and
-  checks the manifests with `compiler.CheckObjects`, which runs check
-  `object` and the rule set's `objects` hook. The compile runs the
+  checks the manifests with `compiler.CheckObjects(ctx, rules, svc,
+  namespace, settings, allowPlainSecrets, objects)`, which runs the rule
+  sets' `objects` hook; a chart's own Secrets, rendered in the cluster
+  and never written to the deployments repository, are checked with
+  `allowPlainSecrets` true. The compile runs the
   `finalValues` hook on the values Finalize returns, after the host's
   own checks. `compiler.CheckFinalValues` runs the hook on final values
   a host reads outside a compile.
@@ -631,8 +681,9 @@ of several origins, the platform's, a project's, an instance's, checks
 each before the compile: that a layer only adds to the platform's, the
 keys of `global` and `global.okdp` a project may set, no template code
 from a layer it does not review, the keys of the secret store a
-namespace's connections may read, who gives the groups
-(`access.groups`, which a host gives in `Inputs.Settings`). The
+namespace's connections may read, who gives a project's groups
+(`global.okdp.access.groups`), which a host better gives in its own
+settings (`Inputs.Settings`): no layer may give them then. The
 security set's `policy.CheckGlobals` checks the `global` of the layers
 a host does not review against the upstream policy: nothing calls it
 but a host.
@@ -697,23 +748,19 @@ but a host.
   whose `global.okdp` gives the settings, why the compile would refuse
   every instance of a namespace of that name, in its words (`namespace
   "kube-foo": the namespace is reserved: ...`): not a name, or one the
-  mandatory rule set reserves (`platform`, `kube-*`, `argocd`,
-  `flux-system`, `okdp-releases`) or one of
-  `global.okdp.policy.reserved`, for a program that creates a namespace
-  before any compile. The release of an instance is `<project>-<name>`;
-  how a host names the files of a deployment is its own.
-- The groups of a namespace, for a program that gives or mirrors them
-  (a control plane): `compiler.ParseAccess(field, v)` reads `v`, a map
-  of group names to roles, as `global.okdp.access.groups`, a
-  `map[string]compiler.AccessRole` (`AccessViewer`, `AccessEditor`,
-  `AccessAdmin`), `field` naming it in the errors, nil giving no group;
-  a host gives them in `Inputs.Settings`, `{access: {groups: ...}}`;
-  `compiler.IsGroupName(name)`, whether a name may be a group's;
-  `compiler.SettingsOf(ctx, in)`, the settings of the layers of `in`
-  with `Inputs.Settings` as a compile checks them, their defaults
-  applied (the platform's administrators at `access.admins`, the
-  groups at `access.groups`), a
-  `*compiler.NamespaceError` when the namespace of `in` is refused
+  rule sets' `namespace` hook refuses, with the settings as written: the
+  mandatory set's (`platform`, `kube-*`), the security set's
+  (`global.okdp.policy.reserved`), a host's set's (its engines'), for a
+  program that creates a namespace before any compile. The release
+  of an instance is `<project>-<name>`; how a host names the files of a
+  deployment is its own.
+- The settings of an instance, for a program that reads them (a
+  control plane): `compiler.SettingsOf(ctx, in)`, the settings of the
+  layers of `in` as a compile checks them, their defaults applied, a
+  `*compiler.NamespaceError` when the namespace of `in` is refused (the
+  `namespace` hook). The groups of a namespace are among them,
+  `access.groups`, a setting of the security set, whose package `access`
+  reads and writes them for a host
   ([access](specs/01_inputs_outputs.md#access)).
 - `compiler.CompileAll(ctx, instances)` compiles instances together, each
   a `compiler.Instance`, its `Definition` and its `Inputs` without
@@ -761,20 +808,15 @@ but a host.
     `Property` whole); the compile's error when one cannot be read or
     is out of its reach ([declaring a
     reference](specs/01_inputs_outputs.md#declaring-a-reference)).
-  - `compiler.ReadContract(contracts, name)` and `ReadContracts` read
-    the contracts as a compile reads them, its error when one cannot
-    be: a `compiler.ContractDescriptor`, its `Label`
+  - `compiler.ReadContracts(contracts)` reads the contracts as a
+    compile reads them, its error when one cannot be: for each, a
+    `compiler.ContractDescriptor`, its `Label`
     (`x-okdp-contract`), `Title`, `Description`, its `Fields` in the
     order of the file (`ContractField`: `Secret`, `Required`, `Default`,
     `Derived`, `Condition`, its `Property` as written), `Required`,
     its claim schema (`Claim`), the document (`Schema`) for the
     keywords the compile does not read (`x-okdp-icon`,
     `x-ui-widget`...).
-  - `compiler.MergeValues(layers...)` merges values layers as the
-    compile merges an instance's, Helm's `-f` (maps key by key, a list
-    replaced, a null kept). Coalescing values over a chart's defaults,
-    as Helm gives them to its templates, is a host's: the compiler reads
-    no chart.
   - `compiler.CheckConnection(rules, contracts, namespace, c, values)`
     checks a connection of `namespace` at its declaration, as
     `CompileAll` checks every connection of an instance's layers: its
@@ -832,18 +874,19 @@ but a host.
   left of the limit, not the limit again. `Inputs.Timeout` bounds one
   compile in time, beside the context's deadline: past it the instance
   is refused with its own message (`okdp-compile --instance-timeout`
-  sets it on every instance), `Result.Cost`
-  is the cost it used (counted under a limit only). A `$for` costs 1 an element
+  sets it on every instance). A `$for` costs 1 an element
   and the size of what its body builds, its context checked at each.
   Whatever the limit, a document's values
   are 32 MiB at most (about their bytes in memory, a value a list holds
   ten times counted ten times): past it, the compile fails with
   `the values the document builds exceed 32 MiB`.
 - `Inputs.AllowPlainSecrets` accepts credentials in clear: a `provides`
-  `secret` without `generate`, a plain Secret of its `stringData`, a
-  Secret of the `objects` section with `data` or `stringData`, an
-  ExternalSecret whose template holds a literal at a sensitive key, a
-  Fake generator with values. Unset, they fail the compile, and a
+  `secret` without `generate`, a plain Secret of its `stringData`, and,
+  where the security set refuses them through the `objects` hook, which
+  the compiler gives the flag, a Secret of the `objects` section with
+  `data` or `stringData`, an ExternalSecret whose template holds a
+  literal at a sensitive key, a Fake generator with values. Unset, they
+  fail the compile, and a
   literal of the upstream values at a sensitive key is a warning: the
   objects are written to the deployments repository, so credentials
   are generated in the cluster or read from the platform's secret store
@@ -862,9 +905,11 @@ that holds a dot in brackets: `databases["eu.main"]`),
 the upstream chart that renders it, `<service>` the `name` of
 `Chart.yaml`. `error: <namespace>/<release>: `
 starts a message as `okdp-compile` prints it; the library's is what
-follows. The messages about reserved namespaces, objects, plain Secrets
-and the platform's schema are the mandatory rule set's; those about
-hosts, OAuth clients and upstream values the security set's
+follows. The messages about the namespaces and releases OKDP keeps and
+the platform's schema are the mandatory rule set's; those about the
+objects of a project, plain Secrets of the objects, the namespaces the
+platform reserves, hosts, OAuth clients and upstream values the security
+set's
 ([its troubleshooting](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/01_usage.md#troubleshooting));
 those about the upstream charts (the chart cache, their schemas, their
 default lists) a host's checks', in its Finalize: a compile without
@@ -904,11 +949,11 @@ them gives none of them.
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | a host's check of the final values against the upstream charts, in its Finalize: the final values, over the chart's defaults, violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
 | `warning: upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; ...` | a host's check of the final values against the upstream charts, in its Finalize: the instance appends to a list (`append`) the chart's defaults hold items of that the package's list leaves out: Helm replaces the chart's list with the final one | restate the items to keep in the package's values of the key, its defaults or values file ([append](specs/01_inputs_outputs.md#append)) |
-| `web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them` | the package writes an object of a cluster-scoped kind (its `objects` section, `<kind>/<name>`), and the instance's project is not one of the platform's own | a namespaced object; for the platform's own projects (cert-manager, an operator...), list the namespace in `global.okdp.policy.privileged` of the platform's values ([objects section](specs/01_inputs_outputs.md#objects-section)) |
-| `web: objects: Secret/token: namespace kube-system, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them` | an object of the package, or a generated Secret (`okdpGeneratedSecret`'s `namespace`), names another namespace than the instance's | the instance's namespace (`release.namespace`), or leave `namespace` out; the platform's own projects write other namespaces ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: objects: ClusterRole/demo-web-reader: a cluster-scoped kind (rbac.authorization.k8s.io/v1): the platform's projects install cluster-scoped objects (global.okdp.policy.privileged), demo is not one of them` | the package writes an object of a cluster-scoped kind (its `objects` section, `<kind>/<name>`), and the instance's project is not one of the platform's own (the security set's `objects` hook) | a namespaced object; for the platform's own projects (cert-manager, an operator...), list the namespace in `global.okdp.policy.privileged` of the platform's values ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: objects: Secret/token: namespace kube-system, not the instance's (demo): the platform's projects write other namespaces (global.okdp.policy.privileged), demo is not one of them` | an object of the package, or a generated Secret (`okdpGeneratedSecret`'s `namespace`), names another namespace than the instance's (the security set's `objects` hook) | the instance's namespace (`release.namespace`), or leave `namespace` out; the platform's own projects write other namespaces ([objects section](specs/01_inputs_outputs.md#objects-section)) |
 | `web: output "store": secret: a plain value (stringData): credentials are generated (generate) or read from the platform's secret store; Inputs.AllowPlainSecrets allows it` | an output of `provides` has a `secret` of `stringData` alone: its credentials would be written in clear to the deployments repository | `generate` the secret keys, `stringData` for the others; or point `secretRef` at a Secret an operator, the chart or an ExternalSecret writes; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([credentials Secrets](specs/01_inputs_outputs.md#credentials-secrets)) |
-| `web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it` | a Secret of the package's `objects` holds values, `data` or `stringData` | `okdpGeneratedSecret`, or an ExternalSecret of the platform's secret store; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([objects section](specs/01_inputs_outputs.md#objects-section)) |
-| `web: objects: ExternalSecret/demo-web: a plain value (spec.target.template.data.password): a literal at a sensitive key, ...`, `web: objects: Fake/demo-web: a plain value (spec.data): a Fake generator gives the values it holds; ...` | an ExternalSecret's template holds a literal at a sensitive key (an `okdpGeneratedSecret` `stringData`'s too), a Fake generator values | a template of what the store or a generator gives (`'{{ .password }}'`), a generated key; the static keys of `stringData` are not credentials ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: objects: Secret/demo-web-token: a plain value (stringData): credentials are generated (okdpGeneratedSecret) or read from the platform's secret store (an ExternalSecret); Inputs.AllowPlainSecrets allows it` | a Secret of the package's `objects` holds values, `data` or `stringData` (the security set's `objects` hook) | `okdpGeneratedSecret`, or an ExternalSecret of the platform's secret store; a caller whose repository is private may set `Inputs.AllowPlainSecrets` ([objects section](specs/01_inputs_outputs.md#objects-section)) |
+| `web: objects: ExternalSecret/demo-web: a plain value (spec.target.template.data.password): a literal at a sensitive key, ...`, `web: objects: Fake/demo-web: a plain value (spec.data): a Fake generator gives the values it holds; ...` | an ExternalSecret's template holds a literal at a sensitive key (an `okdpGeneratedSecret` `stringData`'s too), a Fake generator values (the security set's `objects` hook) | a template of what the store or a generator gives (`'{{ .password }}'`), a generated key; the static keys of `stringData` are not credentials ([objects section](specs/01_inputs_outputs.md#objects-section)) |
 | `warning: upstream.app.auth.password: a literal at a sensitive key, a credential in clear in the values and the deployments repository: ...` | an instance's upstream value at a key named as a credential is a literal | generate it or read it from the store, the chart given the Secret's name (its `existingSecret`); a key that only names one is a false positive ([objects section](specs/01_inputs_outputs.md#objects-section)) |
 | `database: connection "store" has contract "s3", "database" is expected` | the parameter references a `connections` entry of another contract | reference a connection of the expected contract |
 | `database: connection "shared-db": field "user" is not part of the database contract` | an external connection has a field its contract does not declare | remove it ([connections](specs/01_inputs_outputs.md#connections)) |
@@ -992,5 +1037,5 @@ together](specs/01_inputs_outputs.md#compiling-instances-together)).
 | `error: demo/demo-b: claims.reports: claim: unknown key "share": contract, class, provider and request only` (`contract is required, ...`, `a connection of that name too (connections.reports)`) | a named claim not of the form, every instance whose values declare it refused | fix the declaration ([claims](specs/01_inputs_outputs.md#claims)) |
 | `error: data/data-pg: claim "demo.app.db" (database-server): claimed of namespace demo: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` | a claim across namespaces, its credentials in the provider's namespace | set the platform's secret store, `global.okdp.secrets.store`, with its `provider` for a SecretStore of each namespace ([credentials across namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces), [what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
 | `error: platform/platform-x: Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` | a project named `platform`: its namespace would own the platform's keys of the secret store | rename the project |
-| `error: kube-system/kube-system-x: Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own ...`, `error: argocd/argocd-x: Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): ...` | a project of a namespace the compiler reserves: Kubernetes' own, or a deployer engine's, whose objects its releases would rewrite with every verb of the namespace | rename the project; a component of the platform that is not one of its projects is installed outside the platform's projects |
-| `error: openbao/openbao-x: Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it` (`, privileged or not: ...`) | a project of a namespace the platform's values reserve, `global.okdp.policy.reserved`, even one `policy.privileged` lists | rename the project, or remove the namespace from `policy.reserved` |
+| `error: kube-system/kube-system-x: Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)` | a project of a namespace the compiler reserves, Kubernetes' own; a host's set refuses its deployer engines' namespaces in its own words | rename the project; a component of the platform that is not one of its projects is installed outside the platform's projects |
+| `error: openbao/openbao-x: Inputs.Namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it` (`, privileged or not: ...`) | a project of a namespace the platform's values reserve, `global.okdp.policy.reserved`, even one `policy.privileged` lists (the security set's `namespace` hook) | rename the project, or remove the namespace from `policy.reserved` |

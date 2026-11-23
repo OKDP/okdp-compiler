@@ -6,7 +6,7 @@
       "properties": {
         "okdp": {
           "properties": {
-            "policy": {
+            "charts": {
               "properties": {
                 "extraNames": {"type": "array", "items": {"type": "string"}, "description": "A key added to a map the mandatory schema closes."}
               }

@@ -23,15 +23,6 @@ type transfer struct {
 // The store is a SecretStore of each namespace, or a ClusterSecretStore.
 func storeName(okdp M) string { return value.Str(value.Dig(okdp, "secrets.store")) }
 
-// SecretStore is the platform's secret store as the targets write it in
-// the namespace of each project (Result.SecretStore). Provider is its
-// spec.provider, an External Secrets SecretStore provider, verbatim.
-// ServiceAccount is the one of the namespace that it authenticates with.
-type SecretStore struct {
-	Name, ServiceAccount string
-	Provider             map[string]any
-}
-
 // storeOf returns the rule set's account of the secret store that
 // global.okdp.secrets describes: store, ref and refreshInterval.
 func storeOf(ctx context.Context, rules *RuleSet, okdp M) (M, error) {
@@ -45,16 +36,6 @@ func (inst *instance) account(ctx context.Context) (M, error) {
 		s.v, s.err = storeOf(ctx, inst.rules, inst.okdp)
 	}
 	return inst.store.v, inst.store.err
-}
-
-// secretStore returns the store of v, an account of storeOf, or nil
-// without a store or a provider.
-func secretStore(v M) *SecretStore {
-	s := value.AsMap(v["store"])
-	if len(s) == 0 {
-		return nil
-	}
-	return &SecretStore{Name: value.Str(s["name"]), ServiceAccount: value.Str(s["serviceAccount"]), Provider: value.AsMap(s["provider"])}
 }
 
 // platformKeys is the first segment of the platform's keys in the secret

@@ -81,7 +81,7 @@ type Bound struct {
 // refused since they compiled are compiled again (recompileDependents).
 func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 	memo := newSetMemo()
-	t := &compilation{ctx: ctx, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}, declared: map[string]error{}}
+	t := &compilation{ctx: ctx, out: make([]Outcome, len(instances)), published: map[string]map[string]Info{}}
 	releases, names := map[instKey]int{}, map[instKey]int{}
 	for i, inst := range instances {
 		m := &member{Instance: inst, index: i, outcome: &t.out[i], in: inst.Inputs}
@@ -102,7 +102,7 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 			// Its outputs and its claims are named after it.
 			m.outcome.Err = fmt.Errorf("instance name %q is given twice in namespace %q", m.name(), in.Namespace)
 		default:
-			if err := declaredConnections(in, t.declared); err != nil {
+			if err := declaredConnections(in); err != nil {
 				m.outcome.Err = err
 				continue
 			}
@@ -152,7 +152,6 @@ type compilation struct {
 	published map[string]map[string]Info // what the compiled instances publish, by namespace and release
 	byRelease map[instKey]*member        // the instances that reach the compile, by namespace and release
 	byName    map[instKey][]*member      // the same, by namespace and by each name a provider may use: release and name
-	declared  map[string]error           // the connections checked at their declaration (checkDeclared)
 }
 
 // compile compiles m with what its namespace publishes so far, its claims
@@ -412,7 +411,7 @@ func (b *binder) bindOne(of *member, s claimSite, id string, self *member) (choi
 // read reads the claims of m and records the named claims its values
 // declares (decls).
 func (b *binder) read(m *member) {
-	c := claimsOf(b.t.ctx, m.Definition, m.in)
+	c := claimsOf(m.Definition, m.in)
 	m.classes, m.refs = c.classes, c.refs
 	ns := m.in.Namespace
 	for name, spec := range c.named {
@@ -582,24 +581,17 @@ func claimClass(classes M, s claimSite) (ch choice, name, which string, err erro
 	}
 	of := value.AsMap(classes[contract])
 	defined := value.AsMap(of["classes"])
-	these := fmt.Sprintf("no class of %s connections is defined (%s.classes)", contract, key)
-	if len(defined) > 0 {
-		these = "the classes are " + strings.Join(slices.Sorted(maps.Keys(defined)), ", ")
-	}
 	which = fmt.Sprintf("class %q", ch.class)
 	if ch.class == "" {
 		if ch.class = value.Str(of["default"]); ch.class == "" {
+			these := classList(defined, "the classes are ", fmt.Sprintf("no class of %s connections is defined (%s.classes)", contract, key))
 			return ch, "", "", fmt.Errorf("%s: it names no class, and the settings set no default one, %s.default: %s", where, key, these)
 		}
 		which = fmt.Sprintf("the default class %q", ch.class)
 	}
 	class, ok := defined[ch.class].(M)
 	if !ok {
-		if len(defined) > 0 {
-			these = strings.Join(slices.Sorted(maps.Keys(defined)), ", ")
-		} else {
-			these = "none is defined"
-		}
+		these := classList(defined, "", "none is defined")
 		if spec.Class == "" {
 			return ch, "", "", fmt.Errorf("%s: %s (%s.default) is not a class of %s connections (%s.classes): %s", where, which, key, contract, key, these)
 		}
@@ -610,6 +602,15 @@ func claimClass(classes M, s claimSite) (ch choice, name, which string, err erro
 		return ch, "", "", err
 	}
 	return ch, name, which, nil
+}
+
+// classList returns prefix and the names of the classes defined, sorted,
+// or none when none is defined.
+func classList(defined M, prefix, none string) string {
+	if len(defined) == 0 {
+		return none
+	}
+	return prefix + strings.Join(slices.Sorted(maps.Keys(defined)), ", ")
 }
 
 // provider picks the instance the claim at s binds to: the provider the

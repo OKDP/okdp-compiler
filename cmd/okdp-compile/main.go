@@ -114,6 +114,7 @@ func run(o options) error {
 		}
 	}
 	in, err := openInputs(o)
+	defer in.close()
 	if err != nil {
 		return err
 	}
@@ -167,44 +168,69 @@ type inputs struct {
 	files   []compiler.InputFiles
 	catalog *compiler.Catalog
 	rules   *compiler.RuleSet // nil without --rules: the mandatory set alone
+	dirs    []*dirfs.FS       // the directories opened, closed by close
+}
+
+// close releases the directories opened.
+func (in *inputs) close() {
+	for _, d := range in.dirs {
+		d.Close()
+	}
 }
 
 // openInputs opens the directories of -f, --catalog and --rules through
-// dirfs, which bounds what is read, and reads the catalog and the rule
-// set. A file of -f is read in the directory that holds it.
+// dirfs, which bounds what is read and follows no symbolic link under
+// them, and reads the catalog and the rule set. A file of -f is read in
+// the directory that holds it. The directories opened are in the inputs
+// returned, even with an error, for close.
 func openInputs(o options) (*inputs, error) {
 	in := &inputs{}
+	open := func(flag, dir string) (*dirfs.FS, error) {
+		fsys, err := dirfs.New(flag, dir)
+		if err == nil {
+			in.dirs = append(in.dirs, fsys)
+		}
+		return fsys, err
+	}
 	var catalogs []compiler.CatalogFiles
 	for _, dir := range o.catalogs {
-		fsys, err := dirfs.New("--catalog", dir)
+		fsys, err := open("--catalog", dir)
 		if err != nil {
-			return nil, err
+			return in, err
 		}
 		catalogs = append(catalogs, compiler.CatalogFiles{Name: dir, FS: fsys})
 	}
 	for _, p := range o.files {
 		dir, file := p, ""
 		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			// A file of -f that is a symbolic link is read where it
+			// points, its valuesFiles beside that file: the user names
+			// it, as a directory of -f that is a link.
+			if l, err := os.Lstat(p); err == nil && l.Mode()&os.ModeSymlink != 0 {
+				if p, err = filepath.EvalSymlinks(p); err != nil {
+					return in, fmt.Errorf("-f: %w", err)
+				}
+			}
 			dir, file = filepath.Dir(p), filepath.Base(p)
 		}
-		fsys, err := dirfs.New("-f", dir)
+		fsys, err := open("-f", dir)
 		if err != nil {
-			return nil, err
+			return in, err
 		}
 		in.files = append(in.files, compiler.InputFiles{Name: filepath.ToSlash(dir), FS: fsys, Path: file})
 	}
 	if o.rules != "" {
-		fsys, err := dirfs.New("--rules", o.rules)
+		fsys, err := open("--rules", o.rules)
 		if err != nil {
-			return nil, err
+			return in, err
 		}
 		if in.rules, err = compiler.LoadRules(fsys); err != nil {
-			return nil, fmt.Errorf("--rules %s: %w", o.rules, err)
+			return in, fmt.Errorf("--rules %s: %w", o.rules, err)
 		}
 	}
 	cat, err := compiler.LoadCatalog(catalogs)
 	if err != nil {
-		return nil, err
+		return in, err
 	}
 	in.catalog = cat
 	return in, nil

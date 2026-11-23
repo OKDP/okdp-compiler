@@ -105,11 +105,11 @@ func TestRunWithRules(t *testing.T) {
 	if _, ok := files(t, out)["projects/demo/instances/demo-echo/values.yaml"]; !ok {
 		t.Errorf("no values.yaml: %v", files(t, out))
 	}
-	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\ntables:\n  engineNamespaces: {values: []}\n"})
+	write(t, added, map[string]string{"rules.yaml": "apiVersion: okdp-compiler/rules.v1\nname: added\nversion: 1.0.0\nhooks:\n  namespace: [namespace]\n"})
 	o = opts(input)
 	o.rules, o.check = added, true
 	if err := run(o); err == nil || !strings.Contains(err.Error(), "replaces none") {
-		t.Errorf("a set that replaces a mandatory table: %v", err)
+		t.Errorf("a set that lists a mandatory hook document again: %v", err)
 	}
 }
 
@@ -145,6 +145,29 @@ func TestCheck(t *testing.T) {
 	}
 	if got := files(t, input); !maps.Equal(got, before) {
 		t.Errorf("--check changed the inputs: %v", got)
+	}
+}
+
+// TestFileLink: a file of -f that is a symbolic link is read where it
+// points, its valuesFiles beside that file; a symbolic link under a
+// directory read is refused.
+func TestFileLink(t *testing.T) {
+	input, _ := example(t, "01_minimal", "hello")
+	link := filepath.Join(t.TempDir(), "inputs.yaml")
+	if err := os.Symlink(filepath.Join(input, "config", "inputs.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+	o := options{files: []string{link}, catalogs: []string{input}, check: true}
+	if err := run(o); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(link, filepath.Join(input, "config", "linked.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	o = opts(input)
+	o.check = true
+	if err := run(o); err == nil || !strings.Contains(err.Error(), "linked.yaml: a symbolic link, not followed") {
+		t.Errorf("a link in -f's directory: %v", err)
 	}
 }
 

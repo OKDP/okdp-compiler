@@ -57,7 +57,7 @@ func Dig(m M, path string) any {
 // Short formats v for a message: its sensitive keys redacted, cut at 160
 // characters. A caller that knows the key of v calls ShortAt instead.
 func Short(v any) string {
-	s := fmt.Sprintf("%#v", Redact(v))
+	s := fmt.Sprintf("%#v", redact(v))
 	if len(s) > 160 {
 		s = s[:160] + "..."
 	}

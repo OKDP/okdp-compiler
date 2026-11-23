@@ -1,119 +1,20 @@
 # The compiler's mandatory rule set, applied to every compile: what a
 # compile needs to write values a chart installs (the templates and the
-# names of a mapping), and what it refuses (the checks, and the tables they
-# read), as data. Another rule set given to the compile
-# (LoadRules, --rules) adds to this one without replacing any of it. An
-# extensible table is one where more values mean more refusals: a rule set
-# added to this one may add values to it (add), never remove one.
+# names of a mapping), and the few namespaces it refuses (the namespace
+# hook's document), as data. The rule sets given to the compile
+# (LoadRules, --rules) add to this one without replacing any of it. What a
+# platform's policy refuses (cluster-scoped objects, credentials in clear,
+# the namespaces it reserves) is the security set's; the namespaces and
+# the names of the objects a host writes are the host's set's.
 apiVersion: okdp-compiler/rules.v1
 name: core
 version: 1.0.0
-tables:
-  # The namespaces of the deployer engines and of the objects the targets
-  # write in them, which no project may have: a project's releases are
-  # installed with every verb of its namespace, and there they would rewrite
-  # the engine's sources, its Applications or HelmReleases, the other
-  # projects' identities.
-  engineNamespaces:
-    extensible: true
-    values: [argocd, flux-system, okdp-releases]
-  # The well-known cluster-scoped kinds, <group>/<kind>, the group of the
-  # apiVersion, empty for the core group: Kubernetes' own, and those of the
-  # operators OKDP's packages install objects of or that commonly run beside
-  # them. A kind that is not listed is assumed namespaced: the engine's
-  # identity, confined to the namespace, refuses it in the cluster.
-  clusterScopedKinds:
-    extensible: true
-    values:
-      - /Namespace
-      - /Node
-      - /PersistentVolume
-      - storage.k8s.io/StorageClass
-      - storage.k8s.io/CSIDriver
-      - storage.k8s.io/CSINode
-      - storage.k8s.io/VolumeAttachment
-      - storage.k8s.io/VolumeAttributesClass
-      - rbac.authorization.k8s.io/ClusterRole
-      - rbac.authorization.k8s.io/ClusterRoleBinding
-      - apiextensions.k8s.io/CustomResourceDefinition
-      - admissionregistration.k8s.io/ValidatingWebhookConfiguration
-      - admissionregistration.k8s.io/MutatingWebhookConfiguration
-      - admissionregistration.k8s.io/ValidatingAdmissionPolicy
-      - admissionregistration.k8s.io/ValidatingAdmissionPolicyBinding
-      - admissionregistration.k8s.io/MutatingAdmissionPolicy
-      - admissionregistration.k8s.io/MutatingAdmissionPolicyBinding
-      - scheduling.k8s.io/PriorityClass
-      - networking.k8s.io/IngressClass
-      - networking.k8s.io/IPAddress
-      - networking.k8s.io/ServiceCIDR
-      - node.k8s.io/RuntimeClass
-      - apiregistration.k8s.io/APIService
-      - certificates.k8s.io/CertificateSigningRequest
-      - certificates.k8s.io/ClusterTrustBundle
-      - flowcontrol.apiserver.k8s.io/FlowSchema
-      - flowcontrol.apiserver.k8s.io/PriorityLevelConfiguration
-      - policy/PodSecurityPolicy
-      - resource.k8s.io/DeviceClass
-      - resource.k8s.io/ResourceSlice
-      - snapshot.storage.k8s.io/VolumeSnapshotClass
-      - snapshot.storage.k8s.io/VolumeSnapshotContent
-      - gateway.networking.k8s.io/GatewayClass
-      - external-secrets.io/ClusterSecretStore
-      - external-secrets.io/ClusterExternalSecret
-      - external-secrets.io/ClusterPushSecret
-      - generators.external-secrets.io/ClusterGenerator
-      - cert-manager.io/ClusterIssuer
-      - trust.cert-manager.io/Bundle
-      - kyverno.io/ClusterPolicy
-      - kyverno.io/ClusterCleanupPolicy
-      - templates.gatekeeper.sh/ConstraintTemplate
-      - keda.sh/ClusterTriggerAuthentication
-      - cilium.io/CiliumClusterwideNetworkPolicy
-      - crd.projectcalico.org/GlobalNetworkPolicy
-      - projectcalico.org/GlobalNetworkPolicy
-      - security.openshift.io/SecurityContextConstraints
-      - quota.openshift.io/ClusterResourceQuota
-      - argoproj.io/ClusterWorkflowTemplate
-  # The API groups of the deployer engines' custom resources: such an object
-  # in a project's namespace lets it drive the engine with the engine's own
-  # identity.
-  deployerApiGroups:
-    extensible: true
-    values:
-      - helm.toolkit.fluxcd.io
-      - kustomize.toolkit.fluxcd.io
-      - source.toolkit.fluxcd.io
-      - notification.toolkit.fluxcd.io
-      - image.toolkit.fluxcd.io
-      - fluxcd.controlplane.io
-      - source.extensions.fluxcd.io
-      - argoproj.io
-  # The names of the objects the platform writes in the namespace of every
-  # project besides its instances': a release may not take one.
-  platformObjectNames:
-    extensible: true
-    values:
-      - okdp-project
-      - okdp-control-plane
-      - okdp-access-viewer
-      - okdp-access-editor
-      - okdp-access-admin
-      - okdp-secrets
-  # The settings, paths under global.okdp, that name an object the platform
-  # writes in the namespace of every project: their values are taken as
-  # platformObjectNames are.
-  platformObjectSettings:
-    extensible: true
-    values: [secrets.store, secrets.serviceAccount]
-# The checks: each a document of vars and errors (the mapping language),
-# applied by a walker of the compiler, the first message refusing. They see
-# their input and sets, each table as a set, and tables, as a list.
-checks:
-  namespace: checks/namespace.cel.yaml
-  platformNamespace: checks/platform-namespace.cel.yaml
-  release: checks/release.cel.yaml
-  object: checks/objects.cel.yaml
-  plainSecret: checks/plain-secret.cel.yaml
+# The documents the compiler calls at its hooks, each a document of vars
+# and errors (the mapping language), the first message refusing: the
+# namespace of every instance. They see their input and sets, each table
+# of the sets as a set, and tables, as a list.
+hooks:
+  namespace: [namespace]
 # The JSON schemas of the platform's settings, and their defaults, and of
 # what a mapping writes.
 schemas:
@@ -128,18 +29,18 @@ charts:
 functions:
   okdpGeneratedSecret: {fragment: fragments/generated-secret.cel.yaml, result: objects}
 # Documents the others call: rule(<name>, input) in a document, a function of
-# a set's functions, scope (what a mapping sees as platform); deployerRole,
-# which the targets call, the Role of a project's releases.
+# a set's functions, a hook, scope (what a mapping sees as platform);
+# secretStore, which a host also reads, the store it writes in each
+# project's namespace.
 documents:
+  namespace: checks/namespace.cel.yaml
   scope: scope.cel.yaml
   secretStore: objects/secret-store.cel.yaml
   pushSecret: objects/push-secret.cel.yaml
   pullSecret: objects/pull-secret.cel.yaml
-  deployerRole: objects/deployer-role.cel.yaml
 # The documents that compute what a mapping sees as platform, from the
-# platform's settings, the project's groups among them, and the release:
-# those of every set, in the order the sets are read, their platform
-# merged.
+# platform's settings and the release: those of every set, in the order
+# the sets are read, their platform merged.
 scopes: [scope]
 # The names the compiler gives credentials: $<word> stands for the value.
 names:
@@ -147,13 +48,6 @@ names:
   connectionSecret: $release.$connection-credentials
   claimSecret: $release-$secret
   credentialsLabel: okdp.io/credentials-$contract
-# An object Helm keeps is kept alike by Argo CD, which reads none of Helm's
-# annotations: its sync options are added, unless it sets one of that name.
-keepSync:
-  annotation: helm.sh/resource-policy
-  value: keep
-  syncOptions: argocd.argoproj.io/sync-options
-  options: [Prune=false, Delete=false]
 # The labels of OKDP's objects: $service and $release stand for the instance's.
 labels:
   selector:

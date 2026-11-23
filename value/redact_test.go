@@ -47,7 +47,7 @@ func TestSensitivePath(t *testing.T) {
 func TestRedact(t *testing.T) {
 	in := M{"host": "db", "password": "hunter2", "auth": M{"tokens": []any{"a", "b"}, "user": "u"}, "list": []any{M{"apiKey": 1.0, "name": "n"}}}
 	want := M{"host": "db", "password": Redacted, "auth": M{"tokens": Redacted, "user": "u"}, "list": []any{M{"apiKey": Redacted, "name": "n"}}}
-	if got := Redact(in); !reflect.DeepEqual(got, want) {
+	if got := redact(in); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v", got)
 	}
 	if in["password"] != "hunter2" {

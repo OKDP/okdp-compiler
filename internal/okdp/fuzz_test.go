@@ -25,54 +25,6 @@ func errorString(err error) string {
 	return err.Error()
 }
 
-// FuzzParseAccess: whatever access holds, ParseAccess gives the same
-// answer twice, and either an error and no group, or only groups IsGroup
-// accepts with a role of roles; a map every entry of which is such a group
-// and a role is read back whole, and an absent access gives no group.
-// Seeds: the cases of TestParseAccess.
-func FuzzParseAccess(f *testing.F) {
-	for _, s := range []string{
-		"", "access: null", "access: {}", "access: {okdp-project-demo: admin, analysts: viewer, data.eng_team@corp:x: editor}",
-		"access: [okdp-project-demo]", "access: {/okdp/demo: viewer}", "access: {demo team: viewer}", "access: {'a,b': viewer}",
-		"access: {analysts: owner}", "access: {analysts: true}", "access: {a b: viewer, analysts: null}", "access: demo",
-	} {
-		f.Add([]byte(s))
-	}
-	f.Fuzz(func(t *testing.T, b []byte) {
-		doc, ok := layer(b)
-		if !ok {
-			return
-		}
-		access := doc["access"]
-		got, err := ParseAccess("access", access)
-		again, err2 := ParseAccess("access", access)
-		if errorString(err) != errorString(err2) || !reflect.DeepEqual(got, again) {
-			t.Fatalf("%q: not the same twice: %v %v / %v %v", b, got, err, again, err2)
-		}
-		if err != nil {
-			if got != nil {
-				t.Fatalf("%q: groups %v with an error %v", b, got, err)
-			}
-			return
-		}
-		if access == nil {
-			if got != nil {
-				t.Fatalf("%q: absent access gives %v", b, got)
-			}
-			return
-		}
-		m, isMap := access.(M)
-		if !isMap || len(got) != len(m) {
-			t.Fatalf("%q: read as %v", b, got)
-		}
-		for group, role := range got {
-			if !IsGroup(group) || !slices.Contains(roles, role) || m[group] != string(role) {
-				t.Fatalf("%q: group %q role %q of %v", b, group, role, m)
-			}
-		}
-	})
-}
-
 // FuzzClaimID: a claim's ID, whatever its parts: the same twice, at most
 // 63 characters, only lowercase letters, digits, "-" and "."; and when every
 // part has a letter or a digit, the parts normalised (lowercase, every run

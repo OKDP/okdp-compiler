@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A rule set: rules.yaml, at the root of its file system: the compiler's mandatory set, or one added to it (LoadRules). Each section is optional here: what the sets give together is checked when they are combined.",
+  "description": "A rule set: rules.yaml, at the root of its file system: the compiler's mandatory set, or one of the sets added to it, in order (LoadRules). Each section is optional here: what the sets give together is checked when they are combined.",
   "additionalProperties": false,
   "required": ["apiVersion", "version"],
   "properties": {
     "apiVersion": {"const": "okdp-compiler/rules.v1"},
-    "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The set's name: core for the mandatory set; required for a set added to it, a name no other set has. A tree requires a set by its name (global.okdp.ruleSets)."},
+    "name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "description": "The set's name: core for the mandatory set; required for a set added to it, a name no other set has. A platform requires a set by its name (global.okdp.ruleSets)."},
     "version": {"type": "string", "minLength": 1, "description": "The set's version, MAJOR.MINOR.PATCH with an optional -prerelease."},
     "schemas": {
       "type": "object",
@@ -62,17 +62,6 @@
         "credentialsLabel": {"type": "string", "minLength": 1}
       }
     },
-    "keepSync": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["annotation", "value", "syncOptions", "options"],
-      "properties": {
-        "annotation": {"type": "string", "minLength": 1},
-        "value": {"type": "string", "minLength": 1},
-        "syncOptions": {"type": "string", "minLength": 1},
-        "options": {"type": "array", "items": {"type": "string", "minLength": 1}}
-      }
-    },
     "labels": {
       "type": "object",
       "additionalProperties": false,
@@ -83,10 +72,11 @@
         "common": {"type": "object", "additionalProperties": {"type": "string"}}
       }
     },
-    "checks": {
-      "type": "object",
-      "description": "Each check's document, a file of the rule set.",
-      "additionalProperties": {"type": "string", "minLength": 1}
+    "inputs": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "The names of the inputs the set's documents give one another (rule(<name>, input)) besides those the compiler gives: every document of every set may read them.",
+      "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}
     },
     "tables": {
       "type": "object",
@@ -115,9 +105,11 @@
     },
     "hooks": {
       "type": "object",
-      "description": "The documents the compiler calls at each hook, names of documents.",
+      "description": "The documents the compiler calls at each hook, names of documents of this set or of a set read before: those of every set, in the order the sets are read.",
       "additionalProperties": false,
       "properties": {
+        "namespace": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "release": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "objects": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "finalValues": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }

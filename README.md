@@ -18,7 +18,7 @@ host's.
 ```go
 import compiler "github.com/okdp/okdp-compiler"
 
-rules, err := compiler.LoadRules(rulesFS) // added to the mandatory set
+rules, err := compiler.LoadRules(securityFS, ownFS) // added to the mandatory set, in order
 cat, err := compiler.LoadCatalog([]compiler.CatalogFiles{{Name: "charts", FS: catalogFS}})
 instances, err := compiler.LoadInputs(ctx, []compiler.InputFiles{
 	{Name: "config", FS: configFS}, // every .yaml file: Settings, Project, Instance
@@ -45,9 +45,13 @@ for _, out := range compiler.CompileAll(ctx, instances) {
 - `Inputs.Finalize` is where a host adds what the compiler does not do:
   a host may fetch the upstream charts, check the final values against
   them, and add the security set's policy on upstream values.
+- `Inputs.Settings` gives a host's own settings beside the values
+  layers: the rule sets read them as they read `global.okdp`, and no
+  chart receives them (a namespace's groups, say). A layer that gives a
+  path they give too is refused.
 - Accessors let a caller check before it compiles, without restating a
   rule: `FieldErrors`, `ConnectionRefs`, `CheckConnection`,
-  `CheckNamespace`, `ReadContract`, `MergeValues`...
+  `CheckNamespace`, `ReadContracts`...
 
 See [usage](docs/01_usage.md).
 
@@ -73,27 +77,34 @@ final values as it would render the layers given as `-f` files
 
 ## Rules
 
-Two rule sets apply together, both data, the walkers in Go:
+Rule sets apply together, all data, the walkers in Go:
 
 - the mandatory set, embedded
   ([`internal/rules/mandatory`](internal/rules/mandatory)), is what every
-  compile needs and what it refuses: the platform schema, labels, names,
-  the checks and their tables, the mapping schema, the generated
-  Secrets, the secret store's objects, the default objects chart;
-- a rule set given (`LoadRules`, `okdp-compile --rules`) adds a
-  platform's own rules to it, and replaces none: tables, documents,
-  functions, sections, keys of the schemas, what a mapping sees as
-  `platform`, and hooks the compiler calls on every object and on the
-  final values.
+  compile needs: the platform schema, labels, names, the namespaces
+  OKDP keeps (`platform`, `kube-*`, its namespace hook), the mapping
+  schema, the generated Secrets, the secret store's objects, the
+  default objects chart;
+- the rule sets given (`LoadRules`, in order; `okdp-compile --rules`
+  gives one) add a platform's own rules to it, each to those before it,
+  and replace none: tables, documents, functions, sections, keys of the
+  schemas, what a mapping sees as `platform`, and the documents of the
+  hooks the compiler calls, for every project, on its namespace and
+  release, on every object and on the final values.
 
-The hosts a project serves, the OAuth clients, the hardened pod and the
-policy on upstream values are such a set,
+The platform's policy (no cluster-scoped object, no other namespace, no
+credential in clear, but in the platform's privileged projects; the
+namespaces it reserves; the hosts a project serves), the groups of each
+role, the OAuth clients, the hardened pod and the policy on upstream
+values are such a set,
 [okdp-compiler-security](https://github.com/OKDP/okdp-compiler-security),
-which a host gives to every compile. A platform that relies on a set
-requires it (`global.okdp.ruleSets`), and a compile without it is
-refused.
+which a host gives to every compile: a compile without it accepts what
+it refuses. What a host keeps, the namespaces of its deployer engines
+and the names of the objects it writes in every namespace, is its own
+set's. A platform that relies on a set requires it
+(`global.okdp.ruleSets`), and a compile without it is refused.
 
-Every table, check and function: [the rule set](docs/specs/05_rules.md).
+Every hook, function and setting: [the rule set](docs/specs/05_rules.md).
 
 Each instance is bounded by `Inputs.CostLimit` (CEL cost) and
 `Inputs.Timeout`.
@@ -109,11 +120,27 @@ YAML shaped like the upstream values, with `${{ CEL }}` expressions and
 
 ## Command line
 
+Each [release](https://github.com/OKDP/okdp-compiler/releases) attaches
+`okdp-compile` for Linux, macOS and Windows, amd64 and arm64, with the
+SHA-256 sums signed keyless by the release workflow, an SBOM of each
+archive and its build provenance, all verified in
+[install](docs/01_usage.md#install):
+
 ```bash
-make build
-bin/okdp-compile -f <file|dir>... --catalog <dir>... [--rules <dir>] -o <dir>
-bin/okdp-compile --check -f <file|dir>... --catalog <dir>... [--rules <dir>]
-bin/okdp-compile -f examples/04_claims/input/config --catalog examples/04_claims/input -o out
+gh release download -R OKDP/okdp-compiler \
+  -p 'okdp-compile_*_linux_amd64.tar.gz' -p 'okdp-compile_*_checksums.txt'
+sha256sum -c --ignore-missing okdp-compile_*_checksums.txt
+tar xzf okdp-compile_*_linux_amd64.tar.gz okdp-compile
+```
+
+`go install github.com/okdp/okdp-compiler/cmd/okdp-compile@latest`
+builds the latest release too, and `make build` gives `bin/okdp-compile`
+from a checkout.
+
+```bash
+okdp-compile -f <file|dir>... --catalog <dir>... [--rules <dir>] -o <dir>
+okdp-compile --check -f <file|dir>... --catalog <dir>... [--rules <dir>]
+okdp-compile -f examples/04_claims/input/config --catalog examples/04_claims/input -o out
 ```
 
 It reads the input documents of each `-f`, the packages and contracts of

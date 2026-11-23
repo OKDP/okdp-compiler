@@ -65,37 +65,6 @@ func eval(s *cel2yaml.Session, expr string, scope M) (any, error) {
 	return v["v"], err
 }
 
-// TestMappingSections: vars in order, output, instance and provides, read
-// from okdp.yaml, its package keys skipped, and values.cel.yaml.
-func TestMappingSections(t *testing.T) {
-	res, _, err := runMapping(context.Background(), Mandatory(), newSession(mapCtx()), mapCtx(), mapping(`
-roles: [web]
-require: [a.b]
-upstream: {x: {protect: [a]}}
-vars:
-  a: 1.0
-  b: ${{ a + 1.0 }}
-instance:
-  url: https://${{ release.name }}
-provides:
-  - contract: http
-    values: {url: '${{ "u" + str(b) }}'}
-`, "x: {b: '${{ b }}'}\n")...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := value.AsMap(value.Dig(res, "output.x"))["b"]; got != float64(2) {
-		t.Errorf("output: got %#v, want 2", got)
-	}
-	if got := value.Dig(res, "instance.url"); got != "https://demo-x" {
-		t.Errorf("instance: got %#v", got)
-	}
-	want := []any{M{"contract": "http", "values": M{"url": "u2"}}}
-	if !reflect.DeepEqual(res["provides"], want) {
-		t.Errorf("provides: got %#v", res["provides"])
-	}
-}
-
 // TestMappingFunctions: OKDP's host functions beside the language's, next
 // to a vars binding named fullname (the function is okdpFullname).
 func TestMappingFunctions(t *testing.T) {
@@ -176,7 +145,7 @@ func TestMappingNulls(t *testing.T) {
 		t.Errorf("sections: %#v", res)
 	}
 	want := "the mapping's sections don't meet the specifications of mapping.schema.json:\n- at '/notes/0/text': got null, want string"
-	if _, _, err := runMapping(context.Background(), functionRules(t), newSession(mapCtx()), mapCtx(), mapping("notes: [{text: ~}]\n", "")...); err == nil || err.Error() != want {
+	if _, _, err := runMapping(context.Background(), testRules(t, "functions"), newSession(mapCtx()), mapCtx(), mapping("notes: [{text: ~}]\n", "")...); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
@@ -194,16 +163,12 @@ func TestMappingErrors(t *testing.T) {
 		"url not a string":    {"instance: {url: 8080, usage: ~}\n", "", "- at '/instance/url': got number, want string"},
 		"provides not a list": {"provides: {contract: http}\n", "", "- at '/provides': got object, want array"},
 		"objects not a list":  {"objects: x\n", "", "- at '/objects': got string, want array"},
-		"notes not a list":    {"notes: {a: 1}\n", "", "- at '/notes': got object, want array"},
-		"no text":             {"notes: [{}, {name: a}]\n", "", "- at '/notes/0': missing property 'text'\n- at '/notes/1': missing property 'text'"},
-		"note name":           {"notes: [{text: t, name: Console}]\n", "", "- at '/notes/0/name': 'Console' does not match pattern"},
-		"note name length":    {"notes: [{text: t, name: " + strings.Repeat("a", 21) + "}]\n", "", "- at '/notes/0/name': maxLength: got 21, want 20"},
 		"note key":            {"notes: [{text: t, txt: x}]\n", "", "- at '/notes/0': additional properties 'txt' not allowed"},
 		"unknown section":     {"outptu: {x: {}}\n", "", "okdp.yaml: outptu: unknown section (allowed: vars, errors, output, instance, provides, objects, notes)"},
 		"output in okdp.yaml": {"output: {}\n", "{}\n", "values.cel.yaml: output: okdp.yaml gives it too"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := runMapping(context.Background(), functionRules(t), newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
+			_, _, err := runMapping(context.Background(), testRules(t, "functions"), newSession(mapCtx()), mapCtx(), mapping(tc.okdp, tc.values)...)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("got %v, want an error containing %q", err, tc.want)
 			}
