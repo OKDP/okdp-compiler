@@ -6,8 +6,7 @@
 //	def, err := compiler.LoadDefinition(os.DirFS("db/catalog/myservice/1.0.0"), nil)
 //	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 //		Contracts: os.DirFS("contracts"),
-//		Context:   []compiler.ContextLayer{{Values: platformValues}, {Level: 2, Values: instanceConnections}},
-//		Values:    []map[string]any{instanceValues},
+//		Values:    []map[string]any{settings, instanceValues},
 //		Release:   "demo-myservice",
 //		Namespace: "demo",
 //	})
@@ -56,9 +55,6 @@ type (
 	Definition = okdp.Definition
 	// Inputs is what a compile reads besides the package.
 	Inputs = okdp.Inputs
-	// ContextLayer is a values layer of the context (Inputs.Context) with
-	// its level. Level 0 is the platform's.
-	ContextLayer = okdp.ContextLayer
 	// RuleSet holds, as data, what the compiler refuses: its mandatory
 	// rules and those a platform adds (LoadRules).
 	RuleSet = okdp.RuleSet
@@ -83,10 +79,10 @@ type (
 	// (Inputs.Bindings), with the output it publishes for the claim.
 	Binding = okdp.Binding
 	// Connection is an external connection, connections.<name> of the
-	// context, as written (ParseConnection).
+	// values, as written (ParseConnection).
 	Connection = okdp.Connection
-	// ClaimSpec is a claim as written: a named claim of a project's
-	// context (ParseClaim), or the claim template of a reference.
+	// ClaimSpec is a claim as written: a named claim, claims.<name> of the
+	// values (ParseClaim), or the claim template of a reference.
 	ClaimSpec = okdp.ClaimSpec
 	// Instance is an instance that CompileAll compiles: its package, its
 	// inputs and its name, by which a claim or a class names its provider.
@@ -144,55 +140,40 @@ const (
 // the same way.
 func IsName(name string) bool { return chart.IsDNSLabel(name) }
 
-// CheckProjectName returns nil when name may name a project, that is its
-// namespace. A program that creates projects calls it first. The compile
-// makes the same check, and refuses every instance of a project that
-// fails it.
+// CheckNamespace returns nil when name may name a namespace of
+// instances. A program that creates namespaces calls it first. The
+// compile makes the same check, and refuses every instance of a namespace
+// that fails it.
 //
-// platform is the platform's values (PlatformFile), or nil for none. The
-// name must be a name (IsName), and none that the compiler reserves
-// (platform, kube-*, the namespaces of the deployer engines and of the
-// targets) or that the platform reserves (global.okdp.policy.reserved).
-//
-// A namespace that a target writes in by its options is not refused
-// here: the target refuses it when it writes the tree.
-func CheckProjectName(ctx context.Context, rules *RuleSet, name string, platform map[string]any) error {
-	v, err := value.Normalize(platform)
+// values is a values layer whose global.okdp gives the settings, or nil
+// for none. The name must be a name (IsName), and none that the compiler
+// reserves (platform, kube-*, the namespaces of the deployer engines) or
+// that the settings reserve (global.okdp.policy.reserved).
+func CheckNamespace(ctx context.Context, rules *RuleSet, name string, values map[string]any) error {
+	v, err := value.Normalize(values)
 	if err != nil {
-		return fmt.Errorf("the platform's values: %w", err)
+		return fmt.Errorf("the values: %w", err)
 	}
-	return okdp.CheckNamespace(ctx, rules, "project", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
+	return okdp.CheckNamespace(ctx, rules, "namespace", name, value.AsMap(value.Dig(value.AsMap(v), "global.okdp")))
 }
 
-// AccessRole is the role of a group within a project, set by the access
-// of its project.yaml (ProjectAccessKey).
+// AccessRole is the role of a group in a namespace
+// (global.okdp.access.groups).
 type AccessRole = okdp.Role
 
-// The roles of a project's groups. Each may do what the one before it
-// may, and more. The flux and argocd targets write them as Argo CD roles
-// and as RoleBindings to Kubernetes' view, edit and admin
-// (docs/specs/01_inputs_outputs.md, access).
+// The roles of a namespace's groups. Each may do what the one before it
+// may, and more. A mapping reads the groups of each in platform.access;
+// what each may do in the cluster is the host's to write.
 const (
-	// AccessViewer sees the project's Applications, and the objects of
-	// its namespace except its Secrets.
+	// AccessViewer sees the namespace's instances and their objects,
+	// except Secrets.
 	AccessViewer = okdp.RoleViewer
-	// AccessEditor is a viewer who also syncs the Applications, runs
-	// their actions and reads their logs, without exec, and who edits the
-	// objects of the namespace.
+	// AccessEditor is a viewer who also operates the instances and edits
+	// the objects of the namespace.
 	AccessEditor = okdp.RoleEditor
-	// AccessAdmin is an editor who also deletes and overrides the
-	// Applications, and administers the namespace.
+	// AccessAdmin is an editor who also administers the namespace.
 	AccessAdmin = okdp.RoleAdmin
 )
-
-// ProjectAccessKey is access, the key of ProjectFile that maps the
-// project's groups to their roles. No instance receives it.
-const ProjectAccessKey = okdp.AccessKey
-
-// DefaultProjectGroup returns okdp-project-<project>, the group of a
-// project's people when its ProjectFile gives no access. That group is
-// an editor.
-func DefaultProjectGroup(project string) string { return okdp.DefaultGroup(project) }
 
 // IsGroupName reports whether name may name a group, as the identity
 // provider's tokens give it: a letter or a digit, then letters, digits,
@@ -200,14 +181,12 @@ func DefaultProjectGroup(project string) string { return okdp.DefaultGroup(proje
 // the name is that of a Keycloak group, not its path.
 func IsGroupName(name string) bool { return okdp.IsGroup(name) }
 
-// PlatformAdmins returns the groups of the platform's administrators,
-// global.okdp.access.admins of the platform's values, checked as the
-// compile checks them. It returns none when the key is not set.
-//
-// The compiler writes nothing from them: the platform's bootstrap binds
-// them.
-func PlatformAdmins(ctx context.Context, rules *RuleSet, platform map[string]any) ([]string, error) {
-	return okdp.PlatformAdmins(ctx, rules, platform)
+// ParseAccess reads v, a map of group names to roles, as
+// global.okdp.access.groups, which a host gives in Inputs.Settings.
+// field names v in the messages. A nil v gives no group. It reports every
+// problem at once.
+func ParseAccess(field string, v any) (map[string]AccessRole, error) {
+	return okdp.ParseAccess(field, v)
 }
 
 // LoadDefinition reads and checks the package at the root of fsys for
@@ -229,20 +208,20 @@ func LoadDefinition(fsys fs.FS, rules *RuleSet) (*Definition, error) {
 // Whatever the package says, it enforces these rules
 // (docs/04_threat_model.md):
 //   - names: the release, the namespace and the instance name are labels,
-//     and none is reserved by the platform or the compiler;
-//   - values: the layers of an instance hold no connections, claims,
-//     access nor template code, and no layer sets a key of global that
-//     its level may not set, nor changes a value of a lower level;
+//     and none is reserved by the settings or the compiler;
+//   - settings: global.okdp of the values, with the host's settings
+//     (Inputs.Settings), which no values layer may set too, meets the
+//     schema of the rule set: the groups are names with a role;
 //   - upstream values: they respect the package's protect and append
-//     paths; for a project that is not privileged, the rule set's
+//     paths; for a namespace that is not privileged, the rule set's
 //     finalValues hook passes on the final values of each chart, and a
 //     host's Finalize adds its own policy;
-//   - connections: each is of its contract, a store key is under the
-//     project's own, and the claims are those CompileAll bound;
-//   - objects, for a project that is not privileged: each is in the
+//   - connections: each is of its contract, and the claims are those
+//     CompileAll bound;
+//   - objects, for a namespace that is not privileged: each is in the
 //     instance's namespace, none is cluster-scoped or of an engine's API
 //     group, and the rule set's objects hook passes on each;
-//   - objects, for any project: no two are the same, and none holds a
+//   - objects, for any namespace: no two are the same, and none holds a
 //     credential in clear unless Inputs.AllowPlainSecrets;
 //   - cost: the CEL cost of the expressions (Inputs.CostLimit) and the
 //     time of the compile (Inputs.Timeout, ctx).
@@ -328,7 +307,7 @@ func LoadInputs(ctx context.Context, files []InputFiles, cat *Catalog, rules *Ru
 
 // ParseValues reads a values file as Helm 3 does: its first document, as
 // YAML 1.1, with string keys and every number a float64. The result fits
-// Inputs.Context and Inputs.Values.
+// Inputs.Values.
 func ParseValues(b []byte) (map[string]any, error) {
 	return chart.ParseValues(b)
 }

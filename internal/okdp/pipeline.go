@@ -22,21 +22,26 @@ import (
 // M is a values map (value.M).
 type M = value.M
 
-// Inputs is what one compile reads besides the package. A values layer of
-// Context or Values may hold any Go value a values file can hold
-// (map[string]string, int32, a struct with json tags); another one (a
-// func, a NaN) fails the compile.
+// Inputs is what one compile reads besides the package. A values layer
+// may hold any Go value a values file can hold (map[string]string, int32,
+// a struct with json tags); another one (a func, a NaN) fails the compile.
 type Inputs struct {
 	Contracts fs.FS // the contract schemas, <contract>.schema.json
-	// Context holds the context's values layers (global, global.okdp,
-	// connections). They merge by level, lowest first, and in order within a
-	// level, as helm -f does. A layer cannot change a value of a lower level.
-	Context []ContextLayer
-	// Values holds the instance's values layers, merged in order after
-	// Context. They may set no connections, and of global only the keys the
-	// parameter schema declares.
-	Values  []map[string]any
-	Release string // the Helm release, a DNS-1123 label of at most 53 characters
+	// Values holds the values layers, merged in order as helm -f merges
+	// files: parameters, upstream values, global, global.okdp (the settings),
+	// connections and claims. Any layer may set any of them.
+	Values []map[string]any
+	// Settings are settings the host gives beside the values: the content
+	// of global.okdp, such as {access: {groups: {devs: editor}}}. They
+	// join the settings of the values layers, which the platform schema
+	// checks with them, the hooks, the scope documents and Result.Settings
+	// read, but never the values: global as the mapping sees it, the
+	// values, the final values of the charts. A path that both a layer and
+	// Settings give is an error: neither overrides the other. They follow
+	// the type rules of a values layer. LoadInputs reads the groups of a
+	// Project document (access) into them.
+	Settings map[string]any
+	Release  string // the Helm release, a DNS-1123 label of at most 53 characters
 	// Name is the instance's name, a DNS-1123 label. It names the outputs the
 	// mapping leaves unnamed and prefixes the IDs of the instance's claims.
 	// CompileAll sets it. Empty means the release.
@@ -53,7 +58,6 @@ type Inputs struct {
 	// Claimers lists the namespaces that may claim of this instance from
 	// another namespace: namespace names, or "*" for any. Nil falls back to
 	// the claimers of the package's provisions entry (Instance.Claimers).
-	// A class of the platform (level 0) needs no such consent.
 	// LoadInputs reads it from an Instance document (claimers).
 	Claimers []string
 	// Bindings gives, by parameter path, the provider each claim of a
@@ -72,9 +76,6 @@ type Inputs struct {
 	// Finalize makes the final values of the charts from what the compile
 	// computed. Nil uses Helm's merge, with no policy over the upstream values.
 	Finalize Finalize
-	// CheckGlobals is the host's policy on the keys of global a project
-	// sets. It runs before the mapping. Nil means none.
-	CheckGlobals func(context.Context, GlobalsInput) error
 
 	memo *instanceMemo // what the compiles of a set read once (setMemo); nil for this compile's own
 }
@@ -96,36 +97,11 @@ type FinalInput struct {
 	AllowPlainSecrets bool // Inputs.AllowPlainSecrets
 }
 
-// GlobalLayer is the global one layer of a project sets. Name identifies
-// the layer in errors.
-type GlobalLayer struct {
-	Name   string
-	Global M
-}
-
-// GlobalsInput is what Inputs.CheckGlobals checks the keys of global a
-// project sets against.
-type GlobalsInput struct {
-	Rules      *RuleSet
-	Settings   M
-	Namespace  string
-	Privileged bool
-	Layers     []GlobalLayer
-}
-
 // Finalize returns the final values of each key of in.Output, the chart
 // that renders each, and warnings. It runs inside the compile of the
 // instance, so its error refuses the instance like any other stage's. The
 // compile runs the rule set's finalValues hook on the values it returns.
 type Finalize func(ctx context.Context, in FinalInput) (values map[string]map[string]any, charts map[string]chart.Ref, warnings []string, err error)
-
-// ContextLayer is one values layer of the context (Inputs.Context), read
-// as chart.ParseValues reads a file. Level 0 is the platform's; each higher
-// level (a project's, an instance's own connections) adds to those below.
-type ContextLayer struct {
-	Level  uint
-	Values map[string]any
-}
 
 // Result is what a compile produces.
 type Result struct {
@@ -164,9 +140,8 @@ type Result struct {
 	// cluster-scoped objects, write to other namespaces and set any upstream
 	// value, all of which the compile refuses to other projects.
 	Privileged bool
-	Groups     map[string]Role // the project's groups and their roles (access of its project file)
-	Settings   M               // global.okdp, validated and with defaults applied
-	Claims     []Claim         // Inputs.Claims
+	Settings   M       // global.okdp, validated and with defaults applied
+	Claims     []Claim // Inputs.Claims
 }
 
 // run is the state of one compile. Each stage is a method that reads what
@@ -353,7 +328,6 @@ func (c *run) objects() error {
 		Warnings:      slices.Clone(c.def.Warnings),
 		Privileged:    Privileged(inst.okdp, in.Namespace),
 		SecretStore:   secretStore(store),
-		Groups:        inst.groups,
 		Settings:      inst.okdp,
 		Claims:        in.Claims,
 	}

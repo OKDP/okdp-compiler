@@ -68,7 +68,7 @@ func TestDefinitionService(t *testing.T) {
 func TestRequire(t *testing.T) {
 	d := *def
 	d.Package.Require = []string{"cluster.domain", "tls.clusterIssuer"}
-	missing := "global.okdp.tls.clusterIssuer is required. It is a context value: the platform's or a project's (Inputs.Context)"
+	missing := "global.okdp.tls.clusterIssuer is required. It is a setting, of the values (Inputs.Values)"
 	issuer := M{"global": M{"okdp": M{"tls": M{"clusterIssuer": "ca"}}}}
 	for name, tc := range map[string]struct {
 		layers []map[string]any
@@ -80,7 +80,7 @@ func TestRequire(t *testing.T) {
 		"in order":               {[]map[string]any{{"global": M{"okdp": M{"cluster": M{"domain": ""}}}}}, "global.okdp.cluster.domain is required"},
 		"before the mapping":     {[]map[string]any{{"replicas": 11}}, missing},
 		"before platform charts": {[]map[string]any{{"global": M{"okdp": M{"charts": M{"objects": M{"version": "1.x"}}}}}}, missing},
-		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"cluster": M{"domain": ""}, "proxy": M{"httpProxy": true}}}}}, "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/proxy/httpProxy': got boolean, want string"},
+		"after the context":      {[]map[string]any{{"global": M{"okdp": M{"cluster": M{"domain": ""}, "proxy": M{"httpProxy": true}}}}}, "the values (Inputs.Values) don't meet the specifications of the schema of global.okdp:\n- at '/global/okdp/proxy/httpProxy': got boolean, want string"},
 	} {
 		_, err := Compile(context.Background(), &d, inputs(tc.layers...))
 		switch {

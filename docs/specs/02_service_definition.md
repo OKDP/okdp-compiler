@@ -327,7 +327,7 @@ keeps its items restates them in its defaults or values file.
 
 The contracts the package provisions connections of: a database server
 that creates a database per claim, an object store a bucket. A claim binds
-to an instance that names it, or that the claimer's context makes the
+to an instance that names it, or that the claimer's settings make the
 provider of the class it names or of the default class of its contract
 (`global.okdp.provisioning`, [classes](01_inputs_outputs.md#classes)).
 Each instance gets the claims bound to it (`Inputs.Claims`), the mapping's
@@ -352,17 +352,16 @@ provides:
 
 The data of a claim's connection outlives the claim: once no instance
 claims it (a claim template's reference gone, a named claim no longer
-declared by its project), its output and the objects the mapping writes
+declared), its output and the objects the mapping writes
 for it are gone from the compile, and the package keeps what they held (a
 database's reclaim policy, `helm.sh/resource-policy: keep`, which the
 compiler gives Argo CD's equivalents, `argocd.argoproj.io/sync-options:
 Prune=false,Delete=false`, [the objects
 chart](01_inputs_outputs.md#the-objects-chart)): an operator removes it.
 
-An instance of the package serves the claims of its own namespace, and
-of the platform's classes, which route every namespace to it; a claim
-of another namespace that names it, or a class of its project's, only
-with its consent: its instance's `claimers`
+An instance of the package serves the claims of its own namespace; a
+claim of another namespace, whether it names the instance or a class
+routes it there, only with its consent: its instance's `claimers`
 (its `Instance` document, `Inputs.Claimers`), else the `claimers` of the entry
 of the claim's contract, the namespaces whose instances may claim of it,
 `*` for any, none by default
@@ -977,8 +976,8 @@ The variables of every expression:
 |---|---|
 | `release` | `{name, namespace}`: `Inputs.Release`, `Inputs.Namespace`, DNS-1123 labels, the name 53 characters at most ([inputs](01_inputs_outputs.md)) |
 | `claims` | The claims bound to the instance (`Inputs.Claims`), in order, each `{id, contract, namespace, name, request}`: the connection to provision and publish, an output of `contract` named `id`; the namespace of the instances that claim it; the named claim's name, `""` for a claim template's; what it requests, as the contract's claim schema allows (`x-okdp-claim`), its defaults applied, `{}` when it has none ([provisions](#provisions)). `[]` when none. |
-| `values` | The parameters: the defaults of `config.schema.json`, the context's values layers, by level, and the instance's, merged and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in the instance's layers nor in a connection. Without `global`, `connections` and `claims`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
-| `global` | `global` of the same merged values, as written: `okdp`, the platform's settings ([context values](01_inputs_outputs.md#context-values)), and the other keys, the platform's (`imageRegistry`) and a project's own (`global.project`, [levels](01_inputs_outputs.md#levels)), which every chart receives too. |
+| `values` | The parameters: the defaults of `config.schema.json` and the values layers (`Inputs.Values`), merged in order and checked against it ([parameters](01_inputs_outputs.md#parameters)), each connection reference replaced by its resolved connection, external, internal or another instance's output, its `okdp` saying which, `""` or `null` when not set ([connections](01_inputs_outputs.md#connections)); no `{{` in a connection. Without `global`, `connections` and `claims`. `upstream` stays as written: `upstream.<key>` of a chart that accepts upstream values is what will be applied over its computed values. |
+| `global` | `global` of the same merged values, as written: `okdp`, the settings ([values layers](01_inputs_outputs.md#values-layers)), and the other keys (`imageRegistry`, a project's own `global.project`), which every chart receives too. |
 | `platform` | Derived from `global.okdp`, below. |
 | `service` | `{name, version}` of `Chart.yaml`, as written ([Chart.yaml](#chartyaml)). |
 | `labels` | the labels of OKDP's objects, below, without component. |
@@ -996,7 +995,7 @@ mapping is loaded, in any branch: `undeclared reference to '<name>'`.
 | Variable | Value |
 |---|---|
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`: `global.okdp.proxy.httpProxy`, `httpsProxy`, `noProxy`, each only when non-empty; `{}` when none. |
-| `platform.access` | who may use the project's services: the groups of the project (its `access`, of its `Project` document, `okdp-project-<namespace>` an editor when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A project whose `access` is refused gives no project group (the compile fails anyway). |
+| `platform.access` | who may use the namespace's services: the groups of the namespace (`global.okdp.access.groups`, which a host gives in `Inputs.Settings`, the `access` of its `Project` document for `okdp-compile`, none when it gives none; [access](01_inputs_outputs.md#access)) and the platform's administrators (`global.okdp.access.admins`). `viewers`: the groups with any role; `editors`: the editors' and the admins'; `admins`: the admins'; each also holds the platform's administrators; `platformAdmins`: the administrators alone. Lists of group names as the identity provider's tokens give them, no prefix, sorted, once each. A group refused (a name the platform schema refuses, a role of none of these) refuses the instance. |
 
 The settings these are derived from are checked against the platform
 schema first (`- at '/global/okdp/access': got boolean, want object`):

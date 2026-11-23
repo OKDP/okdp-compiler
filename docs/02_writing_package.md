@@ -193,7 +193,7 @@ chart is reached through `upstream.<chart>`, without a parameter.
   "additionalProperties": false,
   "required": ["host"],
   "properties": {
-    "global": {"type": "object", "description": "Platform values: the context's layers, the platform's level then higher ones adding to it, never an instance's."},
+    "global": {"type": "object", "description": "Platform values, and global.okdp the settings: of the values layers, merged in order."},
     "replicas": {"type": "integer", "minimum": 1, "default": 1, "title": "Replicas", "x-ui-group": "Sizing"},
     "host": {"type": "string", "minLength": 1, "pattern": "^[a-z0-9.-]+$", "title": "Host"},
     "database": {
@@ -240,23 +240,26 @@ chart is reached through `upstream.<chart>`, without a parameter.
   `definitions`... (one there is not read), nor on both an object and a
   property under it (the object's wins). `metrics` above gets its defaults
   from its properties' ([defaults](specs/01_inputs_outputs.md#defaults)).
-- `global` is the platform's: an instance that sets it fails. A key the
-  schema declares under it (`"global": {"properties": {"imageRegistry":
-  ...}}`), never `okdp`, is one an instance may set, and every chart
-  receives it
-  ([context values](specs/01_inputs_outputs.md#context-values)). A
+- `global` is the platform's, and every chart receives it: any values
+  layer may set it, and which keys of it a project or an instance sets is
+  a host's to decide
+  ([values layers](specs/01_inputs_outputs.md#values-layers)). A key
+  the schema declares under it (`"global": {"properties":
+  {"imageRegistry": ...}}`), never `okdp`, is checked as a parameter. A
   schema that declares `global.okdp`, or gives it a default (`"global":
-  {"default": {"okdp": ...}}`), is refused: the platform's settings come
-  from the context alone.
-- `connections` is not a parameter: the context gives the connections, an
-  instance's own at a level of its own (`connections` of its Instance
-  document), and the schema does not declare it; a declaration has no effect
-  ([reserved keys](specs/01_inputs_outputs.md#reserved-keys)).
+  {"default": {"okdp": ...}}`), is refused: the settings come from the
+  values layers alone.
+- `connections` is not a parameter: the values layers give the
+  connections, an instance's own in `connections` of its Instance
+  document, and the schema does not declare it; a declaration has no
+  effect ([reserved keys](specs/01_inputs_outputs.md#reserved-keys)).
 - A string pasted into a configuration file, a script or a template refuses
   `{{`, `}}` and line breaks (the `not` pattern above, as in trino, airflow,
-  superset and polaris). The compiler refuses `{{` in every instance value
-  anyway ([layers](specs/01_inputs_outputs.md#layers)); the pattern makes
-  the console refuse it before committing, and covers the rest.
+  superset and polaris). The compiler refuses `{{` in upstream values and
+  in connections, not in the parameters, which a host refuses in the
+  layers it does not review ([layers](specs/01_inputs_outputs.md#layers));
+  the pattern refuses it whoever gives the value, the console before
+  committing, and covers the rest.
 - `x-okdp-connection-ref` makes a string a [connection
   reference](specs/01_inputs_outputs.md#connections), on the items of a
   list too (trino's `hiveCatalogs[].metastore`), on a property reached
@@ -274,9 +277,9 @@ chart is reached through `upstream.<chart>`, without a parameter.
   requires](specs/01_inputs_outputs.md#what-a-reference-requires)).
 - `upstream` declares one object per chart key that accepts instance values:
   the inline values of any other chart would be ignored without a word. The
-  compiler refuses `{{` in them, as in every instance value (upstream
-  charts pass some values to `tpl`); `noTemplate` makes the console refuse
-  it before committing.
+  compiler refuses `{{` in them, whatever layer gives them (upstream
+  charts pass some values to `tpl`); `noTemplate` makes the console
+  refuse it before committing.
 - `title`, `description` and the `x-ui-*` hints (`x-ui-group`, `x-ui-order`,
   `x-ui-advanced`, `x-ui-condition`...) build the console form.
 - Without `config.schema.json`, the package has the empty schema, `{}`: no
@@ -443,8 +446,8 @@ names, labels and Secrets; a rule set adds its own.
 ### 6. Consume and provide connections
 
 A parameter carrying `x-okdp-connection-ref` names an entry of
-`connections` (external, from the context: the platform's, the
-project's, or the instance's own at a level of its own), or an output
+`connections` (external, from the values layers: the platform's, the
+project's, or the instance's own), or an output
 another instance of the namespace publishes, an instance's own named after
 its release by default. Before the mapping runs, the compiler replaces the
 name with the connection, completed against its contract ([what the
@@ -453,8 +456,8 @@ A reference left empty stays `""` (or `null`); a name that is not an entry
 of `connections` must be an output's name.
 
 ```yaml
-# the instance's Instance document: its own connections, the context at
-# level 2, and its values, an external database
+# the instance's Instance document: its own connections, a values layer
+# before its values, and its values, an external database
 kind: Instance
 project: demo
 name: webapp
@@ -619,8 +622,8 @@ the provider's.
 The compiler carries the credentials of a claim of another namespace
 through the platform's secret store ([credentials across
 namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces)).
-An instance serves such a claim through a class of the platform's, or
-with its consent: the namespaces its Instance document lists
+An instance serves such a claim, whatever class routes it there, with
+its consent only: the namespaces its Instance document lists
 (`claimers`), else those of the package's entry, `{contract:
 database-server, claimers: ['*']}` for a server every project may claim
 of; none by default
@@ -629,7 +632,8 @@ of; none by default
 ### 7. Compile, render and check
 
 Each `ci/<case>-values.yaml` is an instance: its parameters, without
-`global` and `connections`, which an instance may not set. A case is
+`global` and `connections`, which the case's other documents give. A
+case is
 compiled from input documents ([input
 documents](01_usage.md#input-documents)), the catalog's directory given
 as `--catalog`, its `catalog/` and `contracts/`: a `Settings` document of
@@ -719,9 +723,11 @@ app:
 A realm's roles are the platform's, every project's people hold them: a
 service that lets anyone with a role of the realm in runs the code of a
 project (a notebook, a flow, a UI that submits jobs) for the people of
-the others. The people of a project are its groups, the roles of the
-`access` of its values, level 1 (`okdp-project-<namespace>`, an editor,
-without one), and the compiler gives them to the mapping:
+the others. The people of a project are its groups, each with a role,
+which a host gives the compile in its settings
+(`global.okdp.access.groups` of `Inputs.Settings`; `okdp-compile` reads
+the `access` of the `Project` document, no group without one), and the
+compiler gives them to the mapping:
 
 | Variable | Value |
 |---|---|
@@ -970,7 +976,7 @@ mode:
 # okdp.yaml
 errors:
   - $if: ${{ values.persistence && global.okdp.?storageClass.?data.orValue('') == '' }}
-    $value: global.okdp.storageClass.data is required with persistence. It is a context value
+    $value: global.okdp.storageClass.data is required with persistence. It is a platform setting
 ```
 
 Read an optional platform value with `.?` and `orValue`

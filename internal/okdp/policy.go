@@ -3,7 +3,7 @@
 // platform's own (privileged). The instances of the other projects keep
 // their objects in their namespace and install no cluster-scoped kind
 // (CheckObjects). What they give upstream charts is for a host to check
-// (Inputs.Finalize, Inputs.CheckGlobals). And no project, privileged or
+// (Inputs.Finalize). And no project, privileged or
 // not, writes a Secret of credentials in clear unless the caller allows
 // it (checkPlainSecrets).
 

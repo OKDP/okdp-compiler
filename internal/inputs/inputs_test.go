@@ -2,11 +2,13 @@ package inputs
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/okdp/okdp-compiler/internal/catalog"
+	"github.com/okdp/okdp-compiler/internal/okdp"
 )
 
 func mapFile(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
@@ -24,12 +26,12 @@ func testCatalog(t *testing.T) *catalog.Catalog {
 }
 
 // TestLoad: documents in several files of any layout, a values file
-// beside them, the layers each instance gets, the claimers absent or
-// empty.
+// beside them, the layers and groups each instance gets, the claimers
+// absent or empty.
 func TestLoad(t *testing.T) {
 	src := Files{Name: "in", FS: fstest.MapFS{
 		"settings.yaml":           mapFile("kind: Settings\nvalues: {global: {region: eu}}\n"),
-		"teams/demo.yaml":         mapFile("kind: Project\nname: demo\nvaluesFiles: [demo/project.yaml]\n---\nkind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\nclaimers: []\nconnections: {db: {contract: database}}\nvaluesFiles: [demo/web.yaml]\nvalues: {replicas: 3}\n"),
+		"teams/demo.yaml":         mapFile("kind: Project\nname: demo\naccess: {devs: editor, leads: admin}\nvaluesFiles: [demo/project.yaml]\n---\nkind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\nclaimers: []\nconnections: {db: {contract: database}}\nvaluesFiles: [demo/web.yaml]\nvalues: {replicas: 3}\n"),
 		"teams/demo/project.yaml": mapFile("global: {team: demo}\n"),
 		"teams/demo/web.yaml":     mapFile("replicas: 2\nkind: not a document\n"),
 		"lab/api.yml":             mapFile("kind: Instance\nproject: lab\nname: api\nservice: app\nversion: 1.0.0\n"),
@@ -48,18 +50,17 @@ func TestLoad(t *testing.T) {
 	if api.Inputs.Claimers != nil {
 		t.Errorf("api: claimers %v, want nil: absent", api.Inputs.Claimers)
 	}
-	var levels []uint
-	for _, l := range web.Inputs.Context {
-		levels = append(levels, l.Level)
-	}
-	if len(levels) != 3 || levels[0] != 0 || levels[1] != 1 || levels[2] != 2 {
-		t.Errorf("web's context levels: %v", levels)
-	}
-	if len(web.Inputs.Values) != 2 || web.Inputs.Values[0]["replicas"] != float64(2) || web.Inputs.Values[1]["replicas"] != float64(3) {
+	// the Settings', the project's values file, the connections, the
+	// instance's values file and values.
+	if len(web.Inputs.Values) != 5 || web.Inputs.Values[0]["global"] == nil || web.Inputs.Values[1]["global"] == nil ||
+		web.Inputs.Values[2]["connections"] == nil || web.Inputs.Values[3]["replicas"] != float64(2) || web.Inputs.Values[4]["replicas"] != float64(3) {
 		t.Errorf("web's values: %v", web.Inputs.Values)
 	}
-	if len(api.Inputs.Context) != 1 {
-		t.Errorf("api's context: %v, the Settings' alone", api.Inputs.Context)
+	if want := (map[string]any{"access": map[string]any{"groups": map[string]any{"devs": string(okdp.RoleEditor), "leads": string(okdp.RoleAdmin)}}}); !reflect.DeepEqual(web.Inputs.Settings, want) {
+		t.Errorf("web's groups: %v", web.Inputs.Settings)
+	}
+	if len(api.Inputs.Values) != 1 || api.Inputs.Settings != nil {
+		t.Errorf("api: %v, %v: the Settings' values alone, no group", api.Inputs.Values, api.Inputs.Settings)
 	}
 }
 
@@ -67,7 +68,7 @@ func TestLoad(t *testing.T) {
 // document.
 func TestLoadErrors(t *testing.T) {
 	src := Files{Name: "in", FS: fstest.MapFS{
-		"a.yaml": mapFile("kind: Settings\n---\nkind: Settings\n---\nkind: Project\nname: demo\n---\nkind: Project\nname: demo\n---\nkind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\n"),
+		"a.yaml": mapFile("kind: Settings\n---\nkind: Settings\n---\nkind: Project\nname: demo\n---\nkind: Project\nname: demo\n---\nkind: Project\nname: lab\naccess: {a/b: viewer, devs: owner}\n---\nkind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\n"),
 		"b.yaml": mapFile("kind: Instance\nproject: demo\nname: web\nservice: app\nversion: 1.0.0\n---\nkind: Instance\nproject: Demo\nname: x\nservice: app\nversion: 2.0.0\n---\nkind: Instance\nproject: lab\nname: y\nservice: app\nversion: 1.0.0\nvaluesFiles: [../outside.yaml]\nclaimers: [a, a]\nreplicas: 1\n"),
 		"c.yaml": mapFile("replicas: 2\n"),
 		"d.yaml": mapFile("kind: Deployment\n"),
@@ -84,6 +85,8 @@ func TestLoadErrors(t *testing.T) {
 		"in/b.yaml: document 2 (line 7, Instance): line 8: project: a DNS label expected",
 		`valuesFiles: "../outside.yaml": a path relative to the document's file, inside in`,
 		"claimers: a is listed twice",
+		"in/a.yaml: document 5 (line 11, Project): access.a/b: a group name",
+		`access.devs: a role, viewer, editor or admin, got "owner"`,
 		"in/c.yaml: document 1 (line 1): no kind",
 		`in/d.yaml: document 1 (line 1): kind "Deployment"`,
 	} {

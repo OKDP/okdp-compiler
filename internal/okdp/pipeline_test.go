@@ -23,8 +23,8 @@ var (
 		"config.schema.json": {Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}}}`)},
 		"app.defaults.yaml":  {Data: []byte("image: {tag: \"4.5\"}\n")},
 	}
-	// The platform values every compile gets, the first context layer of
-	// inputs, at level 0.
+	// The platform values every compile gets, the first values layer of
+	// inputs.
 	platformValues = map[string]any{"global": M{"okdp": M{"cluster": M{"domain": "example.org"}}}}
 	appSource      = chart.Ref{Repository: "https://charts.example.org", Chart: "app", Version: "1.0.0"}
 	appDep         = chart.Dependency{Name: "app", Repository: appSource.Repository, Version: appSource.Version}
@@ -65,29 +65,10 @@ func upstreamOf(key string, k chart.UpstreamKey) chart.Upstream {
 	return chart.Upstream{Keys: map[string]chart.UpstreamKey{key: k}}
 }
 
-// inputs: the in-memory contracts, with these values
-// layers: the global of each, a context layer at level 0 (Inputs.Context),
-// its connections, one at level 2, the instance's own, its claims, one at
-// level 1, the project's, the rest, an instance layer (Inputs.Values).
+// inputs: the in-memory contracts, with the platform's values, then these
+// layers (Inputs.Values).
 func inputs(layers ...map[string]any) Inputs {
-	in := Inputs{Rules: Mandatory(), Contracts: contracts, Context: []ContextLayer{{Values: platformValues}}, Release: "demo-app", Namespace: "demo"}
-	for _, l := range layers {
-		l = maps.Clone(l)
-		if g, ok := l["global"]; ok {
-			in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": g}})
-			delete(l, "global")
-		}
-		if c, ok := l["connections"]; ok {
-			in.Context = append(in.Context, ContextLayer{Level: 2, Values: map[string]any{"connections": c}})
-			delete(l, "connections")
-		}
-		if c, ok := l["claims"]; ok {
-			in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"claims": c}})
-			delete(l, "claims")
-		}
-		in.Values = append(in.Values, l)
-	}
-	return in
+	return Inputs{Rules: Mandatory(), Contracts: contracts, Values: append([]map[string]any{platformValues}, layers...), Release: "demo-app", Namespace: "demo"}
 }
 
 // withFiles: def with these package files.
@@ -208,7 +189,7 @@ func TestCompileErrors(t *testing.T) {
 			}
 		})
 	}
-	// The platform's reserved namespaces (policy.reserved), at level 0:
+	// The platform's reserved namespaces (policy.reserved):
 	// a reservation wins over a privilege; another namespace, default
 	// among them, compiles.
 	for _, privileged := range []bool{false, true} {
@@ -470,7 +451,7 @@ app:
 `)
 	d.Package.Upstream = chart.Upstream{All: true}
 	in := inputs(M{"labels": M{"tier": "gold"}, "upstream": M{"app": M{"image": M{"tag": "5.0"}}, "other": M{"x": "y"}}})
-	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"connections": M{"ext": M{"contract": "database", "host": "db.example.org"}}}})
+	in.Values = append(in.Values, map[string]any{"connections": M{"ext": M{"contract": "database", "host": "db.example.org"}}})
 	res, err := Compile(context.Background(), &d, in)
 	if err != nil {
 		t.Fatal(err)
@@ -478,10 +459,6 @@ app:
 	app := res.Values["app"]
 	if app["replicaCount"] != "none" || value.Dig(app, "labels.tier") != "gold" || value.Dig(app, "image.tag") != "5.0" {
 		t.Errorf("values: %#v", app)
-	}
-	in.Values = append(in.Values, map[string]any{"global": M{"imageRegistry": "registry.example.org"}})
-	if _, err := Compile(context.Background(), &d, in); err == nil || !strings.Contains(err.Error(), "values layer 2: global.imageRegistry is set by the context (Inputs.Context)") {
-		t.Errorf("a key of global: got %v", err)
 	}
 }
 

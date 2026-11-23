@@ -8,7 +8,6 @@ package okdp
 import (
 	"bytes"
 	"cmp"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,8 +30,7 @@ type resolver struct {
 	rules     *RuleSet             // names the credentials Secrets
 	contracts *contractCache       // Inputs.Contracts
 	conns     M                    // the external connections
-	levels    map[string]uint      // the context level each connection is given at, by name
-	claims    map[string]ClaimSpec // the named claims of the context (namedClaims)
+	claims    map[string]ClaimSpec // the named claims of the values (namedClaims)
 	classes   M                    // global.okdp.provisioning, by contract, for the default classes
 	published map[string]Info      // Inputs.Published, by release; nil when unknown
 	bindings  map[string]Binding   // Inputs.Bindings, by parameter path
@@ -169,22 +167,22 @@ func (r *resolver) requirement(ref M) (*requirement, error) {
 	return x.req, x.err
 }
 
-// declaredConnections checks every connection of the context of in at its
-// declaration, whatever its level and whether a reference names it or not.
-// It returns nil when the context's layers fail: the instance's compile
-// reports them. seen is as checkDeclared's.
-func declaredConnections(ctx context.Context, in Inputs, seen map[string]error) error {
-	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
+// declaredConnections checks every connection of in at its declaration,
+// whether a reference names it or not. It returns nil when the values
+// layers fail: the instance's compile reports them. seen is as
+// checkDeclared's.
+func declaredConnections(in Inputs, seen map[string]error) error {
+	ls, err := valuesLayers(in)
 	if err != nil {
 		return nil //nolint:nilerr // the instance's compile reports it
 	}
-	return checkDeclared(in, layers, platform, seen)
+	return checkDeclared(in, ls.layers, ls.platform, seen)
 }
 
-// checkDeclared is declaredConnections once the context's layers are read
-// (contextLayers). seen, when not nil, holds the outcome of each
-// connection checked so far, by what its check reads (declarationKey): the
-// instances of a project check its connections and the platform's once.
+// checkDeclared is declaredConnections once the values layers are read
+// (valuesLayers). seen, when not nil, holds the outcome of each connection
+// checked so far, by what its check reads (declarationKey): the instances
+// of a namespace that share a connection check it once.
 func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[string]error) error {
 	conns := M{}
 	for _, l := range layers {
@@ -196,7 +194,6 @@ func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[stri
 		rules:     in.rules(),
 		contracts: contractCacheOf(in),
 		conns:     conns,
-		levels:    connectionLevels(in.Context),
 		store:     value.Str(value.Dig(platform, "global.okdp.secrets.store")),
 		provider:  len(value.AsMap(value.Dig(platform, "global.okdp.secrets.provider"))) > 0,
 		release:   in.Release,
@@ -206,11 +203,10 @@ func checkDeclared(in Inputs, layers []map[string]any, platform M, seen map[stri
 }
 
 // CheckConnection checks one connection as CompileAll checks it at its
-// declaration. conn is its entry as written in connections, level the
-// level of the context it is declared at (0 the platform, 1 a project, 2
-// an instance), store global.okdp.secrets.store, and provider whether
+// declaration. conn is its entry as written in connections, store
+// global.okdp.secrets.store, and provider whether
 // global.okdp.secrets.provider is set.
-func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, level uint, namespace, store string, provider bool) error {
+func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, namespace, store string, provider bool) error {
 	v, err := value.Normalize(conn)
 	if err != nil {
 		return fmt.Errorf("%s: %w", value.Key("connections", name), err)
@@ -219,7 +215,6 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, lev
 		rules:     rulesOr(rules),
 		contracts: newContractCache(contracts),
 		conns:     M{name: v},
-		levels:    map[string]uint{name: level},
 		store:     store,
 		provider:  provider,
 		namespace: namespace,
@@ -227,7 +222,7 @@ func CheckConnection(rules *RuleSet, contracts fs.FS, name string, conn any, lev
 	return r.declared(nil)
 }
 
-// declared checks every connection of the context, in name order, and
+// declared checks every connection of the values, in name order, and
 // reports every one that fails, each at connections.<name>. seen, when not
 // nil, holds the outcome of the connections checked before, by
 // declarationKey, and receives those it checks.
@@ -249,7 +244,7 @@ func (r *resolver) declared(seen map[string]error) error {
 }
 
 // declarationKey identifies what the check of the connection name at its
-// declaration reads: its entry, its level, the namespace, the secret
+// declaration reads: its entry, the namespace, the secret
 // store and its provider, and the contracts. keyed is false when the entry
 // cannot be encoded.
 func (r *resolver) declarationKey(name string) (key string, keyed bool) {
@@ -257,7 +252,7 @@ func (r *resolver) declarationKey(name string) (key string, keyed bool) {
 	if err != nil {
 		return "", false
 	}
-	return fmt.Sprintf("%p %q %q %t %d %q %s", r.contracts, r.namespace, r.store, r.provider, r.levels[name], name, b), true
+	return fmt.Sprintf("%p %q %q %t %q %s", r.contracts, r.namespace, r.store, r.provider, name, b), true
 }
 
 // declaration checks the connection name, declared at field, as a
@@ -468,7 +463,7 @@ func connectionFields(conn M) (fields M, secretRef any) {
 }
 
 // Connection is an external connection as written at connections.<name>
-// in the context. Its secret fields are not in it: secretRef names a
+// in the values. Its secret fields are not in it: secretRef names a
 // Secret in the namespace of each instance that references the connection
 // (SecretRef) or a key of the platform's secret store (RemoteKey).
 type Connection struct {
@@ -559,16 +554,14 @@ func (c Connection) fields() M {
 // publishes for a claim starts with <namespace>.<...>, while the release
 // of a tree is <namespace>-<instance>.
 //
-// A connection above level 0 names a key under its own namespace,
-// <namespace>/<rest>: a project never reads the key of another namespace,
-// and the platform's keys are read through the platform's connections
-// only. With a store provider (global.okdp.secrets.provider) each
-// namespace has its own SecretStore, which no policy lets read platform/:
-// no connection may then name a key under it.
+// With a store provider (global.okdp.secrets.provider) each namespace
+// has its own SecretStore, which no policy lets read platform/: no
+// connection may then name a key under it. Which keys a namespace may
+// read otherwise is the host's to decide.
 func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (string, error) {
 	where := fmt.Sprintf("%s: connection %q: secretRef", field, ref)
 	key, ok := secretRef["remoteKey"].(string)
-	fields, level := c.secretFields(), r.levels[ref]
+	fields := c.secretFields()
 	switch {
 	case secretRef["name"] != nil:
 		return "", fmt.Errorf("%s: name or remoteKey, not both", where)
@@ -586,9 +579,7 @@ func (r *resolver) storeSecret(c *contract, ref, field string, secretRef M) (str
 	case !isStorePath(key):
 		return "", fmt.Errorf("%s.remoteKey %q: a path of the platform's secret store, segments separated by \"/\", none empty, \".\" or \"..\"", where, key)
 	case r.provider && strings.HasPrefix(key, platformKeys+"/"):
-		return "", fmt.Errorf("%s.remoteKey %q: no namespace reads %s/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>, read through a connection of the project (level 1)", where, key, platformKeys)
-	case level > 0 && !strings.HasPrefix(key, r.namespace+"/"):
-		return "", fmt.Errorf("%s.remoteKey %q: a key of the platform's secret store a project may not read: a connection above level 0 (level %d) names a key under %q, its namespace; the platform's keys are read through the platform's connections (level 0)", where, key, level, r.namespace+"/")
+		return "", fmt.Errorf("%s.remoteKey %q: no namespace reads %s/ when the platform gives a secret store provider (global.okdp.secrets.provider, a SecretStore per namespace): the platform's credentials are copied under the keys of the namespaces that use them, <namespace>/<key>", where, key, platformKeys)
 	}
 	if err := chart.NoTemplate(M{"secretRef": M{"remoteKey": key}}, func(p string) string { return fmt.Sprintf("%s (connection %q): field %q", field, ref, p) }); err != nil {
 		return "", err
@@ -608,26 +599,6 @@ func isStorePath(key string) bool {
 		}
 	}
 	return true
-}
-
-// connectionLevels returns, by name, the lowest level of the context that
-// gives each connection, because a lower level's connection is taken
-// whole. storeSecret scopes a secretRef.remoteKey by it. A layer that
-// does not normalize is skipped: valuesLayers has already reported it.
-func connectionLevels(layers []ContextLayer) map[string]uint {
-	levels := map[string]uint{}
-	for _, l := range layers {
-		v, err := value.Normalize(l.Values)
-		if err != nil {
-			continue
-		}
-		for name := range value.AsMap(value.AsMap(v)["connections"]) {
-			if lv, ok := levels[name]; !ok || l.Level < lv {
-				levels[name] = l.Level
-			}
-		}
-	}
-	return levels
 }
 
 // addTransfer records x once per Secret: two references to one connection,

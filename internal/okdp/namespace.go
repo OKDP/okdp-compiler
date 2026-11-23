@@ -56,7 +56,7 @@ type Bound struct {
 	Namespace, Release string // the provider's instance
 	Class              string // the class whose provider was chosen; "" when the claim names its provider
 	// Named says the claim names its class or its provider. Otherwise the
-	// class is the default of the claimer's context.
+	// class is the default of the claimer's settings.
 	Named bool
 }
 
@@ -67,7 +67,7 @@ type Bound struct {
 // The steps:
 //
 //  1. An instance is refused when its release or name is given twice in its
-//     namespace, or when its context declares a connection that does not hold.
+//     namespace, or when its values declare a connection that does not hold.
 //  2. Each claim is bound to the instance that provisions its contract
 //     (bind). The provider receives the claim and the claimer the binding.
 //  3. Each instance is compiled after the instances it references and the
@@ -102,7 +102,7 @@ func CompileAll(ctx context.Context, instances []Instance) []Outcome {
 			// Its outputs and its claims are named after it.
 			m.outcome.Err = fmt.Errorf("instance name %q is given twice in namespace %q", m.name(), in.Namespace)
 		default:
-			if err := declaredConnections(ctx, in, t.declared); err != nil {
+			if err := declaredConnections(in, t.declared); err != nil {
 				m.outcome.Err = err
 				continue
 			}
@@ -137,10 +137,9 @@ type member struct {
 	bindings map[string]Binding // as a claimer: the provider of each claim, by parameter path; Output is set at each compile
 
 	// What bind reads and records for the instance.
-	classes  M          // the provisioning classes of its context, by contract
-	platform M          // those of them the platform defines (level 0)
-	refs     []claimRef // the claims of its references, in parameter path order
-	errs     []error    // why its claims do not bind, in the order they are reported
+	classes M          // the provisioning classes of its settings, by contract
+	refs    []claimRef // the claims of its references, in parameter path order
+	errs    []error    // why its claims do not bind, in the order they are reported
 }
 
 func (m *member) key() instKey { return instKey{m.Inputs.Namespace, m.Inputs.Release} }
@@ -317,15 +316,15 @@ func notCompiled(err error, others []string) error {
 // that are not refused, in order. A claim template that does not bind
 // refuses its instance.
 //
-// The named claims of a namespace are those its instances' contexts
+// The named claims of a namespace are those its instances' values
 // declare. Each is bound once and given to its provider whether a
-// reference uses it or not. One declared differently in two contexts
+// reference uses it or not. One declared differently in the values of two instances
 // refuses every instance of the namespace; one that does not bind, every
-// instance whose context declares it.
+// instance whose values declare it.
 //
 // The named claims bind first, then the references of each instance in
 // parameter path order: the errors of an instance come in the order they
-// are reported, the claims of its context in name order, then its
+// are reported, its named claims in name order, then its
 // references.
 func (t *compilation) bind(ms []*member) []*member {
 	b := t.newBinder(ms)
@@ -367,7 +366,7 @@ type boundClaim struct {
 	request M // the class's fixed keys, then the claim's own, checked, with the claim schema's defaults
 }
 
-// declaredClaim is a named claim as one instance's context declares it.
+// declaredClaim is a named claim as one instance's values declare it.
 type declaredClaim struct {
 	by   *member
 	spec ClaimSpec
@@ -404,17 +403,17 @@ func (t *compilation) newBinder(ms []*member) *binder {
 func (b *binder) bindOne(of *member, s claimSite, id string, self *member) (choice, M, error) {
 	ch, err := b.t.provider(of.classes, s, self, b.provisioning[s.contract])
 	if err == nil {
-		err = consent(s, id, ch, of.platform)
+		err = consent(s, id, ch)
 	}
 	request, rerr := claimRequest(of.in, s, ch)
 	return ch, request, errors.Join(err, rerr)
 }
 
-// read reads the claims of m and records the named claims its context
+// read reads the claims of m and records the named claims its values
 // declares (decls).
 func (b *binder) read(m *member) {
 	c := claimsOf(b.t.ctx, m.Definition, m.in)
-	m.classes, m.platform, m.refs = c.classes, c.platform, c.refs
+	m.classes, m.refs = c.classes, c.refs
 	ns := m.in.Namespace
 	for name, spec := range c.named {
 		if b.decls[ns] == nil {
@@ -468,7 +467,7 @@ func (b *binder) named(ms []*member) map[instKey]boundClaim {
 			ds := slices.SortedFunc(slices.Values(b.decls[ns][name]), func(a, c declaredClaim) int { return strings.Compare(release(a), release(c)) })
 			where := value.Key("claims", name)
 			if k := slices.IndexFunc(ds, func(d declaredClaim) bool { return !reflect.DeepEqual(d.spec, ds[0].spec) }); k > 0 {
-				err := atField(where, fmt.Errorf("%s: declared differently in the context of %s and %s", where, release(ds[0]), release(ds[k])))
+				err := atField(where, fmt.Errorf("%s: declared differently in the values of %s and %s", where, release(ds[0]), release(ds[k])))
 				for _, m := range ms {
 					if m.Inputs.Namespace == ns {
 						m.errs = append(m.errs, err)
@@ -571,7 +570,7 @@ func provisioningKey(contract string) string { return value.Key("global.okdp.pro
 
 // claimClass works out which provider the claim at s names, without
 // looking the instance up. A claim that names a provider has no class.
-// Otherwise the class is the one it names, or the default of the context,
+// Otherwise the class is the one it names, or the default of the claimer's settings,
 // and must be defined in classes. It also returns the provider's name as
 // written, and how messages call the class ("" without one).
 func claimClass(classes M, s claimSite) (ch choice, name, which string, err error) {
@@ -590,7 +589,7 @@ func claimClass(classes M, s claimSite) (ch choice, name, which string, err erro
 	which = fmt.Sprintf("class %q", ch.class)
 	if ch.class == "" {
 		if ch.class = value.Str(of["default"]); ch.class == "" {
-			return ch, "", "", fmt.Errorf("%s: it names no class, and the context sets no default one, %s.default (Inputs.Context): %s", where, key, these)
+			return ch, "", "", fmt.Errorf("%s: it names no class, and the settings set no default one, %s.default: %s", where, key, these)
 		}
 		which = fmt.Sprintf("the default class %q", ch.class)
 	}
@@ -643,20 +642,15 @@ func (t *compilation) provider(classes M, s claimSite, self *member, candidates 
 
 // consent reports whether the claim id at s may bind to the provider of
 // ch. Within a namespace it always may. Across namespaces it may when the
-// class is one the platform defines (platform: the classes of level 0,
-// which no higher level can change), because the platform routes every
-// namespace to it, or when the provider's claimers list the namespace, or
-// "*".
-func consent(s claimSite, id string, ch choice, platform M) error {
+// provider's claimers list the namespace, or "*", whatever class routes
+// the claim to it.
+func consent(s claimSite, id string, ch choice) error {
 	p := ch.provider
 	if p.Inputs.Namespace == s.namespace {
 		return nil
 	}
 	by := ""
 	if s.spec.Provider == "" {
-		if _, ok := value.AsMap(value.AsMap(platform[s.contract])["classes"])[ch.class]; ok {
-			return nil
-		}
 		by = fmt.Sprintf(", the provider of class %q", ch.class)
 		if s.spec.Class == "" {
 			by = fmt.Sprintf(", the provider of the default class %q", ch.class)
@@ -671,7 +665,7 @@ func consent(s claimSite, id string, ch choice, platform M) error {
 	if p.Inputs.Claimers == nil {
 		list += ", its package's"
 	}
-	return fmt.Errorf("%s: claim %q (%s): of %s%s, another namespace: %s is not one of its claimers (claimers of instance %s: %s): the provider lists the namespaces that may claim of it (claimers of its instance.yaml, else of its package's provisions), or the platform routes them through a class of platform.yaml", s.field, id, s.contract, provider, by, s.namespace, provider, list)
+	return fmt.Errorf("%s: claim %q (%s): of %s%s, another namespace: %s is not one of its claimers (claimers of instance %s: %s): the provider lists the namespaces that may claim of it (Inputs.Claimers, else its package's provisions)", s.field, id, s.contract, provider, by, s.namespace, provider, list)
 }
 
 // matched lists the instances the provider name n matches, in release

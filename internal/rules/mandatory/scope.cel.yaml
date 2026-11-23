@@ -1,18 +1,21 @@
 # What a mapping sees as platform, of the platform's settings: the proxy
 # settings as environment variables, the groups of each role. Input:
-# settings, release, items (the project's groups, by group, each its role).
+# settings, release.
 vars:
+  # The platform's administrators, and the namespace's groups, each its
+  # role (global.okdp.access.groups, which a host gives per namespace).
   admins: >-
     ${{ asList(dig(settings, "access.admins")).map(g, str(g)) }}
+  groups: ${{ asMap(dig(settings, "access.groups")) }}
   # Each list holds the higher roles' groups and the platform's administrators.
   editors: >-
-    ${{ keys(items).filter(g, items[g] in ["editor", "admin"]) }}
+    ${{ keys(groups).filter(g, groups[g] in ["editor", "admin"]) }}
   owners: >-
-    ${{ keys(items).filter(g, items[g] == "admin") }}
+    ${{ keys(groups).filter(g, groups[g] == "admin") }}
 values:
   platform:
     access:
-      viewers: ${{ (admins + keys(items)).sort().distinct() }}
+      viewers: ${{ (admins + keys(groups)).sort().distinct() }}
       editors: ${{ (admins + editors).sort().distinct() }}
       admins: ${{ (admins + owners).sort().distinct() }}
       platformAdmins: ${{ admins.sort().distinct() }}

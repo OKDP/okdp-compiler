@@ -8,7 +8,7 @@ import (
 )
 
 // TestRequiredRuleSets: a platform states the rule sets it requires
-// (global.okdp.ruleSets); every compile, and PlatformOf, refuse it when the
+// (global.okdp.ruleSets); every compile, and SettingsOf, refuse it when the
 // compile was not given one of them, or one of a version its constraint
 // refuses.
 func TestRequiredRuleSets(t *testing.T) {
@@ -40,9 +40,9 @@ func TestRequiredRuleSets(t *testing.T) {
 		"another key": {requiring(extra, M{"name": "extra", "other": 1}), "at '/global/okdp/ruleSets/0': additional properties 'other' not allowed"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, perr := PlatformOf(ctx, tc.in)
+			_, perr := SettingsOf(ctx, tc.in)
 			_, cerr := Compile(ctx, def, tc.in)
-			for what, err := range map[string]error{"PlatformOf": perr, "Compile": cerr} {
+			for what, err := range map[string]error{"SettingsOf": perr, "Compile": cerr} {
 				if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 					t.Errorf("%s: got %v, want %q", what, err, tc.want)
 				}

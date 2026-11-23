@@ -75,8 +75,8 @@ func TestCompileWithoutRules(t *testing.T) {
 	})
 	t.Run("a function of a rule set not given", func(t *testing.T) {
 		def, in := example()
-		in.Rules, in.Values = nil, nil
-		in.Context = []compiler.ContextLayer{{Values: map[string]any{"global": map[string]any{"okdp": map[string]any{"cluster": map[string]any{"domain": "example.org"}}}}}}
+		in.Rules = nil
+		in.Values = []map[string]any{{"global": map[string]any{"okdp": map[string]any{"cluster": map[string]any{"domain": "example.org"}}}}}
 		def.Okdp, def.Values = []byte("objects:\n  - $spread: \"${{ [okdpPodSpec({'containers': []})] }}\"\n"), []byte("app: {}\n")
 		if _, err := compiler.Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "undeclared reference to 'okdpPodSpec'") {
 			t.Errorf("okdpPodSpec without the set that gives it: %v", err)
@@ -86,15 +86,15 @@ func TestCompileWithoutRules(t *testing.T) {
 		for set, rules := range map[string]*compiler.RuleSet{"example": nil, "security": exampleRules("02_advanced")} {
 			def, in := example()
 			in.Rules = rules
-			in.Context = append(slices.Clip(in.Context), compiler.ContextLayer{Values: map[string]any{
+			in.Values = append(slices.Clip(in.Values), map[string]any{
 				"global": map[string]any{"okdp": map[string]any{"ruleSets": []any{map[string]any{"name": set}}}},
-			}})
+			})
 			want := "global.okdp.ruleSets: the platform requires the rule set " + set + ", which the compile was not given: give it with okdp-compile --rules (compiler.LoadRules)"
 			if _, err := compiler.Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s: got %v, want %q", set, err, want)
 			}
-			if _, err := compiler.PlatformOf(context.Background(), in); err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("%s: PlatformOf: got %v, want %q", set, err, want)
+			if _, err := compiler.SettingsOf(context.Background(), in); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: SettingsOf: got %v, want %q", set, err, want)
 			}
 		}
 	})

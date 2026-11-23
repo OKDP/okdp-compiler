@@ -37,7 +37,7 @@ way, a directory read whole or one file: each says what it is by its
 
 ```yaml
 # examples/04_claims/input/config/inputs.yaml, trimmed
-kind: Settings                    # the platform's values, level 0
+kind: Settings                    # the platform's values, every instance's first
 valuesFiles: [platform.yaml]
 ---
 kind: Instance                    # the release data-postgresql, namespace data
@@ -47,7 +47,7 @@ service: postgresql               # the package catalog/postgresql/1.0.0/
 version: 1.0.0
 claimers: [demo]                  # demo's instances may claim of it
 ---
-kind: Project                     # the namespace demo, level 1
+kind: Project                     # the namespace demo
 name: demo
 valuesFiles: [demo/project.yaml]
 ---
@@ -61,9 +61,9 @@ valuesFiles: [demo/dashboards/config.yaml]
 
 | Kind | Keys | What a compile receives |
 |---|---|---|
-| `Settings` | `values`, `valuesFiles` | the context at level 0 of every instance; one document at most |
-| `Project` | `name`, `values`, `valuesFiles` | the context at level 1 of the instances of the project `name`, a namespace; optional |
-| `Instance` | `project`, `name`, `service`, `version`, `claimers`, `connections`, `values`, `valuesFiles` | the release `<project>-<name>` of the namespace `<project>`, of the package `catalog/<service>/<version>/`; `connections`, the context at level 2; `values` and `valuesFiles`, the instance values |
+| `Settings` | `values`, `valuesFiles` | the first values layers of every instance; one document at most |
+| `Project` | `name`, `access`, `values`, `valuesFiles` | the values layers of the instances of the project `name`, a namespace, after the `Settings` document's, and their groups (`access`); optional |
+| `Instance` | `project`, `name`, `service`, `version`, `claimers`, `connections`, `values`, `valuesFiles` | the release `<project>-<name>` of the namespace `<project>`, of the package `catalog/<service>/<version>/`; `connections`, a layer `{connections: ...}` after its project's; `values` and `valuesFiles`, its own layers, last |
 
 - `valuesFiles` lists values files, each a path relative to the
   document's file, inside the same input files, read as Helm reads one
@@ -71,52 +71,55 @@ valuesFiles: [demo/dashboards/config.yaml]
   a document names so is a values file, not read for documents; every
   other `.yaml` and `.yml` file of a directory given is, each non-empty
   document of a kind, of its keys only.
-- The context has a layer per level
-  ([levels](specs/01_inputs_outputs.md#levels)): 0 the `Settings`
-  document's, the platform values (`global.okdp`, the classes of the
-  claims and their default among it, the platform's secret store, the
-  connections every instance may reference); 1 the `Project` document's,
-  what a project adds for its instances (its settings under `global`, its
-  classes beside the platform's, a default class of a contract the
-  platform sets none of, its connections, its named claims, `claims:
-  {<name>: {contract: <contract>}}`, which its instances reference by
-  name, its `access`); 2 the instance's `connections`, its own
-  connections (`{<name>: {...}}`), written as the lower levels write
-  theirs, and nothing else: `global` is the platform's or the project's.
-  A level adds values and changes none of a lower level's. The named
-  claims are a project's only: the platform's values declare none. A
+- An instance's values layers are, in order, the `Settings` document's,
+  the platform values (`global.okdp`, the classes of the claims and
+  their default among it, the platform's secret store, the connections
+  every instance may reference); the `Project` document's, what a
+  project adds for its instances (its settings under `global`, its
+  classes, its connections, its named claims, `claims: {<name>:
+  {contract: <contract>}}`, which its instances reference by name); its
+  `connections`, its own (`{<name>: {...}}`); then its own values. They
+  merge in order, as `helm -f` merges files
+  ([layers](specs/01_inputs_outputs.md#layers)): any layer may set any
+  key, and a later one changes what an earlier one sets. The compiler
+  does not know where a layer comes from. What each may set (the
+  platform's settings to the platform, the keys of `global` a project
+  sets, no template code from a layer no one reviews) is a host's to
+  decide, before it gives the layers: `okdp-compile` decides none of it,
+  and trusts whoever writes the input documents with every key. A
   connection's credentials are in a Secret of the instance's namespace,
   `secretRef: {name: <secret>}`, or in the platform's secret store,
-  `secretRef: {remoteKey: <key>}`, which the compiler reads into one, a
-  key under `<project>/` for a project's or an instance's connection, the
-  platform's under `platform/` with a ClusterSecretStore, refused with
-  `secrets.provider`, where no namespace reads it
+  `secretRef: {remoteKey: <key>}`, which the compiler reads into one;
+  which keys a namespace's connections may read is a host's to decide,
+  and a key under `platform/` is refused with `secrets.provider`, where
+  no namespace reads it
   ([credentials in the platform's secret
   store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)).
 - `claimers`, optional, lists the namespaces whose instances may claim of
   the instance, a provider, from another namespace, by naming it or
-  through a class of their project's (`claimers: [demo]`, `["*"]` for
-  any; absent, its package's, `provisions`, none by default), a class of
-  the platform's needing none
+  through a class, whichever class routes them (`claimers: [demo]`,
+  `["*"]` for any; absent, its package's, `provisions`, none by default)
   ([providers](specs/01_inputs_outputs.md#providers)).
-- A project's values may give its people their roles, `access: {<group>:
-  viewer|editor|admin}`, the identity provider's groups
-  (`compiler.ProjectAccessKey`): absent, `okdp-project-<project>` is an
-  editor; `{}`, no group.
-  No instance receives it; a host that writes Flux or Argo CD files writes
-  it as the Argo CD roles of the project's AppProject and the RoleBindings
-  of its namespace to Kubernetes' `view`, `edit` and `admin`, the
-  platform's values naming the platform's administrators
-  (`global.okdp.access.admins`) and the prefix the API server gives the
-  groups (`global.okdp.access.groupPrefix`)
-  ([access](specs/01_inputs_outputs.md#access)). Whoever writes the
-  project's values sets it.
-- The instance values are its parameters and upstream values, no
-  `connections`, no `claims`.
-- Every connection of the context, the platform's, a project's, an
-  instance's own, is checked at its declaration, referenced or not
+- A `Project` document's `access`, `{<group>: viewer|editor|admin}`,
+  gives the identity provider's groups their roles in the namespace,
+  `access.groups` of the settings `Inputs.Settings` of each of its
+  instances: absent, no group; the compiler gives no default group. No
+  values layer holds it, and no chart receives it: the mapping reads
+  the groups of each role in `platform.access`, with the platform's
+  administrators (`global.okdp.access.admins`). A host that
+  writes Flux or Argo CD files writes them as the Argo CD roles of the
+  project's AppProject and the RoleBindings of its namespace to
+  Kubernetes' `view`, `edit` and `admin`, with the prefix the API server
+  gives the groups (`global.okdp.access.groupPrefix`)
+  ([access](specs/01_inputs_outputs.md#access)). Who may set it is a
+  host's to decide; to `okdp-compile`, whoever writes the documents.
+- The instance values are its parameters and upstream values; like any
+  layer they may set any key, which a host that does not review them
+  refuses.
+- Every connection of an instance's layers, whichever gives it, is
+  checked at its declaration, referenced or not
   ([connections](specs/01_inputs_outputs.md#connections)): one that
-  does not hold refuses the instances of its context, at
+  does not hold refuses the instances whose layers give it, at
   `connections.<name>`.
 - The release is `<project>-<name>`, the project and the instance's name
   joined by `-`, the namespace the project: no key overrides them. The
@@ -239,16 +242,16 @@ and the warnings, then, once the files are written, the dependencies,
 <field>)`. It writes nothing when an instance is refused, nor when `-f`
 holds no `Instance` document (`no instance: -f holds no document of kind
 Instance`). It compiles with Helm's merge alone: it sets no
-`Inputs.Finalize` and no `Inputs.CheckGlobals`, so no host's policy on the
-upstream values runs, whatever `--rules` gives. It orders no release: the
-dependencies are printed, not checked as a deployment graph (a release
-that exists, no cycle), which is a host's. A host's command line may add
-the rest: the layout of a deployment's files, the files of a deployer
-engine (Flux, Argo CD, a single release per instance) and their order, the
-writing of the projects that compile when others do not, a report of the
-compile, and the checks of the final values against the upstream charts
-from a chart cache ([chart
-cache](specs/01_inputs_outputs.md#chart-cache)).
+`Inputs.Finalize` and checks no layer's `global`, so no host's policy on
+the upstream values runs, whatever `--rules` gives, and it decides nothing
+of what a layer may set. It orders no release: the dependencies are
+printed, not checked as a deployment graph (a release that exists, no
+cycle), which is a host's. A host's command line may add the rest: the
+layout of a deployment's files, the files of a deployer engine (Flux, Argo
+CD, a single release per instance) and their order, the writing of the
+projects that compile when others do not, a report of the compile, and the
+checks of the final values against the upstream charts from a chart cache
+([chart cache](specs/01_inputs_outputs.md#chart-cache)).
 
 ## Go library
 
@@ -401,8 +404,10 @@ func main() {
 		}
 		return v
 	}
-	in.Context = []compiler.ContextLayer{{Values: read("examples/02_advanced/input/config/platform.yaml")}}
-	in.Values = []map[string]any{read("examples/02_advanced/input/config/demo/webapp/config.yaml")}
+	in.Values = []map[string]any{
+		read("examples/02_advanced/input/config/platform.yaml"),
+		read("examples/02_advanced/input/config/demo/webapp/config.yaml"),
+	}
 	res, err := compiler.Compile(context.Background(), def, in)
 	if err != nil {
 		log.Fatal(err) // the whole report, e.g. every schema violation
@@ -460,7 +465,7 @@ dependencies:
 	}
 	res, err := compiler.Compile(context.Background(), def, compiler.Inputs{
 		Contracts: fstest.MapFS{},                    // no connection, no provides: no contract read
-		Values:    []map[string]any{{"replicas": 3}}, // no context: the package requires no platform value
+		Values:    []map[string]any{{"replicas": 3}}, // no settings: the package requires none
 		Release:   "demo-app",
 		Namespace: "demo",
 	})
@@ -501,17 +506,19 @@ empty), which its errors start with.
 (`LoadInputs`, [what a compile
 receives](specs/01_inputs_outputs.md#what-a-compile-receives)):
 `Contracts` (those of the catalog's `contracts/`; it may be empty when
-nothing references a contract), `Context` (the context layers, parsed,
-each a `ContextLayer` of its level), `Values` (its values, parsed),
-`Release`, `Namespace`, `Claimers`, and `Published` (what the other
-instances of the namespace publish, by release, each a `compiler.Info`;
+nothing references a contract), `Values` (its values layers, parsed,
+the `Settings` document's, its project's, its `connections`, then its
+own), `Release`, `Namespace`, `Claimers`, `Settings` (its project's
+`access`, as `{access: {groups: ...}}`), and `Published` (what the
+other instances of the namespace publish, by release, each a
+`compiler.Info`;
 nil, none is known; `CompileAll` sets it), `Claims` (the claims bound to
 the instance of a provider, `compiler.Claim`), `Bindings` (the providers
 the instance's claims are bound to, by parameter path,
 `compiler.Binding`): `CompileAll` sets both
 ([claims](specs/01_inputs_outputs.md#claims)); and the host's
-parts, `Rules`, `Finalize` and `CheckGlobals` ([rule
-sets](#rule-sets), [hosts](#hosts)). `Release`, `Namespace` and
+parts, `Rules` and `Finalize` ([rule sets](#rule-sets),
+[hosts](#hosts)). `Release`, `Namespace` and
 `Contracts` are required
 ([inputs and outputs](specs/01_inputs_outputs.md)).
 
@@ -535,9 +542,9 @@ template, nor a null, nor a large integer. `compiler.Info` is what
 What a compile applies of a platform is data, in rule sets. The compiler
 embeds the mandatory one, `core`, which every compile applies: the
 functions it gives, the schema of the platform's settings, what a
-mapping sees as `platform`, the labels, the names, the roles, the
-documents of the secret store, the tables and CEL checks, the schema of
-the mapping and the platform's charts. `Inputs.Rules` nil compiles with
+mapping sees as `platform`, the labels, the names, the documents of
+the secret store, the tables and CEL checks, the schema of the mapping
+and the platform's charts. `Inputs.Rules` nil compiles with
 it alone, which refuses what a
 platform refuses: a reserved namespace, an object or a plain Secret its
 checks deny.
@@ -580,16 +587,14 @@ does not pass what the set would refuse
 usage](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/01_usage.md#requiring-the-set-in-a-tree)).
 
 The helpers that read rules take the set first, nil being the mandatory
-one: `compiler.Roles(rules)`, `EngineNamespaces(rules)`,
-`PlatformObjectNames(rules)`, `ParseAccess(rules, v, namespace)`,
-`CheckProjectName(ctx, rules, name, platform)`,
-`PlatformAdmins(ctx, rules, platform)` and
-`CheckConnection(rules, contracts, project, c, platform)`.
+one: `compiler.EngineNamespaces(rules)`, `PlatformObjectNames(rules)`,
+`CheckNamespace(ctx, rules, name, values)` and
+`CheckConnection(rules, contracts, namespace, c, values)`.
 
 ### Hosts
 
-Two hooks let a host add what the library does not hold, both run inside
-the compile of the instance, and an error of either refuses it:
+A hook lets a host add what the library does not hold, run inside the
+compile of the instance, its error refusing it:
 
 - `Inputs.Finalize` makes the final values of
   the charts from what the compile computed. Nil, it is Helm's merge, with
@@ -608,10 +613,8 @@ the compile of the instance, and an error of either refuses it:
   `finalValues` hook on the values Finalize returns, after the host's
   own checks. `compiler.CheckFinalValues` runs the hook on final values
   a host reads outside a compile.
-- `Inputs.CheckGlobals` checks the keys of
-  `global` a project sets, before the mapping runs; nil, none.
 
-A host sets both on the `Inputs` of the instances `LoadInputs` gives,
+A host sets it on the `Inputs` of the instances `LoadInputs` gives,
 before `CompileAll`; it may fetch the upstream charts of every
 instance's `Definition.Chart` there, before the compiles, so that no
 fetch counts against `Inputs.Timeout`.
@@ -621,6 +624,18 @@ the upstream values
 ([the upstream policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md)),
 and its own checks against the upstream charts beside it
 ([checks of the final values](specs/01_inputs_outputs.md#checks-of-the-final-values)).
+
+What a layer may set is a host's too: the compiler takes the layers of
+`Inputs.Values` as given, whoever wrote them. A host that gives layers
+of several origins, the platform's, a project's, an instance's, checks
+each before the compile: that a layer only adds to the platform's, the
+keys of `global` and `global.okdp` a project may set, no template code
+from a layer it does not review, the keys of the secret store a
+namespace's connections may read, who gives the groups
+(`access.groups`, which a host gives in `Inputs.Settings`). The
+security set's `policy.CheckGlobals` checks the `global` of the layers
+a host does not review against the upstream policy: nothing calls it
+but a host.
 
 ### The rest of the API
 
@@ -678,25 +693,28 @@ and its own checks against the upstream charts beside it
   instances that reference it.
 - `compiler.IsName(name)` is whether a name may be a project's, an
   instance's, a connection's or a named claim's, a DNS-1123 label;
-  `compiler.CheckProjectName(ctx, rules, name, platform)`, `platform` the
-  platform's values, why the compile would refuse every instance of a
-  project of that name, in its words (`project "kube-foo": the namespace
-  is reserved: ...`): not a name, or one the mandatory rule set reserves
-  (`platform`, `kube-*`, `argocd`, `flux-system`, `okdp-releases`) or
-  one of `global.okdp.policy.reserved`, for a program that creates a
-  project's namespace before any compile. The release of an instance is
-  `<project>-<name>`; how a host names the files of a deployment is its
-  own.
-- The authority over projects, for a program that mirrors it (a control
-  plane): `compiler.ParseAccess(rules, v, namespace)`, the roles of the
-  groups of a project, `v` the value of its `access`, a
+  `compiler.CheckNamespace(ctx, rules, name, values)`, `values` a layer
+  whose `global.okdp` gives the settings, why the compile would refuse
+  every instance of a namespace of that name, in its words (`namespace
+  "kube-foo": the namespace is reserved: ...`): not a name, or one the
+  mandatory rule set reserves (`platform`, `kube-*`, `argocd`,
+  `flux-system`, `okdp-releases`) or one of
+  `global.okdp.policy.reserved`, for a program that creates a namespace
+  before any compile. The release of an instance is `<project>-<name>`;
+  how a host names the files of a deployment is its own.
+- The groups of a namespace, for a program that gives or mirrors them
+  (a control plane): `compiler.ParseAccess(field, v)` reads `v`, a map
+  of group names to roles, as `global.okdp.access.groups`, a
   `map[string]compiler.AccessRole` (`AccessViewer`, `AccessEditor`,
-  `AccessAdmin`), the default `compiler.DefaultProjectGroup(project)`,
-  `okdp-project-<project>`, an editor, when it gives none, the compile's
-  errors; `compiler.PlatformAdmins(ctx, rules, platform)`, the groups of the
-  platform's administrators of the platform's values, checked as
-  the compile checks them; `compiler.IsGroupName(name)`, whether a name
-  may be a group's ([access](specs/01_inputs_outputs.md#access)).
+  `AccessAdmin`), `field` naming it in the errors, nil giving no group;
+  a host gives them in `Inputs.Settings`, `{access: {groups: ...}}`;
+  `compiler.IsGroupName(name)`, whether a name may be a group's;
+  `compiler.SettingsOf(ctx, in)`, the settings of the layers of `in`
+  with `Inputs.Settings` as a compile checks them, their defaults
+  applied (the platform's administrators at `access.admins`, the
+  groups at `access.groups`), a
+  `*compiler.NamespaceError` when the namespace of `in` is refused
+  ([access](specs/01_inputs_outputs.md#access)).
 - `compiler.CompileAll(ctx, instances)` compiles instances together, each
   a `compiler.Instance`, its `Definition` and its `Inputs` without
   `Name`, `Published`, `Claims` and `Bindings`, and its `Name`, which a
@@ -712,8 +730,8 @@ and its own checks against the upstream charts beside it
   A provider, a claim's or a class's, is `<namespace>/<name>` or `<name>`
   of the claimer's namespace, the name an instance's or its release; one
   that names two instances, the release of one and the name of the other,
-  is refused, and so is one of another namespace, named or a project's
-  class's, whose claimers (`Inputs.Claimers`, else its package's,
+  is refused, and so is one of another namespace, named or a class's,
+  any class, whose claimers (`Inputs.Claimers`, else its package's,
   `Instance.Claimers(contract)`) do not list the claimer's namespace
   ([providers](specs/01_inputs_outputs.md#providers)).
 - `CompileAll` builds no deployment graph: `Result.Dependencies` of
@@ -757,12 +775,12 @@ and its own checks against the upstream charts beside it
     replaced, a null kept). Coalescing values over a chart's defaults,
     as Helm gives them to its templates, is a host's: the compiler reads
     no chart.
-  - `compiler.CheckConnection(rules, contracts, project, c, platform)` checks
-    a connection of a project (`""`, the platform's) at its
-    declaration, as `CompileAll` checks every connection of
-    a context: its contract, its fields, none secret, its required
-    ones, its types, its `secretRef` against the store of the
-    platform's values and its provider; the compile's error, at
+  - `compiler.CheckConnection(rules, contracts, namespace, c, values)`
+    checks a connection of `namespace` at its declaration, as
+    `CompileAll` checks every connection of an instance's layers: its
+    contract, its fields, none secret, its required ones, its types,
+    its `secretRef` against the store `values` give
+    (`global.okdp.secrets`) and its provider; the compile's error, at
     `connections.<name>`.
   - The names of the claims: `compiler.NamedClaimID(project, name)`,
     `<project>.<name>`, the output its provider publishes for it;
@@ -773,11 +791,11 @@ and its own checks against the upstream charts beside it
     class names its provider by; `compiler.CheckClaimers(name,
     claimers)`, an instance's claimers, as `LoadInputs` checks them.
 - `compiler.ParseValues(b)` reads one values file as Helm 3 does (YAML 1.1,
-  the first document of the file), for `Inputs.Context` and
-  `Inputs.Values`. A layer built in Go may hold other types than
-  `map[string]any` and `[]any` (`map[string]string`, `[]string`, `int32`,
-  a struct by its `json` tags): it is read as the values it would be once
-  written to a file and read back
+  the first document of the file), for `Inputs.Values`. A layer built
+  in Go may hold other types than `map[string]any` and `[]any`
+  (`map[string]string`, `[]string`, `int32`, a struct by its `json`
+  tags): it is read as the values it would be once written to a file
+  and read back
   ([values files](specs/01_inputs_outputs.md#values-files)); what a file
   cannot hold fails, its layer and path named.
 - `compiler.ChartRef` is an upstream chart, `{Repository, Chart, Version}`:
@@ -880,15 +898,9 @@ them gives none of them.
 | `database: the database contract cannot be read: database.schema.json: file does not exist` | a connection reference or a provided connection names a contract no catalog directory's `contracts/` has | add it to a catalog ([contracts](specs/01_inputs_outputs.md#location)) |
 | `database: the database contract cannot be read: database.schema.json: unexpected EOF` | the contract file is not JSON, not an object or not a valid JSON Schema; also `provides "<name>" (<contract>): the <contract> contract cannot be read: ...` | fix the contract ([contracts](specs/01_inputs_outputs.md#location)) |
 | `<file>: cannot unmarshal yaml document: error converting YAML to JSON: yaml: line 1: did not find expected node content` | a values file is not valid YAML | fix the file |
-| `global.okdp.tls.clusterIssuer is required. It is a context value: the platform's or a project's (Inputs.Context)` | `require` in `okdp.yaml` lists it, and no context layer sets it (or a later one of its level sets it to `null`) | set the key in the platform's values, its `Settings` document ([context values](specs/01_inputs_outputs.md#context-values)) |
-| `context layer 2 (level 1): global.okdp.tls.clusterIssuer is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's`, `context layer 2 (level 1): connections.platform-db is set at level 0 ...` | a context layer, the second (`Inputs.Context[1]`), a project's values at level 1, sets a value a layer of a lower level sets (the same value and `null` included, or a parent of it to a non-map), or gives a connection of a lower level's connection's name, even by a field it leaves out | remove it from the layer: a level only adds keys and connections; change the value in the lower level's ([levels](specs/01_inputs_outputs.md#levels)) |
-| `context layer 2 (level 1): global.okdp.charts: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp` | a context layer above level 0, a project's values, sets a key of `global.okdp` other than `provisioning`, one the compiler reads or not, one the platform sets or leaves unset (a key it sets fails before, `is set at level 0`), or `global.okdp` to a non-map | set it in the platform's values; a project's own settings, which the mappings read, go beside `okdp`: `global.project` ([levels](specs/01_inputs_outputs.md#levels)) |
-| `context layer 2 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass; ...` | a context layer above level 0, a project's values, sets a key of `global` beside `okdp` the platform does not list: every chart receives `global`, past its package's `protect` | list the key in `global.okdp.policy.projectGlobals` of the platform's values if it is harmless to every project (`[project, storageClass]` by default), else remove it; a project's own settings go under `global.project` |
-| `values layer 1: global.okdp is set by the context (Inputs.Context)`, `values layer 2: global is set by the context ...` | an instance's values layer, the first, second... (`Inputs.Values[0]`, `[1]`...), its `valuesFiles` first, then `values`, sets `global`: a platform value, a key of `global` the parameter schema does not declare, or `global` itself to a non-map | give platform values in the platform's; a package lets instances set a key of `global` by declaring it in `config.schema.json` ([context values](specs/01_inputs_outputs.md#context-values)) |
-| `config.schema.json: global.okdp is the platform's settings: a package schema declares nothing under it`, `... a package schema gives it no default (properties.global.default)` | the package's parameter schema declares `properties.global.properties.okdp`, or its `properties.global.default` has the key `okdp`: a default of the platform's settings | remove it: the platform's settings are the context's, the platform's values ([defaults](specs/01_inputs_outputs.md#defaults)) |
-| `values layer 1: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level` | an instance's values set `connections`, to any value | give the instance's own connections in the `connections` of its `Instance` document, the context of its level; a connection of a lower level is not changed ([context values](specs/01_inputs_outputs.md#context-values)) |
-| `values layer 1: database: the value contains "{{"`, `values layer 2: upstream.app.podAnnotations.{{ x }}: the key contains "{{"` | template code in an instance's values, in a key or a value under any key: parameters, upstream values; `context layer <n> (level <l>): ...` in a context layer above level 0 (a project's values, an instance's connections); the platform's values, level 0, are not checked | remove it ([layers](specs/01_inputs_outputs.md#layers)) |
-| `values layer 2: json: cannot marshal from Go func() within "/hooks/0"`, `context layer 1 (level 0): json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN` | a values layer built in Go, the second of `Inputs.Values`, the first of `Inputs.Context`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key that is not text or a number, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
+| `global.okdp.tls.clusterIssuer is required. It is a setting, of the values (Inputs.Values)` | `require` in `okdp.yaml` lists it, and no values layer sets it (or a later one sets it to `null`) | set the key in the platform's values, its `Settings` document ([values layers](specs/01_inputs_outputs.md#values-layers)) |
+| `config.schema.json: global.okdp is the platform's settings: a package schema declares nothing under it`, `... a package schema gives it no default (properties.global.default)` | the package's parameter schema declares `properties.global.properties.okdp`, or its `properties.global.default` has the key `okdp`: a default of the platform's settings | remove it: the settings are `global.okdp` of the values layers, the platform's values ([defaults](specs/01_inputs_outputs.md#defaults)) |
+| `values layer 2: json: cannot marshal from Go func() within "/hooks/0"`, `values layer 1: json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN` | a values layer built in Go, the second or the first of `Inputs.Values`, holds what a values file cannot: a func, a chan, a complex, a NaN or an infinity, text that is not UTF-8, a key that is not text or a number, two keys that read as the same, a value that contains itself | build the layer of values a file can hold ([values files](specs/01_inputs_outputs.md#values-files)) |
 | `values don't meet the specifications of the schema(s) in the following chart(s):` then `<service>:` and `- at '/replicas': minimum: got 0, want 1` | the parameters violate the package's `config.schema.json`; every violation is listed | fix the instance values ([parameters](specs/01_inputs_outputs.md#parameters)) |
 | `compiled values don't meet the specifications of the schema(s) in the following chart(s):` then `<key> (<chart>-<version>):` (`app (app-1.8.0):`) and `- at '/replicaCount': maximum: got 3, want 2` | a host's check of the final values against the upstream charts, in its Finalize: the final values, over the chart's defaults, violate the `values.schema.json` of the upstream chart | fix the instance's upstream values; if they are not involved, OKDP's defaults or the mapping |
 | `warning: upstream.app.env: appended to the package's list, not to the default list of app-1.8.0, which Helm replaces: the final list lacks 1 of its 2 items; ...` | a host's check of the final values against the upstream charts, in its Finalize: the instance appends to a list (`append`) the chart's defaults hold items of that the package's list leaves out: Helm replaces the chart's list with the final one | restate the items to keep in the package's values of the key, its defaults or values file ([append](specs/01_inputs_outputs.md#append)) |
@@ -903,25 +915,24 @@ them gives none of them.
 | `database: connection "shared-db": "password" is a secret field, put it in the credentials Secret` | a secret field written in the connection | put it in a Secret named by `secretRef` |
 | `database: connection "shared-db": secretRef.remoteKey: its credentials are in the platform's secret store, global.okdp.secrets.store, which is not set` | a connection whose credentials are in the platform's secret store (`secretRef: {remoteKey: <key>}`), and the platform names no store | set `global.okdp.secrets.store` in the platform's values, or give the Secret of the instance's namespace, `secretRef: {name: <secret>}` ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | `database: connection "shared-db": secretRef: name or remoteKey, not both`, `... secretRef.remoteKey: the key of the credentials in the platform's secret store, a non-empty string, got 5`, `... secretRef.remoteKey: the connection's name is not a DNS-1123 label: ...`, `... secretRef.remoteKey: the queue contract has no secret field (x-okdp-secret): ...`, `... secretRef.remoteKey "demo//shared-db": a path of the platform's secret store, segments separated by "/", none empty, "." or ".."` | a `secretRef` with both a Secret and a key of the store; a key that is not a string, or empty; a connection named so that its Secret, `<release>.<name>-credentials`, cannot be; a contract without credentials; a key that is no path of the store | one of them; the key, a string; rename the connection; drop `secretRef`; a path, `<segment>/<segment>` |
-| `storage: connection "datalake": secretRef.remoteKey "platform/datalake": no namespace reads platform/ when the platform gives a secret store provider (...)` | a connection whose key is under `platform/` while `global.okdp.secrets.provider` is set (a SecretStore per namespace, whose policy reads no `platform/`) | copy the platform's credentials under the key of each namespace that uses them, `<namespace>/<key>`, and name it in a connection of the project (its values, level 1) ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
-| `storage: connection "stolen": secretRef.remoteKey "finance/finance.ledger.database": a key of the platform's secret store a project may not read: a connection above level 0 (level 2) names a key under "demo/", its namespace; the platform's keys are read through the platform's connections (level 0)` | a connection of a project's values (level 1) or an instance's (level 2) keeps its credentials in the platform's secret store under a key outside its namespace's segment: another namespace's claim, the platform's keys | a key under `<project>/`, which the namespace's PushSecrets write and an administrator of the store fills; reference the platform's connection for the platform's keys ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
+| `storage: connection "datalake": secretRef.remoteKey "platform/datalake": no namespace reads platform/ when the platform gives a secret store provider (...)` | a connection whose key is under `platform/` while `global.okdp.secrets.provider` is set (a SecretStore per namespace, whose policy reads no `platform/`) | copy the platform's credentials under the key of each namespace that uses them, `<namespace>/<key>`, and name it in a connection of the namespace's layers ([credentials in the platform's secret store](specs/01_inputs_outputs.md#credentials-in-the-platforms-secret-store)) |
 | `database (connection "shared-db"): field "dbName" is required by the database contract` | a required contract field is missing; one line per missing field | set it |
 | `database (connection "shared-db"): the fields violate the database contract:` then `- at '/engine': value must be one of 'postgresql', 'mysql'`, `- at '/port': got string, want integer` | a field of an external connection the contract's schema refuses; one line per violation | give a value of the contract's type (`port: 5432`, not `"5432"`) and among its values ([checks](specs/01_inputs_outputs.md#checks)) |
-| `<field>: "<name>" is not a connection, nor an output of an instance of the namespace` | the name is not in `connections`, nor an output of that contract another instance of the namespace publishes (`(demo-pg publishes it with contract "database", "s3" is expected)`: one of another contract) | add the connection under `connections` of a context layer (its `Instance` document's for the instance's own), or the instance that publishes the output to the input documents ([resolution](specs/01_inputs_outputs.md#resolution)) |
+| `<field>: "<name>" is not a connection, nor an output of an instance of the namespace` | the name is not in `connections`, nor an output of that contract another instance of the namespace publishes (`(demo-pg publishes it with contract "database", "s3" is expected)`: one of another contract) | add the connection under `connections` of a values layer (its `Instance` document's `connections` for the instance's own), or the instance that publishes the output to the input documents ([resolution](specs/01_inputs_outputs.md#resolution)) |
 | `<field>: "<name>" names s3 outputs of several instances of the namespace: demo-a, demo-b` | two instances of the namespace publish an output of that name and contract | rename one of the outputs, or reference a connection |
-| `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` of a context layer |
+| `<field>: "<name>" is not a connection, nor a release name: lowercase letters, digits and "-", a letter or digit at each end, 53 characters at most` | the name is not in `connections`, and cannot name an instance of the namespace (`Shared_DB`, a name longer than 53 characters) | fix the name, or add the connection under `connections` of a values layer |
 | `database: a connection reference must be a string, got map[string]interface {}{"host":"db.example.org"}` | a connection reference given as a map, a number or a list (the parameter schema does not say `"type": "string"`) | give the name of a connection or an instance; put the connection itself under `connections` |
-| `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection given by the platform's values, or in a contract default (a context layer above level 0 fails earlier, `context layer <n> (level <l>): ...`) | fix the platform values or the contract |
+| `database (connection "shared-db"): field "host": the value contains "{{"` | template code in a connection, whichever values layer gives it, or in a contract default | fix the layer or the contract |
 | `database (claim "demo.app.database" of data/data-postgresql): the connection does not meet the package's requirement (x-okdp-connection-ref.require); data/data-postgresql is the provider of the default class standard of database-server connections (global.okdp.provisioning.database-server.default): name a class whose provider meets it (class), or change the default:` then `- at '/engine': value must be 'postgresql'`; `database (connection "shared-db"): the connection does not meet ...:` then `- at '': missing property 'secretRef'` | the connection, external, an output or what a claim's provider publishes, does not meet what the package requires of it (`require` of its `x-okdp-connection-ref`); one line per violation | reference another connection, or fix it (add its `secretRef`); for a claim, name a class whose provider meets it (`{class: <name>}`), a project's own if need be, or change the default in the platform's values ([what a reference requires](specs/01_inputs_outputs.md#what-a-reference-requires)) |
 | `database: x-okdp-connection-ref: require: field "major" is not part of the database contract`, `... require: "password" is a secret field, in the credentials Secret, never in the connection: require secretRef` | the package's requirement names a field the connection cannot have | fix the package's `config.schema.json`: require `secretRef` for credentials |
 | `config.schema.json: properties.database: x-okdp-connection-ref: require: a JSON Schema, an object, got true`, `... require: "file:///require.schema.json#" is not valid against metaschema: ...` | the package's requirement is no JSON Schema, whether the instance sets the reference or not | fix the package's `config.schema.json` |
 | several lines of the connection messages above, one `<field>` each | several references do not resolve: every one is reported, in parameter path order (keys sorted at each level), with its first error (the fields of a connection in alphabetical order), or all its missing required fields, or all its schema violations | fix each, then compile again: a fixed field may reveal the next one ([connection errors](specs/01_inputs_outputs.md#connection-errors)) |
 | `app: upstream.app.service.port: service.port is set by the platform and cannot be changed` | the instance's upstream values set a path `okdp.yaml` protects (`upstream.<key>.protect`, and always `global`) | remove the value; set it through the parameters when the package offers one |
-| `app: upstream.app.podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in upstream values the platform's values or the package's defaults give (in an instance's, its values file fails before: `values layer <n>: ...`) | remove it |
+| `app: upstream.app.podAnnotations.x: the value contains "{{"`, `... the key contains "{{"` | template code in upstream values, of any values layer or of the package's defaults (the parameters are not checked: refusing template code of a layer it does not review is a host's) | remove it |
 | `app: upstream.app.env must be a list` | a path of `append` given as a non-list | give a list |
-| `context values (Inputs.Context) don't meet the specifications of the schema of global.okdp:` then `- at '/global/okdp/proxy': got string, want object`, `- at '/global/okdp/secrets/refreshInterval': got integer, want string` | a platform setting the compiler reads, or a map on the way to it, of another type (`proxy: <url>`, a number or a list for a string), or not among its values; it would otherwise read as not set. Every violation is listed | fix the platform values against `platform.schema.json`; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
-| `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/certificateIssuers': false schema` | the platform values set the former `certificateIssuers` | rename `certificateIssuers.selfSigned.name` to `tls.clusterIssuer`, the ClusterIssuer of the services' certificates; set `tls.caBundleSecret` to the Secret of the platform's CA bundle, if it has one ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
-| `context values (Inputs.Context) don't meet ...` then `- at '/global/okdp/serviceCatalog': false schema` | the platform values hold the former console menu | remove it: the console's menu is a host's, no value of the platform's |
+| `the values (Inputs.Values) don't meet the specifications of the schema of global.okdp:` then `- at '/global/okdp/proxy': got string, want object`, `- at '/global/okdp/secrets/refreshInterval': got integer, want string` | a platform setting the compiler reads, or a map on the way to it, of another type (`proxy: <url>`, a number or a list for a string), or not among its values; it would otherwise read as not set. Every violation is listed | fix the platform values against `platform.schema.json`; `null` is not set ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
+| `the values (Inputs.Values) don't meet ...` then `- at '/global/okdp/certificateIssuers': false schema` | the platform values set the former `certificateIssuers` | rename `certificateIssuers.selfSigned.name` to `tls.clusterIssuer`, the ClusterIssuer of the services' certificates; set `tls.caBundleSecret` to the Secret of the platform's CA bundle, if it has one ([fields the compiler reads](specs/01_inputs_outputs.md#fields-the-compiler-reads)) |
+| `the values (Inputs.Values) don't meet ...` then `- at '/global/okdp/serviceCatalog': false schema` | the platform values hold the former console menu | remove it: the console's menu is a host's, no value of the platform's |
 | `failing loading "<url>": no URLLoader registered for "<url>"` | a `config.schema.json`, or an upstream chart's `values.schema.json`, references a file, a URL or a `urn:` | inline the referenced schema |
 
 ### Mapping
@@ -956,7 +967,7 @@ together](specs/01_inputs_outputs.md#compiling-instances-together)).
 | `<where>: line 9: replicas: not a key of the document, which holds kind, project, name, service, version, claimers, connections, values, valuesFiles` (`<where>: line 9: name is given twice, first at line 4`) | a key the document's kind does not hold (here values written beside the instance's keys, which belong under `values` or in a values file), or a key twice | write the values under `values`, or in a file of `valuesFiles` ([instance](specs/01_inputs_outputs.md#instance)) |
 | `config/inputs.yaml: document 3 (line 12): no kind: Settings, Project or Instance, or a values file that a document names (valuesFiles)`, `... kind "Deployment": Settings, Project or Instance` | a document of no kind, or of another kind, in a file of `-f` that no `valuesFiles` names: a values file left among the documents, a manifest | name the values file in the `valuesFiles` of its document, or move the file out of `-f` ([input files](specs/01_inputs_outputs.md#input-files)) |
 | `<where>: valuesFiles: "../shared.yaml": a path relative to the document's file, inside config`, `<where>: valuesFiles: config/demo/web.yaml: no such file or directory` | a values file named by an absolute path, or out of the input files, or that does not exist | keep it among the input files, its path relative to the document's file ([valuesFiles](specs/01_inputs_outputs.md#valuesfiles)) |
-| `<where>: a second Settings document, after <where>: give the values of every instance once`, `<where>: project "demo" is given twice, first in <where>`, `<where>: instance demo/web is given twice, first in <where>` | the platform's values, a project or an instance given in two documents, of one `-f` or of two | keep one; several layers of one level are several `valuesFiles` of its document |
+| `<where>: a second Settings document, after <where>: give the values of every instance once`, `<where>: project "demo" is given twice, first in <where>`, `<where>: instance demo/web is given twice, first in <where>` | the platform's values, a project or an instance given in two documents, of one `-f` or of two | keep one; several layers of one document are several `valuesFiles` |
 | `<where>: project is required` (`name`, `service`, `version`), `<where>: line 3: project: a DNS label expected (lowercase letters, digits and -, 63 characters at most)` | an instance or a project without its name, or of a name that is no DNS label | name it ([instance](specs/01_inputs_outputs.md#instance)) |
 | `<where>: claimers[0]: "Demo" is not a namespace name, nor "*"` (`claimers: demo is listed twice`), `<where>: line 8: claimers: a list of strings expected` | an instance's claimer that is not a project's name nor `*`, or listed twice; `claimers` not a list | list each project once, by its name, or `"*"` |
 | `<where>: line 9: connections: a mapping expected` | an instance's `connections` that is not a map of connections | `connections: {<name>: {contract: ..., ...}}` ([connections](specs/01_inputs_outputs.md#connections)) |
@@ -964,23 +975,21 @@ together](specs/01_inputs_outputs.md#compiling-instances-together)).
 | `<where>: the package charts/catalog/web/1.0.1: its Chart.yaml is web 1.0.0` | a version directory whose `Chart.yaml` has another name or version | rename the directory, or fix `Chart.yaml`: a released version is never changed, a change is a new version |
 | `service "web" is in the repositories a and b` | a service of two catalog directories, whatever its versions | keep it in one ([the catalog](specs/01_inputs_outputs.md#the-catalog)) |
 | `contract s3 differs between the repositories a and b` | two catalog directories ship different contracts of one name | make them the same, or rename one |
-| `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none; instances that reference each other's outputs are both refused so | fix that instance; make one of two references a connection's of the context: it waits for nothing |
+| `error: demo/demo-web: database: "demo-db" is not a connection, nor an output of an instance of the namespace, ... (demo-db does not compile either: what it publishes is unknown)` | the output is published by an instance that is refused, or by none; instances that reference each other's outputs are both refused so | fix that instance; make one of two references a connection's of the values layers: it waits for nothing |
 | `error: demo/demo-p: provides "x" (server): demo-q publishes an output of that contract and name too, ...` | two instances of the namespace publish one output | name one of them otherwise: a reference must find one |
 | `error: demo/demo-app: Secret "demo-app-x.yy-credentials" of namespace demo is written by ExternalSecret demo-app-x.yy-credentials of demo-app and ExternalSecret demo-app-x.yy-credentials of demo-app-x: two objects may not write one Secret` | two objects of the namespace, of one instance or two, write one Secret: here a claimer's copy of a provider's credentials, `<release>-<secretRef.name>`, and another instance's connection, `<release>.<connection>-credentials` | rename one: the provider's `secretRef.name`, an instance, a connection or an object |
-| `error: demo/demo-app: db: claim (database-server): it names no class, and the context sets no default one, global.okdp.provisioning.database-server.default (Inputs.Context): the classes are fast, standard` | a claim that names neither a class nor a provider, and neither the platform's values nor the project's set a default class; `no class of database-server connections is defined (...)` when none is; `claims.<name>: ...` for a named claim, every instance of its project refused | set one, `global: {okdp: {provisioning: {database-server: {default: standard, classes: {standard: {provider: data/pg}}}}}}`, or name a class: `db: {class: fast}` ([classes](specs/01_inputs_outputs.md#classes)) |
-| `error: demo/demo-app: db: claim (database-server): class "nvme" is not a class of database-server connections (global.okdp.provisioning.database-server.classes): fast, standard` (`the default class "nvme" (...default) is not a class ...`) | the claim, or the default, names a class the context does not define | name one of those, or define it |
+| `error: demo/demo-app: db: claim (database-server): it names no class, and the settings set no default one, global.okdp.provisioning.database-server.default: the classes are fast, standard` | a claim that names neither a class nor a provider, and no values layer sets a default class; `no class of database-server connections is defined (...)` when none is; `claims.<name>: ...` for a named claim, every instance whose values declare it refused | set one, `global: {okdp: {provisioning: {database-server: {default: standard, classes: {standard: {provider: data/pg}}}}}}`, or name a class: `db: {class: fast}` ([classes](specs/01_inputs_outputs.md#classes)) |
+| `error: demo/demo-app: db: claim (database-server): class "nvme" is not a class of database-server connections (global.okdp.provisioning.database-server.classes): fast, standard` (`the default class "nvme" (...default) is not a class ...`) | the claim, or the default, names a class the settings do not define | name one of those, or define it |
 | `error: demo/demo-app: db: claim (database-server): the default class "standard": data/pg is no instance that provisions database-server connections` (`class "fast": ...`, `data/pg is no instance ...` for a provider the claim names) | the class's provider names no instance of its namespace, by name or release, or one whose package does not provision the contract | fix the class's provider, `<project>/<instance>` or `<project>/<release>`, or add the instance |
 | `error: demo/demo-app: db: claim (database-server): demo/demo-a names more than one instance, demo-a (its release) and demo-demo-a (its name): the claim would not know which` (`class "fast": ...`) | the provider, the claim's or its class's, is the release of the instance `a` and the name of the instance `demo-a`, both of the project `demo` | name the one meant otherwise, `demo/a` or `demo/demo-demo-a`, or rename one of them ([providers](specs/01_inputs_outputs.md#providers)) |
 | `error: demo/demo-app: db: claim: request.size: set by the class large (global.okdp.provisioning.database-server.classes.large): remove it, or name another class` | the claim requests a key its class fixes, in its `request` or its package's | remove it, or name a class that does not fix it |
 | `error: demo/demo-app: db: claim: class or provider, not both` | the claim names both | name one |
-| `error: demo/demo-app: db: claim "demo.app.db" (database-server): of data/data-pg, the provider of class "large", another namespace: demo is not one of its claimers (claimers of instance data/data-pg: none, its package's): ...` (`of data/data-pg, another namespace` for a provider named, `claims.<name>: ...` for a named claim) | the provider, of another project, is named by the claim or by a class of the project's, and does not consent: its `Instance` document's `claimers`, else its package's (`provisions`), do not list the project | list the project in the provider's `claimers`, `claimers: [demo]` in its `Instance` document, or have the platform add a class of its own in its values and name it ([providers](specs/01_inputs_outputs.md#providers)) |
-| `context layer 2 (level 1): global.okdp.provisioning.database-server.default is set at level 0 (Inputs.Context): ...` (`...classes.standard is set at level 0`) | a project changes the platform's default class, or one of its classes | add a class of the project's own and name it ([levels](specs/01_inputs_outputs.md#levels)) |
-| `error: demo/demo-b: db: claim "reports" has contract "s3", "database-server" is expected` | the reference names a named claim of the project of another contract | name a claim of its contract, or declare one ([claims](specs/01_inputs_outputs.md#claims)) |
+| `error: demo/demo-app: db: claim "demo.app.db" (database-server): of data/data-pg, the provider of class "large", another namespace: demo is not one of its claimers (claimers of instance data/data-pg: none, its package's): ...` (`of data/data-pg, another namespace` for a provider named, `claims.<name>: ...` for a named claim) | the provider, of another project, is named by the claim or by a class, whichever layer defines it, and does not consent: its `Instance` document's `claimers`, else its package's (`provisions`), do not list the project | list the project in the provider's `claimers`, `claimers: [demo]` in its `Instance` document ([providers](specs/01_inputs_outputs.md#providers)) |
+| `error: demo/demo-b: db: claim "reports" has contract "s3", "database-server" is expected` | the reference names a named claim of the namespace of another contract | name a claim of its contract, or declare one ([claims](specs/01_inputs_outputs.md#claims)) |
 | `error: demo/demo-b: db: "reports" is a claim: the reference takes none (x-okdp-connection-ref's provision)` | the reference names a named claim, and its package does not let it take claims | name a connection or an output |
 | `error: demo/demo-app: database: claim (database-server): the request does not meet the contract's claim schema (x-okdp-claim):` then `- at '/size': '5G' does not match pattern '^[0-9]+(Mi|Gi)$'` | what the claim requests (its `request`, merged over the package's, or a named claim's declaration's), its claim schema's defaults applied, is not what the contract's claim schema (`x-okdp-claim`) allows; one line per violation | request what it allows ([requests](specs/01_inputs_outputs.md#requests)) |
 | `error: demo/demo-app: database: claim (s3): request: the contract declares no claim schema (x-okdp-claim): a claim requests nothing of it` | a claim requests something of a contract that declares no claim schema | remove the request, or add the claim schema to the contract |
-| `context layer 1 (level 0): claims: a project's, of level 1 or above` | the platform's values declare named claims | declare them in the values of the project whose instances reference them, its `Project` document |
-| `error: demo/demo-b: claims.reports: claim: unknown key "share": contract, class, provider and request only` (`contract is required, ...`, `a connection of that name too (connections.reports)`) | a named claim of a project's values not of the form, every instance of the project refused | fix the declaration ([claims](specs/01_inputs_outputs.md#claims)) |
+| `error: demo/demo-b: claims.reports: claim: unknown key "share": contract, class, provider and request only` (`contract is required, ...`, `a connection of that name too (connections.reports)`) | a named claim not of the form, every instance whose values declare it refused | fix the declaration ([claims](specs/01_inputs_outputs.md#claims)) |
 | `error: data/data-pg: claim "demo.app.db" (database-server): claimed of namespace demo: its credentials go through the platform's secret store, global.okdp.secrets.store, which is not set` | a claim across namespaces, its credentials in the provider's namespace | set the platform's secret store, `global.okdp.secrets.store`, with its `provider` for a SecretStore of each namespace ([credentials across namespaces](specs/01_inputs_outputs.md#credentials-across-namespaces), [what the store must enforce](specs/01_inputs_outputs.md#what-the-store-must-enforce)) |
 | `error: platform/platform-x: Inputs.Namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes` | a project named `platform`: its namespace would own the platform's keys of the secret store | rename the project |
 | `error: kube-system/kube-system-x: Inputs.Namespace "kube-system": the namespace is reserved: kube-* is Kubernetes' own ...`, `error: argocd/argocd-x: Inputs.Namespace "argocd": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): ...` | a project of a namespace the compiler reserves: Kubernetes' own, or a deployer engine's, whose objects its releases would rewrite with every verb of the namespace | rename the project; a component of the platform that is not one of its projects is installed outside the platform's projects |

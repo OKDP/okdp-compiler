@@ -287,23 +287,22 @@ func claimInstance(d *Definition, namespace, name string, values M) Instance {
 	return Instance{Definition: d, Inputs: in}
 }
 
-// withClasses: inst, a context layer of level holding classes, the
-// classes of server connections (global.okdp.provisioning.server).
-func withClasses(inst Instance, level uint, classes M) Instance {
-	inst.Inputs.Context = append(slices.Clone(inst.Inputs.Context), ContextLayer{Level: level, Values: M{"global": M{"okdp": M{"provisioning": M{"server": classes}}}}})
+// withClasses: inst, a values layer holding classes, the classes of
+// server connections (global.okdp.provisioning.server).
+func withClasses(inst Instance, classes M) Instance {
+	inst.Inputs.Values = append(slices.Clone(inst.Inputs.Values), M{"global": M{"okdp": M{"provisioning": M{"server": classes}}}})
 	return inst
 }
 
-// withDefault: inst, its context's classes of server connections, at the
-// platform's level: one, standard, the default, its provider provider.
+// withDefault: inst, its classes of server connections: one, standard,
+// the default, its provider provider.
 func withDefault(inst Instance, provider string) Instance {
-	return withClasses(inst, 0, M{"default": "standard", "classes": M{"standard": M{"provider": provider}}})
+	return withClasses(inst, M{"default": "standard", "classes": M{"standard": M{"provider": provider}}})
 }
 
-// withClaims: inst, its context's named claims, a layer of level (1, a
-// project's).
-func withClaims(inst Instance, level uint, claims M) Instance {
-	inst.Inputs.Context = append(slices.Clone(inst.Inputs.Context), ContextLayer{Level: level, Values: M{"claims": claims}})
+// withClaims: inst, its named claims, a values layer.
+func withClaims(inst Instance, claims M) Instance {
+	inst.Inputs.Values = append(slices.Clone(inst.Inputs.Values), M{"claims": claims})
 	return inst
 }
 
@@ -372,10 +371,10 @@ func TestCompileAllClaims(t *testing.T) {
 	// The platform's classes: standard, the default, of data/pg, and fast,
 	// of data/pg2.
 	classes := func(inst Instance) Instance {
-		return withClasses(inst, 0, M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg"}, "fast": M{"provider": "data/pg2"}}})
+		return withClasses(inst, M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg"}, "fast": M{"provider": "data/pg2"}}})
 	}
 	named := func(name string, db any) Instance {
-		return withClaims(byDefault(name, db, "data/pg"), 1, M{"s": M{"contract": "server"}})
+		return withClaims(byDefault(name, db, "data/pg"), M{"s": M{"contract": "server"}})
 	}
 	for name, tc := range map[string]struct {
 		instances []Instance
@@ -399,8 +398,8 @@ func TestCompileAllClaims(t *testing.T) {
 		},
 		"a named claim of a provider of the namespace": {
 			[]Instance{
-				withClaims(byDefault("demo-a", "s", "pg"), 1, M{"s": M{"contract": "server"}}),
-				withClaims(withDefault(claimInstance(pgDef, "demo", "pg", M{}), "pg"), 1, M{"s": M{"contract": "server"}}),
+				withClaims(byDefault("demo-a", "s", "pg"), M{"s": M{"contract": "server"}}),
+				withClaims(withDefault(claimInstance(pgDef, "demo", "pg", M{}), "pg"), M{"s": M{"contract": "server"}}),
 			},
 			map[string]string{
 				"demo/demo-a": "depends on /pg demo.s; bound db demo.s demo/pg class standard named=false",
@@ -408,7 +407,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a named claim nobody references": {
-			[]Instance{withClaims(app("demo-a", nil), 1, M{"s": M{"contract": "server", "provider": "data/pg2"}}), withClaims(app("demo-b", nil), 1, M{"s": M{"contract": "server", "provider": "data/pg2"}}), pg, pg2},
+			[]Instance{withClaims(app("demo-a", nil), M{"s": M{"contract": "server", "provider": "data/pg2"}}), withClaims(app("demo-b", nil), M{"s": M{"contract": "server", "provider": "data/pg2"}}), pg, pg2},
 			map[string]string{
 				"demo/demo-a": "",
 				"demo/demo-b": "",
@@ -417,7 +416,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a named claim of another contract": {
-			[]Instance{withClaims(byDefault("demo-a", "s", "data/pg"), 1, M{"s": M{"contract": "other", "provider": "data/o"}}), pg, claimInstance(otherDef, "data", "o", M{})},
+			[]Instance{withClaims(byDefault("demo-a", "s", "data/pg"), M{"s": M{"contract": "other", "provider": "data/o"}}), pg, claimInstance(otherDef, "data", "o", M{})},
 			map[string]string{
 				"demo/demo-a": `error: db: claim "s" has contract "other", "server" is expected`,
 				"data/pg":     "",
@@ -425,7 +424,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a named claim and a claim template of one name": {
-			[]Instance{byDefault("x", M{}, "data/pg"), withClaims(byDefault("demo-b", "x-db", "data/pg"), 1, M{"x-db": M{"contract": "server"}}), pg},
+			[]Instance{byDefault("x", M{}, "data/pg"), withClaims(byDefault("demo-b", "x-db", "data/pg"), M{"x-db": M{"contract": "server"}}), pg},
 			map[string]string{
 				"demo/x":      "depends on data/pg demo.x.db; bound db demo.x.db data/pg class standard named=false",
 				"demo/demo-b": "depends on data/pg demo.x-db; bound db demo.x-db data/pg class standard named=false",
@@ -440,18 +439,11 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a claim declared differently": {
-			[]Instance{named("demo-a", "s"), withClaims(byDefault("demo-b", nil, "data/pg"), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}), named("demo-c", nil), pg},
+			[]Instance{named("demo-a", "s"), withClaims(byDefault("demo-b", nil, "data/pg"), M{"s": M{"contract": "server", "provider": "data/pg"}}), named("demo-c", nil), pg},
 			map[string]string{
-				"demo/demo-a": "error: claims.s: declared differently in the context of demo-a and demo-b",
-				"demo/demo-b": "error: claims.s: declared differently in the context of demo-a and demo-b",
-				"demo/demo-c": "error: claims.s: declared differently in the context of demo-a and demo-b",
-				"data/pg":     "",
-			},
-		},
-		"claims at level 0": {
-			[]Instance{withClaims(byDefault("demo-a", "s", "data/pg"), 0, M{"s": M{"contract": "server"}}), pg},
-			map[string]string{
-				"demo/demo-a": "error: context layer 3 (level 0): claims: a project's, of level 1 or above",
+				"demo/demo-a": "error: claims.s: declared differently in the values of demo-a and demo-b",
+				"demo/demo-b": "error: claims.s: declared differently in the values of demo-a and demo-b",
+				"demo/demo-c": "error: claims.s: declared differently in the values of demo-a and demo-b",
 				"data/pg":     "",
 			},
 		},
@@ -480,10 +472,10 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"no default": {
-			[]Instance{app("demo-a", M{}), withClaims(withClasses(app("demo-b", "s"), 0, M{"classes": M{"standard": M{"provider": "data/pg"}, "fast": M{"provider": "data/pg2"}}}), 1, M{"s": M{"contract": "server"}}), pg, pg2},
+			[]Instance{app("demo-a", M{}), withClaims(withClasses(app("demo-b", "s"), M{"classes": M{"standard": M{"provider": "data/pg"}, "fast": M{"provider": "data/pg2"}}}), M{"s": M{"contract": "server"}}), pg, pg2},
 			map[string]string{
-				"demo/demo-a": "error: db: claim (server): it names no class, and the context sets no default one, global.okdp.provisioning.server.default (Inputs.Context): no class of server connections is defined (global.okdp.provisioning.server.classes)",
-				"demo/demo-b": "error: claims.s: claim (server): it names no class, and the context sets no default one, global.okdp.provisioning.server.default (Inputs.Context): the classes are fast, standard",
+				"demo/demo-a": "error: db: claim (server): it names no class, and the settings set no default one, global.okdp.provisioning.server.default: no class of server connections is defined (global.okdp.provisioning.server.classes)",
+				"demo/demo-b": "error: claims.s: claim (server): it names no class, and the settings set no default one, global.okdp.provisioning.server.default: the classes are fast, standard",
 				"data/pg":     "",
 				"data/pg2":    "",
 			},
@@ -491,7 +483,7 @@ func TestCompileAllClaims(t *testing.T) {
 		"no provider": {
 			[]Instance{app("demo-a", M{}), byDefault("demo-b", M{}, "data/pg"), app("demo-c", M{"provider": "data/pg"}), claimInstance(appDef, "data", "pg", M{})},
 			map[string]string{
-				"demo/demo-a": "error: db: claim (server): it names no class, and the context sets no default one, global.okdp.provisioning.server.default (Inputs.Context): no class of server connections is defined (global.okdp.provisioning.server.classes)",
+				"demo/demo-a": "error: db: claim (server): it names no class, and the settings set no default one, global.okdp.provisioning.server.default: no class of server connections is defined (global.okdp.provisioning.server.classes)",
 				"demo/demo-b": `error: db: claim (server): the default class "standard": data/pg is no instance that provisions server connections`,
 				"demo/demo-c": "error: db: claim (server): data/pg is no instance that provisions server connections",
 				"data/pg":     "",
@@ -514,7 +506,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a class a project adds": {
-			[]Instance{withClasses(byDefault("demo-a", M{"class": "large"}, "data/pg"), 1, M{"classes": M{"large": M{"provider": "data/pg2"}}}), pg, pg2},
+			[]Instance{withClasses(byDefault("demo-a", M{"class": "large"}, "data/pg"), M{"classes": M{"large": M{"provider": "data/pg2"}}}), pg, pg2},
 			map[string]string{
 				"demo/demo-a": "depends on data/pg2 demo.demo-a.db; bound db demo.demo-a.db data/pg2 class large named=true",
 				"data/pg":     "",
@@ -523,8 +515,8 @@ func TestCompileAllClaims(t *testing.T) {
 		},
 		"a class with a request": {
 			[]Instance{
-				withClasses(byDefault("demo-a", M{"class": "large"}, "data/pg"), 1, M{"classes": M{"large": M{"provider": "data/pg", "request": M{"size": "50Gi"}}}}),
-				withClasses(byDefault("demo-b", M{"class": "large", "request": M{"size": "1Gi", "tier": "b"}}, "data/pg"), 1, M{"classes": M{"large": M{"provider": "data/pg", "request": M{"size": "50Gi"}}}}),
+				withClasses(byDefault("demo-a", M{"class": "large"}, "data/pg"), M{"classes": M{"large": M{"provider": "data/pg", "request": M{"size": "50Gi"}}}}),
+				withClasses(byDefault("demo-b", M{"class": "large", "request": M{"size": "1Gi", "tier": "b"}}, "data/pg"), M{"classes": M{"large": M{"provider": "data/pg", "request": M{"size": "50Gi"}}}}),
 				pg,
 			},
 			map[string]string{
@@ -534,7 +526,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a class that is not one": {
-			[]Instance{classes(app("demo-a", M{"class": "nope"})), withClasses(app("demo-b", M{}), 0, M{"default": "nope", "classes": M{"standard": M{"provider": "data/pg"}}}), withClasses(app("demo-c", M{"class": "nope"}), 0, M{}), pg},
+			[]Instance{classes(app("demo-a", M{"class": "nope"})), withClasses(app("demo-b", M{}), M{"default": "nope", "classes": M{"standard": M{"provider": "data/pg"}}}), withClasses(app("demo-c", M{"class": "nope"}), M{}), pg},
 			map[string]string{
 				"demo/demo-a": `error: db: claim (server): class "nope" is not a class of server connections (global.okdp.provisioning.server.classes): fast, standard`,
 				"demo/demo-b": `error: db: claim (server): the default class "nope" (global.okdp.provisioning.server.default) is not a class of server connections (global.okdp.provisioning.server.classes): standard`,
@@ -543,7 +535,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a class whose provider provisions nothing": {
-			[]Instance{withClasses(app("demo-a", M{"class": "fast"}), 0, M{"classes": M{"fast": M{"provider": "data/x"}}}), pg},
+			[]Instance{withClasses(app("demo-a", M{"class": "fast"}), M{"classes": M{"fast": M{"provider": "data/x"}}}), pg},
 			map[string]string{
 				"demo/demo-a": `error: db: claim (server): class "fast": data/x is no instance that provisions server connections`,
 				"data/pg":     "",
@@ -572,7 +564,7 @@ func TestCompileAllClaims(t *testing.T) {
 			},
 		},
 		"a request": {
-			[]Instance{byDefault("demo-a", M{"request": M{"size": "5Gi"}}, "data/pg"), withClaims(byDefault("demo-b", "s", "data/pg"), 1, M{"s": M{"contract": "server", "request": M{"tier": "b"}}}), pg},
+			[]Instance{byDefault("demo-a", M{"request": M{"size": "5Gi"}}, "data/pg"), withClaims(byDefault("demo-b", "s", "data/pg"), M{"s": M{"contract": "server", "request": M{"tier": "b"}}}), pg},
 			map[string]string{
 				"demo/demo-a": "depends on data/pg demo.demo-a.db; bound db demo.demo-a.db data/pg class standard named=false",
 				"demo/demo-b": "depends on data/pg demo.s; bound db demo.s data/pg class standard named=false",
@@ -591,7 +583,7 @@ func TestCompileAllClaims(t *testing.T) {
 		},
 		"two claims refused": {
 			[]Instance{
-				withClaims(withDefault(claimInstance(dbsDef, "demo", "demo-a", M{"dbs": M{"eu.main": M{"class": "nope"}, "us": M{"request": M{"size": "5G"}}}}), "data/pg"), 1, M{"s": M{"contract": "server", "request": M{"tier": "c"}}}),
+				withClaims(withDefault(claimInstance(dbsDef, "demo", "demo-a", M{"dbs": M{"eu.main": M{"class": "nope"}, "us": M{"request": M{"size": "5G"}}}}), "data/pg"), M{"s": M{"contract": "server", "request": M{"tier": "c"}}}),
 				pg,
 			},
 			map[string]string{
@@ -604,7 +596,7 @@ dbs.us: claim (server): the request does not meet the contract's claim schema (x
 			},
 		},
 		"a request of a contract without claim schema": {
-			[]Instance{withClaims(app("demo-a", nil), 1, M{"s": M{"contract": "other", "provider": "data/o", "request": M{"size": "1Gi"}}}), claimInstance(otherDef, "data", "o", M{})},
+			[]Instance{withClaims(app("demo-a", nil), M{"s": M{"contract": "other", "provider": "data/o", "request": M{"size": "1Gi"}}}), claimInstance(otherDef, "data", "o", M{})},
 			map[string]string{
 				"demo/demo-a": "error: claims.s: claim (other): request: the contract declares no claim schema (x-okdp-claim): a claim requests nothing of it",
 				"data/o":      "",
@@ -645,12 +637,10 @@ dbs.us: claim (server): the request does not meet the contract's claim schema (x
 }
 
 // TestCompileAllConsent: a provider serves the claims of another
-// namespace through a class of the platform's, or with its consent, in
-// every order: of a package that lists no claimers, the platform's
-// default class and a class of the platform's named bind; a class of the
-// project's, named or the default one, a provider named and a named
-// claim's provider are refused, unless the provider is of the claimer's
-// namespace; the claimers of the instance (Inputs.Claimers) bind the
+// namespace with its consent alone, in every order: of a package that
+// lists no claimers, a class, named or the default one, a provider named
+// and a named claim's provider are refused, unless the provider is of the
+// claimer's namespace; the claimers of the instance (Inputs.Claimers) bind the
 // namespaces they list, or any ("*"), and replace those of its package,
 // none when empty; a package's claimers (provisions) bind those it lists.
 func TestCompileAllConsent(t *testing.T) {
@@ -665,34 +655,34 @@ func TestCompileAllConsent(t *testing.T) {
 	}
 	closed := pg(&closedDef, "data", "pg", nil)
 	app := func(name string, db any) Instance { return claimInstance(appDef, "demo", name, M{"db": db}) }
-	// The platform's classes, standard the default, and a class of the
-	// project's, large, each of data/pg.
+	// Two classes of data/pg, standard the default, and large, given by
+	// two layers.
 	classes := func(inst Instance) Instance {
-		inst = withClasses(inst, 0, M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg"}}})
-		return withClasses(inst, 1, M{"classes": M{"large": M{"provider": "data/pg"}}})
+		inst = withClasses(inst, M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg"}}})
+		return withClasses(inst, M{"classes": M{"large": M{"provider": "data/pg"}}})
 	}
 	refused := func(field, id, by, list string) string {
-		return fmt.Sprintf("error: %s: claim %q (server): of data/pg%s, another namespace: demo is not one of its claimers (claimers of instance data/pg: %s): the provider lists the namespaces that may claim of it (claimers of its instance.yaml, else of its package's provisions), or the platform routes them through a class of platform.yaml", field, id, by, list)
+		return fmt.Sprintf("error: %s: claim %q (server): of data/pg%s, another namespace: demo is not one of its claimers (claimers of instance data/pg: %s): the provider lists the namespaces that may claim of it (Inputs.Claimers, else its package's provisions)", field, id, by, list)
 	}
 	for name, tc := range map[string]struct {
 		instances []Instance
 		want      map[string]string
 	}{
-		"the platform's classes": {
+		"a class, whatever layer gives it": {
 			[]Instance{classes(app("demo-a", M{})), classes(app("demo-b", M{"class": "standard"})), closed},
 			map[string]string{
-				"demo/demo-a": "depends on data/pg demo.demo-a.db; bound db demo.demo-a.db data/pg class standard named=false",
-				"demo/demo-b": "depends on data/pg demo.demo-b.db; bound db demo.demo-b.db data/pg class standard named=true",
-				"data/pg":     `provides demo.demo-a.db demo.demo-a.db.data {"tier":"a"}; provides demo.demo-b.db demo.demo-b.db.data {"tier":"a"}`,
+				"demo/demo-a": refused("db", "demo.demo-a.db", `, the provider of the default class "standard"`, "none, its package's"),
+				"demo/demo-b": refused("db", "demo.demo-b.db", `, the provider of class "standard"`, "none, its package's"),
+				"data/pg":     "",
 			},
 		},
 		"without consent": {
 			[]Instance{
 				classes(app("demo-a", M{"class": "large"})),
-				withClasses(app("demo-b", M{}), 1, M{"default": "large", "classes": M{"large": M{"provider": "data/pg"}}}),
+				withClasses(app("demo-b", M{}), M{"default": "large", "classes": M{"large": M{"provider": "data/pg"}}}),
 				app("demo-c", M{"provider": "data/pg"}),
-				withClaims(classes(app("demo-d", "s")), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}),
-				withClaims(classes(claimInstance(appDef, "demo", "demo-e", M{})), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}),
+				withClaims(classes(app("demo-d", "s")), M{"s": M{"contract": "server", "provider": "data/pg"}}),
+				withClaims(classes(claimInstance(appDef, "demo", "demo-e", M{})), M{"s": M{"contract": "server", "provider": "data/pg"}}),
 				closed,
 			},
 			map[string]string{
@@ -705,7 +695,7 @@ func TestCompileAllConsent(t *testing.T) {
 			},
 		},
 		"of the claimer's namespace": {
-			[]Instance{app("demo-a", M{"provider": "pg"}), withClasses(app("demo-b", M{"class": "large"}), 1, M{"classes": M{"large": M{"provider": "pg"}}}), pg(&closedDef, "demo", "pg", nil)},
+			[]Instance{app("demo-a", M{"provider": "pg"}), withClasses(app("demo-b", M{"class": "large"}), M{"classes": M{"large": M{"provider": "pg"}}}), pg(&closedDef, "demo", "pg", nil)},
 			map[string]string{
 				"demo/demo-a": "depends on /pg demo.demo-a.db; bound db demo.demo-a.db demo/pg named=true",
 				"demo/demo-b": "depends on /pg demo.demo-b.db; bound db demo.demo-b.db demo/pg class large named=true",
@@ -783,7 +773,7 @@ func TestCompileAllProviderNames(t *testing.T) {
 			[]Instance{
 				app("demo-a", "a", M{"provider": "data/pg"}),
 				withDefault(app("demo-b", "b", M{}), "data/pg"),
-				withClaims(withDefault(app("demo-c", "c", "s"), "data/pg"), 1, M{"s": M{"contract": "server", "provider": "data/pg"}}),
+				withClaims(withDefault(app("demo-c", "c", "s"), "data/pg"), M{"s": M{"contract": "server", "provider": "data/pg"}}),
 				pg,
 			},
 			map[string]string{
@@ -904,7 +894,7 @@ provides:
 	with := func(inst Instance, global M) Instance {
 		inst.Inputs.Contracts = contracts
 		if global != nil {
-			inst.Inputs.Context = append(inst.Inputs.Context, ContextLayer{Values: M{"global": global}})
+			inst.Inputs.Values = append(inst.Inputs.Values, M{"global": global})
 		}
 		return inst
 	}
@@ -1088,10 +1078,10 @@ provides:
     $each: {contract: server, name: '${{ c.id }}', values: {host: h}, secretRef: {name: '${{ c.id }}-credentials'}}
   - {contract: server, name: x, values: {host: x}}
 `)
-	store := ContextLayer{Values: M{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}}}
+	store := M{"global": M{"okdp": M{"secrets": M{"store": "okdp-secrets"}}}}
 	with := func(inst Instance) Instance {
 		inst.Inputs.Contracts = contracts
-		inst.Inputs.Context = append(inst.Inputs.Context, store)
+		inst.Inputs.Values = append(inst.Inputs.Values, store)
 		return inst
 	}
 	innocent := node("i", M{"writes": []any{M{"apiVersion": "v1", "kind": "Secret", "metadata": M{"name": "demo-app-demo.demo-app.db-credentials"}, "type": "Opaque"}}})
@@ -1129,7 +1119,7 @@ provides:
 // another context are not.
 func TestCompileAllDeclaredConnections(t *testing.T) {
 	bad := node("a", nil)
-	bad.Inputs.Context = append(bad.Inputs.Context, ContextLayer{Level: 1, Values: M{"connections": M{
+	bad.Inputs.Values = append(bad.Inputs.Values, M{"connections": M{
 		"Bad_Name":  M{"contract": "server", "host": "h"},
 		"no-host":   M{"contract": "server"},
 		"unknown":   M{"contract": "nothing"},
@@ -1138,7 +1128,7 @@ func TestCompileAllDeclaredConnections(t *testing.T) {
 		"scalar":    "x",
 		"other-key": M{"contract": "server", "host": "h", "secretRef": M{"remoteKey": "platform/x"}},
 		"good":      M{"contract": "server", "host": "h"},
-	}}})
+	}})
 	good := node("b", nil)
 	good.Inputs.Namespace = "other"
 	out := CompileAll(context.Background(), []Instance{bad, good})

@@ -92,9 +92,6 @@ func TestAddedTablesRefused(t *testing.T) {
 		edit func(string) string
 		want string
 	}{
-		"closed table": {func(s string) string {
-			return strings.Replace(s, "  colours:\n", "  projectRoles:\n    add: [owner]\n  colours:\n", 1)
-		}, "rules.yaml: tables: projectRoles: add: the table is not extensible: a rule set adds values to the tables marked extensible only"},
 		"unknown table": {func(s string) string {
 			return strings.Replace(s, "  colours:\n", "  sizes:\n    add: [small]\n  colours:\n", 1)
 		}, "rules.yaml: tables: sizes: add: no rule set read before gives the table"},

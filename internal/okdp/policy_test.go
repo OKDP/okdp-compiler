@@ -153,7 +153,7 @@ func TestPolicySchema(t *testing.T) {
 			"- at '/global/okdp/policy/projectGlobals': items at 2 and 3 are equal\n- at '/global/okdp/policy/projectGlobals/0': 'not' failed\n- at '/global/okdp/policy/projectGlobals/1': minLength: got 0, want 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
+			heading := "the values (Inputs.Values) don't meet the specifications of the schema of global.okdp"
 			_, err := ruleset.SchemaValues(Mandatory().PlatformSchema(), heading, M{"global": M{"okdp": M{"policy": tc.policy}}})
 			if want := heading + ":\n" + tc.want; (err == nil) != (tc.want == "") || err != nil && err.Error() != want {
 				t.Errorf("got %v, want %q", err, tc.want)

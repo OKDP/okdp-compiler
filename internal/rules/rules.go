@@ -32,14 +32,10 @@ const (
 	TableDeployerAPIGroups      = "deployerApiGroups"
 	TablePlatformObjectNames    = "platformObjectNames"
 	TablePlatformObjectSettings = "platformObjectSettings"
-	TableDefaultProjectGlobals  = "defaultProjectGlobals"
-	TableWholePaths             = "wholePaths"
-	TableProjectRoles           = "projectRoles"
-	TablePlatformKeysAbove      = "projectPlatformKeys"
 )
 
-// The roles a project's group may hold (TableProjectRoles). The code of the
-// targets says what each may do, so a rule set lists some of these only.
+// The roles of a group (global.okdp.access.groups). The scope documents
+// read them: what each may do is the host's to write.
 const (
 	RoleViewer = "viewer"
 	RoleEditor = "editor"
@@ -48,8 +44,8 @@ const (
 
 // ruleTables lists the names of the tables of the mandatory set, sorted.
 var ruleTables = []string{
-	TableClusterScopedKinds, TableDefaultProjectGlobals, TableDeployerAPIGroups, TableEngineNamespaces,
-	TablePlatformObjectNames, TablePlatformObjectSettings, TablePlatformKeysAbove, TableProjectRoles, TableWholePaths,
+	TableClusterScopedKinds, TableDeployerAPIGroups, TableEngineNamespaces,
+	TablePlatformObjectNames, TablePlatformObjectSettings,
 }
 
 // ruleTable is a table of a rule set.
@@ -84,7 +80,6 @@ type RuleSet struct {
 	ownObjects                    []OwnObjectsSpec     // the sections whose items add objects
 	selectorLabels, commonLabels  map[string]string
 	componentLabel                string
-	wholePaths                    [][]string          // TableWholePaths, split
 	hooks                         map[string][]string // the documents of each hook, in the order the sets list them
 
 	schemaFiles map[string]*schemaFile // the schemas as the sets give them, by key
@@ -127,22 +122,6 @@ func (r *RuleSet) Charts() map[string]chart.Ref { return r.charts }
 
 // OwnObjects returns the sections whose items add objects.
 func (r *RuleSet) OwnObjects() []OwnObjectsSpec { return r.ownObjects }
-
-// Whole reports whether the path keys is one a level gives whole
-// (TableWholePaths). A "*" of a path of the table stands for any key.
-func (r *RuleSet) Whole(keys []string) bool {
-	return slices.ContainsFunc(r.wholePaths, func(pattern []string) bool {
-		if len(pattern) != len(keys) {
-			return false
-		}
-		for i, p := range pattern {
-			if p != "*" && p != keys[i] {
-				return false
-			}
-		}
-		return true
-	})
-}
 
 // DocumentFunc is a function of mappings that a document computes. The
 // document reads the argument as arg, and its value at Result is returned.
@@ -529,15 +508,10 @@ func (r *RuleSet) complete() error {
 }
 
 // ready finishes the rule set once every set is read: the tables as the
-// checks read them, the whole paths split. It prepares the checks and the
+// checks read them. It prepares the checks and the
 // documents together, so that each can call any other, and keeps that
 // session for the first compile.
 func (r *RuleSet) ready() error {
-	for _, role := range r.List(TableProjectRoles) {
-		if !slices.Contains([]string{RoleViewer, RoleEditor, RoleAdmin}, role) {
-			return fmt.Errorf("%s: tables: %s: %q is no role: %s, %s or %s", RulesFile, TableProjectRoles, role, RoleViewer, RoleEditor, RoleAdmin)
-		}
-	}
 	r.sets, r.lists = make(M, len(r.tables)), make(M, len(r.tables))
 	for name, t := range r.tables {
 		set, list := make(M, len(t.values)), make([]any, len(t.values))
@@ -545,9 +519,6 @@ func (r *RuleSet) ready() error {
 			set[v], list[i] = true, v
 		}
 		r.sets[name], r.lists[name] = set, list
-	}
-	for _, p := range r.List(TableWholePaths) {
-		r.wholePaths = append(r.wholePaths, strings.Split(p, "."))
 	}
 	first, err := prepare(r.sources)
 	if err != nil {

@@ -29,15 +29,13 @@ const (
 	CheckReleaseRule    = "release"
 	CheckObjectRule     = "object"
 	CheckPlainSecret    = "plainSecret"
-	CheckContextLayer   = "contextLayer"
-	CheckValuesLayer    = "valuesLayer"
 )
 
 // ruleChecks lists the names of the checks of a rule set, sorted.
-var ruleChecks = []string{CheckContextLayer, CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule, CheckValuesLayer}
+var ruleChecks = []string{CheckNamespaceRule, CheckObjectRule, CheckPlainSecret, CheckPlatformNSRule, CheckReleaseRule}
 
 // ruleInputs lists what the checks may read, besides their sets and tables.
-var ruleInputs = []string{"added", "arg", "at", "declared", "field", "host", "items", "key", "layer", "level", "listed", "name", "ns", "object", "platform", "privileged", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}
+var ruleInputs = []string{"added", "arg", "at", "field", "host", "items", "key", "listed", "name", "ns", "object", "platform", "privileged", "raw", "release", "sets", "settings", "suffix", "svc", "tables", "value"}
 
 // checker holds the checks prepared in one session. A session is not safe
 // for concurrent use, so a rule set keeps the checkers that are free. ctx

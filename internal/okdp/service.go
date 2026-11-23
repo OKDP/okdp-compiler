@@ -95,8 +95,8 @@ type Service struct {
 }
 
 // platformValue ends the error of a missing platform value. It names
-// the input that sets it: the context's values layers (Inputs.Context).
-const platformValue = "It is a context value: the platform's or a project's (Inputs.Context)"
+// the input that sets it.
+const platformValue = "It is a setting, of the values (Inputs.Values)"
 
 // service builds the Service of d and checks it. It runs when the
 // package is loaded and before every compile, because a Definition may

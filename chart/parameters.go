@@ -37,9 +37,9 @@ type Schema struct {
 // without the file gets the empty schema ({}): no defaults, any values
 // accepted.
 //
-// global.okdp holds the platform's settings, which come from the context
-// alone (Inputs.Context). A schema that declares it, or gives it a
-// default, is refused: nothing would read that default.
+// global.okdp holds the settings, which come from the values layers
+// alone. A schema that declares it, or gives it a default, is refused:
+// nothing would read that default.
 func ReadParameterSchema(pkg fs.FS) (*Schema, error) {
 	b, err := fs.ReadFile(pkg, parameterSchema)
 	if errors.Is(err, fs.ErrNotExist) {

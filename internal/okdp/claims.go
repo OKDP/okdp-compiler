@@ -25,7 +25,7 @@ type Claim struct {
 	ID        string `json:"id"`
 	Contract  string `json:"contract"`  // a contract the package provisions
 	Namespace string `json:"namespace"` // the namespace of the instances that claim it
-	// Name is the name of a named claim (claims.<name> of the context), whose
+	// Name is the name of a named claim (claims.<name> of the values), whose
 	// references in Namespace all get this one connection; "" for a template.
 	Name string `json:"name,omitempty"`
 	// Request is what the claim requests, with the claim schema's defaults.
@@ -44,7 +44,7 @@ type Binding struct {
 
 // ClaimSpec is a claim as written: a claim template, an object of the
 // parameters in place of a connection's name, or a named claim of the
-// context (claims.<name>).
+// values (claims.<name>).
 type ClaimSpec struct {
 	// Name is the key of a named claim in claims; "" for a claim template.
 	Name string `json:"-" yaml:"-"`
@@ -104,7 +104,7 @@ func parseClaim(m M, path string, named bool) (ClaimSpec, error) {
 }
 
 // namedClaims returns the named claims of the merged values of an
-// instance, by name. They are its context's: its own values set none.
+// instance, by name.
 // Every problem is reported, in name order, with the claims that hold.
 func namedClaims(values M) (map[string]ClaimSpec, error) {
 	v, set := values["claims"]
@@ -263,34 +263,16 @@ type claimRef struct {
 // instanceClaims is what CompileAll binds of an instance (claimsOf).
 type instanceClaims struct {
 	refs  []claimRef           // the claims of its references
-	named map[string]ClaimSpec // the named claims of its context
-	// classes are the classes its context defines, by contract:
+	named map[string]ClaimSpec // the named claims of its values
+	// classes are the classes its settings define, by contract:
 	//
 	//	{default, classes: {<name>: {provider, request}}}
-	classes  M
-	platform M // those of them the platform defines (level 0)
-}
-
-// platformClasses returns global.okdp.provisioning merged from the layers
-// of level 0 alone. A class of the platform routes every namespace to its
-// provider, and needs no consent from it. A layer that does not normalize
-// is skipped: valuesLayers has already reported it.
-func platformClasses(layers []ContextLayer) M {
-	out := M{}
-	for _, l := range layers {
-		v, err := value.Normalize(l.Values)
-		if l.Level != 0 || err != nil {
-			continue
-		}
-		out = value.Merge(out, value.AsMap(value.Dig(value.AsMap(v), "global.okdp.provisioning")))
-	}
-	return out
+	classes M
 }
 
 // claimsOf returns what CompileAll binds of an instance of def: the
-// claims of its references, in parameter path order, the named claims of
-// its context, and its classes, which come from the context's layers
-// alone. A claim template carries the instance's request merged over what
+// claims of its references, in parameter path order, its named claims,
+// and its classes, which come from its settings (global.okdp.provisioning). A claim template carries the instance's request merged over what
 // the package fixes. It returns nothing when the parameters, the platform
 // values or a claim fail: the compile says why.
 func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
@@ -327,7 +309,7 @@ func claimsOf(ctx context.Context, def *Definition, in Inputs) instanceClaims {
 		}
 		return v
 	})
-	return instanceClaims{out, named, value.AsMap(settings["provisioning"]), platformClasses(in.Context)}
+	return instanceClaims{out, named, value.AsMap(settings["provisioning"])}
 }
 
 // claimID builds the ID of a claim from its namespace and its parts:
@@ -374,29 +356,25 @@ func claimID(namespace string, parts ...string) string {
 	return id
 }
 
-// CheckDeclarations checks the declarations of a context that has no
-// instance, a project's (in.Namespace, in.Contracts, in.Context), as
-// CompileAll checks those of an instance's context: the layers, the
-// platform's settings, every connection and every named claim. The
-// provider of a claim is not looked up: a claim of a project without
-// instance is bound to no provider until an instance's context declares it.
+// CheckDeclarations checks the declarations of values that no instance
+// compiles (in.Namespace, in.Contracts, in.Values), as CompileAll checks
+// those of an instance: the layers, the settings, every connection and
+// every named claim. The provider of a claim is not looked up: such a
+// claim is bound to no provider until an instance's values declare it.
 func CheckDeclarations(ctx context.Context, in Inputs) error {
-	layers, platform, err := contextLayers(ctx, in.rules(), in.Context)
+	ls, err := valuesLayers(in)
 	if err != nil {
 		return err
 	}
-	settings, err := platformSettings(in.rules(), platform)
+	settings, err := platformSettings(in.rules(), ls.platform)
 	if err != nil {
 		return err
 	}
-	if err := upstreamGlobals(ctx, in, layers, settings); err != nil {
-		return err
-	}
-	if err := checkDeclared(in, layers, platform, nil); err != nil {
+	if err := checkDeclared(in, ls.layers, ls.platform, nil); err != nil {
 		return err
 	}
 	merged := M{}
-	for _, l := range layers {
+	for _, l := range ls.layers {
 		merged = value.Merge(merged, value.AsMap(value.Copy(l)))
 	}
 	// The claims that fail are reported first, one error each.

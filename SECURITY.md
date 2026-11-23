@@ -19,8 +19,8 @@ with:
 - the version (`okdp-compile --version`, or the module version of the
   library), and how the compiler is run (the CLI, a host that embeds
   the library, a control plane);
-- what an attacker controls (a package, an instance's `config.yaml`, a
-  project's `project.yaml`, the platform values) and what it gains;
+- what an attacker controls (a package, an instance's values, a
+  project's values or `access`, the platform values) and what it gains;
 - a tree that reproduces it, the smallest you can, and its output.
 
 We acknowledge a report within 3 working days, and tell you within 10

@@ -11,10 +11,6 @@ import (
 
 // The types that a program that writes or edits a tree needs.
 type (
-	// GlobalLayer is the global that a layer of a project sets.
-	GlobalLayer = okdp.GlobalLayer
-	// GlobalsInput is what Inputs.CheckGlobals checks.
-	GlobalsInput = okdp.GlobalsInput
 	// FinalValuesOf is Helm's merge of the final values of a compile
 	// (FinalValues): the values, the chart of each key and the lists the
 	// instance appended to.
@@ -56,9 +52,6 @@ func CheckFinalValues(ctx context.Context, rules *RuleSet, svc, namespace string
 	return okdp.CheckFinalValues(ctx, rules, svc, namespace, settings, values)
 }
 
-// Roles returns the roles of a project's groups, least first.
-func Roles(rules *RuleSet) []AccessRole { return okdp.Roles(rules) }
-
 // EngineNamespaces returns the engines' namespaces, reserved to them.
 func EngineNamespaces(rules *RuleSet) []string { return okdp.EngineNamespaces(rules) }
 
@@ -66,17 +59,13 @@ func EngineNamespaces(rules *RuleSet) []string { return okdp.EngineNamespaces(ru
 // writes in the namespace of every project.
 func PlatformObjectNames(rules *RuleSet) []string { return okdp.PlatformObjectNames(rules) }
 
-// CheckProject returns nil when the namespace of in may be a project's.
-func CheckProject(ctx context.Context, in Inputs) error { return okdp.CheckProject(ctx, in) }
-
-// PlatformOf returns the platform's settings of the context of in, as a
-// compile checks them. It fails when the namespace of in is no project's.
-func PlatformOf(ctx context.Context, in Inputs) (map[string]any, error) {
-	return okdp.PlatformOf(ctx, in)
+// SettingsOf returns the settings (global.okdp) of the values of in, with
+// its host's settings (Inputs.Settings), as a compile checks them, with
+// their defaults applied. The error is a
+// *NamespaceError when the namespace of in is refused.
+func SettingsOf(ctx context.Context, in Inputs) (map[string]any, error) {
+	return okdp.SettingsOf(ctx, in)
 }
-
-// ProjectGroups returns the roles of the groups of the project of in.
-func ProjectGroups(in Inputs) (map[string]AccessRole, error) { return okdp.ProjectGroups(in) }
 
 // SecretStoreOf returns the secret store that settings declare, or nil.
 func SecretStoreOf(ctx context.Context, in Inputs, settings map[string]any) (*SecretStore, error) {
@@ -86,9 +75,4 @@ func SecretStoreOf(ctx context.Context, in Inputs, settings map[string]any) (*Se
 // Privileged reports whether namespace is a project of the platform's own.
 func Privileged(settings map[string]any, namespace string) bool {
 	return okdp.Privileged(settings, namespace)
-}
-
-// ParseAccess reads v, a project's access, as the roles of its groups.
-func ParseAccess(rules *RuleSet, v any, namespace string) (map[string]AccessRole, error) {
-	return okdp.ParseAccess(rules, v, namespace)
 }

@@ -58,7 +58,7 @@ instance: {url: "https://${{ exampleName('web') }}", usage: demo}
 	if want := (M{"a": "b", "replicas": "1", "domain": "example.org"}); !reflect.DeepEqual(o["data"], want) {
 		t.Errorf("the ConfigMap's data: got %#v, want %#v", o["data"], want)
 	}
-	if want := (M{"name": "app-demo-app", "viewers": []any{"okdp-project-demo"}}); !reflect.DeepEqual(res.Values["app"]["settings"], want) {
+	if want := (M{"name": "app-demo-app", "viewers": []any{}}); !reflect.DeepEqual(res.Values["app"]["settings"], want) {
 		t.Errorf("a fragment without result: got %#v, want %#v", res.Values["app"]["settings"], want)
 	}
 	if res.Info.URL != "https://demo-app-web" {

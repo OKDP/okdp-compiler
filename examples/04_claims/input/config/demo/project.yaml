@@ -1,10 +1,8 @@
-# The project demo, the namespace demo: a context layer of level 1, over
+# The project demo, the namespace demo: a values layer after
 # platform.yaml.
 #
-# A class of its own, beside the platform's: a project adds classes, and
-# changes none of the platform's, nor its default. large fixes the size
-# of the databases of its claims (request): a claim that sets it is
-# refused.
+# A class of its own, beside the platform's. large fixes the size of the
+# databases of its claims (request): a claim that sets it is refused.
 global:
   okdp:
     provisioning:

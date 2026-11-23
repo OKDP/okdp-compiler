@@ -71,8 +71,10 @@ func sameFS(a, b fs.FS) bool {
 	return va.Comparable() && vb.Comparable() && va.Equal(vb)
 }
 
-// paramsMemo holds the parameters of one instance. The first compile
-// that asks computes them.
+// paramsMemo holds the parameters of one instance and its settings, of
+// its values layers and its host's settings (Inputs.Values,
+// Inputs.Settings), which no compile of the set changes. The first
+// compile that asks computes them.
 type paramsMemo struct {
 	once             sync.Once
 	schema           *chart.Schema

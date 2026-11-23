@@ -21,8 +21,8 @@ import (
 
 // example: the example package
 // (examples/02_advanced/input/catalog/webapp/1.0.0), and the inputs of
-// its instance demo-webapp: its config.yaml over platform.yaml, at level 0,
-// and its database's claim, bound to demo-db, with what demo-db publishes
+// its instance demo-webapp: its config.yaml over platform.yaml, and its
+// database's claim, bound to demo-db, with what demo-db publishes
 // for it; the rule set the example's platform requires.
 func example() (*compiler.Definition, compiler.Inputs) {
 	def, err := compiler.LoadDefinition(os.DirFS("examples/02_advanced/input/catalog/webapp/1.0.0"), nil)
@@ -32,8 +32,7 @@ func example() (*compiler.Definition, compiler.Inputs) {
 	in := compiler.Inputs{
 		Rules:     exampleRules("02_advanced"),
 		Contracts: os.DirFS("examples/02_advanced/input/contracts"),
-		Context:   []compiler.ContextLayer{{Values: values("examples/02_advanced/input/config/platform.yaml")}},
-		Values:    []map[string]any{values("examples/02_advanced/input/config/demo/webapp/config.yaml")},
+		Values:    []map[string]any{values("examples/02_advanced/input/config/platform.yaml"), values("examples/02_advanced/input/config/demo/webapp/config.yaml")},
 		Release:   "demo-webapp",
 		Namespace: "demo",
 		Bindings: map[string]compiler.Binding{"database": {
@@ -69,12 +68,12 @@ func values(file string) map[string]any {
 func TestConcurrentCompile(t *testing.T) {
 	def, plain := example()
 	proxied := plain
-	proxied.Context = append(slices.Clip(plain.Context), compiler.ContextLayer{Values: map[string]any{
+	proxied.Values = append(slices.Clip(plain.Values), map[string]any{
 		"global": map[string]any{"okdp": map[string]any{"proxy": map[string]any{"httpsProxy": "http://proxy.example.org:3128"}}},
-	}})
+	})
 	inputs := []compiler.Inputs{proxied, plain}
 	snapshot := func() string {
-		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), proxied.Context, plain.Values})
+		b, err := json.Marshal([]any{def.Chart, def.Package.Require, def.Package.Defaults, def.Package.Upstream, string(def.Okdp), string(def.Values), proxied.Values, plain.Values})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,26 +199,25 @@ func TestIsName(t *testing.T) {
 	}
 }
 
-// TestCheckProjectName: the compile's rule of a project's name, its
-// errors the compile's of an instance of the project, the namespace named
-// a project's: a name, none the compiler reserves, none of the platform's
-// policy.reserved, privileged or not; another, default among them, or
-// any without a platform, passes.
-func TestCheckProjectName(t *testing.T) {
+// TestCheckNamespace: the compile's rule of a namespace, its errors the
+// compile's of an instance of the namespace: a name, none the compiler
+// reserves, none of the settings' policy.reserved, privileged or not;
+// another, default among them, or any without settings, passes.
+func TestCheckNamespace(t *testing.T) {
 	platform := map[string]any{"global": map[string]any{"okdp": map[string]any{"policy": map[string]any{"reserved": []any{"openbao", "vault"}, "privileged": []string{"vault", "data"}}}}}
 	for name, want := range map[string]string{
 		"demo": "", "default": "", "data": "", "kube": "", "okdp": "",
-		"Demo":          `project "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`,
-		"":              `project "": a namespace name`,
-		"platform":      `project "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`,
-		"kube-foo":      `project "kube-foo": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`,
-		"flux-system":   `project "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`,
-		"argocd":        `project "argocd": the namespace is reserved: a deployer engine's`,
-		"okdp-releases": `project "okdp-releases": the namespace is reserved: a deployer engine's`,
-		"openbao":       `project "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`,
-		"vault":         `project "vault": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins`,
+		"Demo":          `namespace "Demo": a namespace name, lowercase letters, digits and "-", starting and ending with a letter or a digit, 63 characters at most`,
+		"":              `namespace "": a namespace name`,
+		"platform":      `namespace "platform": the namespace is reserved: platform/ holds the platform's keys of the secret store, which no project writes`,
+		"kube-foo":      `namespace "kube-foo": the namespace is reserved: kube-* is Kubernetes' own (kube-system, kube-public, kube-node-lease)`,
+		"flux-system":   `namespace "flux-system": the namespace is reserved: a deployer engine's, or the namespace its target writes in (argocd, flux-system, okdp-releases): a project's releases there would drive the engine`,
+		"argocd":        `namespace "argocd": the namespace is reserved: a deployer engine's`,
+		"okdp-releases": `namespace "okdp-releases": the namespace is reserved: a deployer engine's`,
+		"openbao":       `namespace "openbao": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it`,
+		"vault":         `namespace "vault": the namespace is reserved by the platform (global.okdp.policy.reserved): no project has it, privileged or not: global.okdp.policy.privileged lists it too, and the reservation wins`,
 	} {
-		err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), name, platform)
+		err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), name, platform)
 		switch {
 		case want == "" && err != nil:
 			t.Errorf("%q: %v", name, err)
@@ -229,24 +227,24 @@ func TestCheckProjectName(t *testing.T) {
 			t.Errorf("%q: got %v, want %s", name, err, want)
 		}
 	}
-	// Without a platform, the compiler's rule alone.
-	if err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), "openbao", nil); err != nil {
+	// Without settings, the compiler's rule alone.
+	if err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), "openbao", nil); err != nil {
 		t.Errorf("openbao, no platform: %v", err)
 	}
-	if err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), "kube-system", nil); err == nil {
+	if err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), "kube-system", nil); err == nil {
 		t.Error("kube-system, no platform: no error")
 	}
-	// The compile refuses what CheckProjectName refuses, in the same
-	// words, Inputs.Namespace for project: the example's instance, its
-	// namespace demo, the example's platform reserving it.
+	// The compile refuses what CheckNamespace refuses, in the same words,
+	// Inputs.Namespace for namespace: the example's instance, its
+	// namespace demo, the example's settings reserving it.
 	def, in := example()
-	example := in.Context[0].Values
+	example := in.Values[0]
 	example["global"].(map[string]any)["okdp"].(map[string]any)["policy"] = map[string]any{"reserved": []any{"demo"}, "privileged": []any{"demo"}}
 	for _, ns := range []string{"kube-foo", "platform", "demo"} {
 		in.Namespace, in.Release = ns, ns+"-webapp"
 		_, cerr := compiler.Compile(context.Background(), def, in)
-		err := compiler.CheckProjectName(context.Background(), compiler.Mandatory(), ns, example)
-		if cerr == nil || err == nil || strings.Replace(cerr.Error(), "Inputs.Namespace", "project", 1) != err.Error() {
+		err := compiler.CheckNamespace(context.Background(), compiler.Mandatory(), ns, example)
+		if cerr == nil || err == nil || strings.Replace(cerr.Error(), "Inputs.Namespace", "namespace", 1) != err.Error() {
 			t.Errorf("%s: compile %v, check %v", ns, cerr, err)
 		}
 	}

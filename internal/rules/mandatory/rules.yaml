@@ -9,21 +9,6 @@ apiVersion: okdp-compiler/rules.v1
 name: core
 version: 1.0.0
 tables:
-  # The paths of the context a level gives whole, or not at all: * stands for
-  # one key. A level may not change them piecemeal.
-  wholePaths:
-    values:
-      - connections.*
-      - claims.*
-      - global.okdp.provisioning.*.classes.*
-      - global.okdp.provisioning.*.default
-  # The keys of global.okdp a level above 0 may set, read as the platform's
-  # settings: the classes a project adds.
-  projectPlatformKeys:
-    values: [provisioning]
-  # The roles of a project's groups, least first.
-  projectRoles:
-    values: [viewer, editor, admin]
   # The namespaces of the deployer engines and of the objects the targets
   # write in them, which no project may have: a project's releases are
   # installed with every verb of its namespace, and there they would rewrite
@@ -120,10 +105,6 @@ tables:
   platformObjectSettings:
     extensible: true
     values: [secrets.store, secrets.serviceAccount]
-  # The keys of global a project sets when the platform lists none
-  # (global.okdp.policy.projectGlobals).
-  defaultProjectGlobals:
-    values: [project, storageClass]
 # The checks: each a document of vars and errors (the mapping language),
 # applied by a walker of the compiler, the first message refusing. They see
 # their input and sets, each table as a set, and tables, as a list.
@@ -133,8 +114,6 @@ checks:
   release: checks/release.cel.yaml
   object: checks/objects.cel.yaml
   plainSecret: checks/plain-secret.cel.yaml
-  contextLayer: checks/context-layer.cel.yaml
-  valuesLayer: checks/values-layer.cel.yaml
 # The JSON schemas of the platform's settings, and their defaults, and of
 # what a mapping writes.
 schemas:
@@ -158,8 +137,9 @@ documents:
   pullSecret: objects/pull-secret.cel.yaml
   deployerRole: objects/deployer-role.cel.yaml
 # The documents that compute what a mapping sees as platform, from the
-# platform's settings, the release and the project's groups: those of every
-# set, in the order the sets are read, their platform merged.
+# platform's settings, the project's groups among them, and the release:
+# those of every set, in the order the sets are read, their platform
+# merged.
 scopes: [scope]
 # The names the compiler gives credentials: $<word> stands for the value.
 names:

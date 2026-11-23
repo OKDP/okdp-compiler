@@ -9,8 +9,9 @@ It is a Go library (package `compiler`) that reads everything through
 `fs.FS`, and a thin command, `okdp-compile`. It compiles instances
 together, read from input documents laid out in any files: claims bound
 to their providers, connections, the mandatory rules, and Helm's merge of
-the final values. How a deployment's files are laid out, and the order
-its releases deploy in, are a host's.
+the final values. How a deployment's files are laid out, what each of
+its values layers may set, and the order its releases deploy in, are a
+host's.
 
 ## Library
 
@@ -46,7 +47,7 @@ for _, out := range compiler.CompileAll(ctx, instances) {
   them, and add the security set's policy on upstream values.
 - Accessors let a caller check before it compiles, without restating a
   rule: `FieldErrors`, `ConnectionRefs`, `CheckConnection`,
-  `CheckProjectName`, `ReadContract`, `MergeValues`...
+  `CheckNamespace`, `ReadContract`, `MergeValues`...
 
 See [usage](docs/01_usage.md).
 
@@ -77,7 +78,7 @@ Two rule sets apply together, both data, the walkers in Go:
 - the mandatory set, embedded
   ([`internal/rules/mandatory`](internal/rules/mandatory)), is what every
   compile needs and what it refuses: the platform schema, labels, names,
-  roles, the checks and their tables, the mapping schema, the generated
+  the checks and their tables, the mapping schema, the generated
   Secrets, the secret store's objects, the default objects chart;
 - a rule set given (`LoadRules`, `okdp-compile --rules`) adds a
   platform's own rules to it, and replaces none: tables, documents,

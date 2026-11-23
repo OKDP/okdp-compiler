@@ -35,7 +35,7 @@ func TestPlatformDefaults(t *testing.T) {
 	}
 	want := M{
 		"proxyEnv": M{},
-		"access":   M{"viewers": []any{"okdp-project-demo"}, "editors": []any{"okdp-project-demo"}, "admins": []any{}, "platformAdmins": []any{}},
+		"access":   M{"viewers": []any{}, "editors": []any{}, "admins": []any{}, "platformAdmins": []any{}},
 	}
 	if !reflect.DeepEqual(p, want) {
 		t.Errorf("got  %#v\nwant %#v", p, want)
@@ -85,7 +85,7 @@ func TestPlatformSchema(t *testing.T) {
 		"unread is unread": {M{"okdp": M{"cluster": M{"domain": 1}, "monitoring": M{"enabled": "yes"}}, "imageRegistry": 1}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			heading := "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp"
+			heading := "the values (Inputs.Values) don't meet the specifications of the schema of global.okdp"
 			_, err := ruleset.SchemaValues(Mandatory().PlatformSchema(), heading, M{"global": value.Copy(tc.global)})
 			want := heading + ":\n" + tc.want
 			if (err == nil) != (tc.want == "") || (err != nil && err.Error() != want) {
@@ -121,7 +121,7 @@ func TestContextErrors(t *testing.T) {
 // keys beside it; and the merged values left as written.
 func TestContextValues(t *testing.T) {
 	in := inputs(M{"replicas": float64(2), "connections": M{}})
-	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"global": M{"project": M{"name": "demo"}}}})
+	in.Values = append(in.Values, map[string]any{"global": M{"project": M{"name": "demo"}}})
 	inst, err := newInstance(context.Background(), pkg, in, defService)
 	if err != nil {
 		t.Fatal(err)
@@ -159,14 +159,13 @@ func TestContextUpstream(t *testing.T) {
 	}
 }
 
-// TestPlatformFromContext: whatever defaults a package's schema gives
-// global, in any shape, the platform's settings an instance reads are its
-// context's, level 0's and the provisioning classes of the levels above:
-// the instance's (inst.okdp) are those of that view, its defaults applied,
+// TestPlatformFromValues: whatever defaults a package's schema gives
+// global, in any shape, the settings an instance reads are global.okdp of
+// its values layers: the instance's (inst.okdp) are those of that view, its defaults applied,
 // and global.okdp of the mapping's global and of the parameters is that
 // view as written; a schema whose defaults give global.okdp is refused, as
 // one that declares it.
-func TestPlatformFromContext(t *testing.T) {
+func TestPlatformFromValues(t *testing.T) {
 	okdpDefault := M{"policy": M{"privileged": []any{"demo"}}, "secrets": M{"store": "evil"}, "charts": M{"objects": M{"repository": "oci://evil.example.org"}}}
 	shapes := []any{
 		M{"type": "object", "default": M{"okdp": okdpDefault}},
@@ -204,11 +203,11 @@ func TestPlatformFromContext(t *testing.T) {
 		key := []string{"okdp", "x"}[rnd.IntN(2)]
 		shapes = append(shapes, M{"default": gen(0)}, M{"properties": M{key: M{"default": gen(0)}}})
 	}
-	contexts := [][]ContextLayer{
-		{{Values: platformValues}},
-		{{Values: platformValues}, {Values: map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"infra"}}}}}}},
-		{{Values: platformValues}, {Level: 1, Values: map[string]any{"global": M{"project": "demo", "okdp": M{"provisioning": M{"pg": M{"classes": M{"small": M{"provider": "demo/pg"}}}}}}}}},
-		{{Level: 1, Values: map[string]any{"global": M{"project": "demo"}}}},
+	contexts := [][]map[string]any{
+		{platformValues},
+		{platformValues, {"global": M{"okdp": M{"policy": M{"privileged": []any{"infra"}}}}}},
+		{platformValues, {"global": M{"project": "demo", "okdp": M{"provisioning": M{"pg": M{"classes": M{"small": M{"provider": "demo/pg"}}}}}}}},
+		{{"global": M{"project": "demo"}}},
 	}
 	refusals := 0
 	for i, shape := range shapes {
@@ -220,7 +219,7 @@ func TestPlatformFromContext(t *testing.T) {
 		files["config.schema.json"] = &fstest.MapFile{Data: doc}
 		for j, ctx := range contexts {
 			in := inputs()
-			in.Context = ctx
+			in.Values = ctx
 			inst, err := newInstance(context.Background(), files, in, defService)
 			if err != nil {
 				if !strings.Contains(err.Error(), "config.schema.json: global.okdp is the platform's settings") {
@@ -229,16 +228,11 @@ func TestPlatformFromContext(t *testing.T) {
 				refusals++
 				continue
 			}
-			// The view, of the context's layers alone: level 0's
-			// global.okdp, the provisioning of the levels above.
+			// The view, of the values layers alone: their global.okdp.
 			view := M{}
 			for _, l := range ctx {
-				okdp, set := value.AsMap(l.Values["global"])["okdp"]
-				switch {
-				case set && l.Level == 0:
+				if okdp, set := value.AsMap(l["global"])["okdp"]; set {
 					view = value.Merge(view, M{"global": M{"okdp": okdp}})
-				case set:
-					view = value.Merge(view, M{"global": M{"okdp": M{"provisioning": value.AsMap(okdp)["provisioning"]}}})
 				}
 			}
 			want, err := platformSettings(Mandatory(), view)
@@ -273,11 +267,10 @@ func TestPlatformFromContext(t *testing.T) {
 	}
 }
 
-// TestPlatformAccess: platform.access, the groups of the project (its
-// file's access, the default group an editor without one) and the
-// platform's administrators: each role's list holds the higher roles'
-// groups and the administrators, sorted, once each. A refused access
-// refuses the instance.
+// TestPlatformAccess: platform.access, the groups (access.groups of
+// Inputs.Settings) and the platform's administrators: each role's list
+// holds the higher roles' groups and the administrators, sorted, once
+// each. A refused group refuses the instance.
 func TestPlatformAccess(t *testing.T) {
 	list := func(g ...string) []any {
 		out := []any{}
@@ -286,22 +279,21 @@ func TestPlatformAccess(t *testing.T) {
 		}
 		return out
 	}
-	project := func(access any) []ContextLayer {
-		return []ContextLayer{{Level: 1, Values: map[string]any{"access": access}}}
-	}
 	for name, tc := range map[string]struct {
 		okdp   M
-		layers []ContextLayer
+		groups map[string]Role
 		want   M
 	}{
-		"the default group":             {M{}, nil, M{"viewers": list("okdp-project-demo"), "editors": list("okdp-project-demo"), "admins": list(), "platformAdmins": list()}},
-		"roles":                         {M{}, project(M{"readers": "viewer", "devs": "editor", "leads": "admin"}), M{"viewers": list("devs", "leads", "readers"), "editors": list("devs", "leads"), "admins": list("leads"), "platformAdmins": list()}},
-		"no group":                      {M{}, project(M{}), M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
-		"the platform's administrators": {M{"access": M{"admins": []any{"ops", "okdp-admins", "ops"}}}, project(M{"devs": "editor", "ops": "viewer"}), M{"viewers": list("devs", "okdp-admins", "ops"), "editors": list("devs", "okdp-admins", "ops"), "admins": list("okdp-admins", "ops"), "platformAdmins": list("okdp-admins", "ops")}},
+		"none":                          {M{}, nil, M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
+		"roles":                         {M{}, map[string]Role{"readers": RoleViewer, "devs": RoleEditor, "leads": RoleAdmin}, M{"viewers": list("devs", "leads", "readers"), "editors": list("devs", "leads"), "admins": list("leads"), "platformAdmins": list()}},
+		"no group":                      {M{}, map[string]Role{}, M{"viewers": list(), "editors": list(), "admins": list(), "platformAdmins": list()}},
+		"the platform's administrators": {M{"access": M{"admins": []any{"ops", "okdp-admins", "ops"}}}, map[string]Role{"devs": RoleEditor, "ops": RoleViewer}, M{"viewers": list("devs", "okdp-admins", "ops"), "editors": list("devs", "okdp-admins", "ops"), "admins": list("okdp-admins", "ops"), "platformAdmins": list("okdp-admins", "ops")}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := inputs(M{"global": M{"okdp": tc.okdp}})
-			in.Context = append(in.Context, tc.layers...)
+			if tc.groups != nil {
+				in.Settings = map[string]any{"access": M{"groups": tc.groups}}
+			}
 			inst, err := newInstance(context.Background(), pkg, in, defService)
 			if err != nil {
 				t.Fatal(err)
@@ -311,10 +303,13 @@ func TestPlatformAccess(t *testing.T) {
 			}
 		})
 	}
-	// A refused access refuses the instance.
+	// A refused group refuses the instance.
 	in := inputs()
-	in.Context = append(in.Context, project(M{"a/b": "viewer"})...)
-	if _, err := newInstance(context.Background(), pkg, in, defService); err == nil || !strings.HasPrefix(err.Error(), "the project's file (level 1): access.a/b: a group name") {
-		t.Errorf("a refused access: got %v", err)
+	in.Settings = map[string]any{"access": M{"groups": map[string]Role{"a/b": RoleViewer, "devs": "owner"}}}
+	_, err := Compile(context.Background(), def, in)
+	for _, want := range []string{"invalid propertyName 'a/b'", "at '/global/okdp/access/groups/devs': value must be one of 'viewer', 'editor', 'admin'"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("a refused group: got %v, want %q", err, want)
+		}
 	}
 }

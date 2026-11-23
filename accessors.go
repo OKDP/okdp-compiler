@@ -30,8 +30,8 @@ type FieldError struct {
 // FieldErrors splits err, the error of a compile (Outcome.Err,
 // or what wraps it), into the problems of its fields,
 // in the order of the error. A violation of the parameter schema, a
-// reference or a claim that does not resolve, and a named claim of the
-// context are placed at their field. Any other problem is at the
+// reference or a claim that does not resolve, and a named claim are
+// placed at their field. Any other problem is at the
 // instance as a whole. The messages are the compile's.
 func FieldErrors(err error) []FieldError {
 	if err == nil {
@@ -148,28 +148,24 @@ func CheckProvider(where, provider string) error { return okdp.CheckProvider(whe
 // listed once. name is what the error calls the list.
 func CheckClaimers(name string, claimers []string) error { return okdp.CheckClaimers(name, claimers) }
 
-// CheckDeclarations checks the declarations of a context that has no
-// instance, a project's (in.Namespace, in.Contracts, in.Context), as
-// CompileAll checks those of an instance's context: the layers, the
-// platform's settings, every connection and every named claim.
+// CheckDeclarations checks the declarations of values that no instance
+// compiles (in.Namespace, in.Contracts, in.Values), as CompileAll checks
+// those of an instance: the layers, the settings, every connection and
+// every named claim.
 func CheckDeclarations(ctx context.Context, in Inputs) error { return okdp.CheckDeclarations(ctx, in) }
 
-// CheckConnection returns nil when the connection c of project holds at
-// its declaration, as the compile checks every connection of a context,
-// referenced or not. project is "" for a connection of the platform. The
-// contract must be one of contracts, the fields must fit it and hold no
-// secret, and a remoteKey must belong to the store of platform, under
-// <project>/ for a project, never under platform/ when the platform gives
-// the store's provider. The error is placed at connections.<name>.
-func CheckConnection(rules *RuleSet, contracts fs.FS, project string, c Connection, platform map[string]any) error {
-	v, err := value.Normalize(platform)
+// CheckConnection returns nil when the connection c of namespace holds
+// at its declaration, as the compile checks every connection of the
+// values, referenced or not. The contract must be one of contracts, the
+// fields must fit it and hold no secret, and a remoteKey must belong to
+// the store that values give (global.okdp.secrets), never under platform/
+// when they give the store's provider. The error is placed at
+// connections.<name>.
+func CheckConnection(rules *RuleSet, contracts fs.FS, namespace string, c Connection, values map[string]any) error {
+	v, err := value.Normalize(values)
 	if err != nil {
-		return fmt.Errorf("the platform's values: %w", err)
-	}
-	level := uint(0)
-	if project != "" {
-		level = 1
+		return fmt.Errorf("the values: %w", err)
 	}
 	secrets := value.AsMap(value.Dig(value.AsMap(v), "global.okdp.secrets"))
-	return okdp.CheckConnection(rules, contracts, c.Name, c.Entry(), level, project, value.Str(secrets["store"]), len(value.AsMap(secrets["provider"])) > 0)
+	return okdp.CheckConnection(rules, contracts, c.Name, c.Entry(), namespace, value.Str(secrets["store"]), len(value.AsMap(secrets["provider"])) > 0)
 }

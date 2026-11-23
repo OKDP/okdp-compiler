@@ -2,9 +2,9 @@ package okdp
 
 import (
 	"context"
-	"errors"
 	"maps"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -12,136 +12,30 @@ import (
 	"github.com/okdp/okdp-compiler/value"
 )
 
-// TestValuesLayers: global, connections and claims are the context's. An
-// instance layer sets only the keys of global the parameter schema
-// declares, never okdp, over the context's layers, no connections and no
-// claims, to any value, and no "{{" under any key; the platform's level is
-// not checked.
+// TestValuesLayers: any layer sets any key, global and global.okdp, a
+// connection and a claim included, and changes what an earlier layer
+// sets; the settings are global.okdp of the layers, merged in order.
 func TestValuesLayers(t *testing.T) {
 	files := maps.Clone(pkg)
 	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1},
-		"global": {"properties": {"imageRegistry": {"type": "string"}}}}}`)}
-	platform := ContextLayer{Values: map[string]any{"global": M{"imageRegistry": "platform.example.org"}}}
-	for name, tc := range map[string]struct {
-		instance []map[string]any
-		want     string // the error, none when empty
-	}{
-		"a declared key": {[]map[string]any{{"global": M{"imageRegistry": "instance.example.org"}}}, ""},
-		"okdp":           {[]map[string]any{{"global": M{"okdp": M{"cluster": M{"domain": "other.example.org"}}}}}, "values layer 1: global.okdp is set by the context (Inputs.Context)"},
-		"another key":    {[]map[string]any{{"replicas": 2}, {"global": M{"imageRegistry": "r", "proxy": "p"}}}, "values layer 2: global.proxy is set by the context"},
-		"not a map":      {[]map[string]any{{"global": nil}}, "values layer 1: global is set by the context"},
-		"connections":    {[]map[string]any{{"replicas": 2}, {"connections": M{}}}, "values layer 2: connections are given by the context (Inputs.Context): an instance's own in a context layer of its level"},
-		"a null":         {[]map[string]any{{"connections": nil}}, "values layer 1: connections are given by the context"},
-		"claims":         {[]map[string]any{{"claims": M{"reports": M{"contract": "database"}}}}, "values layer 1: claims are declared by the context (Inputs.Context): a project's, of level 1 or above"},
-		"a template":     {[]map[string]any{{"replicas": 2}, {"upstream": M{"app": M{"tags": []any{"{{ .Release.Name }}"}}}}}, `values layer 2: upstream.app.tags[0]: the value contains "{{"`},
-		"a template key": {[]map[string]any{{"upstream": M{"app": M{"podAnnotations": M{"{{ x }}": "y"}}}}}, `values layer 1: upstream.app.podAnnotations.{{ x }}: the key contains "{{"`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			in := inputs()
-			in.Context, in.Values = append(in.Context, platform), tc.instance
-			res, err := Compile(context.Background(), withFiles(files), in)
-			if tc.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Errorf("got %v, want an error containing %q", err, tc.want)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if g := value.AsMap(res.Values["app"]["global"]); g["imageRegistry"] != "instance.example.org" || value.Dig(g, "okdp.cluster.domain") != "example.org" {
-				t.Errorf("global: %#v", g)
-			}
-		})
-	}
-	in := inputs()
-	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"imageRegistry": "{{ .Values.registry }}"}}})
-	if _, err := Compile(context.Background(), withFiles(files), in); err != nil {
-		t.Errorf("a template at level 0: %v", err)
-	}
-}
-
-// TestContextLevels: a level adds to the lower levels' values, it changes
-// none: not a value they set (the same one included, a null too, a parent
-// of it), not a connection they give, even by a field they do not set, nor
-// a claim they declare, nor a class they define or the default class they
-// set: it adds classes beside theirs, and the classes of a contract they
-// leave out; and nothing else of global.okdp, the platform's settings,
-// whether the platform sets the key or not, nor global.okdp itself. A
-// layer changes an earlier one of its level. Levels are merged lowest
-// first, whatever their order in Inputs.Context and their gaps; above level
-// 0, no "{{". inputs gives layer 1, at level 0, the platform layer 2.
-func TestContextLevels(t *testing.T) {
-	platform := ContextLayer{Values: map[string]any{
-		"global":      M{"labels": M{"okdp.io/tier": "gold"}, "okdp": M{"registry": nil, "provisioning": M{"server": M{"default": "standard", "classes": M{"standard": M{"provider": "data/pg"}}}}}},
-		"connections": M{"shared-db": M{"contract": "database", "host": "db.example.org"}},
-	}}
-	at := func(level uint, v map[string]any) ContextLayer { return ContextLayer{Level: level, Values: v} }
-	for name, tc := range map[string]struct {
-		layers []ContextLayer
-		want   string // the error, none when empty
-	}{
-		"added": {[]ContextLayer{
-			at(1, map[string]any{"global": M{"storageClass": "fast", "project": M{"name": "demo"}}, "connections": M{"team-db": M{"contract": "database", "host": "a"}}}),
-			at(1, map[string]any{"connections": M{"team-db": M{"host": "team-db.example.org"}}}),
-		}, ""},
-		"a platform value":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"cluster": M{"domain": "other.example.org"}}}})}, "context layer 3 (level 1): global.okdp.cluster.domain is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
-		"the same value":                   {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"cluster": M{"domain": "example.org"}}}})}, "context layer 3 (level 1): global.okdp.cluster.domain is set at level 0"},
-		"a platform null":                  {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"registry": M{"host": "registry.example.org"}}}})}, "context layer 3 (level 1): global.okdp.registry is set at level 0"},
-		"a parent":                         {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"global": M{"okdp": nil}})}, "context layer 4 (level 1): global.okdp is set at level 0"},
-		"a key with dots":                  {[]ContextLayer{at(1, map[string]any{"global": M{"labels": M{"okdp.io/tier": "silver"}}})}, `context layer 3 (level 1): global.labels["okdp.io/tier"] is set at level 0`},
-		"a platform connection":            {[]ContextLayer{at(1, map[string]any{"connections": M{"shared-db": M{"port": 5433}}})}, "context layer 3 (level 1): connections.shared-db is set at level 0"},
-		"a template":                       {[]ContextLayer{at(1, map[string]any{}), at(1, map[string]any{"connections": M{"team-db": M{"host": "{{ .Release.Name }}"}}})}, `context layer 4 (level 1): connections.team-db.host: the value contains "{{"`},
-		"a platform class":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"classes": M{"standard": M{"request": M{"size": "1Gi"}}}}}}}})}, "context layer 3 (level 1): global.okdp.provisioning.server.classes.standard is set at level 0"},
-		"the default class":                {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"default": "fast"}}}}})}, "context layer 3 (level 1): global.okdp.provisioning.server.default is set at level 0 (Inputs.Context): a level adds values, it does not change a lower level's"},
-		"a class added":                    {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"server": M{"classes": M{"fast": M{"provider": "data/pg2"}}}, "s3": M{"default": "standard", "classes": M{"standard": M{"provider": "data/minio"}}}}}}})}, ""},
-		"a project's claim":                {[]ContextLayer{at(1, map[string]any{"claims": M{"reports": M{"contract": "database"}}}), at(2, map[string]any{"claims": M{"reports": M{"provider": "data/pg"}}})}, "context layer 4 (level 2): claims.reports is set at level 1"},
-		"a value of no layer":              {[]ContextLayer{at(1, map[string]any{"replicas": 3})}, ""},
-		"a value of no platform":           {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"monitoring": M{"enabled": true}}}})}, "context layer 3 (level 1): global.okdp.monitoring: a platform setting, level 0 only (Inputs.Context): a project sets global.okdp.provisioning, nothing else of global.okdp"},
-		"a platform chart":                 {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"provisioning": M{"s3": M{"classes": M{}}}, "charts": M{"objects": M{"repository": "oci://attacker.example/x", "chart": "okdp-objects", "version": "0.6.0"}}}}})}, "context layer 3 (level 1): global.okdp.charts: a platform setting, level 0 only"},
-		"the privileged projects":          {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"policy": M{"privileged": []any{"demo"}}}}})}, "context layer 3 (level 1): global.okdp.policy: a platform setting, level 0 only"},
-		"a key the compiler does not read": {[]ContextLayer{at(1, map[string]any{"global": M{"okdp": M{"project": M{"name": "demo"}}}})}, "context layer 3 (level 1): global.okdp.project: a platform setting, level 0 only"},
-		"a setting of a higher level":      {[]ContextLayer{at(2, map[string]any{"global": M{"okdp": M{"proxy": M{"noProxy": ".svc"}}}})}, "context layer 3 (level 2): global.okdp.proxy: a platform setting, level 0 only"},
-		"a third level":                    {[]ContextLayer{at(1, map[string]any{"global": M{"storageClass": "fast"}}), at(2, map[string]any{"global": M{"storageClass": "slow"}})}, "context layer 4 (level 2): global.storageClass is set at level 1"},
-		"a gap":                            {[]ContextLayer{at(5, map[string]any{"global": M{"storageClass": "fast"}}), at(10, map[string]any{"global": M{"storageClass": "slow"}})}, "context layer 4 (level 10): global.storageClass is set at level 5"},
-		"in any order":                     {[]ContextLayer{at(2, map[string]any{"global": M{"storageClass": "slow"}}), at(1, map[string]any{"global": M{"storageClass": "fast"}})}, "context layer 3 (level 2): global.storageClass is set at level 1"},
-		"the lowest level first":           {[]ContextLayer{at(2, map[string]any{"global": M{"okdp": M{"registry": "r"}}}), at(1, map[string]any{"global": M{"okdp": M{"registry": "r"}}})}, "context layer 4 (level 1): global.okdp.registry is set at level 0"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			in := inputs()
-			in.Context = append(append(in.Context, platform), tc.layers...)
-			res, err := Compile(context.Background(), def, in)
-			if tc.want != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.want) {
-					t.Errorf("got %v, want an error containing %q", err, tc.want)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			g := value.AsMap(res.Values["app"]["global"])
-			if value.Dig(g, "okdp.cluster.domain") != "example.org" || value.Dig(g, "labels") == nil {
-				t.Errorf("global: %#v", g)
-			}
-		})
-	}
-	// global.okdp set to a non-map above level 0, where level 0 sets none.
-	in := inputs()
-	in.Context = []ContextLayer{{Level: 1, Values: map[string]any{"global": M{"okdp": nil}}}}
-	if _, err := Compile(context.Background(), def, in); err == nil || !strings.Contains(err.Error(), "context layer 1 (level 1): global.okdp: a platform setting, level 0 only") {
-		t.Errorf("okdp null at level 1: got %v", err)
-	}
-	// The context is merged by level, then the instance's values: a higher
-	// level's global reaches every chart, the instance's values win.
-	in = inputs(map[string]any{"replicas": 2})
-	in.Context = append(in.Context, ContextLayer{Level: 1, Values: map[string]any{"global": M{"storageClass": "fast"}, "replicas": 3}})
-	res, err := Compile(context.Background(), def, in)
+		"db": {"type": "string", "x-okdp-connection-ref": {"contract": "database"}}}}`)}
+	in := inputs(
+		map[string]any{"global": M{"imageRegistry": "platform.example.org", "okdp": M{"proxy": M{"noProxy": ".svc"}}}, "replicas": 3},
+		map[string]any{"global": M{"imageRegistry": "instance.example.org", "okdp": M{"proxy": M{"noProxy": ".local"}}}, "connections": M{"ext": M{"contract": "database", "host": "db.example.org"}}, "db": "ext", "replicas": 2},
+	)
+	in.Contracts = dbContract
+	inst, err := newInstance(context.Background(), files, in, defService)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app := res.Values["app"]; value.Dig(app, "global.storageClass") != "fast" || app["replicaCount"] != float64(2) {
-		t.Errorf("app: %#v", app)
+	if g := value.AsMap(inst.values["global"]); g["imageRegistry"] != "instance.example.org" || value.Dig(g, "okdp.cluster.domain") != "example.org" || value.Dig(g, "okdp.proxy.noProxy") != ".local" {
+		t.Errorf("global: %#v", g)
+	}
+	if inst.okdp["proxy"] == nil || value.Dig(inst.okdp, "proxy.noProxy") != ".local" {
+		t.Errorf("settings: %#v", inst.okdp)
+	}
+	if v := value.AsMap(inst.scope["values"]); v["replicas"] != float64(2) || value.Dig(v, "db.host") != "db.example.org" {
+		t.Errorf("values: %#v", v)
 	}
 }
 
@@ -150,8 +44,7 @@ func TestContextLevels(t *testing.T) {
 // with the global of an earlier layer rather than replacing it, an int32 is
 // a number. What values cannot hold fails, its layer and path named.
 func TestValuesLayersGoTypes(t *testing.T) {
-	in := inputs(map[string]any{"replicas": int32(2)})
-	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": map[string]string{"imageRegistry": "platform.example.org"}}})
+	in := inputs(map[string]any{"global": map[string]string{"imageRegistry": "platform.example.org"}}, map[string]any{"replicas": int32(2)})
 	res, err := Compile(context.Background(), def, in)
 	if err != nil {
 		t.Fatal(err)
@@ -164,131 +57,80 @@ func TestValuesLayersGoTypes(t *testing.T) {
 		t.Errorf("replicaCount: %#v", app["replicaCount"])
 	}
 	for name, tc := range map[string]struct {
-		context  []ContextLayer
-		instance []map[string]any
-		want     string
+		layers []map[string]any
+		want   string
 	}{
-		"context":  {[]ContextLayer{{Level: 1, Values: map[string]any{"global": M{"proxy": M{"no.proxy": math.NaN()}}}}}, nil, `context layer 1 (level 1): json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN`},
-		"instance": {nil, []map[string]any{{}, {"hooks": []any{func() {}}}}, `values layer 2: json: cannot marshal from Go func() within "/hooks/0"`},
+		"a NaN":  {[]map[string]any{{"global": M{"proxy": M{"no.proxy": math.NaN()}}}}, `values layer 2: json: cannot marshal from Go float64 within "/global/proxy/no.proxy": unsupported value: NaN`},
+		"a func": {[]map[string]any{{}, {"hooks": []any{func() {}}}}, `values layer 3: json: cannot marshal from Go func() within "/hooks/0"`},
 	} {
-		in := inputs()
-		in.Context, in.Values = tc.context, tc.instance
-		if _, err := Compile(context.Background(), def, in); err == nil || err.Error() != tc.want {
+		if _, err := Compile(context.Background(), def, inputs(tc.layers...)); err == nil || err.Error() != tc.want {
 			t.Errorf("%s: got %v, want %s", name, err, tc.want)
 		}
 	}
 }
 
-// TestProjectGlobals: a layer above level 0 sets the keys of global the
-// platform lists (global.okdp.policy.projectGlobals, project and
-// storageClass by default), the same for a privileged project; the
-// refusals are field problems at global.<key>. Level 0's global is the
-// platform's.
-func TestProjectGlobals(t *testing.T) {
-	policy := func(p M) ContextLayer {
-		return ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": p}}}}
-	}
-	project := func(g M) ContextLayer { return ContextLayer{Level: 1, Values: map[string]any{"global": g}} }
-	for name, tc := range map[string]struct {
-		platform ContextLayer
-		global   M
-		want     string // the error, none when empty
-		field    string // the field it is tagged with
-	}{
-		"the defaults":                   {policy(M{}), M{"project": M{"name": "demo"}, "storageClass": "fast"}, "", ""},
-		"imageRegistry":                  {policy(M{}), M{"imageRegistry": "evil.example.com"}, "context layer 3 (level 1): global.imageRegistry: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists project, storageClass", "global.imageRegistry"},
-		"security":                       {policy(M{}), M{"security": M{"allowInsecureImages": true}}, "global.security: a key of global the platform does not let a project set", "global.security"},
-		"podSecurity":                    {policy(M{}), M{"podSecurity": M{"privileged": true}}, "global.podSecurity: a key of global the platform does not let a project set", "global.podSecurity"},
-		"the first in key order":         {policy(M{}), M{"zone": "a", "app": "b"}, "global.app: a key of global", "global.app"},
-		"a key with dots":                {policy(M{}), M{"okdp.io/tier": "gold"}, `global["okdp.io/tier"]: a key of global`, `global["okdp.io/tier"]`},
-		"the platform's list":            {policy(M{"projectGlobals": []any{"imageRegistry"}}), M{"imageRegistry": "registry.example.org"}, "", ""},
-		"the list replaces the defaults": {policy(M{"projectGlobals": []any{"imageRegistry"}}), M{"storageClass": "fast"}, "global.storageClass: a key of global the platform does not let a project set (Inputs.Context): global.okdp.policy.projectGlobals lists imageRegistry", "global.storageClass"},
-		"none":                           {policy(M{"projectGlobals": []any{}}), M{"project": M{}}, "projectGlobals lists none", "global.project"},
-		"a listed map":                   {policy(M{"projectGlobals": []any{"image"}}), M{"image": M{"registry": "registry.example.org", "repository": "app"}}, "", ""},
-		"a privileged project":           {policy(M{"privileged": []any{"demo"}}), M{"project": M{"hostNetwork": true}}, "", ""},
-		"a privileged project's keys":    {policy(M{"privileged": []any{"demo"}}), M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set", "global.imageRegistry"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			in := inputs()
-			in.Context = append(in.Context, tc.platform, project(tc.global))
-			_, err := Compile(context.Background(), def, in)
-			if tc.want == "" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				return
-			}
-			var fe *FieldError
-			switch {
-			case err == nil || !strings.Contains(err.Error(), tc.want):
-				t.Fatalf("got %v, want an error containing %q", err, tc.want)
-			case !errors.As(err, &fe) || fe.Field != tc.field:
-				t.Errorf("got %#v, want a problem at %q", fe, tc.field)
-			}
-		})
-	}
-	// Level 0's global is the platform's, whatever the list; the
-	// instance's layers set the keys their package declares, the host's
-	// policy (Inputs.CheckGlobals) seeing them too.
-	files := maps.Clone(pkg)
-	files["config.schema.json"] = &fstest.MapFile{Data: []byte(`{"properties": {"replicas": {"type": "integer", "default": 1}, "global": {"properties": {"image": {"type": "object"}}}}}`)}
-	in := inputs(map[string]any{"global": M{"image": M{"repository": "docker.io/evil/app"}}})
-	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"projectGlobals": []any{"project"}}}, "imageRegistry": "docker.io"}}})
-	_, err := Compile(context.Background(), withFiles(files), in)
+// TestHostSettings: the host's settings (Inputs.Settings) join the
+// settings of the layers: the platform schema checks them, the hooks,
+// Result.Settings and SettingsOf read them, and a package's requirement
+// holds with them; they reach no values: neither the mapping's global nor
+// the final values of a chart. A value both give is refused, a key
+// added to a map of the host's values among them, and so is a value that
+// values cannot hold.
+func TestHostSettings(t *testing.T) {
+	ctx := context.Background()
+	in := inputs(M{"global": M{"okdp": M{"team": M{"name": "data"}}}})
+	in.Values = in.Values[1:] // cluster.domain, which def requires, is the host's
+	in.Settings = map[string]any{"cluster": map[string]string{"domain": "example.org"}, "team": M{"members": M{"ann": "lead"}}}
+	inst, err := newInstance(ctx, pkg, in, defService)
 	if err != nil {
-		t.Errorf("level 0's global: %v", err)
-	}
-	in = inputs()
-	in.Context = append(in.Context, ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"projectGlobals": []any{"project"}}}}}})
-	in.Values = []map[string]any{{"global": M{"image": M{"repository": "docker.io/evil/app"}}}}
-	var named []GlobalLayer
-	in.CheckGlobals = func(_ context.Context, g GlobalsInput) error { named = g.Layers; return nil }
-	if _, err := Compile(context.Background(), withFiles(files), in); err != nil {
 		t.Fatal(err)
 	}
-	if len(named) != 1 || named[0].Name != "values layer 1" || value.Dig(named[0].Global, "image.repository") != "docker.io/evil/app" {
-		t.Errorf("an instance's global: got %+v", named)
+	if want := (M{"okdp": M{"team": M{"name": "data"}}}); !reflect.DeepEqual(inst.scope["global"], want) || !reflect.DeepEqual(inst.values["global"], want) {
+		t.Errorf("global: %#v, %#v", inst.scope["global"], inst.values["global"])
 	}
-}
-
-// TestDeclarationsGlobals: a project without instance has its global
-// checked as an instance's compile checks it: the keys the platform lists
-// and what they hold.
-func TestDeclarationsGlobals(t *testing.T) {
-	platform := ContextLayer{Values: map[string]any{"global": M{"okdp": M{"policy": M{"reserved": []any{"vault"}}}}}}
+	d := *def
+	d.Okdp, d.Values = nil, []byte("app:\n  team: ${{ global.okdp.team }}\n")
+	res, err := Compile(ctx, &d, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Dig(res.Settings, "cluster.domain") != "example.org" || value.Dig(res.Settings, "team.name") != "data" || value.Dig(res.Settings, "team.members.ann") != "lead" {
+		t.Errorf("Result.Settings: %#v", res.Settings)
+	}
+	if app := res.Values["app"]; !reflect.DeepEqual(app["team"], M{"name": "data"}) || !reflect.DeepEqual(app["global"], M{"okdp": M{"team": M{"name": "data"}}}) {
+		t.Errorf("the final values: %#v", app)
+	}
+	if s, err := SettingsOf(ctx, in); err != nil || value.Dig(s, "cluster.domain") != "example.org" {
+		t.Errorf("SettingsOf: %v %#v", err, s)
+	}
+	r := hookRules(t)
+	hd, err := LoadDefinition(hookPackage(hookOkdp), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooked := inputs(M{"objects": []any{labelled("a", "team")}})
+	hooked.Rules, hooked.Settings = r, map[string]any{"label": "owner"}
+	if _, err := Compile(ctx, hd, hooked); err == nil || err.Error() != "demo: objects: ConfigMap/a: metadata.labels: no label owner in demo" {
+		t.Errorf("the objects hook: %v", err)
+	}
 	for name, tc := range map[string]struct {
-		global M
-		want   string
+		layer    any
+		settings M
+		want     string
 	}{
-		"listed":   {M{"storageClass": "fast", "project": M{"name": "demo"}}, ""},
-		"unlisted": {M{"imageRegistry": "evil.example.com"}, "global.imageRegistry: a key of global the platform does not let a project set"},
+		"a value":        {M{"team": M{"name": "data"}}, M{"team": M{"name": "ops"}}, "global.okdp.team: set both by the values (Inputs.Values) and by the host's settings (Inputs.Settings)"},
+		"a member":       {M{"team": M{"members": M{"bob": "dev"}}}, M{"team": M{"members": M{"ann": "lead"}}}, "global.okdp.team.members: set both"},
+		"an empty map":   {M{"team": M{"members": M{"bob": "dev"}}}, M{"team": M{"members": M{}}}, "global.okdp.team.members: set both"},
+		"a map, a value": {M{"team": "data"}, M{"team": M{"name": "ops"}}, "global.okdp.team: set both"},
+		"a null":         {M{"team": nil}, M{"team": M{}}, "global.okdp.team: set both"},
+		"not a map":      {"x", M{"team": "x"}, "global.okdp: set both"},
+		"the schema":     {M{}, M{"proxy": M{"httpProxy": true}}, "at '/global/okdp/proxy/httpProxy': got boolean, want string"},
+		"a func":         {M{}, M{"hooks": []any{func() {}}}, `Inputs.Settings: json: cannot marshal from Go func() within "/hooks/0"`},
 	} {
-		t.Run(name, func(t *testing.T) {
-			err := CheckDeclarations(context.Background(), Inputs{Rules: Mandatory(), Contracts: contracts, Namespace: "demo", Context: []ContextLayer{platform, {Level: 1, Values: map[string]any{"global": tc.global}}}})
-			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
-				t.Errorf("got %v, want %q", err, tc.want)
-			}
-		})
-	}
-}
-
-// TestCheckGlobalsHook: the host's policy sees the global of each layer
-// above level 0, by the layer's name; what it refuses refuses the compile.
-func TestCheckGlobalsHook(t *testing.T) {
-	in := inputs()
-	in.Context = append(in.Context, ContextLayer{Level: 1, Values: M{"global": M{"project": M{"a": "b"}}}})
-	var got []GlobalLayer
-	in.CheckGlobals = func(_ context.Context, g GlobalsInput) error {
-		got = g.Layers
-		if g.Namespace != "demo" || g.Rules == nil {
-			t.Errorf("the input: %+v", g)
+		in := inputs(M{"global": M{"okdp": tc.layer}})
+		in.Settings = tc.settings
+		if _, err := Compile(ctx, def, in); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want %q", name, err, tc.want)
 		}
-		return errors.New("refused")
-	}
-	if _, err := Compile(context.Background(), def, in); err == nil || err.Error() != "refused" {
-		t.Errorf("got %v", err)
-	}
-	if len(got) != 1 || !strings.Contains(got[0].Name, "level 1") || value.Dig(got[0].Global, "project.a") != "b" {
-		t.Errorf("the layers: %+v", got)
 	}
 }

@@ -71,9 +71,9 @@ func TestLoadRules(t *testing.T) {
 		want string
 	}{
 		"missing table": {func(s string) string {
-			return strings.Replace(s, "  defaultProjectGlobals:\n    values: [project, storageClass]\n", "", 1)
-		}, "tables: missing defaultProjectGlobals"},
-		"unknown table": {func(s string) string { return strings.Replace(s, "  defaultProjectGlobals:\n", "  renamed:\n", 1) }, "tables: unknown renamed"},
+			return strings.Replace(s, "  platformObjectSettings:\n    extensible: true\n    values: [secrets.store, secrets.serviceAccount]\n", "", 1)
+		}, "tables: missing platformObjectSettings"},
+		"unknown table": {func(s string) string { return strings.Replace(s, "  deployerApiGroups:\n", "  renamed:\n", 1) }, "tables: unknown renamed"},
 		"no mapping schema": {func(s string) string {
 			return strings.Replace(s, "  mapping: schemas/mapping.schema.json\n", "", 1)
 		}, "schemas: mapping is required"},
@@ -174,8 +174,8 @@ func TestMandatory(t *testing.T) {
 	if !r.Has(TableEngineNamespaces, "argocd") || !r.Has(TableClusterScopedKinds, "/Namespace") {
 		t.Error("the mandatory set lost the tables of the checks")
 	}
-	if !r.Whole([]string{"claims", "db"}) || !slices.Contains(r.List(TablePlatformKeysAbove), "provisioning") || len(r.List(TableProjectRoles)) != 3 {
-		t.Error("the mandatory set lost the tables of the claim format and of the roles")
+	if !slices.Contains(r.List(TablePlatformObjectSettings), "secrets.store") {
+		t.Error("the mandatory set lost the table of the settings that name objects")
 	}
 	if got := r.Name("credentialsSecret", "output", "o", "contract", "c"); got != "o-c-credentials" {
 		t.Errorf("a credentials Secret: %q", got)
@@ -205,7 +205,7 @@ func TestBothSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := r.Fragment("okdpGeneratedSecret"); !ok || r.PlatformSchema() == nil || len(r.List(TableProjectRoles)) != 3 {
+	if _, ok := r.Fragment("okdpGeneratedSecret"); !ok || r.PlatformSchema() == nil || !r.Has(TableEngineNamespaces, "argocd") {
 		t.Errorf("the mandatory set is not applied: %+v", r)
 	}
 	if err := r.Refuse(ctx, CheckNamespaceRule, M{"ns": "argocd"}); err == nil {
@@ -231,7 +231,7 @@ func TestSetsDisjoint(t *testing.T) {
 		rest string
 		want string
 	}{
-		"table":    {"tables:\n  projectRoles: {values: [admin]}\n", "tables: projectRoles"},
+		"table":    {"tables:\n  engineNamespaces: {values: [admin]}\n", "tables: engineNamespaces"},
 		"check":    {"checks:\n  namespace: checks/release.cel.yaml\n", "checks: namespace"},
 		"document": {"documents:\n  scope: objects/deployer-role.cel.yaml\n", "documents: scope"},
 		"schema":   {"schemas:\n  platform: schemas/mapping.schema.json\n", "schemas: platform"},
@@ -252,23 +252,14 @@ func TestSetsDisjoint(t *testing.T) {
 	}
 }
 
-// TestMandatoryRolesChecked: a role of no target is refused in the set that
-// gives it.
-func TestMandatoryRolesChecked(t *testing.T) {
-	base := fstest.MapFS{}
-	sub := mandatoryFS()
-	if err := fs.WalkDir(sub, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		b, err := fs.ReadFile(sub, p)
-		base[p] = &fstest.MapFile{Data: b}
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	base[RulesFile] = &fstest.MapFile{Data: []byte(strings.Replace(string(base[RulesFile].Data), "[viewer, editor, admin]", "[viewer, owner]", 1))}
-	if _, err := loadOver(base, nil); err == nil || !strings.Contains(err.Error(), `projectRoles: "owner" is no role`) {
-		t.Errorf("got %v", err)
+// TestClosedTable: a set adds no value to a table the sets before it do
+// not mark extensible.
+func TestClosedTable(t *testing.T) {
+	base := mandatoryCopy(t, func(s string) string {
+		return strings.Replace(s, "  engineNamespaces:\n    extensible: true\n", "  engineNamespaces:\n", 1)
+	})
+	_, err := loadOver(base, addedSet(t, "tables:\n  engineNamespaces:\n    add: [other]\n"))
+	if want := "tables: engineNamespaces: add: the table is not extensible"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("got %v, want an error containing %q", err, want)
 	}
 }

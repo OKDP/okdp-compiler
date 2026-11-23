@@ -106,9 +106,9 @@ func TestValuesAndNames(t *testing.T) {
 	}
 }
 
-// A connection is checked at its declaration as the compile of a tree
-// checks it, whatever references it, the platform's store provider
-// included.
+// A connection is checked at its declaration as the compile checks it,
+// whatever references it, the store's provider included; which keys of
+// the store a namespace reads is the host's to decide.
 func TestCheckConnection(t *testing.T) {
 	contracts := os.DirFS("examples/02_advanced/input/contracts")
 	c := compiler.Connection{Name: "pg", Contract: "database", Values: map[string]any{"host": "db", "dbName": "app"}, SecretRef: "pg"}
@@ -121,11 +121,11 @@ func TestCheckConnection(t *testing.T) {
 		t.Fatalf("a secret field: %v", err)
 	}
 	c.Values, c.SecretRef, c.RemoteKey = map[string]any{"host": "db", "dbName": "app"}, "", "platform/pg"
-	if err := compiler.CheckConnection(compiler.Mandatory(), contracts, "demo", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err == nil || !strings.Contains(err.Error(), `names a key under "demo/"`) {
-		t.Fatalf("a project's key of the platform's: %v", err)
+	if err := compiler.CheckConnection(compiler.Mandatory(), contracts, "demo", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err != nil {
+		t.Fatalf("a key of another namespace: %v", err)
 	}
 	if err := compiler.CheckConnection(compiler.Mandatory(), contracts, "", c, map[string]any{"global": map[string]any{"okdp": map[string]any{"secrets": map[string]any{"store": "s"}}}}); err != nil {
-		t.Fatalf("the platform's: %v", err)
+		t.Fatalf("no namespace: %v", err)
 	}
 	// With the store's provider, a SecretStore per namespace, no
 	// connection reads platform/, the platform's neither.

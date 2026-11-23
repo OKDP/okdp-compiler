@@ -35,7 +35,7 @@ internal/rules/mandatory/     what every compile applies
   rules.yaml                  its tables, and every file below by name
   scope.cel.yaml              what a mapping sees as platform
   schemas/
-    platform.schema.json      global.okdp of the platform's values
+    platform.schema.json      global.okdp, the settings
     mapping.schema.json       what a mapping writes, and the functions' arguments
   checks/                     one file per check
   fragments/
@@ -92,8 +92,8 @@ given by another rule set`.
 **Scopes.** `scopes` lists the documents, names of `documents` of the
 set or of a set read before, that compute what a mapping sees as
 `platform`. The compiler evaluates those of every set, in the order the
-sets are read, each with the same input (`settings`, `release`,
-`items`), and merges their `values.platform` key by key. A value two
+sets are read, each with the same input (`settings`, `release`), and
+merges their `values.platform` key by key. A value two
 documents give at one path, unless both are maps, is an error that names
 both: `the rule set: scopes: platform.<path> is given by both <first>
 and <second>`. A document is listed once. With the mandatory set alone,
@@ -119,7 +119,7 @@ caller gives.
 A program that calls `compiler.CompileAll` or `compiler.Compile` itself, this
 module's `okdp-compile` among them, applies the sets it gives, their
 checks and hooks among them, but not what a host adds through
-`Inputs.Finalize` and `Inputs.CheckGlobals` ([what a host
+`Inputs.Finalize` or checks of the layers it gives ([what a host
 adds](#what-a-host-adds)).
 
 ## What is not in the rule set
@@ -128,19 +128,23 @@ These stay in the compiler's Go code and apply whatever the rule set:
 
 - a release, a namespace and an instance name must be DNS names;
 - claim binding, classes, consent across namespaces and claim IDs;
-- a level may add values but not change a lower level's (`chart.Overlap`);
-- no template code in what an instance or a level above 0 gives
-  (`chart.NoTemplate`);
+- no template code in the upstream values, in a connection nor in what
+  a mapping receives of one (`chart.NoTemplate`);
+- the roles of a group (`ParseAccess`, the `access` of a `Project`
+  document): `viewer`, `editor`, `admin`;
 - no two objects of one group, kind, namespace and name
   (`checkDuplicateObjects`);
 - `okdpFullname`, `okdpSqlName`, `okdpObjectName`, and the walkers that
   call the checks below.
 
 What each role may do is not in the rule set either: the host that
-writes a project's roles (Kubernetes' ClusterRoles, Argo CD's policies)
-fixes it. The roles are the mandatory set's, `viewer`, `editor` and
-`admin`, and no rule set changes them: a role other than these refuses
-the set.
+writes a namespace's roles (Kubernetes' ClusterRoles, Argo CD's
+policies) fixes it. Nor is what a values layer may set: the compiler
+merges every layer of `Inputs.Values` alike, any of them setting
+parameters, upstream values, `global`, `global.okdp`, `connections` or
+`claims`. A host that gives layers of several origins decides what each
+may set ([the threat
+model](../04_threat_model.md#what-a-host-checks-of-the-layers)).
 
 ## When each rule applies
 
@@ -154,8 +158,6 @@ instance. A project is privileged when its namespace is listed in
 | `namespace` | the namespace | compiler | applies | applies |
 | `platformNamespace` | the namespace | compiler | applies: a reservation wins over a privilege | applies |
 | `release` | the release | compiler | applies | applies |
-| `contextLayer` | each context layer | compiler | applies | applies |
-| `valuesLayer` | each values layer | compiler | applies | applies |
 | `object` | each object, items of a List too | compiler | skipped | applies |
 | `plainSecret` | each object, items of a List too | compiler | applies | skipped |
 | hook `objects` | each object, items of a List too, after `object` | compiler | skipped | applies |
@@ -166,13 +168,13 @@ instance. A project is privileged when its namespace is listed in
 objects of a set's sections (`ownObjects`), the credentials Secrets,
 generated Secrets, PushSecrets and ExternalSecrets.
 
-What a host runs through `Inputs.Finalize` and `Inputs.CheckGlobals`
-applies only where that host compiles ([what a host
+What a host runs through `Inputs.Finalize`, or checks of the layers it
+gives, applies only where that host compiles ([what a host
 adds](#what-a-host-adds)).
 
-`namespace` and `platformNamespace` also run when a project is created
-(`compiler.CheckProjectName`, for a host that creates projects), with
-`project` in place of `Inputs.Namespace` in the message.
+`namespace` and `platformNamespace` also run when a namespace is
+created (`compiler.CheckNamespace`, for a host that creates namespaces),
+with `namespace` in place of `Inputs.Namespace` in the message.
 
 ## Tables
 
@@ -292,47 +294,6 @@ Paths under `global.okdp` of settings that name an object the platform
 writes in every project's namespace. Check `release` takes their values
 as it takes `platformObjectNames`. Extensible.
 
-### defaultProjectGlobals
-
-`project`, `storageClass`.
-
-The keys of `global` a level above 0 may set when the platform does not
-set `global.okdp.policy.projectGlobals` (check `contextLayer`). A platform
-list replaces this table instead of adding to it, and `[]` allows none.
-
-### wholePaths
-
-`connections.*`, `claims.*`, `global.okdp.provisioning.*.classes.*`,
-`global.okdp.provisioning.*.default`.
-
-`*` stands for one key. A level gives these paths whole or not at all. A
-higher level that sets one a lower level set is refused, even when both
-values are maps.
-
-### projectPlatformKeys
-
-`provisioning`.
-
-The keys of `global.okdp` a level above 0 may set (check `contextLayer`),
-read as part of the platform's settings: the classes a project adds.
-
-### projectRoles
-
-`viewer`, `editor`, `admin`, least first.
-
-The roles a group may hold in a project's `access` (its `Project`
-document, level 1). Each role with groups becomes:
-
-| Role | RoleBinding | ClusterRole | Argo CD |
-|---|---|---|---|
-| `viewer` | `okdp-access-viewer` | `view` | sees the project's Applications |
-| `editor` | `okdp-access-editor` | `edit` | also syncs them, runs resource actions and reads logs, never execs |
-| `admin` | `okdp-access-admin` | `admin` | also deletes them and overrides their sources and parameters |
-
-With no `access`, the group `okdp-project-<namespace>` is an editor.
-Group names in a RoleBinding carry `global.okdp.access.groupPrefix`. Argo
-CD reads the token's groups claim and has no prefix.
-
 ## Checks
 
 A check is a document of `vars` and `errors` in the mapping language. It
@@ -342,9 +303,9 @@ language's: `dig`, `pathKey`, `merge`, `rule`, `asList`, `asMap`,
 `credentialLiteral`, `leaves`, `fields` and `urlParse`. Checks run in a
 session of their own, so their cost does not count against a package's
 limit. The inputs are a closed list (`ruleInputs`, `check.go`): `added`,
-`arg`, `at`, `declared`, `field`, `host`, `items`, `key`, `layer`,
-`level`, `listed`, `name`, `ns`, `object`, `platform`, `privileged`,
-`raw`, `release`, `settings`, `suffix`, `svc`, `value`.
+`arg`, `at`, `field`, `host`, `items`, `key`, `listed`, `name`, `ns`,
+`object`, `platform`, `privileged`, `raw`, `release`, `settings`,
+`suffix`, `svc`, `value`.
 
 | Function | Returns |
 |---|---|
@@ -398,31 +359,6 @@ one: `okdp` is refused because of `okdp-project`.
 |---|---|
 | a taken name `n` has `n == release` or starts with `release + "-"` | `<field> "<release>": the name of an object the platform writes in every namespace (<n>), or its beginning up to a "-": ...` |
 
-### contextLayer
-
-Input: `name`, `level`, `layer`, `platform`.
-`checks/context-layer.cel.yaml`. Level 0 is the platform's.
-
-| Refused when | Message starts with |
-|---|---|
-| level above 0 sets `global.okdp` to a non-map, or a key not in `projectPlatformKeys` | `<name>: <path>: a platform setting, level 0 only ...` |
-| level above 0 sets a key of `global` other than `okdp` that is not allowed (`policy.projectGlobals`, else `defaultProjectGlobals`) | `<name>: global.<key>: a key of global the platform does not let a project set ...` (a field error at `global.<key>`) |
-| `claims` at level 0 | `<name>: claims: a project's, of level 1 or above` |
-| `access` at a level other than 1 | `<name>: access: the roles of a project's groups, its file's, of level 1 only` |
-
-### valuesLayer
-
-Input: `name`, `layer`, `declared`, the keys under `global` the package's
-parameter schema declares. `checks/values-layer.cel.yaml`.
-
-| Refused when | Message |
-|---|---|
-| `global` is not a map | `<name>: global is set by the context (Inputs.Context)` |
-| a key of `global` is `okdp` or is not declared | `<name>: global.<key> is set by the context (Inputs.Context)` |
-| `connections` is set | `<name>: connections are given by the context (Inputs.Context): ...` |
-| `claims` is set | `<name>: claims are declared by the context (Inputs.Context): ...` |
-| `access` is set | `<name>: access is the project's, its file's (the context at level 1)` |
-
 ### object
 
 Input: `svc`, `ns`, `object` (`id`, `kind`, `name`, `apiVersion`, `group`,
@@ -473,8 +409,8 @@ and are skipped for a privileged project.
 | `objects` | on each object of an instance, items of a List too, once it passed check `object`; also by `compiler.CheckObjects`, on a host's objects | `svc`, `ns`, `object` (as check `object` reads it), `settings` |
 | `finalValues` | on the final values of each chart key, keys in order, whether `Inputs.Finalize` or Helm's merge made them; also by `compiler.CheckFinalValues` | `svc`, `ns`, `key`, `value` (the key's values), `settings` |
 
-`settings` is `global.okdp`, the platform's, never null. A message in
-the shape of the compiler's own is written by the document:
+`settings` is `global.okdp` of the values layers, never null. A
+message in the shape of the compiler's own is written by the document:
 `<svc>: objects: <Kind>/<name>: <path>: ...` (`object.id` is
 `<Kind>/<name>`) and `<key>: <path>: ...`. The security set checks the
 hosts of objects and of final values this way ([its
@@ -487,22 +423,24 @@ after Helm's merge.
 ## What a host adds
 
 A host's `Inputs.Finalize` makes the final values in the host's own
-Helm merge, and `Inputs.CheckGlobals` checks `global` of every layer
-above level 0; the hooks of the set still run on what `Finalize`
-returns. A host may set both: render the upstream charts, whose
-manifests go through `compiler.CheckObjects` (check `object`, then the
-hook `objects`), and apply the security set's policy on upstream values,
-the package `policy` of okdp-compiler-security ([the upstream
+Helm merge; the hooks of the set still run on what `Finalize` returns.
+A host may also check the layers it gives before the compile: what
+each may set, and `global` of those it does not review. It may do
+both: render the upstream charts, whose manifests go through
+`compiler.CheckObjects` (check `object`, then the hook `objects`), and
+apply the security set's policy on upstream values and on `global`, the
+package `policy` of okdp-compiler-security ([the upstream
 policy](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/05_upstream_policy.md)).
 A compile without such a host, `okdp-compile` among them, does neither.
 
 ## Platform settings
 
-`schemas/platform.schema.json` reads `global.okdp` of the context. Keys
-it does not describe are allowed (a key a mapping reads), except where a
-row says no other key is accepted. A null deletes a default. A set added
-to the mandatory set adds keys to it (`schemas.platform`): those of the
-security set are in [its
+`schemas/platform.schema.json` reads `global.okdp` of the values
+layers, merged in order (`Inputs.Values`). Keys it does not describe are
+allowed (a key a mapping reads), except where a row says no other key
+is accepted. A null deletes a default. A set added to the mandatory set
+adds keys to it (`schemas.platform`): those of the security set are in
+[its
 reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/04_rules.md#platform-settings).
 
 | Setting | Type | Default | Rule |
@@ -514,14 +452,15 @@ reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/0
 | `charts` | map | | only `objects` is accepted |
 | `charts.objects` | `repository`, `chart`, `version` | see [charts](#charts) | `https://` or `oci://`, never `http://`; a pinned version |
 | `proxy.httpProxy`, `httpsProxy`, `noProxy` | string | | |
-| `provisioning.<contract>.default` | string | | a class of `classes`, set once at the lowest level that sets it |
+| `provisioning.<contract>.default` | string | | a class of `classes` |
 | `provisioning.<contract>.classes.<name>` | `provider` (required), `request` | | `<name>` is a DNS label; no other key is accepted |
 | `secrets.store` | string | | |
 | `secrets.provider` | map | | External Secrets' `spec.provider`, verbatim |
 | `secrets.serviceAccount` | string | `okdp-secrets` | |
 | `secrets.refreshInterval` | string | `1h` | |
-| `access` | map | | no other key than the two below |
+| `access` | map | | no other key than the three below |
 | `access.admins` | list of groups | | each `^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$` |
+| `access.groups` | map of groups to roles | | each key `^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$`, each role `viewer`, `editor` or `admin`; a host gives them per namespace (`Inputs.Settings`) |
 | `access.groupPrefix` | string | | `^[A-Za-z0-9._@:#/-]*$` |
 | `network` | map | | no other key than the two below |
 | `network.policy` | boolean | | |
@@ -530,7 +469,7 @@ reference](https://github.com/OKDP/okdp-compiler-security/blob/main/docs/specs/0
 | `policy` | map | | no other key than the four below, and those a set added gives |
 | `policy.privileged` | list of strings | | |
 | `policy.reserved` | list of strings | | |
-| `policy.projectGlobals` | unique strings, not `okdp` | | |
+| `policy.projectGlobals` | unique strings, not `okdp` | | read by a host, never by the compiler |
 | `policy.projectApiGroups` | list of strings | | the API groups added to the Role a project's releases are installed with (Flux; see [the deployer's Role](#the-deployers-role)) |
 | `ruleSets[]` | `name` (required), `version` | | the rule sets the compile must be given; no other key is accepted |
 
@@ -542,9 +481,9 @@ version on, of the same major and minor) or `^` (from the version on, of
 the same major, or of the same minor when the major is 0) followed by a
 version, or a version alone, which stands for `=`. Versions compare as
 Semantic Versioning 2.0.0 orders them, a `-prerelease` before its
-release. Every compile, `PlatformOf` and `CheckProject` refuse a
-platform that requires a set the compile was not given, or one of a version its
-constraint refuses:
+release. Every compile and `SettingsOf` refuse settings that require a
+set the compile was not given, or one of a version its constraint
+refuses:
 
 ```text
 global.okdp.ruleSets: the platform requires the rule set <name>, which the compile was not given: give it with okdp-compile --rules (compiler.LoadRules)
@@ -578,15 +517,16 @@ identity. Argo CD confines by the AppProject instead
 `scope.cel.yaml`, the mandatory set's scope document (`scopes`),
 computes `platform`; an added set's scope documents add keys to it
 ([how the sets add up](#how-the-sets-add-up)). Its inputs are
-`settings`, `release`, and `items`, the project's groups with their
-roles.
+`settings`, the namespace's groups with their roles among them
+(`access.groups`, which a host gives in `Inputs.Settings`), and
+`release`.
 
 | Value | How it is computed |
 |---|---|
 | `platform.access.platformAdmins` | `access.admins`, sorted and unique |
-| `platform.access.viewers` | the administrators and every group of the project |
-| `platform.access.editors` | the administrators and the project's `editor` and `admin` groups |
-| `platform.access.admins` | the administrators and the project's `admin` groups |
+| `platform.access.viewers` | the administrators and every group of `access.groups` |
+| `platform.access.editors` | the administrators and the `editor` and `admin` groups |
+| `platform.access.admins` | the administrators and the `admin` groups |
 | `platform.proxyEnv` | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, each only when its setting is not empty |
 
 ## What a mapping writes
@@ -740,7 +680,6 @@ the rules below. Of them, the platform's values can only set these:
 |---|---|
 | `policy.reserved` | adds namespaces to `platformNamespace` |
 | `policy.privileged` | exempts namespaces, as in [the table above](#when-each-rule-applies) |
-| `policy.projectGlobals` | replaces `defaultProjectGlobals` |
 | `policy.projectApiGroups` | adds API groups to the Role of a project's releases, never an engine's nor `*` (the document `deployerRole`) |
 | `secrets.store`, `secrets.serviceAccount` | add names to check `release` |
 | `charts.objects` | replaces the `objects` chart |

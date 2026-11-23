@@ -20,16 +20,16 @@ import (
 // instance is what a compile knows of its instance. The first stages
 // build it once (newInstance) and the others read it.
 type instance struct {
-	rules              *RuleSet        // Inputs.Rules
-	release, namespace string          // Inputs.Release, Inputs.Namespace
-	name               string          // Inputs.Name, or the release when it is empty
-	svc                *Service        // the package: Chart.yaml's name and version
-	groups             map[string]Role // the project's groups (access of its project file)
+	rules              *RuleSet // Inputs.Rules
+	release, namespace string   // Inputs.Release, Inputs.Namespace
+	name               string   // Inputs.Name, or the release when it is empty
+	svc                *Service // the package: Chart.yaml's name and version
 	// values are the merged parameters as the user wrote them, with global,
 	// connections and the upstream values.
 	values M
-	// okdp holds the platform's settings: global.okdp of the context, checked
-	// against platform.schema.json, with its defaults applied.
+	// okdp holds the settings: global.okdp of the values layers with the
+	// host's settings (Inputs.Settings), checked against
+	// platform.schema.json, with its defaults applied.
 	okdp  M
 	deps  []Dependency // the instances the references point to, in parameter path order
 	scope M            // what the mapping sees
@@ -50,11 +50,12 @@ type instance struct {
 // the package files.
 //
 //  1. Parameters. The values layers are merged in order, as Helm merges -f
-//     files, the context's then the instance's, over the defaults of the
-//     package's parameter schema, and checked against it (parameters).
-//  2. Platform context. The platform's settings are global.okdp of the
-//     context's layers alone, never of the parameters, which the defaults
-//     of a package schema reach.
+//     files, over the defaults of the package's parameter schema, and
+//     checked against it (parameters).
+//  2. Settings. The settings are global.okdp of the values layers alone,
+//     never of the parameters, which the defaults of a package schema
+//     reach, with the host's settings (Inputs.Settings), which no value
+//     holds.
 //  3. Connections. The connection references of the parameters are
 //     resolved in a copy; the merged values stay as the user wrote them.
 //     The references that do not resolve are reported together.
@@ -63,11 +64,6 @@ type instance struct {
 // parameters), global as written, platform (what the compiler derives from
 // global.okdp), service, labels, selectorLabels and claims.
 func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*instance, error) {
-	// A project file with bad access refuses every instance of the project.
-	groups, err := projectAccess(in.rules(), in.Context, in.Namespace)
-	if err != nil {
-		return nil, err
-	}
 	schema, values, settings, err := in.memo.paramsOf().get(ctx, files, in, svc)
 	if err != nil {
 		return nil, err
@@ -78,7 +74,6 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 		namespace: in.Namespace,
 		name:      cmp.Or(in.Name, in.Release),
 		svc:       svc,
-		groups:    groups,
 		values:    values,
 		okdp:      settings,
 	}
@@ -91,7 +86,6 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 		rules:     in.rules(),
 		contracts: contractCacheOf(in),
 		conns:     value.AsMap(values["connections"]),
-		levels:    connectionLevels(in.Context),
 		claims:    named,
 		classes:   value.AsMap(inst.okdp["provisioning"]),
 		published: in.Published,
@@ -118,11 +112,7 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 	inst.deps, inst.transfers = r.deps, r.transfers
 	// platform, as the mapping sees it, derives from the platform's settings.
 	release := M{"name": in.Release, "namespace": in.Namespace}
-	roles := M{}
-	for g, role := range groups {
-		roles[g] = string(role)
-	}
-	platform, err := inst.rules.Scope(ctx, M{"settings": inst.okdp, "release": release, "items": roles})
+	platform, err := inst.rules.Scope(ctx, M{"settings": inst.okdp, "release": release})
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +123,7 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 		"release":        release,
 		"values":         params,
 		"claims":         claimsScope(in.Claims),
-		"global":         value.AsMap(value.Copy(values["global"])), // the platform's and the project's settings, as written
+		"global":         value.AsMap(value.Copy(values["global"])), // as written
 		"platform":       platform,
 	}
 	return inst, nil
@@ -143,9 +133,10 @@ func newInstance(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*in
 // package, the parameters (the values layers merged over the schema's
 // defaults, and checked) and the platform's settings (platformSettings).
 //
-// global.okdp of the parameters is the context's, as written, whatever
-// the package's schema gives: the mapping and the charts read the
-// platform's settings, never a package's.
+// global.okdp of the parameters is the values layers', as written,
+// whatever the package's schema gives: the mapping and the charts read the
+// settings of the inputs, never a package's, and never the host's
+// settings (Inputs.Settings), which the compile reads apart.
 func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*chart.Schema, M, M, error) {
 	schema, err := chart.ReadParameterSchema(files)
 	if err != nil {
@@ -154,16 +145,16 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 	if err := requirements(schema.Doc); err != nil {
 		return nil, nil, nil, err
 	}
-	layers, platform, err := valuesLayers(ctx, schema.Doc, in)
+	l, err := valuesLayers(in)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	values, err := chart.Parameters(schema, svc.Name, layers)
+	values, err := chart.Parameters(schema, svc.Name, l.layers)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	g, _ := values["global"].(M)
-	switch okdp, set := value.AsMap(platform["global"])["okdp"]; {
+	switch okdp, set := value.AsMap(l.written["global"])["okdp"]; {
 	case set && g == nil:
 		values["global"] = M{"okdp": value.Copy(okdp)}
 	case set:
@@ -171,23 +162,20 @@ func parameters(ctx context.Context, files fs.FS, in Inputs, svc *Service) (*cha
 	case g != nil:
 		delete(g, "okdp")
 	}
-	settings, err := platformSettings(in.rules(), platform)
+	settings, err := platformSettings(in.rules(), l.platform)
 	if err != nil {
-		return nil, nil, nil, err
-	}
-	if err := upstreamGlobals(ctx, in, layers, settings); err != nil {
 		return nil, nil, nil, err
 	}
 	return schema, values, settings, nil
 }
 
-// platformSettings returns global.okdp of platform, the context's values,
-// checked against the platform schema with its defaults applied. A value
-// of another type is refused rather than read as not set: proxy: false
-// would read as no proxy. A platform that requires a rule set the
+// platformSettings returns global.okdp of platform, the values layers'
+// with the host's settings (valuesLayers), checked against the platform
+// schema with its defaults applied. A value of another type is refused
+// rather than read as not set: proxy: false would read as no proxy. A platform that requires a rule set the
 // compile was not given is refused (requiredRuleSets).
 func platformSettings(rules *RuleSet, platform M) (M, error) {
-	settings, err := ruleset.SchemaValues(rules.PlatformSchema(), "context values (Inputs.Context) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
+	settings, err := ruleset.SchemaValues(rules.PlatformSchema(), "the values (Inputs.Values) don't meet the specifications of the schema of global.okdp", value.AsMap(value.Copy(platform)))
 	if err != nil {
 		return nil, err
 	}
