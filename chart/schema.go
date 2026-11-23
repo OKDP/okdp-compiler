@@ -5,8 +5,10 @@ package chart
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -37,6 +39,7 @@ func validate(name string, sch *jsonschema.Schema, v any) (string, []Violation, 
 	if !errors.As(verr, &ve) {
 		return "", nil, fmt.Errorf("%s: %w", name, verr)
 	}
+	relocate(ve, v, nil, map[string]bool{})
 	sortCauses(ve)
 	redactCauses(ve)
 	// Drop the first line, which only names the schema.
@@ -70,6 +73,102 @@ func violations(e *jsonschema.ValidationError) []Violation {
 		out = append(out, violations(c)...)
 	}
 	return out
+}
+
+// relocate restores the instance location of the violations whose location
+// the validator gives without copying it (jsonschema v6.0.3: propertyNames
+// and contentSchema). Such a slice shares the validator's own, which the
+// rest of the walk writes over: its length holds, its keys may be those of
+// a value read later. The location of every other violation is a copy.
+//
+// The value is found again in v, the values validated: under prefix, the
+// location of the nearest violation above e that is a copy, at the depth
+// of the slice, an object that holds the refused name. When several
+// values fit, the one the slice still names is taken, else the first, in
+// path order, that no violation of the same name took (taken); two
+// objects of one depth that hold the same refused name, only one of them
+// under propertyNames, may thus be named one for the other.
+func relocate(e *jsonschema.ValidationError, v any, prefix []string, taken map[string]bool) {
+	var fits func(any) bool
+	name := ""
+	switch k := e.ErrorKind.(type) {
+	case *kind.PropertyNames:
+		name = k.Property
+		fits = func(x any) bool {
+			m, ok := x.(map[string]any)
+			_, has := m[name]
+			return ok && has
+		}
+	case *kind.ContentSchema:
+		fits = func(x any) bool { _, ok := x.(string); return ok }
+	default:
+		for _, c := range e.Causes {
+			relocate(c, v, e.InstanceLocation, taken)
+		}
+		return
+	}
+	// The causes of such a violation are about the name or the decoded
+	// content, a value of its own: their locations are not of v.
+	var found [][]string
+	if at, ok := valueAt(v, prefix); ok {
+		pathsAt(at, slices.Clone(prefix), len(e.InstanceLocation)-len(prefix), fits, &found)
+	}
+	key := func(loc []string) string { return name + "\x00" + strings.Join(loc, "\x00") }
+	pick := slices.IndexFunc(found, func(loc []string) bool { return slices.Equal(loc, e.InstanceLocation) && !taken[key(loc)] })
+	if pick < 0 {
+		pick = slices.IndexFunc(found, func(loc []string) bool { return !taken[key(loc)] })
+	}
+	if pick < 0 {
+		e.InstanceLocation = slices.Clone(e.InstanceLocation)
+		return
+	}
+	taken[key(found[pick])] = true
+	e.InstanceLocation = found[pick]
+}
+
+// valueAt returns the value of v at the location loc, keys of maps and
+// indexes of lists.
+func valueAt(v any, loc []string) (any, bool) {
+	for _, k := range loc {
+		switch t := v.(type) {
+		case map[string]any:
+			x, ok := t[k]
+			if !ok {
+				return nil, false
+			}
+			v = x
+		case []any:
+			i, err := strconv.Atoi(k)
+			if err != nil || i < 0 || i >= len(t) {
+				return nil, false
+			}
+			v = t[i]
+		default:
+			return nil, false
+		}
+	}
+	return v, true
+}
+
+// pathsAt appends to out the locations, depth levels under v, of the
+// values that fit, in path order: at is the location of v.
+func pathsAt(v any, at []string, depth int, fits func(any) bool, out *[][]string) {
+	if depth <= 0 {
+		if depth == 0 && fits(v) {
+			*out = append(*out, at)
+		}
+		return
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(t)) {
+			pathsAt(t[k], append(slices.Clip(at), k), depth-1, fits, out)
+		}
+	case []any:
+		for i, x := range t {
+			pathsAt(x, append(slices.Clip(at), strconv.Itoa(i)), depth-1, fits, out)
+		}
+	}
 }
 
 // compileSchema compiles the JSON schema doc (as jsonschema.UnmarshalJSON
