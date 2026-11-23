@@ -236,14 +236,16 @@ func TestSetsDisjoint(t *testing.T) {
 // TestClosedTable: a set adds no value to a table the sets before it do
 // not mark extensible, and gives no values to one they mark so.
 func TestClosedTable(t *testing.T) {
-	for extensible, tc := range map[string]struct{ rest, want string }{
-		"":                   {"tables:\n  held:\n    add: [other]\n", "tables: held: add: the table is not extensible"},
-		"extensible: true, ": {"tables:\n  held:\n    values: [other]\n", "tables: held: given by a rule set read before"},
+	for name, tc := range map[string]struct{ extensible, rest, want string }{
+		"closed":     {"", "tables:\n  held:\n    add: [other]\n", "tables: held: add: the table is not extensible"},
+		"extensible": {"extensible: true, ", "tables:\n  held:\n    values: [other]\n", "tables: held: given by a rule set read before"},
 	} {
-		base := copyFS(t, mandatoryFS(), func(s string) string { return s + "tables: {held: {" + extensible + "values: [a]}}\n" })
-		_, err := loadOver(base, addedSet(t, tc.rest))
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("got %v, want an error containing %q", err, tc.want)
-		}
+		t.Run(name, func(t *testing.T) {
+			base := copyFS(t, mandatoryFS(), func(s string) string { return s + "tables: {held: {" + tc.extensible + "values: [a]}}\n" })
+			_, err := loadOver(base, addedSet(t, tc.rest))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
 	}
 }

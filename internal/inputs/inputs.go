@@ -376,7 +376,7 @@ func (d *document) name(k string) error {
 // list checks that the value at key k, when set, is a list of strings.
 func (d *document) list(k string) error {
 	v, ok := d.m[k]
-	if ok && !(v.Kind == yaml.ScalarNode && v.Tag == "!!null") && d.strs(k) == nil {
+	if ok && (v.Kind != yaml.ScalarNode || v.Tag != "!!null") && d.strs(k) == nil {
 		return fmt.Errorf("%s: line %d: %s: a list of strings expected", d.where(), v.Line, k)
 	}
 	return nil
@@ -480,7 +480,7 @@ func readInstance(d *document) (*instance, error) {
 		}
 	}
 	in := &instance{doc: d, project: d.str("project"), name: d.str("name"), service: d.str("service"), version: d.str("version")}
-	if v, ok := d.m["claimers"]; ok && !(v.Kind == yaml.ScalarNode && v.Tag == "!!null") {
+	if v, ok := d.m["claimers"]; ok && (v.Kind != yaml.ScalarNode || v.Tag != "!!null") {
 		in.claimers = d.strs("claimers")
 		if in.claimers != nil {
 			if err := okdp.CheckClaimers("claimers", in.claimers); err != nil {
