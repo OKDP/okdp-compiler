@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.9.0](https://github.com/OKDP/okdp-compiler/compare/v0.8.1...v0.9.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* policy out of the compiler: rule sets added in order (LoadRules(sets...)), the checks as hooks (namespace, release, objects, finalValues), the object and plain-secret checks, privileged, reserved and access to okdp-compiler-security, the engines' namespaces, the platform's objects, keepSync, deployerRole and SecretStore to a host, dead exports, the memo's locks and redundant tests gone, dirfs and outdir following no symbolic link
+* flat values: Inputs.Values alone, the levels, their checks and tables out, Inputs.Settings (global.okdp.access.groups for platform.access), class consent by claimers alone, CheckNamespace and SettingsOf
+* the tree out of the compiler: input documents of any layout (LoadInputs), the catalog alone (LoadCatalog), okdp-compile -f/--catalog, the examples converted
+* okdpGeneratedSecret a fragment of the mandatory rule set, a connection checked at its declaration as a reference resolves it, the dependents of a refused instance compiled again before the Secrets are compared, an errors map item refusing with its message, rule set versions compared by chart.CompareVersions
+* one LoadDefinition, LoadRepository and Partial each taking the rules, a table's addFrom and RuleSet.Added gone, chart.NewSchema the one schema type, the claim ID form okdp's
+* the ingress hosts, the OAuth clients, the hardened pod functions and the upstream policy's tables out of the compiler, to okdp-compiler-security
+* rule sets add tables, values to the extensible ones, schema keys, scope documents and hooks on objects and final values, a tree names the rule sets it requires, okdp.yaml sections from the rule set
+
+### Features
+
+* compiler.CheckClaimers and CheckDeclarations, the checks of an instance's claimers and of a project without instance ([e66e07d](https://github.com/OKDP/okdp-compiler/commit/e66e07d9866adb9c50ff6befe19aa26f7aecbde0))
+* okdpGeneratedSecret a fragment of the mandatory rule set, a connection checked at its declaration as a reference resolves it, the dependents of a refused instance compiled again before the Secrets are compared, an errors map item refusing with its message, rule set versions compared by chart.CompareVersions ([a162663](https://github.com/OKDP/okdp-compiler/commit/a1626635ed2be27138e8355cdfbfd926e911de0b))
+* rule sets add tables, values to the extensible ones, schema keys, scope documents and hooks on objects and final values, a tree names the rule sets it requires, okdp.yaml sections from the rule set ([da4ac68](https://github.com/OKDP/okdp-compiler/commit/da4ac680f0843d8abe5234347fcfc9cae4dd9d5a))
+* the ingress hosts, the OAuth clients, the hardened pod functions and the upstream policy's tables out of the compiler, to okdp-compiler-security ([da5a94e](https://github.com/OKDP/okdp-compiler/commit/da5a94e6e857493806a455d7eba1642e07705949))
+
+
+### Bug Fixes
+
+* a refused property name reported at its object, the location jsonschema gives without copying it restored (relocate) ([73dddb6](https://github.com/OKDP/okdp-compiler/commit/73dddb6fc0a37e2a50b0f8da7fdb624972b9a0b4))
+
+
+### Code Refactoring
+
+* flat values: Inputs.Values alone, the levels, their checks and tables out, Inputs.Settings (global.okdp.access.groups for platform.access), class consent by claimers alone, CheckNamespace and SettingsOf ([75c7711](https://github.com/OKDP/okdp-compiler/commit/75c7711670bfa468890ff60d35b6fcb231fd0409))
+* one LoadDefinition, LoadRepository and Partial each taking the rules, a table's addFrom and RuleSet.Added gone, chart.NewSchema the one schema type, the claim ID form okdp's ([53b64d7](https://github.com/OKDP/okdp-compiler/commit/53b64d71a24b2c51c62475b8071ca482e175ed6e))
+* policy out of the compiler: rule sets added in order (LoadRules(sets...)), the checks as hooks (namespace, release, objects, finalValues), the object and plain-secret checks, privileged, reserved and access to okdp-compiler-security, the engines' namespaces, the platform's objects, keepSync, deployerRole and SecretStore to a host, dead exports, the memo's locks and redundant tests gone, dirfs and outdir following no symbolic link ([35ce461](https://github.com/OKDP/okdp-compiler/commit/35ce461a30a97cffc198f10794fa12e077a3f523))
+* the tree out of the compiler: input documents of any layout (LoadInputs), the catalog alone (LoadCatalog), okdp-compile -f/--catalog, the examples converted ([324ffa9](https://github.com/OKDP/okdp-compiler/commit/324ffa996956bb4b6ee845911345bbb12b7944f5))
+
 ## [0.8.1](https://github.com/OKDP/okdp-compiler/compare/v0.7.0...v0.8.1) (2026-11-18)
 
 
