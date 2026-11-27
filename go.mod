@@ -3,7 +3,7 @@ module github.com/okdp/okdp-compiler
 go 1.27.3
 
 require (
-	cel.dev/cel-go v0.33.2
+	cel.dev/cel-go v0.33.4
 	github.com/okdp/cel2yaml v0.2.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	go.yaml.in/yaml/v3 v3.0.6
